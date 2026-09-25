@@ -138,3 +138,15 @@ test('every journal line agrees with the result it points at', () => {
     });
   }
 });
+
+test("a multi-step call's outcome is its last step's, as that step's result records it", () => {
+  const multiStep = resultFiles()
+    .map((path) => JSON.parse(text(path)))
+    .filter((result) => Array.isArray(result.steps));
+  expect(multiStep.map((result) => result.key)).toEqual(['publish#1']);
+  for (const result of multiStep) {
+    const last = result.steps.at(-1);
+    expect(result.outcome).toBe(last.outcome);
+    expect(JSON.parse(text(last.resultPath)).outcome).toBe(last.outcome);
+  }
+});
