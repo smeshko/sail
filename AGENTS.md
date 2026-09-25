@@ -48,6 +48,8 @@ replace the synonyms each entry lists under `_Avoid_`. When a term is missing, a
 - Tests live under `test/`, mirroring `src/`: `test/cli/run.test.ts` tests `src/cli/index.ts`.
 - `src/` modules have no import-time side effects, because `test/coverage-census.test.ts` imports every one of them.
   The bin shim `src/cli/main.ts` is the one exception.
+- Type tests live in `test/types/`. Each `// @ts-expect-error TSnnnn: <why>` names the code its next line fails with,
+  and `test/types/expect-error.test.ts` proves it on a temp copy, so cases import only `sail` and `sail/intakes`.
 - Every `src/` file needs 80% line coverage on its own: Bun applies the threshold per file. Reach it by testing the
   branch. A file that genuinely can't goes in `coveragePathIgnorePatterns` in `bunfig.toml`, where review sees it.
 
@@ -65,7 +67,7 @@ including as examples in this file.
 ## Layout
 
 - `src/sdk`: what a repository imports from `sail`: `workflow()`, `stage()`, `agent()`, `script()`, `intake()` and the
-  run helpers.
+  run helpers. `src/sdk/intakes.ts` is `sail/intakes`, the built-in intakes.
 - `src/engine`: loads `project.yaml`, claims a source, leases its branch, runs intake and stages, validates and
   journals.
 - `src/ports`: the interfaces to outside systems: TicketSource, CodeHost, Harness, Workspace.
