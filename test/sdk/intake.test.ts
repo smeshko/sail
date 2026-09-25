@@ -22,3 +22,10 @@ test('intake() defaults absent produces to an empty object, and has no steps unt
   expect(declared).toEqual({ kind: 'intake', name: 'bare', accepts: ['pr'], output: Output, produces: {} });
   expect(declared).not.toHaveProperty('steps');
 });
+
+test("intake() refuses an output that only looks like its last step's, because types can't see refinements", () => {
+  const fetch = script('fetch', { run: './fetch.sh', output: z.object({ ref: z.string() }) });
+  expect(() => intake('design', { accepts: ['pr'], output: z.object({ ref: z.url() }), steps: [fetch] })).toThrow(
+    "intake 'design': its output must be the schema its last step 'fetch' declares",
+  );
+});

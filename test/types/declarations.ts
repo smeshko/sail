@@ -1,7 +1,7 @@
 // Declaration-level type cases: what agent(), script() and stage() refuse. test/types/expect-error.test.ts proves
 // that each directive's line fails with the code it names. Cases import only from `sail`, because the harness checks
 // a copy of this file in a temp directory.
-import { agent, file, gitDiff, type OutcomeOf, type ScriptOutcome, script, stage, z } from 'sail';
+import { agent, file, gitDiff, intake, type OutcomeOf, type ScriptOutcome, script, stage, z } from 'sail';
 
 const Output = z.object({ ok: z.boolean() });
 const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] };
@@ -59,6 +59,13 @@ stage('optional-spec', {
   consumes: { spec: file('spec.md').optional() },
   output: Output,
   steps: [implement],
+});
+
+intake('mismatched-intake', {
+  accepts: ['ticket'],
+  output: z.object({ ticketKey: z.string() }),
+  // @ts-expect-error TS2322: an intake's input is its last step's output, and this step's has no ticketKey
+  steps: [script('fetch', { run: './fetch.sh', output: Output })],
 });
 
 const describe = agent('describe', { prompt: './describe.md', output: Output, permissions, budget });

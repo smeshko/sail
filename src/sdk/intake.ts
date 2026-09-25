@@ -2,7 +2,7 @@
 // through `run.input` and `run.intake.files`. Workflow code never calls one.
 
 import type { z } from 'zod';
-import type { Produces, StepList } from './steps';
+import { assertEndsIn, type EndsIn, type Produces, type StepList } from './steps';
 
 /** What a run can start from. */
 export type SourceKind = 'ticket' | 'pr';
@@ -10,7 +10,7 @@ export type SourceKind = 'ticket' | 'pr';
 export interface IntakeOptions<O extends z.ZodType, P extends Produces, Steps extends StepList> {
   /** The sources this intake builds an input from. */
   readonly accepts: readonly SourceKind[];
-  /** The input's schema. */
+  /** The input's schema. An intake with steps outputs its last step's, so this is that step's own schema. */
   readonly output: O;
   readonly produces?: P;
   /** Its body. A built-in intake declared ahead of its body has none. */
@@ -32,6 +32,7 @@ export function intake<
   O extends z.ZodType,
   P extends Produces = Record<never, never>,
   const Steps extends StepList = StepList,
->(name: string, options: IntakeOptions<O, P, Steps>): Intake<O, P, Steps> {
+>(name: string, options: IntakeOptions<O, P, Steps> & { readonly steps?: EndsIn<O> }): Intake<O, P, Steps> {
+  if (options.steps !== undefined) assertEndsIn(`intake '${name}'`, options.steps, options.output);
   return { kind: 'intake', name, ...options, produces: options.produces ?? ({} as P) };
 }
