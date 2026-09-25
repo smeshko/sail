@@ -1,0 +1,189 @@
+{
+  "schema": "sail.summary.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "workflow": "ticket-to-pr@1",
+  "source": {
+    "kind": "ticket",
+    "ticketKey": "FAKE-1",
+    "via": "cli"
+  },
+  "ticket": {
+    "ticketKey": "FAKE-1",
+    "title": "Add a --shout flag to the greet command"
+  },
+  "status": "completed",
+  "startedAt": "2026-09-25T09:00:00.000Z",
+  "endedAt": "2026-09-25T09:01:11.135Z",
+  "durationMs": 71135,
+  "result": {
+    "pr": {
+      "number": 1,
+      "url": "fake://codehost/fixture/pull/1",
+      "draft": false
+    }
+  },
+  "calls": [
+    {
+      "key": "intake#1",
+      "kind": "script",
+      "outcome": "passed",
+      "durationMs": 2050,
+      "files": [
+        "ticket.json",
+        "brief.md"
+      ],
+      "summary": "FAKE-1: Add a --shout flag to the greet command",
+      "resultPath": "00-intake/call-1/result.json"
+    },
+    {
+      "key": "spec#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 10405,
+      "turns": 4,
+      "toolCalls": 2,
+      "denials": 0,
+      "costUsd": 0.3125,
+      "files": [
+        "spec.md"
+      ],
+      "summary": "2 tasks",
+      "resultPath": "01-spec/call-1/result.json"
+    },
+    {
+      "key": "implement#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 12630,
+      "turns": 5,
+      "toolCalls": 3,
+      "denials": 1,
+      "costUsd": 0.476,
+      "commits": 2,
+      "files": [
+        "diff.patch"
+      ],
+      "summary": "2 commits, 1 denial",
+      "resultPath": "02-implement/call-1/result.json"
+    },
+    {
+      "key": "tests#1",
+      "kind": "script",
+      "outcome": "failed",
+      "durationMs": 2540,
+      "files": [
+        "junit.xml"
+      ],
+      "summary": "5 of 6 passed",
+      "resultPath": "03-tests/call-1/result.json"
+    },
+    {
+      "key": "implement#2",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 12495,
+      "turns": 4,
+      "toolCalls": 2,
+      "denials": 0,
+      "costUsd": 0.239,
+      "commits": 1,
+      "feedbackFrom": "tests#1",
+      "files": [
+        "diff.patch"
+      ],
+      "summary": "1 commit",
+      "resultPath": "02-implement/call-2/result.json"
+    },
+    {
+      "key": "tests#2",
+      "kind": "script",
+      "outcome": "passed",
+      "durationMs": 2690,
+      "files": [
+        "junit.xml"
+      ],
+      "summary": "7 of 7 passed",
+      "resultPath": "03-tests/call-2/result.json"
+    },
+    {
+      "key": "self-review#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 10450,
+      "turns": 4,
+      "toolCalls": 2,
+      "denials": 0,
+      "costUsd": 0.2215,
+      "files": [
+        "review.md"
+      ],
+      "summary": "0 high, 1 low, 1 nit",
+      "resultPath": "04-self-review/call-1/result.json"
+    },
+    {
+      "key": "publish#1",
+      "outcome": "passed",
+      "durationMs": 14505,
+      "costUsd": 0.101,
+      "files": [
+        "pr-body.md"
+      ],
+      "summary": "PR #1: fake://codehost/fixture/pull/1",
+      "resultPath": "05-publish/call-1/result.json",
+      "steps": [
+        {
+          "key": "publish#1/describe",
+          "kind": "agent",
+          "outcome": "done",
+          "durationMs": 10365,
+          "turns": 4,
+          "toolCalls": 2,
+          "costUsd": 0.101,
+          "files": [
+            "pr-body.md"
+          ],
+          "summary": "PR description written"
+        },
+        {
+          "key": "publish#1/open",
+          "kind": "script",
+          "outcome": "passed",
+          "durationMs": 3840,
+          "summary": "PR #1 opened"
+        }
+      ]
+    }
+  ],
+  "loops": {
+    "fix": {
+      "iterations": 2,
+      "max": 3
+    }
+  },
+  "routes": [
+    {
+      "at": "self-review#1",
+      "value": 0,
+      "took": "publish"
+    }
+  ],
+  "totals": {
+    "stageCalls": 8,
+    "steps": 9,
+    "toolCalls": 11,
+    "denials": 1,
+    "replays": 8,
+    "usage": {
+      "inputTokens": 28400,
+      "cacheReadTokens": 189200,
+      "cacheWriteTokens": 15500,
+      "outputTokens": 8950,
+      "costUsd": 1.35
+    },
+    "budget": {
+      "maxUsd": 25,
+      "usedPct": 5.4
+    }
+  },
+  "version": 1
+}

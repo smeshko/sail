@@ -1,0 +1,57 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "implement",
+  "call": 2,
+  "key": "implement#2",
+  "kind": "agent",
+  "outcome": "done",
+  "output": {
+    "commits": [
+      {
+        "sha": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b",
+        "message": "fix: upper-case the name when shouting"
+      }
+    ],
+    "files": [
+      "src/greet.ts",
+      "test/cli.test.ts"
+    ],
+    "notes": "bun test passes locally: 7 of 7."
+  },
+  "files": {
+    "diff.patch": {
+      "path": "02-implement/call-2/diff.patch",
+      "bytes": 613,
+      "sha256": "2a10783a63a95398d9ab4bace6f0919d15d15ab03637579579b192693547ea25"
+    }
+  },
+  "consumed": {
+    "spec": "01-spec/call-1/spec.md",
+    "feedback": "03-tests/call-1/result.json#/output"
+  },
+  "startedAt": "2026-09-25T09:00:29.705Z",
+  "finishedAt": "2026-09-25T09:00:42.200Z",
+  "durationMs": 12495,
+  "harness": {
+    "adapter": "fake",
+    "model": "claude-sonnet-5",
+    "provider": "fake",
+    "sessionId": "fake-session-implement-2",
+    "turns": 4,
+    "toolCalls": 2,
+    "denials": 0
+  },
+  "usage": {
+    "inputTokens": 6100,
+    "cacheReadTokens": 71500,
+    "cacheWriteTokens": 2200,
+    "outputTokens": 1700,
+    "costUsd": 0.239
+  },
+  "workspace": {
+    "headSha": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b",
+    "commitsAdded": 1,
+    "diffStat": "2 files changed, 6 insertions(+), 2 deletions(-)"
+  }
+}

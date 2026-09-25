@@ -1,0 +1,3 @@
+fetched FAKE-1 through the ticket source
+wrote ticket.json and brief.md
+{"ticketKey":"FAKE-1","title":"Add a --shout flag to the greet command","url":"fake://tickets/FAKE-1","acceptanceCriteria":["`greet Ada --shout` prints `HELLO, ADA!`","`greet Ada` still prints `Hello, Ada!`","`greet --help` lists `--shout`"]}

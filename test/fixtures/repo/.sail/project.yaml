@@ -1,0 +1,12 @@
+# The fixture repository's config: every port on its fake adapter.
+name: fixture
+sail: ">=0.0.0 <1"
+label: sail
+defaultWorkflow: ticket-to-pr
+adapters:
+  ticketSource: { use: fake }
+  codeHost: { use: fake }
+  harness: { use: fake }
+  workspace: { use: fake }
+models: { default: claude-sonnet-5, deep: claude-opus-5-5 }
+budgets: { run: { maxUsd: 25, maxMinutes: 90 } }

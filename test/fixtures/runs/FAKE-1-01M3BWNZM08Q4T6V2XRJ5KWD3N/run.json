@@ -1,0 +1,179 @@
+{
+  "schema": "sail.run.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "source": {
+    "kind": "ticket",
+    "ticketKey": "FAKE-1",
+    "via": "cli",
+    "forced": false
+  },
+  "workflow": {
+    "name": "ticket-to-pr",
+    "version": 1,
+    "origin": "repo:.sail/workflows/ticket-to-pr.ts",
+    "sha256": "e0b3cf9118c5580b04a63a226324576776169295075084965c306c90e250a710"
+  },
+  "repository": {
+    "url": "fake://codehost/fixture",
+    "defaultBranch": "main",
+    "baseSha": "f569e7f50659194ebd39f2f141e95091f40791da"
+  },
+  "workspace": "workspace",
+  "sail": {
+    "version": "0.0.0",
+    "runtime": "bun 1.3.14"
+  },
+  "adapters": {
+    "ticketSource": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "codeHost": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "harness": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "workspace": {
+      "use": "fake",
+      "origin": "builtin"
+    }
+  },
+  "intake": {
+    "name": "ticket",
+    "kind": "script",
+    "origin": "builtin",
+    "output": "TicketInput",
+    "produces": [
+      "ticket.json",
+      "brief.md"
+    ]
+  },
+  "stages": {
+    "spec": {
+      "kind": "agent",
+      "origin": "repo:.sail/stages/spec",
+      "model": "claude-opus-5-5",
+      "output": "SpecOutput",
+      "produces": [
+        "spec.md"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "git log *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 40,
+        "maxUsd": 2,
+        "maxMinutes": 10
+      }
+    },
+    "implement": {
+      "kind": "agent",
+      "origin": "repo:.sail/stages/implement",
+      "model": "claude-sonnet-5",
+      "output": "ChangeSet",
+      "produces": [
+        "diff.patch"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "src/**",
+          "test/**",
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "bun test*",
+          "git add *",
+          "git commit *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 60,
+        "maxUsd": 5,
+        "maxMinutes": 20
+      }
+    },
+    "tests": {
+      "kind": "script",
+      "origin": "repo:.sail/stages/tests",
+      "output": "TestReport",
+      "produces": [
+        "junit.xml"
+      ],
+      "exitCodes": {
+        "passed": [
+          0
+        ],
+        "failed": [
+          1
+        ]
+      }
+    },
+    "self-review": {
+      "kind": "agent",
+      "origin": "repo:.sail/stages/self-review",
+      "model": "claude-opus-5-5",
+      "output": "ReviewOutput",
+      "produces": [
+        "review.md"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "git log *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 30,
+        "maxUsd": 2,
+        "maxMinutes": 10
+      }
+    },
+    "publish": {
+      "origin": "repo:.sail/stages/publish",
+      "output": "PrInfo",
+      "steps": [
+        {
+          "step": "describe",
+          "kind": "agent",
+          "model": "claude-sonnet-5",
+          "output": "PrDescription",
+          "produces": [
+            "pr-body.md"
+          ]
+        },
+        {
+          "step": "open",
+          "kind": "script",
+          "output": "PrInfo"
+        }
+      ]
+    }
+  },
+  "budget": {
+    "maxUsd": 25,
+    "maxMinutes": 90
+  },
+  "startedAt": "2026-09-25T09:00:00.000Z"
+}

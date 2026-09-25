@@ -1,0 +1,40 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "tests",
+  "call": 2,
+  "key": "tests#2",
+  "kind": "script",
+  "outcome": "passed",
+  "output": {
+    "ok": true,
+    "total": 7,
+    "failed": 0,
+    "durationMs": 2450,
+    "failures": []
+  },
+  "files": {
+    "junit.xml": {
+      "path": "03-tests/call-2/junit.xml",
+      "bytes": 876,
+      "sha256": "e64a9744ccaf5de6502f18d8829bdf7831793b53c33e4a795b07901cfeb1d3c0"
+    }
+  },
+  "consumed": {},
+  "startedAt": "2026-09-25T09:00:42.470Z",
+  "finishedAt": "2026-09-25T09:00:45.160Z",
+  "durationMs": 2690,
+  "exit": {
+    "code": 0,
+    "mapped": "passed"
+  },
+  "command": ".sail/stages/tests/run.sh",
+  "env": {
+    "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+    "STAGE": "tests",
+    "CALL": "2",
+    "TRY": "1",
+    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2",
+    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace"
+  }
+}

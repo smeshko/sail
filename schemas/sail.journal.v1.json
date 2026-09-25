@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.journal.v1.json",
+  "title": "sail journal line: one completed call or step",
+  "description": "One NDJSON line in journal.ndjson: the append-only record a resume replays from. One line per completed call, per completed intake, and per step inside a multi-step stage.",
+  "type": "object",
+  "properties": {
+    "seq": { "type": "integer", "minimum": 1 },
+    "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+(/[a-z0-9-]+)?$" },
+    "stage": { "type": "string" },
+    "call": { "type": "integer", "minimum": 1 },
+    "step": { "type": "string" },
+    "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
+    "output": true,
+    "reason": { "type": ["string", "null"], "description": "set when outcome is blocked; null otherwise" },
+    "files": {
+      "type": "object",
+      "patternProperties": { ".": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "resultPath": { "type": "string" },
+    "recordedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" }
+  },
+  "required": ["seq", "key", "stage", "call", "outcome", "output", "reason", "files", "resultPath", "recordedAt"],
+  "additionalProperties": false
+}

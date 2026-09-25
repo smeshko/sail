@@ -1,0 +1,46 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "tests",
+  "call": 1,
+  "key": "tests#1",
+  "kind": "script",
+  "outcome": "failed",
+  "output": {
+    "ok": false,
+    "total": 6,
+    "failed": 1,
+    "durationMs": 2300,
+    "failures": [
+      {
+        "test": "greet --shout › uppercases the name",
+        "file": "test/greet.test.ts",
+        "message": "Expected \"HELLO, ADA!\" but received \"HELLO, Ada!\""
+      }
+    ]
+  },
+  "files": {
+    "junit.xml": {
+      "path": "03-tests/call-1/junit.xml",
+      "bytes": 893,
+      "sha256": "c98a97ba5504e953e5ddd12d9b65f5f176325398331606b16512f617d3a3358f"
+    }
+  },
+  "consumed": {},
+  "startedAt": "2026-09-25T09:00:26.865Z",
+  "finishedAt": "2026-09-25T09:00:29.405Z",
+  "durationMs": 2540,
+  "exit": {
+    "code": 1,
+    "mapped": "failed"
+  },
+  "command": ".sail/stages/tests/run.sh",
+  "env": {
+    "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+    "STAGE": "tests",
+    "CALL": "1",
+    "TRY": "1",
+    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-1",
+    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace"
+  }
+}

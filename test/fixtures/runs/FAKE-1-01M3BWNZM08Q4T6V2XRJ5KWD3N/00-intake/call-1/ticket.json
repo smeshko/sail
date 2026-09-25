@@ -1,0 +1,23 @@
+{
+  "ticketKey": "FAKE-1",
+  "title": "Add a --shout flag to the greet command",
+  "url": "fake://tickets/FAKE-1",
+  "state": "In Progress",
+  "labels": [
+    "sail"
+  ],
+  "description": "Add a `--shout` flag to the `greet` command. With the flag, the whole greeting is printed in upper case.",
+  "acceptanceCriteria": [
+    "`greet Ada --shout` prints `HELLO, ADA!`",
+    "`greet Ada` still prints `Hello, Ada!`",
+    "`greet --help` lists `--shout`"
+  ],
+  "comments": [
+    {
+      "author": "fixture-user",
+      "body": "Upper-case the whole line, the name included."
+    }
+  ],
+  "links": [],
+  "attachments": []
+}

@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.summary.v1.json",
+  "title": "sail run summary: what happened",
+  "description": "summary.json: the rolled-up view of a run derived from its events, rewritten after every call. For people and dashboards; never read for resume. The run has a status; calls and steps have outcomes.",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "sail.summary.v1" },
+    "runId": { "type": "string" },
+    "workflow": { "type": "string" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "ticket" },
+        "ticketKey": { "type": "string" },
+        "via": { "enum": ["cli", "watch"] }
+      },
+      "required": ["kind", "ticketKey", "via"],
+      "additionalProperties": false
+    },
+    "ticket": {
+      "description": "the fetched ticket; absent when intake did not get that far",
+      "type": "object",
+      "properties": {
+        "ticketKey": { "type": "string" },
+        "title": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "required": ["ticketKey", "title"],
+      "additionalProperties": false
+    },
+    "status": { "enum": ["running", "suspended", "completed", "failed"] },
+    "stopReason": {
+      "description": "why a failed or suspended run ended without completing; exactly one, and only then",
+      "enum": [
+        "workflow_failed",
+        "stage_error",
+        "budget_exceeded",
+        "determinism_violation",
+        "until",
+        "unwatched",
+        "stopped"
+      ]
+    },
+    "startedAt": { "$ref": "#/$defs/ts" },
+    "endedAt": { "$ref": "#/$defs/ts" },
+    "durationMs": { "type": "number", "minimum": 0 },
+    "result": true,
+    "calls": { "type": "array", "items": { "$ref": "#/$defs/callEntry" } },
+    "loops": {
+      "type": "object",
+      "patternProperties": {
+        ".": {
+          "type": "object",
+          "properties": {
+            "iterations": { "type": "integer", "minimum": 1 },
+            "max": { "type": "integer", "minimum": 1 }
+          },
+          "required": ["iterations", "max"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "routes": {
+      "description": "routing decisions the workflow took: a route, never a (git) branch",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "at": { "type": "string" },
+          "value": true,
+          "took": { "type": "string" }
+        },
+        "required": ["at", "value", "took"],
+        "additionalProperties": false
+      }
+    },
+    "totals": {
+      "type": "object",
+      "properties": {
+        "stageCalls": { "type": "integer", "minimum": 0 },
+        "steps": { "type": "integer", "minimum": 0 },
+        "toolCalls": { "type": "integer", "minimum": 0 },
+        "denials": { "type": "integer", "minimum": 0 },
+        "replays": { "type": "integer", "minimum": 0 },
+        "usage": { "$ref": "#/$defs/usage" },
+        "budget": {
+          "type": "object",
+          "properties": {
+            "maxUsd": { "type": "number", "minimum": 0 },
+            "usedPct": { "type": "number", "minimum": 0 }
+          },
+          "required": ["maxUsd", "usedPct"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["stageCalls", "steps", "toolCalls", "denials", "replays", "usage", "budget"],
+      "additionalProperties": false
+    },
+    "version": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["schema", "runId", "workflow", "source", "status", "startedAt", "calls", "totals", "version"],
+  "additionalProperties": false,
+  "if": {
+    "type": "object",
+    "properties": { "status": { "enum": ["failed", "suspended"] } },
+    "required": ["status"]
+  },
+  "then": { "type": "object", "properties": { "stopReason": true }, "required": ["stopReason"] },
+  "else": { "properties": { "stopReason": false } },
+  "$defs": {
+    "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "cacheReadTokens": { "type": "integer", "minimum": 0 },
+        "cacheWriteTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 }
+      },
+      "required": ["costUsd"],
+      "additionalProperties": false
+    },
+    "callEntry": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+$" },
+        "kind": { "enum": ["agent", "script"] },
+        "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "turns": { "type": "integer", "minimum": 0 },
+        "toolCalls": { "type": "integer", "minimum": 0 },
+        "denials": { "type": "integer", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "commits": { "type": "integer", "minimum": 0 },
+        "feedbackFrom": { "type": "string" },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "summary": { "type": "string" },
+        "resultPath": { "type": "string" },
+        "steps": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/stepEntry" } }
+      },
+      "required": ["key", "outcome", "durationMs"],
+      "additionalProperties": false
+    },
+    "stepEntry": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+/[a-z0-9-]+$" },
+        "kind": { "enum": ["agent", "script"] },
+        "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "turns": { "type": "integer", "minimum": 0 },
+        "toolCalls": { "type": "integer", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "files": { "type": "array", "items": { "type": "string" } },
+        "summary": { "type": "string" }
+      },
+      "required": ["key", "kind", "outcome", "durationMs"],
+      "additionalProperties": false
+    }
+  }
+}

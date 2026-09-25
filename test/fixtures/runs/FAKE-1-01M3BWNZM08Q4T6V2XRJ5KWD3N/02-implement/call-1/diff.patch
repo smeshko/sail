@@ -1,0 +1,29 @@
+diff --git a/src/greet.ts b/src/greet.ts
+--- a/src/greet.ts
++++ b/src/greet.ts
+@@ -1,3 +1,4 @@
+-export function greet(name: string): string {
+-  return `Hello, ${name.trim() || 'world'}!`;
++export function greet(name: string, options: { shout?: boolean } = {}): string {
++  const greeting = options.shout ? 'HELLO' : 'Hello';
++  return `${greeting}, ${name.trim() || 'world'}!`;
+ }
+diff --git a/src/cli.ts b/src/cli.ts
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -3,5 +3,6 @@
+ const args = process.argv.slice(2);
+-console.log(greet(args[0] ?? ''));
++const shout = args.includes('--shout');
++console.log(greet(args.find((arg) => !arg.startsWith('--')) ?? '', { shout }));
+diff --git a/test/greet.test.ts b/test/greet.test.ts
+--- a/test/greet.test.ts
++++ b/test/greet.test.ts
+@@ -12,3 +12,11 @@
++test('greet --shout › uppercases the name', () => {
++  expect(greet('Ada', { shout: true })).toBe('HELLO, ADA!');
++});
++
++test('greet --shout › keeps the exclamation mark', () => {
++  expect(greet('Ada', { shout: true })).toEndWith('!');
++});

@@ -1,0 +1,40 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "publish",
+  "call": 1,
+  "step": "open",
+  "key": "publish#1/open",
+  "kind": "script",
+  "outcome": "passed",
+  "output": {
+    "number": 1,
+    "url": "fake://codehost/fixture/pull/1",
+    "draft": false
+  },
+  "files": {},
+  "consumed": {
+    "description": "05-publish/call-1/steps/1-describe/result.json#/output"
+  },
+  "startedAt": "2026-09-25T09:01:06.795Z",
+  "finishedAt": "2026-09-25T09:01:10.635Z",
+  "durationMs": 3840,
+  "exit": {
+    "code": 0,
+    "mapped": "passed"
+  },
+  "command": ".sail/stages/publish/open.sh",
+  "env": {
+    "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+    "STAGE": "publish",
+    "CALL": "1",
+    "TRY": "1",
+    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open",
+    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace"
+  },
+  "codeHost": {
+    "operation": "openPullRequest",
+    "reviewers": [],
+    "ticketLinked": true
+  }
+}

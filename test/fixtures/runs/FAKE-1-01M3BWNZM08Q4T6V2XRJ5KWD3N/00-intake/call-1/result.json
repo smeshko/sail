@@ -1,0 +1,57 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "intake",
+  "call": 1,
+  "key": "intake#1",
+  "kind": "script",
+  "outcome": "passed",
+  "output": {
+    "ticketKey": "FAKE-1",
+    "title": "Add a --shout flag to the greet command",
+    "url": "fake://tickets/FAKE-1",
+    "acceptanceCriteria": [
+      "`greet Ada --shout` prints `HELLO, ADA!`",
+      "`greet Ada` still prints `Hello, Ada!`",
+      "`greet --help` lists `--shout`"
+    ]
+  },
+  "files": {
+    "ticket.json": {
+      "path": "00-intake/call-1/ticket.json",
+      "bytes": 622,
+      "sha256": "00dfba83bc3416c489aaaf86a571c03d5b7dace8adb4135e3c7d990e73e977dc"
+    },
+    "brief.md": {
+      "path": "00-intake/call-1/brief.md",
+      "bytes": 674,
+      "sha256": "77279acc674ac04758c7f34b343999dc1e1d1708cbdb6c8691215e249c1378e6",
+      "validation": {
+        "ok": true,
+        "checks": [
+          "hasSections(Request, Acceptance criteria, Context)",
+          "untrustedInputWrapped"
+        ]
+      }
+    }
+  },
+  "consumed": {
+    "source": "run.json#/source"
+  },
+  "startedAt": "2026-09-25T09:00:00.940Z",
+  "finishedAt": "2026-09-25T09:00:02.990Z",
+  "durationMs": 2050,
+  "exit": {
+    "code": 0,
+    "mapped": "passed"
+  },
+  "command": "builtin:ticket",
+  "env": {
+    "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+    "STAGE": "intake",
+    "CALL": "1",
+    "TRY": "1",
+    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/00-intake/call-1",
+    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace"
+  }
+}
