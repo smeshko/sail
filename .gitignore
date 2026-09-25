@@ -3,6 +3,9 @@ docs/
 CONTEXT.md
 README.md
 
+# Spikes are throwaway research, never committed.
+spikes/
+
 .sail-runs/
 node_modules/
 coverage/
