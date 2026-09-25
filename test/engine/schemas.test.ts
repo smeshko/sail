@@ -189,6 +189,16 @@ test('result: dispatch reports only the branch the document claims to be', () =>
   expect(paths('sail.result.v1', { ...multiStepResult, steps: [describeStep] })).toEqual(['/steps']);
 });
 
+test("result: a multi-step call's outcome must be its last step's", () => {
+  const blockedLast = { ...describeStep, step: 'finish', outcome: 'blocked' };
+  expect(validateDocument('sail.result.v1', { ...multiStepResult, steps: [openStep, blockedLast] })).toEqual([
+    { schema: 'sail.result.v1', path: '/outcome', message: "must equal the last step's outcome (blocked)" },
+  ]);
+  expect(
+    validateDocument('sail.result.v1', { ...multiStepResult, outcome: 'blocked', steps: [openStep, blockedLast] }),
+  ).toEqual([]);
+});
+
 test('journal: an unknown outcome names the field', () => {
   expect(paths('sail.journal.v1', { ...journal, outcome: 'maybe' })).toEqual(['/outcome']);
 });

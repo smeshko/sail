@@ -83,10 +83,20 @@ function toIssue(error: ErrorObject): Pick<SchemaIssue, 'path' | 'message'> {
 
 const RESTATING = new Set(['if', 'propertyNames']);
 
-/** Validates one parsed document. An empty array means it is valid. */
+// Rules JSON Schema can't state, checked once a document matches its schema. A multi-step call's outcome is its last
+// step's, and JSON Schema can't compare against the last element of an array.
+function ruleIssues(schema: SchemaName, data: unknown): SchemaIssue[] {
+  if (schema !== 'sail.result.v1') return [];
+  const result = data as { outcome: string; steps?: { outcome: string }[] };
+  const last = result.steps?.at(-1);
+  if (last === undefined || last.outcome === result.outcome) return [];
+  return [{ schema, path: '/outcome', message: `must equal the last step's outcome (${last.outcome})` }];
+}
+
+/** Validates one parsed document against its schema and the rules beside it. An empty array means it is valid. */
 export function validateDocument(schema: SchemaName, data: unknown): SchemaIssue[] {
   const validate = validatorFor(schema);
-  if (validate(data)) return [];
+  if (validate(data)) return ruleIssues(schema, data);
   // `if` and `propertyNames` errors only restate the errors reported beneath them.
   return (validate.errors ?? [])
     .filter((error) => !RESTATING.has(error.keyword))
