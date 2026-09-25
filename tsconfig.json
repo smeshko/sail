@@ -18,5 +18,5 @@
       "sail/intakes": ["./src/sdk/intakes.ts"]
     }
   },
-  "include": ["src", "test", "scripts"]
+  "include": ["src", "test", "scripts", "test/fixtures/repo/.sail/**/*.ts"]
 }
