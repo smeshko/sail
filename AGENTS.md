@@ -75,3 +75,4 @@ including as examples in this file.
 - `src/watch`: the per-repository watcher: poll, queue, claim, and dispatch detached runs.
 - `src/dashboard`: reads the watcher registry, the branch leases and run files across the machine.
 - `src/cli`: the `sail` command. `src/cli/main.ts` is the bin.
+- `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
