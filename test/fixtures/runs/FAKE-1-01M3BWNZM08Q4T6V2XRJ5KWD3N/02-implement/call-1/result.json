@@ -1,0 +1,62 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "implement",
+  "call": 1,
+  "key": "implement#1",
+  "kind": "agent",
+  "outcome": "done",
+  "output": {
+    "commits": [
+      {
+        "sha": "89541459e5b0696a12a6adb712334ea24cff1a31",
+        "message": "feat: add a shout option to greet"
+      },
+      {
+        "sha": "17c569cb442d288920415d862cfabdb2bb335469",
+        "message": "test: cover greet --shout"
+      }
+    ],
+    "files": [
+      "src/greet.ts",
+      "src/cli.ts",
+      "test/greet.test.ts"
+    ],
+    "notes": "The push was denied; publishing pushes the branch."
+  },
+  "files": {
+    "diff.patch": {
+      "path": "02-implement/call-1/diff.patch",
+      "bytes": 1034,
+      "sha256": "e1d86ba7d2fc90d34ddbe81ee21c2410fb38855023caf1f2b779c398731912e2"
+    }
+  },
+  "consumed": {
+    "spec": "01-spec/call-1/spec.md",
+    "feedback": null
+  },
+  "startedAt": "2026-09-25T09:00:13.965Z",
+  "finishedAt": "2026-09-25T09:00:26.595Z",
+  "durationMs": 12630,
+  "harness": {
+    "adapter": "fake",
+    "model": "claude-sonnet-5",
+    "provider": "fake",
+    "sessionId": "fake-session-implement-1",
+    "turns": 5,
+    "toolCalls": 3,
+    "denials": 1
+  },
+  "usage": {
+    "inputTokens": 9800,
+    "cacheReadTokens": 64000,
+    "cacheWriteTokens": 7400,
+    "outputTokens": 3900,
+    "costUsd": 0.476
+  },
+  "workspace": {
+    "headSha": "17c569cb442d288920415d862cfabdb2bb335469",
+    "commitsAdded": 2,
+    "diffStat": "3 files changed, 12 insertions(+), 3 deletions(-)"
+  }
+}

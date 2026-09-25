@@ -1,0 +1,5 @@
+bun test v1.3.14
+5 pass
+1 fail
+(fail) greet --shout › uppercases the name
+{"ok":false,"total":6,"failed":1,"durationMs":2300,"failures":[{"test":"greet --shout › uppercases the name","file":"test/greet.test.ts","message":"Expected \"HELLO, ADA!\" but received \"HELLO, Ada!\""}]}

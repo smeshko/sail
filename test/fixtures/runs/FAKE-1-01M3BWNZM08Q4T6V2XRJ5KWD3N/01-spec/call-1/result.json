@@ -1,0 +1,66 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "spec",
+  "call": 1,
+  "key": "spec#1",
+  "kind": "agent",
+  "outcome": "done",
+  "output": {
+    "summary": "Add an optional shout flag to greet() and the CLI; with it the whole greeting is upper-cased.",
+    "tasks": [
+      {
+        "title": "Add the shout option to greet() and the --shout flag to the CLI",
+        "files": [
+          "src/greet.ts",
+          "src/cli.ts"
+        ]
+      },
+      {
+        "title": "Cover --shout and its help text in tests",
+        "files": [
+          "test/greet.test.ts"
+        ]
+      }
+    ]
+  },
+  "files": {
+    "spec.md": {
+      "path": "01-spec/call-1/spec.md",
+      "bytes": 427,
+      "sha256": "7cfdb9431ea6aa3d875a9c8f607989903c30cfee471b39a7891077bbd96f5cd6",
+      "validation": {
+        "ok": true,
+        "checks": [
+          "hasSections(Requirements, Tasks)",
+          "noPlaceholders"
+        ]
+      }
+    }
+  },
+  "consumed": {
+    "brief": "00-intake/call-1/brief.md"
+  },
+  "startedAt": "2026-09-25T09:00:03.260Z",
+  "finishedAt": "2026-09-25T09:00:13.665Z",
+  "durationMs": 10405,
+  "derived": {
+    "tasks": 2
+  },
+  "harness": {
+    "adapter": "fake",
+    "model": "claude-opus-5-5",
+    "provider": "fake",
+    "sessionId": "fake-session-spec-1",
+    "turns": 4,
+    "toolCalls": 2,
+    "denials": 0
+  },
+  "usage": {
+    "inputTokens": 5200,
+    "cacheReadTokens": 18400,
+    "cacheWriteTokens": 3100,
+    "outputTokens": 1450,
+    "costUsd": 0.3125
+  }
+}

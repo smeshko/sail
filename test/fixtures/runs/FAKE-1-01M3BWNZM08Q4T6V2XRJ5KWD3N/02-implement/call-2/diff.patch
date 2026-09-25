@@ -1,0 +1,17 @@
+diff --git a/src/greet.ts b/src/greet.ts
+--- a/src/greet.ts
++++ b/src/greet.ts
+@@ -1,4 +1,4 @@
+ export function greet(name: string, options: { shout?: boolean } = {}): string {
+-  const greeting = options.shout ? 'HELLO' : 'Hello';
+-  return `${greeting}, ${name.trim() || 'world'}!`;
++  const line = `Hello, ${name.trim() || 'world'}!`;
++  return options.shout ? line.toUpperCase() : line;
+ }
+diff --git a/test/cli.test.ts b/test/cli.test.ts
+--- a/test/cli.test.ts
++++ b/test/cli.test.ts
+@@ -8,3 +8,7 @@
++test('cli › lists --shout in help', () => {
++  expect(run(['--help']).stdout).toContain('--shout');
++});

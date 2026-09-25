@@ -76,3 +76,5 @@ including as examples in this file.
 - `src/dashboard`: reads the watcher registry, the branch leases and run files across the machine.
 - `src/cli`: the `sail` command. `src/cli/main.ts` is the bin.
 - `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
+- `test/fixtures/`: `repo/` is the fixture repository and `runs/` the golden run directories. Both are data, edited by
+  hand when a schema changes.

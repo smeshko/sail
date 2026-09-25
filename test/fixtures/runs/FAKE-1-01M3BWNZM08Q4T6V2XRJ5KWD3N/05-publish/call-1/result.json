@@ -1,0 +1,52 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "publish",
+  "call": 1,
+  "key": "publish#1",
+  "outcome": "passed",
+  "output": {
+    "number": 1,
+    "url": "fake://codehost/fixture/pull/1",
+    "draft": false
+  },
+  "files": {
+    "pr-body.md": {
+      "path": "05-publish/call-1/steps/1-describe/pr-body.md",
+      "bytes": 324,
+      "sha256": "23db9e45270f517c89384417def832f1c37b29a01c818087da81f4e7b6ac231c",
+      "validation": {
+        "ok": true,
+        "checks": [
+          "hasSections(Summary, Changes, Testing)",
+          "noPlaceholders"
+        ]
+      }
+    }
+  },
+  "consumed": {
+    "ticket": "00-intake/call-1/result.json#/output",
+    "spec": "01-spec/call-1/spec.md"
+  },
+  "steps": [
+    {
+      "step": "describe",
+      "kind": "agent",
+      "outcome": "done",
+      "resultPath": "05-publish/call-1/steps/1-describe/result.json",
+      "costUsd": 0.101
+    },
+    {
+      "step": "open",
+      "kind": "script",
+      "outcome": "passed",
+      "resultPath": "05-publish/call-1/steps/2-open/result.json"
+    }
+  ],
+  "usage": {
+    "costUsd": 0.101
+  },
+  "startedAt": "2026-09-25T09:00:56.210Z",
+  "finishedAt": "2026-09-25T09:01:10.715Z",
+  "durationMs": 14505
+}
