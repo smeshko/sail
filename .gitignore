@@ -1,6 +1,5 @@
 # Design docs, ADRs, epics and plans stay local: they reference internal work.
 docs/
-CONTEXT.md
 README.md
 # Plan artifacts (/create-plan) stay local even if docs/ is ever published.
 docs/artifacts/plans/

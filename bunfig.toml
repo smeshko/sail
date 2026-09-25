@@ -1,0 +1,7 @@
+[test]
+preload = ["./test/setup.ts"]
+coverageThreshold = { lines = 0.8 } # enforced per file by Bun
+coverageSkipTestFiles = true
+# The gate's visible exclusions. src/cli/main.ts is the bin shim: importing it runs the CLI, so
+# test/cli/main.test.ts covers it in a subprocess instead.
+coveragePathIgnorePatterns = ["test/**", "src/cli/main.ts"]
