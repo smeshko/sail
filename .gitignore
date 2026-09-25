@@ -1,0 +1,10 @@
+# Design docs, ADRs, epics and plans stay local: they reference internal work.
+docs/
+CONTEXT.md
+README.md
+
+.sail-runs/
+node_modules/
+coverage/
+.linear
+.DS_Store
