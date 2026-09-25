@@ -103,7 +103,21 @@ export function validateDocument(schema: SchemaName, data: unknown): SchemaIssue
     .map((error) => ({ schema, ...toIssue(error) }));
 }
 
-function checkText(report: RunDirReport, schema: SchemaName, file: string, text: string, line?: number): void {
+type Doc = Record<string, unknown>;
+
+interface Checked {
+  data: Doc;
+  valid: boolean;
+}
+
+/** Parses and validates one document. Returns it unless it didn't parse. */
+function checkText(
+  report: RunDirReport,
+  schema: SchemaName,
+  file: string,
+  text: string,
+  line?: number,
+): Checked | undefined {
   report.counts[schema] = (report.counts[schema] ?? 0) + 1;
   const at: Pick<SchemaIssue, 'file' | 'line' | 'schema'> =
     line === undefined ? { file, schema } : { file, line, schema };
@@ -112,41 +126,98 @@ function checkText(report: RunDirReport, schema: SchemaName, file: string, text:
     data = JSON.parse(text);
   } catch (error) {
     report.issues.push({ ...at, path: '/', message: `is not valid JSON: ${(error as Error).message}` });
+    return undefined;
+  }
+  const issues = validateDocument(schema, data);
+  for (const issue of issues) report.issues.push({ ...issue, ...at });
+  return { data: data as Doc, valid: issues.length === 0 };
+}
+
+// A journal line and a multi-step call each point at result.json files by run-relative path. Both are written after
+// the result they point at, so the result must exist and agree on every field the link names.
+function checkLink(
+  report: RunDirReport,
+  at: SchemaIssue,
+  results: ReadonlyMap<string, Checked>,
+  target: string,
+  expected: Doc,
+): void {
+  const linked = results.get(target);
+  if (linked === undefined) {
+    report.issues.push({ ...at, message: `points at no result.json: ${target}` });
     return;
   }
-  for (const issue of validateDocument(schema, data)) report.issues.push({ ...issue, ...at });
+  if (!linked.valid) return; // its own issues are reported
+  const differ = Object.entries(expected)
+    .filter(([field, value]) => value !== undefined && linked.data[field] !== value)
+    .map(([field, value]) => `${field} is ${JSON.stringify(linked.data[field])}, not ${JSON.stringify(value)}`);
+  if (differ.length > 0) report.issues.push({ ...at, message: `points at ${target}, whose ${differ.join(', ')}` });
 }
 
 // Call directories are `NN-<stage>/call-N/`, with a multi-step call's steps below them. Nothing else in a run
 // directory is walked: the workspace in particular is the repository's checkout and may hold any result.json.
 const RESULT_FILES = new Bun.Glob('[0-9][0-9]*-*/**/result.json');
 
-/** Validates run.json, every journal and event line, summary.json and every call's result.json in `dir`. */
+/**
+ * Validates run.json, every journal and event line, summary.json and every call's result.json in `dir`, and checks
+ * that every journal line and multi-step call points at a result that agrees with it.
+ */
 export function validateRunDir(dir: string): RunDirReport {
   const report: RunDirReport = { counts: {}, issues: [] };
   const read = (file: string): string | undefined =>
     existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8') : undefined;
 
-  const header = read('run.json');
-  if (header === undefined)
+  const headerText = read('run.json');
+  if (headerText === undefined)
     report.issues.push({ file: 'run.json', schema: 'sail.run.v1', path: '/', message: 'is missing' });
-  else checkText(report, 'sail.run.v1', 'run.json', header);
+  const header = headerText === undefined ? undefined : checkText(report, 'sail.run.v1', 'run.json', headerText);
+  const runId = header?.valid ? header.data.runId : undefined;
 
+  const journal: { line: number; data: Doc }[] = [];
   for (const [file, schema] of [
     ['journal.ndjson', 'sail.journal.v1'],
     ['events.ndjson', 'sail.event.v1'],
   ] as const) {
     const lines = read(file)?.split('\n') ?? [];
     lines.forEach((text, i) => {
-      if (text.trim() !== '') checkText(report, schema, file, text, i + 1);
+      if (text.trim() === '') return;
+      const checked = checkText(report, schema, file, text, i + 1);
+      if (schema === 'sail.journal.v1' && checked?.valid) journal.push({ line: i + 1, data: checked.data });
     });
   }
 
   const summaryText = read('summary.json');
   if (summaryText !== undefined) checkText(report, 'sail.summary.v1', 'summary.json', summaryText);
 
+  const results = new Map<string, Checked>();
   for (const file of [...RESULT_FILES.scanSync({ cwd: dir })].sort()) {
-    checkText(report, 'sail.result.v1', file, readFileSync(join(dir, file), 'utf8'));
+    const checked = checkText(report, 'sail.result.v1', file, readFileSync(join(dir, file), 'utf8'));
+    if (checked) results.set(file, checked);
+  }
+
+  for (const { line, data } of journal) {
+    const at: SchemaIssue = {
+      file: 'journal.ndjson',
+      line,
+      schema: 'sail.journal.v1',
+      path: '/resultPath',
+      message: '',
+    };
+    const { key, stage, call, step, outcome } = data;
+    checkLink(report, at, results, String(data.resultPath), { runId, key, stage, call, step, outcome });
+  }
+  for (const [file, { data, valid }] of results) {
+    if (!valid || !Array.isArray(data.steps)) continue;
+    (data.steps as Doc[]).forEach((step, i) => {
+      const at: SchemaIssue = { file, schema: 'sail.result.v1', path: `/steps/${i}/resultPath`, message: '' };
+      const expected = { runId: data.runId, key: `${data.key}/${step.step}`, stage: data.stage, call: data.call };
+      checkLink(report, at, results, String(step.resultPath), {
+        ...expected,
+        step: step.step,
+        kind: step.kind,
+        outcome: step.outcome,
+      });
+    });
   }
   return report;
 }

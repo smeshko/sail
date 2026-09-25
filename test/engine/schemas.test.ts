@@ -90,8 +90,18 @@ const agentResult = {
   harness: { adapter: 'fake', model: 'fake', provider: 'fake', sessionId: 's-1', turns: 1, toolCalls: 0, denials: 0 },
   usage: { costUsd: 0 },
 };
-const describeStep = { step: 'describe', kind: 'agent', outcome: 'done', resultPath: 'steps/1-describe/result.json' };
-const openStep = { step: 'open', kind: 'script', outcome: 'passed', resultPath: 'steps/2-open/result.json' };
+const describeStep = {
+  step: 'describe',
+  kind: 'agent',
+  outcome: 'done',
+  resultPath: '05-publish/call-1/steps/1-describe/result.json',
+};
+const openStep = {
+  step: 'open',
+  kind: 'script',
+  outcome: 'passed',
+  resultPath: '05-publish/call-1/steps/2-open/result.json',
+};
 const multiStepResult = {
   ...call,
   stage: 'publish',
@@ -254,6 +264,60 @@ test('validateRunDir reports a nested result.json by its path in the run directo
   expect(issues.map(formatIssue)).toEqual([
     '01-spec/call-1/result.json  [sail.result.v1]  /outcome must be equal to one of the allowed values',
     '05-publish/call-1/steps/2-open/result.json  [sail.result.v1]  /extra is not allowed',
+  ]);
+});
+
+const publishFiles = (): Record<string, string> => ({
+  '05-publish/call-1/result.json': json(multiStepResult),
+  '05-publish/call-1/steps/1-describe/result.json': json({
+    ...agentResult,
+    stage: 'publish',
+    step: 'describe',
+    key: 'publish#1/describe',
+  }),
+  '05-publish/call-1/steps/2-open/result.json': json({
+    ...scriptResult,
+    stage: 'publish',
+    step: 'open',
+    key: 'publish#1/open',
+  }),
+});
+
+test('validateRunDir checks that a multi-step call points at results for its own steps', () => {
+  expect(validateRunDir(tempDir({ ...validRunDir(), ...publishFiles() })).issues).toEqual([]);
+  const wrongLink = {
+    ...multiStepResult,
+    steps: [describeStep, { ...openStep, resultPath: '00-intake/call-1/result.json' }],
+  };
+  const dir = tempDir({ ...validRunDir(), ...publishFiles(), '05-publish/call-1/result.json': json(wrongLink) });
+  expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
+    '05-publish/call-1/result.json  [sail.result.v1]  /steps/1/resultPath points at 00-intake/call-1/result.json, ' +
+      'whose key is "intake#1", not "publish#1/open", stage is "intake", not "publish", step is undefined, not "open"',
+  ]);
+});
+
+test('validateRunDir checks that every journal line points at a result that agrees with it', () => {
+  const missing = tempDir({
+    ...validRunDir(),
+    'journal.ndjson': ndjson({ ...journal, resultPath: '01-spec/call-1/result.json' }),
+  });
+  const disagrees = tempDir({
+    ...validRunDir(),
+    'journal.ndjson': ndjson({ ...journal, outcome: 'failed' }),
+    '00-intake/call-1/result.json': json({ ...scriptResult, runId: 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N' }),
+  });
+  expect([...validateRunDir(missing).issues, ...validateRunDir(disagrees).issues].map(formatIssue)).toEqual([
+    'journal.ndjson:1  [sail.journal.v1]  /resultPath points at no result.json: 01-spec/call-1/result.json',
+    'journal.ndjson:1  [sail.journal.v1]  /resultPath points at 00-intake/call-1/result.json, ' +
+      'whose runId is "FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N", not "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N", ' +
+      'outcome is "passed", not "failed"',
+  ]);
+});
+
+test('validateRunDir reports an invalid linked result once, by its own issues', () => {
+  const dir = tempDir({ ...validRunDir(), '00-intake/call-1/result.json': json({ ...scriptResult, extra: true }) });
+  expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
+    '00-intake/call-1/result.json  [sail.result.v1]  /extra is not allowed',
   ]);
 });
 

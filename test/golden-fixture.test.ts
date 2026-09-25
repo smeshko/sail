@@ -150,3 +150,19 @@ test("a multi-step call's outcome is its last step's, as that step's result reco
     expect(JSON.parse(text(last.resultPath)).outcome).toBe(last.outcome);
   }
 });
+
+test("a multi-step call linked to another call's result names the link", () => {
+  const dir = mutatedCopy('05-publish/call-1/result.json', (content) =>
+    content.replace(
+      '"resultPath": "05-publish/call-1/steps/2-open/result.json"',
+      '"resultPath": "03-tests/call-2/result.json"',
+    ),
+  );
+  const found = validateRunDir(dir).issues.map(formatIssue);
+  for (const issue of found) console.log(issue);
+  expect(found).toEqual([
+    '05-publish/call-1/result.json  [sail.result.v1]  /steps/1/resultPath points at 03-tests/call-2/result.json, ' +
+      'whose key is "tests#2", not "publish#1/open", stage is "tests", not "publish", call is 2, not 1, ' +
+      'step is undefined, not "open"',
+  ]);
+});
