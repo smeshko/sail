@@ -1,0 +1,3 @@
+#!/bin/sh
+# Runs the full gate before every push. Bypass once with `git push --no-verify`.
+exec bun run verify

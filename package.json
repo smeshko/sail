@@ -13,7 +13,9 @@
     "typecheck": "bun --bun tsc --noEmit -p tsconfig.json",
     "lint": "bun --bun biome check .",
     "fix": "bun --bun biome check --write .",
-    "test": "bun scripts/test.ts"
+    "test": "bun scripts/test.ts",
+    "verify": "bun run typecheck && bun run lint && bun run test --coverage",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
