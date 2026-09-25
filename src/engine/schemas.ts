@@ -190,20 +190,36 @@ export function validateRunDir(dir: string): RunDirReport {
   const runId = header?.valid ? header.data.runId : undefined;
 
   const journal: { line: number; data: Doc }[] = [];
+  const journaled = new Set<unknown>(); // every parsed line's resultPath, valid or not
   for (const [file, schema] of [
     ['journal.ndjson', 'sail.journal.v1'],
     ['events.ndjson', 'sail.event.v1'],
   ] as const) {
     const lines = read(file)?.split('\n') ?? [];
+    let position = 0;
     lines.forEach((text, i) => {
       if (text.trim() === '') return;
+      position++;
       const checked = checkText(report, schema, file, text, i + 1);
-      if (schema === 'sail.journal.v1' && checked?.valid) journal.push({ line: i + 1, data: checked.data });
+      if (schema !== 'sail.journal.v1' || checked === undefined) return;
+      journaled.add(checked.data.resultPath);
+      if (!checked.valid) return;
+      journal.push({ line: i + 1, data: checked.data });
+      if (checked.data.seq !== position) {
+        report.issues.push({
+          file,
+          line: i + 1,
+          schema,
+          path: '/seq',
+          message: `must be ${position}, its place in the journal`,
+        });
+      }
     });
   }
 
   const summaryText = read('summary.json');
-  if (summaryText !== undefined) checkText(report, 'sail.summary.v1', 'summary.json', summaryText);
+  const summary =
+    summaryText === undefined ? undefined : checkText(report, 'sail.summary.v1', 'summary.json', summaryText);
 
   const results = new Map<string, Checked>();
   for (const file of [...RESULT_FILES.scanSync({ cwd: dir })].sort()) {
@@ -235,6 +251,29 @@ export function validateRunDir(dir: string): RunDirReport {
         outcome: step.outcome,
       });
     });
+  }
+
+  // A result with no journal line is the crash window a resume re-runs: the engine writes result.json, then appends
+  // the journal. A completed run has left its replay loop, so by then every result it holds is journaled.
+  if (summary?.valid && summary.data.status === 'completed') {
+    if ((report.counts['sail.journal.v1'] ?? 0) === 0) {
+      report.issues.push({
+        file: 'journal.ndjson',
+        schema: 'sail.journal.v1',
+        path: '/',
+        message: 'is missing or empty, and the run completed',
+      });
+    } else {
+      for (const file of results.keys()) {
+        if (!journaled.has(file))
+          report.issues.push({
+            file,
+            schema: 'sail.result.v1',
+            path: '/',
+            message: 'is not journaled, and the run completed',
+          });
+      }
+    }
   }
   return report;
 }

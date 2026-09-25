@@ -338,6 +338,24 @@ test('validateRunDir checks that a journal line replays the output and files its
   ]);
 });
 
+test('validateRunDir requires a completed run to journal every result, in order', () => {
+  const unjournaled = { ...validRunDir(), '01-spec/call-1/result.json': json(agentResult) };
+  expect(validateRunDir(tempDir(unjournaled)).issues).toEqual([]);
+  const completed = { ...unjournaled, 'summary.json': json({ ...summary, status: 'completed' }) };
+  expect(validateRunDir(tempDir(completed)).issues.map(formatIssue)).toEqual([
+    '01-spec/call-1/result.json  [sail.result.v1]  / is not journaled, and the run completed',
+  ]);
+  const noJournal: Record<string, string> = { ...completed };
+  delete noJournal['journal.ndjson'];
+  expect(validateRunDir(tempDir(noJournal)).issues.map(formatIssue)).toEqual([
+    'journal.ndjson  [sail.journal.v1]  / is missing or empty, and the run completed',
+  ]);
+  const outOfOrder = { ...validRunDir(), 'journal.ndjson': ndjson({ ...journal, seq: 2 }) };
+  expect(validateRunDir(tempDir(outOfOrder)).issues.map(formatIssue)).toEqual([
+    'journal.ndjson:1  [sail.journal.v1]  /seq must be 1, its place in the journal',
+  ]);
+});
+
 test('validateRunDir reports an invalid linked result once, by its own issues', () => {
   const dir = tempDir({ ...validRunDir(), '00-intake/call-1/result.json': json({ ...scriptResult, extra: true }) });
   expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
