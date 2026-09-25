@@ -2,6 +2,8 @@
 docs/
 CONTEXT.md
 README.md
+# Plan artifacts (/create-plan) stay local even if docs/ is ever published.
+docs/artifacts/plans/
 
 # Spikes are throwaway research, never committed.
 spikes/
