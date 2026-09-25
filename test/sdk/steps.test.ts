@@ -99,3 +99,21 @@ test('stage() keeps produces as given', () => {
     'out.md': 'file',
   });
 });
+
+test("stage() refuses an output that only looks like its last step's, because types can't see refinements", () => {
+  const open = script('open', { run: './open.sh', output: z.object({ url: z.string() }) });
+  expect(() => stage('publish', { output: z.object({ url: z.url() }), steps: [open] })).toThrow(
+    "stage 'publish': its output must be the schema its last step 'open' declares",
+  );
+});
+
+test('stage() refuses a value binding whose schema only looks like the one its step takes', () => {
+  const Email = z.email();
+  const notify = script('notify', { run: './notify.sh', consumes: { to: value(Email) }, output: Output });
+  expect(() => stage('announce', { consumes: { to: value(z.string()) }, output: Output, steps: [notify] })).toThrow(
+    "stage 'announce': binding 'to' must use the schema step 'notify' declares for it",
+  );
+  expect(
+    stage('announce', { consumes: { to: value(Email) }, output: Output, steps: [notify] }).consumes.to.schema,
+  ).toBe(Email);
+});

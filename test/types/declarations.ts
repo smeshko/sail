@@ -34,12 +34,6 @@ stage('mismatched-output', {
   steps: [script('open', { run: './open.sh', output: Output })],
 });
 
-// A last step whose output has more than the stage declares still fits it.
-stage('wider-output', {
-  output: Output,
-  steps: [script('open', { run: './open.sh', output: Output.extend({ url: z.string() }) })],
-});
-
 // The workflow supplies a stage's bindings, so a stage declares each one its steps take from the workflow.
 const implement = agent('implement', {
   prompt: './prompt.md',

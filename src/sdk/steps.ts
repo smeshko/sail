@@ -74,7 +74,7 @@ export interface StageOptions<C extends Consumes, P extends Produces, O extends 
   /** What the workflow supplies, including every binding the steps take from the workflow, under the same name. */
   readonly consumes?: C;
   readonly produces?: P;
-  /** The stage's output schema. Its last step's output must fit it, because the stage's output is its last step's. */
+  /** The stage's output schema: its last step's own, because the stage's output is its last step's. */
   readonly output: O;
   /** Run in order, sharing `$STAGE_OUT`. */
   readonly steps: Steps;
@@ -164,6 +164,17 @@ export function script<C extends Consumes = None, P extends Produces = None, O e
 export type EndsIn<O extends z.ZodType> = readonly [...Step[], { readonly output: z.ZodType<z.infer<O>> }];
 
 /**
+ * Throws unless the last of `steps` declares `output` itself. `EndsIn` compares types, which can't see a schema's
+ * refinements, so an equal-looking copy could still reject what the step emits.
+ */
+export function assertEndsIn(owner: string, steps: StepList, output: z.ZodType): void {
+  const last = steps[steps.length - 1];
+  if (last?.output !== output) {
+    throw new Error(`${owner}: its output must be the schema its last step '${last?.name}' declares`);
+  }
+}
+
+/**
  * The binding a stage declares for one that its step takes from the workflow: the same kind, a value the step's
  * accepts, and required when the step's is.
  */
@@ -214,6 +225,17 @@ export function stage<
   name: string,
   options: StageOptions<C, P, O, Steps> & { readonly steps: EndsIn<O> } & CoversSteps<C, Steps>,
 ): Stage<C, P, O, Steps> {
+  assertEndsIn(`stage '${name}'`, options.steps, options.output);
+  // The types check each binding the steps take from the workflow, except the refinements of a value's schema.
+  const consumes: Consumes = options.consumes ?? {};
+  for (const step of options.steps) {
+    for (const [key, binding] of Object.entries(step.consumes)) {
+      const own = consumes[key];
+      if (binding.kind === 'value' && own?.kind === 'value' && own.schema !== binding.schema) {
+        throw new Error(`stage '${name}': binding '${key}' must use the schema step '${step.name}' declares for it`);
+      }
+    }
+  }
   return {
     kind: 'stage',
     name,
