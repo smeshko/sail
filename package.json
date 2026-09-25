@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "sail": "src/cli/main.ts"
+  },
   "engines": {
     "bun": ">=1.3.14"
   },

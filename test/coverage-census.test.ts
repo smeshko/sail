@@ -2,10 +2,11 @@ import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 
 // `bun test --coverage` only reports modules some test imports, so an untested file could never fail the
-// per-file gate. Importing every src module here puts each one in the report.
+// per-file gate. Importing every src module here puts each one in the report. The bin shim is skipped: importing
+// it would run the CLI.
 const root = join(import.meta.dir, '..');
 const modules = [...new Bun.Glob('src/**/*.ts').scanSync({ cwd: root })]
-  .filter((path) => !path.endsWith('.test.ts') && !path.endsWith('.d.ts'))
+  .filter((path) => !path.endsWith('.test.ts') && !path.endsWith('.d.ts') && path !== 'src/cli/main.ts')
   .sort();
 
 test('the census finds every src module', () => {
