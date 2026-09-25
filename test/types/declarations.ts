@@ -28,6 +28,18 @@ stage('no-steps', {
   steps: [],
 });
 
+stage('mismatched-output', {
+  output: z.object({ url: z.string() }),
+  // @ts-expect-error TS2322: a stage's output is its last step's, and this step's has no url
+  steps: [script('open', { run: './open.sh', output: Output })],
+});
+
+// A last step whose output has more than the stage declares still fits it.
+stage('wider-output', {
+  output: Output,
+  steps: [script('open', { run: './open.sh', output: Output.extend({ url: z.string() }) })],
+});
+
 const describe = agent('describe', { prompt: './describe.md', output: Output, permissions, budget });
 const open = script('open', { run: './open.sh', output: Output });
 const publish = stage('publish', { output: Output, steps: [describe, open] });

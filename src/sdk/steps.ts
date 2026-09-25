@@ -73,7 +73,7 @@ export interface ScriptOptions<C extends Consumes, P extends Produces, O extends
 export interface StageOptions<C extends Consumes, P extends Produces, O extends z.ZodType, Steps extends StepList> {
   readonly consumes?: C;
   readonly produces?: P;
-  /** The stage's output schema: its last step's output. */
+  /** The stage's output schema. Its last step's output must fit it, because the stage's output is its last step's. */
   readonly output: O;
   /** Run in order, sharing `$STAGE_OUT`. */
   readonly steps: Steps;
@@ -159,13 +159,16 @@ export function script<C extends Consumes = None, P extends Produces = None, O e
   };
 }
 
+/** A stage's steps, whose last step's output fits the stage's `output`: the stage's output is its last step's. */
+export type EndsIn<O extends z.ZodType> = readonly [...Step[], { readonly output: z.ZodType<z.infer<O>> }];
+
 /** Declares a stage of several steps, run in order. The workflow supplies `consumes` and gets `output` back. */
 export function stage<
   C extends Consumes = None,
   P extends Produces = None,
   O extends z.ZodType = z.ZodType,
   const Steps extends StepList = StepList,
->(name: string, options: StageOptions<C, P, O, Steps>): Stage<C, P, O, Steps> {
+>(name: string, options: StageOptions<C, P, O, Steps> & { readonly steps: EndsIn<O> }): Stage<C, P, O, Steps> {
   return {
     kind: 'stage',
     name,

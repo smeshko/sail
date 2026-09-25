@@ -23,6 +23,7 @@ export {
   type AgentStep,
   agent,
   type Budget,
+  type EndsIn,
   type ExitCodes,
   type KindOf,
   type OutcomeOf,
