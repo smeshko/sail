@@ -114,3 +114,27 @@ test('every result records its files by size and hash, and its duration by its t
     }
   }
 });
+
+test('every journal line agrees with the result it points at', () => {
+  for (const line of lines('journal.ndjson')) {
+    expect(existsSync(join(fixture, String(line.resultPath)))).toBe(true);
+    const result = JSON.parse(text(String(line.resultPath)));
+    const files = Object.fromEntries(
+      Object.entries<FileEntry>(result.files).map(([name, entry]) => [name, entry.path]),
+    );
+    const recorded: Record<string, unknown> = {
+      runId: result.runId,
+      key: result.key,
+      outcome: result.outcome,
+      output: result.output,
+      files,
+    };
+    expect(recorded).toEqual({
+      runId: RUN_ID,
+      key: line.key,
+      outcome: line.outcome,
+      output: line.output,
+      files: line.files,
+    });
+  }
+});
