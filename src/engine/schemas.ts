@@ -134,13 +134,15 @@ function checkText(
 }
 
 // A journal line and a multi-step call each point at result.json files by run-relative path. Both are written after
-// the result they point at, so the result must exist and agree on every field the link names.
+// the result they point at, so the result must exist and agree on every field the link names. `view` shapes the
+// result the way the linking document records it.
 function checkLink(
   report: RunDirReport,
   at: SchemaIssue,
   results: ReadonlyMap<string, Checked>,
   target: string,
   expected: Doc,
+  view: (result: Doc) => Doc = (result) => result,
 ): void {
   const linked = results.get(target);
   if (linked === undefined) {
@@ -148,11 +150,25 @@ function checkLink(
     return;
   }
   if (!linked.valid) return; // its own issues are reported
+  const actual = view(linked.data);
   const differ = Object.entries(expected)
-    .filter(([field, value]) => value !== undefined && linked.data[field] !== value)
-    .map(([field, value]) => `${field} is ${JSON.stringify(linked.data[field])}, not ${JSON.stringify(value)}`);
-  if (differ.length > 0) report.issues.push({ ...at, message: `points at ${target}, whose ${differ.join(', ')}` });
+    .filter(([field, value]) => value !== undefined && !Bun.deepEquals(actual[field], value))
+    .map(([field, value]) =>
+      typeof value === 'object' && value !== null
+        ? field
+        : `${field} (${JSON.stringify(actual[field])}, not ${JSON.stringify(value)})`,
+    );
+  if (differ.length > 0)
+    report.issues.push({ ...at, message: `points at ${target}, which differs in ${differ.join(', ')}` });
 }
+
+// The journal records a result's files as name → run-relative path.
+const asJournaled = (result: Doc): Doc => ({
+  ...result,
+  files: Object.fromEntries(
+    Object.entries(result.files as Record<string, { path: string }>).map(([name, entry]) => [name, entry.path]),
+  ),
+});
 
 // Call directories are `NN-<stage>/call-N/`, with a multi-step call's steps below them. Nothing else in a run
 // directory is walked: the workspace in particular is the repository's checkout and may hold any result.json.
@@ -203,8 +219,9 @@ export function validateRunDir(dir: string): RunDirReport {
       path: '/resultPath',
       message: '',
     };
-    const { key, stage, call, step, outcome } = data;
-    checkLink(report, at, results, String(data.resultPath), { runId, key, stage, call, step, outcome });
+    const { key, stage, call, step, outcome, output, files } = data;
+    const expected = { runId, key, stage, call, step, outcome, output, files };
+    checkLink(report, at, results, String(data.resultPath), expected, asJournaled);
   }
   for (const [file, { data, valid }] of results) {
     if (!valid || !Array.isArray(data.steps)) continue;

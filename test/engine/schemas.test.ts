@@ -292,7 +292,7 @@ test('validateRunDir checks that a multi-step call points at results for its own
   const dir = tempDir({ ...validRunDir(), ...publishFiles(), '05-publish/call-1/result.json': json(wrongLink) });
   expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
     '05-publish/call-1/result.json  [sail.result.v1]  /steps/1/resultPath points at 00-intake/call-1/result.json, ' +
-      'whose key is "intake#1", not "publish#1/open", stage is "intake", not "publish", step is undefined, not "open"',
+      'which differs in key ("intake#1", not "publish#1/open"), stage ("intake", not "publish"), step (undefined, not "open")',
   ]);
 });
 
@@ -309,8 +309,32 @@ test('validateRunDir checks that every journal line points at a result that agre
   expect([...validateRunDir(missing).issues, ...validateRunDir(disagrees).issues].map(formatIssue)).toEqual([
     'journal.ndjson:1  [sail.journal.v1]  /resultPath points at no result.json: 01-spec/call-1/result.json',
     'journal.ndjson:1  [sail.journal.v1]  /resultPath points at 00-intake/call-1/result.json, ' +
-      'whose runId is "FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N", not "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N", ' +
-      'outcome is "passed", not "failed"',
+      'which differs in runId ("FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N", not "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N"), ' +
+      'outcome ("passed", not "failed")',
+  ]);
+});
+
+test('validateRunDir checks that a journal line replays the output and files its result recorded', () => {
+  const brief = { path: '00-intake/call-1/brief.md', bytes: 1, sha256: 'a'.repeat(64) };
+  const dir = tempDir({
+    ...validRunDir(),
+    'journal.ndjson': ndjson({ ...journal, output: { ticketKey: 'FAKE-1' }, files: { 'brief.md': brief.path } }),
+    '00-intake/call-1/result.json': json({
+      ...scriptResult,
+      output: { ticketKey: 'FAKE-2' },
+      files: { 'brief.md': brief },
+    }),
+  });
+  expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
+    'journal.ndjson:1  [sail.journal.v1]  /resultPath points at 00-intake/call-1/result.json, which differs in output',
+  ]);
+  const moved = tempDir({
+    ...validRunDir(),
+    'journal.ndjson': ndjson({ ...journal, files: { 'brief.md': 'elsewhere/brief.md' } }),
+    '00-intake/call-1/result.json': json({ ...scriptResult, files: { 'brief.md': brief } }),
+  });
+  expect(validateRunDir(moved).issues.map(formatIssue)).toEqual([
+    'journal.ndjson:1  [sail.journal.v1]  /resultPath points at 00-intake/call-1/result.json, which differs in files',
   ]);
 });
 

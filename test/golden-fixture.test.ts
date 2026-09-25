@@ -162,7 +162,7 @@ test("a multi-step call linked to another call's result names the link", () => {
   for (const issue of found) console.log(issue);
   expect(found).toEqual([
     '05-publish/call-1/result.json  [sail.result.v1]  /steps/1/resultPath points at 03-tests/call-2/result.json, ' +
-      'whose key is "tests#2", not "publish#1/open", stage is "tests", not "publish", call is 2, not 1, ' +
-      'step is undefined, not "open"',
+      'which differs in key ("tests#2", not "publish#1/open"), stage ("tests", not "publish"), call (2, not 1), ' +
+      'step (undefined, not "open")',
   ]);
 });
