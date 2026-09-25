@@ -1,0 +1,5 @@
+[test]
+preload = ["./test/setup.ts"]
+coverageThreshold = { lines = 0.8 } # enforced per file by Bun
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["test/**"]
