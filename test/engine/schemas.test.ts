@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
-import { formatIssue, SCHEMA_NAMES, type SchemaName, validateDocument, validateRunDir } from '../../src/engine/schemas';
+import {
+  formatIssue,
+  SCHEMA_NAMES,
+  type SchemaName,
+  validateDocument,
+  validateProjectFile,
+  validateRunDir,
+} from '../../src/engine/schemas';
 
 const root = join(import.meta.dir, '..', '..');
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
@@ -109,8 +116,8 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function runDir(files: Record<string, string>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'sail-run-dir-'));
+function tempDir(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-schemas-'));
   dirs.push(dir);
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(join(dir, path, '..'), { recursive: true });
@@ -191,14 +198,14 @@ test('property names in a path are escaped as JSON pointer segments', () => {
 });
 
 test('validateRunDir counts every document and finds nothing wrong in a valid run directory', () => {
-  expect(validateRunDir(runDir(validRunDir()))).toEqual({
+  expect(validateRunDir(tempDir(validRunDir()))).toEqual({
     counts: { 'sail.run.v1': 1, 'sail.journal.v1': 1, 'sail.event.v1': 2, 'sail.summary.v1': 1, 'sail.result.v1': 1 },
     issues: [],
   });
 });
 
 test('validateRunDir skips blank lines and absent optional files, and walks only call directories', () => {
-  const dir = runDir({
+  const dir = tempDir({
     'run.json': json(run),
     'events.ndjson': `\n${ndjson(event)}\n`,
     'workspace/test/fixtures/result.json': '{ "not": "a result" }',
@@ -209,13 +216,13 @@ test('validateRunDir skips blank lines and absent optional files, and walks only
 test('validateRunDir reports a missing run.json', () => {
   const files = validRunDir();
   delete files['run.json'];
-  expect(validateRunDir(runDir(files)).issues).toEqual([
+  expect(validateRunDir(tempDir(files)).issues).toEqual([
     { file: 'run.json', schema: 'sail.run.v1', path: '/', message: 'is missing' },
   ]);
 });
 
 test('validateRunDir reports an unparseable line or file by file and line', () => {
-  const dir = runDir({
+  const dir = tempDir({
     ...validRunDir(),
     'events.ndjson': `${JSON.stringify(event)}\n{ not json\n`,
     'summary.json': '{',
@@ -227,7 +234,7 @@ test('validateRunDir reports an unparseable line or file by file and line', () =
 });
 
 test('validateRunDir reports a nested result.json by its path in the run directory', () => {
-  const dir = runDir({
+  const dir = tempDir({
     ...validRunDir(),
     '01-spec/call-1/result.json': json({ ...scriptResult, stage: 'spec', key: 'spec#1', outcome: 'approved' }),
     '05-publish/call-1/steps/2-open/result.json': json({ ...scriptResult, extra: true }),
@@ -262,4 +269,45 @@ test('importing the module compiles nothing, and each schema compiles once', () 
   const result = Bun.spawnSync([process.execPath, '-e', script], { cwd: root });
   expect(result.stderr.toString()).toBe('');
   expect(JSON.parse(result.stdout.toString())).toEqual({ onImport: 0, afterTwoCalls: 1 });
+});
+
+const fixtureProject = join(root, 'test', 'fixtures', 'repo', '.sail', 'project.yaml');
+
+function projectIssues(text: string): string[] {
+  const issues = validateProjectFile(join(tempDir({ 'project.yaml': text }), 'project.yaml'));
+  for (const issue of issues) console.log(`project.yaml  ${formatIssue(issue)}`);
+  return issues.map((issue) => issue.path);
+}
+
+test('the fixture project.yaml is valid', () => {
+  expect(validateProjectFile(fixtureProject)).toEqual([]);
+});
+
+test('project.yaml: an unknown key, a missing name and a missing adapter each name their path', async () => {
+  const text = await Bun.file(fixtureProject).text();
+  expect(projectIssues(`${text}colour: blue\n`)).toEqual(['/colour']);
+  expect(projectIssues(text.replace('name: fixture\n', ''))).toEqual(['/name']);
+  expect(projectIssues(text.replace('  harness: { use: fake }\n', ''))).toEqual(['/adapters/harness']);
+  expect(projectIssues(text.replace('harness: { use: fake }', 'harness: { model: deep }'))).toEqual([
+    '/adapters/harness/use',
+  ]);
+});
+
+test('project.yaml: adapter options are open, and every other object is closed', async () => {
+  const text = await Bun.file(fixtureProject).text();
+  expect(
+    projectIssues(text.replace('ticketSource: { use: fake }', 'ticketSource: { use: linear, team: ADW }')),
+  ).toEqual([]);
+  expect(projectIssues(text.replace('maxMinutes: 90', 'maxMinutes: 90, maxTurns: 5'))).toEqual([
+    '/budgets/run/maxTurns',
+  ]);
+  expect(projectIssues(text.replace('deep: claude-opus-5-5', 'Deep: claude-opus-5-5'))).toEqual(['/models/Deep']);
+  expect(projectIssues(text.replace('name: fixture', 'name: Fixture'))).toEqual(['/name']);
+});
+
+test('project.yaml: invalid YAML or an unreadable file is one issue, not a throw', () => {
+  expect(projectIssues('name: [unclosed\n')).toEqual(['/']);
+  const [issue] = validateProjectFile(join(tempDir({}), 'missing.yaml'));
+  expect(issue).toMatchObject({ schema: 'sail.project.v1', path: '/' });
+  expect(issue?.message).toContain('ENOENT');
 });

@@ -1,4 +1,4 @@
-// The sail.*.v1 JSON Schemas and the checks against them: one document, or a whole run directory.
+// The sail.*.v1 JSON Schemas and the checks against them: one document, a whole run directory, or a project.yaml.
 // Ajv compiles a schema the first time it is used, so importing this module compiles nothing.
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import Ajv2020, { type AnySchemaObject, type ErrorObject, type ValidateFunction } from 'ajv/dist/2020';
 import event from '../../schemas/sail.event.v1.json' with { type: 'json' };
 import journal from '../../schemas/sail.journal.v1.json' with { type: 'json' };
+import project from '../../schemas/sail.project.v1.json' with { type: 'json' };
 import result from '../../schemas/sail.result.v1.json' with { type: 'json' };
 import run from '../../schemas/sail.run.v1.json' with { type: 'json' };
 import summary from '../../schemas/sail.summary.v1.json' with { type: 'json' };
@@ -16,6 +17,7 @@ export const SCHEMA_NAMES = [
   'sail.event.v1',
   'sail.summary.v1',
   'sail.result.v1',
+  'sail.project.v1',
 ] as const;
 export type SchemaName = (typeof SCHEMA_NAMES)[number];
 
@@ -25,6 +27,7 @@ const SCHEMAS: Record<SchemaName, AnySchemaObject> = {
   'sail.event.v1': event,
   'sail.summary.v1': summary,
   'sail.result.v1': result,
+  'sail.project.v1': project,
 };
 
 /** One way a document breaks its schema. `path` is a JSON pointer into the document, `/` for the whole of it. */
@@ -61,8 +64,11 @@ function pointer(base: string, property: string): string {
   return `${base}/${property.replaceAll('~', '~0').replaceAll('/', '~1')}`;
 }
 
-// Ajv reports a missing or unknown property at its parent object. Pointing at the property itself reads better.
+// Ajv reports a missing, unknown or badly named property at its parent object. Pointing at the property reads better.
 function toIssue(error: ErrorObject): Pick<SchemaIssue, 'path' | 'message'> {
+  if (error.propertyName !== undefined) {
+    return { path: pointer(error.instancePath, error.propertyName), message: `name ${error.message}` };
+  }
   switch (error.keyword) {
     case 'additionalProperties':
       return { path: pointer(error.instancePath, error.params.additionalProperty), message: 'is not allowed' };
@@ -75,13 +81,15 @@ function toIssue(error: ErrorObject): Pick<SchemaIssue, 'path' | 'message'> {
   }
 }
 
+const RESTATING = new Set(['if', 'propertyNames']);
+
 /** Validates one parsed document. An empty array means it is valid. */
 export function validateDocument(schema: SchemaName, data: unknown): SchemaIssue[] {
   const validate = validatorFor(schema);
   if (validate(data)) return [];
-  // An `if` error only restates that its `then` or `else` branch failed, and that branch's errors are reported too.
+  // `if` and `propertyNames` errors only restate the errors reported beneath them.
   return (validate.errors ?? [])
-    .filter((error) => error.keyword !== 'if')
+    .filter((error) => !RESTATING.has(error.keyword))
     .map((error) => ({ schema, ...toIssue(error) }));
 }
 
@@ -131,6 +139,17 @@ export function validateRunDir(dir: string): RunDirReport {
     checkText(report, 'sail.result.v1', file, readFileSync(join(dir, file), 'utf8'));
   }
   return report;
+}
+
+/** Reads and validates a `.sail/project.yaml`. A file that can't be read or parsed is one issue at `/`. */
+export function validateProjectFile(path: string): SchemaIssue[] {
+  let data: unknown;
+  try {
+    data = Bun.YAML.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    return [{ schema: 'sail.project.v1', path: '/', message: (error as Error).message }];
+  }
+  return validateDocument('sail.project.v1', data);
 }
 
 /** `file[:line]  [schema]  path message`, leaving out what the issue doesn't carry. */

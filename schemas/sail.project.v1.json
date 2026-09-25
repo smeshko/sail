@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.project.v1.json",
+  "title": "sail config: .sail/project.yaml",
+  "description": "A repository's config: its name, the sail versions it accepts, which adapter fills each port, model aliases, budgets, the designation label and the default workflow. Validated before anything runs.",
+  "type": "object",
+  "properties": {
+    "name": { "description": "the repository's name, unique among a machine's watchers", "$ref": "#/$defs/slug" },
+    "sail": {
+      "description": "the sail versions this repository accepts, as a semver range",
+      "type": "string",
+      "minLength": 1
+    },
+    "label": {
+      "description": "the designation label; sail's own label when absent",
+      "type": "string",
+      "minLength": 1
+    },
+    "defaultWorkflow": { "description": "the workflow a run uses when none is named", "$ref": "#/$defs/slug" },
+    "adapters": {
+      "description": "which adapter fills each port",
+      "type": "object",
+      "properties": {
+        "ticketSource": { "$ref": "#/$defs/adapterEntry" },
+        "codeHost": { "$ref": "#/$defs/adapterEntry" },
+        "harness": { "$ref": "#/$defs/adapterEntry" },
+        "workspace": { "$ref": "#/$defs/adapterEntry" }
+      },
+      "required": ["ticketSource", "codeHost", "harness", "workspace"],
+      "additionalProperties": false
+    },
+    "models": {
+      "description": "model aliases: alias → model id",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/slug" },
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "budgets": {
+      "type": "object",
+      "properties": {
+        "run": {
+          "description": "the most one run may spend",
+          "type": "object",
+          "properties": {
+            "maxUsd": { "type": "number", "minimum": 0 },
+            "maxMinutes": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["name", "sail", "adapters"],
+  "additionalProperties": false,
+  "$defs": {
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "adapterEntry": {
+      "description": "an adapter by name (built-in) or module path (the repository's own), with its options beside it",
+      "$comment": "The one open object in this schema: options are adapter-specific, and each adapter validates its own.",
+      "type": "object",
+      "properties": {
+        "use": { "type": "string", "minLength": 1 }
+      },
+      "required": ["use"],
+      "additionalProperties": true
+    }
+  }
+}
