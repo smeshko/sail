@@ -23,8 +23,10 @@ export {
   type AgentStep,
   agent,
   type Budget,
+  type CoversSteps,
   type EndsIn,
   type ExitCodes,
+  type FitsSteps,
   type KindOf,
   type OutcomeOf,
   type Permissions,
@@ -37,6 +39,7 @@ export {
   type StageOptions,
   type Step,
   type StepList,
+  type StepNeeds,
   script,
   stage,
 } from './steps';

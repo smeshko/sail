@@ -1,7 +1,7 @@
 // Declaration-level type cases: what agent(), script() and stage() refuse. test/types/expect-error.test.ts proves
 // that each directive's line fails with the code it names. Cases import only from `sail`, because the harness checks
 // a copy of this file in a temp directory.
-import { agent, type OutcomeOf, type ScriptOutcome, script, stage, z } from 'sail';
+import { agent, file, gitDiff, type OutcomeOf, type ScriptOutcome, script, stage, z } from 'sail';
 
 const Output = z.object({ ok: z.boolean() });
 const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] };
@@ -38,6 +38,33 @@ stage('mismatched-output', {
 stage('wider-output', {
   output: Output,
   steps: [script('open', { run: './open.sh', output: Output.extend({ url: z.string() }) })],
+});
+
+// The workflow supplies a stage's bindings, so a stage declares each one its steps take from the workflow.
+const implement = agent('implement', {
+  prompt: './prompt.md',
+  consumes: { spec: file('spec.md'), diff: gitDiff('origin/main...HEAD') },
+  output: Output,
+  permissions,
+  budget,
+});
+stage('covered', { consumes: { spec: file('spec.md') }, output: Output, steps: [implement] });
+
+// @ts-expect-error TS2345: implement takes spec from the workflow, and the stage declares no bindings
+stage('uncovered', { output: Output, steps: [implement] });
+
+stage('elsewhere', {
+  // @ts-expect-error TS2322: implement takes spec from the workflow, and the stage declares only brief
+  consumes: { brief: file('brief.md') },
+  output: Output,
+  steps: [implement],
+});
+
+stage('optional-spec', {
+  // @ts-expect-error TS2322: implement requires spec, so the stage can't leave it optional
+  consumes: { spec: file('spec.md').optional() },
+  output: Output,
+  steps: [implement],
 });
 
 const describe = agent('describe', { prompt: './describe.md', output: Output, permissions, budget });

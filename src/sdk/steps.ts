@@ -2,7 +2,7 @@
 // engine reads. A stage is one or more steps run in order. Its outcome is its last step's.
 
 import type { z } from 'zod';
-import type { Consumes } from './bindings';
+import type { Consumes, FileBinding, ValueBinding } from './bindings';
 
 /** How a script step ended. The engine maps the exit code through `exitCodes`, and anything unmapped is `error`. */
 export type ScriptOutcome = 'passed' | 'failed' | 'error';
@@ -71,6 +71,7 @@ export interface ScriptOptions<C extends Consumes, P extends Produces, O extends
 }
 
 export interface StageOptions<C extends Consumes, P extends Produces, O extends z.ZodType, Steps extends StepList> {
+  /** What the workflow supplies, including every binding the steps take from the workflow, under the same name. */
   readonly consumes?: C;
   readonly produces?: P;
   /** The stage's output schema. Its last step's output must fit it, because the stage's output is its last step's. */
@@ -162,13 +163,57 @@ export function script<C extends Consumes = None, P extends Produces = None, O e
 /** A stage's steps, whose last step's output fits the stage's `output`: the stage's output is its last step's. */
 export type EndsIn<O extends z.ZodType> = readonly [...Step[], { readonly output: z.ZodType<z.infer<O>> }];
 
+/**
+ * The binding a stage declares for one that its step takes from the workflow: the same kind, a value the step's
+ * accepts, and required when the step's is.
+ */
+type Covering<B> =
+  B extends FileBinding<infer Opt>
+    ? FileBinding<Opt extends false ? false : boolean>
+    : B extends ValueBinding<infer S, infer Opt>
+      ? ValueBinding<z.ZodType<z.infer<S>>, Opt extends false ? false : boolean>
+      : never;
+
+/** What one step takes from the workflow, by name. The engine resolves `gitDiff()` and `fromStep()` itself. */
+type FromWorkflow<C extends Consumes> = {
+  readonly [K in keyof C as C[K] extends FileBinding | ValueBinding ? K : never]: Covering<C[K]>;
+};
+
+/** Merges a union into an intersection, so what every step takes applies at once. */
+type AllOf<U> = (U extends unknown ? (each: U) => void : never) extends (all: infer I) => void ? I : never;
+
+/**
+ * The workflow supplies a stage's bindings, never its steps', so a stage declares each binding its steps take from the
+ * workflow, under the same name, as `Covering` describes.
+ */
+export type StepNeeds<Steps extends StepList> =
+  AllOf<FromWorkflow<Steps[number]['consumes']>> extends infer Needs
+    ? { readonly [K in keyof Needs]: Needs[K] }
+    : never;
+
+/** A stage's bindings: any its steps also take must fit what they take. */
+export type FitsSteps<Steps extends StepList> = { readonly [K in keyof StepNeeds<Steps>]?: StepNeeds<Steps>[K] };
+
+/**
+ * The bindings a stage leaves out that its steps take, each required. Kept apart from `FitsSteps`, because intersecting
+ * a declared binding with a mismatched one reduces it to `never`, which a diagnostic can't explain.
+ */
+export type CoversSteps<C extends Consumes, Steps extends StepList> = [
+  Exclude<keyof StepNeeds<Steps>, keyof C>,
+] extends [never]
+  ? unknown
+  : { readonly consumes: { readonly [K in Exclude<keyof StepNeeds<Steps>, keyof C>]: StepNeeds<Steps>[K] } };
+
 /** Declares a stage of several steps, run in order. The workflow supplies `consumes` and gets `output` back. */
 export function stage<
-  C extends Consumes = None,
+  C extends Consumes & FitsSteps<Steps> = None,
   P extends Produces = None,
   O extends z.ZodType = z.ZodType,
   const Steps extends StepList = StepList,
->(name: string, options: StageOptions<C, P, O, Steps> & { readonly steps: EndsIn<O> }): Stage<C, P, O, Steps> {
+>(
+  name: string,
+  options: StageOptions<C, P, O, Steps> & { readonly steps: EndsIn<O> } & CoversSteps<C, Steps>,
+): Stage<C, P, O, Steps> {
   return {
     kind: 'stage',
     name,
