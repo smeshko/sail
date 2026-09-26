@@ -79,7 +79,7 @@ export function file(name: string): FileBinding<false> {
   return describe({ kind: 'file', name, isOptional: false });
 }
 
-/** Binds a typed value. The workflow supplies a value of the schema's type, such as another call's output. */
+/** Binds a typed value. The workflow supplies a value the schema parses, such as another call's output. */
 export function value<S extends z.ZodType>(schema: S): ValueBinding<S, false> {
   return describe({ kind: 'value', schema, isOptional: false });
 }

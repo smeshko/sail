@@ -9,8 +9,11 @@ import type { KindOf, Produces, Stage, StageDefinition, Step } from './steps';
 
 declare const noBindings: unique symbol;
 
-/** The value the workflow supplies for one binding: a produced file for `file()`, the schema's type for `value()`. */
-type Supplied<B> = B extends FileBinding ? ProducedFile : B extends ValueBinding<infer S> ? z.infer<S> : never;
+/**
+ * The value the workflow supplies for one binding: a produced file for `file()`, and for `value()` what its schema
+ * parses, since the engine validates the value with it. That is the schema's input, which a transform can change.
+ */
+type Supplied<B> = B extends FileBinding ? ProducedFile : B extends ValueBinding<infer S> ? z.input<S> : never;
 
 /** The bindings the workflow supplies. The engine resolves `gitDiff()` and `fromStep()` itself. */
 type SuppliedKeys<C extends Consumes> = {
@@ -89,12 +92,15 @@ export type Result<S extends StageDefinition> =
     ? ScriptResult<z.infer<S['output']>, FileNames<S>>
     : AgentResult<z.infer<S['output']>, FileNames<S>>;
 
-/** One pass through a loop. `F` is what a failed pass carries into the next one. */
-export interface Iteration<F = undefined> {
-  /** What the previous pass failed with. `undefined` on the first pass. */
-  readonly previous: F | undefined;
+/**
+ * One pass through a loop. A failed pass hands `In` to `fail()`, and the engine parses it with the loop's `feedback`
+ * schema into the next pass's `previous`, an `Out`. They differ only when the schema transforms.
+ */
+export interface Iteration<Out = undefined, In = Out> {
+  /** What the previous pass failed with, parsed. `undefined` on the first pass. */
+  readonly previous: Out | undefined;
   /** Ends this pass as failed, carrying `feedback` into the next pass's `previous`. */
-  fail(...feedback: [F] extends [undefined] ? [] : [feedback: F]): void;
+  fail(...feedback: [In] extends [undefined] ? [] : [feedback: In]): void;
 }
 
 export interface LoopOptions {
@@ -113,7 +119,7 @@ export interface Run<I extends z.ZodType = z.ZodType, P extends Produces = Produ
   loop<F extends z.ZodType>(
     name: string,
     options: LoopOptions & { readonly feedback: F },
-  ): Iterable<Iteration<z.infer<F>>>;
+  ): Iterable<Iteration<z.output<F>, z.input<F>>>;
   /** A bounded loop whose passes carry nothing forward. */
   loop(name: string, options: LoopOptions): Iterable<Iteration>;
   /**

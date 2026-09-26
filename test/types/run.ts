@@ -16,6 +16,8 @@ const TestReport = z.object({ ok: z.boolean(), failed: z.number() });
 const Findings = z.object({ findings: z.array(z.string()) });
 const Feedback = z.union([TestReport, Findings]);
 const PrInfo = z.object({ url: z.string() });
+/** A schema whose input and output differ: it parses a string into its length. */
+const Length = z.string().transform((text) => text.length);
 
 const spec = agent('spec', {
   prompt,
@@ -41,6 +43,7 @@ const review = agent('review', {
   permissions,
   budget,
 });
+const measure = script('measure', { run: './measure.sh', consumes: { text: value(Length) }, output: TestReport });
 const publish = stage('publish', {
   consumes: { ticket: value(TicketInput), spec: file('spec.md') },
   output: PrInfo,
@@ -77,6 +80,14 @@ export const compiles = workflow('compiles', { intake: ticket }, async (run) => 
     const previous: undefined = iteration.previous;
     read(previous);
     iteration.fail();
+  }
+
+  // A value binding takes what its schema parses, and a loop's feedback goes in raw and comes back parsed.
+  await run.stage(measure, { text: 'abc' });
+  for (const iteration of run.loop('measure', { max: 2, feedback: Length })) {
+    const previous: number | undefined = iteration.previous;
+    read(previous);
+    iteration.fail('abc');
   }
 
   const p = await run.stage(publish, { ticket: run.input, spec: s.files['spec.md'] });
@@ -123,6 +134,13 @@ export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
   for (const iteration of run.loop('fix', { max: 3, feedback: Feedback })) {
     // @ts-expect-error TS2353: the feedback is a test report or findings
     iteration.fail({ reason: 'flaky' });
+  }
+
+  // @ts-expect-error TS2322: Length parses a string, so a number is what it parses to, not what it takes
+  await run.stage(measure, { text: 3 });
+  for (const iteration of run.loop('measure', { max: 2, feedback: Length })) {
+    // @ts-expect-error TS2345: the feedback goes in as Length's input, a string
+    iteration.fail(3);
   }
   return undefined;
 });
