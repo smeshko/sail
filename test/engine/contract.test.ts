@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { callPaths, createCallDir } from '../../src/engine/call-dir';
@@ -105,4 +105,14 @@ test('a declared file named __proto__ is recorded, and survives JSON', () => {
   const { files, errors } = recordFiles({ ['__proto__']: 'file' }, outDir, runDir);
   expect(errors).toEqual([]);
   expect(Object.keys(JSON.parse(JSON.stringify(files)))).toEqual(['__proto__']);
+});
+
+test.skipIf(process.getuid?.() === 0)('a declared file that cannot be read is a missing_file error, naming why', () => {
+  const { runDir, outDir } = callDir();
+  writeFileSync(join(outDir, 'junit.xml'), '<testsuites/>\n');
+  chmodSync(join(outDir, 'junit.xml'), 0);
+  expect(recordFiles({ 'junit.xml': 'file' }, outDir, runDir)).toEqual({
+    files: {},
+    errors: [{ reason: 'missing_file', message: "'junit.xml' in $STAGE_OUT can't be read (EACCES)" }],
+  });
 });

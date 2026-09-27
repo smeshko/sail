@@ -159,6 +159,28 @@ test('a type error in an unrelated workflow does not stop the stage', async () =
   });
 });
 
+test('a script that clears $STAGE_OUT first still gets a result.json, naming the removed log', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureCopy(repo);
+    const runSh = join(sail, 'stages', 'tests', 'run.sh');
+    writeFileSync(
+      runSh,
+      readFileSync(runSh, 'utf8').replace('set -euo pipefail\n', 'set -euo pipefail\nrm -rf "$STAGE_OUT"/*\n'),
+    );
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir);
+    console.log(stdout.trimEnd());
+    expect(stderr).toBe('');
+    expect(code).toBe(EXIT_FAILED);
+    expect(readResult(callDirOf(stdout, repo.dir))).toMatchObject({
+      outcome: 'error',
+      errors: [
+        { reason: 'invalid_output', message: "stdout.log was removed from $STAGE_OUT, so the output can't be read" },
+      ],
+      files: { 'junit.xml': { path: '00-tests/call-1/junit.xml' } },
+    });
+  });
+});
+
 test('Ctrl+C stops the script, and the command ends with the signal recorded', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);

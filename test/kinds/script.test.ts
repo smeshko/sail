@@ -257,6 +257,29 @@ test('an interrupted script is error, even when it handles SIGTERM, leaves its r
   expect(readFileSync(s.context.paths.stdout, 'utf8')).toBe(`${PASSING}\n`);
 });
 
+test('a script that clears $STAGE_OUT removes its log, and ends invalid_output', async () => {
+  const s = setup();
+  s.run(`rm -rf "$STAGE_OUT"/*\n${JUNIT}\necho '${PASSING}'`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect(run).toMatchObject({
+    outcome: 'error',
+    output: null,
+    errors: [
+      { reason: 'invalid_output', message: "stdout.log was removed from $STAGE_OUT, so the output can't be read" },
+    ],
+  });
+  expect(Object.keys(run.files)).toEqual(['junit.xml']);
+});
+
+test.skipIf(process.getuid?.() === 0)('a log the script leaves unreadable is invalid_output, naming why', async () => {
+  const s = setup();
+  s.run(`${JUNIT}\necho '${PASSING}'\nchmod 000 "$STAGE_OUT/stdout.log"`);
+  expect(await scriptKind.run(tests(), s.context)).toMatchObject({
+    outcome: 'error',
+    errors: [{ reason: 'invalid_output', message: "stdout.log can't be read (EACCES), so the output can't be either" }],
+  });
+});
+
 test('a script that is missing is not_started, with no exit', async () => {
   const s = setup();
   const run = await scriptKind.run(tests({ run: './missing.sh' }), s.context);

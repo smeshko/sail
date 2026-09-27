@@ -80,13 +80,19 @@ export function recordFiles(
   const errors: ContractError[] = [];
   for (const name of Object.keys(produces)) {
     const path = join(outDir, name);
-    const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (stat === undefined) {
-      errors.push({ reason: 'missing_file', message: `'${name}' was not produced in $STAGE_OUT` });
-    } else if (!stat.isFile()) {
-      errors.push({ reason: 'missing_file', message: `'${name}' in $STAGE_OUT is not a regular file` });
-    } else {
-      files.push([name, { path: runRelative(runDir, path), bytes: stat.size, sha256: sha256(path) }]);
+    try {
+      const stat = lstatSync(path, { throwIfNoEntry: false });
+      if (stat === undefined) {
+        errors.push({ reason: 'missing_file', message: `'${name}' was not produced in $STAGE_OUT` });
+      } else if (!stat.isFile()) {
+        errors.push({ reason: 'missing_file', message: `'${name}' in $STAGE_OUT is not a regular file` });
+      } else {
+        files.push([name, { path: runRelative(runDir, path), bytes: stat.size, sha256: sha256(path) }]);
+      }
+    } catch (error) {
+      // The step left the file unreadable: a problem to record, not a crash that leaves the call without a result.
+      const code = (error as NodeJS.ErrnoException).code ?? (error as Error).message;
+      errors.push({ reason: 'missing_file', message: `'${name}' in $STAGE_OUT can't be read (${code})` });
     }
   }
   return { files: Object.fromEntries(files), errors };
