@@ -53,6 +53,9 @@ export type TypecheckResult =
 const LOCATED = /^(.+)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 const GLOBAL = /^error (TS\d+): (.*)$/;
 
+/** Whether `line` is a diagnostic `tsc --pretty false` printed, located or global. */
+export const isDiagnosticLine = (line: string): boolean => LOCATED.test(line) || GLOBAL.test(line);
+
 /**
  * Parses `tsc --pretty false` output. An indented line continues the diagnostic before it, and any other line becomes a
  * diagnostic with no code, so nothing `tsc` prints is dropped. Relative files resolve against `cwd`.
@@ -82,17 +85,13 @@ export function parseDiagnostics(output: string, cwd: string): Diagnostic[] {
 }
 
 /**
- * Checks every `**\/*.ts` under `dir`, a `.sail/`, under the house rules, or only `options.files` and what they import.
- * `tsc` runs from the repository, the parent of `dir`, and every file it reports comes back absolute.
+ * Runs `tsc` under the house rules on `dir`'s TypeScript, or `files` and their imports, from `dirname(dir)`, with
+ * `args` after its own. The config is a temp file, removed afterwards. Throws when `tsc` can't be spawned.
  */
-export async function typecheck(
+export async function spawnTsc(
   dir: string,
-  options: { tsc?: string; files?: string[] } = {},
-): Promise<TypecheckResult> {
-  // `tsc` fails an empty include with TS18003, and the `.sail/` that `sail init` writes has no TypeScript yet.
-  const files = options.files?.length ?? [...new Bun.Glob('**/*.ts').scanSync({ cwd: dir })].length;
-  if (files === 0) return { ok: true, files };
-
+  options: { tsc?: string; files?: string[]; args?: string[] } = {},
+): Promise<{ code: number; stdout: string; stderr: string; cwd: string }> {
   const configDir = mkdtempSync(join(tmpdir(), 'sail-check-'));
   try {
     const config = join(configDir, 'tsconfig.json');
@@ -104,16 +103,33 @@ export async function typecheck(
 
     const tsc = options.tsc ?? join(dirname(Bun.resolveSync('typescript/package.json', import.meta.dir)), 'bin', 'tsc');
     const cwd = dirname(dir);
-    const child = Bun.spawn([process.execPath, tsc, '--noEmit', '--pretty', 'false', '-p', config], {
-      cwd,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const argv = [process.execPath, tsc, '--noEmit', '--pretty', 'false', ...(options.args ?? []), '-p', config];
+    const child = Bun.spawn(argv, { cwd, stdout: 'pipe', stderr: 'pipe' });
     const [code, stdout, stderr] = await Promise.all([
       child.exited,
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
     ]);
+    return { code, stdout, stderr, cwd };
+  } finally {
+    rmSync(configDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Checks every `**\/*.ts` under `dir`, a `.sail/`, under the house rules, or only `options.files` and what they import.
+ * `tsc` runs from the repository, the parent of `dir`, and every file it reports comes back absolute.
+ */
+export async function typecheck(
+  dir: string,
+  options: { tsc?: string; files?: string[] } = {},
+): Promise<TypecheckResult> {
+  // `tsc` fails an empty include with TS18003, and the `.sail/` that `sail init` writes has no TypeScript yet.
+  const files = options.files?.length ?? [...new Bun.Glob('**/*.ts').scanSync({ cwd: dir })].length;
+  if (files === 0) return { ok: true, files };
+
+  try {
+    const { code, stdout, stderr, cwd } = await spawnTsc(dir, options);
     if (code === 0) return { ok: true, files };
     // `tsc` exits 1 on type errors and 2 on a config error. Either way, a diagnostic with a code is the repository's
     // problem; anything else means `tsc` itself didn't run properly.
@@ -122,7 +138,5 @@ export async function typecheck(
     return { internal: `tsc exited ${code}:\n${stdout}${stderr}` };
   } catch (error) {
     return { internal: error instanceof Error ? error.message : String(error) };
-  } finally {
-    rmSync(configDir, { recursive: true, force: true });
   }
 }
