@@ -1,6 +1,11 @@
 // Opens a fresh run: every check that can refuse comes first, and only then is `.sail-runs/<run id>/` created, holding
 // the run header, an empty journal and STATUS `running`. So a refusal leaves nothing behind. Phase 3.2's runtime calls
 // this to start a run; phase 3.3's resume opens an existing run directory with `readRunHeader()` instead.
+//
+// One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
+// imported while its header hashes the files on disk. `sail run`, `sail resume` and the watcher's dispatch each start
+// one run per process.
+import { realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { readConfig } from './config';
 import { createJournal } from './journal';
@@ -10,6 +15,9 @@ import { assertRunHeader, buildRunHeader, type RunHeader, writeRunHeader } from 
 import { newRunId } from './run-id';
 import { findSailDir } from './sail-dir';
 import { formatIssue } from './schemas';
+
+/** The realpaths of the `.sail/` directories a run has been opened from in this process. */
+const claimed = new Set<string>();
 
 export interface OpenedRun {
   runId: string;
@@ -33,6 +41,9 @@ export interface OpenRunOptions {
  * Finds `.sail/`, reads its config and loads the workflow, refusing at the first that fails. It then builds the run
  * header and checks it, all before writing anything. A header that breaks `sail.run.v1` throws: that is a bug in sail,
  * not a refusal. Only then does it create the run directory and write the header, the journal and STATUS.
+ *
+ * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
+ * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
  */
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, workflow, source = LOCAL_SOURCE, now = new Date() } = options;
@@ -43,6 +54,13 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     const file = relative(dirname(found.dir), join(found.dir, 'project.yaml'));
     return { refused: config.issues.map((issue) => formatIssue({ ...issue, file })).join('\n') };
   }
+  const real = realpathSync(found.dir);
+  if (claimed.has(real)) {
+    throw new Error(
+      `a run from ${found.dir} already started in this process: Bun can't reload its modules, so each run needs a process of its own`,
+    );
+  }
+  claimed.add(real);
   const loaded = await loadWorkflow(found.dir, workflow);
   if ('refused' in loaded) return loaded;
 
