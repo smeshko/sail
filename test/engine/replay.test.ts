@@ -33,6 +33,12 @@ const planner = agent('planner', {
   permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] },
   budget: { maxTurns: 1, maxUsd: 1, maxMinutes: 1 },
 });
+const implement = script('implement', {
+  run: './run.sh',
+  consumes: { feedback: value(Report).optional() },
+  output: Report,
+});
+const tests = script('tests', { run: './run.sh', output: Report });
 /** A stage the workflow reaches at run time but its roster doesn't hold. */
 const stray = script('stray', { run: './run.sh', output: Report });
 
@@ -41,7 +47,7 @@ const reached = (definition: StageDefinition): ReachedStage => ({
   dir: `/repo/.sail/stages/${definition.name}`,
   module: {},
 });
-const STAGES = [a, b, c, planner].map(reached);
+const STAGES = [a, b, c, planner, implement, tests].map(reached);
 
 type Body = (run: Run<typeof ticket.output>) => Promise<unknown>;
 
@@ -54,7 +60,7 @@ function replayed(body: Body, entries: JournalEntry[] = []): Promise<ReplayEnd> 
 /** A journaled call of `key`, `stage#call`, in stage directory `index`. */
 function entry(key: string, outcome: JournalEntry['outcome'], fields: Partial<JournalEntry> = {}): JournalEntry {
   const [stage = '', call = '1'] = key.split('#');
-  const index = { a: 1, b: 2, c: 2, planner: 3 }[stage] ?? 9;
+  const index = { a: 1, b: 2, c: 2, planner: 3, implement: 1, tests: 2 }[stage] ?? 9;
   return {
     seq: 1,
     key,
@@ -329,4 +335,142 @@ test("an exception inside sail rejects the replay, and never reaches the workflo
   await expect(replaying).rejects.toThrow(TypeError);
   await settle();
   expect(caught).toBe(false);
+});
+
+test("a failed pass hands its parsed feedback to the next pass, which binds it as the failed call's output", async () => {
+  const entries = [entry('implement#1', 'passed'), entry('tests#1', 'failed', { output: { ok: false, noise: 1 } })];
+  const previous: unknown[] = [];
+  const end = await replayed(async (run) => {
+    for (const iteration of run.loop('fix', { max: 3, feedback: Report })) {
+      previous.push(iteration.previous);
+      await run.stage(implement, { feedback: iteration.previous });
+      const t = await run.stage(tests);
+      if (t.outcome === 'failed') {
+        iteration.fail(t.output);
+        continue;
+      }
+      break;
+    }
+  }, entries);
+
+  expect(previous).toEqual([undefined, { ok: false }]);
+  expect(end).toMatchObject({
+    kind: 'call',
+    call: {
+      key: 'implement#2',
+      stageIndex: 1,
+      supplied: { feedback: { kind: 'value', value: { ok: false }, from: '02-tests/call-1/result.json#/output' } },
+    },
+  });
+});
+
+test('asking for the pass after max fails the run, even when the workflow catches it', async () => {
+  const entries = [entry('a#1', 'passed'), entry('a#2', 'passed')];
+  let after = false;
+  const end = await replayed(async (run) => {
+    try {
+      for (const iteration of run.loop('fix', { max: 2, feedback: Report })) {
+        const r = await run.stage(a);
+        iteration.fail(r.output);
+      }
+    } catch {
+      after = true;
+      return 'swallowed';
+    }
+    return 'looped';
+  }, entries);
+  expect(end).toEqual(failed('workflow_failed', 'loop "fix" exceeded 2'));
+  expect(after).toBe(true);
+});
+
+test('a pass that neither fails nor breaks runs again, with no feedback', async () => {
+  const previous: unknown[] = [];
+  const end = await replayed(
+    async (run) => {
+      for (const iteration of run.loop('fix', { max: 3, feedback: Report })) {
+        previous.push(iteration.previous);
+        await run.stage(a);
+      }
+    },
+    [entry('a#1', 'passed')],
+  );
+  expect(previous).toEqual([undefined, undefined]);
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'a#2' } });
+});
+
+test('break ends the loop, and the workflow goes on past it', async () => {
+  const end = await replayed(
+    async (run) => {
+      for (const _ of run.loop('fix', { max: 3 })) {
+        await run.stage(a);
+        break;
+      }
+      await run.stage(c, { data: 1 });
+    },
+    [entry('a#1', 'passed')],
+  );
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'c#1' } });
+});
+
+test('a loop without feedback carries nothing forward, and still stops at max', async () => {
+  const previous: unknown[] = [];
+  const end = await replayed(async (run) => {
+    for (const iteration of run.loop('settle', { max: 2 })) {
+      previous.push(iteration.previous);
+      iteration.fail();
+    }
+  });
+  expect(previous).toEqual([undefined, undefined]);
+  expect(end).toEqual(failed('workflow_failed', 'loop "settle" exceeded 2'));
+});
+
+test('a loop that is misused fails the run, naming the loop', async () => {
+  const rejected = await replayed(async (run) => {
+    for (const iteration of run.loop('fix', { max: 3, feedback: Report })) {
+      iteration.fail({ verdict: 'flaky' } as never);
+    }
+  });
+  expect(rejected).toMatchObject({ kind: 'failed', stopReason: 'workflow_failed' });
+  if (rejected.kind !== 'failed') throw new Error('failed');
+  expect(rejected.message).toStartWith(`loop "fix" feedback doesn't match its schema:\n`);
+  expect(rejected.message).toContain('ok');
+
+  const twice = await replayed(async (run) => {
+    for (const _ of run.loop('fix', { max: 1 })) break;
+    for (const _ of run.loop('fix', { max: 1 })) break;
+  });
+  expect(twice).toEqual(failed('workflow_failed', 'loop "fix" is started twice in one replay'));
+
+  for (const max of [0, 1.5, undefined]) {
+    const bounded = await replayed(async (run) => {
+      for (const _ of run.loop('fix', { max } as never)) break;
+    });
+    expect(bounded).toEqual(failed('workflow_failed', 'loop "fix" needs a whole max of at least 1'));
+  }
+});
+
+test('a loop the workflow keeps using after the run ended stops at its next pass', async () => {
+  let passes = 0;
+  const end = await replayed(async (run) => {
+    for (const _ of run.loop('fix', { max: 3 })) {
+      passes++;
+      try {
+        run.fail('why');
+      } catch {}
+    }
+  });
+  expect(end).toEqual(failed('workflow_failed', 'why'));
+  expect(passes).toBe(1);
+});
+
+test("an exception inside a loop's methods rejects the replay", async () => {
+  const replaying = replayed(async (run) => {
+    for (const iteration of run.loop('fix', { max: 3, feedback: {} as never })) {
+      try {
+        const fail = iteration.fail as (feedback: unknown) => void;
+        fail({ ok: true });
+      } catch {}
+    }
+  });
+  await expect(replaying).rejects.toThrow(TypeError);
 });

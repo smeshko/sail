@@ -12,9 +12,10 @@
 // Replay goes by position: request n must be journal entry n. That is how a request finds its result, and it catches a
 // workflow whose calls changed between replays, which a lookup by key would silently accept.
 import { join } from 'node:path';
+import { z } from 'zod';
 import type { ProducedFile } from '../sdk/bindings';
 import type { StageDefinition } from '../sdk/steps';
-import type { CallOptions, Run, Workflow } from '../sdk/workflow';
+import type { CallOptions, Iteration, Run, Workflow } from '../sdk/workflow';
 import type { Supplied } from './bindings';
 import type { JournalEntry } from './journal';
 import type { ReachedStage } from './load-workflow';
@@ -85,6 +86,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
     let position = 0;
     const calls = new Map<string, number>();
     const stageIndexes = new Map<string, number>();
+    const loops = new Set<string>();
     /** Each file handed to the workflow, to its run-relative path. */
     const files = new WeakMap<object, string>();
     /** Each output handed to the workflow, to its JSON pointer. */
@@ -198,6 +200,65 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       return never();
     }
 
+    /** Records a failed run, then stops the workflow where it stands. */
+    function halt(message: string): never {
+      failRun('workflow_failed', message);
+      throw new Halt();
+    }
+
+    /** Wraps a synchronous `run` method: an exception other than a Halt is a bug in sail, and crashes the replay. */
+    function guarded<A extends unknown[], R>(method: (...args: A) => R): (...args: A) => R {
+      return (...args) => {
+        try {
+          return method(...args);
+        } catch (error) {
+          if (error instanceof Halt) throw error;
+          record({ kind: 'crashed', error });
+          throw new Halt();
+        }
+      };
+    }
+
+    /**
+     * A bounded loop: only `break` or `return` ends it, and asking for pass `max + 1` fails the run. A pass that
+     * neither fails nor breaks runs again with no feedback, so a forgotten `fail()` costs passes, not a check.
+     */
+    function loop(name: string, loopOptions: { max: number; feedback?: z.ZodType }): Iterable<Iteration<unknown>> {
+      if (loops.has(name)) halt(`loop "${name}" is started twice in one replay`);
+      loops.add(name);
+      const max = loopOptions?.max;
+      const schema = loopOptions?.feedback;
+      if (!Number.isInteger(max) || max < 1) halt(`loop "${name}" needs a whole max of at least 1`);
+      let passes = 0;
+      let pending: { value: unknown } | undefined;
+
+      const fail = guarded((feedback?: unknown) => {
+        let value = feedback;
+        if (schema !== undefined) {
+          const parsed = schema.safeParse(feedback);
+          if (!parsed.success) {
+            halt(`loop "${name}" feedback doesn't match its schema:\n${z.prettifyError(parsed.error)}`);
+          }
+          value = parsed.data;
+        }
+        // Parsing makes a new object, so the parsed feedback carries the pointer of the output it came from.
+        const pointer = isObject(feedback) ? pointers.get(feedback) : undefined;
+        if (pointer !== undefined && isObject(value)) pointers.set(value, pointer);
+        pending = { value };
+      });
+
+      const next = guarded((): IteratorResult<Iteration<unknown>> => {
+        if (ended) throw new Halt();
+        if (passes === max) halt(`loop "${name}" exceeded ${max}`);
+        passes++;
+        const previous = pending?.value;
+        pending = undefined;
+        return { done: false, value: { previous, fail } };
+      });
+
+      return { [Symbol.iterator]: () => ({ next }) };
+    }
+
     const run = {
       input,
       intake: { files: {} },
@@ -210,9 +271,9 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
           return never();
         }
       },
+      loop: guarded(loop),
       fail(reason: string): never {
-        failRun('workflow_failed', String(reason));
-        throw new Halt();
+        halt(String(reason));
       },
     } as unknown as Run;
 
