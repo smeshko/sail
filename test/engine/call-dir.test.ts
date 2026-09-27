@@ -2,7 +2,14 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { callPaths, createCallDir, RESERVED_NAMES, runRelative, stageDirName } from '../../src/engine/call-dir';
+import {
+  callPaths,
+  createCallDir,
+  isPlainName,
+  RESERVED_NAMES,
+  runRelative,
+  stageDirName,
+} from '../../src/engine/call-dir';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -50,6 +57,11 @@ test('createCallDir creates the call directory and in/, and refuses to reuse one
 
 test('no produced file may take the name of what the engine writes beside it', () => {
   expect([...RESERVED_NAMES].sort()).toEqual(['in', 'result.json', 'stderr.log', 'stdout.log']);
+});
+
+test('isPlainName takes a name that stays directly inside a directory', () => {
+  for (const name of ['junit.xml', '.hidden', '..x', 'a b']) expect(isPlainName(name)).toBe(true);
+  for (const name of ['', '.', '..', '../x', 'a/b', 'a\\b', '/abs']) expect(isPlainName(name)).toBe(false);
 });
 
 test('runRelative gives a run-relative POSIX path, as result.json records files', () => {

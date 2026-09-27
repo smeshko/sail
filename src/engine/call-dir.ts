@@ -25,6 +25,11 @@ export interface CallPaths {
 /** The names in a call directory that are the engine's. No `produces` may declare one. */
 export const RESERVED_NAMES: ReadonlySet<string> = new Set(['in', 'stdout.log', 'stderr.log', 'result.json']);
 
+/** A name that stays directly inside the directory it is joined to: no separator, and not `.` or `..`. */
+export function isPlainName(name: string): boolean {
+  return /^[^/\\]+$/.test(name) && name !== '.' && name !== '..';
+}
+
 /** `NN-<stage>`: the stage's index, zero-padded to two digits, then its name. */
 export function stageDirName(index: number, stage: string): string {
   if (!Number.isInteger(index) || index < 0) throw new Error(`stage index must be a whole number ≥ 0: ${index}`);

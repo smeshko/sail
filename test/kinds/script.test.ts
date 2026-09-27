@@ -269,7 +269,7 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
   expect((run.record.env as Record<string, string>).INPUT_SPEC).toBe(`.sail-runs/${RUN_ID}/00-tests/call-1/in/spec.md`);
 });
 
-test('problems() reports overlapping exit codes, a reserved produced name and a timeout that is not positive', () => {
+test('problems() reports overlapping exit codes, a produced name that is reserved or not plain, and a timeout that is not positive', () => {
   expect(scriptKind.problems(tests())).toEqual([]);
   expect(scriptKind.problems(tests({ exitCodes: { passed: [0], failed: [0, 1], error: [1] } }))).toEqual([
     'exit code 0 is listed under both passed and failed',
@@ -287,6 +287,8 @@ test('problems() reports overlapping exit codes, a reserved produced name and a 
     "'stdout.log' can't be produced: the engine writes it in $STAGE_OUT",
     "'in' can't be produced: the engine writes it in $STAGE_OUT",
   ]);
+  const escaping = script('tests', { run: './run.sh', produces: { '../junit.xml': 'file' }, output: TestReport });
+  expect(scriptKind.problems(escaping)).toEqual(["'../junit.xml' can't be produced: it is not a plain file name"]);
   for (const timeoutSeconds of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
     expect(scriptKind.problems(tests({ timeoutSeconds }))).toEqual([
       `timeoutSeconds must be a positive number: ${timeoutSeconds}`,

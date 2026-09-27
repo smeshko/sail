@@ -5,6 +5,7 @@ import { copyFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Binding, Consumes } from '../sdk/bindings';
+import { isPlainName } from './call-dir';
 
 /**
  * What a caller supplies for one binding. `path` is absolute. `from` is where it came from, as `result.json`'s
@@ -76,7 +77,7 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
   const byName = new Map<string, string>();
   for (const { key, name } of planned) {
     const first = byName.get(name);
-    if (!/^[^/\\]+$/.test(name) || name === '.' || name === '..') {
+    if (!isPlainName(name)) {
       problems.push(`'${key}' would be written to $STAGE_IN as '${name}', which is not a plain file name`);
     } else if (first !== undefined) {
       problems.push(`'${first}' and '${key}' are both written to $STAGE_IN as '${name}'`);

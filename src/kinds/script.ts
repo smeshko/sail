@@ -3,8 +3,7 @@
 // file in `$STAGE_OUT`. Every broken promise is collected as an error.
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
-import { RESERVED_NAMES } from '../engine/call-dir';
-import { type ContractError, recordFiles, validateOutput } from '../engine/contract';
+import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { runProcess } from '../engine/process';
 import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
@@ -34,9 +33,7 @@ function problems(step: ScriptStep): string[] {
       else if (first !== list) found.push(`exit code ${code} is listed under both ${first} and ${list}`);
     }
   }
-  for (const name of Object.keys(step.produces)) {
-    if (RESERVED_NAMES.has(name)) found.push(`'${name}' can't be produced: the engine writes it in $STAGE_OUT`);
-  }
+  found.push(...producesProblems(step.produces));
   const timeout = step.timeoutSeconds;
   if (timeout !== undefined && !(Number.isFinite(timeout) && timeout > 0)) {
     found.push(`timeoutSeconds must be a positive number: ${timeout}`);

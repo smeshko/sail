@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { callPaths, createCallDir } from '../../src/engine/call-dir';
-import { recordFiles, validateOutput } from '../../src/engine/contract';
+import { producesProblems, recordFiles, validateOutput } from '../../src/engine/contract';
 import { z } from '../../src/sdk/index';
 
 const dirs: string[] = [];
@@ -69,4 +69,32 @@ test('a declared file that is missing, or is not a regular file, is a missing_fi
       { reason: 'missing_file', message: "'report' in $STAGE_OUT is not a regular file" },
     ],
   });
+});
+
+test('a declared file that is a symlink is a missing_file error, even to a real file', () => {
+  const { runDir, outDir } = callDir();
+  const outside = join(runDir, 'outside.xml');
+  writeFileSync(outside, '<testsuites/>\n');
+  symlinkSync(outside, join(outDir, 'junit.xml'));
+  expect(recordFiles({ 'junit.xml': 'file' }, outDir, runDir)).toEqual({
+    files: {},
+    errors: [{ reason: 'missing_file', message: "'junit.xml' in $STAGE_OUT is not a regular file" }],
+  });
+});
+
+test('producesProblems refuses a name that is not a plain file name, or that the engine writes', () => {
+  expect(producesProblems({ 'junit.xml': 'file', '.hidden': 'file' })).toEqual([]);
+  expect(
+    producesProblems({ '../secret': 'file', 'a/b.md': 'file', 'a\\b.md': 'file', '..': 'file', '.': 'file' }),
+  ).toEqual([
+    "'../secret' can't be produced: it is not a plain file name",
+    "'a/b.md' can't be produced: it is not a plain file name",
+    "'a\\b.md' can't be produced: it is not a plain file name",
+    "'..' can't be produced: it is not a plain file name",
+    "'.' can't be produced: it is not a plain file name",
+  ]);
+  expect(producesProblems({ 'result.json': 'file', in: 'file' })).toEqual([
+    "'result.json' can't be produced: the engine writes it in $STAGE_OUT",
+    "'in' can't be produced: the engine writes it in $STAGE_OUT",
+  ]);
 });
