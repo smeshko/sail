@@ -29,8 +29,11 @@
     "STAGE": "publish",
     "CALL": "1",
     "TRY": "1",
+    "STAGE_IN": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open/in",
     "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open",
-    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace"
+    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace",
+    "SAIL_CONFIG": ".sail/project.yaml",
+    "INPUT_DESCRIPTION": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open/in/description.json"
   },
   "codeHost": {
     "operation": "openPullRequest",
