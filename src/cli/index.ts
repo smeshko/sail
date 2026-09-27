@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
 import { check } from './commands/check';
+import { stageRun } from './commands/stage-run';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
 export interface Io {
@@ -8,14 +9,17 @@ export interface Io {
   cwd: string;
   stdout(text: string): void;
   stderr(text: string): void;
+  /** Calls `handler` on Ctrl+C or SIGTERM instead of exiting, until the returned function unregisters it. */
+  onInterrupt?(handler: () => void): () => void;
 }
 
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.
 
 Usage:
-  sail check [--list]   Type-check .sail/ and list its workflows and stages
-  sail --version        Print the version
-  sail --help           Print this help
+  sail check [--list]                                Type-check .sail/ and list its workflows and stages
+  sail stage run <stage-dir> [--bind name=value]...  Run one script stage in isolation
+  sail --version                                     Print the version
+  sail --help                                        Print this help
 `;
 
 interface OptionSpec {
@@ -93,6 +97,7 @@ const bare = (command: Command): CommandSpec => ({ options: {}, positionals: 0, 
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
+  ['stage', { options: { bind: { type: 'string', multiple: true } }, positionals: 2, command: stageRun }],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],

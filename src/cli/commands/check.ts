@@ -4,11 +4,10 @@ import { join, relative } from 'node:path';
 import { loadDefinitions } from '../../engine/definitions';
 import { findSailDir, projectIssues } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
-import { type Diagnostic, typecheck } from '../../engine/typecheck';
+import { typecheck } from '../../engine/typecheck';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
+import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
-
-const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
 
 /** Rows as columns two spaces apart, indented by two. A column that is empty in every row is left out. */
 function columns(rows: readonly (readonly string[])[]): string {
@@ -43,9 +42,7 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
     return EXIT_INTERNAL;
   }
   if (!types.ok) {
-    const format = ({ file, line, column, code, message }: Diagnostic) =>
-      `${file === undefined ? '' : `${at(file)}:${line}:${column}  `}${code === '' ? '' : `${code}  `}${message}`;
-    for (const diagnostic of types.diagnostics) io.stderr(`${format(diagnostic)}\n`);
+    for (const diagnostic of types.diagnostics) io.stderr(`${formatDiagnostic(diagnostic, at)}\n`);
     const errors = types.diagnostics.filter((diagnostic) => diagnostic.code !== '').length;
     io.stderr(`sail check: ${count(errors, 'type error')} in ${sail}\n`);
     return EXIT_REFUSED;
