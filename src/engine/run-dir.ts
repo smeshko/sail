@@ -1,8 +1,8 @@
 // A run's directory, `.sail-runs/<ticket key>-<ulid>/` beside `.sail/`, and its STATUS file. The run id's ticket key
 // comes from the run's source, which until intake exists is the LOCAL stub.
-import { mkdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { replaceFile, syncDir } from './durable';
+import { createDir, replaceFile } from './durable';
 
 export const RUNS_DIR = '.sail-runs';
 
@@ -23,15 +23,15 @@ export interface Source {
 export const LOCAL_SOURCE: Source = { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: false };
 
 /**
- * Creates the directory of run `runId` and returns its absolute path, creating `.sail-runs/` on first use. A run
- * directory is created once, so an existing one throws `EEXIST`.
+ * Creates the directory of run `runId` and returns its absolute path, creating `.sail-runs/` on first use. Both entries
+ * are synced, or a crash could lose the first run whole. A run directory is created once, so an existing one throws
+ * `EEXIST`.
  */
 export function createRunDir(sailDir: string, runId: string): string {
   const runs = runsDir(sailDir);
-  mkdirSync(runs, { recursive: true });
+  createDir(runs, true);
   const dir = join(runs, runId);
-  mkdirSync(dir);
-  syncDir(runs);
+  createDir(dir);
   return dir;
 }
 

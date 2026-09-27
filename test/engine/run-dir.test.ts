@@ -21,6 +21,7 @@ import {
   writeStatus,
 } from '../../src/engine/run-dir';
 import { newRunId } from '../../src/engine/run-id';
+import { syncedDirs } from '../helpers/synced-dirs';
 
 const GOLDEN = join(import.meta.dir, '..', 'fixtures', 'runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N');
 
@@ -61,6 +62,15 @@ test('createRunDir creates .sail-runs/ on first use, then the run directory, onc
   const second = createRunDir(sailDir, newRunId(LOCAL_SOURCE.ticketKey));
   expect(readdirSync(join(root, '.sail-runs'))).toHaveLength(2);
   expect(existsSync(second)).toBe(true);
+});
+
+test('createRunDir syncs the directory holding .sail-runs/, so a crash cannot lose the first run whole', () => {
+  const root = tempDir();
+  const sailDir = join(root, '.sail');
+  mkdirSync(sailDir);
+  const runs = join(root, '.sail-runs');
+  expect(syncedDirs(() => createRunDir(sailDir, newRunId('LOCAL')))).toEqual([root, runs]);
+  expect(syncedDirs(() => createRunDir(sailDir, newRunId('LOCAL')))).toEqual([root, runs]);
 });
 
 test.each<Status>(['running', 'suspended', 'completed', 'failed'])('STATUS round-trips %s', (status) => {

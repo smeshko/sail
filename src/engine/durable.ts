@@ -1,7 +1,7 @@
 // The fsync discipline for the files a run directory keeps: the journal, STATUS and run.json. A write is durable once
 // its bytes are synced and so is the directory entry that names them, so every helper here syncs both before it
 // returns.
-import { chmodSync, closeSync, fsyncSync, openSync, renameSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /** Syncs `dir` itself, so the entries created, renamed or removed in it survive a crash. */
@@ -12,6 +12,20 @@ export function syncDir(dir: string): void {
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * Creates the directory `path`, then syncs the directory holding it, whose entry names it. An existing `path` throws
+ * `EEXIST`, unless `mayExist` says others create it too, as every run does `.sail-runs/`. Its parent is synced all the
+ * same then, since a crash may have come between its creation and that sync.
+ */
+export function createDir(path: string, mayExist = false): void {
+  try {
+    mkdirSync(path);
+  } catch (error) {
+    if (!mayExist || (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+  }
+  syncDir(dirname(path));
 }
 
 /** Writes `text` whole to the open `fd`, then syncs it. */

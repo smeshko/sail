@@ -2,7 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendLine, createFileOnce, replaceFile, syncDir } from '../../src/engine/durable';
+import { appendLine, createDir, createFileOnce, replaceFile, syncDir } from '../../src/engine/durable';
+import { syncedDirs } from '../helpers/synced-dirs';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -49,6 +50,26 @@ test('replaceFile replaces the file whole and leaves no .tmp behind', () => {
   replaceFile(path, 'completed\n');
   expect(readFileSync(path, 'utf8')).toBe('completed\n');
   expect(readdirSync(dir)).toEqual(['STATUS']);
+});
+
+test('createDir creates the directory, then syncs the one holding it', () => {
+  const dir = tempDir();
+  const path = join(dir, 'made');
+  expect(syncedDirs(() => createDir(path))).toEqual([dir]);
+  expect(statSync(path).isDirectory()).toBe(true);
+});
+
+test('createDir refuses an existing directory unless it may exist, and then still syncs the one holding it', () => {
+  const dir = tempDir();
+  const path = join(dir, 'shared');
+  createDir(path);
+  expect(() => createDir(path)).toThrow(expect.objectContaining({ code: 'EEXIST' }));
+  expect(syncedDirs(() => createDir(path, true))).toEqual([dir]);
+});
+
+test('createDir throws when the directory to hold it is missing, even if it may exist', () => {
+  const path = join(tempDir(), 'missing', 'made');
+  expect(() => createDir(path, true)).toThrow(expect.objectContaining({ code: 'ENOENT' }));
 });
 
 test('syncDir syncs a directory, and throws for one that is missing', () => {
