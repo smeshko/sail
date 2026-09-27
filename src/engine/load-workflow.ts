@@ -32,6 +32,11 @@ export interface LoadedWorkflow {
   dir: string;
   /** Every file under `.sail/` in the workflow's import graph, `workflow.ts` included, absolute and sorted. */
   files: string[];
+  /**
+   * The namespace of each file in `files`, by file. A file the workflow only imports types from may be missing: it
+   * doesn't run, so it may throw when imported.
+   */
+  modules: ReadonlyMap<string, Record<string, unknown>>;
   /** Sorted by name. */
   stages: ReachedStage[];
   intake: LoadedIntake;
@@ -105,5 +110,13 @@ export async function loadWorkflow(sailDir: string, name: string): Promise<Loade
     const why = 'is neither built in nor exported by an intake.ts it imports';
     return { refused: `${at(file)}: its intake '${workflow.intake.name}' ${why}` };
   }
-  return { name, workflow, dir, files, stages, intake };
+  const modules = new Map<string, Record<string, unknown>>();
+  for (const each of files) {
+    try {
+      modules.set(each, await import(each));
+    } catch {
+      // A file the workflow imports values from has imported already. This one only lends types, and never runs.
+    }
+  }
+  return { name, workflow, dir, files, modules, stages, intake };
 }

@@ -55,6 +55,31 @@ test('ticket-to-pr loads with its private and shared stages, the built-in intake
       'workflows/ticket-to-pr/stages/spec/stage.ts',
       'workflows/ticket-to-pr/workflow.ts',
     ]);
+    expect([...workflow.modules.keys()]).toEqual(workflow.files);
+    expect(workflow.modules.get(join(sail, 'stages', 'tests', 'stage.ts'))?.tests).toBe(
+      workflow.stages.find((stage) => stage.definition.name === 'tests')?.definition,
+    );
+  });
+});
+
+test('a file the workflow only imports types from is in its files, and in its modules only if it imports', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const types = write(
+      sail,
+      'workflows/ticket-to-pr/types.ts',
+      "throw new Error('never run');\nexport type Note = string;\n",
+    );
+    edit(
+      sail,
+      WORKFLOW,
+      "import { workflow } from 'sail';",
+      "import { workflow } from 'sail';\nimport type { Note } from './types';\nexport type Noted = Note;",
+    );
+    const workflow = await loaded(sail);
+    expect(workflow.files).toContain(types);
+    expect(workflow.modules.has(types)).toBe(false);
+    expect(workflow.modules.size).toBe(workflow.files.length - 1);
   });
 });
 
