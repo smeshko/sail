@@ -15,7 +15,11 @@ import type { ImportGraph } from './imports';
  * The stages a workflow's code reaches: those whose `stage.ts` its `workflow.ts` imports, directly or through helper
  * files. The walk stops at every `stage.ts` and `intake.ts`, since a definition's own imports add no stages.
  */
-export function reach(workflow: WorkflowEntry, definitions: Definitions, graph: ImportGraph): StageEntry[] {
+export function reach(
+  workflow: Pick<WorkflowEntry, 'file'>,
+  definitions: Definitions,
+  graph: ImportGraph,
+): StageEntry[] {
   const stages = new Map(definitions.stages.map((stage) => [stage.file, stage]));
   const intakes = new Set(definitions.intakes.map((intake) => intake.file));
   const reached: StageEntry[] = [];

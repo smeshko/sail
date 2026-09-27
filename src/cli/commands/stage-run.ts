@@ -6,6 +6,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import type { Supplied } from '../../engine/bindings';
 import { callProblems, runCall } from '../../engine/call';
 import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
+import { runsDir } from '../../engine/run-dir';
 import { newRunId } from '../../engine/run-id';
 import { findSailDir, projectIssues } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
@@ -119,7 +120,7 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   let ran: Awaited<ReturnType<typeof runCall>>;
   try {
     ran = await runCall({
-      runDir: join(workspace, '.sail-runs', runId),
+      runDir: join(runsDir(found.dir), runId),
       runId,
       stageIndex: 0,
       call: 1,

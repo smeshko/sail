@@ -54,15 +54,18 @@ const produced = (produces: Record<string, unknown>) => {
   return names.length > 0 ? { produces: names } : {};
 };
 
-/** One step as the golden roster records it: kind, output and model. A stage's steps go without their guardrails. */
-function recorded(module: Module, step: Step, guardrails = true): Record<string, unknown> {
+/**
+ * One step as the golden roster records it: kind, output, model and an agent's guardrails. Exit codes belong to a
+ * one-step script's entry, since a stage's step entries have no field for them.
+ */
+function recorded(module: Module, step: Step, flat = true): Record<string, unknown> {
   return {
     kind: step.kind,
     output: schemaName(module, step.output),
     ...produced(step.produces),
     ...(step.kind === 'agent' ? { model: models[step.model ?? 'default'] } : {}),
-    ...(guardrails && step.kind === 'agent' ? { permissions: step.permissions, budget: step.budget } : {}),
-    ...(guardrails && step.kind === 'script' && step.exitCodes !== undefined ? { exitCodes: step.exitCodes } : {}),
+    ...(step.kind === 'agent' ? { permissions: step.permissions, budget: step.budget } : {}),
+    ...(flat && step.kind === 'script' && step.exitCodes !== undefined ? { exitCodes: step.exitCodes } : {}),
   };
 }
 
@@ -98,7 +101,7 @@ test("each golden origin is its definition's folder, in run.json and the run:sta
   const event: { type: string; workflow: typeof run.workflow; roster: { stages: Roster } } = JSON.parse(start ?? '');
   expect(event.type).toBe('run:start');
   for (const recorded of [run, { ...event.roster, workflow: event.workflow }]) {
-    expect(recorded.workflow.origin).toBe('repo:.sail/workflows/ticket-to-pr/workflow.ts');
+    expect(recorded.workflow.origin).toBe('repo:.sail/workflows/ticket-to-pr');
     expect(Object.keys(recorded.stages).sort()).toEqual(stageDirs.sort());
     for (const [name, entry] of Object.entries(recorded.stages)) {
       expect(entry.origin).toBe(`repo:.sail/${stageFolders.get(name)}`);

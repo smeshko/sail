@@ -71,7 +71,7 @@ function kindOf(value: unknown): unknown {
 
 const isWorkflow = (value: unknown): value is Workflow => kindOf(value) === 'workflow';
 const isIntake = (value: unknown): value is Intake => kindOf(value) === 'intake';
-const isStageDefinition = (value: unknown): value is StageDefinition => STAGE_KINDS.includes(kindOf(value));
+export const isStageDefinition = (value: unknown): value is StageDefinition => STAGE_KINDS.includes(kindOf(value));
 
 /**
  * Where `stageDir` sits under `dir`, a `.sail/`: a shared stage's folder, `stages/<stage>/`, gives `workflow: null`,
