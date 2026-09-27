@@ -13,6 +13,7 @@ test.each([[[]], [['--help']], [['-h']]])('%p prints usage', async (argv) => {
   expect(code).toBe(EXIT_OK);
   expect(stdout).toContain('sail check [--list]');
   expect(stdout).toContain('sail stage run <stage-dir> [--bind name=value]...');
+  expect(stdout).toContain('sail run [--workflow <name>] [--input <json>]');
   expect(stdout).toContain('--version');
   expect(stdout).toContain('--help');
   expect(stderr).toBe('');

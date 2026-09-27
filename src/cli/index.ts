@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
 import { check } from './commands/check';
+import { runWorkflowCommand } from './commands/run-workflow';
 import { stageRun } from './commands/stage-run';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
@@ -17,6 +18,7 @@ const USAGE = `sail: a software factory. A ticket goes in and a pull request com
 
 Usage:
   sail check [--list]                                Type-check .sail/ and list its workflows and stages
+  sail run [--workflow <name>] [--input <json>]      Run a workflow in this repository
   sail stage run <stage-dir> [--bind name=value]...  Run one script stage in isolation
   sail --version                                     Print the version
   sail --help                                        Print this help
@@ -97,6 +99,14 @@ const bare = (command: Command): CommandSpec => ({ options: {}, positionals: 0, 
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
+  [
+    'run',
+    {
+      options: { workflow: { type: 'string' }, input: { type: 'string' } },
+      positionals: 0,
+      command: runWorkflowCommand,
+    },
+  ],
   ['stage', { options: { bind: { type: 'string', multiple: true } }, positionals: 2, command: stageRun }],
   ['--help', bare(help)],
   ['-h', bare(help)],
