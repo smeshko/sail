@@ -6,7 +6,8 @@ import { projectIssues } from './sail-dir';
 import type { SchemaIssue } from './schemas';
 
 /** The outside systems a run talks to, one adapter each. */
-export type Port = 'ticketSource' | 'codeHost' | 'harness' | 'workspace';
+export const PORTS = ['ticketSource', 'codeHost', 'harness', 'workspace'] as const;
+export type Port = (typeof PORTS)[number];
 
 /** An adapter by name for a built-in, or by module path for the repository's own, with its options beside it. */
 export interface AdapterConfig {
