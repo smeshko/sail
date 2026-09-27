@@ -65,6 +65,10 @@ export interface ScriptOptions<C extends Consumes, P extends Produces, O extends
   /** The schema the script's output is validated against. */
   readonly output: O;
   readonly exitCodes?: ExitCodes;
+  /**
+   * How long the script may run. The engine defaults to 600, and on a timeout stops the script's whole process group:
+   * SIGTERM, then SIGKILL after a grace period.
+   */
   readonly timeoutSeconds?: number;
   /** The hosts the script reaches. Declared and recorded, not enforced. */
   readonly network?: 'none' | readonly string[];
