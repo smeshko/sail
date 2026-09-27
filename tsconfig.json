@@ -12,7 +12,11 @@
     "noImplicitOverride": true,
     "verbatimModuleSyntax": true,
     "resolveJsonModule": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "paths": {
+      "sail": ["./src/sdk/index.ts"],
+      "sail/intakes": ["./src/sdk/intakes.ts"]
+    }
   },
-  "include": ["src", "test", "scripts"]
+  "include": ["src", "test", "scripts", "test/fixtures/repo/.sail/**/*.ts"]
 }
