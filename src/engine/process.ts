@@ -3,7 +3,7 @@
 // The leader is spawned detached, so it leads a new process group and everything it starts can be signalled at once
 // through the group id. A timeout or an abort stops the group: SIGTERM, then SIGKILL after a grace period. So does the
 // leader's own exit, because whatever it leaves running would outlive the call, hold files in `$STAGE_OUT` open, and
-// keep writing to its logs after `result.json` (DECISIONS D4 of the script runner).
+// keep writing to its logs after `result.json`.
 //
 // stdout and stderr go straight to files, never through pipes: a descendant that inherits a pipe keeps it open after
 // the leader exits, and a read waiting for it to close would hang until that descendant ends.
