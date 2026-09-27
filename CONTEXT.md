@@ -123,7 +123,7 @@ How a call or step ended, from a fixed set per kind:
 - script: `passed`, `failed` or `error`, a verdict the engine maps from the exit code
 - agent: `done`, `blocked` or `error`, completion the agent declares; its judgments travel in the output
 
-The workflow routes on the outcome. A multi-step stage's outcome is its last step's.
+The workflow routes on the outcome. An `error` fails the run with stop reason `stage_error`, unless the call passes `{ onError: 'return' }` to receive it. A multi-step stage's outcome is its last step's.
 _Avoid_: status (the run's word), result, state, verdict
 
 **Blocked**:

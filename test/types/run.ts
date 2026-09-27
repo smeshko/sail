@@ -90,6 +90,14 @@ export const compiles = workflow('compiles', { intake: ticket }, async (run) => 
     iteration.fail('abc');
   }
 
+  // { onError: 'return' } hands an error back to the workflow, which rules it out before reading the output.
+  const checked = await run.stage(tests, {}, { onError: 'return' });
+  if (checked.outcome === 'error') return run.fail(checked.reason);
+  read(checked.output.failed);
+  const redone = await run.stage(implement, { spec: s.files['spec.md'] }, { onError: 'return' });
+  const ended: 'done' | 'blocked' | 'error' = redone.outcome;
+  read(ended);
+
   const p = await run.stage(publish, { ticket: run.input, spec: s.files['spec.md'] });
   const settled: 'passed' | 'failed' = p.outcome;
   read(settled, p.files['pr-body.md']);
@@ -126,6 +134,16 @@ export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
   read(i.output);
   // @ts-expect-error TS2339: a script result has no reason
   read(t.reason);
+  // @ts-expect-error TS2367: without { onError: 'return' }, an error never reaches the workflow
+  read(t.outcome === 'error');
+
+  // @ts-expect-error TS2322: onError takes only 'return'
+  await run.stage(tests, {}, { onError: 'ignore' });
+  // @ts-expect-error TS2741: the required binding `brief` is left out, with the options
+  await run.stage(spec, {}, { onError: 'return' });
+  const e = await run.stage(tests, {}, { onError: 'return' });
+  // @ts-expect-error TS2339: the output can't be read until error is ruled out
+  read(e.output);
 
   if (s.outcome === 'blocked') return run.fail(s.reason);
   // @ts-expect-error TS2339: SpecOutput has no title
