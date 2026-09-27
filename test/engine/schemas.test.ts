@@ -199,6 +199,67 @@ test('result: dispatch reports only the branch the document claims to be', () =>
   expect(paths('sail.result.v1', { ...multiStepResult, steps: [describeStep] })).toEqual(['/steps']);
 });
 
+const invalidOutput = { reason: 'invalid_output', message: 'the last stdout line is not JSON' };
+
+test.each([
+  ['script', scriptResult],
+  ['agent', agentResult],
+  ['multi-step', multiStepResult],
+] as const)('result: a %s result lists its errors when the outcome is error, and only then', (_, result) => {
+  const failing = {
+    ...result,
+    outcome: 'error',
+    ...('steps' in result ? { steps: [describeStep, { ...openStep, outcome: 'error' }] } : {}),
+  };
+  expect(validateDocument('sail.result.v1', { ...failing, errors: [invalidOutput] })).toEqual([]);
+  expect(validateDocument('sail.result.v1', failing)).toEqual([
+    { schema: 'sail.result.v1', path: '/errors', message: 'is required' },
+  ]);
+  expect(validateDocument('sail.result.v1', { ...result, errors: [invalidOutput] })).toEqual([
+    { schema: 'sail.result.v1', path: '/errors', message: 'is not allowed' },
+  ]);
+});
+
+test('result: errors is non-empty, and each error has a known reason and a message', () => {
+  const failing = { ...scriptResult, outcome: 'error' };
+  expect(paths('sail.result.v1', { ...failing, errors: [] })).toEqual(['/errors']);
+  expect(paths('sail.result.v1', { ...failing, errors: [{ ...invalidOutput, reason: 'oops' }] })).toEqual([
+    '/errors/0/reason',
+  ]);
+  expect(paths('sail.result.v1', { ...failing, errors: [{ ...invalidOutput, message: '' }] })).toEqual([
+    '/errors/0/message',
+  ]);
+  expect(paths('sail.result.v1', { ...failing, errors: [{ ...invalidOutput, hint: 'x' }] })).toEqual([
+    '/errors/0/hint',
+  ]);
+  const reasons = [
+    'invalid_output',
+    'missing_file',
+    'timeout',
+    'exit_code',
+    'not_started',
+    'budget_exceeded',
+    'harness',
+  ];
+  const every = reasons.map((reason) => ({ reason, message: reason }));
+  expect(paths('sail.result.v1', { ...failing, errors: every })).toEqual([]);
+});
+
+test("result: a script's exit code is null only beside the signal that ended it, and exit is left out if it never started", () => {
+  const killed = { ...scriptResult, outcome: 'error', errors: [{ reason: 'timeout', message: 'timed out after 1s' }] };
+  expect(paths('sail.result.v1', { ...killed, exit: { code: null, signal: 'SIGTERM' } })).toEqual([]);
+  expect(validateDocument('sail.result.v1', { ...killed, exit: { code: null } })).toEqual([
+    { schema: 'sail.result.v1', path: '/exit/signal', message: 'is required' },
+  ]);
+  expect(paths('sail.result.v1', { ...killed, exit: { code: null, signal: 'TERM' } })).toEqual(['/exit/signal']);
+  const notStarted = {
+    ...omit(scriptResult, 'exit'),
+    outcome: 'error',
+    errors: [{ reason: 'not_started', message: 'ENOENT' }],
+  };
+  expect(paths('sail.result.v1', notStarted)).toEqual([]);
+});
+
 test("result: a multi-step call's outcome must be its last step's", () => {
   const blockedLast = { ...describeStep, step: 'finish', outcome: 'blocked' };
   expect(validateDocument('sail.result.v1', { ...multiStepResult, steps: [openStep, blockedLast] })).toEqual([

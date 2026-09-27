@@ -91,6 +91,30 @@
       "patternProperties": { ".": { "type": "string" } },
       "additionalProperties": false
     },
+    "errors": {
+      "description": "why the outcome is error: every contract problem found, each with its reason",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "enum": [
+              "invalid_output",
+              "missing_file",
+              "timeout",
+              "exit_code",
+              "not_started",
+              "budget_exceeded",
+              "harness"
+            ]
+          },
+          "message": { "type": "string", "minLength": 1 }
+        },
+        "required": ["reason", "message"],
+        "additionalProperties": false
+      }
+    },
     "scriptResult": {
       "type": "object",
       "properties": {
@@ -102,6 +126,7 @@
         "key": { "$ref": "#/$defs/key" },
         "kind": { "const": "script" },
         "outcome": { "enum": ["passed", "failed", "error"] },
+        "errors": { "$ref": "#/$defs/errors" },
         "output": true,
         "files": { "$ref": "#/$defs/files" },
         "consumed": { "$ref": "#/$defs/consumed" },
@@ -109,12 +134,16 @@
         "finishedAt": { "$ref": "#/$defs/ts" },
         "durationMs": { "type": "number", "minimum": 0 },
         "exit": {
+          "description": "how the script ended; absent only when it never started. A null code names the signal that ended it.",
           "type": "object",
           "properties": {
-            "code": { "type": "integer" },
+            "code": { "type": ["integer", "null"] },
+            "signal": { "type": "string", "pattern": "^SIG[A-Z0-9]+$" },
             "mapped": { "enum": ["passed", "failed", "error"] }
           },
           "required": ["code"],
+          "if": { "properties": { "code": { "const": null } }, "required": ["code"] },
+          "then": { "properties": { "signal": true }, "required": ["signal"] },
           "additionalProperties": false
         },
         "command": { "type": "string" },
@@ -146,9 +175,11 @@
         "startedAt",
         "finishedAt",
         "durationMs",
-        "exit",
         "command"
       ],
+      "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+      "then": { "properties": { "errors": true }, "required": ["errors"] },
+      "else": { "properties": { "errors": false } },
       "additionalProperties": false
     },
     "agentResult": {
@@ -162,6 +193,7 @@
         "key": { "$ref": "#/$defs/key" },
         "kind": { "const": "agent" },
         "outcome": { "enum": ["done", "blocked", "error"] },
+        "errors": { "$ref": "#/$defs/errors" },
         "output": true,
         "reason": { "type": "string" },
         "files": { "$ref": "#/$defs/files" },
@@ -200,6 +232,9 @@
         "harness",
         "usage"
       ],
+      "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+      "then": { "properties": { "errors": true }, "required": ["errors"] },
+      "else": { "properties": { "errors": false } },
       "additionalProperties": false
     },
     "multiStepStageResult": {
@@ -212,6 +247,7 @@
         "call": { "type": "integer", "minimum": 1 },
         "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+$" },
         "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
+        "errors": { "$ref": "#/$defs/errors" },
         "output": true,
         "files": { "$ref": "#/$defs/files" },
         "consumed": { "$ref": "#/$defs/consumed" },
@@ -252,6 +288,9 @@
         "finishedAt",
         "durationMs"
       ],
+      "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+      "then": { "properties": { "errors": true }, "required": ["errors"] },
+      "else": { "properties": { "errors": false } },
       "additionalProperties": false
     }
   }
