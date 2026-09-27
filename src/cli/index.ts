@@ -1,3 +1,4 @@
+import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
 import { check } from './commands/check';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
@@ -17,8 +18,65 @@ Usage:
   sail --help           Print this help
 `;
 
-/** A command gets the arguments after its name, already checked against the flags it takes. */
-type Command = (args: readonly string[], io: Io) => ExitCode | Promise<ExitCode>;
+interface OptionSpec {
+  type: 'boolean' | 'string';
+  multiple?: boolean;
+}
+
+/** What a command takes: its options by name, and the most positionals it accepts. */
+export interface CommandSpec {
+  options: Readonly<Record<string, OptionSpec>>;
+  positionals: number;
+  command: Command;
+}
+
+/** A command's arguments, parsed against its spec. A `multiple` option is a list, in the order given. */
+export interface Parsed {
+  values: Record<string, boolean | string | string[]>;
+  positionals: string[];
+}
+
+/** A command gets the arguments after its name, already parsed against its spec. */
+export type Command = (args: Parsed, io: Io) => ExitCode | Promise<ExitCode>;
+
+/**
+ * Parses a command's arguments against its spec. `parseArgs` runs lenient and hands back tokens, so every refusal is
+ * sail's own words rather than Bun's.
+ */
+export function parseCommandArgs(
+  args: readonly string[],
+  spec: Pick<CommandSpec, 'options' | 'positionals'>,
+): Parsed | { refused: string } {
+  const { tokens } = parseArgs({
+    args: [...args],
+    options: spec.options,
+    strict: false,
+    tokens: true,
+    allowPositionals: true,
+  });
+  const parsed: Parsed = { values: {}, positionals: [] };
+  for (const token of tokens) {
+    if (token.kind === 'option-terminator') continue;
+    if (token.kind === 'positional') {
+      if (parsed.positionals.length === spec.positionals) return { refused: `unknown argument '${token.value}'` };
+      parsed.positionals.push(token.value);
+      continue;
+    }
+    const option = Object.hasOwn(spec.options, token.name) ? spec.options[token.name] : undefined;
+    if (option === undefined) return { refused: `unknown argument '${token.rawName}'` };
+    if (option.type === 'boolean') {
+      if (token.value !== undefined) return { refused: `option '--${token.name}' takes no value` };
+      parsed.values[token.name] = true;
+      continue;
+    }
+    if (token.value === undefined) return { refused: `option '--${token.name}' needs a value` };
+    const previous = parsed.values[token.name];
+    parsed.values[token.name] = option.multiple
+      ? [...(Array.isArray(previous) ? previous : []), token.value]
+      : token.value;
+  }
+  return parsed;
+}
 
 const help: Command = (_, io) => {
   io.stdout(USAGE);
@@ -30,22 +88,27 @@ const version: Command = (_, io) => {
   return EXIT_OK;
 };
 
-/** Each command, with the flags it takes. Any other argument after its name is refused. */
-const commands = new Map<string, { flags: readonly string[]; command: Command }>([
-  ['check', { flags: ['--list'], command: check }],
-  ['--help', { flags: [], command: help }],
-  ['-h', { flags: [], command: help }],
-  ['--version', { flags: [], command: version }],
+const bare = (command: Command): CommandSpec => ({ options: {}, positionals: 0, command });
+
+/** Each command, with what it takes. Anything else after its name is refused. */
+const commands = new Map<string, CommandSpec>([
+  ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
+  ['--help', bare(help)],
+  ['-h', bare(help)],
+  ['--version', bare(version)],
 ]);
 
+const refuse = (io: Io, message: string): ExitCode => {
+  io.stderr(`sail: ${message}\nRun 'sail --help' for usage.\n`);
+  return EXIT_REFUSED;
+};
+
 export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
-  const [first, ...args] = argv;
-  const entry = first === undefined ? { flags: [], command: help } : commands.get(first);
-  const unknown = entry === undefined ? first : args.find((arg) => !entry.flags.includes(arg));
-  if (entry === undefined || unknown !== undefined) {
-    io.stderr(`sail: unknown argument '${unknown}'\nRun 'sail --help' for usage.\n`);
-    return EXIT_REFUSED;
-  }
+  const [first, ...rest] = argv;
+  const entry = first === undefined ? bare(help) : commands.get(first);
+  if (entry === undefined) return refuse(io, `unknown argument '${first}'`);
+  const args = parseCommandArgs(rest, entry);
+  if ('refused' in args) return refuse(io, args.refused);
   try {
     return await entry.command(args, io);
   } catch (error) {

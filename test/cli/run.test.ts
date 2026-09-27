@@ -30,6 +30,14 @@ test.each([
   expect(stderr).toBe(`sail: unknown argument '${bad}'\nRun 'sail --help' for usage.\n`);
 });
 
+test('a value given to a flag is refused with exit 3', async () => {
+  expect(await runCaptured(['check', '--list=yes'])).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: "sail: option '--list' takes no value\nRun 'sail --help' for usage.\n",
+  });
+});
+
 test('a command that throws exits 4 and names the error', async () => {
   let stderr = '';
   const io: Io = {
