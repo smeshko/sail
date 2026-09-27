@@ -14,16 +14,17 @@
     "lint": "bun --bun biome check .",
     "fix": "bun --bun biome check --write .",
     "test": "bun scripts/test.ts",
+    "types": "bun scripts/types.ts",
     "verify": "bun run typecheck && bun run lint && bun run test --coverage",
     "prepare": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
-    "@types/bun": "1.3.14",
-    "typescript": "7.0.2"
+    "@types/bun": "1.3.14"
   },
   "dependencies": {
     "ajv": "^8.20",
+    "typescript": "7.0.2",
     "zod": "^4.6.5"
   }
 }
