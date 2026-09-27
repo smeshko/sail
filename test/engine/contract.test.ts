@@ -98,3 +98,11 @@ test('producesProblems refuses a name that is not a plain file name, or that the
     "'in' can't be produced: the engine writes it in $STAGE_OUT",
   ]);
 });
+
+test('a declared file named __proto__ is recorded, and survives JSON', () => {
+  const { runDir, outDir } = callDir();
+  writeFileSync(join(outDir, '__proto__'), 'x');
+  const { files, errors } = recordFiles({ ['__proto__']: 'file' }, outDir, runDir);
+  expect(errors).toEqual([]);
+  expect(Object.keys(JSON.parse(JSON.stringify(files)))).toEqual(['__proto__']);
+});

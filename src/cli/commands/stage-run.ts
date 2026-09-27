@@ -31,28 +31,29 @@ function supply(
   cwd: string,
   workspace: string,
 ): { supplied: Record<string, Supplied> } | { refused: string } {
-  const supplied: Record<string, Supplied> = {};
+  // A Map, not assignment: `supplied['__proto__'] = …` would set the prototype, and the binding would go unchecked.
+  const supplied = new Map<string, Supplied>();
   for (const bind of binds) {
     const equals = bind.indexOf('=');
     if (equals < 0) return { refused: `--bind '${bind}' has no '=': use --bind name=value` };
     const name = bind.slice(0, equals);
     const text = bind.slice(equals + 1);
-    if (Object.hasOwn(supplied, name)) return { refused: `'${name}' is bound twice` };
+    if (supplied.has(name)) return { refused: `'${name}' is bound twice` };
     const binding = Object.hasOwn(definition.consumes, name) ? definition.consumes[name] : undefined;
     if (binding?.kind === 'file') {
       const path = resolve(cwd, text);
-      supplied[name] = { kind: 'file', path, from: relative(workspace, path) };
+      supplied.set(name, { kind: 'file', path, from: relative(workspace, path) });
     } else if (binding?.kind === 'value') {
       try {
-        supplied[name] = { kind: 'value', value: JSON.parse(text), from: '--bind' };
+        supplied.set(name, { kind: 'value', value: JSON.parse(text), from: '--bind' });
       } catch (error) {
         return { refused: `'${name}': not JSON: ${(error as Error).message}` };
       }
     } else {
-      supplied[name] = { kind: 'value', value: text, from: '--bind' };
+      supplied.set(name, { kind: 'value', value: text, from: '--bind' });
     }
   }
-  return { supplied };
+  return { supplied: Object.fromEntries(supplied) };
 }
 
 export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {

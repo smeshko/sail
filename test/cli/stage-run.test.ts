@@ -198,6 +198,7 @@ test('Ctrl+C stops the script, and the command ends with the signal recorded', a
 
 test.each([
   ['an unknown binding', ['--bind', 'nope=1'], "  'nope' is not a binding of this stage"],
+  ['a binding named __proto__', ['--bind', '__proto__=1'], "  '__proto__' is not a binding of this stage"],
   ['a missing required binding', ['--bind', 'spec=docs/spec.md'], "  'ticket' is required"],
   [
     'a value its schema rejects',

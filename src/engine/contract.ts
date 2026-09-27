@@ -75,7 +75,8 @@ export function recordFiles(
   outDir: string,
   runDir: string,
 ): { files: Record<string, FileEntry>; errors: ContractError[] } {
-  const files: Record<string, FileEntry> = {};
+  // Entries, not assignment: `files['__proto__'] = …` would set the prototype, and the file would vanish from the JSON.
+  const files: [string, FileEntry][] = [];
   const errors: ContractError[] = [];
   for (const name of Object.keys(produces)) {
     const path = join(outDir, name);
@@ -85,8 +86,8 @@ export function recordFiles(
     } else if (!stat.isFile()) {
       errors.push({ reason: 'missing_file', message: `'${name}' in $STAGE_OUT is not a regular file` });
     } else {
-      files[name] = { path: runRelative(runDir, path), bytes: stat.size, sha256: sha256(path) };
+      files.push([name, { path: runRelative(runDir, path), bytes: stat.size, sha256: sha256(path) }]);
     }
   }
-  return { files, errors };
+  return { files: Object.fromEntries(files), errors };
 }
