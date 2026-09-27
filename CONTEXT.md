@@ -63,8 +63,16 @@ A TypeScript function in the repository that names its intake and composes stage
 _Avoid_: pipeline, DAG, graph, flow, recipe
 
 **Stage**:
-The unit of contract and ownership. It declares what it consumes, what it produces, its output schema, its permissions and its budget. It lives in one folder and the workflow calls it.
+The unit of contract and ownership. It declares what it consumes, what it produces, its output schema, its permissions and its budget. It lives in one folder, private to one workflow or shared, and the workflow calls it.
 _Avoid_: phase, node, task, job, command
+
+**Private stage**:
+A stage in its workflow's own folder, `.sail/workflows/<workflow>/stages/<stage>/`. Only files in that folder may import it, so another workflow may have a private stage of the same name. The folder may carry a number prefix (`10-spec/`), which only orders a listing.
+_Avoid_: local stage, internal stage, workflow stage
+
+**Shared stage**:
+A stage in `.sail/stages/<stage>/`, which any workflow may import. A private stage becomes shared by moving its folder there; its keys stay the same.
+_Avoid_: global stage, common stage, public stage
 
 **Step**:
 One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step.
@@ -185,7 +193,7 @@ Where a definition used by a run came from: built-in, or a path in the repositor
 _Avoid_: source, provenance, tier, layer
 
 **Roster**:
-The intake and stages a run resolved at start, each with its origin, permissions and budget, frozen for the run.
+The intake and stages a run resolved at start: the intake its workflow names and the stages its workflow's code imports, each with its origin, permissions and budget, frozen for the run.
 _Avoid_: stage list, manifest, plan, registry
 
 **Config**:

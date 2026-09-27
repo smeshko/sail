@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmdirSync,
   rmSync,
   writeFileSync,
@@ -121,6 +122,25 @@ test('a stage that binds a file and a value runs from a subdirectory, with both 
   });
 });
 
+test.each([
+  ['a private stage runs from its folder', 'workflows/ticket-to-pr/stages/tests'],
+  ['a numbered stage folder runs under its stage name', 'stages/10-tests'],
+])('%s', async (_, folder) => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureCopy(repo);
+    renameSync(join(sail, 'stages', 'tests'), join(sail, folder));
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', `.sail/${folder}`], repo.dir);
+    expect(stderr).toBe('');
+    expect(code).toBe(EXIT_OK);
+    expect(stdout).toMatch(/^tests#1 passed {2}\.sail-runs\/tests-[0-9A-HJKMNP-TV-Z]{26}\/00-tests\/call-1\n$/);
+    expect(readResult(callDirOf(stdout, repo.dir))).toMatchObject({
+      key: 'tests#1',
+      outcome: 'passed',
+      command: `.sail/${folder}/run.sh`,
+    });
+  });
+});
+
 test('failed and error exit 1, and print each error with its reason', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);
@@ -149,7 +169,7 @@ test('failed and error exit 1, and print each error with its reason', async () =
 test('a type error in an unrelated workflow does not stop the stage', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);
-    const workflow = join(sail, 'workflows', 'ticket-to-pr.ts');
+    const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');
     writeFileSync(
       workflow,
       readFileSync(workflow, 'utf8').replace("s.files['spec.md'], feedback", 'run.input, feedback'),
@@ -261,20 +281,18 @@ test.each([
   ],
   [
     'the agent stage spec',
-    ['.sail/stages/spec'],
+    ['.sail/workflows/ticket-to-pr/stages/spec'],
     "sail stage run: spec can't run:\n  agent steps can't run in isolation yet\n",
   ],
   [
     'the multi-step stage publish',
-    ['.sail/stages/publish'],
+    ['.sail/workflows/ticket-to-pr/stages/publish'],
     "sail stage run: publish can't run:\n  multi-step stages can't run in isolation yet\n",
   ],
   ['a directory without stage.ts', ['.sail/stages'], 'sail stage run: no stage.ts in .sail/stages\n'],
-  ['a stage outside .sail/', ['docs'], 'sail stage run: docs is not inside .sail/\n'],
-])('%s is refused', async (label, argv, message) => {
+])('%s is refused', async (_, argv, message) => {
   await withTempRepo(async (repo) => {
     fixtureCopy(repo);
-    if (label === 'a stage outside .sail/') writeFileSync(join(repo.dir, 'docs', 'stage.ts'), '');
     const { code, stdout, stderr } = await runCaptured(['stage', 'run', ...argv], repo.dir);
     expect(code).toBe(EXIT_REFUSED);
     expect(stdout).toBe('');
@@ -282,6 +300,25 @@ test.each([
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
+
+test.each([['docs'], ['.sail'], ['.sail/workflows/ticket-to-pr'], ['.sail/misc/x']])(
+  '%s, holding a stage.ts, is refused as not a stage folder',
+  async (dir) => {
+    await withTempRepo(async (repo) => {
+      fixtureCopy(repo);
+      mkdirSync(join(repo.dir, dir), { recursive: true });
+      writeFileSync(join(repo.dir, dir, 'stage.ts'), '');
+      expect(await runCaptured(['stage', 'run', dir], repo.dir)).toEqual({
+        code: EXIT_REFUSED,
+        stdout: '',
+        stderr:
+          `sail stage run: ${dir} is not a stage folder: stages live in .sail/stages/<stage>/ or ` +
+          '.sail/workflows/<workflow>/stages/<stage>/\n',
+      });
+      expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+    });
+  },
+);
 
 test("a type error in the stage's own files is refused before it runs", async () => {
   await withTempRepo(async (repo) => {
@@ -294,6 +331,20 @@ test("a type error in the stage's own files is refused before it runs", async ()
     expect(stderr).toContain('.sail/stages/tests/stage.ts:');
     expect(stderr).toContain('TS2322');
     expect(stderr).toEndWith('sail stage run: 1 type error in .sail/stages/tests/stage.ts\n');
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('a stage named unlike its folder is refused, as sail check refuses it', async () => {
+  await withTempRepo(async (repo) => {
+    const stageFile = join(fixtureCopy(repo), 'stages', 'tests', 'stage.ts');
+    writeFileSync(stageFile, readFileSync(stageFile, 'utf8').replace("script('tests',", "script('other',"));
+    expect(await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        "sail stage run: .sail/stages/tests/stage.ts: declares stage 'other', but its folder tests/ says 'tests'\n",
+    });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
@@ -316,8 +367,10 @@ test('a stage.ts that throws on import, or exports no single definition, is refu
     expect(await runCaptured(['stage', 'run', '.sail/stages/bound'], repo.dir)).toMatchObject({
       code: EXIT_REFUSED,
       stderr:
-        'sail stage run: .sail/stages/bound/stage.ts must export one stage definition, and exports 2: bound, other\n',
+        'sail stage run: .sail/stages/bound/stage.ts: exports 2 stage definitions (bound, other), and a stage.ts ' +
+        'exports exactly one\n',
     });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
 

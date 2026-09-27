@@ -2,10 +2,10 @@
 // enforced, into `.sail-runs/<stage>-<ulid>/00-<stage>/call-1/` beside its `.sail/`. Every refusal comes before anything
 // is written. This module parses, prints and maps the outcome to an exit code; the work is the engine's.
 import { existsSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import type { Supplied } from '../../engine/bindings';
 import { callProblems, runCall } from '../../engine/call';
-import { loadStageFile } from '../../engine/definitions';
+import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
 import { newRunId } from '../../engine/run-id';
 import { findSailDir, projectIssues } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
@@ -73,9 +73,9 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   // Found from the stage directory, not from where the user is, so a stage in another repository runs as its own.
   const found = findSailDir(stageDir);
   if ('refused' in found) return refuse(found.refused);
-  const within = relative(found.dir, stageDir);
-  if (within === '' || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
-    return refuse(`${at(stageDir)} is not inside ${at(found.dir)}/`);
+  if (stageFolder(found.dir, stageDir) === undefined) {
+    const locations = '.sail/stages/<stage>/ or .sail/workflows/<workflow>/stages/<stage>/';
+    return refuse(`${at(stageDir)} is not a stage folder: stages live in ${locations}`);
   }
   const workspace = dirname(found.dir);
 
@@ -100,14 +100,10 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
 
   const loaded = await loadStageFile(stageFile);
   if ('problem' in loaded) return refuse(`${at(stageFile)}: ${loaded.problem}`);
-  const [definition, ...others] = loaded.definitions;
-  if (definition === undefined || others.length > 0) {
-    const names = loaded.definitions.map(({ name }) => name).join(', ');
-    return refuse(
-      `${at(stageFile)} must export one stage definition, and exports ${loaded.definitions.length}` +
-        (names === '' ? '' : `: ${names}`),
-    );
-  }
+  // The same rules as `sail check`: one definition, named after its folder.
+  const problem = stageFileProblem(stageFile, loaded.definitions);
+  const [definition] = loaded.definitions;
+  if (problem !== undefined || definition === undefined) return refuse(`${at(stageFile)}: ${problem}`);
 
   const binds = args.values.bind;
   const given = supply(Array.isArray(binds) ? binds : [], definition, io.cwd, workspace);

@@ -40,13 +40,13 @@ test('the shim runs check: 0 on a fixture copy, 3 once a binding is wrongly wire
     expect(passing.stdout.toString()).toBe('.sail/ checked: 1 workflow, 5 stages\n');
     expect(passing.exitCode).toBe(0);
 
-    const workflow = join(sail, 'workflows', 'ticket-to-pr.ts');
+    const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');
     writeFileSync(
       workflow,
       readFileSync(workflow, 'utf8').replace("s.files['spec.md'], feedback", 'run.input, feedback'),
     );
     const failing = check();
-    expect(failing.stderr.toString()).toContain('.sail/workflows/ticket-to-pr.ts:');
+    expect(failing.stderr.toString()).toContain('.sail/workflows/ticket-to-pr/workflow.ts:');
     expect(failing.stderr.toString()).toContain('TS2739');
     expect(failing.exitCode).toBe(3);
   });

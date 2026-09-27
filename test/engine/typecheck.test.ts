@@ -39,7 +39,7 @@ test('a copy of the fixture .sail/ checks ok with no node_modules in reach', asy
 test('a wrongly wired binding is one TS2739 at its file and line', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
-    const workflow = join(sail, 'workflows', 'ticket-to-pr.ts');
+    const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');
     const source = readFileSync(workflow, 'utf8');
     expect(source).toContain(BROKEN);
     const mutated = source.replace(BROKEN, 'run.input, feedback');
@@ -151,7 +151,7 @@ test('parseDiagnostics keeps an indented line with nothing before it', () => {
 test('with files, only those files and their imports are checked', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
-    const workflow = join(sail, 'workflows', 'ticket-to-pr.ts');
+    const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');
     writeFileSync(workflow, readFileSync(workflow, 'utf8').replace(BROKEN, 'run.input, feedback'));
     const tests = join(sail, 'stages', 'tests', 'stage.ts');
     expect(await typecheck(sail, { files: [tests] })).toEqual({ ok: true, files: 1 });
