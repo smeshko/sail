@@ -136,6 +136,19 @@ test('a directory outside any git repository is refused', async () => {
   }
 });
 
+test('a stage named unlike its folder is refused, naming the file', async () => {
+  await withTempRepo(async (repo) => {
+    const stage = join(copyFixture(repo.dir), 'workflows', 'ticket-to-pr', 'stages', 'spec', 'stage.ts');
+    writeFileSync(stage, readFileSync(stage, 'utf8').replace("agent('spec',", "agent('specs',"));
+    expect(await runCaptured(['check'], subdirectory(repo.dir))).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        "../../.sail/workflows/ticket-to-pr/stages/spec/stage.ts  declares stage 'specs', but its folder spec/ says 'spec'\n",
+    });
+  });
+});
+
 test('a workflow that throws on import is refused, naming the file', async () => {
   await withTempRepo(async (repo) => {
     const boom = join(copyFixture(repo.dir), 'workflows', 'boom');

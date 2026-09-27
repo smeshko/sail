@@ -1,4 +1,5 @@
 // Loads a repository's `.sail/` definitions: imports each workflow and stage, and reads what the engine would run.
+import { existsSync, readdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { Intake, StageDefinition, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
@@ -72,6 +73,29 @@ const isWorkflow = (value: unknown): value is Workflow => kindOf(value) === 'wor
 const isIntake = (value: unknown): value is Intake => kindOf(value) === 'intake';
 const isStageDefinition = (value: unknown): value is StageDefinition => STAGE_KINDS.includes(kindOf(value));
 
+/** A stage's name as its folder gives it: the folder's name less a number prefix, so `10-spec` is `spec`. */
+export function stageName(folder: string): string {
+  return folder.replace(/^\d+-/, '');
+}
+
+/**
+ * What is wrong with a `stage.ts`, the absolute `file`, that exports `definitions`, or `undefined` when nothing is: it
+ * exports exactly one, named after its folder.
+ */
+export function stageFileProblem(file: string, definitions: readonly StageDefinition[]): string | undefined {
+  const [definition, ...more] = definitions;
+  if (definition === undefined) return 'exports no stage definition';
+  if (more.length > 0) {
+    const names = definitions.map((d) => d.name).join(', ');
+    return `exports ${definitions.length} stage definitions (${names}), and a stage.ts exports exactly one`;
+  }
+  const folder = basename(dirname(file));
+  if (definition.name !== stageName(folder)) {
+    return `declares stage '${definition.name}', but its folder ${folder}/ says '${stageName(folder)}'`;
+  }
+  return undefined;
+}
+
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** By name, then file: two workflows may each own a stage of the same name. */
 const byName = <T extends { name: string; file: string }>(a: T, b: T) =>
@@ -83,8 +107,10 @@ const byName = <T extends { name: string; file: string }>(a: T, b: T) =>
  * - `workflows/*\/intake.ts` and `intakes/*\/intake.ts`, which must export an intake
  * - `workflows/*\/stages/*\/stage.ts` and `stages/*\/stage.ts`, which must export an agent, script or stage
  *
- * A definition under `workflows/<folder>/` is private to that workflow, and one elsewhere is shared. A
- * `workflows/*.ts` is refused without being imported: a workflow is a folder.
+ * A definition under `workflows/<folder>/` is private to that workflow, and one elsewhere is shared. A workflow and a
+ * stage are named after their folders, and a `stage.ts` or `intake.ts` exports exactly one definition. A
+ * `workflows/*.ts` is refused without being imported: a workflow is a folder, and one without a `workflow.ts` is
+ * refused too. A file with a problem adds no entry.
  */
 export async function loadDefinitions(dir: string): Promise<Definitions> {
   registerSail();
@@ -114,27 +140,47 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
     const name = basename(file, '.ts');
     found.problems.push({ file, message: `a workflow is a folder: move this file to workflows/${name}/workflow.ts` });
   }
+  const workflowsDir = join(dir, 'workflows');
+  const folders = existsSync(workflowsDir) ? readdirSync(workflowsDir, { withFileTypes: true }) : [];
+  for (const folder of folders.filter((entry) => entry.isDirectory())) {
+    const file = join(workflowsDir, folder.name);
+    if (!existsSync(join(file, 'workflow.ts'))) found.problems.push({ file, message: 'holds no workflow.ts' });
+  }
 
   await load('workflows/*/workflow.ts', (file, module) => {
     const workflow = module.default;
+    const folder = basename(dirname(file));
     if (!isWorkflow(workflow)) {
       found.problems.push({ file, message: 'default-exports no workflow' });
-      return;
+    } else if (workflow.name !== folder) {
+      found.problems.push({ file, message: `declares workflow '${workflow.name}', but its folder is '${folder}'` });
+    } else {
+      found.workflows.push({ name: workflow.name, intake: workflow.intake.name, folder, file });
     }
-    found.workflows.push({ name: workflow.name, intake: workflow.intake.name, folder: basename(dirname(file)), file });
   });
 
   const readIntakes = (file: string, module: Record<string, unknown>, workflow: string | null) => {
-    const intakes = new Set(Object.values(module).filter(isIntake));
-    if (intakes.size === 0) found.problems.push({ file, message: 'exports no intake' });
-    for (const intake of intakes) found.intakes.push({ name: intake.name, workflow, file });
+    const [intake, ...more] = new Set(Object.values(module).filter(isIntake));
+    if (intake === undefined) {
+      found.problems.push({ file, message: 'exports no intake' });
+    } else if (more.length > 0) {
+      const names = [intake, ...more].map((i) => i.name).join(', ');
+      const message = `exports ${more.length + 1} intakes (${names}), and an intake.ts exports exactly one`;
+      found.problems.push({ file, message });
+    } else {
+      found.intakes.push({ name: intake.name, workflow, file });
+    }
   };
   await load('workflows/*/intake.ts', readIntakes);
   await load('intakes/*/intake.ts', readIntakes);
 
   const readStages = (file: string, module: Record<string, unknown>, workflow: string | null) => {
-    const definitions = new Set(Object.values(module).filter(isStageDefinition));
-    if (definitions.size === 0) found.problems.push({ file, message: 'exports no stage definition' });
+    const definitions = [...new Set(Object.values(module).filter(isStageDefinition))];
+    const problem = stageFileProblem(file, definitions);
+    if (problem !== undefined) {
+      found.problems.push({ file, message: problem });
+      return;
+    }
     for (const definition of definitions) {
       const steps = definition.kind === 'stage' ? definition.steps.map(({ name, kind }) => ({ name, kind })) : [];
       found.stages.push({ name: definition.name, kind: definition.kind, steps, workflow, file });
@@ -146,6 +192,7 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
   found.workflows.sort(byName);
   found.intakes.sort(byName);
   found.stages.sort(byName);
+  found.problems.sort((a, b) => compare(a.file, b.file) || compare(a.message, b.message));
   return found;
 }
 

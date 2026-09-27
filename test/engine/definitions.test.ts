@@ -1,7 +1,13 @@
 import { expect, test } from 'bun:test';
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { loadDefinitions, loadStageFile, registerSail } from '../../src/engine/definitions';
+import { cpSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import {
+  loadDefinitions,
+  loadStageFile,
+  registerSail,
+  stageFileProblem,
+  stageName,
+} from '../../src/engine/definitions';
 import { z } from '../../src/sdk/index';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -15,6 +21,24 @@ function copyFixture(repoDir: string): string {
 
 /** The workflow folder `ticket-to-pr` under `sail`. */
 const ticketToPr = (sail: string, ...path: string[]) => join(sail, 'workflows', 'ticket-to-pr', ...path);
+
+/** Replaces `from` with `to` in a file, which must contain it. */
+function replaceIn(file: string, from: string, to: string): void {
+  const text = readFileSync(file, 'utf8');
+  if (!text.includes(from)) throw new Error(`${file} has no ${from}`);
+  writeFileSync(file, text.replace(from, to));
+}
+
+/** Renames the stage folder at `path` under `sail` to `to`, with every import that names it, and gives its new path. */
+function renameStage(sail: string, path: string, to: string): string {
+  const renamed = join(sail, dirname(path), to);
+  renameSync(join(sail, path), renamed);
+  for (const file of new Bun.Glob('**/*.ts').scanSync({ cwd: sail, absolute: true })) {
+    const text = readFileSync(file, 'utf8');
+    writeFileSync(file, text.replaceAll(`/${basename(path)}/stage'`, `/${to}/stage'`));
+  }
+  return renamed;
+}
 
 test("a copy of the fixture .sail/ outside sail's tree loads its workflow, private stages and shared stages", async () => {
   await withTempRepo(async (repo) => {
@@ -84,6 +108,90 @@ test('a private and a shared intake are found with their owners, and an intake.t
   });
 });
 
+test('stageName drops a number prefix of digits then a dash, and nothing else', () => {
+  expect(['10-spec', 'spec', '1-2-three', '10spec', 'v2-spec', '-spec'].map(stageName)).toEqual([
+    'spec',
+    'spec',
+    '2-three',
+    '10spec',
+    'v2-spec',
+    '-spec',
+  ]);
+});
+
+test('a numbered stage folder loads under the name it declares, private or shared', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const spec = renameStage(sail, 'workflows/ticket-to-pr/stages/spec', '10-spec');
+    const tests = renameStage(sail, 'stages/tests', '20-tests');
+    const { stages, problems } = await loadDefinitions(sail);
+    expect(problems).toEqual([]);
+    expect(stages.map((s) => [s.name, s.file])).toEqual([
+      ['implement', join(sail, 'stages', 'implement', 'stage.ts')],
+      ['publish', ticketToPr(sail, 'stages', 'publish', 'stage.ts')],
+      ['self-review', ticketToPr(sail, 'stages', 'self-review', 'stage.ts')],
+      ['spec', join(spec, 'stage.ts')],
+      ['tests', join(tests, 'stage.ts')],
+    ]);
+  });
+});
+
+test('a stage named unlike its folder is a problem, and adds no entry', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const spec = join(renameStage(sail, 'workflows/ticket-to-pr/stages/spec', '10-spec'), 'stage.ts');
+    replaceIn(spec, "agent('spec',", "agent('specs',");
+    const { stages, problems } = await loadDefinitions(sail);
+    expect(problems).toEqual([{ file: spec, message: "declares stage 'specs', but its folder 10-spec/ says 'spec'" }]);
+    expect(stages.map((s) => s.name)).toEqual(['implement', 'publish', 'self-review', 'tests']);
+  });
+});
+
+test('a workflow named unlike its folder is a problem, and adds no entry', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const workflow = ticketToPr(sail, 'workflow.ts');
+    replaceIn(workflow, "  'ticket-to-pr',\n", "  'other',\n");
+    const { workflows, problems } = await loadDefinitions(sail);
+    expect(problems).toEqual([
+      { file: workflow, message: "declares workflow 'other', but its folder is 'ticket-to-pr'" },
+    ]);
+    expect(workflows).toEqual([]);
+  });
+});
+
+test('a folder under workflows/ without a workflow.ts is a problem on the folder', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const empty = join(sail, 'workflows', 'empty');
+    mkdirSync(join(empty, 'stages', 'x'), { recursive: true });
+    writeFileSync(
+      join(empty, 'stages', 'x', 'stage.ts'),
+      "import { script, z } from 'sail';\nexport const x = script('x', { run: './x.sh', output: z.object({}) });\n",
+    );
+    const { workflows, problems } = await loadDefinitions(sail);
+    expect(problems).toEqual([{ file: empty, message: 'holds no workflow.ts' }]);
+    expect(workflows.map((w) => w.folder)).toEqual(['ticket-to-pr']);
+  });
+});
+
+test('an intake.ts exporting two intakes is a problem naming both, and adds no entry', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const file = ticketToPr(sail, 'intake.ts');
+    writeFileSync(
+      file,
+      "import { intake, z } from 'sail';\n" +
+        "export const a = intake('a', { accepts: ['ticket'], output: z.object({}) });\n" +
+        "export const b = intake('b', { accepts: ['pr'], output: z.object({}) });\n",
+    );
+    expect(await loadDefinitions(sail)).toMatchObject({
+      intakes: [],
+      problems: [{ file, message: 'exports 2 intakes (a, b), and an intake.ts exports exactly one' }],
+    });
+  });
+});
+
 test('the loaded definitions share src/sdk: one zod', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
@@ -120,8 +228,8 @@ test('a workflow file without a default workflow, and a stage.ts without a defin
       intakes: [],
       stages: [],
       problems: [
-        { file: workflow, message: 'default-exports no workflow' },
         { file: stage, message: 'exports no stage definition' },
+        { file: workflow, message: 'default-exports no workflow' },
       ],
     });
   });
@@ -137,7 +245,7 @@ test('registering twice is harmless, and a .sail/ with neither directory loads n
   });
 });
 
-test('loadStageFile gives the stage definitions one stage.ts exports, each once', async () => {
+test('loadStageFile gives the stage definitions one stage.ts exports, each once, and two are a problem', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const tests = await loadStageFile(join(sail, 'stages', 'tests', 'stage.ts'));
@@ -157,7 +265,12 @@ test('loadStageFile gives the stage definitions one stage.ts exports, each once'
         "export const b = script('b', { run: './b.sh', output: z.object({}) });\n",
     );
     const loaded = await loadStageFile(twice);
-    expect('definitions' in loaded && loaded.definitions.map((d) => d.name)).toEqual(['a', 'b']);
+    const definitions = 'definitions' in loaded ? loaded.definitions : [];
+    expect(definitions.map((d) => d.name)).toEqual(['a', 'b']);
+    const message = 'exports 2 stage definitions (a, b), and a stage.ts exports exactly one';
+    expect(stageFileProblem(twice, definitions)).toBe(message);
+    expect(await loadDefinitions(sail)).toMatchObject({ problems: [{ file: twice, message }] });
+    expect((await loadDefinitions(sail)).stages.map((s) => s.name)).not.toContain('a');
   });
 });
 
