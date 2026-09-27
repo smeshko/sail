@@ -2,21 +2,7 @@ import { expect, test } from 'bun:test';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
-
-async function runCaptured(argv: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  let stdout = '';
-  let stderr = '';
-  const io: Io = {
-    stdout: (text) => {
-      stdout += text;
-    },
-    stderr: (text) => {
-      stderr += text;
-    },
-  };
-  const code = await run(argv, io);
-  return { code, stdout, stderr };
-}
+import { runCaptured } from '../helpers/run-captured';
 
 test('--version prints the package version', async () => {
   expect(await runCaptured(['--version'])).toEqual({ code: EXIT_OK, stdout: `${pkg.version}\n`, stderr: '' });
@@ -25,6 +11,7 @@ test('--version prints the package version', async () => {
 test.each([[[]], [['--help']], [['-h']]])('%p prints usage', async (argv) => {
   const { code, stdout, stderr } = await runCaptured(argv);
   expect(code).toBe(EXIT_OK);
+  expect(stdout).toContain('sail check [--list]');
   expect(stdout).toContain('--version');
   expect(stdout).toContain('--help');
   expect(stderr).toBe('');
@@ -34,6 +21,8 @@ test.each([
   [['--bogus'], '--bogus'],
   [['--version', 'extra'], 'extra'],
   [['--help', '--version'], '--version'],
+  [['check', '--bogus'], '--bogus'],
+  [['check', '--list', 'extra'], 'extra'],
 ])('%p is refused with exit 3', async (argv, bad) => {
   const { code, stdout, stderr } = await runCaptured(argv);
   expect(code).toBe(EXIT_REFUSED);
@@ -44,6 +33,7 @@ test.each([
 test('a command that throws exits 4 and names the error', async () => {
   let stderr = '';
   const io: Io = {
+    cwd: process.cwd(),
     stdout: () => {
       throw new Error('stdout closed');
     },
