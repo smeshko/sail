@@ -71,12 +71,12 @@ test('the exit code is reported, and stdout and stderr land in their logs', asyn
 test('the command runs from cwd with only the environment it is given', async () => {
   const s = scratch();
   const end = await runProcess(
-    s.options(['bash', '-c', 'pwd -P; echo "${ONLY}:${HOME:-unset}"'], {
+    s.options(['bash', '-c', 'pwd -P; echo "$ONLY"; printenv HOME || echo unset'], {
       env: { PATH: process.env.PATH ?? '', ONLY: 'yes' },
     }),
   );
   expect(end).toMatchObject({ code: 0 });
-  expect(s.log('stdout')).toBe(`${realpathSync(s.dir)}\nyes:unset\n`);
+  expect(s.log('stdout')).toBe(`${realpathSync(s.dir)}\nyes\nunset\n`);
 });
 
 test('a timeout stops the group with SIGTERM', async () => {
