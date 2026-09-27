@@ -6,6 +6,7 @@ import {
   loadStageFile,
   registerSail,
   stageFileProblem,
+  stageFolder,
   stageName,
 } from '../../src/engine/definitions';
 import { z } from '../../src/sdk/index';
@@ -117,6 +118,16 @@ test('stageName drops a number prefix of digits then a dash, and nothing else', 
     'v2-spec',
     '-spec',
   ]);
+});
+
+test('stageFolder says whether a directory is a shared or a private stage folder, and nothing else is', () => {
+  const at = (path: string) => stageFolder('/repo/.sail', join('/repo/.sail', path));
+  expect(at('stages/10-tests')).toEqual({ workflow: null });
+  expect(at('workflows/ticket-to-pr/stages/spec')).toEqual({ workflow: 'ticket-to-pr' });
+  const elsewhere = ['', 'stages', 'stages/tests/deeper', 'workflows/ticket-to-pr', 'workflows/ticket-to-pr/stages'];
+  for (const path of [...elsewhere, 'workflows/a/stages/b/c', 'misc/x', '../other/stages/x']) {
+    expect([path, at(path)]).toEqual([path, undefined]);
+  }
 });
 
 test('a numbered stage folder loads under the name it declares, private or shared', async () => {

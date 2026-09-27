@@ -1,6 +1,6 @@
 // Loads a repository's `.sail/` definitions: imports each workflow and stage, and reads what the engine would run.
 import { existsSync, readdirSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import type { Intake, StageDefinition, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
 import * as intakes from '../sdk/intakes';
@@ -72,6 +72,19 @@ function kindOf(value: unknown): unknown {
 const isWorkflow = (value: unknown): value is Workflow => kindOf(value) === 'workflow';
 const isIntake = (value: unknown): value is Intake => kindOf(value) === 'intake';
 const isStageDefinition = (value: unknown): value is StageDefinition => STAGE_KINDS.includes(kindOf(value));
+
+/**
+ * Where `stageDir` sits under `dir`, a `.sail/`: a shared stage's folder, `stages/<stage>/`, gives `workflow: null`,
+ * and a private one's, `workflows/<workflow>/stages/<stage>/`, gives its workflow. Any other directory is `undefined`.
+ */
+export function stageFolder(dir: string, stageDir: string): { workflow: string | null } | undefined {
+  const [top, second, third, fourth, ...rest] = relative(dir, stageDir).split(sep);
+  if (top === 'stages' && second !== undefined && third === undefined) return { workflow: null };
+  if (top === 'workflows' && second !== undefined && third === 'stages' && fourth !== undefined && rest.length === 0) {
+    return { workflow: second };
+  }
+  return undefined;
+}
 
 /** A stage's name as its folder gives it: the folder's name less a number prefix, so `10-spec` is `spec`. */
 export function stageName(folder: string): string {
