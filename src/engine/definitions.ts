@@ -98,8 +98,11 @@ export function stageFileProblem(file: string, definitions: readonly StageDefini
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** By name, then file: two workflows may each own a stage of the same name. */
-const byName = <T extends { name: string; file: string }>(a: T, b: T) =>
+export const byName = <T extends { name: string; file: string }>(a: T, b: T) =>
   compare(a.name, b.name) || compare(a.file, b.file);
+/** By file, then message: the order problems are printed in. */
+export const byFile = (a: DefinitionProblem, b: DefinitionProblem) =>
+  compare(a.file, b.file) || compare(a.message, b.message);
 
 /**
  * Imports every definition under `dir`, a `.sail/`, and lists them by their own names, never their export names:
@@ -192,7 +195,7 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
   found.workflows.sort(byName);
   found.intakes.sort(byName);
   found.stages.sort(byName);
-  found.problems.sort((a, b) => compare(a.file, b.file) || compare(a.message, b.message));
+  found.problems.sort(byFile);
   return found;
 }
 

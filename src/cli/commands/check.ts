@@ -1,7 +1,10 @@
-// `sail check [--list]`: finds `.sail/`, validates its config, type-checks it and loads its definitions, in that order.
-// The first step with a problem refuses, with every problem it found located relative to where the user ran it.
+// `sail check [--list]`: finds `.sail/`, validates its config, type-checks it, then loads its definitions and applies
+// the layout's rules, in that order. The first step with a problem refuses, with every problem it found located
+// relative to where the user ran it.
 import { join, relative } from 'node:path';
-import { loadDefinitions } from '../../engine/definitions';
+import { byFile, loadDefinitions } from '../../engine/definitions';
+import { importGraph } from '../../engine/imports';
+import { layoutProblems } from '../../engine/layout';
 import { findSailDir, projectIssues } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
@@ -48,7 +51,14 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
     return EXIT_REFUSED;
   }
 
-  const { workflows, stages, problems } = await loadDefinitions(found.dir);
+  const definitions = await loadDefinitions(found.dir);
+  const imports = await importGraph(found.dir);
+  if ('internal' in imports) {
+    io.stderr(`sail check: could not read the import graph\n${imports.internal}\n`);
+    return EXIT_INTERNAL;
+  }
+  const problems = [...definitions.problems, ...layoutProblems(found.dir, definitions, imports.graph)].sort(byFile);
+  const { workflows, stages } = definitions;
   if (problems.length > 0) {
     for (const problem of problems) io.stderr(`${at(problem.file)}  ${problem.message}\n`);
     return EXIT_REFUSED;

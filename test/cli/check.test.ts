@@ -149,6 +149,52 @@ test('a stage named unlike its folder is refused, naming the file', async () => 
   });
 });
 
+test("a workflow importing another's private stage is refused, naming the importing file", async () => {
+  await withTempRepo(async (repo) => {
+    const other = join(copyFixture(repo.dir), 'workflows', 'other');
+    mkdirSync(other);
+    writeFileSync(
+      join(other, 'workflow.ts'),
+      "import { workflow } from 'sail';\n" +
+        "import { ticket } from 'sail/intakes';\n" +
+        "import { spec } from '../ticket-to-pr/stages/spec/stage';\n\n" +
+        "export default workflow('other', { intake: ticket }, async (run) => {\n" +
+        "  await run.stage(spec, { brief: run.intake.files['brief.md'] });\n" +
+        '});\n',
+    );
+    expect(await runCaptured(['check'], subdirectory(repo.dir))).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        '../../.sail/workflows/other/workflow.ts  imports workflows/ticket-to-pr/stages/spec/stage.ts, which is private ' +
+        'to workflow ticket-to-pr\n',
+    });
+  });
+});
+
+test('a workflow reaching two stages named alike is refused, naming its workflow.ts and both stages', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const owned = join(sail, 'workflows', 'ticket-to-pr');
+    cpSync(join(sail, 'stages', 'tests'), join(owned, 'stages', 'tests'), { recursive: true });
+    const workflow = join(owned, 'workflow.ts');
+    writeFileSync(
+      workflow,
+      readFileSync(workflow, 'utf8').replace(
+        "import { workflow } from 'sail';",
+        "import { workflow } from 'sail';\nimport { tests as ownTests } from './stages/tests/stage';\nexport const own = ownTests;",
+      ),
+    );
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        ".sail/workflows/ticket-to-pr/workflow.ts  reaches two stages named 'tests': stages/tests/stage.ts and " +
+        'workflows/ticket-to-pr/stages/tests/stage.ts\n',
+    });
+  });
+});
+
 test('a workflow that throws on import is refused, naming the file', async () => {
   await withTempRepo(async (repo) => {
     const boom = join(copyFixture(repo.dir), 'workflows', 'boom');
