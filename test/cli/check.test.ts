@@ -40,26 +40,92 @@ function breakBinding(sail: string): string {
   return `${index + 1}:${(lines[index] ?? '').indexOf('spec: run.input') + 1}`;
 }
 
-test('check --list in the in-repo fixture lists its workflow and stages', async () => {
-  const { code, stdout, stderr } = await runCaptured(['check', '--list'], inRepoFixture);
-  expect(stderr).toBe('');
-  expect(code).toBe(EXIT_OK);
-  expect(stdout).toStartWith('.sail/ checked: 1 workflow, 5 stages\n');
-  expect(stdout).toMatch(/^ {2}ticket-to-pr {2}intake ticket {2}\.sail\/workflows\/ticket-to-pr\/workflow\.ts$/m);
-  for (const [name, kind] of [
-    ['implement', 'agent'],
-    ['publish', 'stage'],
-    ['self-review', 'agent'],
-    ['spec', 'agent'],
-    ['tests', 'script'],
-  ]) {
-    expect(stdout).toMatch(
-      new RegExp(`^ {2}${name} +${kind} .*\\.sail/(workflows/ticket-to-pr/)?stages/${name}/stage\\.ts$`, 'm'),
+test('check --list in the in-repo fixture groups its stages under its workflow, then lists the shared ones', async () => {
+  expect(await runCaptured(['check', '--list'], inRepoFixture)).toEqual({
+    code: EXIT_OK,
+    stdout: [
+      '.sail/ checked: 1 workflow, 5 stages',
+      '',
+      'workflows',
+      '  ticket-to-pr  intake ticket  .sail/workflows/ticket-to-pr/workflow.ts',
+      '    private',
+      '      publish      stage   describe (agent), open (script)',
+      '      self-review  agent',
+      '      spec         agent',
+      '    shared',
+      '      implement    agent',
+      '      tests        script',
+      '',
+      'shared stages',
+      '  implement  agent   used by ticket-to-pr  .sail/stages/implement/stage.ts',
+      '  tests      script  used by ticket-to-pr  .sail/stages/tests/stage.ts',
+      '',
+    ].join('\n'),
+    stderr: '',
+  });
+});
+
+test('check --list orders private stages by folder, intake first, and marks a shared stage no one uses', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(join(sail, path)), { recursive: true });
+      writeFileSync(join(sail, path), text);
+    };
+    const scriptStage = (name: string) =>
+      `import { script, z } from 'sail';\nexport const ${name} = script('${name}', { run: './run.sh', output: z.object({}) });\n`;
+    write('workflows/other/stages/20-spec/stage.ts', scriptStage('spec'));
+    write('workflows/other/stages/10-lint/stage.ts', scriptStage('lint'));
+    write('stages/format/stage.ts', scriptStage('format'));
+    write(
+      'workflows/other/intake.ts',
+      "import { intake, z } from 'sail';\n" +
+        "export const ticketed = intake('ticketed', { accepts: ['ticket'], output: z.object({ key: z.string() }) });\n",
     );
-  }
-  expect(stdout).toMatch(
-    /^ {2}publish +stage +describe \(agent\), open \(script\) {2}\.sail\/workflows\/ticket-to-pr\/stages\/publish/m,
-  );
+    write(
+      'workflows/other/workflow.ts',
+      "import { workflow } from 'sail';\n" +
+        "import { tests } from '../../stages/tests/stage';\n" +
+        "import { ticketed } from './intake';\n" +
+        "import { lint } from './stages/10-lint/stage';\n" +
+        "import { spec } from './stages/20-spec/stage';\n\n" +
+        "export default workflow('other', { intake: ticketed }, async (run) => {\n" +
+        '  await run.stage(lint);\n' +
+        '  await run.stage(spec);\n' +
+        '  await run.stage(tests);\n' +
+        '});\n',
+    );
+    expect(await runCaptured(['check', '--list'], repo.dir)).toEqual({
+      code: EXIT_OK,
+      stdout: [
+        '.sail/ checked: 2 workflows, 8 stages',
+        '',
+        'workflows',
+        '  other         intake ticketed  .sail/workflows/other/workflow.ts',
+        '    private',
+        '      ticketed     intake',
+        '      lint         script',
+        '      spec         script',
+        '    shared',
+        '      tests        script',
+        '  ticket-to-pr  intake ticket    .sail/workflows/ticket-to-pr/workflow.ts',
+        '    private',
+        '      publish      stage   describe (agent), open (script)',
+        '      self-review  agent',
+        '      spec         agent',
+        '    shared',
+        '      implement    agent',
+        '      tests        script',
+        '',
+        'shared stages',
+        '  format     script  unused                       .sail/stages/format/stage.ts',
+        '  implement  agent   used by ticket-to-pr         .sail/stages/implement/stage.ts',
+        '  tests      script  used by other, ticket-to-pr  .sail/stages/tests/stage.ts',
+        '',
+      ].join('\n'),
+      stderr: '',
+    });
+  });
 });
 
 test('check without --list prints only the summary', async () => {
@@ -78,6 +144,7 @@ test('a copy of the fixture checks from a subdirectory with no node_modules in r
     expect(code).toBe(EXIT_OK);
     expect(stdout).toStartWith('../../.sail/ checked: 1 workflow, 5 stages\n');
     expect(stdout).toContain('  ../../.sail/workflows/ticket-to-pr/workflow.ts\n');
+    expect(stdout).toContain('used by ticket-to-pr  ../../.sail/stages/tests/stage.ts\n');
     expect(stdout).not.toContain(repo.dir);
     expect(nodeModulesAbove(repo.dir)).toEqual([]);
     expect([...new Bun.Glob('**/node_modules').scanSync({ cwd: repo.dir, dot: true, onlyFiles: false })]).toEqual([]);
