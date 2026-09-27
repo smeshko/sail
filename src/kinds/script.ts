@@ -171,6 +171,11 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   // A script that didn't finish on its own, or whose exit code means error, produced nothing worth checking. Any other
   // end owes its output and files, `failed` as much as `passed`: a failing test run still owes its report.
   if (end.timedOut) return ended({ reason: 'timeout', message: `timed out after ${timeoutSeconds}s` }, record);
+  // An interrupted call didn't finish its work, even when the script handles SIGTERM and exits with a passing code.
+  if (end.aborted) {
+    const how = end.signal === null ? `exited with code ${end.code}` : `ended by signal ${end.signal}`;
+    return ended({ reason: 'exit_code', message: `interrupted, then ${how}` }, record);
+  }
   if (end.signal !== null) return ended({ reason: 'exit_code', message: `ended by signal ${end.signal}` }, record);
   if (mapped !== 'passed' && mapped !== 'failed') {
     return ended({ reason: 'exit_code', message: `exit code ${end.code} is not mapped to passed or failed` }, record);

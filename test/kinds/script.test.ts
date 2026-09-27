@@ -1,5 +1,14 @@
 import { afterEach, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { callPaths, createCallDir } from '../../src/engine/call-dir';
@@ -224,6 +233,28 @@ test('a script killed by a signal is exit_code, naming the signal', async () => 
     errors: [{ reason: 'exit_code', message: 'ended by signal SIGKILL' }],
     record: { exit: { code: null, signal: 'SIGKILL' } },
   });
+});
+
+test('an interrupted script is error, even when it handles SIGTERM, leaves its report and exits 0', async () => {
+  const s = setup();
+  s.run(
+    `finish() {\n  ${JUNIT}\n  echo '${PASSING}'\n  exit 0\n}\n` +
+      'trap finish TERM\ntouch "$STAGE_OUT/ready"\nwhile :; do sleep 0.05; done',
+  );
+  const controller = new AbortController();
+  const running = scriptKind.run(tests(), { ...s.context, signal: controller.signal });
+  // Aborted once the trap is set, not after a fixed delay: a script's first exec can be slow.
+  while (!existsSync(join(s.context.paths.dir, 'ready'))) await Bun.sleep(20);
+  controller.abort();
+  const run = await running;
+  expect(run).toMatchObject({
+    outcome: 'error',
+    output: null,
+    files: {},
+    errors: [{ reason: 'exit_code', message: 'interrupted, then exited with code 0' }],
+    record: { exit: { code: 0, mapped: 'passed' } },
+  });
+  expect(readFileSync(s.context.paths.stdout, 'utf8')).toBe(`${PASSING}\n`);
 });
 
 test('a script that is missing is not_started, with no exit', async () => {

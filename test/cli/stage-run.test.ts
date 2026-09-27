@@ -191,7 +191,7 @@ test('Ctrl+C stops the script, and the command ends with the signal recorded', a
     expect(readResult(callDirOf(stdout, repo.dir))).toMatchObject({
       outcome: 'error',
       exit: { code: null, signal: 'SIGTERM' },
-      errors: [{ reason: 'exit_code', message: 'ended by signal SIGTERM' }],
+      errors: [{ reason: 'exit_code', message: 'interrupted, then ended by signal SIGTERM' }],
     });
   });
 });
