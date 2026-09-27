@@ -14,6 +14,7 @@
     "lint": "bun --bun biome check .",
     "fix": "bun --bun biome check --write .",
     "test": "bun scripts/test.ts",
+    "types": "bun scripts/types.ts",
     "verify": "bun run typecheck && bun run lint && bun run test --coverage",
     "prepare": "git config core.hooksPath .githooks || true"
   },

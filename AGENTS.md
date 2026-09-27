@@ -13,6 +13,8 @@ Bun `>=1.3.14` is the only runtime. No command needs Node.
 - `bun run verify`: typecheck, lint, then tests with the coverage gate. A change is green when this passes.
 - `bun run test [path]`: tests without the coverage gate. A path filters the run.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
+- `bun run types`: regenerates `types/`, the SDK's committed declarations. Run it after changing `src/sdk`: `verify`
+  fails while they're stale.
 - `npm link`, then `sail --version` from any directory: puts this checkout's `sail` bin on the `PATH`. `bun link` does
   the same once `~/.bun/bin` is on the `PATH`.
 
@@ -79,5 +81,6 @@ including as examples in this file.
 - `src/cli`: the `sail` command. `src/cli/main.ts` is the bin, and `src/cli/exit-codes.ts` holds the exit codes every
   command returns.
 - `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
+- `types/`: generated from `src/sdk` by `bun run types`. `sail check` type-checks a repository against it.
 - `test/fixtures/`: `repo/` is the fixture repository and `runs/` the golden run directories. Both are data, edited by
   hand when a schema changes.
