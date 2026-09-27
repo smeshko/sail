@@ -51,7 +51,7 @@ test('a run opened from a subdirectory gets .sail-runs/LOCAL-<ulid>/ with its he
     expect(run.runId).toMatch(new RegExp(`^LOCAL-${ulid(NOW.getTime()).slice(0, 10)}[0-9A-HJKMNP-TV-Z]{16}$`));
     expect(run.dir).toBe(join(repo.dir, '.sail-runs', run.runId));
     expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'journal.ndjson', 'run.json']);
-    expect(readStatus(run.dir)).toBe('running');
+    expect(readStatus(run.dir)).toEqual({ status: 'running' });
     expect(readJournal(run.dir)).toEqual({ entries: [], torn: false });
     expect(readFileSync(join(run.dir, 'journal.ndjson'), 'utf8')).toBe('');
     expect(run.header.runId).toBe(run.runId);
@@ -76,7 +76,7 @@ test('run.json is byte-identical after the run journals calls and completes, and
     expect(statSync(path).mode & 0o777).toBe(0o444);
     expect(reread).toEqual(run.header);
     expect(readJournal(run.dir).entries.map((entry) => entry.key)).toEqual(['spec#1', 'implement#1']);
-    expect(readStatus(run.dir)).toBe('completed');
+    expect(readStatus(run.dir)).toEqual({ status: 'completed' });
   });
 });
 

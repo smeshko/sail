@@ -15,9 +15,12 @@ import {
   createRunDir,
   LOCAL_SOURCE,
   RUNS_DIR,
+  type RunStatus,
   readStatus,
   runsDir,
+  STOP_REASONS,
   type Status,
+  type StopReason,
   writeStatus,
 } from '../../src/engine/run-dir';
 import { newRunId } from '../../src/engine/run-id';
@@ -73,21 +76,59 @@ test('createRunDir syncs the directory holding .sail-runs/, so a crash cannot lo
   expect(syncedDirs(() => createRunDir(sailDir, newRunId('LOCAL')))).toEqual([root, runs]);
 });
 
-test.each<Status>(['running', 'suspended', 'completed', 'failed'])('STATUS round-trips %s', (status) => {
+const PAIRINGS: RunStatus[] = [
+  { status: 'running' },
+  { status: 'completed' },
+  ...STOP_REASONS.flatMap((stopReason): RunStatus[] => [
+    { status: 'failed', stopReason },
+    { status: 'suspended', stopReason },
+  ]),
+];
+
+test.each(PAIRINGS)('STATUS round-trips %o', ({ status, stopReason }) => {
   const dir = tempDir();
   writeStatus(dir, 'running');
-  writeStatus(dir, status);
-  expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe(`${status}\n`);
-  expect(readStatus(dir)).toBe(status);
+  writeStatus(dir, status, stopReason);
+  const line = stopReason === undefined ? status : `${status} ${stopReason}`;
+  expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe(`${line}\n`);
+  expect(readStatus(dir)).toEqual(stopReason === undefined ? { status } : { status, stopReason });
   expect(readdirSync(dir)).toEqual(['STATUS']);
 });
 
-test.each([['bogus\n'], ['running'], ['']])('readStatus refuses %p, naming the file', (text) => {
+test.each<[Status, StopReason | undefined, string]>([
+  ['failed', undefined, 'a failed run carries exactly one stop reason'],
+  ['suspended', undefined, 'a suspended run carries exactly one stop reason'],
+  ['completed', 'stage_error', 'a completed run carries no stop reason'],
+  ['running', 'workflow_failed', 'a running run carries no stop reason'],
+])('writeStatus refuses %s with stop reason %p, and STATUS keeps its content', (status, stopReason, message) => {
+  const dir = tempDir();
+  writeStatus(dir, 'running');
+  expect(() => writeStatus(dir, status, stopReason)).toThrow(message);
+  expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('running\n');
+  expect(readdirSync(dir)).toEqual(['STATUS']);
+});
+
+test.each([
+  ['bogus\n'],
+  ['running'],
+  [''],
+  ['failed\n'],
+  ['completed workflow_failed\n'],
+  ['failed bogus\n'],
+  ['failed workflow_failed'],
+  ['failed  workflow_failed\n'],
+  ['failed workflow_failed stage_error\n'],
+])('readStatus refuses %p, naming the file', (text) => {
   const dir = tempDir();
   writeFileSync(join(dir, 'STATUS'), text);
   expect(() => readStatus(dir)).toThrow(`${join(dir, 'STATUS')} holds ${JSON.stringify(text)}`);
 });
 
 test("the golden run's STATUS reads completed", () => {
-  expect(readStatus(GOLDEN)).toBe('completed');
+  expect(readStatus(GOLDEN)).toEqual({ status: 'completed' });
+});
+
+test("the stop reasons are sail.summary.v1's, in its order", () => {
+  const schema = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', 'schemas', 'sail.summary.v1.json'), 'utf8'));
+  expect([...STOP_REASONS]).toEqual(schema.properties.stopReason.enum);
 });
