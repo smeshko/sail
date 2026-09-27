@@ -76,7 +76,8 @@ including as examples in this file.
 - `src/events`: the event bus and its consumers: `events.ndjson`, the terminal, `summary.json`.
 - `src/watch`: the per-repository watcher: poll, queue, claim, and dispatch detached runs.
 - `src/dashboard`: reads the watcher registry, the branch leases and run files across the machine.
-- `src/cli`: the `sail` command. `src/cli/main.ts` is the bin.
+- `src/cli`: the `sail` command. `src/cli/main.ts` is the bin, and `src/cli/exit-codes.ts` holds the exit codes every
+  command returns.
 - `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
 - `test/fixtures/`: `repo/` is the fixture repository and `runs/` the golden run directories. Both are data, edited by
   hand when a schema changes.
