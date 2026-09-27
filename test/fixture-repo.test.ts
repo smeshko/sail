@@ -19,7 +19,13 @@ const { models } = Bun.YAML.parse(readFileSync(join(sail, 'project.yaml'), 'utf8
 };
 
 const sources = [...new Bun.Glob('**/*.ts').scanSync({ cwd: sail, dot: true })].sort();
-const stageDirs = [...new Bun.Glob('stages/*/stage.ts').scanSync({ cwd: sail })].map((path) => basename(dirname(path)));
+/** Each stage folder, shared or private, under its name: `spec` → `workflows/ticket-to-pr/stages/spec`. */
+const stageFolders = new Map(
+  ['stages/*/stage.ts', 'workflows/*/stages/*/stage.ts']
+    .flatMap((pattern) => [...new Bun.Glob(pattern).scanSync({ cwd: sail })])
+    .map((path) => [basename(dirname(path)), dirname(path)]),
+);
+const stageDirs = [...stageFolders.keys()];
 
 type Module = Record<string, unknown>;
 const load = async (path: string): Promise<Module> => import(join(sail, path));
@@ -32,7 +38,7 @@ const isDefinition = (value: unknown): value is StageDefinition =>
 async function stages(): Promise<Map<string, { module: Module; definition: StageDefinition }>> {
   const found = new Map<string, { module: Module; definition: StageDefinition }>();
   for (const dir of stageDirs) {
-    const module = await load(`stages/${dir}/stage.ts`);
+    const module = await load(`${stageFolders.get(dir)}/stage.ts`);
     const definition = Object.values(module).find((value) => isDefinition(value) && value.name === dir);
     if (isDefinition(definition)) found.set(dir, { module, definition });
   }
@@ -72,7 +78,7 @@ test('the typecheck includes every fixture .ts file, though tsc skips dot-direct
 });
 
 test('the workflow is ticket-to-pr, as the golden run recorded it', async () => {
-  const workflow = (await load('workflows/ticket-to-pr.ts')).default as Workflow;
+  const workflow = (await load('workflows/ticket-to-pr/workflow.ts')).default as Workflow;
   expect(workflow).toMatchObject({ kind: 'workflow', name: run.workflow.name, version: run.workflow.version });
   expect(workflow.watch).toEqual({ every: '5m' });
   expect(workflow.maxConcurrentRuns).toBe(2);
@@ -85,6 +91,19 @@ test('each stage directory exports a definition by its name, and together they a
   const found = await stages();
   expect([...found.keys()].sort()).toEqual(stageDirs.sort());
   expect([...found.keys()].sort()).toEqual(Object.keys(run.stages).sort());
+});
+
+test("each golden origin is its definition's folder, in run.json and the run:start event", () => {
+  const [start] = readFileSync(join(golden, 'events.ndjson'), 'utf8').split('\n');
+  const event: { type: string; workflow: typeof run.workflow; roster: { stages: Roster } } = JSON.parse(start ?? '');
+  expect(event.type).toBe('run:start');
+  for (const recorded of [run, { ...event.roster, workflow: event.workflow }]) {
+    expect(recorded.workflow.origin).toBe('repo:.sail/workflows/ticket-to-pr/workflow.ts');
+    expect(Object.keys(recorded.stages).sort()).toEqual(stageDirs.sort());
+    for (const [name, entry] of Object.entries(recorded.stages)) {
+      expect(entry.origin).toBe(`repo:.sail/${stageFolders.get(name)}`);
+    }
+  }
 });
 
 test('each stage matches its golden roster entry', async () => {

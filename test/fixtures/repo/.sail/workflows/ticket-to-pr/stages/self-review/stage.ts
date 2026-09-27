@@ -1,12 +1,6 @@
 // self-review: reviews the change against the spec. The workflow decides which findings must be fixed.
 import { agent, file, z } from 'sail';
-
-export const Finding = z.object({
-  severity: z.enum(['high', 'medium', 'low', 'nit']),
-  file: z.string(),
-  title: z.string(),
-  detail: z.string(),
-});
+import { Finding } from '../../../../stages/implement/stage';
 
 export const ReviewOutput = z.object({
   summary: z.string(),

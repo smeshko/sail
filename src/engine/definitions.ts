@@ -1,6 +1,6 @@
 // Loads a repository's `.sail/` definitions: imports each workflow and stage, and reads what the engine would run.
-import { join } from 'node:path';
-import type { StageDefinition, Workflow } from '../sdk/index';
+import { basename, dirname, join } from 'node:path';
+import type { Intake, StageDefinition, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
 import * as intakes from '../sdk/intakes';
 
@@ -27,6 +27,8 @@ export function registerSail(): void {
 export interface WorkflowEntry {
   name: string;
   intake: string;
+  /** The folder's name under `workflows/`. */
+  folder: string;
   file: string;
 }
 
@@ -35,6 +37,15 @@ export interface StageEntry {
   kind: StageDefinition['kind'];
   /** A multi-step stage's steps, in order. Empty for a one-step agent or script. */
   steps: { name: string; kind: 'agent' | 'script' }[];
+  /** The folder name of the workflow that owns it, or `null` when shared. */
+  workflow: string | null;
+  file: string;
+}
+
+export interface IntakeEntry {
+  name: string;
+  /** The folder name of the workflow that owns it, or `null` when shared. */
+  workflow: string | null;
   file: string;
 }
 
@@ -46,6 +57,7 @@ export interface DefinitionProblem {
 
 export interface Definitions {
   workflows: WorkflowEntry[];
+  intakes: IntakeEntry[];
   stages: StageEntry[];
   problems: DefinitionProblem[];
 }
@@ -57,49 +69,82 @@ function kindOf(value: unknown): unknown {
 }
 
 const isWorkflow = (value: unknown): value is Workflow => kindOf(value) === 'workflow';
+const isIntake = (value: unknown): value is Intake => kindOf(value) === 'intake';
 const isStageDefinition = (value: unknown): value is StageDefinition => STAGE_KINDS.includes(kindOf(value));
 
-const byName = <T extends { name: string }>(a: T, b: T) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/** By name, then file: two workflows may each own a stage of the same name. */
+const byName = <T extends { name: string; file: string }>(a: T, b: T) =>
+  compare(a.name, b.name) || compare(a.file, b.file);
 
 /**
- * Imports every `workflows/*.ts` and `stages/*\/stage.ts` under `dir`, a `.sail/`, and lists the definitions by their
- * own names, never their export names. A workflow file must default-export a workflow, and a `stage.ts` must export at
- * least one agent, script or stage.
+ * Imports every definition under `dir`, a `.sail/`, and lists them by their own names, never their export names:
+ * - `workflows/*\/workflow.ts`, which must default-export a workflow
+ * - `workflows/*\/intake.ts` and `intakes/*\/intake.ts`, which must export an intake
+ * - `workflows/*\/stages/*\/stage.ts` and `stages/*\/stage.ts`, which must export an agent, script or stage
+ *
+ * A definition under `workflows/<folder>/` is private to that workflow, and one elsewhere is shared. A
+ * `workflows/*.ts` is refused without being imported: a workflow is a folder.
  */
 export async function loadDefinitions(dir: string): Promise<Definitions> {
   registerSail();
-  const found: Definitions = { workflows: [], stages: [], problems: [] };
+  const found: Definitions = { workflows: [], intakes: [], stages: [], problems: [] };
 
-  const load = async (pattern: string, read: (file: string, module: Record<string, unknown>) => void) => {
-    const files = [...new Bun.Glob(pattern).scanSync({ cwd: dir })].sort().map((path) => join(dir, path));
-    for (const file of files) {
+  /** The files matching `pattern`, sorted, with the folder name of the workflow each sits under, or `null`. */
+  const files = (pattern: string) =>
+    [...new Bun.Glob(pattern).scanSync({ cwd: dir })].sort().map((path) => {
+      const [top, folder = null] = path.split('/');
+      return { file: join(dir, path), workflow: top === 'workflows' ? folder : null };
+    });
+
+  const load = async (
+    pattern: string,
+    read: (file: string, module: Record<string, unknown>, workflow: string | null) => void,
+  ) => {
+    for (const { file, workflow } of files(pattern)) {
       try {
-        read(file, await import(file));
+        read(file, await import(file), workflow);
       } catch (error) {
         found.problems.push({ file, message: error instanceof Error ? error.message : String(error) });
       }
     }
   };
 
-  await load('workflows/*.ts', (file, module) => {
+  for (const { file } of files('workflows/*.ts')) {
+    const name = basename(file, '.ts');
+    found.problems.push({ file, message: `a workflow is a folder: move this file to workflows/${name}/workflow.ts` });
+  }
+
+  await load('workflows/*/workflow.ts', (file, module) => {
     const workflow = module.default;
     if (!isWorkflow(workflow)) {
       found.problems.push({ file, message: 'default-exports no workflow' });
       return;
     }
-    found.workflows.push({ name: workflow.name, intake: workflow.intake.name, file });
+    found.workflows.push({ name: workflow.name, intake: workflow.intake.name, folder: basename(dirname(file)), file });
   });
 
-  await load('stages/*/stage.ts', (file, module) => {
+  const readIntakes = (file: string, module: Record<string, unknown>, workflow: string | null) => {
+    const intakes = new Set(Object.values(module).filter(isIntake));
+    if (intakes.size === 0) found.problems.push({ file, message: 'exports no intake' });
+    for (const intake of intakes) found.intakes.push({ name: intake.name, workflow, file });
+  };
+  await load('workflows/*/intake.ts', readIntakes);
+  await load('intakes/*/intake.ts', readIntakes);
+
+  const readStages = (file: string, module: Record<string, unknown>, workflow: string | null) => {
     const definitions = new Set(Object.values(module).filter(isStageDefinition));
     if (definitions.size === 0) found.problems.push({ file, message: 'exports no stage definition' });
     for (const definition of definitions) {
       const steps = definition.kind === 'stage' ? definition.steps.map(({ name, kind }) => ({ name, kind })) : [];
-      found.stages.push({ name: definition.name, kind: definition.kind, steps, file });
+      found.stages.push({ name: definition.name, kind: definition.kind, steps, workflow, file });
     }
-  });
+  };
+  await load('workflows/*/stages/*/stage.ts', readStages);
+  await load('stages/*/stage.ts', readStages);
 
   found.workflows.sort(byName);
+  found.intakes.sort(byName);
   found.stages.sort(byName);
   return found;
 }

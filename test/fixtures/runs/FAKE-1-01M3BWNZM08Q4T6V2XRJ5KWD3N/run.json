@@ -10,7 +10,7 @@
   "workflow": {
     "name": "ticket-to-pr",
     "version": 1,
-    "origin": "repo:.sail/workflows/ticket-to-pr.ts",
+    "origin": "repo:.sail/workflows/ticket-to-pr/workflow.ts",
     "sha256": "e0b3cf9118c5580b04a63a226324576776169295075084965c306c90e250a710"
   },
   "repository": {
@@ -54,7 +54,7 @@
   "stages": {
     "spec": {
       "kind": "agent",
-      "origin": "repo:.sail/stages/spec",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/spec",
       "model": "claude-opus-5-5",
       "output": "SpecOutput",
       "produces": [
@@ -126,7 +126,7 @@
     },
     "self-review": {
       "kind": "agent",
-      "origin": "repo:.sail/stages/self-review",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/self-review",
       "model": "claude-opus-5-5",
       "output": "ReviewOutput",
       "produces": [
@@ -151,7 +151,7 @@
       }
     },
     "publish": {
-      "origin": "repo:.sail/stages/publish",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/publish",
       "output": "PrInfo",
       "steps": [
         {

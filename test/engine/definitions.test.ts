@@ -13,14 +13,21 @@ function copyFixture(repoDir: string): string {
   return sail;
 }
 
-test("a copy of the fixture .sail/ outside sail's tree loads its workflow and stages", async () => {
+/** The workflow folder `ticket-to-pr` under `sail`. */
+const ticketToPr = (sail: string, ...path: string[]) => join(sail, 'workflows', 'ticket-to-pr', ...path);
+
+test("a copy of the fixture .sail/ outside sail's tree loads its workflow, private stages and shared stages", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
-    const stage = (name: string) => join(sail, 'stages', name, 'stage.ts');
+    const shared = (name: string) => join(sail, 'stages', name, 'stage.ts');
+    const owned = (name: string) => ticketToPr(sail, 'stages', name, 'stage.ts');
     expect(await loadDefinitions(sail)).toEqual({
-      workflows: [{ name: 'ticket-to-pr', intake: 'ticket', file: join(sail, 'workflows', 'ticket-to-pr.ts') }],
+      workflows: [
+        { name: 'ticket-to-pr', intake: 'ticket', folder: 'ticket-to-pr', file: ticketToPr(sail, 'workflow.ts') },
+      ],
+      intakes: [],
       stages: [
-        { name: 'implement', kind: 'agent', steps: [], file: stage('implement') },
+        { name: 'implement', kind: 'agent', steps: [], workflow: null, file: shared('implement') },
         {
           name: 'publish',
           kind: 'stage',
@@ -28,14 +35,52 @@ test("a copy of the fixture .sail/ outside sail's tree loads its workflow and st
             { name: 'describe', kind: 'agent' },
             { name: 'open', kind: 'script' },
           ],
-          file: stage('publish'),
+          workflow: 'ticket-to-pr',
+          file: owned('publish'),
         },
-        { name: 'self-review', kind: 'agent', steps: [], file: stage('self-review') },
-        { name: 'spec', kind: 'agent', steps: [], file: stage('spec') },
-        { name: 'tests', kind: 'script', steps: [], file: stage('tests') },
+        { name: 'self-review', kind: 'agent', steps: [], workflow: 'ticket-to-pr', file: owned('self-review') },
+        { name: 'spec', kind: 'agent', steps: [], workflow: 'ticket-to-pr', file: owned('spec') },
+        { name: 'tests', kind: 'script', steps: [], workflow: null, file: shared('tests') },
       ],
       problems: [],
     });
+  });
+});
+
+test('a workflow file outside a folder is refused with a hint to move it, and is never imported', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const flat = join(sail, 'workflows', 'flat.ts');
+    writeFileSync(flat, "throw new Error('imported');\n");
+    const { workflows, problems } = await loadDefinitions(sail);
+    expect(problems).toEqual([
+      { file: flat, message: 'a workflow is a folder: move this file to workflows/flat/workflow.ts' },
+    ]);
+    expect(workflows.map((w) => w.name)).toEqual(['ticket-to-pr']);
+  });
+});
+
+test('a private and a shared intake are found with their owners, and an intake.ts with none is a problem', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const declare = (name: string) =>
+      "import { intake, z } from 'sail';\n" +
+      `export const ${name.replace('-', '')} = intake('${name}', { accepts: ['ticket'], output: z.object({}) });\n`;
+    const owned = ticketToPr(sail, 'intake.ts');
+    writeFileSync(owned, declare('ticket-plus'));
+    mkdirSync(join(sail, 'intakes', 'jira'), { recursive: true });
+    const shared = join(sail, 'intakes', 'jira', 'intake.ts');
+    writeFileSync(shared, declare('jira'));
+    mkdirSync(join(sail, 'intakes', 'none'));
+    const none = join(sail, 'intakes', 'none', 'intake.ts');
+    writeFileSync(none, "import { z } from 'sail';\nexport const Schema = z.object({});\n");
+
+    const { intakes, problems } = await loadDefinitions(sail);
+    expect(intakes).toEqual([
+      { name: 'jira', workflow: null, file: shared },
+      { name: 'ticket-plus', workflow: 'ticket-to-pr', file: owned },
+    ]);
+    expect(problems).toEqual([{ file: none, message: 'exports no intake' }]);
   });
 });
 
@@ -51,7 +96,8 @@ test('the loaded definitions share src/sdk: one zod', async () => {
 test('a workflow that throws on import is a problem, and the rest still load', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
-    const boom = join(sail, 'workflows', 'boom.ts');
+    mkdirSync(join(sail, 'workflows', 'boom'));
+    const boom = join(sail, 'workflows', 'boom', 'workflow.ts');
     writeFileSync(boom, "throw new Error('boom');\n");
     const { workflows, stages, problems } = await loadDefinitions(sail);
     expect(problems).toEqual([{ file: boom, message: 'boom' }]);
@@ -63,14 +109,15 @@ test('a workflow that throws on import is a problem, and the rest still load', a
 test('a workflow file without a default workflow, and a stage.ts without a definition, are problems', async () => {
   await withTempRepo(async (repo) => {
     const sail = join(repo.dir, '.sail');
-    mkdirSync(join(sail, 'workflows'), { recursive: true });
+    mkdirSync(join(sail, 'workflows', 'named'), { recursive: true });
     mkdirSync(join(sail, 'stages', 'empty'), { recursive: true });
-    const workflow = join(sail, 'workflows', 'named.ts');
+    const workflow = join(sail, 'workflows', 'named', 'workflow.ts');
     const stage = join(sail, 'stages', 'empty', 'stage.ts');
     writeFileSync(workflow, "import { z } from 'sail';\nexport const named = z.string();\n");
     writeFileSync(stage, "import { z } from 'sail';\nexport const Schema = z.object({});\n");
     expect(await loadDefinitions(sail)).toEqual({
       workflows: [],
+      intakes: [],
       stages: [],
       problems: [
         { file: workflow, message: 'default-exports no workflow' },
@@ -86,7 +133,7 @@ test('registering twice is harmless, and a .sail/ with neither directory loads n
   await withTempRepo(async (repo) => {
     const sail = join(repo.dir, '.sail');
     mkdirSync(sail);
-    expect(await loadDefinitions(sail)).toEqual({ workflows: [], stages: [], problems: [] });
+    expect(await loadDefinitions(sail)).toEqual({ workflows: [], intakes: [], stages: [], problems: [] });
   });
 });
 
@@ -95,7 +142,7 @@ test('loadStageFile gives the stage definitions one stage.ts exports, each once'
     const sail = copyFixture(repo.dir);
     const tests = await loadStageFile(join(sail, 'stages', 'tests', 'stage.ts'));
     expect('definitions' in tests && tests.definitions.map((d) => [d.name, d.kind])).toEqual([['tests', 'script']]);
-    const publish = await loadStageFile(join(sail, 'stages', 'publish', 'stage.ts'));
+    const publish = await loadStageFile(ticketToPr(sail, 'stages', 'publish', 'stage.ts'));
     expect('definitions' in publish && publish.definitions.map((d) => [d.name, d.kind])).toEqual([
       ['publish', 'stage'],
     ]);

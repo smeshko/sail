@@ -1,11 +1,11 @@
 // ticket-to-pr: a ticket in, a pull request out. Composition only: every contract lives on its stage.
 import { workflow } from 'sail';
 import { ticket } from 'sail/intakes';
-import { Feedback, implement } from '../stages/implement/stage';
-import { publish } from '../stages/publish/stage';
-import { selfReview } from '../stages/self-review/stage';
-import { spec } from '../stages/spec/stage';
-import { tests } from '../stages/tests/stage';
+import { Feedback, implement } from '../../stages/implement/stage';
+import { tests } from '../../stages/tests/stage';
+import { publish } from './stages/publish/stage';
+import { selfReview } from './stages/self-review/stage';
+import { spec } from './stages/spec/stage';
 
 export default workflow(
   'ticket-to-pr',

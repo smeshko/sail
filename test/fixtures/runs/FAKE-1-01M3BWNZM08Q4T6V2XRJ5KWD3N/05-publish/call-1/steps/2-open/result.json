@@ -23,7 +23,7 @@
     "code": 0,
     "mapped": "passed"
   },
-  "command": ".sail/stages/publish/open.sh",
+  "command": ".sail/workflows/ticket-to-pr/stages/publish/open.sh",
   "env": {
     "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
     "STAGE": "publish",

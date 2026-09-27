@@ -32,7 +32,7 @@ function nodeModulesAbove(dir: string): string[] {
 
 /** Wires run.input where implement takes spec.md, and returns where tsc reports it: `line:column`. */
 function breakBinding(sail: string): string {
-  const workflow = join(sail, 'workflows', 'ticket-to-pr.ts');
+  const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');
   const mutated = readFileSync(workflow, 'utf8').replace(BROKEN, 'run.input, feedback');
   writeFileSync(workflow, mutated);
   const lines = mutated.split('\n');
@@ -45,7 +45,7 @@ test('check --list in the in-repo fixture lists its workflow and stages', async 
   expect(stderr).toBe('');
   expect(code).toBe(EXIT_OK);
   expect(stdout).toStartWith('.sail/ checked: 1 workflow, 5 stages\n');
-  expect(stdout).toMatch(/^ {2}ticket-to-pr {2}intake ticket {2}\.sail\/workflows\/ticket-to-pr\.ts$/m);
+  expect(stdout).toMatch(/^ {2}ticket-to-pr {2}intake ticket {2}\.sail\/workflows\/ticket-to-pr\/workflow\.ts$/m);
   for (const [name, kind] of [
     ['implement', 'agent'],
     ['publish', 'stage'],
@@ -53,9 +53,13 @@ test('check --list in the in-repo fixture lists its workflow and stages', async 
     ['spec', 'agent'],
     ['tests', 'script'],
   ]) {
-    expect(stdout).toMatch(new RegExp(`^ {2}${name} +${kind} .*\\.sail/stages/${name}/stage\\.ts$`, 'm'));
+    expect(stdout).toMatch(
+      new RegExp(`^ {2}${name} +${kind} .*\\.sail/(workflows/ticket-to-pr/)?stages/${name}/stage\\.ts$`, 'm'),
+    );
   }
-  expect(stdout).toMatch(/^ {2}publish +stage +describe \(agent\), open \(script\) {2}\.sail\/stages\/publish/m);
+  expect(stdout).toMatch(
+    /^ {2}publish +stage +describe \(agent\), open \(script\) {2}\.sail\/workflows\/ticket-to-pr\/stages\/publish/m,
+  );
 });
 
 test('check without --list prints only the summary', async () => {
@@ -73,7 +77,7 @@ test('a copy of the fixture checks from a subdirectory with no node_modules in r
     expect(stderr).toBe('');
     expect(code).toBe(EXIT_OK);
     expect(stdout).toStartWith('../../.sail/ checked: 1 workflow, 5 stages\n');
-    expect(stdout).toContain('  ../../.sail/workflows/ticket-to-pr.ts\n');
+    expect(stdout).toContain('  ../../.sail/workflows/ticket-to-pr/workflow.ts\n');
     expect(stdout).not.toContain(repo.dir);
     expect(nodeModulesAbove(repo.dir)).toEqual([]);
     expect([...new Bun.Glob('**/node_modules').scanSync({ cwd: repo.dir, dot: true, onlyFiles: false })]).toEqual([]);
@@ -86,7 +90,7 @@ test('a wrongly wired binding is refused with its location relative to the worki
     const { code, stdout, stderr } = await runCaptured(['check'], subdirectory(repo.dir));
     expect(code).toBe(EXIT_REFUSED);
     expect(stdout).toBe('');
-    expect(stderr).toStartWith(`../../.sail/workflows/ticket-to-pr.ts:${at}  TS2739  Type '`);
+    expect(stderr).toStartWith(`../../.sail/workflows/ticket-to-pr/workflow.ts:${at}  TS2739  Type '`);
     expect(stderr).toEndWith('sail check: 1 type error in ../../.sail/\n');
   });
 });
@@ -134,11 +138,13 @@ test('a directory outside any git repository is refused', async () => {
 
 test('a workflow that throws on import is refused, naming the file', async () => {
   await withTempRepo(async (repo) => {
-    writeFileSync(join(copyFixture(repo.dir), 'workflows', 'boom.ts'), "throw new Error('boom');\n");
+    const boom = join(copyFixture(repo.dir), 'workflows', 'boom');
+    mkdirSync(boom);
+    writeFileSync(join(boom, 'workflow.ts'), "throw new Error('boom');\n");
     expect(await runCaptured(['check'], repo.dir)).toEqual({
       code: EXIT_REFUSED,
       stdout: '',
-      stderr: '.sail/workflows/boom.ts  boom\n',
+      stderr: '.sail/workflows/boom/workflow.ts  boom\n',
     });
   });
 });

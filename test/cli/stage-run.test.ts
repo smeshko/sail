@@ -149,7 +149,7 @@ test('failed and error exit 1, and print each error with its reason', async () =
 test('a type error in an unrelated workflow does not stop the stage', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);
-    const workflow = join(sail, 'workflows', 'ticket-to-pr.ts');
+    const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');
     writeFileSync(
       workflow,
       readFileSync(workflow, 'utf8').replace("s.files['spec.md'], feedback", 'run.input, feedback'),
@@ -261,12 +261,12 @@ test.each([
   ],
   [
     'the agent stage spec',
-    ['.sail/stages/spec'],
+    ['.sail/workflows/ticket-to-pr/stages/spec'],
     "sail stage run: spec can't run:\n  agent steps can't run in isolation yet\n",
   ],
   [
     'the multi-step stage publish',
-    ['.sail/stages/publish'],
+    ['.sail/workflows/ticket-to-pr/stages/publish'],
     "sail stage run: publish can't run:\n  multi-step stages can't run in isolation yet\n",
   ],
   ['a directory without stage.ts', ['.sail/stages'], 'sail stage run: no stage.ts in .sail/stages\n'],
