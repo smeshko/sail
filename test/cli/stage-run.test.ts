@@ -282,12 +282,12 @@ test.each([
   [
     'the agent stage spec',
     ['.sail/workflows/ticket-to-pr/stages/spec'],
-    "sail stage run: spec can't run:\n  agent steps can't run in isolation yet\n",
+    "sail stage run: spec can't run:\n  agent steps can't run yet\n",
   ],
   [
     'the multi-step stage publish',
     ['.sail/workflows/ticket-to-pr/stages/publish'],
-    "sail stage run: publish can't run:\n  multi-step stages can't run in isolation yet\n",
+    "sail stage run: publish can't run:\n  multi-step stages can't run yet\n",
   ],
   ['a directory without stage.ts', ['.sail/stages'], 'sail stage run: no stage.ts in .sail/stages\n'],
 ])('%s is refused', async (_, argv, message) => {

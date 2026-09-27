@@ -198,3 +198,41 @@ test('a .sail/ refused by its project.yaml is not claimed, so a run from it can 
     expect(readdirSync(join(repo.dir, '.sail-runs'))).toEqual([run.runId]);
   });
 });
+
+test("an input the intake's schema accepts becomes the run's input, parsed", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const input = {
+      ticketKey: 'FAKE-3',
+      title: 'Greet loudly',
+      url: 'fake://tickets/FAKE-3',
+      acceptanceCriteria: ['greet --shout shouts'],
+      ignored: true,
+    };
+    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', input });
+    if ('refused' in run) throw new Error(run.refused);
+    const { ignored: _, ...parsed } = input;
+    expect(run.input).toEqual(parsed);
+    expect(run.sailDir).toBe(sail);
+    expect(run.loaded.workflow.name).toBe('ticket-to-pr');
+  });
+});
+
+test("an input the intake's schema rejects is refused, and no run directory is created", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', input: { ticketKey: 3 } });
+    if (!('refused' in run)) throw new Error('refused');
+    expect(run.refused).toStartWith("the input doesn't match intake 'ticket':\n");
+    expect(run.refused).toContain('ticketKey');
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('a run opened without an input has none', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const run = await opened(repo.dir);
+    expect(run.input).toBeUndefined();
+  });
+});

@@ -7,9 +7,10 @@
 // one run per process.
 import { realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import { z } from 'zod';
 import { readConfig } from './config';
 import { createJournal } from './journal';
-import { loadWorkflow } from './load-workflow';
+import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { createRunDir, LOCAL_SOURCE, type Source, writeStatus } from './run-dir';
 import { assertRunHeader, buildRunHeader, type RunHeader, writeRunHeader } from './run-header';
 import { newRunId } from './run-id';
@@ -24,6 +25,12 @@ export interface OpenedRun {
   /** The absolute run directory. */
   dir: string;
   header: RunHeader;
+  /** The absolute `.sail/` the run started from. */
+  sailDir: string;
+  /** The workflow, with the stages it reaches: what the run replays. */
+  loaded: LoadedWorkflow;
+  /** `run.input`: the input, parsed with the intake's schema, or undefined when none was given. */
+  input: unknown;
 }
 
 export interface OpenRunOptions {
@@ -35,11 +42,13 @@ export interface OpenRunOptions {
   source?: Source;
   /** The run id's time and the header's `startedAt`, from one clock. */
   now?: Date;
+  /** The run's input, checked against the intake's schema. It stands in for what intake builds until intake exists. */
+  input?: unknown;
 }
 
 /**
- * Finds `.sail/`, reads its config and loads the workflow, refusing at the first that fails. It then builds the run
- * header and checks it, all before writing anything. A header that breaks `sail.run.v1` throws: that is a bug in sail,
+ * Finds `.sail/`, reads its config, loads the workflow and checks the input, refusing at the first that fails. It then
+ * builds the run header and checks it, all before writing anything. A header that breaks `sail.run.v1` throws: that is a bug in sail,
  * not a refusal. Only then does it create the run directory and write the header, the journal and STATUS.
  *
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
@@ -63,6 +72,15 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   claimed.add(real);
   const loaded = await loadWorkflow(found.dir, workflow);
   if ('refused' in loaded) return loaded;
+  let input: unknown;
+  if (options.input !== undefined) {
+    const parsed = loaded.intake.definition.output.safeParse(options.input);
+    if (!parsed.success) {
+      const name = loaded.intake.definition.name;
+      return { refused: `the input doesn't match intake '${name}':\n${z.prettifyError(parsed.error)}` };
+    }
+    input = parsed.data;
+  }
 
   const runId = newRunId(source.ticketKey, now.getTime());
   const header = buildRunHeader({ runId, source, sailDir: found.dir, loaded, config, now });
@@ -72,5 +90,5 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   writeRunHeader(dir, header);
   createJournal(dir);
   writeStatus(dir, 'running');
-  return { runId, dir, header };
+  return { runId, dir, header, sailDir: found.dir, loaded, input };
 }

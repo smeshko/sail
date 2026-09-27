@@ -27,8 +27,8 @@ export interface CallRequest {
 
 /** Why the definition can't run with what is supplied, found before anything is written. */
 export function callProblems(definition: StageDefinition, supplied: Readonly<Record<string, Supplied>>): string[] {
-  if (definition.kind === 'agent') return ["agent steps can't run in isolation yet"];
-  if (definition.kind === 'stage') return ["multi-step stages can't run in isolation yet"];
+  if (definition.kind === 'agent') return ["agent steps can't run yet"];
+  if (definition.kind === 'stage') return ["multi-step stages can't run yet"];
   return [...KINDS[definition.kind].problems(definition), ...bindingProblems(definition.consumes, supplied)];
 }
 
