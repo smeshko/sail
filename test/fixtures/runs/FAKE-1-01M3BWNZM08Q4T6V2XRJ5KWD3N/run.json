@@ -10,7 +10,7 @@
   "workflow": {
     "name": "ticket-to-pr",
     "version": 1,
-    "origin": "repo:.sail/workflows/ticket-to-pr/workflow.ts",
+    "origin": "repo:.sail/workflows/ticket-to-pr",
     "sha256": "e0b3cf9118c5580b04a63a226324576776169295075084965c306c90e250a710"
   },
   "repository": {
@@ -43,7 +43,6 @@
   },
   "intake": {
     "name": "ticket",
-    "kind": "script",
     "origin": "builtin",
     "output": "TicketInput",
     "produces": [
@@ -52,32 +51,6 @@
     ]
   },
   "stages": {
-    "spec": {
-      "kind": "agent",
-      "origin": "repo:.sail/workflows/ticket-to-pr/stages/spec",
-      "model": "claude-opus-5-5",
-      "output": "SpecOutput",
-      "produces": [
-        "spec.md"
-      ],
-      "permissions": {
-        "read": [
-          "**"
-        ],
-        "write": [
-          "$STAGE_OUT/**"
-        ],
-        "commands": [
-          "git log *",
-          "git diff *"
-        ]
-      },
-      "budget": {
-        "maxTurns": 40,
-        "maxUsd": 2,
-        "maxMinutes": 10
-      }
-    },
     "implement": {
       "kind": "agent",
       "origin": "repo:.sail/stages/implement",
@@ -108,21 +81,42 @@
         "maxMinutes": 20
       }
     },
-    "tests": {
-      "kind": "script",
-      "origin": "repo:.sail/stages/tests",
-      "output": "TestReport",
-      "produces": [
-        "junit.xml"
-      ],
-      "exitCodes": {
-        "passed": [
-          0
-        ],
-        "failed": [
-          1
-        ]
-      }
+    "publish": {
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/publish",
+      "output": "PrInfo",
+      "steps": [
+        {
+          "step": "describe",
+          "kind": "agent",
+          "model": "claude-sonnet-5",
+          "output": "PrDescription",
+          "produces": [
+            "pr-body.md"
+          ],
+          "permissions": {
+            "read": [
+              "**"
+            ],
+            "write": [
+              "$STAGE_OUT/**"
+            ],
+            "commands": [
+              "git log *",
+              "git diff *"
+            ]
+          },
+          "budget": {
+            "maxTurns": 20,
+            "maxUsd": 1,
+            "maxMinutes": 5
+          }
+        },
+        {
+          "step": "open",
+          "kind": "script",
+          "output": "PrInfo"
+        }
+      ]
     },
     "self-review": {
       "kind": "agent",
@@ -150,25 +144,47 @@
         "maxMinutes": 10
       }
     },
-    "publish": {
-      "origin": "repo:.sail/workflows/ticket-to-pr/stages/publish",
-      "output": "PrInfo",
-      "steps": [
-        {
-          "step": "describe",
-          "kind": "agent",
-          "model": "claude-sonnet-5",
-          "output": "PrDescription",
-          "produces": [
-            "pr-body.md"
-          ]
-        },
-        {
-          "step": "open",
-          "kind": "script",
-          "output": "PrInfo"
-        }
-      ]
+    "spec": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/spec",
+      "model": "claude-opus-5-5",
+      "output": "SpecOutput",
+      "produces": [
+        "spec.md"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "git log *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 40,
+        "maxUsd": 2,
+        "maxMinutes": 10
+      }
+    },
+    "tests": {
+      "kind": "script",
+      "origin": "repo:.sail/stages/tests",
+      "output": "TestReport",
+      "produces": [
+        "junit.xml"
+      ],
+      "exitCodes": {
+        "passed": [
+          0
+        ],
+        "failed": [
+          1
+        ]
+      }
     }
   },
   "budget": {

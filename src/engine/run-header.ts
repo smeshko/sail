@@ -112,15 +112,20 @@ export function validateRunHeader(header: unknown): SchemaIssue[] {
   return validateDocument('sail.run.v1', header);
 }
 
-/**
- * Writes `run.json` into `runDir` once, synced, then sets it read-only. A header that breaks `sail.run.v1` is a bug in
- * sail, and throws before anything is written. An existing `run.json` throws `EEXIST`.
- */
-export function writeRunHeader(runDir: string, header: RunHeader): void {
+/** Throws unless `header` validates against `sail.run.v1`. One that doesn't is a bug in sail, never a refusal. */
+export function assertRunHeader(header: RunHeader): void {
   const issues = validateRunHeader(header);
   if (issues.length > 0) {
     throw new Error(`run.json breaks sail.run.v1, a bug in sail:\n${issues.map(formatIssue).join('\n')}`);
   }
+}
+
+/**
+ * Writes `run.json` into `runDir` once, synced, then sets it read-only. A header that breaks `sail.run.v1` throws
+ * before anything is written, and so does an existing `run.json`, with `EEXIST`.
+ */
+export function writeRunHeader(runDir: string, header: RunHeader): void {
+  assertRunHeader(header);
   createFileOnce(join(runDir, RUN_HEADER_FILE), `${JSON.stringify(header, null, 2)}\n`, 0o444);
 }
 
