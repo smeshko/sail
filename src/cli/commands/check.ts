@@ -4,11 +4,10 @@ import { join, relative } from 'node:path';
 import { loadDefinitions } from '../../engine/definitions';
 import { findSailDir, projectIssues } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
-import { type Diagnostic, typecheck } from '../../engine/typecheck';
+import { typecheck } from '../../engine/typecheck';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
-import type { Io } from '../index';
-
-const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+import { count, formatDiagnostic } from '../format';
+import type { Io, Parsed } from '../index';
 
 /** Rows as columns two spaces apart, indented by two. A column that is empty in every row is left out. */
 function columns(rows: readonly (readonly string[])[]): string {
@@ -19,7 +18,7 @@ function columns(rows: readonly (readonly string[])[]): string {
     .join('\n');
 }
 
-export async function check(args: readonly string[], io: Io): Promise<ExitCode> {
+export async function check(args: Parsed, io: Io): Promise<ExitCode> {
   /** Every path the command prints goes through here, relative to where the user ran it. */
   const at = (path: string) => relative(io.cwd, path) || '.';
 
@@ -43,9 +42,7 @@ export async function check(args: readonly string[], io: Io): Promise<ExitCode> 
     return EXIT_INTERNAL;
   }
   if (!types.ok) {
-    const format = ({ file, line, column, code, message }: Diagnostic) =>
-      `${file === undefined ? '' : `${at(file)}:${line}:${column}  `}${code === '' ? '' : `${code}  `}${message}`;
-    for (const diagnostic of types.diagnostics) io.stderr(`${format(diagnostic)}\n`);
+    for (const diagnostic of types.diagnostics) io.stderr(`${formatDiagnostic(diagnostic, at)}\n`);
     const errors = types.diagnostics.filter((diagnostic) => diagnostic.code !== '').length;
     io.stderr(`sail check: ${count(errors, 'type error')} in ${sail}\n`);
     return EXIT_REFUSED;
@@ -58,7 +55,7 @@ export async function check(args: readonly string[], io: Io): Promise<ExitCode> 
   }
 
   io.stdout(`${sail} checked: ${count(workflows.length, 'workflow')}, ${count(stages.length, 'stage')}\n`);
-  if (args.includes('--list')) {
+  if (args.values.list === true) {
     if (workflows.length > 0) {
       io.stdout(`\nworkflows\n${columns(workflows.map((w) => [w.name, `intake ${w.intake}`, at(w.file)]))}\n`);
     }

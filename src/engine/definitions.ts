@@ -103,3 +103,17 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
   found.stages.sort(byName);
   return found;
 }
+
+/**
+ * Imports one `stage.ts` and gives the stage definitions it exports, each once however many names it goes by. A throw
+ * on import is a problem, carrying its message.
+ */
+export async function loadStageFile(file: string): Promise<{ definitions: StageDefinition[] } | { problem: string }> {
+  registerSail();
+  try {
+    const module: Record<string, unknown> = await import(file);
+    return { definitions: [...new Set(Object.values(module).filter(isStageDefinition))] };
+  } catch (error) {
+    return { problem: error instanceof Error ? error.message : String(error) };
+  }
+}

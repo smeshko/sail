@@ -147,3 +147,21 @@ test('parseDiagnostics reads a global diagnostic, a continuation and an unrecogn
 test('parseDiagnostics keeps an indented line with nothing before it', () => {
   expect(parseDiagnostics('  stray\n', '/repo')).toEqual([{ code: '', message: 'stray' }]);
 });
+
+test('with files, only those files and their imports are checked', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const workflow = join(sail, 'workflows', 'ticket-to-pr.ts');
+    writeFileSync(workflow, readFileSync(workflow, 'utf8').replace(BROKEN, 'run.input, feedback'));
+    const tests = join(sail, 'stages', 'tests', 'stage.ts');
+    expect(await typecheck(sail, { files: [tests] })).toEqual({ ok: true, files: 1 });
+
+    writeFileSync(join(sail, 'stages', 'tests', 'report.ts'), "export const total: number = 'none';\n");
+    writeFileSync(tests, `import { total } from './report.ts';\n${readFileSync(tests, 'utf8')}\nexport { total };\n`);
+    const result = await typecheck(sail, { files: [tests] });
+    expect(result).toMatchObject({
+      ok: false,
+      diagnostics: [{ file: join(sail, 'stages', 'tests', 'report.ts'), code: 'TS2322' }],
+    });
+  });
+});

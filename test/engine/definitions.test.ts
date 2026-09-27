@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadDefinitions, registerSail } from '../../src/engine/definitions';
+import { loadDefinitions, loadStageFile, registerSail } from '../../src/engine/definitions';
 import { z } from '../../src/sdk/index';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -87,5 +87,37 @@ test('registering twice is harmless, and a .sail/ with neither directory loads n
     const sail = join(repo.dir, '.sail');
     mkdirSync(sail);
     expect(await loadDefinitions(sail)).toEqual({ workflows: [], stages: [], problems: [] });
+  });
+});
+
+test('loadStageFile gives the stage definitions one stage.ts exports, each once', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const tests = await loadStageFile(join(sail, 'stages', 'tests', 'stage.ts'));
+    expect('definitions' in tests && tests.definitions.map((d) => [d.name, d.kind])).toEqual([['tests', 'script']]);
+    const publish = await loadStageFile(join(sail, 'stages', 'publish', 'stage.ts'));
+    expect('definitions' in publish && publish.definitions.map((d) => [d.name, d.kind])).toEqual([
+      ['publish', 'stage'],
+    ]);
+
+    const twice = join(sail, 'stages', 'twice', 'stage.ts');
+    mkdirSync(join(sail, 'stages', 'twice'));
+    writeFileSync(
+      twice,
+      "import { script, z } from 'sail';\n" +
+        "export const a = script('a', { run: './a.sh', output: z.object({}) });\n" +
+        'export const alias = a;\n' +
+        "export const b = script('b', { run: './b.sh', output: z.object({}) });\n",
+    );
+    const loaded = await loadStageFile(twice);
+    expect('definitions' in loaded && loaded.definitions.map((d) => d.name)).toEqual(['a', 'b']);
+  });
+});
+
+test('a stage.ts that throws on import is a problem', async () => {
+  await withTempRepo(async (repo) => {
+    const boom = join(repo.dir, 'stage.ts');
+    writeFileSync(boom, "throw new Error('boom');\n");
+    expect(await loadStageFile(boom)).toEqual({ problem: 'boom' });
   });
 });

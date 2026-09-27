@@ -12,6 +12,7 @@ test.each([[[]], [['--help']], [['-h']]])('%p prints usage', async (argv) => {
   const { code, stdout, stderr } = await runCaptured(argv);
   expect(code).toBe(EXIT_OK);
   expect(stdout).toContain('sail check [--list]');
+  expect(stdout).toContain('sail stage run <stage-dir> [--bind name=value]...');
   expect(stdout).toContain('--version');
   expect(stdout).toContain('--help');
   expect(stderr).toBe('');
@@ -28,6 +29,14 @@ test.each([
   expect(code).toBe(EXIT_REFUSED);
   expect(stdout).toBe('');
   expect(stderr).toBe(`sail: unknown argument '${bad}'\nRun 'sail --help' for usage.\n`);
+});
+
+test('a value given to a flag is refused with exit 3', async () => {
+  expect(await runCaptured(['check', '--list=yes'])).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: "sail: option '--list' takes no value\nRun 'sail --help' for usage.\n",
+  });
 });
 
 test('a command that throws exits 4 and names the error', async () => {

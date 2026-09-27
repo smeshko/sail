@@ -82,12 +82,15 @@ export function parseDiagnostics(output: string, cwd: string): Diagnostic[] {
 }
 
 /**
- * Checks every `**\/*.ts` under `dir`, a `.sail/`, under the house rules. `tsc` runs from the repository, the parent of
- * `dir`, and every file it reports comes back absolute.
+ * Checks every `**\/*.ts` under `dir`, a `.sail/`, under the house rules, or only `options.files` and what they import.
+ * `tsc` runs from the repository, the parent of `dir`, and every file it reports comes back absolute.
  */
-export async function typecheck(dir: string, options: { tsc?: string } = {}): Promise<TypecheckResult> {
+export async function typecheck(
+  dir: string,
+  options: { tsc?: string; files?: string[] } = {},
+): Promise<TypecheckResult> {
   // `tsc` fails an empty include with TS18003, and the `.sail/` that `sail init` writes has no TypeScript yet.
-  const files = [...new Bun.Glob('**/*.ts').scanSync({ cwd: dir })].length;
+  const files = options.files?.length ?? [...new Bun.Glob('**/*.ts').scanSync({ cwd: dir })].length;
   if (files === 0) return { ok: true, files };
 
   const configDir = mkdtempSync(join(tmpdir(), 'sail-check-'));
@@ -96,7 +99,8 @@ export async function typecheck(dir: string, options: { tsc?: string } = {}): Pr
     // The include is absolute because `tsc` skips dot-directories under a pattern, unless the literal base path holds
     // them.
     const compilerOptions = { ...CHECK_OPTIONS, paths: SDK_TYPES };
-    writeFileSync(config, JSON.stringify({ compilerOptions, include: [join(dir, '**', '*.ts')] }));
+    const roots = options.files === undefined ? { include: [join(dir, '**', '*.ts')] } : { files: options.files };
+    writeFileSync(config, JSON.stringify({ compilerOptions, ...roots }));
 
     const tsc = options.tsc ?? join(dirname(Bun.resolveSync('typescript/package.json', import.meta.dir)), 'bin', 'tsc');
     const cwd = dirname(dir);
