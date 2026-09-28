@@ -383,3 +383,17 @@ test("a later try reports its try, under its call's key", async () => {
     expect(events.at(-1)).toMatchObject({ type: 'stage:end', try: 2, resultPath: '00-tests/call-1/try-2/result.json' });
   });
 });
+
+test('a call that crashes creating its directory has still reported its start', async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(PASSES);
+    const request = s.request(plainStep());
+    mkdirSync(join(request.runDir, '00-tests', 'call-1'), { recursive: true });
+    const { events, emit } = collect();
+
+    await expect(runCall({ ...request, emit })).rejects.toThrow('EEXIST');
+    expect(types(events)).toEqual(['stage:start']);
+    expect(keys(events)).toEqual(['tests#1']);
+  });
+});
