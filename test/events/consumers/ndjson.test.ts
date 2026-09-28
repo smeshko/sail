@@ -1,6 +1,6 @@
 // events.ndjson: created with the run, one appended line per event, and where a resumed run's numbering continues.
 import { afterEach, expect, test } from 'bun:test';
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEventsFile, ndjsonConsumer, nextSeq } from '../../../src/events/consumers/ndjson';
@@ -74,6 +74,24 @@ test('a write that fails throws, for the bus to report', () => {
   rmSync(dir, { recursive: true });
   expect(() => consumer.onEvent(event(1))).toThrow(expect.objectContaining({ code: 'ENOENT' }));
 });
+
+test.skipIf(process.getuid?.() === 0)(
+  'a line a write failed on goes ahead of the next event, once what that write left is cut, so no seq is missing',
+  () => {
+    const dir = runDir();
+    createEventsFile(dir);
+    const path = join(dir, 'events.ndjson');
+    const consumer = ndjsonConsumer(dir);
+    consumer.onEvent(event(1));
+    chmodSync(path, 0o444);
+    expect(() => consumer.onEvent(event(2))).toThrow(expect.objectContaining({ code: 'EACCES' }));
+    expect(() => consumer.onEvent(event(3))).toThrow(expect.objectContaining({ code: 'EACCES' }));
+    chmodSync(path, 0o644);
+    appendFileSync(path, JSON.stringify(event(2)).slice(0, 30)); // what a write that failed part way leaves
+    consumer.onEvent(event(4));
+    expect(contents(dir)).toBe(lines(1, 2, 3, 4));
+  },
+);
 
 test("nextSeq is 1 for a missing or empty file, and one past the last line's seq otherwise", () => {
   const dir = runDir();
