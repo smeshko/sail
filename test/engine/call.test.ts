@@ -269,6 +269,7 @@ test
         'stage:end',
       ]);
       expect(keys(events)).toEqual(Array(6).fill('tests#1'));
+      checkStamped(events);
       expect(events).toMatchObject([
         { stage: 'tests', call: 1, try: 1, kind: 'script', consumed: {} },
         { command: '.sail/stages/tests/run.sh', cwd: '.', envKeys: ENV_KEYS },
@@ -286,7 +287,6 @@ test
       ]);
       expect(events[2]).not.toHaveProperty('signal');
       expect(events[5]).not.toHaveProperty('errors');
-      checkStamped(events);
     });
   });
 
