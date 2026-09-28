@@ -170,3 +170,34 @@ test('by default, a throw on an error:consumer is written to stderr as one line'
   }
   expect(written).toEqual(['sail: consumer always failed on error:consumer #2: disk full\n']);
 });
+
+test('an event emitted during delivery waits until every consumer has the one being delivered', () => {
+  const log: string[] = [];
+  const bus = createBus({
+    runId: RUN_ID,
+    firstSeq: 1,
+    consumers: [
+      recorder('echo', log, (event) => {
+        if (event.type === 'stage:start') bus.emit(iteration);
+      }),
+      recorder('flaky', log, (event) => {
+        if (event.type === 'stage:start') throw new Error('boom');
+      }),
+      recorder('b', log),
+    ],
+    now,
+  });
+
+  expect(bus.emit(stageStart).seq).toBe(1);
+  expect(log).toEqual([
+    'echo stage:start #1',
+    'flaky stage:start #1',
+    'b stage:start #1',
+    'echo loop:iteration #2',
+    'flaky loop:iteration #2',
+    'b loop:iteration #2',
+    'echo error:consumer #3',
+    'flaky error:consumer #3',
+    'b error:consumer #3',
+  ]);
+});
