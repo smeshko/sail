@@ -1,4 +1,5 @@
 // The exit codes every sail command returns, from design.md §4.
+import type { Status } from '../engine/run-dir';
 
 /** 0: `completed`. The run completed, or the command succeeded. */
 export const EXIT_OK = 0;
@@ -24,3 +25,15 @@ export type ExitCode =
   | typeof EXIT_SUSPENDED
   | typeof EXIT_REFUSED
   | typeof EXIT_INTERNAL;
+
+/** The exit code of a run that ended with `status`. */
+export function exitCodeFor(status: Exclude<Status, 'running'>): ExitCode {
+  switch (status) {
+    case 'completed':
+      return EXIT_OK;
+    case 'failed':
+      return EXIT_FAILED;
+    case 'suspended':
+      return EXIT_SUSPENDED;
+  }
+}

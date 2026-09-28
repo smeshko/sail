@@ -41,12 +41,14 @@ export type ProducedFiles<F extends PropertyKey> = {
 /** A script's result, or a stage's that ends in a script step: `passed` or `failed`, each with output and files. */
 export interface ScriptResult<O, F extends PropertyKey> {
     readonly outcome: 'passed' | 'failed';
+    /** Frozen, as the call's `result.json` holds it. */
     readonly output: O;
     readonly files: ProducedFiles<F>;
 }
 /** An agent that finished: its output and files. */
 export interface DoneResult<O, F extends PropertyKey> {
     readonly outcome: 'done';
+    /** Frozen, as the call's `result.json` holds it. */
     readonly output: O;
     readonly files: ProducedFiles<F>;
 }
@@ -58,10 +60,21 @@ export interface BlockedResult {
 /** An agent's result, or a stage's that ends in an agent step. Rule out `blocked` before reading the output. */
 export type AgentResult<O, F extends PropertyKey> = DoneResult<O, F> | BlockedResult;
 /**
- * What `run.stage()` returns, by the kind of the definition's last step. `error` never reaches the workflow: by
- * default the engine fails the run on it.
+ * What `run.stage()` returns, by the kind of the definition's last step. `error` reaches the workflow only through
+ * `{ onError: 'return' }`: by default the engine fails the run with `stage_error`.
  */
 export type Result<S extends StageDefinition> = KindOf<S> extends 'script' ? ScriptResult<z.infer<S['output']>, FileNames<S>> : AgentResult<z.infer<S['output']>, FileNames<S>>;
+/** A call that broke its contract, handed back because the call passed `{ onError: 'return' }`. */
+export interface ErrorResult {
+    readonly outcome: 'error';
+    /** What broke the call's contract: its errors' messages. */
+    readonly reason: string;
+}
+/** How one call is made. */
+export interface CallOptions {
+    /** Hands an `error` outcome back to the workflow instead of failing the run with `stage_error`. */
+    readonly onError: 'return';
+}
 /**
  * One pass through a loop. A failed pass hands `In` to `fail()`, and the engine parses it with the loop's `feedback`
  * schema into the next pass's `previous`, an `Out`. They differ only when the schema transforms.
@@ -77,7 +90,7 @@ export interface LoopOptions {
     readonly max: number;
 }
 export interface Run<I extends z.ZodType = z.ZodType, P extends Produces = Produces> {
-    /** The typed value the intake built. */
+    /** The typed value the intake built. It is frozen: every replay reads the same value, so changing it throws. */
     readonly input: z.infer<I>;
     /** What the intake left: its files, by name. */
     readonly intake: {
@@ -85,6 +98,8 @@ export interface Run<I extends z.ZodType = z.ZodType, P extends Produces = Produ
     };
     /** Calls a stage with its bindings, and resolves to its result. */
     stage<S extends StageDefinition>(definition: S, ...bindings: BindingsArgument<S['consumes']>): Promise<Result<S>>;
+    /** Calls a stage with its bindings and options. `{ onError: 'return' }` resolves to an `error` too. */
+    stage<S extends StageDefinition>(definition: S, bindings: BindingsOf<S['consumes']>, options: CallOptions): Promise<Result<S> | ErrorResult>;
     /** A bounded loop whose failed passes carry `feedback`, checked against its schema. */
     loop<F extends z.ZodType>(name: string, options: LoopOptions & {
         readonly feedback: F;

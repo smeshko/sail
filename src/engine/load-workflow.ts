@@ -73,6 +73,16 @@ async function findIntake(
   return undefined;
 }
 
+/** `<sailDir>/workflows/<name>/workflow.ts`, or why there is none: a name that isn't one, or no such file. */
+export function findWorkflowFile(sailDir: string, name: string): { file: string } | { refused: string } {
+  if (!NAME.test(name)) return { refused: `'${name}' is not a workflow name: lowercase letters, digits and dashes` };
+  const file = join(sailDir, 'workflows', name, 'workflow.ts');
+  if (!existsSync(file)) {
+    return { refused: `no workflow '${name}': ${relative(dirname(sailDir), file)} doesn't exist` };
+  }
+  return { file };
+}
+
 /**
  * Imports `<sailDir>/workflows/<name>/workflow.ts` with the stages it reaches and its intake. It is refused when the
  * name isn't one, the file is missing, or any file in its import graph has a problem `sail check` would refuse: one
@@ -80,11 +90,11 @@ async function findIntake(
  * name. A problem elsewhere under `.sail/` doesn't refuse it. Reading the import graph failing is a crash, and throws.
  */
 export async function loadWorkflow(sailDir: string, name: string): Promise<LoadedWorkflow | { refused: string }> {
-  if (!NAME.test(name)) return { refused: `'${name}' is not a workflow name: lowercase letters, digits and dashes` };
+  const found = findWorkflowFile(sailDir, name);
+  if ('refused' in found) return found;
+  const { file } = found;
+  const dir = dirname(file);
   const at = (path: string) => relative(dirname(sailDir), path);
-  const dir = join(sailDir, 'workflows', name);
-  const file = join(dir, 'workflow.ts');
-  if (!existsSync(file)) return { refused: `no workflow '${name}': ${at(file)} doesn't exist` };
 
   const definitions = await loadDefinitions(sailDir);
   const imports = await importGraph(sailDir);

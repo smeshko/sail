@@ -12,7 +12,10 @@
     "step": { "type": "string" },
     "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
     "output": true,
-    "reason": { "type": ["string", "null"], "description": "set when outcome is blocked; null otherwise" },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "why the call didn't produce what was asked: the agent's reason when blocked, its errors when error; null otherwise"
+    },
     "files": {
       "type": "object",
       "patternProperties": { ".": { "type": "string" } },

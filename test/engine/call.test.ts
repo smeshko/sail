@@ -180,10 +180,10 @@ const twoSteps = stage('two', {
 test('an agent step or a multi-step stage is refused, and gets no call directory', async () => {
   await withTempRepo(async (repo) => {
     const s = tests(repo);
-    expect(callProblems(spec, {})).toEqual(["agent steps can't run in isolation yet"]);
-    expect(callProblems(twoSteps, {})).toEqual(["multi-step stages can't run in isolation yet"]);
-    await expect(runCall(s.request(spec))).rejects.toThrow("agent steps can't run in isolation yet");
-    await expect(runCall(s.request(twoSteps))).rejects.toThrow("multi-step stages can't run in isolation yet");
+    expect(callProblems(spec, {})).toEqual(["agent steps can't run yet"]);
+    expect(callProblems(twoSteps, {})).toEqual(["multi-step stages can't run yet"]);
+    await expect(runCall(s.request(spec))).rejects.toThrow("agent steps can't run yet");
+    await expect(runCall(s.request(twoSteps))).rejects.toThrow("multi-step stages can't run yet");
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
