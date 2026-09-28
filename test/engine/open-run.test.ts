@@ -1,14 +1,25 @@
 import { afterEach, expect, test } from 'bun:test';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engine/journal';
-import { type OpenedRun, openRun } from '../../src/engine/open-run';
+import { findRun, type OpenedRun, openRun, reopenRun } from '../../src/engine/open-run';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
 import { ulid } from '../../src/engine/run-id';
 import { validateRunDir } from '../../src/engine/schemas';
 import { copyFixture, edit } from '../helpers/fixture';
+import { copyRun } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const GOLDEN = join(import.meta.dir, '..', 'fixtures', 'runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N');
@@ -236,3 +247,109 @@ test('a run opened without an input has none', async () => {
     expect(run.input).toBeUndefined();
   });
 });
+
+const TICKET = { ticketKey: 'FAKE-7', title: 'Greet', url: 'fake://tickets/FAKE-7', acceptanceCriteria: [] };
+
+/** A run of the fixture opened in a repository of its own and suspended, then copied into `to` to be reopened there. */
+function suspendedCopy(to: string): Promise<OpenedRun> {
+  return withTempRepo(async (from) => {
+    copyFixture(from.dir);
+    const run = await opened(from.dir);
+    writeStatus(run.dir, 'suspended', 'budget_exceeded');
+    copyRun(from.dir, to);
+    return run;
+  });
+}
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('findRun finds a suspended or running run by its id, with its header and STATUS', async () => {
+    await withTempRepo(async (repo) => {
+      const sail = copyFixture(repo.dir);
+      const run = await opened(repo.dir);
+      writeStatus(run.dir, 'suspended', 'budget_exceeded');
+      expect(findRun(sail, run.runId)).toEqual({
+        dir: run.dir,
+        header: run.header,
+        status: { status: 'suspended', stopReason: 'budget_exceeded' },
+      });
+      writeStatus(run.dir, 'running');
+      expect(findRun(sail, run.runId)).toEqual({ dir: run.dir, header: run.header, status: { status: 'running' } });
+    });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  .each<[string, (run: OpenedRun) => string, (runId: string) => string]>([
+    [
+      'a completed run',
+      (run) => {
+        writeStatus(run.dir, 'completed');
+        return run.runId;
+      },
+      (runId) => `run ${runId} has completed: there is nothing to resume`,
+    ],
+    [
+      'a failed run',
+      (run) => {
+        writeStatus(run.dir, 'failed', 'stage_error');
+        return run.runId;
+      },
+      (runId) => `run ${runId} failed (stage_error): a failed run is final`,
+    ],
+    ['an id that names no run', () => 'LOCAL-NOPE', () => "no run 'LOCAL-NOPE' in .sail-runs"],
+    ['an id that is not a plain name', () => '../x', () => "'../x' is not a run id"],
+  ])('findRun refuses %s', async (_, prepare, reason) => {
+    await withTempRepo(async (repo) => {
+      const sail = copyFixture(repo.dir);
+      const runId = prepare(await opened(repo.dir));
+      expect(findRun(sail, runId)).toEqual({ refused: reason(runId) });
+    });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("findRun throws on a STATUS it can't read: sail's own files are broken", async () => {
+    await withTempRepo(async (repo) => {
+      const sail = copyFixture(repo.dir);
+      const run = await opened(repo.dir);
+      writeFileSync(join(run.dir, 'STATUS'), 'bogus\n');
+      expect(() => findRun(sail, run.runId)).toThrow(`${join(run.dir, 'STATUS')} holds "bogus\\n"`);
+    });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('reopenRun reopens a suspended run with the header on disk, its input parsed, and STATUS running again', async () => {
+    await withTempRepo(async (repo) => {
+      const run = await suspendedCopy(repo.dir);
+      const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, input: { ...TICKET, ignored: true } });
+      const dir = join(repo.dir, '.sail-runs', run.runId);
+      expect(reopened).toMatchObject({
+        runId: run.runId,
+        dir,
+        header: run.header,
+        sailDir: join(repo.dir, '.sail'),
+        loaded: { workflow: { name: 'ticket-to-pr' } },
+        input: TICKET,
+      });
+      expect(readStatus(dir)).toEqual({ status: 'running' });
+    });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("reopenRun refuses an input the intake's schema rejects, and STATUS is left as it was", async () => {
+    await withTempRepo(async (repo) => {
+      const run = await suspendedCopy(repo.dir);
+      const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, input: { ticketKey: 3 } });
+      expect(reopened).toEqual({ refused: expect.stringMatching(/^the input doesn't match intake 'ticket':\n/) });
+      const status = readFileSync(join(repo.dir, '.sail-runs', run.runId, 'STATUS'), 'utf8');
+      expect(status).toBe('suspended budget_exceeded\n');
+    });
+  });

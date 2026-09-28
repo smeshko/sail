@@ -99,6 +99,15 @@ test('producesProblems refuses a name that is not a plain file name, or that the
   ]);
 });
 
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("producesProblems refuses try-<n>, the name of a later try's directory", () => {
+    expect(producesProblems({ 'try-2': 'file', 'try-x': 'file', 'try-2.txt': 'file' })).toEqual([
+      "'try-2' can't be produced: the engine uses it for a later try",
+    ]);
+  });
+
 test('a declared file named __proto__ is recorded, and survives JSON', () => {
   const { runDir, outDir } = callDir();
   writeFileSync(join(outDir, '__proto__'), 'x');

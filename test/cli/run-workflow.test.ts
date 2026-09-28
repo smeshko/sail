@@ -1,12 +1,13 @@
-// `sail run`, in process through run(): a workflow of the stub repository, from the type-check to the exit code. Each
-// case has a temp repository of its own, because a process opens one run per .sail/.
+// `sail run`, in process through run(): a workflow of the stub repository, from the type-check to the exit code, and
+// Ctrl-C through a fake `io.onInterrupt`. Each case has a temp repository of its own, because a process opens one run
+// per .sail/.
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { edit } from '../helpers/fixture';
-import { type Captured, runCaptured } from '../helpers/run-captured';
-import { type StubOptions, writeStub } from '../helpers/stub-workflow';
+import { type Captured, fakeInterrupts, runCaptured } from '../helpers/run-captured';
+import { interruptWhenAsleep, type StubOptions, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
@@ -148,3 +149,68 @@ test('a journal corrupted mid-run is an internal error, exit 4', async () => {
   expect(stderr).toContain('journal.ndjson:1 is not valid JSON');
   expect(code).toBe(EXIT_INTERNAL);
 });
+
+/** `sail <argv>` of the stub in `repoDir`, interrupted through `io.onInterrupt` once `implement#2` sleeps. */
+async function interruptedRun(repoDir: string, argv: string[]) {
+  writeStub(repoDir, { sleepAt: 'implement#2' });
+  const interrupts = fakeInterrupts();
+  const { end, alive } = await interruptWhenAsleep(
+    repoDir,
+    runCaptured(argv, repoDir, interrupts),
+    interrupts.interrupt,
+  );
+  const [runId = ''] = readdirSync(join(repoDir, '.sail-runs'));
+  return { ...end, lines: end.stdout.trimEnd().split('\n'), runId, alive, interrupts };
+}
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('Ctrl-C during sail run suspends the run, prints how to resume it, and exits 2', async () => {
+    await withTempRepo(async (repo) => {
+      const { code, lines, stderr, runId, alive, interrupts } = await interruptedRun(repo.dir, ['run']);
+      expect(lines).toEqual([
+        'spec#1 passed',
+        'implement#1 passed',
+        'tests#1 failed',
+        `${runId} suspended interrupted: stopped during implement#2  .sail-runs/${runId}`,
+        `resume it with: sail resume ${runId}`,
+      ]);
+      expect(stderr).toBe('');
+      expect(code).toBe(EXIT_SUSPENDED);
+      expect(alive).toEqual([]);
+      expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);
+    });
+  }, 20_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('the resume hint repeats --input, quoted for the shell', async () => {
+    await withTempRepo(async (repo) => {
+      const input = { ticketKey: 'FAKE-6', title: "Greet O'Brien", url: 'fake://tickets/FAKE-6', acceptanceCriteria: [] };
+      const { lines, runId } = await interruptedRun(repo.dir, ['run', '--input', JSON.stringify(input)]);
+      expect(lines.at(-1)).toBe(
+        `resume it with: sail resume ${runId} --input '{"ticketKey":"FAKE-6","title":"Greet O'\\''Brien","url":"fake://tickets/FAKE-6","acceptanceCriteria":[]}'`,
+      );
+    });
+  }, 20_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('the interrupt handler is unregistered even when the run throws', async () => {
+    await withTempRepo(async (repo) => {
+      const sail = writeStub(repo.dir);
+      edit(
+        sail,
+        'workflows/ticket-to-pr/stages/spec/run.sh',
+        "printf '# Spec",
+        'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+      );
+      const interrupts = fakeInterrupts();
+      const { code } = await runCaptured(['run'], repo.dir, interrupts);
+      expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);
+      expect(code).toBe(EXIT_INTERNAL);
+    });
+  });

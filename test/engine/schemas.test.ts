@@ -191,6 +191,15 @@ test('summary: a stop reason is required when failed or suspended, and forbidden
   ]);
 });
 
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('summary: a suspended run may be stopped by an interrupt', () => {
+    expect(validateDocument('sail.summary.v1', { ...summary, status: 'suspended', stopReason: 'interrupted' })).toEqual(
+      [],
+    );
+  });
+
 test('result: dispatch reports only the branch the document claims to be', () => {
   expect(validateDocument('sail.result.v1', { ...scriptResult, outcome: 'done' })).toEqual([
     { schema: 'sail.result.v1', path: '/outcome', message: 'must be equal to one of the allowed values' },
@@ -416,6 +425,32 @@ test('validateRunDir requires a completed run to journal every result, in order'
     'journal.ndjson:1  [sail.journal.v1]  /seq must be 1, its place in the journal',
   ]);
 });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("validateRunDir takes a completed run's unjournaled try as superseded by its call's journaled later try", () => {
+    const spec = (n: number) => json({ ...agentResult, call: n, key: `spec#${n}` });
+    const retried = {
+      ...validRunDir(),
+      'summary.json': json({ ...summary, status: 'completed' }),
+      'journal.ndjson': ndjson(journal, {
+        ...journal,
+        seq: 2,
+        key: 'spec#1',
+        stage: 'spec',
+        outcome: 'done',
+        resultPath: '01-spec/call-1/try-2/result.json',
+      }),
+      '01-spec/call-1/result.json': spec(1),
+      '01-spec/call-1/try-2/result.json': spec(1),
+    };
+    expect(validateRunDir(tempDir(retried)).issues.map(formatIssue)).toEqual([]);
+    const anotherCall = { ...retried, '01-spec/call-2/result.json': spec(2) };
+    expect(validateRunDir(tempDir(anotherCall)).issues.map(formatIssue)).toEqual([
+      '01-spec/call-2/result.json  [sail.result.v1]  / is not journaled, and the run completed',
+    ]);
+  });
 
 test('validateRunDir reports an invalid linked result once, by its own issues', () => {
   const dir = tempDir({ ...validRunDir(), '00-intake/call-1/result.json': json({ ...scriptResult, extra: true }) });
