@@ -1,7 +1,8 @@
 // The script kind: any executable, run with the environment preamble in its own process group. Its exit code maps to
 // `passed` or `failed` through `exitCodes`, its last stdout line is its JSON output, and it must leave every declared
-// file in `$STAGE_OUT`. Every broken promise is collected as an error.
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
+// file in `$STAGE_OUT`. Every broken promise is collected as an error. It reports the facts only it knows as events:
+// how the process ran and ended, whether the output was read and held its schema, and which files it recorded.
+import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { runProcess } from '../engine/process';
@@ -130,13 +131,36 @@ function readOutput(
   };
 }
 
+/** The bytes the script printed, or 0 when its log is gone or can't be read: `readOutput()` reports why. */
+function printedBytes(stdout: string): number {
+  try {
+    return statSync(stdout).size;
+  } catch {
+    return 0;
+  }
+}
+
 async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
+  const emit = context.emit ?? (() => {});
   const command = resolve(context.stageDir, step.run);
   const timeoutSeconds = step.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
   const variables = preamble(context);
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
+
+  // Recorded relative to the workspace, and only the preamble: the inherited environment may hold secrets.
+  const at = (path: string) => relative(context.workspace, path) || '.';
+  const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
+  const recorded = { command: at(command), env };
+
+  emit({
+    type: 'script:exec',
+    command: recorded.command,
+    cwd: at(context.workspace),
+    envKeys: variables.map(({ name }) => name),
+  });
+  const startedAt = Date.now();
   const end = await runProcess({
     command: [command],
     cwd: context.workspace,
@@ -147,11 +171,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     ...(context.graceMs === undefined ? {} : { graceMs: context.graceMs }),
     ...(context.signal === undefined ? {} : { signal: context.signal }),
   });
-
-  // Recorded relative to the workspace, and only the preamble: the inherited environment may hold secrets.
-  const at = (path: string) => relative(context.workspace, path) || '.';
-  const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
-  const recorded = { command: at(command), env };
+  const durationMs = Date.now() - startedAt;
   const ended = (error: ContractError, record: Record<string, unknown>): StepRun => ({
     outcome: 'error',
     output: null,
@@ -177,10 +197,22 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     ...(mapped === undefined ? {} : { mapped }),
   };
   const record = { exit, ...recorded };
+  emit({
+    type: 'script:exit',
+    code: end.code,
+    ...(end.signal === null ? {} : { signal: end.signal }),
+    ...(mapped === undefined ? {} : { outcome: mapped }),
+    durationMs,
+    stdoutBytes: printedBytes(context.paths.stdout),
+  });
 
   // A script that didn't finish on its own, or whose exit code means error, produced nothing worth checking. Any other
   // end owes its output and files, `failed` as much as `passed`: a failing test run still owes its report.
-  if (end.timedOut) return ended({ reason: 'timeout', message: `timed out after ${timeoutSeconds}s` }, record);
+  if (end.timedOut) {
+    const message = `timed out after ${timeoutSeconds}s`;
+    emit({ type: 'error:timeout', message, timeoutSeconds });
+    return ended({ reason: 'timeout', message }, record);
+  }
   // An interrupted call didn't finish its work, even when the script handles SIGTERM and exits with a passing code.
   if (end.aborted) {
     const how = end.signal === null ? `exited with code ${end.code}` : `ended by signal ${end.signal}`;
@@ -193,8 +225,15 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
 
   const errors: ContractError[] = [];
   const output = readOutput(step, context.paths.stdout);
-  if (!output.ok) errors.push(output.error);
+  if (output.ok) emit({ type: 'output:validated' });
+  else {
+    emit({ type: 'output:invalid', message: output.error.message });
+    errors.push(output.error);
+  }
   const produced = recordFiles(step.produces, context.paths.dir, context.runDir);
+  for (const [name, { path, bytes, sha256 }] of Object.entries(produced.files)) {
+    emit({ type: 'file:produced', name, path, bytes, sha256 });
+  }
   errors.push(...produced.errors);
   return {
     outcome: errors.length > 0 ? 'error' : mapped,

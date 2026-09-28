@@ -9,13 +9,31 @@
 //
 // An exception inside sail, such as a journal that can't be trusted or a bug in a call, propagates and leaves STATUS
 // `running`: writing it may be what failed, and a `running` run with no process is how a dead one looks.
+//
+// Every event of the run goes through one bus to `events.ndjson` and any consumers passed in. The runtime emits
+// `run:start` for a fresh run, `journal:append` for each call it journals, `run:end` once STATUS says how the run
+// ended, and `error:crash` before an exception inside sail propagates. The call emits its own events, and the replay
+// the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
+// `run:end` ends the stream: a replay an abort abandoned may move on once its workflow stops waiting, since the CLI
+// only sets an exit code, but nothing it reports after that is emitted.
 import { dirname, join } from 'node:path';
+import { createBus } from '../events/bus';
+import { ndjsonConsumer } from '../events/consumers/ndjson';
+import type { Consumer, Emit, SailEvent } from '../events/types';
 import { callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
 import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
 import { type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
+
+/** Who else receives a run's events, beside `events.ndjson`. */
+interface EventOptions {
+  /** Consumers that receive every event after the events file. */
+  consumers?: readonly Consumer[];
+  /** Where a consumer's throw on an `error:consumer` event goes. Stderr by default. */
+  unreported?: (error: unknown, consumer: Consumer, event: SailEvent) => void;
+}
 
 /** How a run ended. */
 export interface RunEnd {
@@ -29,14 +47,14 @@ export interface RunEnd {
   result?: unknown;
 }
 
-export interface RunWorkflowOptions extends OpenRunOptions {
+export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
   /** Stops the running call when it aborts, and suspends the run. */
   signal?: AbortSignal;
   /** Called after each call is journaled. */
   onCall?(entry: JournalEntry): void;
 }
 
-export interface ResumeWorkflowOptions extends ReopenRunOptions {
+export interface ResumeWorkflowOptions extends ReopenRunOptions, EventOptions {
   /** Stops the running call when it aborts, and suspends the run again. */
   signal?: AbortSignal;
   /** Called after each call is journaled. */
@@ -44,7 +62,7 @@ export interface ResumeWorkflowOptions extends ReopenRunOptions {
 }
 
 /** What drives an opened run, whether it started or resumed. */
-interface DriveOptions {
+interface DriveOptions extends EventOptions {
   signal?: AbortSignal;
   onCall?(entry: JournalEntry): void;
 }
@@ -85,11 +103,27 @@ function unlessAborted(replaying: Promise<ReplayEnd>, signal: AbortSignal | unde
   });
 }
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/**
+ * A completed run's `result` for `run:end`, serialised once and parsed back, or a `message` saying why it's left out. A
+ * workflow may return anything: a result JSON can't hold, like a BigInt or a cyclic object, or one whose `toJSON` gives
+ * a different answer the second time, would make `run:end` itself unwritable.
+ */
+function resultOf(result: unknown): { result?: unknown } | { message: string } {
+  try {
+    const text = JSON.stringify(result);
+    return text === undefined ? {} : { result: JSON.parse(text) };
+  } catch (error) {
+    return { message: `the workflow's result can't be written as JSON: ${messageOf(error)}` };
+  }
+}
+
 /** Opens a run of the workflow and runs it to its end. A refusal to open passes through, and nothing is written. */
 export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd | { refused: string }> {
   const opened = await openRun(options);
   if ('refused' in opened) return opened;
-  return drive(opened, options);
+  return drive(opened, options, { start: true });
 }
 
 /**
@@ -97,49 +131,100 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
  * seen before a call starts, or once it has returned, suspends the run with that call unjournaled, and so does one seen
  * while a replay hangs. A replay that ends the run ends it that way, aborted or not: nothing is left to resume.
  */
-async function drive(opened: OpenedRun, options: DriveOptions): Promise<RunEnd> {
-  const { runId, dir, sailDir, loaded, input } = opened;
+async function drive(opened: OpenedRun, options: DriveOptions, { start }: { start: boolean }): Promise<RunEnd> {
+  const { runId, dir, sailDir, loaded, input, header } = opened;
   const { signal } = options;
-  const failed = (stopReason: StopReason, message: string): RunEnd => {
-    writeStatus(dir, 'failed', stopReason);
-    return { runId, dir, status: 'failed', stopReason, message };
-  };
-  const suspended = (message: string): RunEnd => {
-    writeStatus(dir, 'suspended', 'interrupted');
-    return { runId, dir, status: 'suspended', stopReason: 'interrupted', message };
+  const bus = createBus({
+    runId,
+    firstSeq: opened.firstSeq,
+    consumers: [ndjsonConsumer(dir), ...(options.consumers ?? [])],
+    ...(options.unreported === undefined ? {} : { unreported: options.unreported }),
+  });
+  let replays = 0;
+  /** The call being run or journaled, which a crash names. */
+  let running: string | undefined;
+  /** Set by `run:end`. */
+  let ended = false;
+  const replayEmit: Emit = (event) => {
+    if (!ended) bus.emit(event);
   };
 
-  while (true) {
-    const { entries } = readJournal(dir);
-    const replaying = replay({ workflow: loaded.workflow, stages: loaded.stages, entries, runDir: dir, input });
-    const end = await unlessAborted(replaying, signal);
-    if (end === undefined) return suspended('stopped during the replay');
-    if (end.kind === 'completed') {
-      writeStatus(dir, 'completed');
-      return { runId, dir, status: 'completed', result: end.result };
-    }
-    if (end.kind === 'failed') return failed(end.stopReason, end.message);
-
-    const { call } = end;
-    const problems = callProblems(call.definition, call.supplied);
-    if (problems.length > 0) return failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
-    if (signal?.aborted) return suspended(`stopped before ${call.key}`);
-    const { result, paths } = await runCall({
-      runDir: dir,
-      runId,
-      stageIndex: call.stageIndex,
-      call: call.call,
-      try: nextTry(dir, call.stageIndex, call.stage, call.call),
-      definition: call.definition,
-      stageFile: call.stageFile,
-      workspace: dirname(sailDir),
-      config: join(sailDir, 'project.yaml'),
-      supplied: call.supplied,
-      ...(signal === undefined ? {} : { signal }),
+  /** Records how the run ended in STATUS, then reports it. */
+  const finish = (end: RunEnd): RunEnd => {
+    writeStatus(dir, end.status, end.stopReason);
+    const { status, stopReason, message } = end;
+    bus.emit({
+      type: 'run:end',
+      status,
+      ...(stopReason === undefined ? {} : { stopReason }),
+      ...(message === undefined ? {} : { message }),
+      ...(status === 'completed' ? resultOf(end.result) : {}),
+      replays,
     });
-    if (signal?.aborted) return suspended(`stopped during ${call.key}`);
-    const journaled = appendJournal(dir, entryFrom(dir, result, paths));
-    options.onCall?.(journaled);
+    ended = true;
+    return end;
+  };
+  const failed = (stopReason: StopReason, message: string): RunEnd =>
+    finish({ runId, dir, status: 'failed', stopReason, message });
+  const suspended = (message: string): RunEnd =>
+    finish({ runId, dir, status: 'suspended', stopReason: 'interrupted', message });
+
+  try {
+    if (start) {
+      // From the header, never derived again: the roster in the stream is the one frozen in run.json.
+      bus.emit({
+        type: 'run:start',
+        source: header.source,
+        workflow: header.workflow,
+        roster: { intake: header.intake, stages: header.stages },
+        adapters: header.adapters,
+        ...(header.budget === undefined ? {} : { budget: header.budget }),
+      });
+    }
+    while (true) {
+      const { entries } = readJournal(dir);
+      replays++;
+      const replaying = replay({
+        workflow: loaded.workflow,
+        stages: loaded.stages,
+        entries,
+        runDir: dir,
+        input,
+        emit: replayEmit,
+      });
+      const end = await unlessAborted(replaying, signal);
+      if (end === undefined) return suspended('stopped during the replay');
+      if (end.kind === 'completed') return finish({ runId, dir, status: 'completed', result: end.result });
+      if (end.kind === 'failed') return failed(end.stopReason, end.message);
+
+      const { call } = end;
+      running = call.key;
+      const problems = callProblems(call.definition, call.supplied);
+      if (problems.length > 0) return failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
+      if (signal?.aborted) return suspended(`stopped before ${call.key}`);
+      const { result, paths } = await runCall({
+        runDir: dir,
+        runId,
+        stageIndex: call.stageIndex,
+        call: call.call,
+        try: nextTry(dir, call.stageIndex, call.stage, call.call),
+        definition: call.definition,
+        stageFile: call.stageFile,
+        workspace: dirname(sailDir),
+        config: join(sailDir, 'project.yaml'),
+        supplied: call.supplied,
+        ...(signal === undefined ? {} : { signal }),
+        emit: bus.emit,
+      });
+      if (signal?.aborted) return suspended(`stopped during ${call.key}`);
+      const journaled = appendJournal(dir, entryFrom(dir, result, paths));
+      bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
+      running = undefined;
+      options.onCall?.(journaled);
+    }
+  } catch (error) {
+    bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });
+    throw error;
   }
 }
 
@@ -147,5 +232,5 @@ async function drive(opened: OpenedRun, options: DriveOptions): Promise<RunEnd> 
 export async function resumeWorkflow(options: ResumeWorkflowOptions): Promise<RunEnd | { refused: string }> {
   const opened = await reopenRun(options);
   if ('refused' in opened) return opened;
-  return drive(opened, options);
+  return drive(opened, options, { start: false });
 }

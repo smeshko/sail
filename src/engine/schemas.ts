@@ -72,6 +72,8 @@ function toIssue(error: ErrorObject): Pick<SchemaIssue, 'path' | 'message'> {
   switch (error.keyword) {
     case 'additionalProperties':
       return { path: pointer(error.instancePath, error.params.additionalProperty), message: 'is not allowed' };
+    case 'unevaluatedProperties':
+      return { path: pointer(error.instancePath, error.params.unevaluatedProperty), message: 'is not allowed' };
     case 'required':
       return { path: pointer(error.instancePath, error.params.missingProperty), message: 'is required' };
     case 'false schema':
@@ -175,8 +177,9 @@ const asJournaled = (result: Doc): Doc => ({
 const RESULT_FILES = new Bun.Glob('[0-9][0-9]*-*/**/result.json');
 
 /**
- * Validates run.json, every journal and event line, summary.json and every call's result.json in `dir`, and checks
- * that every journal line and multi-step call points at a result that agrees with it.
+ * Validates run.json, every journal and event line, summary.json and every call's result.json in `dir`. Checks that
+ * the journal's and the events file's `seq` values run 1, 2, 3… without a gap, and that every journal line and
+ * multi-step call points at a result that agrees with it.
  */
 export function validateRunDir(dir: string): RunDirReport {
   const report: RunDirReport = { counts: {}, issues: [] };
@@ -191,9 +194,9 @@ export function validateRunDir(dir: string): RunDirReport {
 
   const journal: { line: number; data: Doc }[] = [];
   const journaled = new Set<unknown>(); // every parsed line's resultPath, valid or not
-  for (const [file, schema] of [
-    ['journal.ndjson', 'sail.journal.v1'],
-    ['events.ndjson', 'sail.event.v1'],
+  for (const [file, schema, place] of [
+    ['journal.ndjson', 'sail.journal.v1', 'the journal'],
+    ['events.ndjson', 'sail.event.v1', 'the events file'],
   ] as const) {
     const lines = read(file)?.split('\n') ?? [];
     let position = 0;
@@ -201,17 +204,17 @@ export function validateRunDir(dir: string): RunDirReport {
       if (text.trim() === '') return;
       position++;
       const checked = checkText(report, schema, file, text, i + 1);
-      if (schema !== 'sail.journal.v1' || checked === undefined) return;
-      journaled.add(checked.data.resultPath);
+      if (checked === undefined) return;
+      if (schema === 'sail.journal.v1') journaled.add(checked.data.resultPath);
       if (!checked.valid) return;
-      journal.push({ line: i + 1, data: checked.data });
+      if (schema === 'sail.journal.v1') journal.push({ line: i + 1, data: checked.data });
       if (checked.data.seq !== position) {
         report.issues.push({
           file,
           line: i + 1,
           schema,
           path: '/seq',
-          message: `must be ${position}, its place in the journal`,
+          message: `must be ${position}, its place in ${place}`,
         });
       }
     });

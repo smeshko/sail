@@ -61,7 +61,6 @@ test('a run opened from a subdirectory gets .sail-runs/LOCAL-<ulid>/ with its he
 
     expect(run.runId).toMatch(new RegExp(`^LOCAL-${ulid(NOW.getTime()).slice(0, 10)}[0-9A-HJKMNP-TV-Z]{16}$`));
     expect(run.dir).toBe(join(repo.dir, '.sail-runs', run.runId));
-    expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'journal.ndjson', 'run.json']);
     expect(readStatus(run.dir)).toEqual({ status: 'running' });
     expect(readJournal(run.dir)).toEqual({ entries: [], torn: false });
     expect(readFileSync(join(run.dir, 'journal.ndjson'), 'utf8')).toBe('');
@@ -336,5 +335,39 @@ test("reopenRun refuses an input the intake's schema rejects, and STATUS is left
     expect(reopened).toEqual({ refused: expect.stringMatching(/^the input doesn't match intake 'ticket':\n/) });
     const status = readFileSync(join(repo.dir, '.sail-runs', run.runId, 'STATUS'), 'utf8');
     expect(status).toBe('suspended budget_exceeded\n');
+  });
+});
+
+test('openRun creates an empty events.ndjson beside the journal, and its events start at seq 1', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const run = await opened(repo.dir);
+    expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'events.ndjson', 'journal.ndjson', 'run.json']);
+    expect(readFileSync(join(run.dir, 'events.ndjson'), 'utf8')).toBe('');
+    expect(run.firstSeq).toBe(1);
+  });
+});
+
+const eventLine = (seq: number) =>
+  `${JSON.stringify({ seq, ts: NOW.toISOString(), type: 'loop:iteration', runId: 'x', loop: 'fix', iteration: seq, max: 3 })}\n`;
+
+test.each<[string, (runDir: string) => void, number]>([
+  [
+    'continues from the last seq in its events file',
+    (runDir) => writeFileSync(join(runDir, 'events.ndjson'), [1, 2, 3].map(eventLine).join('')),
+    4,
+  ],
+  [
+    'starts at 1 for a run opened before it had events',
+    (runDir) => rmSync(join(runDir, 'events.ndjson'), { force: true }),
+    1,
+  ],
+])('reopenRun %s', async (_, prepare, firstSeq) => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    prepare(join(repo.dir, '.sail-runs', run.runId));
+    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    expect(reopened.firstSeq).toBe(firstSeq);
   });
 });

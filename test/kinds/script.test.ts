@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { callPaths, createCallDir } from '../../src/engine/call-dir';
+import type { CallEvent } from '../../src/events/types';
 import { KINDS, type StepContext } from '../../src/kinds/index';
 import { DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
 import { type ExitCodes, type ScriptStep, script, z } from '../../src/sdk/index';
@@ -281,6 +282,18 @@ test.skipIf(process.getuid?.() === 0)('a log the script leaves unreadable is inv
   });
 });
 
+test('a log the script leaves a symlink loop is invalid_output, and script:exit counts no bytes', async () => {
+  const s = setup();
+  s.run(`${JUNIT}\necho '${PASSING}'\nrm "$STAGE_OUT/stdout.log"\nln -s stdout.log "$STAGE_OUT/stdout.log"`);
+  const { context, events } = collecting(s);
+  expect(await scriptKind.run(tests(), context)).toMatchObject({
+    outcome: 'error',
+    errors: [{ reason: 'invalid_output', message: "stdout.log can't be read (ELOOP), so the output can't be either" }],
+  });
+  expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit', 'output:invalid', 'file:produced']);
+  expect(events[1]).toMatchObject({ code: 0, stdoutBytes: 0 });
+});
+
 test('a script that is missing is not_started, with no exit', async () => {
   const s = setup();
   const run = await scriptKind.run(tests({ run: './missing.sh' }), s.context);
@@ -375,4 +388,42 @@ test('lastLine finds a 200 KiB last line whole, and skips trailing blank lines',
   expect(lastLine(path)).toBeUndefined();
   writeFileSync(path, '\n \n\t\n');
   expect(lastLine(path)).toBeUndefined();
+});
+
+/** The setup's context with an emitter that keeps every event the step reports. */
+function collecting(s: Setup): { context: StepContext; events: CallEvent[] } {
+  const events: CallEvent[] = [];
+  return { context: { ...s.context, emit: (event) => events.push(event) }, events };
+}
+
+test('a script that is missing reports script:exec, and nothing more', async () => {
+  const s = setup();
+  const { context, events } = collecting(s);
+  await scriptKind.run(tests({ run: './missing.sh' }), context);
+  expect(events).toEqual([
+    {
+      type: 'script:exec',
+      command: '.sail/stages/tests/missing.sh',
+      cwd: '.',
+      envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG'],
+    },
+  ]);
+});
+
+test('an unmapped exit code reports script:exit with outcome error, and nothing about the output', async () => {
+  const s = setup();
+  s.run('exit 2');
+  const { context, events } = collecting(s);
+  await scriptKind.run(tests(), context);
+  expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit']);
+  expect(events[1]).toMatchObject({ code: 2, outcome: 'error', durationMs: expect.any(Number), stdoutBytes: 0 });
+});
+
+test('a declared file that is missing reports no file:produced, while the output is still validated', async () => {
+  const s = setup();
+  s.run(`echo '${PASSING}'`);
+  const { context, events } = collecting(s);
+  await scriptKind.run(tests(), context);
+  expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit', 'output:validated']);
+  expect(events[1]).toMatchObject({ code: 0, outcome: 'passed', stdoutBytes: PASSING.length + 1 });
 });

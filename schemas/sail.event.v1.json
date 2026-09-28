@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.event.v1.json",
-  "title": "sail event envelope: one line of a run's event stream",
-  "description": "One NDJSON line in events.ndjson. The envelope ({ seq, ts, type, runId, key? }) is typed and the type vocabulary is exhaustive; the per-type payload stays open, because the engine types each event family itself. This is the one schema in the set that allows additional properties.",
-  "$comment": "additionalProperties is deliberately true: every event carries its payload beside the envelope, and payload shapes are typed per event family in the engine, not here.",
+  "title": "sail event: one line of a run's event stream",
+  "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine emits have closed payloads, and a call-level event requires the key of its call. The families later epics emit keep open payloads until they are built.",
+  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash and error:consumer. Open, and closed as their epics emit them (ADR-0012): run:adopted, run:resumed, all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:*, ticket:*, codehost:*, workspace:* and error:harness. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -59,12 +59,596 @@
         "workspace:released",
         "error:harness",
         "error:timeout",
-        "error:crash"
+        "error:crash",
+        "error:consumer"
       ]
     },
     "runId": { "type": "string" },
     "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+(/[a-z0-9-]+)?$" }
   },
   "required": ["seq", "ts", "type", "runId"],
-  "additionalProperties": true
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "run:start" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/runStart" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "run:end" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/runEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "intake:start" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/intakeStart" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "intake:end" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/intakeEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "stage:start" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/stageStart" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "stage:end" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/stageEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "step:start" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/stepStart" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "step:end" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/stepEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "loop:iteration" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/loopIteration" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "loop:exit" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/loopExit" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "workflow:route" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/workflowRoute" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "journal:append" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/journalAppend" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "script:exec" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/scriptExec" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "script:exit" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/scriptExit" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "input:materialised" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/inputMaterialised" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "output:validated" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/outputValidated" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "output:invalid" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/outputInvalid" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "file:produced" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/fileProduced" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "file:validated" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/fileValidated" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "error:timeout" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/errorTimeout" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "error:crash" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/errorCrash" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "error:consumer" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/errorConsumer" }
+    }
+  ],
+  "$defs": {
+    "envelope": {
+      "description": "the envelope's names, which the root validates: a closed payload $refs this so they count as evaluated",
+      "type": "object",
+      "properties": { "seq": true, "ts": true, "type": true, "runId": true }
+    },
+    "callEnvelope": {
+      "description": "the envelope of an event that belongs to a call, which requires the call's key",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": { "key": true },
+      "required": ["key"]
+    },
+    "origin": { "type": "string", "pattern": "^(builtin|repo:.+)$" },
+    "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
+    "resultPath": { "description": "relative to the run directory", "type": "string" },
+    "consumed": {
+      "description": "binding name → where it came from (null for an optional binding left unbound)",
+      "type": "object",
+      "patternProperties": { ".": { "type": ["string", "null"] } },
+      "additionalProperties": false
+    },
+    "errors": {
+      "description": "why the outcome is error: every contract problem found, each with its reason",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "enum": [
+              "invalid_output",
+              "missing_file",
+              "timeout",
+              "exit_code",
+              "not_started",
+              "budget_exceeded",
+              "harness"
+            ]
+          },
+          "message": { "type": "string", "minLength": 1 }
+        },
+        "required": ["reason", "message"],
+        "additionalProperties": false
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "read": { "type": "array", "items": { "type": "string" } },
+        "write": { "type": "array", "items": { "type": "string" } },
+        "commands": { "type": "array", "items": { "type": "string" } },
+        "network": {
+          "oneOf": [{ "const": "none" }, { "type": "array", "items": { "type": "string" } }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "budget": {
+      "description": "a step's budget",
+      "type": "object",
+      "properties": {
+        "maxTurns": { "type": "integer", "minimum": 1 },
+        "maxUsd": { "type": "number", "minimum": 0 },
+        "maxMinutes": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "runBudget": {
+      "type": "object",
+      "properties": {
+        "maxUsd": { "type": "number", "minimum": 0 },
+        "maxMinutes": { "type": "number", "minimum": 0 }
+      },
+      "minProperties": 1,
+      "additionalProperties": false
+    },
+    "adapterEntry": {
+      "type": "object",
+      "properties": {
+        "use": { "type": "string", "minLength": 1 },
+        "origin": { "$ref": "#/$defs/origin" },
+        "versions": {
+          "type": "object",
+          "patternProperties": { ".": { "type": "string" } },
+          "additionalProperties": false
+        }
+      },
+      "required": ["use", "origin"],
+      "additionalProperties": false
+    },
+    "exitCodes": {
+      "type": "object",
+      "patternProperties": { "^(passed|failed|error)$": { "type": "array", "items": { "type": "integer" } } },
+      "additionalProperties": false
+    },
+    "rosterEntry": {
+      "description": "a stage as sail.run.v1 records it in the roster",
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["agent", "script"] },
+        "origin": { "$ref": "#/$defs/origin" },
+        "model": { "type": "string" },
+        "output": { "type": "string" },
+        "produces": { "type": "array", "items": { "type": "string" } },
+        "network": { "type": "array", "items": { "type": "string" } },
+        "permissions": { "$ref": "#/$defs/permissions" },
+        "exitCodes": { "$ref": "#/$defs/exitCodes" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "steps": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "properties": {
+              "step": { "type": "string" },
+              "kind": { "enum": ["agent", "script"] },
+              "model": { "type": "string" },
+              "output": { "type": "string" },
+              "produces": { "type": "array", "items": { "type": "string" } },
+              "permissions": { "$ref": "#/$defs/permissions" },
+              "network": { "type": "array", "items": { "type": "string" } },
+              "budget": { "$ref": "#/$defs/budget" }
+            },
+            "required": ["step", "kind"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["origin"]
+    },
+    "runStart": {
+      "description": "the run header's values, emitted once, when a fresh run starts",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "ticket" },
+            "ticketKey": { "type": "string" },
+            "via": { "enum": ["cli", "watch"] },
+            "forced": { "type": "boolean" }
+          },
+          "required": ["kind", "ticketKey", "via", "forced"],
+          "additionalProperties": false
+        },
+        "workflow": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "integer" },
+            "origin": { "$ref": "#/$defs/origin" },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{16,64}$" }
+          },
+          "required": ["name", "version"],
+          "additionalProperties": false
+        },
+        "roster": {
+          "type": "object",
+          "properties": {
+            "intake": {
+              "type": "object",
+              "$ref": "#/$defs/rosterEntry",
+              "properties": { "name": { "type": "string", "minLength": 1 } },
+              "required": ["name"],
+              "unevaluatedProperties": false
+            },
+            "stages": {
+              "type": "object",
+              "patternProperties": {
+                ".": { "type": "object", "$ref": "#/$defs/rosterEntry", "unevaluatedProperties": false }
+              },
+              "additionalProperties": false
+            }
+          },
+          "required": ["intake", "stages"],
+          "additionalProperties": false
+        },
+        "adapters": {
+          "type": "object",
+          "properties": {
+            "ticketSource": { "$ref": "#/$defs/adapterEntry" },
+            "codeHost": { "$ref": "#/$defs/adapterEntry" },
+            "harness": { "$ref": "#/$defs/adapterEntry" },
+            "workspace": { "$ref": "#/$defs/adapterEntry" }
+          },
+          "required": ["ticketSource", "codeHost", "harness", "workspace"],
+          "additionalProperties": false
+        },
+        "budget": { "$ref": "#/$defs/runBudget" }
+      },
+      "required": ["source", "workflow", "roster", "adapters"],
+      "unevaluatedProperties": false
+    },
+    "runEnd": {
+      "description": "how this process left the run; a stop reason exactly when it failed or was suspended",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "status": { "enum": ["completed", "failed", "suspended"] },
+        "stopReason": {
+          "enum": [
+            "workflow_failed",
+            "stage_error",
+            "budget_exceeded",
+            "determinism_violation",
+            "until",
+            "unwatched",
+            "stopped",
+            "interrupted"
+          ]
+        },
+        "message": { "type": "string" },
+        "result": true,
+        "replays": { "description": "the replays this process ran", "type": "integer", "minimum": 0 }
+      },
+      "required": ["status", "replays"],
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "enum": ["failed", "suspended"] } }, "required": ["status"] },
+          "then": { "properties": { "stopReason": true }, "required": ["stopReason"] },
+          "else": { "properties": { "stopReason": false } }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "intakeStart": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "intake": { "type": "string" },
+        "kind": { "enum": ["agent", "script"] },
+        "origin": { "$ref": "#/$defs/origin" },
+        "consumed": { "$ref": "#/$defs/consumed" }
+      },
+      "required": ["intake", "kind", "origin", "consumed"],
+      "unevaluatedProperties": false
+    },
+    "intakeEnd": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "resultPath": { "$ref": "#/$defs/resultPath" }
+      },
+      "required": ["outcome", "resultPath"],
+      "unevaluatedProperties": false
+    },
+    "stageStart": {
+      "description": "a try of a call starting: model, permissions and budget for an agent, steps for a multi-step stage",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "stage": { "type": "string" },
+        "call": { "type": "integer", "minimum": 1 },
+        "try": { "type": "integer", "minimum": 1 },
+        "kind": { "enum": ["agent", "script", "stage"] },
+        "consumed": { "$ref": "#/$defs/consumed" },
+        "model": { "type": "string" },
+        "permissions": { "$ref": "#/$defs/permissions" },
+        "budget": { "$ref": "#/$defs/budget" },
+        "steps": { "type": "array", "minItems": 2, "items": { "type": "string" } }
+      },
+      "required": ["stage", "call", "try", "kind", "consumed"],
+      "unevaluatedProperties": false
+    },
+    "stageEnd": {
+      "description": "a try of a call ending, with the result it wrote; errors exactly when the outcome is error",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "stage": { "type": "string" },
+        "call": { "type": "integer", "minimum": 1 },
+        "try": { "type": "integer", "minimum": 1 },
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "resultPath": { "$ref": "#/$defs/resultPath" },
+        "errors": { "$ref": "#/$defs/errors" }
+      },
+      "required": ["stage", "call", "try", "outcome", "durationMs", "resultPath"],
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+          "then": { "properties": { "errors": true }, "required": ["errors"] },
+          "else": { "properties": { "errors": false } }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "stepStart": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "stage": { "type": "string" },
+        "step": { "type": "string" },
+        "index": { "type": "integer", "minimum": 1 },
+        "of": { "type": "integer", "minimum": 2 },
+        "kind": { "enum": ["agent", "script"] },
+        "model": { "type": "string" },
+        "command": { "type": "string" }
+      },
+      "required": ["stage", "step", "index", "of", "kind"],
+      "unevaluatedProperties": false
+    },
+    "stepEnd": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "step": { "type": "string" },
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "resultPath": { "$ref": "#/$defs/resultPath" }
+      },
+      "required": ["step", "outcome", "resultPath"],
+      "unevaluatedProperties": false
+    },
+    "loopIteration": {
+      "description": "a pass of a loop starting; feedback names where the previous pass's feedback came from",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "loop": { "type": "string" },
+        "iteration": { "type": "integer", "minimum": 1 },
+        "max": { "type": "integer", "minimum": 1 },
+        "feedback": {
+          "type": "object",
+          "properties": {
+            "from": { "description": "a call's output pointer, or workflow", "type": "string" }
+          },
+          "required": ["from"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["loop", "iteration", "max"],
+      "unevaluatedProperties": false
+    },
+    "loopExit": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "loop": { "type": "string" },
+        "iterations": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 1 },
+        "reason": { "enum": ["break", "exceeded"] }
+      },
+      "required": ["loop", "iterations", "max", "reason"],
+      "unevaluatedProperties": false
+    },
+    "workflowRoute": {
+      "description": "the move a workflow made after a call: the call's key and outcome, and the next call's key, end or fail",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "at": { "type": "string" },
+        "value": { "$ref": "#/$defs/outcome" },
+        "took": { "type": "string" }
+      },
+      "required": ["at", "value", "took"],
+      "unevaluatedProperties": false
+    },
+    "journalAppend": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "line": { "type": "integer", "minimum": 1 },
+        "outcome": { "$ref": "#/$defs/outcome" }
+      },
+      "required": ["line", "outcome"],
+      "unevaluatedProperties": false
+    },
+    "scriptExec": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "command": { "description": "relative to the workspace", "type": "string" },
+        "cwd": { "type": "string" },
+        "envKeys": { "description": "the preamble's names, in order", "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["command", "cwd", "envKeys"],
+      "unevaluatedProperties": false
+    },
+    "scriptExit": {
+      "description": "how a script that started ended. A null code names the signal that ended it.",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "code": { "type": ["integer", "null"] },
+        "signal": { "type": "string", "pattern": "^SIG[A-Z0-9]+$" },
+        "outcome": {
+          "description": "what the exit code maps to, when it has a mapping",
+          "enum": ["passed", "failed", "error"]
+        },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "stdoutBytes": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["code", "durationMs", "stdoutBytes"],
+      "allOf": [
+        {
+          "if": { "properties": { "code": { "const": null } }, "required": ["code"] },
+          "then": { "properties": { "signal": true }, "required": ["signal"] }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "inputMaterialised": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "binding": { "type": "string" },
+        "from": { "type": "string" }
+      },
+      "required": ["binding", "from"],
+      "unevaluatedProperties": false
+    },
+    "outputValidated": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "unevaluatedProperties": false
+    },
+    "outputInvalid": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "message": { "type": "string", "minLength": 1 }
+      },
+      "required": ["message"],
+      "unevaluatedProperties": false
+    },
+    "fileProduced": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "name": { "type": "string" },
+        "path": { "$ref": "#/$defs/resultPath" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{16,64}$" }
+      },
+      "required": ["name", "path", "bytes", "sha256"],
+      "unevaluatedProperties": false
+    },
+    "fileValidated": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "name": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "checks": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name", "ok", "checks"],
+      "unevaluatedProperties": false
+    },
+    "errorTimeout": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "message": { "type": "string", "minLength": 1 },
+        "timeoutSeconds": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "required": ["message", "timeoutSeconds"],
+      "unevaluatedProperties": false
+    },
+    "errorCrash": {
+      "description": "an exception inside sail, and the call it happened in when there was one",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "message": { "type": "string" }
+      },
+      "required": ["message"],
+      "unevaluatedProperties": false
+    },
+    "errorConsumer": {
+      "description": "a consumer that threw, and the event it threw on",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "consumer": { "type": "string" },
+        "failed": {
+          "type": "object",
+          "properties": {
+            "seq": { "type": "integer", "minimum": 1 },
+            "type": { "$ref": "#/properties/type" }
+          },
+          "required": ["seq", "type"],
+          "additionalProperties": false
+        },
+        "message": { "type": "string" }
+      },
+      "required": ["consumer", "failed", "message"],
+      "unevaluatedProperties": false
+    }
+  }
 }

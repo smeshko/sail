@@ -1,7 +1,8 @@
 // Opens a run. `openRun()` opens a fresh one: every check that can refuse comes first, and only then is
-// `.sail-runs/<run id>/` created, holding the run header, an empty journal and STATUS `running`. `reopenRun()` opens an
-// existing one to resume it: every check that can refuse comes first, and only then is its STATUS set back to
-// `running`. So a refusal leaves nothing behind. Both claim the `.sail/` for the process.
+// `.sail-runs/<run id>/` created, holding the run header, an empty journal, an empty events file and STATUS `running`.
+// `reopenRun()` opens an existing one to resume it: every check that can refuse comes first, and only then is its
+// STATUS set back to `running`. So a refusal leaves nothing behind, apart from the torn tail of an events file, which
+// is cut only once no refusal remains. Both claim the `.sail/` for the process.
 //
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail run`, `sail resume` and the watcher's dispatch each start
@@ -9,6 +10,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { z } from 'zod';
+import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import { isPlainName } from './call-dir';
 import { type ProjectConfig, readConfig } from './config';
 import { createJournal } from './journal';
@@ -40,6 +42,8 @@ export interface OpenedRun {
   loaded: LoadedWorkflow;
   /** `run.input`: the input, parsed with the intake's schema, or undefined when none was given. */
   input: unknown;
+  /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
+  firstSeq: number;
 }
 
 export interface OpenRunOptions {
@@ -116,8 +120,9 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const dir = createRunDir(found.dir, runId);
   writeRunHeader(dir, header);
   createJournal(dir);
+  createEventsFile(dir);
   writeStatus(dir, 'running');
-  return { runId, dir, header, sailDir: found.dir, loaded, input };
+  return { runId, dir, header, sailDir: found.dir, loaded, input, firstSeq: 1 };
 }
 
 export interface ReopenRunOptions {
@@ -163,7 +168,10 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in loaded) return loaded;
   const parsed = parseInput(loaded, options.input);
   if ('refused' in parsed) return parsed;
+  // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
+  const firstSeq = nextSeq(run.dir);
+  if (typeof firstSeq !== 'number') return firstSeq;
 
   writeStatus(run.dir, 'running');
-  return { runId, dir: run.dir, header: run.header, sailDir: found.dir, loaded, input: parsed.input };
+  return { runId, dir: run.dir, header: run.header, sailDir: found.dir, loaded, input: parsed.input, firstSeq };
 }

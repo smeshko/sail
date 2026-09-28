@@ -11,8 +11,15 @@
 //
 // Replay goes by position: request n must be journal entry n. That is how a request finds its result, and it catches a
 // workflow whose calls changed between replays, which a lookup by key would silently accept.
+//
+// Every replay passes the same moves again, so the loop and route events are emitted only past the journal's end, once
+// every journaled call has been handed back. A move there is new: the workflow asking for a call the journal doesn't
+// hold, returning, or calling `run.fail()`. A route records the last journaled call's outcome and that move. A loop's
+// `break` is only known at the next move, since `for…of` also closes the loop when an exception leaves its body, so
+// its `loop:exit` is held until then, and dropped if the replay ends another way.
 import { join } from 'node:path';
 import { z } from 'zod';
+import type { Emit, NewEvent } from '../events/types';
 import type { ProducedFile } from '../sdk/bindings';
 import type { StageDefinition } from '../sdk/steps';
 import type { CallOptions, Iteration, Run, Workflow } from '../sdk/workflow';
@@ -52,6 +59,8 @@ export interface ReplayOptions {
   runDir: string;
   /** `run.input`. */
   input: unknown;
+  /** Where the loop and route events of moves past the journal's end go. */
+  emit?: Emit;
 }
 
 /**
@@ -103,6 +112,7 @@ function deepFreeze<T>(value: T): T {
  */
 export function replay(options: ReplayOptions): Promise<ReplayEnd> {
   const { workflow, stages, entries, runDir } = options;
+  const emit = options.emit ?? (() => {});
   const input = deepFreeze(options.input);
   if (!process.listeners('unhandledRejection').includes(dropStrayHalt)) process.on('unhandledRejection', dropStrayHalt);
   return new Promise<ReplayEnd>((resolve, reject) => {
@@ -116,6 +126,22 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
     const files = new WeakMap<object, string>();
     /** Each output handed to the workflow, to its JSON pointer. */
     const pointers = new WeakMap<object, string>();
+    /** The `break` of each loop left since the last move, innermost first, reported at the workflow's next move. */
+    const pendingExits: NewEvent[] = [];
+
+    /** Every journaled call has been handed back, so the workflow's moves from here on are new. */
+    const live = () => position === entries.length;
+
+    function flush(): void {
+      for (const exit of pendingExits.splice(0)) emit(exit);
+    }
+
+    /** Reports a move past the journal's end: the loops it left, then the route from the last journaled call. */
+    function move(took: string): void {
+      flush();
+      const last = entries[position - 1];
+      if (last !== undefined) emit({ type: 'workflow:route', at: last.key, value: last.outcome, took });
+    }
 
     function record(end: Recorded): void {
       if (ended) return;
@@ -221,6 +247,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         return never();
       }
       const stageFile = join(reached.dir, 'stage.ts');
+      move(key);
       record({ kind: 'call', call: { key, stage, call, stageIndex, definition, stageFile, ...resolved } });
       return never();
     }
@@ -275,14 +302,33 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
 
       const next = guarded((): IteratorResult<Iteration<unknown>> => {
         if (ended) throw new Halt();
-        if (passes === max) halt(`loop "${name}" exceeded ${max}`);
+        if (passes === max) {
+          if (live()) {
+            flush();
+            emit({ type: 'loop:exit', loop: name, iterations: passes, max, reason: 'exceeded' });
+          }
+          halt(`loop "${name}" exceeded ${max}`);
+        }
         passes++;
         const previous = pending?.value;
+        if (live()) {
+          flush();
+          const feedback = previous === undefined ? {} : { feedback: { from: from(previous) } };
+          emit({ type: 'loop:iteration', loop: name, iteration: passes, max, ...feedback });
+        }
         pending = undefined;
         return { done: false, value: { previous, fail } };
       });
 
-      return { [Symbol.iterator]: () => ({ next }) };
+      // `for…of` calls this on `break`, on `return` and when an exception leaves the body. Only the workflow's next
+      // move shows it left on purpose, so the exit waits for it.
+      const close = guarded((): IteratorResult<Iteration<unknown>> => {
+        if (!ended && live())
+          pendingExits.push({ type: 'loop:exit', loop: name, iterations: passes, max, reason: 'break' });
+        return { done: true, value: undefined };
+      });
+
+      return { [Symbol.iterator]: () => ({ next, return: close }) };
     }
 
     const run = {
@@ -299,6 +345,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       },
       loop: guarded(loop),
       fail(reason: string): never {
+        if (!ended && live()) move('fail');
         halt(String(reason));
       },
     } as unknown as Run;
@@ -307,7 +354,10 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
     Promise.resolve(run)
       .then((ready) => workflow.fn(ready))
       .then(
-        (result) => record({ kind: 'completed', result }),
+        (result) => {
+          if (!ended && live()) move('end');
+          record({ kind: 'completed', result });
+        },
         (error: unknown) => {
           // A Halt's end is already recorded.
           if (!(error instanceof Halt)) failRun('workflow_failed', `workflow threw: ${messageOf(error)}`);
