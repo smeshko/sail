@@ -48,6 +48,7 @@ export const STOP_REASONS = [
   'until',
   'unwatched',
   'stopped',
+  'interrupted',
 ] as const;
 export type StopReason = (typeof STOP_REASONS)[number];
 

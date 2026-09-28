@@ -128,14 +128,11 @@ test("the golden run's STATUS reads completed", () => {
   expect(readStatus(GOLDEN)).toEqual({ status: 'completed' });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('interrupted is the last stop reason, so STATUS can say a suspended run was interrupted', () => {
-    expect(STOP_REASONS.join(' ')).toBe(
-      'workflow_failed stage_error budget_exceeded determinism_violation until unwatched stopped interrupted',
-    );
-  });
+test('interrupted is the last stop reason, so STATUS can say a suspended run was interrupted', () => {
+  expect(STOP_REASONS.join(' ')).toBe(
+    'workflow_failed stage_error budget_exceeded determinism_violation until unwatched stopped interrupted',
+  );
+});
 
 test("the stop reasons are sail.summary.v1's, in its order", () => {
   const schema = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', 'schemas', 'sail.summary.v1.json'), 'utf8'));

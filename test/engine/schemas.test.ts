@@ -191,14 +191,11 @@ test('summary: a stop reason is required when failed or suspended, and forbidden
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('summary: a suspended run may be stopped by an interrupt', () => {
-    expect(validateDocument('sail.summary.v1', { ...summary, status: 'suspended', stopReason: 'interrupted' })).toEqual(
-      [],
-    );
-  });
+test('summary: a suspended run may be stopped by an interrupt', () => {
+  expect(validateDocument('sail.summary.v1', { ...summary, status: 'suspended', stopReason: 'interrupted' })).toEqual(
+    [],
+  );
+});
 
 test('result: dispatch reports only the branch the document claims to be', () => {
   expect(validateDocument('sail.result.v1', { ...scriptResult, outcome: 'done' })).toEqual([
