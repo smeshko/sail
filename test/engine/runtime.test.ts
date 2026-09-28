@@ -734,6 +734,33 @@ test('a replay abandoned by an abort reports nothing after run:end, even once it
   });
 });
 
+test("a result JSON can't hold is left out of run:end, which says why, and the stream keeps its end", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
+    edit(
+      sail,
+      WORKFLOW,
+      "  return run.stage(publish, { spec: s.files['spec.md'] });",
+      "  await run.stage(publish, { spec: s.files['spec.md'] });\n  return { count: 1n };",
+    );
+    const end = await ran(repo.dir);
+    expect(end).toMatchObject({ status: 'completed', result: { count: 1n } });
+    const list = events(end.dir);
+    expect(list.at(-1)).toEqual({
+      seq: list.length,
+      ts: expect.any(String),
+      type: 'run:end',
+      runId: end.runId,
+      status: 'completed',
+      message: expect.stringMatching(/^the workflow's result can't be written as JSON: ./),
+      replays: expect.any(Number),
+    });
+    expect(seqs(list)).toEqual(gapless(list));
+    expect(outline(list)).not.toContain('error:consumer');
+    expect(validateRunDir(end.dir).issues).toEqual([]);
+  });
+});
+
 test('consumers passed in receive the events the file holds, in the same order', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
