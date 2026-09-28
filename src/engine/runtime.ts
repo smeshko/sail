@@ -106,13 +106,14 @@ function unlessAborted(replaying: Promise<ReplayEnd>, signal: AbortSignal | unde
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
- * A completed run's `result` for `run:end`, or a `message` saying why it's left out. A workflow may return anything,
- * and a result JSON can't hold, like a BigInt or a cyclic object, would make `run:end` itself unwritable.
+ * A completed run's `result` for `run:end`, serialised once and parsed back, or a `message` saying why it's left out. A
+ * workflow may return anything: a result JSON can't hold, like a BigInt or a cyclic object, or one whose `toJSON` gives
+ * a different answer the second time, would make `run:end` itself unwritable.
  */
-function resultOf(result: unknown): { result: unknown } | { message: string } {
+function resultOf(result: unknown): { result?: unknown } | { message: string } {
   try {
-    JSON.stringify(result);
-    return { result };
+    const text = JSON.stringify(result);
+    return text === undefined ? {} : { result: JSON.parse(text) };
   } catch (error) {
     return { message: `the workflow's result can't be written as JSON: ${messageOf(error)}` };
   }
