@@ -384,43 +384,34 @@ function collecting(s: Setup): { context: StepContext; events: CallEvent[] } {
   return { context: { ...s.context, emit: (event) => events.push(event) }, events };
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a script that is missing reports script:exec, and nothing more', async () => {
-    const s = setup();
-    const { context, events } = collecting(s);
-    await scriptKind.run(tests({ run: './missing.sh' }), context);
-    expect(events).toEqual([
-      {
-        type: 'script:exec',
-        command: '.sail/stages/tests/missing.sh',
-        cwd: '.',
-        envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG'],
-      },
-    ]);
-  });
+test('a script that is missing reports script:exec, and nothing more', async () => {
+  const s = setup();
+  const { context, events } = collecting(s);
+  await scriptKind.run(tests({ run: './missing.sh' }), context);
+  expect(events).toEqual([
+    {
+      type: 'script:exec',
+      command: '.sail/stages/tests/missing.sh',
+      cwd: '.',
+      envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG'],
+    },
+  ]);
+});
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an unmapped exit code reports script:exit with outcome error, and nothing about the output', async () => {
-    const s = setup();
-    s.run('exit 2');
-    const { context, events } = collecting(s);
-    await scriptKind.run(tests(), context);
-    expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit']);
-    expect(events[1]).toMatchObject({ code: 2, outcome: 'error', durationMs: expect.any(Number), stdoutBytes: 0 });
-  });
+test('an unmapped exit code reports script:exit with outcome error, and nothing about the output', async () => {
+  const s = setup();
+  s.run('exit 2');
+  const { context, events } = collecting(s);
+  await scriptKind.run(tests(), context);
+  expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit']);
+  expect(events[1]).toMatchObject({ code: 2, outcome: 'error', durationMs: expect.any(Number), stdoutBytes: 0 });
+});
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a declared file that is missing reports no file:produced, while the output is still validated', async () => {
-    const s = setup();
-    s.run(`echo '${PASSING}'`);
-    const { context, events } = collecting(s);
-    await scriptKind.run(tests(), context);
-    expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit', 'output:validated']);
-    expect(events[1]).toMatchObject({ code: 0, outcome: 'passed', stdoutBytes: PASSING.length + 1 });
-  });
+test('a declared file that is missing reports no file:produced, while the output is still validated', async () => {
+  const s = setup();
+  s.run(`echo '${PASSING}'`);
+  const { context, events } = collecting(s);
+  await scriptKind.run(tests(), context);
+  expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit', 'output:validated']);
+  expect(events[1]).toMatchObject({ code: 0, outcome: 'passed', stdoutBytes: PASSING.length + 1 });
+});

@@ -249,144 +249,137 @@ const plainStep = (options: { timeoutSeconds?: number } = {}) =>
 const PASSES = `echo "<testsuites/>" > "$STAGE_OUT/junit.xml"\nprintf '${REPORT}\\n' true 0`;
 const ENV_KEYS = ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG'];
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a passing call reports its events in order, each keyed by its call', async () => {
-    await withTempRepo(async (repo) => {
-      const s = tests(repo);
-      s.run(PASSES);
-      const { events, emit } = collect();
-      const { result, paths } = await runCall({ ...s.request(plainStep()), emit });
-      console.log(types(events).join(' '));
+test('a passing call reports its events in order, each keyed by its call', async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(PASSES);
+    const { events, emit } = collect();
+    const { result, paths } = await runCall({ ...s.request(plainStep()), emit });
+    console.log(types(events).join(' '));
 
-      expect(types(events)).toEqual([
-        'stage:start',
-        'script:exec',
-        'script:exit',
-        'output:validated',
-        'file:produced',
-        'stage:end',
-      ]);
-      expect(keys(events)).toEqual(Array(6).fill('tests#1'));
-      checkStamped(events);
-      expect(events).toMatchObject([
-        { stage: 'tests', call: 1, try: 1, kind: 'script', consumed: {} },
-        { command: '.sail/stages/tests/run.sh', cwd: '.', envKeys: ENV_KEYS },
-        { code: 0, outcome: 'passed', durationMs: expect.any(Number), stdoutBytes: statSync(paths.stdout).size },
-        {},
-        { name: 'junit.xml', path: '00-tests/call-1/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
-        {
-          stage: 'tests',
-          call: 1,
-          try: 1,
-          outcome: 'passed',
-          durationMs: result.durationMs,
-          resultPath: '00-tests/call-1/result.json',
-        },
-      ]);
-      expect(events[2]).not.toHaveProperty('signal');
-      expect(events[5]).not.toHaveProperty('errors');
-    });
+    expect(types(events)).toEqual([
+      'stage:start',
+      'script:exec',
+      'script:exit',
+      'output:validated',
+      'file:produced',
+      'stage:end',
+    ]);
+    expect(keys(events)).toEqual(Array(6).fill('tests#1'));
+    checkStamped(events);
+    expect(events).toMatchObject([
+      { stage: 'tests', call: 1, try: 1, kind: 'script', consumed: {} },
+      { command: '.sail/stages/tests/run.sh', cwd: '.', envKeys: ENV_KEYS },
+      { code: 0, outcome: 'passed', durationMs: expect.any(Number), stdoutBytes: statSync(paths.stdout).size },
+      {},
+      { name: 'junit.xml', path: '00-tests/call-1/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
+      {
+        stage: 'tests',
+        call: 1,
+        try: 1,
+        outcome: 'passed',
+        durationMs: result.durationMs,
+        resultPath: '00-tests/call-1/result.json',
+      },
+    ]);
+    expect(events[2]).not.toHaveProperty('signal');
+    expect(events[5]).not.toHaveProperty('errors');
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('each bound binding reports where it came from, in the order the stage declares them, and an unbound one nothing', async () => {
-    await withTempRepo(async (repo) => {
-      const s = tests(repo);
-      s.run(PASSES);
-      const spec = join(repo.dir, 'spec.md');
-      writeFileSync(spec, '# spec\n');
-      const step = script('tests', {
-        run: './run.sh',
-        consumes: { spec: file('spec.md'), exit: value(z.number()), note: value(z.string()).optional() },
-        produces: { 'junit.xml': 'file' },
-        output: TestReport,
-      });
-      const supplied: Record<string, Supplied> = {
-        exit: { kind: 'value', value: 0, from: '--bind' },
-        spec: { kind: 'file', path: spec, from: '01-spec/call-1/spec.md' },
-      };
-      const { events, emit } = collect();
-      await runCall({ ...s.request(step, supplied), emit });
-
-      expect(types(events).slice(0, 4)).toEqual([
-        'stage:start',
-        'input:materialised',
-        'input:materialised',
-        'script:exec',
-      ]);
-      expect(events.slice(1, 3)).toEqual([
-        { type: 'input:materialised', key: 'tests#1', binding: 'spec', from: '01-spec/call-1/spec.md' },
-        { type: 'input:materialised', key: 'tests#1', binding: 'exit', from: '--bind' },
-      ]);
-      const [start] = events;
-      if (start?.type !== 'stage:start') throw new Error('stage:start first');
-      expect(start.consumed).toEqual({ spec: '01-spec/call-1/spec.md', exit: '--bind' });
-      expect(start.consumed).not.toHaveProperty('note');
-      checkStamped(events);
+test('each bound binding reports where it came from, in the order the stage declares them, and an unbound one nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(PASSES);
+    const spec = join(repo.dir, 'spec.md');
+    writeFileSync(spec, '# spec\n');
+    const step = script('tests', {
+      run: './run.sh',
+      consumes: { spec: file('spec.md'), exit: value(z.number()), note: value(z.string()).optional() },
+      produces: { 'junit.xml': 'file' },
+      output: TestReport,
     });
+    const supplied: Record<string, Supplied> = {
+      exit: { kind: 'value', value: 0, from: '--bind' },
+      spec: { kind: 'file', path: spec, from: '01-spec/call-1/spec.md' },
+    };
+    const { events, emit } = collect();
+    await runCall({ ...s.request(step, supplied), emit });
+
+    expect(types(events).slice(0, 4)).toEqual([
+      'stage:start',
+      'input:materialised',
+      'input:materialised',
+      'script:exec',
+    ]);
+    expect(events.slice(1, 3)).toEqual([
+      { type: 'input:materialised', key: 'tests#1', binding: 'spec', from: '01-spec/call-1/spec.md' },
+      { type: 'input:materialised', key: 'tests#1', binding: 'exit', from: '--bind' },
+    ]);
+    const [start] = events;
+    if (start?.type !== 'stage:start') throw new Error('stage:start first');
+    expect(start.consumed).toEqual({ spec: '01-spec/call-1/spec.md', exit: '--bind' });
+    expect(start.consumed).not.toHaveProperty('note');
+    checkStamped(events);
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("an output that breaks its schema reports output:invalid with the contract's message, and stage:end its errors", async () => {
-    await withTempRepo(async (repo) => {
-      const s = tests(repo);
-      s.run(`echo "<testsuites/>" > "$STAGE_OUT/junit.xml"\necho '{"ok":true}'`);
-      const { events, emit } = collect();
-      const { result } = await runCall({ ...s.request(plainStep()), emit });
-      const message = (result.errors as { message: string }[])[0]?.message ?? '';
-      expect(message).toStartWith("the output doesn't match its schema:\n");
+test("an output that breaks its schema reports output:invalid with the contract's message, and stage:end its errors", async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(`echo "<testsuites/>" > "$STAGE_OUT/junit.xml"\necho '{"ok":true}'`);
+    const { events, emit } = collect();
+    const { result } = await runCall({ ...s.request(plainStep()), emit });
+    const message = (result.errors as { message: string }[])[0]?.message ?? '';
+    expect(message).toStartWith("the output doesn't match its schema:\n");
 
-      expect(types(events)).toEqual([
-        'stage:start',
-        'script:exec',
-        'script:exit',
-        'output:invalid',
-        'file:produced',
-        'stage:end',
-      ]);
-      expect(events[3]).toEqual({ type: 'output:invalid', key: 'tests#1', message });
-      expect(events[5]).toMatchObject({ outcome: 'error', errors: [{ reason: 'invalid_output', message }] });
-      checkStamped(events);
+    expect(types(events)).toEqual([
+      'stage:start',
+      'script:exec',
+      'script:exit',
+      'output:invalid',
+      'file:produced',
+      'stage:end',
+    ]);
+    expect(events[3]).toEqual({ type: 'output:invalid', key: 'tests#1', message });
+    expect(events[5]).toMatchObject({ outcome: 'error', errors: [{ reason: 'invalid_output', message }] });
+    checkStamped(events);
+  });
+});
+
+test('a timeout reports the signal and error:timeout, and nothing about output or files', async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run('sleep 5');
+    const { events, emit } = collect();
+    await runCall({ ...s.request(plainStep({ timeoutSeconds: 1 })), emit });
+
+    expect(types(events)).toEqual(['stage:start', 'script:exec', 'script:exit', 'error:timeout', 'stage:end']);
+    expect(events[2]).toMatchObject({ type: 'script:exit', code: null, signal: 'SIGTERM' });
+    expect(events[2]).not.toHaveProperty('outcome');
+    expect(events[3]).toEqual({
+      type: 'error:timeout',
+      key: 'tests#1',
+      message: 'timed out after 1s',
+      timeoutSeconds: 1,
     });
-  });
-
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a timeout reports the signal and error:timeout, and nothing about output or files', async () => {
-    await withTempRepo(async (repo) => {
-      const s = tests(repo);
-      s.run('sleep 5');
-      const { events, emit } = collect();
-      await runCall({ ...s.request(plainStep({ timeoutSeconds: 1 })), emit });
-
-      expect(types(events)).toEqual(['stage:start', 'script:exec', 'script:exit', 'error:timeout', 'stage:end']);
-      expect(events[2]).toMatchObject({ type: 'script:exit', code: null, signal: 'SIGTERM' });
-      expect(events[2]).not.toHaveProperty('outcome');
-      expect(events[3]).toEqual({ type: 'error:timeout', key: 'tests#1', message: 'timed out after 1s', timeoutSeconds: 1 });
-      expect(events[4]).toMatchObject({ outcome: 'error', errors: [{ reason: 'timeout', message: 'timed out after 1s' }] });
-      checkStamped(events);
+    expect(events[4]).toMatchObject({
+      outcome: 'error',
+      errors: [{ reason: 'timeout', message: 'timed out after 1s' }],
     });
+    checkStamped(events);
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a later try reports its try, under its call's key", async () => {
-    await withTempRepo(async (repo) => {
-      const s = tests(repo);
-      s.run(PASSES);
-      const { events, emit } = collect();
-      await runCall({ ...s.request(plainStep()), try: 2, emit });
+test("a later try reports its try, under its call's key", async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(PASSES);
+    const { events, emit } = collect();
+    await runCall({ ...s.request(plainStep()), try: 2, emit });
 
-      expect(keys(events)).toEqual(Array(6).fill('tests#1'));
-      expect(events[0]).toMatchObject({ type: 'stage:start', try: 2 });
-      expect(events.at(-1)).toMatchObject({ type: 'stage:end', try: 2, resultPath: '00-tests/call-1/try-2/result.json' });
-    });
+    expect(keys(events)).toEqual(Array(6).fill('tests#1'));
+    expect(events[0]).toMatchObject({ type: 'stage:start', try: 2 });
+    expect(events.at(-1)).toMatchObject({ type: 'stage:end', try: 2, resultPath: '00-tests/call-1/try-2/result.json' });
   });
+});
