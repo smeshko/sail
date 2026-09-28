@@ -10,12 +10,21 @@
 // An exception inside sail, such as a journal that can't be trusted or a bug in a call, propagates and leaves STATUS
 // `running`: writing it may be what failed, and a `running` run with no process is how a dead one looks.
 import { dirname, join } from 'node:path';
+import type { Consumer, SailEvent } from '../events/types';
 import { callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
 import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
 import { type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
+
+/** Who else receives a run's events, beside `events.ndjson`. */
+interface EventOptions {
+  /** Consumers that receive every event after the events file. */
+  consumers?: readonly Consumer[];
+  /** Where a consumer's throw on an `error:consumer` event goes. Stderr by default. */
+  unreported?: (error: unknown, consumer: Consumer, event: SailEvent) => void;
+}
 
 /** How a run ended. */
 export interface RunEnd {
@@ -29,14 +38,14 @@ export interface RunEnd {
   result?: unknown;
 }
 
-export interface RunWorkflowOptions extends OpenRunOptions {
+export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
   /** Stops the running call when it aborts, and suspends the run. */
   signal?: AbortSignal;
   /** Called after each call is journaled. */
   onCall?(entry: JournalEntry): void;
 }
 
-export interface ResumeWorkflowOptions extends ReopenRunOptions {
+export interface ResumeWorkflowOptions extends ReopenRunOptions, EventOptions {
   /** Stops the running call when it aborts, and suspends the run again. */
   signal?: AbortSignal;
   /** Called after each call is journaled. */
@@ -44,7 +53,7 @@ export interface ResumeWorkflowOptions extends ReopenRunOptions {
 }
 
 /** What drives an opened run, whether it started or resumed. */
-interface DriveOptions {
+interface DriveOptions extends EventOptions {
   signal?: AbortSignal;
   onCall?(entry: JournalEntry): void;
 }

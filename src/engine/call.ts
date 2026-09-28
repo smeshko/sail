@@ -2,6 +2,7 @@
 // step through the kind the definition names, then validate and write `result.json`. `sail stage run` calls it for a
 // stage in isolation, and Epic 03's replay loop for each call of a run.
 import { dirname } from 'node:path';
+import type { Emit } from '../events/types';
 import { KINDS } from '../kinds/index';
 import type { StageDefinition } from '../sdk/steps';
 import { bindingProblems, materialise, type Supplied } from './bindings';
@@ -25,6 +26,8 @@ export interface CallRequest {
   supplied: Record<string, Supplied>;
   signal?: AbortSignal;
   graceMs?: number;
+  /** Where the call's events go, each keyed `<stage>#<call>`. `sail stage run` passes none. */
+  emit?: Emit;
 }
 
 /** Why the definition can't run with what is supplied, found before anything is written. */

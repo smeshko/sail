@@ -40,6 +40,8 @@ export interface OpenedRun {
   loaded: LoadedWorkflow;
   /** `run.input`: the input, parsed with the intake's schema, or undefined when none was given. */
   input: unknown;
+  /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
+  firstSeq: number;
 }
 
 export interface OpenRunOptions {
@@ -117,7 +119,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   writeRunHeader(dir, header);
   createJournal(dir);
   writeStatus(dir, 'running');
-  return { runId, dir, header, sailDir: found.dir, loaded, input };
+  return { runId, dir, header, sailDir: found.dir, loaded, input, firstSeq: 0 };
 }
 
 export interface ReopenRunOptions {
@@ -165,5 +167,5 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in parsed) return parsed;
 
   writeStatus(run.dir, 'running');
-  return { runId, dir: run.dir, header: run.header, sailDir: found.dir, loaded, input: parsed.input };
+  return { runId, dir: run.dir, header: run.header, sailDir: found.dir, loaded, input: parsed.input, firstSeq: 0 };
 }

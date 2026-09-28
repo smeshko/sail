@@ -2,6 +2,7 @@
 // the script kind is its first implementation. Epic 05 adds `agent`.
 import type { CallPaths } from '../engine/call-dir';
 import type { ContractError, FileEntry } from '../engine/contract';
+import type { CallEmit } from '../events/types';
 import type { Step } from '../sdk/steps';
 import { scriptKind } from './script';
 
@@ -24,6 +25,8 @@ export interface StepContext {
   signal?: AbortSignal;
   /** Between SIGTERM and SIGKILL when the step is stopped. */
   graceMs?: number;
+  /** Where the step's events go. The call stamps each with its key. */
+  emit?: CallEmit;
 }
 
 /** How a step ended. `record` holds the kind's own `result.json` fields, such as a script's `exit`, `command` and `env`. */

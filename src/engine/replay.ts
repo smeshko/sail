@@ -13,6 +13,7 @@
 // workflow whose calls changed between replays, which a lookup by key would silently accept.
 import { join } from 'node:path';
 import { z } from 'zod';
+import type { Emit } from '../events/types';
 import type { ProducedFile } from '../sdk/bindings';
 import type { StageDefinition } from '../sdk/steps';
 import type { CallOptions, Iteration, Run, Workflow } from '../sdk/workflow';
@@ -52,6 +53,8 @@ export interface ReplayOptions {
   runDir: string;
   /** `run.input`. */
   input: unknown;
+  /** Where the loop and route events of moves past the journal's end go. */
+  emit?: Emit;
 }
 
 /**
