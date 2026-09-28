@@ -14,10 +14,12 @@
 // `run:start` for a fresh run, `journal:append` for each call it journals, `run:end` once STATUS says how the run
 // ended, and `error:crash` before an exception inside sail propagates. The call emits its own events, and the replay
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
+// `run:end` ends the stream: a replay an abort abandoned may move on once its workflow stops waiting, since the CLI
+// only sets an exit code, but nothing it reports after that is emitted.
 import { dirname, join } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
-import type { Consumer, SailEvent } from '../events/types';
+import type { Consumer, Emit, SailEvent } from '../events/types';
 import { callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
@@ -127,6 +129,11 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   let replays = 0;
   /** The call being run or journaled, which a crash names. */
   let running: string | undefined;
+  /** Set by `run:end`. */
+  let ended = false;
+  const replayEmit: Emit = (event) => {
+    if (!ended) bus.emit(event);
+  };
 
   /** Records how the run ended in STATUS, then reports it. */
   const finish = (end: RunEnd): RunEnd => {
@@ -140,6 +147,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       ...(status === 'completed' ? { result: end.result } : {}),
       replays,
     });
+    ended = true;
     return end;
   };
   const failed = (stopReason: StopReason, message: string): RunEnd =>
@@ -168,7 +176,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         entries,
         runDir: dir,
         input,
-        emit: bus.emit,
+        emit: replayEmit,
       });
       const end = await unlessAborted(replaying, signal);
       if (end === undefined) return suspended('stopped during the replay');
