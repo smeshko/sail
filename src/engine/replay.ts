@@ -64,6 +64,16 @@ class Halt extends Error {
   }
 }
 
+/**
+ * A Halt thrown in a promise chain the workflow doesn't await, such as a `run.fail()` in a `.then()` nothing awaits,
+ * rejects a promise nothing handles. Bun would print sail's internal error and exit 1, whatever end the replay
+ * recorded. So the first replay registers this for the process: it drops a Halt, and throws anything else on, which
+ * Bun reports as it would have.
+ */
+export function dropStrayHalt(reason: unknown): void {
+  if (!(reason instanceof Halt)) throw reason;
+}
+
 /** A replay's end, or a bug in sail that makes `replay()` reject. */
 type Recorded = ReplayEnd | { kind: 'crashed'; error: unknown };
 
@@ -80,6 +90,7 @@ const isObject = (value: unknown): value is object =>
  */
 export function replay(options: ReplayOptions): Promise<ReplayEnd> {
   const { workflow, stages, entries, runDir, input } = options;
+  if (!process.listeners('unhandledRejection').includes(dropStrayHalt)) process.on('unhandledRejection', dropStrayHalt);
   return new Promise<ReplayEnd>((resolve, reject) => {
     let ended = false;
     /** The next journal entry a request must match. */

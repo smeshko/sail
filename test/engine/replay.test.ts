@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { JournalEntry } from '../../src/engine/journal';
 import type { ReachedStage } from '../../src/engine/load-workflow';
-import { type ReplayEnd, replay } from '../../src/engine/replay';
+import { dropStrayHalt, type ReplayEnd, replay } from '../../src/engine/replay';
 import {
   agent,
   file,
@@ -214,6 +214,22 @@ test('run.fail() ends the replay, even when the workflow catches it and asks for
   await settle();
   expect(end).toEqual(failed('workflow_failed', 'why'));
   expect(after).toBe(false);
+});
+
+// test/cli/main.test.ts shows it in a process of its own: bun test fails a test on any unhandled rejection.
+test('a replay has the process drop a stray Halt, and throw any other unhandled rejection on', async () => {
+  let halt: unknown;
+  await replayed(async (run) => {
+    try {
+      run.fail('why');
+    } catch (error) {
+      halt = error;
+    }
+  });
+  expect(process.listeners('unhandledRejection')).toContain(dropStrayHalt);
+  expect(() => dropStrayHalt(halt)).not.toThrow();
+  const bug = new Error('a bug');
+  expect(() => dropStrayHalt(bug)).toThrow(bug);
 });
 
 test.each<[string, unknown, string]>([
