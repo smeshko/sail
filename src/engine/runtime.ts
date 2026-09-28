@@ -4,7 +4,8 @@
 // scripts run in the directory that holds `.sail/`.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
-// a resume runs it again as its next try.
+// a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
+// Ctrl-C no longer ends the process once sail listens for it.
 //
 // An exception inside sail, such as a journal that can't be trusted or a bug in a call, propagates and leaves STATUS
 // `running`: writing it may be what failed, and a `running` run with no process is how a dead one looks.
@@ -13,7 +14,7 @@ import { callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
 import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
-import { replay } from './replay';
+import { type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
 
 /** How a run ended. */
@@ -64,6 +65,26 @@ function entryFrom(runDir: string, result: Record<string, unknown>, paths: CallP
   };
 }
 
+/**
+ * How the replay ended, or undefined when `signal` aborted while it hung in the workflow's own code. The abort only wins
+ * a task later: a replay settles in microtasks, so one that ends the run still ends it when the abort came first.
+ */
+function unlessAborted(replaying: Promise<ReplayEnd>, signal: AbortSignal | undefined): Promise<ReplayEnd | undefined> {
+  if (signal === undefined) return replaying;
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const abandon = () => {
+      timer = setTimeout(() => resolve(undefined), 0);
+    };
+    if (signal.aborted) abandon();
+    else signal.addEventListener('abort', abandon, { once: true });
+    replaying.then(resolve, reject).finally(() => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abandon);
+    });
+  });
+}
+
 /** Opens a run of the workflow and runs it to its end. A refusal to open passes through, and nothing is written. */
 export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd | { refused: string }> {
   const opened = await openRun(options);
@@ -73,8 +94,8 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
 
 /**
  * The loop every run goes through: replay the journal, run the call the replay stopped at, journal it, again. An abort
- * seen before a call starts, or once it has returned, suspends the run with that call unjournaled. A replay that ends
- * the run ends it that way, aborted or not: nothing is left to resume.
+ * seen before a call starts, or once it has returned, suspends the run with that call unjournaled, and so does one seen
+ * while a replay hangs. A replay that ends the run ends it that way, aborted or not: nothing is left to resume.
  */
 async function drive(opened: OpenedRun, options: DriveOptions): Promise<RunEnd> {
   const { runId, dir, sailDir, loaded, input } = opened;
@@ -90,7 +111,9 @@ async function drive(opened: OpenedRun, options: DriveOptions): Promise<RunEnd> 
 
   while (true) {
     const { entries } = readJournal(dir);
-    const end = await replay({ workflow: loaded.workflow, stages: loaded.stages, entries, runDir: dir, input });
+    const replaying = replay({ workflow: loaded.workflow, stages: loaded.stages, entries, runDir: dir, input });
+    const end = await unlessAborted(replaying, signal);
+    if (end === undefined) return suspended('stopped during the replay');
     if (end.kind === 'completed') {
       writeStatus(dir, 'completed');
       return { runId, dir, status: 'completed', result: end.result };
