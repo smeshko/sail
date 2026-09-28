@@ -282,6 +282,18 @@ test.skipIf(process.getuid?.() === 0)('a log the script leaves unreadable is inv
   });
 });
 
+test('a log the script leaves a symlink loop is invalid_output, and script:exit counts no bytes', async () => {
+  const s = setup();
+  s.run(`${JUNIT}\necho '${PASSING}'\nrm "$STAGE_OUT/stdout.log"\nln -s stdout.log "$STAGE_OUT/stdout.log"`);
+  const { context, events } = collecting(s);
+  expect(await scriptKind.run(tests(), context)).toMatchObject({
+    outcome: 'error',
+    errors: [{ reason: 'invalid_output', message: "stdout.log can't be read (ELOOP), so the output can't be either" }],
+  });
+  expect(events.map((event) => event.type)).toEqual(['script:exec', 'script:exit', 'output:invalid', 'file:produced']);
+  expect(events[1]).toMatchObject({ code: 0, stdoutBytes: 0 });
+});
+
 test('a script that is missing is not_started, with no exit', async () => {
   const s = setup();
   const run = await scriptKind.run(tests({ run: './missing.sh' }), s.context);
