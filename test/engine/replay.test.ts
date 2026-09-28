@@ -566,108 +566,97 @@ function journalTo(last: string): JournalEntry[] {
   return all.slice(0, all.findIndex((each) => each.key === last) + 1);
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a first pass past the journal's end reports its iteration, then the route into it", async () => {
-    const { events, emit } = collect();
-    const end = await replayed(fixLoop(), journalTo('a#1'), emit);
-    expect(end).toMatchObject({ kind: 'call', call: { key: 'implement#1' } });
-    expect(events).toEqual([
-      { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 },
-      { type: 'workflow:route', at: 'a#1', value: 'passed', took: 'implement#1' },
-    ]);
-    checkStamped(events);
-  });
+test("a first pass past the journal's end reports its iteration, then the route into it", async () => {
+  const { events, emit } = collect();
+  const end = await replayed(fixLoop(), journalTo('a#1'), emit);
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'implement#1' } });
+  expect(events).toEqual([
+    { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 },
+    { type: 'workflow:route', at: 'a#1', value: 'passed', took: 'implement#1' },
+  ]);
+  checkStamped(events);
+});
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a pass after a failed one names the output its feedback came from, and the route records the failure', async () => {
-    const { events, emit } = collect();
-    await replayed(fixLoop(), journalTo('tests#1'), emit);
-    expect(events).toEqual([
-      {
-        type: 'loop:iteration',
-        loop: 'fix',
-        iteration: 2,
-        max: 3,
-        feedback: { from: '02-tests/call-1/result.json#/output' },
-      },
-      { type: 'workflow:route', at: 'tests#1', value: 'failed', took: 'implement#2' },
-    ]);
-    checkStamped(events);
-  });
+test('a pass after a failed one names the output its feedback came from, and the route records the failure', async () => {
+  const { events, emit } = collect();
+  await replayed(fixLoop(), journalTo('tests#1'), emit);
+  expect(events).toEqual([
+    {
+      type: 'loop:iteration',
+      loop: 'fix',
+      iteration: 2,
+      max: 3,
+      feedback: { from: '02-tests/call-1/result.json#/output' },
+    },
+    { type: 'workflow:route', at: 'tests#1', value: 'failed', took: 'implement#2' },
+  ]);
+  checkStamped(events);
+});
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('feedback the workflow builds itself comes from the workflow', async () => {
-    const { events, emit } = collect();
-    await replayed(fixLoop(() => ({ ok: false })), journalTo('tests#1'), emit);
-    expect(events[0]).toEqual({ type: 'loop:iteration', loop: 'fix', iteration: 2, max: 3, feedback: { from: 'workflow' } });
+test('feedback the workflow builds itself comes from the workflow', async () => {
+  const { events, emit } = collect();
+  await replayed(
+    fixLoop(() => ({ ok: false })),
+    journalTo('tests#1'),
+    emit,
+  );
+  expect(events[0]).toEqual({
+    type: 'loop:iteration',
+    loop: 'fix',
+    iteration: 2,
+    max: 3,
+    feedback: { from: 'workflow' },
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('moves the journal already holds are not reported again', async () => {
-    const { events, emit } = collect();
-    await replayed(fixLoop(), journalTo('implement#2'), emit);
-    expect(events).toEqual([{ type: 'workflow:route', at: 'implement#2', value: 'passed', took: 'tests#2' }]);
-  });
+test('moves the journal already holds are not reported again', async () => {
+  const { events, emit } = collect();
+  await replayed(fixLoop(), journalTo('implement#2'), emit);
+  expect(events).toEqual([{ type: 'workflow:route', at: 'implement#2', value: 'passed', took: 'tests#2' }]);
+});
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("break reports the loop's exit at the workflow's next move, before its route", async () => {
-    const { events, emit } = collect();
-    const end = await replayed(fixLoop(), journalTo('tests#2'), emit);
-    console.log(JSON.stringify(events));
-    expect(end).toMatchObject({ kind: 'call', call: { key: 'c#1' } });
-    expect(events).toEqual([
-      { type: 'loop:exit', loop: 'fix', iterations: 2, max: 3, reason: 'break' },
-      { type: 'workflow:route', at: 'tests#2', value: 'passed', took: 'c#1' },
-    ]);
-    checkStamped(events);
-  });
+test("break reports the loop's exit at the workflow's next move, before its route", async () => {
+  const { events, emit } = collect();
+  const end = await replayed(fixLoop(), journalTo('tests#2'), emit);
+  console.log(JSON.stringify(events));
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'c#1' } });
+  expect(events).toEqual([
+    { type: 'loop:exit', loop: 'fix', iterations: 2, max: 3, reason: 'break' },
+    { type: 'workflow:route', at: 'tests#2', value: 'passed', took: 'c#1' },
+  ]);
+  checkStamped(events);
+});
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a throw out of a loop body is not an exit', async () => {
-    const { events, emit } = collect();
-    const end = await replayed(
-      async (run) => {
-        await run.stage(a);
-        for (const _ of run.loop('fix', { max: 3 })) throw new Error('boom');
-      },
-      [entry('a#1', 'passed')],
-      emit,
-    );
-    expect(end).toEqual(failed('workflow_failed', 'workflow threw: boom'));
-    expect(events).toEqual([{ type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 }]);
-  });
+test('a throw out of a loop body is not an exit', async () => {
+  const { events, emit } = collect();
+  const end = await replayed(
+    async (run) => {
+      await run.stage(a);
+      for (const _ of run.loop('fix', { max: 3 })) throw new Error('boom');
+    },
+    [entry('a#1', 'passed')],
+    emit,
+  );
+  expect(end).toEqual(failed('workflow_failed', 'workflow threw: boom'));
+  expect(events).toEqual([{ type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 }]);
+});
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('asking for the pass after max reports the loop exceeded, and no route', async () => {
-    const { events, emit } = collect();
-    const end = await replayed(
-      async (run) => {
-        for (const iteration of run.loop('fix', { max: 2, feedback: Report })) {
-          const r = await run.stage(a);
-          iteration.fail(r.output);
-        }
-      },
-      [entry('a#1', 'passed'), entry('a#2', 'passed')],
-      emit,
-    );
-    expect(end).toEqual(failed('workflow_failed', 'loop "fix" exceeded 2'));
-    expect(events).toEqual([{ type: 'loop:exit', loop: 'fix', iterations: 2, max: 2, reason: 'exceeded' }]);
-    checkStamped(events);
-  });
+test('asking for the pass after max reports the loop exceeded, and no route', async () => {
+  const { events, emit } = collect();
+  const end = await replayed(
+    async (run) => {
+      for (const iteration of run.loop('fix', { max: 2, feedback: Report })) {
+        const r = await run.stage(a);
+        iteration.fail(r.output);
+      }
+    },
+    [entry('a#1', 'passed'), entry('a#2', 'passed')],
+    emit,
+  );
+  expect(end).toEqual(failed('workflow_failed', 'loop "fix" exceeded 2'));
+  expect(events).toEqual([{ type: 'loop:exit', loop: 'fix', iterations: 2, max: 2, reason: 'exceeded' }]);
+  checkStamped(events);
+});
 
 /** The events a replay of `body` against `entries` reports. */
 async function reported(body: Body, entries: JournalEntry[]): Promise<NewEvent[]> {
@@ -676,36 +665,43 @@ async function reported(body: Body, entries: JournalEntry[]): Promise<NewEvent[]
   return events;
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a route is reported for the moves the workflow made: its end, run.fail(), never an end the engine made', async () => {
-    const after = [entry('a#1', 'passed')];
-    const returns: Body = async (run) => {
-      await run.stage(a);
-      return 'done';
-    };
-    const fails: Body = async (run) => {
-      await run.stage(a);
-      run.fail('why');
-    };
-    expect(await reported(returns, after)).toEqual([{ type: 'workflow:route', at: 'a#1', value: 'passed', took: 'end' }]);
-    expect(await reported(fails, after)).toEqual([{ type: 'workflow:route', at: 'a#1', value: 'passed', took: 'fail' }]);
+test('a route is reported for the moves the workflow made: its end, run.fail(), never an end the engine made', async () => {
+  const after = [entry('a#1', 'passed')];
+  const returns: Body = async (run) => {
+    await run.stage(a);
+    return 'done';
+  };
+  const fails: Body = async (run) => {
+    await run.stage(a);
+    run.fail('why');
+  };
+  expect(await reported(returns, after)).toEqual([{ type: 'workflow:route', at: 'a#1', value: 'passed', took: 'end' }]);
+  expect(await reported(fails, after)).toEqual([{ type: 'workflow:route', at: 'a#1', value: 'passed', took: 'fail' }]);
 
-    // With no journaled call there is no route to report.
-    expect(await reported(async () => 'done', [])).toEqual([]);
-    expect(await reported(async (run) => run.fail('why'), [])).toEqual([]);
+  // With no journaled call there is no route to report.
+  expect(await reported(async () => 'done', [])).toEqual([]);
+  expect(await reported(async (run) => run.fail('why'), [])).toEqual([]);
 
-    // A call that can't start, an unhandled error and a diverging replay are the engine's ends, not the workflow's.
-    const loopThen = (next: (run: Run<typeof ticket.output>) => Promise<unknown>): Body => async (run) => {
+  // A call that can't start, an unhandled error and a diverging replay are the engine's ends, not the workflow's.
+  const loopThen =
+    (next: (run: Run<typeof ticket.output>) => Promise<unknown>): Body =>
+    async (run) => {
       await run.stage(a);
       for (const _ of run.loop('fix', { max: 3 })) await next(run);
     };
-    const iteration = { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 } as const;
-    expect(await reported(loopThen((run) => run.stage(b, { report: { name: 'r.txt' } as ProducedFile })), after)).toEqual([
-      iteration,
-    ]);
-    expect(await reported(loopThen((run) => run.stage(stray)), after)).toEqual([iteration]);
-    expect(await reported(returns, [entry('a#1', 'error', { reason: 'boom' })])).toEqual([]);
-    expect(await reported(returns, [entry('a#1', 'passed'), entry('c#1', 'passed')])).toEqual([]);
-  });
+  const iteration = { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 } as const;
+  expect(
+    await reported(
+      loopThen((run) => run.stage(b, { report: { name: 'r.txt' } as ProducedFile })),
+      after,
+    ),
+  ).toEqual([iteration]);
+  expect(
+    await reported(
+      loopThen((run) => run.stage(stray)),
+      after,
+    ),
+  ).toEqual([iteration]);
+  expect(await reported(returns, [entry('a#1', 'error', { reason: 'boom' })])).toEqual([]);
+  expect(await reported(returns, [entry('a#1', 'passed'), entry('c#1', 'passed')])).toEqual([]);
+});
