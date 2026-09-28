@@ -11,6 +11,7 @@ import {
   validateProjectFile,
   validateRunDir,
 } from '../../src/engine/schemas';
+import type { NewEvent } from '../../src/events/types';
 
 const root = join(import.meta.dir, '..', '..');
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
@@ -40,7 +41,27 @@ const journal = {
   resultPath: '00-intake/call-1/result.json',
   recordedAt: TS,
 };
-const event = { seq: 1, ts: TS, type: 'run:start', runId: RUN_ID };
+/** The payload of the event type `T`. */
+type Payload<T extends NewEvent['type']> = Omit<Extract<NewEvent, { type: T }>, 'type'>;
+const envelope = { seq: 1, ts: TS, runId: RUN_ID };
+const runStart: Payload<'run:start'> = {
+  source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false },
+  workflow: {
+    name: 'ticket-to-pr',
+    version: 1,
+    origin: 'repo:.sail/workflows/ticket-to-pr',
+    sha256: 'e0b3cf9118c5580b04a63a226324576776169295075084965c306c90e250a710',
+  },
+  roster: {
+    intake: { name: 'ticket', kind: 'script', origin: 'builtin' },
+    stages: { spec: { kind: 'agent', origin: 'repo:.sail/stages/spec' } },
+  },
+  adapters: { ticketSource: fake, codeHost: fake, harness: fake, workspace: fake },
+};
+const event = { ...envelope, type: 'run:start', ...runStart };
+const runEnd = { ...envelope, seq: 2, type: 'run:end', status: 'completed', result: 'done', replays: 1 };
+/** An event of a family a later epic closes. */
+const later = { ...envelope, type: 'workspace:leased' };
 const summary = {
   schema: 'sail.summary.v1',
   runId: RUN_ID,
@@ -142,7 +163,7 @@ const ndjson = (...lines: unknown[]): string => lines.map((line) => `${JSON.stri
 const validRunDir = (): Record<string, string> => ({
   'run.json': json(run),
   'journal.ndjson': ndjson(journal),
-  'events.ndjson': ndjson(event, { ...event, seq: 2, type: 'run:end', status: 'completed' }),
+  'events.ndjson': ndjson(event, runEnd),
   'summary.json': json(summary),
   '00-intake/call-1/result.json': json(scriptResult),
 });
@@ -175,11 +196,143 @@ test('run: an unknown key is not allowed and a missing source is required', () =
   ]);
 });
 
-test('event: the type is exhaustive, runId is required and the payload is open', () => {
-  expect(paths('sail.event.v1', { ...event, type: 'agent:thought' })).toEqual(['/type']);
-  expect(paths('sail.event.v1', omit(event, 'runId'))).toEqual(['/runId']);
-  expect(paths('sail.event.v1', { ...event, roster: { spec: {} }, anything: [1, 2] })).toEqual([]);
+test("event: the type is exhaustive, runId is required, and a later family's payload is open, key and all", () => {
+  expect(paths('sail.event.v1', { ...later, type: 'agent:thought' })).toEqual(['/type']);
+  expect(paths('sail.event.v1', omit(later, 'runId'))).toEqual(['/runId']);
+  expect(paths('sail.event.v1', { ...later, remote: 'fake://codehost/fixture', anything: [1, 2] })).toEqual([]);
+  expect(paths('sail.event.v1', { ...later, type: 'agent:message', key: 'spec#1', text: 'hi' })).toEqual([]);
 });
+
+const KEY = 'tests#1';
+
+/** One sample of each type this phase closes, from its payload table (DECISIONS D5). */
+const CLOSED: NewEvent[] = [
+  { type: 'run:start', ...runStart, budget: { maxUsd: 25, maxMinutes: 90 } },
+  { type: 'run:end', status: 'failed', stopReason: 'workflow_failed', message: 'loop "fix" exceeded 3', replays: 8 },
+  { type: 'stage:start', key: KEY, stage: 'tests', call: 1, try: 2, kind: 'script', consumed: { exit: '--bind' } },
+  {
+    type: 'stage:end',
+    key: KEY,
+    stage: 'tests',
+    call: 1,
+    try: 2,
+    outcome: 'error',
+    durationMs: 1012,
+    resultPath: '03-tests/call-1/try-2/result.json',
+    errors: [{ reason: 'timeout', message: 'timed out after 1s' }],
+  },
+  {
+    type: 'intake:start',
+    key: 'intake#1',
+    intake: 'ticket',
+    kind: 'script',
+    origin: 'builtin',
+    consumed: { source: 'run.json#/source' },
+  },
+  { type: 'intake:end', key: 'intake#1', outcome: 'passed', resultPath: '00-intake/call-1/result.json' },
+  {
+    type: 'step:start',
+    key: 'publish#1/open',
+    stage: 'publish',
+    step: 'open',
+    index: 2,
+    of: 2,
+    kind: 'script',
+    command: '.sail/workflows/ticket-to-pr/stages/publish/open.sh',
+  },
+  {
+    type: 'step:end',
+    key: 'publish#1/open',
+    step: 'open',
+    outcome: 'passed',
+    resultPath: '05-publish/call-1/steps/2-open/result.json',
+  },
+  { type: 'input:materialised', key: KEY, binding: 'exit', from: '--bind' },
+  {
+    type: 'script:exec',
+    key: KEY,
+    command: '.sail/stages/tests/run.sh',
+    cwd: '.',
+    envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG', 'INPUT_EXIT'],
+  },
+  { type: 'script:exit', key: KEY, code: null, signal: 'SIGTERM', durationMs: 1004, stdoutBytes: 0 },
+  { type: 'output:validated', key: KEY },
+  { type: 'output:invalid', key: KEY, message: "the output doesn't match its schema:\n✖ Invalid input" },
+  {
+    type: 'file:produced',
+    key: KEY,
+    name: 'junit.xml',
+    path: '03-tests/call-1/junit.xml',
+    bytes: 14,
+    sha256: 'c98a97ba5504e953e5ddd12d9b65f5f176325398331606b16512f617d3a3358f',
+  },
+  { type: 'file:validated', key: 'spec#1', name: 'spec.md', ok: true, checks: ['noPlaceholders'] },
+  { type: 'journal:append', key: KEY, line: 3, outcome: 'failed' },
+  {
+    type: 'loop:iteration',
+    loop: 'fix',
+    iteration: 2,
+    max: 3,
+    feedback: { from: '03-tests/call-1/result.json#/output' },
+  },
+  { type: 'loop:exit', loop: 'fix', iterations: 3, max: 3, reason: 'exceeded' },
+  { type: 'workflow:route', at: 'tests#2', value: 'passed', took: 'self-review#1' },
+  { type: 'error:timeout', key: KEY, message: 'timed out after 1s', timeoutSeconds: 1 },
+  { type: 'error:crash', key: KEY, message: "journal.ndjson:3 can't be read" },
+  {
+    type: 'error:consumer',
+    consumer: 'events.ndjson',
+    failed: { seq: 7, type: 'stage:start' },
+    message: 'ENOSPC: no space left on device, write',
+  },
+];
+
+/** The closed types that belong to a call, and so require its key. */
+const CALL_LEVEL = new Set([
+  'stage:start',
+  'stage:end',
+  'intake:start',
+  'intake:end',
+  'step:start',
+  'step:end',
+  'input:materialised',
+  'script:exec',
+  'script:exit',
+  'output:validated',
+  'output:invalid',
+  'file:produced',
+  'file:validated',
+  'journal:append',
+  'error:timeout',
+]);
+
+const stamped = (sample: NewEvent): Record<string, unknown> => ({ ...envelope, ...sample });
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  .each(CLOSED.map((sample) => [sample.type, sample] as const))(
+    '%s accepts its payload, and rejects a field it does not declare',
+    (_, sample) => {
+      expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
+      expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
+        { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+      ]);
+    },
+  );
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  .each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) => [sample.type, sample] as const))(
+    '%s requires the key of its call',
+    (_, sample) => {
+      expect(CALL_LEVEL.size).toBe(15);
+      expect(validateDocument('sail.event.v1', omit(stamped(sample), 'key'))).toEqual([
+        { schema: 'sail.event.v1', path: '/key', message: 'is required' },
+      ]);
+    },
+  );
 
 test('summary: a stop reason is required when failed or suspended, and forbidden otherwise', () => {
   expect(validateDocument('sail.summary.v1', { ...summary, status: 'failed' })).toEqual([
@@ -299,6 +452,16 @@ test('validateRunDir skips blank lines and absent optional files, and walks only
   });
   expect(validateRunDir(dir)).toEqual({ counts: { 'sail.run.v1': 1, 'sail.event.v1': 1 }, issues: [] });
 });
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('validateRunDir reports an events file whose seq skips a number', () => {
+    const gap = { ...validRunDir(), 'events.ndjson': ndjson(event, { ...runEnd, seq: 3 }) };
+    expect(validateRunDir(tempDir(gap)).issues.map(formatIssue)).toEqual([
+      'events.ndjson:2  [sail.event.v1]  /seq must be 2, its place in the events file',
+    ]);
+  });
 
 test('validateRunDir reports a missing run.json', () => {
   const files = validRunDir();
