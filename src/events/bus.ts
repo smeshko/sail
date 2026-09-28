@@ -17,7 +17,10 @@ export interface BusOptions {
 }
 
 export interface EventBus {
-  /** Stamps `event`, delivers it to every consumer, and returns it stamped. Never throws. */
+  /**
+   * Stamps `event`, delivers it to every consumer, and returns it stamped. Never throws. Called during a delivery, it
+   * returns before its event is delivered, since that waits for the current one.
+   */
   emit(event: NewEvent): SailEvent;
 }
 
@@ -39,10 +42,13 @@ export function createBus(options: BusOptions): EventBus {
     return { ...envelope, ...(key === undefined ? {} : { key }), ...payload } as SailEvent;
   }
 
-  // Every consumer gets the event before any failure is reported, so each one sees the stream in `seq` order. A
-  // failure on an `error:consumer` goes to `unreported` rather than becoming another report, so the stream can't loop.
-  function publish(event: NewEvent): SailEvent {
-    const stamped = stamp(event);
+  /** Stamped events waiting for the one being delivered to reach every consumer. */
+  const queue: SailEvent[] = [];
+  let delivering = false;
+
+  // A failure is reported once every consumer has the event. A failure on an `error:consumer` goes to `unreported`
+  // rather than becoming another report, so the stream can't loop.
+  function deliver(stamped: SailEvent): void {
     const failures: { consumer: Consumer; error: unknown }[] = [];
     for (const consumer of consumers) {
       try {
@@ -54,15 +60,29 @@ export function createBus(options: BusOptions): EventBus {
     for (const { consumer, error } of failures) {
       if (stamped.type === 'error:consumer') unreported(error, consumer, stamped);
       else
-        publish({
+        emit({
           type: 'error:consumer',
           consumer: consumer.name,
           failed: { seq: stamped.seq, type: stamped.type },
           message: messageOf(error),
         });
     }
+  }
+
+  // An event emitted during a delivery, by a consumer or as a failure's report, waits in the queue until every
+  // consumer has the one being delivered. So each consumer sees the stream in `seq` order.
+  function emit(event: NewEvent): SailEvent {
+    const stamped = stamp(event);
+    queue.push(stamped);
+    if (delivering) return stamped;
+    delivering = true;
+    try {
+      for (let next = queue.shift(); next !== undefined; next = queue.shift()) deliver(next);
+    } finally {
+      delivering = false;
+    }
     return stamped;
   }
 
-  return { emit: publish };
+  return { emit };
 }
