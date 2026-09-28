@@ -131,6 +131,15 @@ function readOutput(
   };
 }
 
+/** The bytes the script printed, or 0 when its log is gone or can't be read: `readOutput()` reports why. */
+function printedBytes(stdout: string): number {
+  try {
+    return statSync(stdout).size;
+  } catch {
+    return 0;
+  }
+}
+
 async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   const emit = context.emit ?? (() => {});
   const command = resolve(context.stageDir, step.run);
@@ -194,7 +203,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     ...(end.signal === null ? {} : { signal: end.signal }),
     ...(mapped === undefined ? {} : { outcome: mapped }),
     durationMs,
-    stdoutBytes: statSync(context.paths.stdout, { throwIfNoEntry: false })?.size ?? 0,
+    stdoutBytes: printedBytes(context.paths.stdout),
   });
 
   // A script that didn't finish on its own, or whose exit code means error, produced nothing worth checking. Any other
