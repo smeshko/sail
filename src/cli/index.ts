@@ -20,7 +20,7 @@ const USAGE = `sail: a software factory. A ticket goes in and a pull request com
 Usage:
   sail check [--list]                                Type-check .sail/ and list its workflows and stages
   sail run [--workflow <name>] [--input <json>]      Run a workflow in this repository
-  sail resume <run> [--input <json>]                 Resume an interrupted or suspended run
+  sail resume <run> [--input <json>]                 Resume a suspended or crashed run
   sail stage run <stage-dir> [--bind name=value]...  Run one script stage in isolation
   sail --version                                     Print the version
   sail --help                                        Print this help
