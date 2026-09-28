@@ -47,8 +47,7 @@ function preamble(context: StepContext): { name: string; value: string; path: bo
     { name: 'RUN_ID', value: context.runId, path: false },
     { name: 'STAGE', value: context.stage, path: false },
     { name: 'CALL', value: String(context.call), path: false },
-    // Scripts never retry, so every script runs as try 1.
-    { name: 'TRY', value: '1', path: false },
+    { name: 'TRY', value: String(context.try), path: false },
     { name: 'STAGE_IN', value: context.paths.stageIn, path: true },
     { name: 'STAGE_OUT', value: context.paths.dir, path: true },
     { name: 'WORKSPACE', value: context.workspace, path: true },

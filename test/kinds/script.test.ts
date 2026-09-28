@@ -324,17 +324,14 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
   expect((run.record.env as Record<string, string>).INPUT_SPEC).toBe(`.sail-runs/${RUN_ID}/00-tests/call-1/in/spec.md`);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a script on a later try sees TRY as that try', async () => {
-    const s = setup();
-    s.run('echo "{\\"try\\":\\"$TRY\\"}"');
-    const step = script('tests', { run: './run.sh', output: z.object({ try: z.string() }) });
-    const run = await scriptKind.run(step, { ...s.context, try: 3 });
-    expect(run.output).toEqual({ try: '3' });
-    expect((run.record.env as Record<string, string>).TRY).toBe('3');
-  });
+test('a script on a later try sees TRY as that try', async () => {
+  const s = setup();
+  s.run('echo "{\\"try\\":\\"$TRY\\"}"');
+  const step = script('tests', { run: './run.sh', output: z.object({ try: z.string() }) });
+  const run = await scriptKind.run(step, { ...s.context, try: 3 });
+  expect(run.output).toEqual({ try: '3' });
+  expect((run.record.env as Record<string, string>).TRY).toBe('3');
+});
 
 test('problems() reports overlapping exit codes, a produced name that is reserved or not plain, and a timeout that is not positive', () => {
   expect(scriptKind.problems(tests())).toEqual([]);
