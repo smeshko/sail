@@ -3,13 +3,16 @@
 // this one loop, and phase 3.3's resume enters it with an existing run directory. Until runs get a workspace of their
 // own, scripts run in the directory that holds `.sail/`.
 //
+// An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
+// a resume runs it again as its next try.
+//
 // An exception inside sail, such as a journal that can't be trusted or a bug in a call, propagates and leaves STATUS
 // `running`: writing it may be what failed, and a `running` run with no process is how a dead one looks.
 import { dirname, join } from 'node:path';
 import { callProblems, runCall } from './call';
-import { type CallPaths, runRelative } from './call-dir';
+import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
-import { type OpenRunOptions, openRun, type ReopenRunOptions } from './open-run';
+import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions } from './open-run';
 import { replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
 
@@ -39,6 +42,12 @@ export interface ResumeWorkflowOptions extends ReopenRunOptions {
   onCall?(entry: JournalEntry): void;
 }
 
+/** What drives an opened run, whether it started or resumed. */
+interface DriveOptions {
+  signal?: AbortSignal;
+  onCall?(entry: JournalEntry): void;
+}
+
 /** The journal entry of a call that ran, from its `result.json`. An error's `reason` is its errors' messages. */
 function entryFrom(runDir: string, result: Record<string, unknown>, paths: CallPaths): NewJournalEntry {
   const files = result.files as Record<string, { path: string }>;
@@ -59,11 +68,24 @@ function entryFrom(runDir: string, result: Record<string, unknown>, paths: CallP
 export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd | { refused: string }> {
   const opened = await openRun(options);
   if ('refused' in opened) return opened;
+  return drive(opened, options);
+}
+
+/**
+ * The loop every run goes through: replay the journal, run the call the replay stopped at, journal it, again. An abort
+ * seen before a call starts, or once it has returned, suspends the run with that call unjournaled. A replay that ends
+ * the run ends it that way, aborted or not: nothing is left to resume.
+ */
+async function drive(opened: OpenedRun, options: DriveOptions): Promise<RunEnd> {
   const { runId, dir, sailDir, loaded, input } = opened;
-  if (options.signal?.aborted) return { runId, dir, status: 'suspended', stopReason: 'stopped', message: 'stub' };
+  const { signal } = options;
   const failed = (stopReason: StopReason, message: string): RunEnd => {
     writeStatus(dir, 'failed', stopReason);
     return { runId, dir, status: 'failed', stopReason, message };
+  };
+  const suspended = (message: string): RunEnd => {
+    writeStatus(dir, 'suspended', 'interrupted');
+    return { runId, dir, status: 'suspended', stopReason: 'interrupted', message };
   };
 
   while (true) {
@@ -78,17 +100,21 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
     const { call } = end;
     const problems = callProblems(call.definition, call.supplied);
     if (problems.length > 0) return failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
+    if (signal?.aborted) return suspended(`stopped before ${call.key}`);
     const { result, paths } = await runCall({
       runDir: dir,
       runId,
       stageIndex: call.stageIndex,
       call: call.call,
+      try: nextTry(dir, call.stageIndex, call.stage, call.call),
       definition: call.definition,
       stageFile: call.stageFile,
       workspace: dirname(sailDir),
       config: join(sailDir, 'project.yaml'),
       supplied: call.supplied,
+      ...(signal === undefined ? {} : { signal }),
     });
+    if (signal?.aborted) return suspended(`stopped during ${call.key}`);
     const journaled = appendJournal(dir, entryFrom(dir, result, paths));
     options.onCall?.(journaled);
   }

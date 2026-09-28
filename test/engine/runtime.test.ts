@@ -256,71 +256,66 @@ function interruptedCopy(to: string, options: Partial<RunWorkflowOptions> = {}):
 const ALL_KEYS = ['spec#1', 'implement#1', 'tests#1', 'implement#2', 'tests#2', 'self-review#1', 'publish#1'];
 const INPUT = { ticketKey: 'FAKE-5', title: 'Greet', url: 'fake://tickets/FAKE-5', acceptanceCriteria: ['greets'] };
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an abort stops the running call, leaves it unjournaled, and suspends the run', async () => {
-    await withTempRepo(async (repo) => {
-      const journaled: string[] = [];
-      const { end, alive } = await interruptedIn(repo.dir, { onCall: (entry) => journaled.push(entry.key) });
-      expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during implement#2' });
-      expect(alive).toEqual([]);
-      expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
-      expect(keys(end.dir)).toEqual(['spec#1', 'implement#1', 'tests#1']);
-      expect(journaled).toEqual(['spec#1', 'implement#1', 'tests#1']);
-      const interrupted = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
-      expect(interrupted).toMatchObject({
-        key: 'implement#2',
-        outcome: 'error',
-        errors: [{ reason: 'exit_code', message: expect.stringMatching(/^interrupted, then /) }],
-      });
-      expect(existsSync(join(end.dir, '02-implement', 'call-2', 'stdout.log'))).toBe(true);
-      expect(stubExecutions(repo.dir)).toEqual(['spec#1', 'implement#1', 'tests#1', 'implement#2']);
+test('an abort stops the running call, leaves it unjournaled, and suspends the run', async () => {
+  await withTempRepo(async (repo) => {
+    const journaled: string[] = [];
+    const { end, alive } = await interruptedIn(repo.dir, { onCall: (entry) => journaled.push(entry.key) });
+    expect(end).toMatchObject({
+      status: 'suspended',
+      stopReason: 'interrupted',
+      message: 'stopped during implement#2',
     });
-  }, 20_000);
-
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an abort before the first call suspends the run before anything runs', async () => {
-    await withTempRepo(async (repo) => {
-      writeStub(repo.dir);
-      const controller = new AbortController();
-      controller.abort();
-      const end = await ran(repo.dir, { signal: controller.signal });
-      expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped before spec#1' });
-      expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
-      expect(keys(end.dir)).toEqual([]);
-      expect(existsSync(join(end.dir, '01-spec'))).toBe(false);
-      expect(stubExecutions(repo.dir)).toEqual([]);
+    expect(alive).toEqual([]);
+    expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
+    expect(keys(end.dir)).toEqual(['spec#1', 'implement#1', 'tests#1']);
+    expect(journaled).toEqual(['spec#1', 'implement#1', 'tests#1']);
+    const interrupted = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
+    expect(interrupted).toMatchObject({
+      key: 'implement#2',
+      outcome: 'error',
+      errors: [{ reason: 'exit_code', message: expect.stringMatching(/^interrupted, then /) }],
     });
+    expect(existsSync(join(end.dir, '02-implement', 'call-2', 'stdout.log'))).toBe(true);
+    expect(stubExecutions(repo.dir)).toEqual(['spec#1', 'implement#1', 'tests#1', 'implement#2']);
   });
+}, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an abort does not hide a replay that ends the run', async () => {
-    await withTempRepo(async (repo) => {
-      const sail = writeStub(repo.dir);
-      edit(
-        sail,
-        WORKFLOW,
-        '  const s = await run.stage(spec);',
-        "  if (run.input === undefined) return run.fail('no ticket given');\n  const s = await run.stage(spec);",
-      );
-      const controller = new AbortController();
-      controller.abort();
-      const end = await ran(repo.dir, { signal: controller.signal });
-      expect(end).toEqual({
-        runId: end.runId,
-        dir: end.dir,
-        status: 'failed',
-        stopReason: 'workflow_failed',
-        message: 'no ticket given',
-      });
-      expect(readStatus(end.dir)).toEqual({ status: 'failed', stopReason: 'workflow_failed' });
-    });
+test('an abort before the first call suspends the run before anything runs', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const controller = new AbortController();
+    controller.abort();
+    const end = await ran(repo.dir, { signal: controller.signal });
+    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped before spec#1' });
+    expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
+    expect(keys(end.dir)).toEqual([]);
+    expect(existsSync(join(end.dir, '01-spec'))).toBe(false);
+    expect(stubExecutions(repo.dir)).toEqual([]);
   });
+});
+
+test('an abort does not hide a replay that ends the run', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(
+      sail,
+      WORKFLOW,
+      '  const s = await run.stage(spec);',
+      "  if (run.input === undefined) return run.fail('no ticket given');\n  const s = await run.stage(spec);",
+    );
+    const controller = new AbortController();
+    controller.abort();
+    const end = await ran(repo.dir, { signal: controller.signal });
+    expect(end).toEqual({
+      runId: end.runId,
+      dir: end.dir,
+      status: 'failed',
+      stopReason: 'workflow_failed',
+      message: 'no ticket given',
+    });
+    expect(readStatus(end.dir)).toEqual({ status: 'failed', stopReason: 'workflow_failed' });
+  });
+});
 
 // biome-ignore format: TDD-PENDING TASK-005
 test
