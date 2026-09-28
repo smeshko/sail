@@ -105,6 +105,19 @@ function unlessAborted(replaying: Promise<ReplayEnd>, signal: AbortSignal | unde
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/**
+ * A completed run's `result` for `run:end`, or a `message` saying why it's left out. A workflow may return anything,
+ * and a result JSON can't hold, like a BigInt or a cyclic object, would make `run:end` itself unwritable.
+ */
+function resultOf(result: unknown): { result: unknown } | { message: string } {
+  try {
+    JSON.stringify(result);
+    return { result };
+  } catch (error) {
+    return { message: `the workflow's result can't be written as JSON: ${messageOf(error)}` };
+  }
+}
+
 /** Opens a run of the workflow and runs it to its end. A refusal to open passes through, and nothing is written. */
 export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd | { refused: string }> {
   const opened = await openRun(options);
@@ -144,7 +157,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       status,
       ...(stopReason === undefined ? {} : { stopReason }),
       ...(message === undefined ? {} : { message }),
-      ...(status === 'completed' ? { result: end.result } : {}),
+      ...(status === 'completed' ? resultOf(end.result) : {}),
       replays,
     });
     ended = true;
