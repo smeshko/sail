@@ -15,12 +15,9 @@ function typeEnum(schema: unknown): unknown {
   return undefined;
 }
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("EVENT_TYPES is sail.event.v1's type enum, error:consumer included", async () => {
-    const schema = await Bun.file(join(import.meta.dir, '..', '..', 'schemas', 'sail.event.v1.json')).json();
-    expect(typeEnum(schema)).toEqual([...EVENT_TYPES]);
-    expect(EVENT_TYPES).toHaveLength(51);
-    expect(EVENT_TYPES.indexOf('error:consumer')).toBe(EVENT_TYPES.indexOf('error:crash') + 1);
-  });
+test("EVENT_TYPES is sail.event.v1's type enum, error:consumer included", async () => {
+  const schema = await Bun.file(join(import.meta.dir, '..', '..', 'schemas', 'sail.event.v1.json')).json();
+  expect(typeEnum(schema)).toEqual([...EVENT_TYPES]);
+  expect(EVENT_TYPES).toHaveLength(51);
+  expect(EVENT_TYPES.indexOf('error:consumer')).toBe(EVENT_TYPES.indexOf('error:crash') + 1);
+});

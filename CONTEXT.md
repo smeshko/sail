@@ -261,7 +261,7 @@ _Avoid_: output (the typed value alone), record, report
 ### Observability
 
 **Event**:
-One line in a run's event stream: a stage starting, an agent message, a tool call, a denial, a usage update, a file produced, an error. Each carries the key it belongs to.
+One line in a run's event stream, numbered by `seq` without a gap: a call starting, a script exiting, a file produced, a loop's iteration, a route, an error. Call-level events carry the key they belong to.
 _Avoid_: log line, trace, telemetry, message
 
 **Event stream**:
@@ -269,8 +269,12 @@ The ordered events of one run, written to `events.ndjson` and handed to every co
 _Avoid_: log, feed, bus (the bus is the mechanism)
 
 **Consumer**:
-Something that receives the event stream and does one thing with it: write the events file, render the terminal view, keep the summary, and feed the dashboard. Consumers are an extension point.
+Something that receives the event stream and does one thing with it: write the events file, render the terminal view, keep the summary. A consumer that throws is reported as an `error:consumer` event and keeps receiving events. The dashboard reads the files consumers write; it isn't one.
 _Avoid_: listener, sink, subscriber, reporter
+
+**Route**:
+The move a workflow made after a call: the outcome it received and what it did next, another call, its end or `run.fail()`. sail infers it from the calls the workflow asks for, since routing is the workflow's own code.
+_Avoid_: branch, transition, edge
 
 **Summary**:
 The rolled-up view of a run derived from its events: calls, loops, totals, and cost against budget. It is rewritten after every call for people and dashboards and never read for resume.

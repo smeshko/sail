@@ -308,31 +308,25 @@ const CALL_LEVEL = new Set([
 
 const stamped = (sample: NewEvent): Record<string, unknown> => ({ ...envelope, ...sample });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each(CLOSED.map((sample) => [sample.type, sample] as const))(
-    '%s accepts its payload, and rejects a field it does not declare',
-    (_, sample) => {
-      expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
-      expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
-        { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
-      ]);
-    },
-  );
+test.each(CLOSED.map((sample) => [sample.type, sample] as const))(
+  '%s accepts its payload, and rejects a field it does not declare',
+  (_, sample) => {
+    expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
+    expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
+      { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+    ]);
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) => [sample.type, sample] as const))(
-    '%s requires the key of its call',
-    (_, sample) => {
-      expect(CALL_LEVEL.size).toBe(15);
-      expect(validateDocument('sail.event.v1', omit(stamped(sample), 'key'))).toEqual([
-        { schema: 'sail.event.v1', path: '/key', message: 'is required' },
-      ]);
-    },
-  );
+test.each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) => [sample.type, sample] as const))(
+  '%s requires the key of its call',
+  (_, sample) => {
+    expect(CALL_LEVEL.size).toBe(15);
+    expect(validateDocument('sail.event.v1', omit(stamped(sample), 'key'))).toEqual([
+      { schema: 'sail.event.v1', path: '/key', message: 'is required' },
+    ]);
+  },
+);
 
 test('summary: a stop reason is required when failed or suspended, and forbidden otherwise', () => {
   expect(validateDocument('sail.summary.v1', { ...summary, status: 'failed' })).toEqual([
@@ -453,15 +447,12 @@ test('validateRunDir skips blank lines and absent optional files, and walks only
   expect(validateRunDir(dir)).toEqual({ counts: { 'sail.run.v1': 1, 'sail.event.v1': 1 }, issues: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir reports an events file whose seq skips a number', () => {
-    const gap = { ...validRunDir(), 'events.ndjson': ndjson(event, { ...runEnd, seq: 3 }) };
-    expect(validateRunDir(tempDir(gap)).issues.map(formatIssue)).toEqual([
-      'events.ndjson:2  [sail.event.v1]  /seq must be 2, its place in the events file',
-    ]);
-  });
+test('validateRunDir reports an events file whose seq skips a number', () => {
+  const gap = { ...validRunDir(), 'events.ndjson': ndjson(event, { ...runEnd, seq: 3 }) };
+  expect(validateRunDir(tempDir(gap)).issues.map(formatIssue)).toEqual([
+    'events.ndjson:2  [sail.event.v1]  /seq must be 2, its place in the events file',
+  ]);
+});
 
 test('validateRunDir reports a missing run.json', () => {
   const files = validRunDir();
