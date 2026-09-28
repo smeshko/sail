@@ -36,7 +36,8 @@ export function stageDirName(index: number, stage: string): string {
   return `${String(index).padStart(2, '0')}-${stage}`;
 }
 
-export function callPaths(runDir: string, index: number, stage: string, call: number): CallPaths {
+// biome-ignore lint/correctness/noUnusedFunctionParameters: a stub until TASK-002 reads the try
+export function callPaths(runDir: string, index: number, stage: string, call: number, tryNumber = 1): CallPaths {
   if (!Number.isInteger(call) || call < 1) throw new Error(`call must be a whole number ≥ 1: ${call}`);
   const dir = join(runDir, stageDirName(index, stage), `call-${call}`);
   return {
@@ -46,6 +47,12 @@ export function callPaths(runDir: string, index: number, stage: string, call: nu
     stderr: join(dir, 'stderr.log'),
     result: join(dir, 'result.json'),
   };
+}
+
+/** The try a call runs as next: 1 when `call-N/` doesn't exist, else one more than its highest try. */
+// biome-ignore lint/correctness/noUnusedFunctionParameters: a stub until TASK-002 numbers tries
+export function nextTry(runDir: string, index: number, stage: string, call: number): number {
+  return 0;
 }
 
 /** Creates the call directory and `$STAGE_IN`. A call directory is written once, so an existing one throws. */

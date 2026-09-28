@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { readConfig } from './config';
 import { createJournal } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
-import { createRunDir, LOCAL_SOURCE, type Source, writeStatus } from './run-dir';
+import { createRunDir, LOCAL_SOURCE, type RunStatus, type Source, writeStatus } from './run-dir';
 import { assertRunHeader, buildRunHeader, type RunHeader, writeRunHeader } from './run-header';
 import { newRunId } from './run-id';
 import { findSailDir } from './sail-dir';
@@ -91,4 +91,29 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   createJournal(dir);
   writeStatus(dir, 'running');
   return { runId, dir, header, sailDir: found.dir, loaded, input };
+}
+
+export interface ReopenRunOptions {
+  /** Where the run is resumed from: `.sail/` is found from here up to the git root, and the run beside it. */
+  cwd: string;
+  /** The run's id, its directory under `.sail-runs/`. */
+  runId: string;
+  /** The run's input, checked against the intake's schema as on a fresh start. */
+  input?: unknown;
+}
+
+/**
+ * Finds run `runId` beside `sailDir`, with its header and STATUS. A run that has completed or failed is refused, and so
+ * is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
+ */
+export function findRun(
+  sailDir: string,
+  runId: string,
+): { dir: string; header: RunHeader; status: RunStatus } | { refused: string } {
+  return { refused: `findRun is a stub: ${sailDir} ${runId}` };
+}
+
+/** Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. */
+export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
+  return { refused: `reopenRun is a stub: ${options.runId}` };
 }

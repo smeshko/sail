@@ -9,7 +9,7 @@ import { dirname, join } from 'node:path';
 import { callProblems, runCall } from './call';
 import { type CallPaths, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
-import { type OpenRunOptions, openRun } from './open-run';
+import { type OpenRunOptions, openRun, type ReopenRunOptions } from './open-run';
 import { replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
 
@@ -17,15 +17,24 @@ import { type StopReason, writeStatus } from './run-dir';
 export interface RunEnd {
   runId: string;
   dir: string;
-  status: 'completed' | 'failed';
+  status: 'completed' | 'failed' | 'suspended';
   stopReason?: StopReason;
-  /** Why a failed run stopped, for people. */
+  /** Why a failed or suspended run stopped, for people. */
   message?: string;
   /** What the workflow returned, when it completed. */
   result?: unknown;
 }
 
 export interface RunWorkflowOptions extends OpenRunOptions {
+  /** Stops the running call when it aborts, and suspends the run. */
+  signal?: AbortSignal;
+  /** Called after each call is journaled. */
+  onCall?(entry: JournalEntry): void;
+}
+
+export interface ResumeWorkflowOptions extends ReopenRunOptions {
+  /** Stops the running call when it aborts, and suspends the run again. */
+  signal?: AbortSignal;
   /** Called after each call is journaled. */
   onCall?(entry: JournalEntry): void;
 }
@@ -51,6 +60,7 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
   const opened = await openRun(options);
   if ('refused' in opened) return opened;
   const { runId, dir, sailDir, loaded, input } = opened;
+  if (options.signal?.aborted) return { runId, dir, status: 'suspended', stopReason: 'stopped', message: 'stub' };
   const failed = (stopReason: StopReason, message: string): RunEnd => {
     writeStatus(dir, 'failed', stopReason);
     return { runId, dir, status: 'failed', stopReason, message };
@@ -82,4 +92,9 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
     const journaled = appendJournal(dir, entryFrom(dir, result, paths));
     options.onCall?.(journaled);
   }
+}
+
+/** Reopens a suspended or crashed run and runs it to its end from its journal. A refusal passes through. */
+export async function resumeWorkflow(options: ResumeWorkflowOptions): Promise<RunEnd | { refused: string }> {
+  return { refused: `resumeWorkflow is a stub: ${options.runId}` };
 }
