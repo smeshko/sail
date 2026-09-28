@@ -692,6 +692,26 @@ test('an exception inside sail leaves error:crash as the last event, and still p
   });
 });
 
+test('a replay abandoned by an abort reports nothing after run:end, even once its workflow moves on', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    const moved = join(repo.dir, 'moved');
+    edit(
+      sail,
+      WORKFLOW,
+      "  if (s.outcome === 'failed') return run.fail('spec failed');",
+      `  if (s.outcome === 'failed') return run.fail('spec failed');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  (await import('node:fs')).writeFileSync(${JSON.stringify(moved)}, '');`,
+    );
+    const controller = new AbortController();
+    const end = await ran(repo.dir, { signal: controller.signal, onCall: () => controller.abort() });
+    expect(end).toMatchObject({ status: 'suspended', message: 'stopped during the replay' });
+    while (!existsSync(moved)) await Bun.sleep(10);
+    expect(outline(events(end.dir)).slice(-2)).toEqual(['journal:append spec#1', 'run:end']);
+  });
+});
+
 test('consumers passed in receive the events the file holds, in the same order', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
