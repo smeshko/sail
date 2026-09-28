@@ -201,3 +201,37 @@ test('an event emitted during delivery waits until every consumer has the one be
     'b error:consumer #3',
   ]);
 });
+
+test('emit never throws: not on a thrown value String() rejects, nor when unreported throws', () => {
+  const kept = keeper();
+  const odd: Consumer = {
+    name: 'odd',
+    onEvent() {
+      throw Object.create(null);
+    },
+  };
+  const bus = createBus({
+    runId: RUN_ID,
+    firstSeq: 1,
+    consumers: [odd, kept],
+    now,
+    unreported: () => {
+      throw new Error('stderr is gone');
+    },
+  });
+
+  expect(() => bus.emit(stageStart)).not.toThrow();
+  expect(kept.events[1]).toMatchObject({
+    seq: 2,
+    type: 'error:consumer',
+    consumer: 'odd',
+    message: "a thrown value String() can't convert",
+  });
+  expect(() => bus.emit(iteration)).not.toThrow();
+  expect(kept.events.map((event) => `${event.type} #${event.seq}`)).toEqual([
+    'stage:start #1',
+    'error:consumer #2',
+    'loop:iteration #3',
+    'error:consumer #4',
+  ]);
+});
