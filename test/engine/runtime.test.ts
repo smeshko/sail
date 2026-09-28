@@ -317,117 +317,104 @@ test('an abort does not hide a replay that ends the run', async () => {
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a resume runs the interrupted call again as its next try, and nothing journaled runs again', async () => {
-    await withTempRepo(async (repo) => {
-      const runId = await interruptedCopy(repo.dir);
-      const dir = join(repo.dir, '.sail-runs', runId);
-      const header = sha256(join(dir, RUN_HEADER_FILE));
-      const end = await resumeWorkflow({ cwd: repo.dir, runId });
-      expect(end).toMatchObject({ runId, dir, status: 'completed' });
-      expect(keys(dir)).toEqual(ALL_KEYS);
-      expect(stubExecutions(repo.dir)).toEqual([
-        'spec#1',
-        'implement#1',
-        'tests#1',
-        'implement#2',
-        'implement#2',
-        'tests#2',
-        'self-review#1',
-        'publish#1',
-      ]);
-      expect(readJournal(dir).entries[3]?.resultPath).toBe('02-implement/call-2/try-2/result.json');
-      const tryTwo = JSON.parse(readFileSync(join(dir, '02-implement', 'call-2', 'try-2', 'result.json'), 'utf8'));
-      expect(tryTwo.env.TRY).toBe('2');
-      expect(existsSync(join(dir, '02-implement', 'call-2', 'stdout.log'))).toBe(true);
-      expect(readStatus(dir)).toEqual({ status: 'completed' });
-      expect(validateRunDir(dir).issues).toEqual([]);
-      expect(sha256(join(dir, RUN_HEADER_FILE))).toBe(header);
-    });
-  }, 30_000);
-
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and nothing runs', async () => {
-    await withTempRepo(async (repo) => {
-      const runId = await interruptedCopy(repo.dir);
-      swapImplementAndTests(join(repo.dir, '.sail'));
-      const end = await resumeWorkflow({ cwd: repo.dir, runId });
-      expect(end).toMatchObject({
-        runId,
-        status: 'failed',
-        stopReason: 'determinism_violation',
-        message: "the workflow asked for 'tests#1' where the journal has 'implement#1'",
-      });
-      expect(stubExecutions(repo.dir)).toEqual(['spec#1', 'implement#1', 'tests#1', 'implement#2']);
-      const dir = join(repo.dir, '.sail-runs', runId);
-      expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'determinism_violation' });
-    });
-  }, 30_000);
-
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a run left running, as after a crash, resumes', async () => {
-    await withTempRepo(async (repo) => {
-      const runId = await interruptedCopy(repo.dir);
-      const dir = join(repo.dir, '.sail-runs', runId);
-      writeFileSync(join(dir, 'STATUS'), 'running\n');
-      const end = await resumeWorkflow({ cwd: repo.dir, runId });
-      expect(end).toMatchObject({ runId, status: 'completed' });
-      expect(keys(dir)).toEqual(ALL_KEYS);
-    });
-  }, 30_000);
-
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a refused resume passes through, and neither STATUS nor the journal changes', async () => {
-    await withTempRepo(async (repo) => {
-      const runId = await withTempRepo(async (from) => {
-        writeStub(from.dir, { testsPassAt: 1 });
-        const { runId } = await ran(from.dir);
-        copyRun(from.dir, repo.dir);
-        return runId;
-      });
-      const dir = join(repo.dir, '.sail-runs', runId);
-      const before = [readFileSync(join(dir, 'STATUS'), 'utf8'), readFileSync(join(dir, 'journal.ndjson'), 'utf8')];
-      const ranBefore = stubExecutions(repo.dir);
-      expect(await resumeWorkflow({ cwd: repo.dir, runId })).toEqual({
-        refused: `run ${runId} has completed: there is nothing to resume`,
-      });
-      expect([readFileSync(join(dir, 'STATUS'), 'utf8'), readFileSync(join(dir, 'journal.ndjson'), 'utf8')]).toEqual(
-        before,
-      );
-      expect(stubExecutions(repo.dir)).toEqual(ranBefore);
-    });
+test('a resume runs the interrupted call again as its next try, and nothing journaled runs again', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const header = sha256(join(dir, RUN_HEADER_FILE));
+    const end = await resumeWorkflow({ cwd: repo.dir, runId });
+    expect(end).toMatchObject({ runId, dir, status: 'completed' });
+    expect(keys(dir)).toEqual(ALL_KEYS);
+    expect(stubExecutions(repo.dir)).toEqual([
+      'spec#1',
+      'implement#1',
+      'tests#1',
+      'implement#2',
+      'implement#2',
+      'tests#2',
+      'self-review#1',
+      'publish#1',
+    ]);
+    expect(readJournal(dir).entries[3]?.resultPath).toBe('02-implement/call-2/try-2/result.json');
+    const tryTwo = JSON.parse(readFileSync(join(dir, '02-implement', 'call-2', 'try-2', 'result.json'), 'utf8'));
+    expect(tryTwo.env.TRY).toBe('2');
+    expect(existsSync(join(dir, '02-implement', 'call-2', 'stdout.log'))).toBe(true);
+    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    expect(validateRunDir(dir).issues).toEqual([]);
+    expect(sha256(join(dir, RUN_HEADER_FILE))).toBe(header);
   });
+}, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('resuming from a .sail/ this process already ran from throws before it writes anything', async () => {
-    await withTempRepo(async (repo) => {
-      const { end } = await interruptedIn(repo.dir);
-      const status = readFileSync(join(end.dir, 'STATUS'), 'utf8');
-      await expect(resumeWorkflow({ cwd: repo.dir, runId: end.runId })).rejects.toThrow(
-        'already started in this process',
-      );
-      expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe(status);
+test('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and nothing runs', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    swapImplementAndTests(join(repo.dir, '.sail'));
+    const end = await resumeWorkflow({ cwd: repo.dir, runId });
+    expect(end).toMatchObject({
+      runId,
+      status: 'failed',
+      stopReason: 'determinism_violation',
+      message: "the workflow asked for 'tests#1' where the journal has 'implement#1'",
     });
-  }, 20_000);
+    expect(stubExecutions(repo.dir)).toEqual(['spec#1', 'implement#1', 'tests#1', 'implement#2']);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'determinism_violation' });
+  });
+}, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the input given again on resume is run.input', async () => {
-    await withTempRepo(async (repo) => {
-      const runId = await interruptedCopy(repo.dir, { input: INPUT });
-      edit(join(repo.dir, '.sail'), WORKFLOW, "  return run.stage(publish, { spec: s.files['spec.md'] });", '  return run.input;');
-      const end = await resumeWorkflow({ cwd: repo.dir, runId, input: INPUT });
-      expect(end).toEqual({ runId, dir: join(repo.dir, '.sail-runs', runId), status: 'completed', result: INPUT });
+test('a run left running, as after a crash, resumes', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    writeFileSync(join(dir, 'STATUS'), 'running\n');
+    const end = await resumeWorkflow({ cwd: repo.dir, runId });
+    expect(end).toMatchObject({ runId, status: 'completed' });
+    expect(keys(dir)).toEqual(ALL_KEYS);
+  });
+}, 30_000);
+
+test('a refused resume passes through, and neither STATUS nor the journal changes', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeStub(from.dir, { testsPassAt: 1 });
+      const { runId } = await ran(from.dir);
+      copyRun(from.dir, repo.dir);
+      return runId;
     });
-  }, 30_000);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const before = [readFileSync(join(dir, 'STATUS'), 'utf8'), readFileSync(join(dir, 'journal.ndjson'), 'utf8')];
+    const ranBefore = stubExecutions(repo.dir);
+    expect(await resumeWorkflow({ cwd: repo.dir, runId })).toEqual({
+      refused: `run ${runId} has completed: there is nothing to resume`,
+    });
+    expect([readFileSync(join(dir, 'STATUS'), 'utf8'), readFileSync(join(dir, 'journal.ndjson'), 'utf8')]).toEqual(
+      before,
+    );
+    expect(stubExecutions(repo.dir)).toEqual(ranBefore);
+  });
+});
+
+test('resuming from a .sail/ this process already ran from throws before it writes anything', async () => {
+  await withTempRepo(async (repo) => {
+    const { end } = await interruptedIn(repo.dir);
+    const status = readFileSync(join(end.dir, 'STATUS'), 'utf8');
+    await expect(resumeWorkflow({ cwd: repo.dir, runId: end.runId })).rejects.toThrow(
+      'already started in this process',
+    );
+    expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe(status);
+  });
+}, 20_000);
+
+test('the input given again on resume is run.input', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir, { input: INPUT });
+    edit(
+      join(repo.dir, '.sail'),
+      WORKFLOW,
+      "  return run.stage(publish, { spec: s.files['spec.md'] });",
+      '  return run.input;',
+    );
+    const end = await resumeWorkflow({ cwd: repo.dir, runId, input: INPUT });
+    expect(end).toEqual({ runId, dir: join(repo.dir, '.sail-runs', runId), status: 'completed', result: INPUT });
+  });
+}, 30_000);

@@ -1,7 +1,7 @@
 // Runs a workflow to its end: open the run, then loop. Each turn replays the workflow against the journal, runs the call
-// the replay stopped at, and journals it, until a replay ends the run and STATUS records how. Start and continue are
-// this one loop, and phase 3.3's resume enters it with an existing run directory. Until runs get a workspace of their
-// own, scripts run in the directory that holds `.sail/`.
+// the replay stopped at, and journals it, until a replay ends the run and STATUS records how. Start, continue and resume
+// are this one loop: a resume enters it with an existing run directory. Until runs get a workspace of their own,
+// scripts run in the directory that holds `.sail/`.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try.
@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
-import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions } from './open-run';
+import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
 import { replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
 
@@ -122,5 +122,7 @@ async function drive(opened: OpenedRun, options: DriveOptions): Promise<RunEnd> 
 
 /** Reopens a suspended or crashed run and runs it to its end from its journal. A refusal passes through. */
 export async function resumeWorkflow(options: ResumeWorkflowOptions): Promise<RunEnd | { refused: string }> {
-  return { refused: `resumeWorkflow is a stub: ${options.runId}` };
+  const opened = await reopenRun(options);
+  if ('refused' in opened) return opened;
+  return drive(opened, options);
 }
