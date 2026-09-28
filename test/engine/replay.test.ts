@@ -627,6 +627,28 @@ test("break reports the loop's exit at the workflow's next move, before its rout
   checkStamped(events);
 });
 
+test('leaving nested loops at once reports each exit, inner first, before the route', async () => {
+  const events = await reported(
+    async (run) => {
+      await run.stage(a);
+      for (const _outer of run.loop('outer', { max: 2 })) {
+        for (const _inner of run.loop('inner', { max: 2 })) {
+          await run.stage(tests);
+          break;
+        }
+        return 'done';
+      }
+    },
+    [entry('a#1', 'passed'), entry('tests#1', 'passed')],
+  );
+  expect(events).toEqual([
+    { type: 'loop:exit', loop: 'inner', iterations: 1, max: 2, reason: 'break' },
+    { type: 'loop:exit', loop: 'outer', iterations: 1, max: 2, reason: 'break' },
+    { type: 'workflow:route', at: 'tests#1', value: 'passed', took: 'end' },
+  ]);
+  checkStamped(events);
+});
+
 test('a throw out of a loop body is not an exit', async () => {
   const { events, emit } = collect();
   const end = await replayed(
