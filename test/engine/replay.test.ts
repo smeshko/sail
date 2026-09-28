@@ -201,6 +201,26 @@ test('a workflow that returns once every call is journaled completes with its va
   expect(end).toEqual({ kind: 'completed', result: { summary: true } });
 });
 
+test('run.input and a journaled output are frozen, so a workflow that changes either fails the run', async () => {
+  const input = { ticketKey: 'FAKE-1', title: 'a ticket', url: 'fake://tickets/FAKE-1', acceptanceCriteria: ['one'] };
+  const flow = workflow('flow', { intake: ticket }, async (run) => {
+    run.input.acceptanceCriteria.push('two');
+  });
+  const changesInput = await replay({ workflow: flow as never, stages: STAGES, entries: [], runDir: RUN_DIR, input });
+  const threw = failed('workflow_failed', expect.stringMatching(/^workflow threw: /));
+  expect(changesInput).toEqual(threw);
+  expect(input.acceptanceCriteria).toEqual(['one']);
+
+  const changesOutput = await replayed(
+    async (run) => {
+      const result = await run.stage(a);
+      (result.output as { ok: boolean }).ok = false;
+    },
+    [entry('a#1', 'passed')],
+  );
+  expect(changesOutput).toEqual(threw);
+});
+
 test('run.fail() ends the replay, even when the workflow catches it and asks for another call', async () => {
   let after = false;
   const end = await replayed(async (run) => {
@@ -370,6 +390,7 @@ test("a failed pass hands its parsed feedback to the next pass, which binds it a
   }, entries);
 
   expect(previous).toEqual([undefined, { ok: false }]);
+  expect(Object.isFrozen(previous[1])).toBe(true);
   expect(end).toMatchObject({
     kind: 'call',
     call: {

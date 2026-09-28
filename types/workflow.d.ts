@@ -41,12 +41,14 @@ export type ProducedFiles<F extends PropertyKey> = {
 /** A script's result, or a stage's that ends in a script step: `passed` or `failed`, each with output and files. */
 export interface ScriptResult<O, F extends PropertyKey> {
     readonly outcome: 'passed' | 'failed';
+    /** Frozen, as the call's `result.json` holds it. */
     readonly output: O;
     readonly files: ProducedFiles<F>;
 }
 /** An agent that finished: its output and files. */
 export interface DoneResult<O, F extends PropertyKey> {
     readonly outcome: 'done';
+    /** Frozen, as the call's `result.json` holds it. */
     readonly output: O;
     readonly files: ProducedFiles<F>;
 }
@@ -88,7 +90,7 @@ export interface LoopOptions {
     readonly max: number;
 }
 export interface Run<I extends z.ZodType = z.ZodType, P extends Produces = Produces> {
-    /** The typed value the intake built. */
+    /** The typed value the intake built. It is frozen: every replay reads the same value, so changing it throws. */
     readonly input: z.infer<I>;
     /** What the intake left: its files, by name. */
     readonly intake: {

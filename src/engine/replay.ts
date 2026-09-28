@@ -85,11 +85,25 @@ const isObject = (value: unknown): value is object =>
   (typeof value === 'object' && value !== null) || typeof value === 'function';
 
 /**
+ * Freezes `value` and everything it holds, and returns it. `run.input` is one object every replay reads, so a change
+ * one replay made would reach the next, and an output the workflow changed would still claim its `result.json` in
+ * `consumed`. Frozen, a change throws, and the run fails. A frozen object is taken as frozen all the way down.
+ */
+function deepFreeze<T>(value: T): T {
+  if (isObject(value) && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const each of Object.values(value)) deepFreeze(each);
+  }
+  return value;
+}
+
+/**
  * Runs the workflow once against `entries`, and resolves with how the replay ended as soon as the end is recorded. The
  * workflow's own promise may never settle. An exception inside sail's `run` methods rejects instead.
  */
 export function replay(options: ReplayOptions): Promise<ReplayEnd> {
-  const { workflow, stages, entries, runDir, input } = options;
+  const { workflow, stages, entries, runDir } = options;
+  const input = deepFreeze(options.input);
   if (!process.listeners('unhandledRejection').includes(dropStrayHalt)) process.on('unhandledRejection', dropStrayHalt);
   return new Promise<ReplayEnd>((resolve, reject) => {
     let ended = false;
@@ -144,7 +158,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
             files.set(handle, path);
             produced.set(name, handle);
           }
-          if (isObject(entry.output)) pointers.set(entry.output, `${entry.resultPath}#/output`);
+          if (isObject(entry.output)) pointers.set(deepFreeze(entry.output), `${entry.resultPath}#/output`);
           return Promise.resolve({ outcome: entry.outcome, output: entry.output, files: Object.fromEntries(produced) });
         }
       }
@@ -252,9 +266,10 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
           }
           value = parsed.data;
         }
-        // Parsing makes a new object, so the parsed feedback carries the pointer of the output it came from.
+        // Parsing makes a new object, so the parsed feedback carries the pointer of the output it came from, frozen
+        // like that output.
         const pointer = isObject(feedback) ? pointers.get(feedback) : undefined;
-        if (pointer !== undefined && isObject(value)) pointers.set(value, pointer);
+        if (pointer !== undefined && isObject(value)) pointers.set(deepFreeze(value), pointer);
         pending = { value };
       });
 
