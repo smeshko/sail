@@ -626,6 +626,20 @@ test('a torn tail is cut before a resume, and seq continues from the last comple
   });
 }, 30_000);
 
+test('a resume refused for its input leaves a torn tail as it was', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    appendFileSync(join(dir, 'events.ndjson'), '{"seq":99,"ts":"2026-09-28T');
+    const before = eventsText(dir);
+
+    expect(await resumeWorkflow({ cwd: repo.dir, runId, input: { ticketKey: 5 } })).toEqual({
+      refused: expect.stringMatching(/^the input doesn't match intake 'ticket'/),
+    });
+    expect(eventsText(dir)).toBe(before);
+  });
+}, 30_000);
+
 test("an events file whose last line can't be read refuses the resume, and leaves STATUS as it was", async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);

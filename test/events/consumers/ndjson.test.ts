@@ -109,3 +109,13 @@ test.each<[string, string]>([
   });
   expect(contents(dir)).toBe(before);
 });
+
+test("nextSeq refuses before it cuts: a torn tail after a line it can't read stays", () => {
+  const dir = runDir();
+  writeFileSync(join(dir, 'events.ndjson'), `${lines(1, 2)}{ not json\n${JSON.stringify(event(4)).slice(0, 40)}`);
+  const before = contents(dir);
+  expect(nextSeq(dir)).toEqual({
+    refused: expect.stringMatching(/^events\.ndjson:3 can't be read, so the events can't continue: ./),
+  });
+  expect(contents(dir)).toBe(before);
+});
