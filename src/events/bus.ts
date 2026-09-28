@@ -24,7 +24,14 @@ export interface EventBus {
   emit(event: NewEvent): SailEvent;
 }
 
-const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** A thrown value's message. Anything can be thrown, including a value `String()` rejects, like `Object.create(null)`. */
+function messageOf(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "a thrown value String() can't convert";
+  }
+}
 
 function writeToStderr(error: unknown, consumer: Consumer, event: SailEvent): void {
   process.stderr.write(`sail: consumer ${consumer.name} failed on ${event.type} #${event.seq}: ${messageOf(error)}\n`);
@@ -58,8 +65,13 @@ export function createBus(options: BusOptions): EventBus {
       }
     }
     for (const { consumer, error } of failures) {
-      if (stamped.type === 'error:consumer') unreported(error, consumer, stamped);
-      else
+      if (stamped.type === 'error:consumer') {
+        try {
+          unreported(error, consumer, stamped);
+        } catch {
+          // The last resort failed too, and nothing is left to tell. `emit` still doesn't throw.
+        }
+      } else
         emit({
           type: 'error:consumer',
           consumer: consumer.name,
