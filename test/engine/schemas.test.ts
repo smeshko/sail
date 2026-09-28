@@ -328,6 +328,36 @@ test.each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) =>
   },
 );
 
+test('event: a stop reason, errors and a signal each appear exactly when D5 says', () => {
+  const issue = (path: string, message: string) => [{ schema: 'sail.event.v1' as const, path, message }];
+  const check = (sample: NewEvent) => validateDocument('sail.event.v1', stamped(sample));
+  const end = { type: 'run:end', replays: 1 } as const;
+  expect(check({ ...end, status: 'completed', stopReason: 'stopped' })).toEqual(issue('/stopReason', 'is not allowed'));
+  expect(check({ ...end, status: 'failed' })).toEqual(issue('/stopReason', 'is required'));
+  expect(check({ ...end, status: 'suspended' })).toEqual(issue('/stopReason', 'is required'));
+  expect(check({ ...end, status: 'suspended', stopReason: 'interrupted', message: 'stopped during tests#1' })).toEqual(
+    [],
+  );
+
+  const stageEnd = {
+    type: 'stage:end',
+    key: KEY,
+    stage: 'tests',
+    call: 1,
+    try: 1,
+    durationMs: 12,
+    resultPath: '03-tests/call-1/result.json',
+  } as const;
+  const errors = [{ reason: 'timeout', message: 'timed out after 1s' }] as const;
+  expect(check({ ...stageEnd, outcome: 'error' })).toEqual(issue('/errors', 'is required'));
+  expect(check({ ...stageEnd, outcome: 'passed', errors: [...errors] })).toEqual(issue('/errors', 'is not allowed'));
+  expect(check({ ...stageEnd, outcome: 'failed' })).toEqual([]);
+
+  const exit = { type: 'script:exit', key: KEY, durationMs: 5, stdoutBytes: 0 } as const;
+  expect(check({ ...exit, code: null })).toEqual(issue('/signal', 'is required'));
+  expect(check({ ...exit, code: 1, outcome: 'failed' })).toEqual([]);
+});
+
 test('summary: a stop reason is required when failed or suspended, and forbidden otherwise', () => {
   expect(validateDocument('sail.summary.v1', { ...summary, status: 'failed' })).toEqual([
     { schema: 'sail.summary.v1', path: '/stopReason', message: 'is required' },
