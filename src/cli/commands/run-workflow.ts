@@ -1,16 +1,39 @@
 // `sail run [--workflow <name>] [--input <json>]`: runs a workflow of the repository sail is run from, to its end. The
 // workflow is type-checked first, so a wrongly wired stage never runs. Every refusal comes before the run directory
 // exists. This module parses, prints and maps the run's status to an exit code; the run is the engine's.
+//
+// Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
+// resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
 import { join, relative } from 'node:path';
 import { readConfig } from '../../engine/config';
+import type { JournalEntry } from '../../engine/journal';
 import { findWorkflowFile } from '../../engine/load-workflow';
-import { runWorkflow } from '../../engine/runtime';
+import { type RunEnd, runWorkflow } from '../../engine/runtime';
 import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
 import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
+
+/** Prints each journaled call as `<key> <outcome>`. */
+export function printCall(io: Io): (entry: JournalEntry) => void {
+  return (entry) => io.stdout(`${entry.key} ${entry.outcome}\n`);
+}
+
+/**
+ * Prints how a run ended, `<run id> <status>[ <stop reason>: <message>]  <dir>`, and for a suspended run how to resume
+ * it, repeating `--input` quoted for a POSIX shell. Returns the status's exit code.
+ */
+export function printEnd(end: RunEnd, io: Io, rawInput: string | undefined): ExitCode {
+  const stopped = end.status === 'completed' ? '' : ` ${end.stopReason}: ${end.message}`;
+  io.stdout(`${end.runId} ${end.status}${stopped}  ${relative(io.cwd, end.dir) || '.'}\n`);
+  if (end.status === 'suspended') {
+    const input = rawInput === undefined ? '' : ` --input '${rawInput.replaceAll("'", "'\\''")}'`;
+    io.stdout(`resume it with: sail resume ${end.runId}${input}\n`);
+  }
+  return exitCodeFor(end.status);
+}
 
 export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode> {
   /** Every path the command prints goes through here, relative to where the user ran it. */
@@ -57,14 +80,20 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
     return refuse(`${count(errors, 'type error')} in ${at(workflowFile.file)}`);
   }
 
-  const end = await runWorkflow({
-    cwd: io.cwd,
-    workflow,
-    ...(input === undefined ? {} : { input }),
-    onCall: (entry) => io.stdout(`${entry.key} ${entry.outcome}\n`),
-  });
+  const controller = new AbortController();
+  const unregister = io.onInterrupt?.(() => controller.abort());
+  let end: Awaited<ReturnType<typeof runWorkflow>>;
+  try {
+    end = await runWorkflow({
+      cwd: io.cwd,
+      workflow,
+      ...(input === undefined ? {} : { input }),
+      signal: controller.signal,
+      onCall: printCall(io),
+    });
+  } finally {
+    unregister?.();
+  }
   if ('refused' in end) return refuse(end.refused);
-  const stopped = end.status === 'failed' ? ` ${end.stopReason}: ${end.message}` : '';
-  io.stdout(`${end.runId} ${end.status}${stopped}  ${at(end.dir)}\n`);
-  return exitCodeFor(end.status);
+  return printEnd(end, io, typeof given === 'string' ? given : undefined);
 }
