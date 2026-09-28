@@ -126,18 +126,17 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
     const files = new WeakMap<object, string>();
     /** Each output handed to the workflow, to its JSON pointer. */
     const pointers = new WeakMap<object, string>();
-    /** A loop's `break`, reported at the workflow's next move. */
-    let pendingExit: NewEvent | undefined;
+    /** The `break` of each loop left since the last move, innermost first, reported at the workflow's next move. */
+    const pendingExits: NewEvent[] = [];
 
     /** Every journaled call has been handed back, so the workflow's moves from here on are new. */
     const live = () => position === entries.length;
 
     function flush(): void {
-      if (pendingExit !== undefined) emit(pendingExit);
-      pendingExit = undefined;
+      for (const exit of pendingExits.splice(0)) emit(exit);
     }
 
-    /** Reports a move past the journal's end: the loop it left, then the route from the last journaled call. */
+    /** Reports a move past the journal's end: the loops it left, then the route from the last journaled call. */
     function move(took: string): void {
       flush();
       const last = entries[position - 1];
@@ -324,7 +323,8 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       // `for…of` calls this on `break`, on `return` and when an exception leaves the body. Only the workflow's next
       // move shows it left on purpose, so the exit waits for it.
       const close = guarded((): IteratorResult<Iteration<unknown>> => {
-        if (!ended && live()) pendingExit = { type: 'loop:exit', loop: name, iterations: passes, max, reason: 'break' };
+        if (!ended && live())
+          pendingExits.push({ type: 'loop:exit', loop: name, iterations: passes, max, reason: 'break' });
         return { done: true, value: undefined };
       });
 
