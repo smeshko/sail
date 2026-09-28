@@ -583,7 +583,7 @@ test
 // biome-ignore format: TDD-PENDING TASK-005
 test
   .skip // TDD-PENDING TASK-005
-  ("a pass after a failed one names the output its feedback came from, and the route records the failure", async () => {
+  ('a pass after a failed one names the output its feedback came from, and the route records the failure', async () => {
     const { events, emit } = collect();
     await replayed(fixLoop(), journalTo('tests#1'), emit);
     expect(events).toEqual([

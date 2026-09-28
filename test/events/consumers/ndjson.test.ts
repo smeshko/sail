@@ -120,7 +120,7 @@ test
   .each<[string, string]>([
     ['is not JSON', '{ not json'],
     ['has no whole seq', JSON.stringify({ ...event(3), seq: '3' })],
-  ])("nextSeq refuses a last line that %s, naming it, and leaves the file as it was", (_, last) => {
+  ])('nextSeq refuses a last line that %s, naming it, and leaves the file as it was', (_, last) => {
     const dir = runDir();
     writeFileSync(join(dir, 'events.ndjson'), lines(1, 2));
     appendFileSync(join(dir, 'events.ndjson'), `${last}\n`);
