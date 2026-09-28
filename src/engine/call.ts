@@ -14,6 +14,8 @@ export interface CallRequest {
   /** The stage's `NN` in the run directory. */
   stageIndex: number;
   call: number;
+  /** The call's try: 1, the default, unless an earlier try was interrupted. */
+  try?: number;
   definition: StageDefinition;
   /** The `stage.ts` that exported the definition: a script's `run` is relative to its directory. */
   stageFile: string;
@@ -38,7 +40,8 @@ export async function runCall(request: CallRequest): Promise<{ result: Record<st
   const problems = callProblems(definition, request.supplied);
   if (problems.length > 0 || definition.kind !== 'script') throw new Error(problems.join('\n'));
 
-  const paths = callPaths(runDir, request.stageIndex, definition.name, call);
+  const tryNumber = request.try ?? 1;
+  const paths = callPaths(runDir, request.stageIndex, definition.name, call, tryNumber);
   createCallDir(paths);
   const { inputs, consumed } = materialise(definition.consumes, request.supplied, paths.stageIn);
   const startedAt = new Date();
@@ -47,6 +50,7 @@ export async function runCall(request: CallRequest): Promise<{ result: Record<st
     runDir,
     stage: definition.name,
     call,
+    try: tryNumber,
     stageDir: dirname(request.stageFile),
     workspace: request.workspace,
     config: request.config,

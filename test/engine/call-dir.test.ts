@@ -1,11 +1,12 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   callPaths,
   createCallDir,
   isPlainName,
+  nextTry,
   RESERVED_NAMES,
   runRelative,
   stageDirName,
@@ -44,6 +45,32 @@ test("a call's paths sit in NN-<stage>/call-N/, with $STAGE_IN as in/ inside it"
 
 test.each([[0], [-1], [1.5]])('call %p is refused', (call) => {
   expect(() => callPaths('/r', 0, 'tests', call)).toThrow('call');
+});
+
+test("a later try's paths sit in call-N/try-M/, and try 1 is call-N/ itself", () => {
+  expect(callPaths('/r', 3, 'tests', 2, 1).dir).toBe('/r/03-tests/call-2');
+  expect(callPaths('/r', 3, 'tests', 2, 3)).toEqual({
+    dir: '/r/03-tests/call-2/try-3',
+    stageIn: '/r/03-tests/call-2/try-3/in',
+    stdout: '/r/03-tests/call-2/try-3/stdout.log',
+    stderr: '/r/03-tests/call-2/try-3/stderr.log',
+    result: '/r/03-tests/call-2/try-3/result.json',
+  });
+});
+
+test.each([[0], [-1], [1.5]])('try %p is refused', (tryNumber) => {
+  expect(() => callPaths('/r', 0, 'tests', 1, tryNumber)).toThrow(`try must be a whole number ≥ 1: ${tryNumber}`);
+});
+
+test("nextTry numbers a call's tries from what is on disk", () => {
+  const runDir = tempDir();
+  expect(nextTry(runDir, 3, 'tests', 1)).toBe(1);
+  mkdirSync(join(runDir, '03-tests', 'call-1', 'in'), { recursive: true });
+  expect(nextTry(runDir, 3, 'tests', 1)).toBe(2);
+  mkdirSync(join(runDir, '03-tests', 'call-1', 'try-2'));
+  mkdirSync(join(runDir, '03-tests', 'call-1', 'try-3'));
+  expect(nextTry(runDir, 3, 'tests', 1)).toBe(4);
+  expect(nextTry(runDir, 3, 'tests', 2)).toBe(1);
 });
 
 test('createCallDir creates the call directory and in/, and refuses to reuse one', () => {

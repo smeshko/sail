@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
+import { readJournal } from '../../src/engine/journal';
 import { edit } from '../helpers/fixture';
-import { writeStub } from '../helpers/stub-workflow';
+import { interruptWhenAsleep, stubExecutions, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
@@ -85,3 +86,54 @@ test("a run.fail() in a chain the workflow doesn't await, after the run has ende
     expect(result.exitCode).toBe(0);
   });
 });
+
+// A real signal through the shim: the test sends it to the spawned bin, never to its own process.
+test.each(['SIGINT', 'SIGTERM'] as const)(
+  '%s during sail run suspends the run, and sail resume runs it to its end',
+  async (signal) => {
+    await withTempRepo(async (repo) => {
+      writeStub(repo.dir, { sleepAt: 'implement#2' });
+      const sail = Bun.spawn([process.execPath, shim, 'run'], {
+        cwd: repo.dir,
+        env: repo.env,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const { end: code, alive } = await interruptWhenAsleep(repo.dir, sail.exited, () => sail.kill(signal));
+      const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
+      const dir = join(repo.dir, '.sail-runs', runId);
+      expect(await new Response(sail.stdout).text()).toEndWith(
+        `${runId} suspended interrupted: stopped during implement#2  .sail-runs/${runId}\n` +
+          `resume it with: sail resume ${runId}\n`,
+      );
+      expect(await new Response(sail.stderr).text()).toBe('');
+      expect(code).toBe(2);
+      expect(alive).toEqual([]);
+      expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
+
+      const resumed = Bun.spawnSync([process.execPath, shim, 'resume', runId], { cwd: repo.dir, env: repo.env });
+      expect(resumed.stdout.toString()).toEndWith(`${runId} completed  .sail-runs/${runId}\n`);
+      expect(resumed.exitCode).toBe(0);
+      expect(stubExecutions(repo.dir)).toEqual([
+        'spec#1',
+        'implement#1',
+        'tests#1',
+        'implement#2',
+        'implement#2',
+        'tests#2',
+        'self-review#1',
+        'publish#1',
+      ]);
+      expect(readJournal(dir).entries.map((entry) => entry.key)).toEqual([
+        'spec#1',
+        'implement#1',
+        'tests#1',
+        'implement#2',
+        'tests#2',
+        'self-review#1',
+        'publish#1',
+      ]);
+    });
+  },
+  60_000,
+);

@@ -39,7 +39,8 @@
         "determinism_violation",
         "until",
         "unwatched",
-        "stopped"
+        "stopped",
+        "interrupted"
       ]
     },
     "startedAt": { "$ref": "#/$defs/ts" },

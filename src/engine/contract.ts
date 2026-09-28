@@ -4,7 +4,7 @@ import { closeSync, lstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { Produces } from '../sdk/steps';
-import { isPlainName, RESERVED_NAMES, runRelative } from './call-dir';
+import { isPlainName, isTryName, RESERVED_NAMES, runRelative } from './call-dir';
 
 /** Why an outcome is `error`, as `sail.result.v1` names the reasons. */
 export type ErrorReason =
@@ -55,13 +55,14 @@ function sha256(path: string): string {
 
 /**
  * What is wrong with a step's `produces`, found before it runs. Later calls consume a file by its name, so each name is
- * a plain file name in `$STAGE_OUT`, and none is one the engine writes there.
+ * a plain file name in `$STAGE_OUT`, and none is one the engine writes there, or a later try's directory.
  */
 export function producesProblems(produces: Produces): string[] {
   const found: string[] = [];
   for (const name of Object.keys(produces)) {
     if (!isPlainName(name)) found.push(`'${name}' can't be produced: it is not a plain file name`);
     else if (RESERVED_NAMES.has(name)) found.push(`'${name}' can't be produced: the engine writes it in $STAGE_OUT`);
+    else if (isTryName(name)) found.push(`'${name}' can't be produced: the engine uses it for a later try`);
   }
   return found;
 }

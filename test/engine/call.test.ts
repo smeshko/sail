@@ -168,6 +168,26 @@ test("a stage with no bindings records the golden result's env keys, in the same
   });
 });
 
+test('a later try writes into call-N/try-M/, and its script sees TRY as M', async () => {
+  await withTempRepo(async (repo) => {
+    const s = tests(repo);
+    s.run(`echo "<testsuites/>" > "$STAGE_OUT/junit.xml"\nprintf '${REPORT}\\n' true 0`);
+    const plain = script('tests', { run: './run.sh', produces: { 'junit.xml': 'file' }, output: TestReport });
+    const { paths } = await runCall({ ...s.request(plain), try: 2 });
+    expect(paths.result).toBe(join(repo.dir, '.sail-runs', RUN_ID, '00-tests', 'call-1', 'try-2', 'result.json'));
+    expect(readBack(paths.result)).toMatchObject({
+      key: 'tests#1',
+      outcome: 'passed',
+      files: { 'junit.xml': { path: '00-tests/call-1/try-2/junit.xml' } },
+      env: {
+        TRY: '2',
+        STAGE_IN: `.sail-runs/${RUN_ID}/00-tests/call-1/try-2/in`,
+        STAGE_OUT: `.sail-runs/${RUN_ID}/00-tests/call-1/try-2`,
+      },
+    });
+  });
+});
+
 const budget = { maxTurns: 1, maxUsd: 1, maxMinutes: 1 };
 const permissions = { read: [], write: [], commands: [] };
 const spec = agent('spec', { prompt: './prompt.md', output: z.object({}), permissions, budget });

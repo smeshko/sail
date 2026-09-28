@@ -3,16 +3,21 @@
 // harness. Its tests fail until the call a threshold names, and every script logs `<stage>#<call>` to
 // `.stub/executions.log`, which proves what ran.
 //
+// `sleepAt` names a call that sleeps the first time it runs, until something stops its process group. The sleeping
+// script writes its own pid and its `sleep`'s to `.stub/sleeping`, so a test can interrupt it there and check that
+// neither process survives.
+//
 // A helper, not a committed fixture: the fixture repository's agent-based `ticket-to-pr` takes over end to end once
-// agents run on fakes, and what stays here are cheap edge cases a test sets up by editing its own copy. Phase 3.3 adds
-// a sleep to interrupt.
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// agents run on fakes, and what stays here are cheap edge cases a test sets up by editing its own copy.
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { write } from './fixture';
+import { edit, write } from './fixture';
 
 export interface StubOptions {
   /** The first call of `tests` that passes. Earlier calls fail. Defaults to 2. */
   testsPassAt?: number;
+  /** The key of the call that sleeps the first time it runs, such as `implement#2`, for a test to interrupt. */
+  sleepAt?: string;
 }
 
 const PROJECT = `# The stub repository's config: every port on its fake adapter.
@@ -29,12 +34,23 @@ models: { default: claude-sonnet-5, deep: claude-opus-5-5 }
 budgets: { run: { maxUsd: 25, maxMinutes: 90 } }
 `;
 
-/** A stub script: it logs the call it is, then runs `body`, whose last stdout line is the output. */
+/**
+ * A stub script: it logs the call it is, sleeps if `.stub/sleep-at` names it, then runs `body`, whose last stdout line is
+ * the output. The marker is removed before the sleep, so the call's next try runs through. `.stub/sleeping` is written
+ * whole, by a rename, so a poller never reads half of it.
+ */
 const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 # ${purpose}
 set -euo pipefail
 mkdir -p "$WORKSPACE/.stub"
 echo "$STAGE#$CALL" >>"$WORKSPACE/.stub/executions.log"
+if [ -f "$WORKSPACE/.stub/sleep-at" ] && [ "$(cat "$WORKSPACE/.stub/sleep-at")" = "$STAGE#$CALL" ]; then
+  rm "$WORKSPACE/.stub/sleep-at"
+  sleep 30 &
+  echo "$$ $!" >"$WORKSPACE/.stub/sleeping.tmp"
+  mv "$WORKSPACE/.stub/sleeping.tmp" "$WORKSPACE/.stub/sleeping"
+  wait
+fi
 ${body}`;
 
 const FILES: Record<string, string> = {
@@ -178,6 +194,23 @@ export default workflow('ticket-to-pr', { intake: ticket, version: 1 }, async (r
 `,
 };
 
+const IMPLEMENT_THEN_TESTS = `    const impl = await run.stage(implement, { spec: s.files['spec.md'], feedback: iteration.previous });
+    if (impl.outcome === 'failed') return run.fail('implement failed');
+    const t = await run.stage(tests);
+`;
+const TESTS_THEN_IMPLEMENT = `    const t = await run.stage(tests);
+    const impl = await run.stage(implement, { spec: s.files['spec.md'], feedback: iteration.previous });
+    if (impl.outcome === 'failed') return run.fail('implement failed');
+`;
+
+/**
+ * Moves the fix loop's tests call above its implement call in the stub's `.sail/`. The workflow still type-checks, but
+ * its keys no longer fit a journal that has `implement#1` second.
+ */
+export function swapImplementAndTests(sail: string): void {
+  edit(sail, 'workflows/ticket-to-pr/workflow.ts', IMPLEMENT_THEN_TESTS, TESTS_THEN_IMPLEMENT);
+}
+
 /** Writes the stub `.sail/` into `repoDir` and returns it. */
 export function writeStub(repoDir: string, options: StubOptions = {}): string {
   const sail = join(repoDir, '.sail');
@@ -190,7 +223,106 @@ export function writeStub(repoDir: string, options: StubOptions = {}): string {
     mkdirSync(join(repoDir, '.stub'), { recursive: true });
     writeFileSync(join(repoDir, '.stub', 'tests-pass-at'), `${options.testsPassAt}\n`);
   }
+  if (options.sleepAt !== undefined) setSleepAt(repoDir, options.sleepAt);
   return sail;
+}
+
+/** Makes the call `key` sleep the next time it runs, and clears the `.stub/sleeping` an earlier sleep left. */
+export function setSleepAt(repoDir: string, key: string): void {
+  mkdirSync(join(repoDir, '.stub'), { recursive: true });
+  writeFileSync(join(repoDir, '.stub', 'sleep-at'), `${key}\n`);
+  rmSync(join(repoDir, '.stub', 'sleeping'), { force: true });
+}
+
+/** The pids of the sleeping script and its `sleep`, from `<repo>/.stub/sleeping`, or undefined until it exists. */
+export function sleepingPids(repoDir: string): number[] | undefined {
+  const path = join(repoDir, '.stub', 'sleeping');
+  if (!existsSync(path)) return undefined;
+  return readFileSync(path, 'utf8').trim().split(' ').map(Number);
+}
+
+/** Waits for the call `sleepAt` names to fall asleep, and returns its pids. It throws, naming the file, after `timeoutMs`. */
+export async function whenSleeping(repoDir: string, timeoutMs = 10_000): Promise<number[]> {
+  const deadline = performance.now() + timeoutMs;
+  let pids = sleepingPids(repoDir);
+  while (pids === undefined) {
+    if (performance.now() > deadline) {
+      throw new Error(`${join(repoDir, '.stub', 'sleeping')} did not appear within ${timeoutMs} ms`);
+    }
+    await Bun.sleep(20);
+    pids = sleepingPids(repoDir);
+  }
+  return pids;
+}
+
+/** Whether a process with this pid exists: signal 0 checks without sending anything. */
+export function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+/** How long an interrupted run may take to end: the grace period between SIGTERM and SIGKILL. */
+const STOP_MS = 5_000;
+
+/**
+ * Interrupts `running` once the call `sleepAt` names is asleep, and returns what `running` resolves to with the pids of
+ * the sleeping processes still `alive` at that moment. If `running` ends before anything sleeps, nothing is interrupted.
+ * If it hasn't ended `STOP_MS` after the interrupt, the interrupt didn't stop it: the sleepers are killed so it can end,
+ * and all of them count as alive. Either way no sleeper outlives the call, so a failing test leaves none behind.
+ */
+export async function interruptWhenAsleep<T>(
+  repoDir: string,
+  running: Promise<T>,
+  interrupt: () => void,
+  timeoutMs = 10_000,
+): Promise<{ end: T; alive: number[] }> {
+  let ended = false;
+  const settled = running.then(
+    () => {
+      ended = true;
+    },
+    () => {
+      ended = true;
+    },
+  );
+  const deadline = performance.now() + timeoutMs;
+  let pids = sleepingPids(repoDir);
+  while (pids === undefined && !ended) {
+    if (performance.now() > deadline) {
+      throw new Error(`${join(repoDir, '.stub', 'sleeping')} did not appear within ${timeoutMs} ms`);
+    }
+    await Bun.sleep(20);
+    pids = sleepingPids(repoDir);
+  }
+  if (pids === undefined) return { end: await running, alive: [] };
+
+  interrupt();
+  const stopped = await Promise.race([settled.then(() => true), Bun.sleep(STOP_MS).then(() => false)]);
+  const alive = stopped ? pids.filter(isAlive) : pids;
+  for (const pid of alive) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  }
+  return { end: await running, alive };
+}
+
+/**
+ * Copies a repository's `.sail/`, `.sail-runs/` and, when it exists, `.stub/` into `to`, so a run can resume there: a
+ * fresh `.sail/` path gets a claim and modules of its own. Paths in a run directory are relative, so the copy resumes
+ * as the original would.
+ */
+export function copyRun(from: string, to: string): void {
+  for (const name of ['.sail', '.sail-runs', '.stub']) {
+    if (existsSync(join(from, name))) cpSync(join(from, name), join(to, name), { recursive: true });
+  }
 }
 
 /** What the stub's scripts actually ran, one `<stage>#<call>` per line: `<repo>/.stub/executions.log`. */

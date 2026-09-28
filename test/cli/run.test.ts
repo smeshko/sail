@@ -19,6 +19,11 @@ test.each([[[]], [['--help']], [['-h']]])('%p prints usage', async (argv) => {
   expect(stderr).toBe('');
 });
 
+test('the usage lists sail resume', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toContain('sail resume <run> [--input <json>]');
+});
+
 test.each([
   [['--bogus'], '--bogus'],
   [['--version', 'extra'], 'extra'],

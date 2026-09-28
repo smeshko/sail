@@ -11,6 +11,8 @@ export interface StepContext {
   runDir: string;
   stage: string;
   call: number;
+  /** The call's try, 1 unless an earlier try was interrupted. */
+  try: number;
   /** The directory of the `stage.ts` that declared the step: its `run` and `prompt` are relative to it. */
   stageDir: string;
   workspace: string;

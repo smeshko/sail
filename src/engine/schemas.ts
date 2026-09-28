@@ -253,8 +253,9 @@ export function validateRunDir(dir: string): RunDirReport {
     });
   }
 
-  // A result with no journal line is the crash window a resume re-runs: the engine writes result.json, then appends
-  // the journal. A completed run has left its replay loop, so by then every result it holds is journaled.
+  // A result with no journal line is either the crash window a resume re-runs (the engine writes result.json, then
+  // appends the journal) or an interrupted try. Either way, once a later try of that call is journaled, the earlier
+  // try is superseded. A completed run has left its replay loop, so by then every other result it holds is journaled.
   if (summary?.valid && summary.data.status === 'completed') {
     if ((report.counts['sail.journal.v1'] ?? 0) === 0) {
       report.issues.push({
@@ -264,8 +265,9 @@ export function validateRunDir(dir: string): RunDirReport {
         message: 'is missing or empty, and the run completed',
       });
     } else {
+      const journaledCalls = new Set([...journaled].map((path) => callOf(String(path))));
       for (const file of results.keys()) {
-        if (!journaled.has(file))
+        if (!journaled.has(file) && !journaledCalls.has(callOf(file)))
           report.issues.push({
             file,
             schema: 'sail.result.v1',
@@ -276,6 +278,11 @@ export function validateRunDir(dir: string): RunDirReport {
     }
   }
   return report;
+}
+
+/** `NN-<stage>/call-N`: the first two segments of a run-relative result path, the call every try of it belongs to. */
+function callOf(resultPath: string): string {
+  return resultPath.split('/').slice(0, 2).join('/');
 }
 
 /** Reads and validates a `.sail/project.yaml`. A file that can't be read or parsed is one issue at `/`. */
