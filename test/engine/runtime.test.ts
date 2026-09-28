@@ -761,6 +761,30 @@ test("a result JSON can't hold is left out of run:end, which says why, and the s
   });
 });
 
+test('run:end holds the result as it was serialised once, so a toJSON that throws the second time changes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
+    edit(
+      sail,
+      WORKFLOW,
+      "  return run.stage(publish, { spec: s.files['spec.md'] });",
+      `  await run.stage(publish, { spec: s.files['spec.md'] });
+  let calls = 0;
+  return {
+    toJSON: () => {
+      if (++calls > 1) throw new Error('serialised twice');
+      return { ok: true };
+    },
+  };`,
+    );
+    const end = await ran(repo.dir);
+    const list = events(end.dir);
+    expect(list.at(-1)).toMatchObject({ seq: list.length, type: 'run:end', status: 'completed', result: { ok: true } });
+    expect(seqs(list)).toEqual(gapless(list));
+    expect(outline(list)).not.toContain('error:consumer');
+  });
+});
+
 test('consumers passed in receive the events the file holds, in the same order', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
