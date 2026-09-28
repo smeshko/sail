@@ -701,7 +701,15 @@ test('an exception inside sail leaves error:crash as the last event, and still p
     expect(error).toBeInstanceOf(JournalError);
     const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
     const dir = join(repo.dir, '.sail-runs', runId);
-    expect(events(dir).at(-1)).toMatchObject({ type: 'error:crash', message: (error as Error).message });
+    // The journal breaks while spec#1 is being journaled, so the crash names that call.
+    expect(events(dir).at(-1)).toEqual({
+      seq: expect.any(Number),
+      ts: expect.any(String),
+      type: 'error:crash',
+      runId,
+      key: 'spec#1',
+      message: (error as Error).message,
+    });
     expect(readStatus(dir)).toEqual({ status: 'running' });
   });
 });
