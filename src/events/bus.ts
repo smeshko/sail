@@ -41,12 +41,13 @@ export function createBus(options: BusOptions): EventBus {
   const { runId, consumers, now, unreported = writeToStderr } = options;
   let seq = options.firstSeq;
 
-  // The envelope comes first, then the key, then the payload, so a written line reads in that order.
+  // The envelope comes first, then the key, then the payload, so a written line reads in that order. The envelope is
+  // spread again last, since it is the bus's: an open payload's `seq`, `ts` or `runId` must not replace it.
   function stamp(event: NewEvent): SailEvent {
     const { type, ...rest } = event;
     const { key, ...payload } = rest as { key?: string };
     const envelope = { seq: seq++, ts: (now?.() ?? new Date()).toISOString(), type, runId };
-    return { ...envelope, ...(key === undefined ? {} : { key }), ...payload } as SailEvent;
+    return { ...envelope, ...(key === undefined ? {} : { key }), ...payload, ...envelope } as SailEvent;
   }
 
   /** Stamped events waiting for the one being delivered to reach every consumer. */
