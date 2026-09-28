@@ -88,10 +88,9 @@ test("a run.fail() in a chain the workflow doesn't await, after the run has ende
 });
 
 // A real signal through the shim: the test sends it to the spawned bin, never to its own process.
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each(['SIGINT', 'SIGTERM'] as const)('%s during sail run suspends the run, and sail resume runs it to its end', async (signal) => {
+test.each(['SIGINT', 'SIGTERM'] as const)(
+  '%s during sail run suspends the run, and sail resume runs it to its end',
+  async (signal) => {
     await withTempRepo(async (repo) => {
       writeStub(repo.dir, { sleepAt: 'implement#2' });
       const sail = Bun.spawn([process.execPath, shim, 'run'], {
@@ -135,4 +134,6 @@ test
         'publish#1',
       ]);
     });
-  }, 60_000);
+  },
+  60_000,
+);
