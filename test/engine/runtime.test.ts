@@ -317,6 +317,30 @@ test('an abort does not hide a replay that ends the run', async () => {
   });
 });
 
+test("an abort suspends a run whose replay hangs in the workflow's own code", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(
+      sail,
+      WORKFLOW,
+      '  const s = await run.stage(spec);',
+      '  await new Promise<void>(() => {});\n  const s = await run.stage(spec);',
+    );
+    const controller = new AbortController();
+    const running = ran(repo.dir, { signal: controller.signal });
+    const runs = join(repo.dir, '.sail-runs');
+    const started = () => existsSync(runs) && readdirSync(runs).some((id) => existsSync(join(runs, id, 'STATUS')));
+    while (!started()) await Bun.sleep(10);
+    await Bun.sleep(50);
+    controller.abort();
+    const end = await running;
+    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during the replay' });
+    expect(readStatus(end.dir)).toEqual({ status: 'suspended', stopReason: 'interrupted' });
+    expect(keys(end.dir)).toEqual([]);
+    expect(stubExecutions(repo.dir)).toEqual([]);
+  });
+});
+
 test('a resume runs the interrupted call again as its next try, and nothing journaled runs again', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
