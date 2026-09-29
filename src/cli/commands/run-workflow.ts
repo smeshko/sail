@@ -14,6 +14,7 @@ import { type RunEnd, runWorkflow } from '../../engine/runtime';
 import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
+import type { Verbosity } from '../../events/consumers/terminal';
 import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
@@ -40,6 +41,11 @@ export function parseInputOption(args: Parsed, io: Io, command: string): { input
   } catch (error) {
     return refuseAs(io, command)(`--input is not JSON: ${(error as Error).message}`);
   }
+}
+
+/** The verbosity `-q` and `-v` ask for. A stub until TASK-006: every run is normal. */
+export function verbosityOf(_args: Parsed, _io: Io, _command: string): Verbosity | ExitCode {
+  return 'normal';
 }
 
 /** `.sail/`, found from where sail runs, and its config. A config with issues prints each and refuses. */

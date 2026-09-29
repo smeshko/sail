@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
+import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
 import { resume } from './commands/resume';
 import { runWorkflowCommand } from './commands/run-workflow';
@@ -13,6 +14,8 @@ export interface Io {
   stderr(text: string): void;
   /** Calls `handler` on Ctrl+C or SIGTERM instead of exiting, until the returned function unregisters it. */
   onInterrupt?(handler: () => void): () => void;
+  /** Present when stdout is an interactive terminal: colour and the live line. */
+  tty?: Tty;
 }
 
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.
@@ -29,6 +32,7 @@ Usage:
 interface OptionSpec {
   type: 'boolean' | 'string';
   multiple?: boolean;
+  short?: string;
 }
 
 /** What a command takes: its options by name, and the most positionals it accepts. */
@@ -40,7 +44,7 @@ export interface CommandSpec {
 
 /** A command's arguments, parsed against its spec. A `multiple` option is a list, in the order given. */
 export interface Parsed {
-  values: Record<string, boolean | string | string[]>;
+  values: Record<string, boolean | number | string | string[]>;
   positionals: string[];
 }
 

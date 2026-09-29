@@ -11,7 +11,7 @@
 import { appendFileSync, existsSync, readFileSync, statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFileOnce } from '../../engine/durable';
-import type { Consumer } from '../types';
+import type { Consumer, SailEvent } from '../types';
 
 export const EVENTS_FILE = 'events.ndjson';
 
@@ -50,6 +50,13 @@ export function nextSeq(runDir: string): number | { refused: string } {
   }
   if (end < text.length) truncateSync(path, Buffer.byteLength(text.slice(0, end)));
   return last + 1;
+}
+
+/**
+ * The run's events, in file order. A stub until TASK-005: it reads nothing.
+ */
+export function readEvents(_runDir: string): SailEvent[] {
+  return [];
 }
 
 /**
