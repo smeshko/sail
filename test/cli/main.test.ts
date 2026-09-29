@@ -55,12 +55,17 @@ test('the shim runs check: 0 on a fixture copy, 3 once a binding is wrongly wire
   });
 });
 
-test('the shim runs a workflow and exits with its code: 0 when the run completes', async () => {
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('the shim runs a workflow through a pipe in plain mode, with no escape byte, and exits 0 when the run completes', async () => {
   await withTempRepo((repo) => {
     writeStub(repo.dir);
     const result = Bun.spawnSync([process.execPath, shim, 'run'], { cwd: repo.dir, env: repo.env });
-    expect(result.stdout.toString()).toContain('publish#1 passed\n');
-    expect(result.stdout.toString()).toMatch(/LOCAL-[0-9A-Z]{26} completed {2}\.sail-runs\/LOCAL-/);
+    const stdout = result.stdout.toString();
+    expect(stdout).toMatch(/^sail · ticket-to-pr v1 · LOCAL-[0-9A-Z]{26}\n/);
+    expect(stdout).toMatch(/\ncompleted · [^\n]+\n {2}calls {4}7 · 6 passed, 1 failed\n/);
+    expect(stdout.includes('\x1b')).toBe(false);
     expect(result.exitCode).toBe(0);
   });
 });
@@ -81,15 +86,19 @@ test("a run.fail() in a chain the workflow doesn't await, after the run has ende
   return run.stage(publish`,
     );
     const result = Bun.spawnSync([process.execPath, shim, 'run'], { cwd: repo.dir, env: repo.env });
-    expect(result.stdout.toString()).toMatch(/LOCAL-[0-9A-Z]{26} completed {2}\.sail-runs\/LOCAL-/);
+    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
+    expect(readFileSync(join(repo.dir, '.sail-runs', runId, 'STATUS'), 'utf8')).toBe('completed\n');
     expect(result.stderr.toString()).toBe('');
     expect(result.exitCode).toBe(0);
   });
 });
 
 // A real signal through the shim: the test sends it to the spawned bin, never to its own process.
-test.each(['SIGINT', 'SIGTERM'] as const)(
-  '%s during sail run suspends the run, and sail resume runs it to its end',
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  .each(['SIGINT', 'SIGTERM'] as const)(
+  '%s during sail run suspends the run, and sail resume runs it to its end, both in plain mode',
   async (signal) => {
     await withTempRepo(async (repo) => {
       writeStub(repo.dir, { sleepAt: 'implement#2' });
@@ -102,17 +111,20 @@ test.each(['SIGINT', 'SIGTERM'] as const)(
       const { end: code, alive } = await interruptWhenAsleep(repo.dir, sail.exited, () => sail.kill(signal));
       const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
       const dir = join(repo.dir, '.sail-runs', runId);
-      expect(await new Response(sail.stdout).text()).toEndWith(
-        `${runId} suspended interrupted: stopped during implement#2  .sail-runs/${runId}\n` +
-          `resume it with: sail resume ${runId}\n`,
-      );
+      const suspended = await new Response(sail.stdout).text();
+      expect(suspended).toContain('\n  stop     interrupted: stopped during implement#2\n');
+      expect(suspended).toEndWith(`  run      .sail-runs/${runId}\nresume it with: sail resume ${runId}\n`);
+      expect(suspended.includes('\x1b')).toBe(false);
       expect(await new Response(sail.stderr).text()).toBe('');
       expect(code).toBe(2);
       expect(alive).toEqual([]);
       expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
 
       const resumed = Bun.spawnSync([process.execPath, shim, 'resume', runId], { cwd: repo.dir, env: repo.env });
-      expect(resumed.stdout.toString()).toEndWith(`${runId} completed  .sail-runs/${runId}\n`);
+      const resumedOut = resumed.stdout.toString();
+      expect(resumedOut).toStartWith(`sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed\n`);
+      expect(resumedOut).toEndWith(`  run      .sail-runs/${runId}\n`);
+      expect(resumedOut.includes('\x1b')).toBe(false);
       expect(resumed.exitCode).toBe(0);
       expect(stubExecutions(repo.dir)).toEqual([
         'spec#1',

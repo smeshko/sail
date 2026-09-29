@@ -3,6 +3,15 @@ import { parseCommandArgs } from '../../src/cli/index';
 
 const stage = { options: { bind: { type: 'string', multiple: true } }, positionals: 2 } as const;
 const check = { options: { list: { type: 'boolean' } }, positionals: 0 } as const;
+const run = {
+  options: {
+    workflow: { type: 'string' },
+    input: { type: 'string' },
+    quiet: { type: 'boolean', short: 'q' },
+    verbose: { type: 'boolean', short: 'v', multiple: true },
+  },
+  positionals: 0,
+} as const;
 
 test('positionals and a repeated option are collected in order, keeping = and JSON intact', () => {
   expect(parseCommandArgs(['run', 'x', '--bind', 'a=1', '--bind=b={"k":2}'], stage)).toEqual({
@@ -19,6 +28,22 @@ test('a boolean option is true, and a single string option takes its last value'
   expect(parseCommandArgs(['--list'], check)).toEqual({ values: { list: true }, positionals: [] });
   const single = { options: { at: { type: 'string' } }, positionals: 0 } as const;
   expect(parseCommandArgs(['--at', 'a', '--at=b'], single)).toEqual({ values: { at: 'b' }, positionals: [] });
+});
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('with the run spec, each -v counts, -q is a flag, and -x or a value given to --verbose are still refused', () => {
+  const given = [['-vv'], ['-v', '-v'], ['--verbose', '-v'], ['-q'], ['-qv']];
+  expect(given.map((args) => parseCommandArgs(args, run))).toEqual([
+    { values: { verbose: 2 }, positionals: [] },
+    { values: { verbose: 2 }, positionals: [] },
+    { values: { verbose: 2 }, positionals: [] },
+    { values: { quiet: true }, positionals: [] },
+    { values: { quiet: true, verbose: 1 }, positionals: [] },
+  ]);
+  expect(parseCommandArgs(['-x'], run)).toEqual({ refused: "unknown argument '-x'" });
+  expect(parseCommandArgs(['--verbose=1'], run)).toEqual({ refused: "option '--verbose' takes no value" });
 });
 
 test('arguments after -- count as positionals', () => {
