@@ -39,7 +39,12 @@ function listing(runs: string, runId: string): RunListing {
   try {
     const header = readRunHeader(dir);
     listed.workflow = `${header.workflow.name}@${header.workflow.version}`;
-    listed.startedAt = header.startedAt;
+    // sail.run.v1's timestamp pattern lets an impossible date like month 13 through, and it neither sorts nor prints.
+    if (Number.isNaN(Date.parse(header.startedAt))) {
+      problems.push(`${join(dir, RUN_HEADER_FILE)}'s startedAt '${header.startedAt}' is not a date`);
+    } else {
+      listed.startedAt = header.startedAt;
+    }
   } catch (error) {
     problems.push(messageOf(error));
   }
