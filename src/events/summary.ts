@@ -127,8 +127,8 @@ export interface SummaryState {
   calls: Map<string, CallState>;
   /** Each ended call's and step's `resultPath`, to the key it belongs to. */
   results: Map<string, string>;
-  /** The latest `loop:iteration`'s feedback pointer. */
-  feedback?: string | undefined;
+  /** Each running loop's latest feedback pointer, by loop name. */
+  feedback: Map<string, string>;
   loops: Map<string, { iterations: number; max: number }>;
   routes: { at: string; value: unknown; took: string }[];
   journaledSinceRoute: boolean;
@@ -167,6 +167,7 @@ export function emptyState(): SummaryState {
   return {
     calls: new Map(),
     results: new Map(),
+    feedback: new Map(),
     loops: new Map(),
     routes: [],
     journaledSinceRoute: false,
@@ -208,10 +209,11 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
       foldSession(state, event);
       break;
     case 'loop:iteration':
-      state.feedback = event.feedback?.from;
+      holdFeedback(state, event.loop, event.feedback?.from);
       raiseLoop(state, event.loop, event.iteration, event.max);
       break;
     case 'loop:exit':
+      state.feedback.delete(event.loop);
       raiseLoop(state, event.loop, event.iterations, event.max);
       break;
     case 'workflow:route':
@@ -245,16 +247,30 @@ function foldRunEnd(state: SummaryState, event: EventOf<'run:end'>): void {
 }
 
 function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf<'stage:start'>): void {
-  const consumed = Object.values(event.consumed);
+  const held = new Set(state.feedback.values());
+  const feedback = Object.values(event.consumed).find((from): from is string => from !== null && held.has(from));
   state.calls.set(event.key, {
     key: event.key,
     kind: event.kind,
     startedAt: event.ts,
     facts: {},
-    ...(state.feedback !== undefined && consumed.includes(state.feedback) ? { feedback: state.feedback } : {}),
+    ...(feedback === undefined ? {} : { feedback }),
     files: [],
     steps: new Map(),
   });
+}
+
+/**
+ * `consumed` says `workflow` for any value no call produced, and `--input` for the run's input. A feedback from either
+ * can't be told apart from a call's other inputs, so it is never attributed: a call that took it shows no
+ * `feedbackFrom`.
+ */
+const UNTRACEABLE: ReadonlySet<string> = new Set(['workflow', '--input']);
+
+/** A loop's iteration holds its feedback pointer until the next iteration or the loop's exit. */
+function holdFeedback(state: SummaryState, loop: string, from: string | undefined): void {
+  if (from === undefined || UNTRACEABLE.has(from)) state.feedback.delete(loop);
+  else state.feedback.set(loop, from);
 }
 
 function endCall(state: SummaryState, event: EventOf<'intake:end'> | EventOf<'stage:end'>): void {
