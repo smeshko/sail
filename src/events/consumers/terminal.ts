@@ -161,13 +161,18 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   /** The first `run:start`'s time, or else the first event's: where the final block's duration starts. */
   let startedAt: number | undefined;
   let firstAt: number | undefined;
+  /** `<name> v<version>`, from the `run:start`. */
+  let workflow: string | undefined;
   const kinds = new Map<string, string>();
   const keysByResult = new Map<string, string>();
-  const calls: Outcome[] = [];
+  /** The journaled calls, their steps left out. */
+  const calls: { key: string; outcome: Outcome }[] = [];
   const loops = new Map<string, { iteration: number; max: number }>();
   let replays = 0;
   /** The calls and steps running now, innermost last: the live line names the last. */
   let running: { key: string; since: number }[] = [];
+  /** Set by `prior` until the first live event, which prints the resume line first. */
+  let resuming = false;
 
   const liveText = (): string => {
     const top = running.at(-1);
@@ -200,13 +205,14 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     return level >= LEVEL[SHOWN_FROM[event.type] ?? 'trace'];
   }
 
-  /** Keeps what later lines and the final block need, and the live line. */
+  /** Keeps what later lines, the live line and the final block need. It prints nothing, so prior events run it alone. */
   function update(event: SailEvent): void {
     const at = Date.parse(event.ts);
     firstAt ??= at;
     switch (event.type) {
       case 'run:start': {
         startedAt ??= at;
+        workflow = `${event.workflow.name} v${event.workflow.version}`;
         // The longest key the roster allows: each call's first, and each step of a multi-step one.
         const entries = [['intake', event.roster.intake] as const, ...Object.entries(event.roster.stages)];
         const keys = entries.flatMap(([name, entry]) => [
@@ -221,17 +227,15 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       case 'step:start':
         kinds.set(event.key, event.kind);
         running.push({ key: event.key, since: now() });
-        screen.live(liveText);
         return;
       case 'intake:end':
       case 'stage:end':
       case 'step:end':
         keysByResult.set(event.resultPath, event.key);
         running = running.filter((each) => each.key !== event.key);
-        screen.live(running.length === 0 ? undefined : liveText);
         return;
       case 'journal:append':
-        if (!event.key.includes('/')) calls.push(event.outcome);
+        if (!event.key.includes('/')) calls.push({ key: event.key, outcome: event.outcome });
         return;
       case 'loop:iteration': {
         const seen = loops.get(event.loop);
@@ -243,13 +247,21 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       case 'run:end':
         replays += event.replays;
         running = [];
-        screen.live(undefined);
         return;
       case 'error:crash':
         running = [];
-        screen.live(undefined);
         return;
     }
+  }
+
+  /** The resume's opening line: the run as the prior events left it. */
+  function resumeLine(runId: string): Line {
+    const last = calls.at(-1);
+    const after =
+      last === undefined
+        ? 'resumed before its first call'
+        : `resumed after ${calls.length} call${calls.length === 1 ? '' : 's'}, last ${last.key} ${last.outcome}`;
+    return [`sail · ${workflow === undefined ? '' : `${workflow} · `}${runId} · ${after}`];
   }
 
   /** An end line, its errors, and the output tail of a script that didn't pass. */
@@ -284,7 +296,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       rows.push(['stop', event.message === undefined ? event.stopReason : `${event.stopReason}: ${event.message}`]);
     }
     const counts = OUTCOMES.flatMap((outcome) => {
-      const n = calls.filter((each) => each === outcome).length;
+      const n = calls.filter((call) => call.outcome === outcome).length;
       return n === 0 ? [] : [`${n} ${outcome}`];
     });
     rows.push(['calls', counts.length === 0 ? '0' : `${calls.length} · ${counts.join(', ')}`]);
@@ -305,7 +317,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   function lines(event: SailEvent): Line[] {
     switch (event.type) {
       case 'run:start':
-        return [[`sail · ${event.workflow.name} v${event.workflow.version} · ${event.runId}`]];
+        return [[`sail · ${workflow} · ${event.runId}`]];
       case 'run:end':
         return finalBlock(event);
       case 'intake:start':
@@ -381,10 +393,25 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     return [head(key, ['red', '✗'], `${event.type} ${payload(event)}`)];
   }
 
+  // A resume's earlier events set the header, the key column, the feedback sources and the totals, and print nothing.
+  // Nothing of theirs is running any more.
+  if (options.prior !== undefined) {
+    for (const event of options.prior) update(event);
+    running = [];
+    resuming = true;
+  }
+
   return {
     name: 'terminal',
     onEvent(event) {
+      if (resuming) {
+        resuming = false;
+        screen.print(resumeLine(event.runId));
+      }
+      const was = running.at(-1);
       update(event);
+      // The live line follows the innermost running call, and goes when none is left.
+      if (running.at(-1) !== was) screen.live(running.length === 0 ? undefined : liveText);
       if (shows(event)) for (const line of lines(event)) screen.print(line);
     },
     close() {

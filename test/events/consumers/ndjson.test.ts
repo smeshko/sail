@@ -128,10 +128,7 @@ test.each<[string, string]>([
   expect(contents(dir)).toBe(before);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('readEvents gives every event of a run in file order, and none for a missing file', () => {
+test('readEvents gives every event of a run in file order, and none for a missing file', () => {
   const fake1 = join(import.meta.dir, '..', '..', 'fixtures', 'runs', RUN_ID);
   const events = readEvents(fake1);
   expect(events.map((each) => each.seq)).toEqual(Array.from({ length: 131 }, (_, index) => index + 1));
@@ -140,10 +137,7 @@ test
   expect(readEvents(runDir())).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('readEvents skips a torn tail and every line that is not an event, and leaves the file as it was', () => {
+test('readEvents skips a torn tail and every line that is not an event, and leaves the file as it was', () => {
   const dir = runDir();
   const junk = ['{ not json', 'null', '["seq",3]', '{"seq":"3","type":"stage:start"}', '{"seq":3}'];
   const text = `${lines(1, 2)}${junk.join('\n')}\n${lines(3)}${JSON.stringify(event(4)).slice(0, 40)}`;

@@ -53,10 +53,33 @@ export function nextSeq(runDir: string): number | { refused: string } {
 }
 
 /**
- * The run's events, in file order. A stub until TASK-005: it reads nothing.
+ * The run's events, in file order: every complete line that parses as an object with an integer `seq` and a string
+ * `type`. A torn tail and any other line are skipped, and a missing file gives none. It never truncates: `nextSeq()`
+ * alone cuts a torn tail, and only on a resume that proceeds.
  */
-export function readEvents(_runDir: string): SailEvent[] {
-  return [];
+export function readEvents(runDir: string): SailEvent[] {
+  const path = join(runDir, EVENTS_FILE);
+  if (!existsSync(path)) return [];
+  const text = readFileSync(path, 'utf8');
+  return text
+    .slice(0, text.lastIndexOf('\n') + 1)
+    .split('\n')
+    .flatMap((line) => {
+      const event = parseEvent(line);
+      return event === undefined ? [] : [event];
+    });
+}
+
+function parseEvent(line: string): SailEvent | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const { seq, type } = value as { seq?: unknown; type?: unknown };
+  return Number.isInteger(seq) && typeof type === 'string' ? (value as SailEvent) : undefined;
 }
 
 /**

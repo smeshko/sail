@@ -657,10 +657,7 @@ test('verbose shows the tail of a script that passed, and none for an agent call
 
 // TASK-005: the whole run on resume.
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then opens with the resume line and ends with the whole run', () => {
+test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then opens with the resume line and ends with the whole run', () => {
   const events = fake1();
   let out = '';
   const terminal = terminalConsumer({
@@ -679,16 +676,14 @@ test
   const resumedAt = normal.findIndex((line) => line.endsWith('↻ iteration 2/3 · feedback from tests#1'));
   expect(resumedAt).toBe(24);
   expect(out).toBe(
-    [`sail · ticket-to-pr v1 · ${FAKE_1} · resumed after 4 calls, last tests#1 failed`, ...normal.slice(resumedAt)].join(
-      '\n',
-    ),
+    [
+      `sail · ticket-to-pr v1 · ${FAKE_1} · resumed after 4 calls, last tests#1 failed`,
+      ...normal.slice(resumedAt),
+    ].join('\n'),
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the final block adds up the replays of every run:end, earlier ones included', () => {
+test('the final block adds up the replays of every run:end, earlier ones included', () => {
   const events = stream([
     fake1Start(),
     { type: 'journal:append', key: 'spec#1', line: 1, outcome: 'passed' },
@@ -709,10 +704,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('with no earlier events, the resume line names the run from the first live event', () => {
+test('with no earlier events, the resume line names the run from the first live event', () => {
   const events = stream([stageStart('spec#1')], 'RUN-9');
   expect(render(events, 'normal', { prior: [] })).toBe(
     view('sail · RUN-9 · resumed before its first call', head('spec#1', '▶ spec · script')),
