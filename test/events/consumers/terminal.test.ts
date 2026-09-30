@@ -287,6 +287,28 @@ test('a script that ends in error shows the last 10 non-blank lines of stdout.lo
   );
 });
 
+test('a tail reads the last 64 KiB: a line the window starts inside is dropped, and one it starts on is kept', () => {
+  // stdout.log's window starts just after a newline, on the A line. stderr.log's starts inside its long y line.
+  const a = 'A'.repeat(65533);
+  const runs = runsWith({
+    '03-tests/call-1/stdout.log': `${'x'.repeat(100)}\n${a}\nB\n`,
+    '03-tests/call-1/stderr.log': `${'y'.repeat(65540)}\nC\nD\n`,
+  });
+  const events = stream([stageStart('tests#1'), stageEnd('tests#1', 'failed', 40, '03-tests/call-1/result.json')]);
+  expect(render(events, 'normal', { runsDir: runs })).toBe(
+    view(
+      head('tests#1', '▶ tests · script'),
+      head('tests#1', '✗ failed · 40ms'),
+      detail('tests#1', 'stdout.log · last 2 lines'),
+      detail('tests#1', `│ ${a}`),
+      detail('tests#1', '│ B'),
+      detail('tests#1', 'stderr.log · last 2 lines'),
+      detail('tests#1', '│ C'),
+      detail('tests#1', '│ D'),
+    ),
+  );
+});
+
 test('a tail line that holds only escape codes is blank, and a tail line never ends in whitespace', () => {
   const runs = runsWith({
     '03-tests/call-1/stdout.log': 'ok 1\n\x1b[0m\n\x1b[2K\nok 2 \x1b[0m\n\x1b[32m\x1b[0m\r\n',
