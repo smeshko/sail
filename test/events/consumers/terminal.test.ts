@@ -207,6 +207,24 @@ test.each(['quiet', 'normal'] as const)(
   },
 );
 
+test('a message prints no blank line of its own, and an empty one leaves no trailing space', () => {
+  const events = stream([
+    { type: 'error:crash', message: 'a\n\n  \nb\n' },
+    { type: 'error:crash', message: '' },
+    { type: 'error:consumer', consumer: 'x', failed: { seq: 3, type: 'stage:end' }, message: '' },
+    { type: 'error:harness', key: 'spec#1', message: '' },
+  ]);
+  expect(events.map((event) => render([event], 'quiet')).join('')).toBe(
+    view(
+      head('', '✗ crash: a'),
+      detail('', '  b'),
+      head('', '✗ crash:'),
+      head('', '✗ consumer x failed on stage:end #3:'),
+      head('spec#1', '✗ error:harness:'),
+    ),
+  );
+});
+
 test('a timeout prints nothing of its own below trace, and an invalid output prints only its verdict', () => {
   const events = stream([
     { type: 'error:timeout', key: 'tests#1', message: 'timed out after 30s', timeoutSeconds: 30 },
