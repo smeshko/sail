@@ -2,15 +2,14 @@
 import { expect, test } from 'bun:test';
 import { formatDuration, formatUsd, table } from '../../src/cli/format';
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('table pads each column to its widest cell, two spaces apart, and ends no line in whitespace', () => {
-  expect(table([['key', 'kind', 'next'], ['spec#1', 'agent', ''], ['  publish#1/open', '', 'end']])).toEqual([
-    'key               kind   next',
-    'spec#1            agent',
-    '  publish#1/open         end',
-  ]);
+test('table pads each column to its widest cell, two spaces apart, and ends no line in whitespace', () => {
+  expect(
+    table([
+      ['key', 'kind', 'next'],
+      ['spec#1', 'agent', ''],
+      ['  publish#1/open', '', 'end'],
+    ]),
+  ).toEqual(['key               kind   next', 'spec#1            agent', '  publish#1/open         end']);
 });
 
 // biome-ignore format: TDD-PENDING TASK-006

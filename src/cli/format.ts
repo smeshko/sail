@@ -11,7 +11,18 @@ export const formatDuration = (_ms: number): string => '';
 export const formatUsd = (_usd: number): string => '';
 
 /** Rows as lines: each column as wide as its widest cell, two spaces apart, and no line ending in whitespace. */
-export const table = (_rows: readonly (readonly string[])[]): string[] => [];
+export function table(rows: readonly (readonly string[])[]): string[] {
+  const widths: number[] = [];
+  for (const row of rows) {
+    for (const [i, cell] of row.entries()) widths[i] = Math.max(widths[i] ?? 0, cell.length);
+  }
+  return rows.map((row) =>
+    row
+      .map((cell, i) => cell.padEnd(widths[i] ?? 0))
+      .join('  ')
+      .trimEnd(),
+  );
+}
 
 /** `file:line:column  code  message`, leaving out what the diagnostic doesn't carry. `at` relativises the file. */
 export function formatDiagnostic({ file, line, column, code, message }: Diagnostic, at: (path: string) => string) {

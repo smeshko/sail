@@ -4,6 +4,7 @@ import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
 import { resume } from './commands/resume';
 import { runWorkflowCommand } from './commands/run-workflow';
+import { runs } from './commands/runs';
 import { stageRun } from './commands/stage-run';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
@@ -24,6 +25,7 @@ Usage:
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]  Run a workflow in this repository
   sail resume <run> [--input <json>] [-q|-v|-vv]             Resume a suspended or crashed run
+  sail runs                                                  List the runs in .sail-runs/
   sail stage run <stage-dir> [--bind name=value]...          Run one script stage in isolation
   sail --version                                             Print the version
   sail --help                                                Print this help
@@ -129,6 +131,7 @@ const commands = new Map<string, CommandSpec>([
     },
   ],
   ['resume', { options: { input: { type: 'string' }, ...VERBOSITY_OPTIONS }, positionals: 1, command: resume }],
+  ['runs', bare(runs)],
   ['stage', { options: { bind: { type: 'string', multiple: true } }, positionals: 2, command: stageRun }],
   ['--help', bare(help)],
   ['-h', bare(help)],

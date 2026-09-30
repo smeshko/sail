@@ -18,10 +18,7 @@ function runNamed(repoDir: string, id: string): void {
 const MANY = ['MANY-1', 'MANY-2', 'MANY-3', 'MANY-4', 'MANY-5', 'MANY-6', 'MANY-7'];
 const FAKE_2 = 'FAKE-2-01M3C0Q5ZJ3K8T1V9XRJ5KWD3P';
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, string, string | undefined]>([
+test.each<[string, string, string | undefined]>([
   ['an exact id', GOLDEN_RUN_ID, GOLDEN_RUN_ID],
   ['a prefix only one run starts with', 'FAKE-2', FAKE_2],
   ['an exact id that also starts another', 'LOCAL-1', 'LOCAL-1'],
@@ -41,10 +38,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([
+test.each([
   ['FAKE', `'FAKE' matches 2 runs: ${GOLDEN_RUN_ID}, ${FAKE_2}`],
   ['MANY', "'MANY' matches 7 runs: MANY-1, MANY-2, MANY-3, MANY-4, MANY-5 and 2 more"],
   ['../x', "'../x' is not a run id"],
@@ -61,16 +55,21 @@ const SAME_START = 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const WORKFLOW = 'ticket-to-pr@1';
 const GOLDEN_START = '2026-09-25T09:00:00.000Z';
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('listRuns gives the runs that hold run.json, oldest first and then by id, with their workflow, start and status', () => {
+test('listRuns gives the runs that hold run.json, oldest first and then by id, with their workflow, start and status', () => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
     expect(listRuns(sail)).toEqual([]);
     copyGoldenRun(repo.dir, { status: 'completed\n' });
-    copyGoldenRun(repo.dir, { runId: FAKE_2, startedAt: '2026-09-26T10:30:15.250Z', status: 'suspended interrupted\n' });
-    copyGoldenRun(repo.dir, { runId: EARLIEST, startedAt: '2026-09-24T08:05:09.999Z', status: 'failed workflow_failed\n' });
+    copyGoldenRun(repo.dir, {
+      runId: FAKE_2,
+      startedAt: '2026-09-26T10:30:15.250Z',
+      status: 'suspended interrupted\n',
+    });
+    copyGoldenRun(repo.dir, {
+      runId: EARLIEST,
+      startedAt: '2026-09-24T08:05:09.999Z',
+      status: 'failed workflow_failed\n',
+    });
     copyGoldenRun(repo.dir, { runId: SAME_START, status: 'running\n' });
     mkdirSync(join(repo.dir, '.sail-runs', STAGE_RUN), { recursive: true });
     const dir = (id: string) => join(repo.dir, '.sail-runs', id);
@@ -82,7 +81,13 @@ test
         startedAt: '2026-09-24T08:05:09.999Z',
         status: { status: 'failed', stopReason: 'workflow_failed' },
       },
-      { runId: SAME_START, dir: dir(SAME_START), workflow: WORKFLOW, startedAt: GOLDEN_START, status: { status: 'running' } },
+      {
+        runId: SAME_START,
+        dir: dir(SAME_START),
+        workflow: WORKFLOW,
+        startedAt: GOLDEN_START,
+        status: { status: 'running' },
+      },
       {
         runId: GOLDEN_RUN_ID,
         dir: dir(GOLDEN_RUN_ID),
@@ -101,10 +106,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a run whose run.json or STATUS can't be read is listed with its problem, and one with no start goes last", () => {
+test("a run whose run.json or STATUS can't be read is listed with its problem, and one with no start goes last", () => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
     const noHeader = copyGoldenRun(repo.dir, { runId: 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N', status: 'completed\n' });

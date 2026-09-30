@@ -35,10 +35,7 @@ test('the usage lists -q, -v and -vv on run and resume, and what each prints', a
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the usage lists sail runs', async () => {
+test('the usage lists sail runs', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(/^ {2}sail runs {2,}List the runs in \.sail-runs\/$/m);
 });
