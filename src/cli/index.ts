@@ -21,12 +21,16 @@ export interface Io {
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.
 
 Usage:
-  sail check [--list]                                Type-check .sail/ and list its workflows and stages
-  sail run [--workflow <name>] [--input <json>]      Run a workflow in this repository
-  sail resume <run> [--input <json>]                 Resume a suspended or crashed run
-  sail stage run <stage-dir> [--bind name=value]...  Run one script stage in isolation
-  sail --version                                     Print the version
-  sail --help                                        Print this help
+  sail check [--list]                                        Type-check .sail/ and list its workflows and stages
+  sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]  Run a workflow in this repository
+  sail resume <run> [--input <json>] [-q|-v|-vv]             Resume a suspended or crashed run
+  sail stage run <stage-dir> [--bind name=value]...          Run one script stage in isolation
+  sail --version                                             Print the version
+  sail --help                                                Print this help
+
+Output of run and resume:
+  -q, --quiet    Only the run's start, its errors and the final block
+  -v, --verbose  Adds contract details, routes and every script's output tail; -vv prints every event
 `;
 
 interface OptionSpec {
@@ -42,7 +46,10 @@ export interface CommandSpec {
   command: Command;
 }
 
-/** A command's arguments, parsed against its spec. A `multiple` option is a list, in the order given. */
+/**
+ * A command's arguments, parsed against its spec. A `multiple` option is a list, in the order given, and a `multiple`
+ * boolean the number of times it was given.
+ */
 export interface Parsed {
   values: Record<string, boolean | number | string | string[]>;
   positionals: string[];
@@ -78,7 +85,9 @@ export function parseCommandArgs(
     if (option === undefined) return { refused: `unknown argument '${token.rawName}'` };
     if (option.type === 'boolean') {
       if (token.value !== undefined) return { refused: `option '--${token.name}' takes no value` };
-      parsed.values[token.name] = true;
+      // A `multiple` boolean counts: `-vv` is 2.
+      const previous = parsed.values[token.name];
+      parsed.values[token.name] = option.multiple ? (typeof previous === 'number' ? previous : 0) + 1 : true;
       continue;
     }
     if (token.value === undefined) return { refused: `option '--${token.name}' needs a value` };
@@ -102,18 +111,24 @@ const version: Command = (_, io) => {
 
 const bare = (command: Command): CommandSpec => ({ options: {}, positionals: 0, command });
 
+/** How much of a run `sail run` and `sail resume` print: `-q`, or `-v` given once or twice. */
+const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
+  quiet: { type: 'boolean', short: 'q' },
+  verbose: { type: 'boolean', short: 'v', multiple: true },
+};
+
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
   [
     'run',
     {
-      options: { workflow: { type: 'string' }, input: { type: 'string' } },
+      options: { workflow: { type: 'string' }, input: { type: 'string' }, ...VERBOSITY_OPTIONS },
       positionals: 0,
       command: runWorkflowCommand,
     },
   ],
-  ['resume', { options: { input: { type: 'string' } }, positionals: 1, command: resume }],
+  ['resume', { options: { input: { type: 'string' }, ...VERBOSITY_OPTIONS }, positionals: 1, command: resume }],
   ['stage', { options: { bind: { type: 'string', multiple: true } }, positionals: 2, command: stageRun }],
   ['--help', bare(help)],
   ['-h', bare(help)],

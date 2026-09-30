@@ -17,6 +17,7 @@ import {
   printEnd,
   refuseAs,
   typecheckWorkflow,
+  verbosityOf,
 } from './run-workflow';
 
 const COMMAND = 'sail resume';
@@ -27,6 +28,8 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   if (runId === undefined) return refuse('usage: sail resume <run> [--input <json>]');
   const given = parseInputOption(args, io, COMMAND);
   if (typeof given === 'number') return given;
+  const verbosity = verbosityOf(args, io, COMMAND);
+  if (typeof verbosity === 'number') return verbosity;
   const project = findProject(io, COMMAND);
   if (typeof project === 'number') return project;
 

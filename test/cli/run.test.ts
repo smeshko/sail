@@ -24,10 +24,7 @@ test('the usage lists sail resume', async () => {
   expect(stdout).toContain('sail resume <run> [--input <json>]');
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the usage lists -q, -v and -vv on run and resume, and what each prints', async () => {
+test('the usage lists -q, -v and -vv on run and resume, and what each prints', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toContain('sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]');
   expect(stdout).toContain('sail resume <run> [--input <json>] [-q|-v|-vv]');

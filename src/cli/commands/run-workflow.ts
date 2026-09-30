@@ -43,9 +43,14 @@ export function parseInputOption(args: Parsed, io: Io, command: string): { input
   }
 }
 
-/** The verbosity `-q` and `-v` ask for. A stub until TASK-006: every run is normal. */
-export function verbosityOf(_args: Parsed, _io: Io, _command: string): Verbosity | ExitCode {
-  return 'normal';
+/** The verbosity `-q` and `-v` ask for: `-v` is verbose, and `-vv` or more is trace. `-q` with any `-v` refuses. */
+export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | ExitCode {
+  const quiet = args.values.quiet === true;
+  const verbose = typeof args.values.verbose === 'number' ? args.values.verbose : 0;
+  if (quiet && verbose > 0) return refuseAs(io, command)("-q and -v can't be combined");
+  if (verbose >= 2) return 'trace';
+  if (verbose === 1) return 'verbose';
+  return quiet ? 'quiet' : 'normal';
 }
 
 /** `.sail/`, found from where sail runs, and its config. A config with issues prints each and refuses. */
@@ -118,6 +123,8 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   const refuse = refuseAs(io, COMMAND);
   const given = parseInputOption(args, io, COMMAND);
   if (typeof given === 'number') return given;
+  const verbosity = verbosityOf(args, io, COMMAND);
+  if (typeof verbosity === 'number') return verbosity;
   const project = findProject(io, COMMAND);
   if (typeof project === 'number') return project;
 

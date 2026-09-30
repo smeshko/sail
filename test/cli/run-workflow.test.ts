@@ -170,10 +170,7 @@ test
   expect(trace.view).toContain(`\n${detail('spec#1', 'journal line 1')}\n`);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('verbosityOf maps no flag, -q, -v, -vv and -vvv to normal, quiet, verbose, trace and trace', () => {
+test('verbosityOf maps no flag, -q, -v, -vv and -vvv to normal, quiet, verbose, trace and trace', () => {
   const io = { cwd: '.', stdout: () => undefined, stderr: () => undefined };
   const of = (values: Parsed['values']) => verbosityOf({ values, positionals: [] }, io, 'sail run');
   expect([{}, { quiet: true }, { verbose: 1 }, { verbose: 2 }, { verbose: 3 }].map(of)).toEqual([
@@ -185,10 +182,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail run refuses -q with -v, and sail check takes no -v, each with exit 3 before anything runs', async () => {
+test('sail run refuses -q with -v, and sail check takes no -v, each with exit 3 before anything runs', async () => {
   const { code, stdout, stderr, runs } = await sailIn(['run', '-q', '-v']);
   expect({ code, stdout, stderr, runs }).toEqual({
     code: EXIT_REFUSED,

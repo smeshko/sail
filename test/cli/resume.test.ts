@@ -106,10 +106,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('-q with -v is refused with exit 3, and the run is left as it was', async () => {
+test('-q with -v is refused with exit 3, and the run is left as it was', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const before = runFiles(repo.dir);

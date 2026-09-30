@@ -30,10 +30,7 @@ test('a boolean option is true, and a single string option takes its last value'
   expect(parseCommandArgs(['--at', 'a', '--at=b'], single)).toEqual({ values: { at: 'b' }, positionals: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('with the run spec, each -v counts, -q is a flag, and -x or a value given to --verbose are still refused', () => {
+test('with the run spec, each -v counts, -q is a flag, and -x or a value given to --verbose are still refused', () => {
   const given = [['-vv'], ['-v', '-v'], ['--verbose', '-v'], ['-q'], ['-qv']];
   expect(given.map((args) => parseCommandArgs(args, run))).toEqual([
     { values: { verbose: 2 }, positionals: [] },
