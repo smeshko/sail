@@ -153,17 +153,11 @@ function visibleLive(out: string): string | undefined {
 
 // TASK-003: quiet and normal.
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each(['quiet', 'normal'] as const)('FAKE-1 at %s equals its golden view, byte for byte', (verbosity) => {
+test.each(['quiet', 'normal'] as const)('FAKE-1 at %s equals its golden view, byte for byte', (verbosity) => {
   expect(render(fake1(), verbosity)).toBe(golden(verbosity));
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('quiet prints an error end with its duration and each message, a later line indented two more, and no tail', () => {
+test('quiet prints an error end with its duration and each message, a later line indented two more, and no tail', () => {
   const runs = runsWith({ '03-tests/call-1/stdout.log': 'a tail quiet leaves out\n' });
   const events = stream([
     stageStart('tests#1'),
@@ -185,33 +179,35 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each(['quiet', 'normal'] as const)('at %s, crashes, consumer failures and other errors each print their message', (verbosity) => {
-  const events = stream([
-    { type: 'error:crash', message: 'journal.ndjson:1 is not valid JSON', key: 'spec#1' },
-    { type: 'error:crash', message: 'out of memory' },
-    { type: 'error:consumer', consumer: 'summary.json', failed: { seq: 12, type: 'stage:end' }, message: 'disk full' },
-    { type: 'error:harness', key: 'spec#1', message: 'session lost' },
-    { type: 'error:harness', key: 'spec#1', adapter: 'fake', code: 7 },
-  ]);
-  // Each through a consumer of its own, so no error can stop the ones after it from printing.
-  expect(events.map((event) => render([event], verbosity)).join('')).toBe(
-    view(
-      head('spec#1', '✗ crash: journal.ndjson:1 is not valid JSON'),
-      head('', '✗ crash: out of memory'),
-      head('', '✗ consumer summary.json failed on stage:end #12: disk full'),
-      head('spec#1', '✗ error:harness: session lost'),
-      head('spec#1', '✗ error:harness {"adapter":"fake","code":7}'),
-    ),
-  );
-});
+test.each(['quiet', 'normal'] as const)(
+  'at %s, crashes, consumer failures and other errors each print their message',
+  (verbosity) => {
+    const events = stream([
+      { type: 'error:crash', message: 'journal.ndjson:1 is not valid JSON', key: 'spec#1' },
+      { type: 'error:crash', message: 'out of memory' },
+      {
+        type: 'error:consumer',
+        consumer: 'summary.json',
+        failed: { seq: 12, type: 'stage:end' },
+        message: 'disk full',
+      },
+      { type: 'error:harness', key: 'spec#1', message: 'session lost' },
+      { type: 'error:harness', key: 'spec#1', adapter: 'fake', code: 7 },
+    ]);
+    // Each through a consumer of its own, so no error can stop the ones after it from printing.
+    expect(events.map((event) => render([event], verbosity)).join('')).toBe(
+      view(
+        head('spec#1', '✗ crash: journal.ndjson:1 is not valid JSON'),
+        head('', '✗ crash: out of memory'),
+        head('', '✗ consumer summary.json failed on stage:end #12: disk full'),
+        head('spec#1', '✗ error:harness: session lost'),
+        head('spec#1', '✗ error:harness {"adapter":"fake","code":7}'),
+      ),
+    );
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a timeout prints nothing of its own below trace, and an invalid output prints only its verdict', () => {
+test('a timeout prints nothing of its own below trace, and an invalid output prints only its verdict', () => {
   const events = stream([
     { type: 'error:timeout', key: 'tests#1', message: 'timed out after 30s', timeoutSeconds: 30 },
     { type: 'output:invalid', key: 'tests#2', message: 'the last stdout line is not JSON: Unexpected token' },
@@ -222,10 +218,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('normal shows an unmapped exit, a signal, a second try and a blocked outcome as such', () => {
+test('normal shows an unmapped exit, a signal, a second try and a blocked outcome as such', () => {
   const events = stream([
     stageStart('tests#1'),
     { type: 'script:exit', key: 'tests#1', code: 2, durationMs: 40, stdoutBytes: 0 },
@@ -244,13 +237,16 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('loop lines name feedback from the workflow or an unknown pointer as given, and an exceeded loop', () => {
+test('loop lines name feedback from the workflow or an unknown pointer as given, and an exceeded loop', () => {
   const events = stream([
     { type: 'loop:iteration', loop: 'fix', iteration: 2, max: 3, feedback: { from: 'workflow' } },
-    { type: 'loop:iteration', loop: 'review', iteration: 2, max: 2, feedback: { from: '09-review/call-9/result.json#/output' } },
+    {
+      type: 'loop:iteration',
+      loop: 'review',
+      iteration: 2,
+      max: 2,
+      feedback: { from: '09-review/call-9/result.json#/output' },
+    },
     { type: 'loop:exit', loop: 'fix', iterations: 3, max: 3, reason: 'exceeded' },
   ]);
   expect(render(events, 'normal')).toBe(
@@ -262,10 +258,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a script that ends in error shows the last 10 non-blank lines of stdout.log, then stderr.log, and a missing call directory shows none', () => {
+test('a script that ends in error shows the last 10 non-blank lines of stdout.log, then stderr.log, and a missing call directory shows none', () => {
   const stdout = ['line 1', 'line 2', 'line 3', 'line 4', 'line 5', 'line 6', '', 'line 7', 'line 8', 'line 9'];
   const runs = runsWith({
     '03-tests/call-1/stdout.log': `${[...stdout, 'line 10', 'line 11', 'line 12', ''].join('\n')}\n`,
@@ -294,10 +287,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, NewEvent[], string]>([
+test.each<[string, NewEvent[], string]>([
   [
     'a failed run names its stop, counts outcomes in order and keeps each loop at its highest',
     [
@@ -313,7 +303,13 @@ test
       { type: 'loop:iteration', loop: 'fix', iteration: 2, max: 3 },
       { type: 'loop:iteration', loop: 'fix', iteration: 3, max: 3 },
       { type: 'loop:exit', loop: 'fix', iterations: 3, max: 3, reason: 'exceeded' },
-      { type: 'run:end', status: 'failed', stopReason: 'workflow_failed', message: 'loop "fix" exceeded 3', replays: 6 },
+      {
+        type: 'run:end',
+        status: 'failed',
+        stopReason: 'workflow_failed',
+        message: 'loop "fix" exceeded 3',
+        replays: 6,
+      },
     ],
     view(
       'sail · ticket-to-pr v1 · RUN-1',
@@ -330,7 +326,13 @@ test
     'a suspended run with no call and no loop has calls 0 and no loops row',
     [
       fake1Start(),
-      { type: 'run:end', status: 'suspended', stopReason: 'interrupted', message: 'stopped during implement#2', replays: 1 },
+      {
+        type: 'run:end',
+        status: 'suspended',
+        stopReason: 'interrupted',
+        message: 'stopped during implement#2',
+        replays: 1,
+      },
     ],
     view(
       'sail · ticket-to-pr v1 · RUN-1',
@@ -346,10 +348,7 @@ test
   expect(render(stream(events), 'quiet')).toBe(expected);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[number, string]>([
+test.each<[number, string]>([
   [0, '0ms'],
   [999, '999ms'],
   [1450, '1.5s'],
@@ -365,15 +364,18 @@ test
   expect(formatDuration(ms)).toBe(text);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('in a terminal, the live line names the running call and its elapsed seconds, and follows a step and back', () => {
+test('in a terminal, the live line names the running call and its elapsed seconds, and follows a step and back', () => {
   const t = inTerminal();
   const [start, stepStart, stepEnd, end] = stream([
     stageStart('publish#1', 'stage', { steps: ['open'] }),
     { type: 'step:start', key: 'publish#1/open', stage: 'publish', step: 'open', index: 1, of: 1, kind: 'script' },
-    { type: 'step:end', key: 'publish#1/open', step: 'open', outcome: 'passed', resultPath: '05-publish/call-1/steps/1-open/result.json' },
+    {
+      type: 'step:end',
+      key: 'publish#1/open',
+      step: 'open',
+      outcome: 'passed',
+      resultPath: '05-publish/call-1/steps/1-open/result.json',
+    },
     stageEnd('publish#1', 'passed', 75900, '05-publish/call-1/result.json'),
   ]) as [SailEvent, SailEvent, SailEvent, SailEvent];
 
@@ -405,16 +407,16 @@ test
   expect(t.out).toBe(ended);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, NewEvent | undefined]>([
+test.each<[string, NewEvent | undefined]>([
   ['run:end', { type: 'run:end', status: 'completed', replays: 1 }],
   ['error:crash', { type: 'error:crash', key: 'implement#2', message: 'boom' }],
   ['close()', undefined],
 ])('in a terminal, %s leaves no live line and no timer', (_, ending) => {
   const t = inTerminal();
-  const [start, last] = stream([stageStart('implement#2'), ending ?? { type: 'run:resumed' }]) as [SailEvent, SailEvent];
+  const [start, last] = stream([stageStart('implement#2'), ending ?? { type: 'run:resumed' }]) as [
+    SailEvent,
+    SailEvent,
+  ];
   t.terminal.onEvent(start);
   expect(visibleLive(t.out)).toBe('implement#2 running · 0s');
   if (ending === undefined) t.terminal.close();
@@ -422,10 +424,7 @@ test
   expect({ live: visibleLive(t.out), cancelled: t.timers.cancelled }).toEqual({ live: undefined, cancelled: 1 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('in a terminal, a pass is green, a failure yellow and an error red', () => {
+test('in a terminal, a pass is green, a failure yellow and an error red', () => {
   const t = inTerminal('normal');
   const events = stream([
     stageStart('tests#1'),

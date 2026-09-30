@@ -82,5 +82,5 @@ including as examples in this file.
   and `src/cli/exit-codes.ts` holds the exit codes every command returns.
 - `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
 - `types/`: generated from `src/sdk` by `bun run types`. `sail check` type-checks a repository against it.
-- `test/fixtures/`: `repo/` is the fixture repository and `runs/` the golden run directories. Both are data, edited by
-  hand when a schema changes.
+- `test/fixtures/`: `repo/` is the fixture repository, `runs/` the golden run directories, and `terminal/` the golden
+  terminal views, one per verbosity. All are data, edited by hand when a schema or a line format changes.
