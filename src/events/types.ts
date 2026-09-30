@@ -8,6 +8,7 @@ import type { JournalEntry } from '../engine/journal';
 import type { IntakeEntry, RosterEntry } from '../engine/roster';
 import type { StopReason } from '../engine/run-dir';
 import type { RunHeader } from '../engine/run-header';
+import type { CheckStatus, MergeMethod, TicketMove, TicketState } from '../ports/types';
 import type { Budget, Permissions } from '../sdk/steps';
 
 /** Every event type, in `sail.event.v1`'s order. */
@@ -172,6 +173,39 @@ interface Payloads {
   'error:timeout': { key: string; message: string; timeoutSeconds: number };
   'error:crash': { message: string; key?: string };
   'error:consumer': { consumer: string; failed: { seq: number; type: EventType }; message: string };
+  // The provider families (D10). A ticket or codehost event carries its call's key when a call emitted it, and none at
+  // dispatch; a workspace event carries none.
+  // STUB (TASK-003): closed here, while sail.event.v1 still takes them open until TASK-003.
+  'ticket:fetched': {
+    key?: string;
+    ticketKey: string;
+    comments: number;
+    links: number;
+    attachments: number;
+    durationMs: number;
+  };
+  'ticket:claimed': { key?: string; ticketKey: string; state: TicketState };
+  'ticket:updated': { key?: string; ticketKey: string; change: { state: TicketMove }; state: TicketState };
+  'ticket:commented': { key?: string; ticketKey: string; body: string };
+  'codehost:pushed': { key?: string; branch: string; headSha: string };
+  'codehost:pr_opened': {
+    key?: string;
+    number: number;
+    url: string;
+    draft: boolean;
+    base: string;
+    head: string;
+    ticketKey?: string;
+  };
+  'codehost:checks': { key?: string; number: number; headSha: string; checks: { name: string; status: CheckStatus }[] };
+  'codehost:labelled': { key?: string; number: number; label: string; change: 'added' | 'removed' };
+  'codehost:commented': { key?: string; number: number; body: string };
+  'codehost:merged': { key?: string; number: number; method: MergeMethod; sha: string };
+  /** `took` is the stale run whose lease this one replaced. */
+  'workspace:leased': { remote: string; branch: string; took?: string };
+  'workspace:lease_released': { remote: string; branch: string };
+  'workspace:created': { path: string; branch: string; baseSha: string; durationMs: number };
+  'workspace:released': { path: string; kept: boolean };
 }
 
 type ClosedType = keyof Payloads;
@@ -196,6 +230,13 @@ export type CallEvent = { [T in EventType]: { type: T } & Omit<PayloadOf<T>, 'ke
 export type Emit = (event: NewEvent) => void;
 
 export type CallEmit = (event: CallEvent) => void;
+
+type ProviderType = Extract<EventType, `ticket:${string}` | `codehost:${string}` | `workspace:${string}`>;
+
+/** An event as an adapter emits it, without the key: its caller stamps one. */
+export type ProviderEvent = Extract<CallEvent, { type: ProviderType }>;
+
+export type ProviderEmit = (event: ProviderEvent) => void;
 
 /** Receives the event stream and does one thing with it. A consumer that throws is reported as `error:consumer`. */
 export interface Consumer {
