@@ -5,7 +5,8 @@
 //   another process or through a rename.
 // - A run has ended once the last event delivered is `run:end` and STATUS isn't `running`. The runtime writes STATUS
 //   before `run:end`, and a resume sets it back to `running` before it emits anything, so a `run:end` in the middle of
-//   a resumed run's file never ends the follow.
+//   a resumed run's file never ends the follow. A consumer that failed on `run:end` reports after it, and changes
+//   nothing.
 // - A crashed run keeps STATUS `running` with no process behind it, so it is followed until the signal aborts.
 import { readStatus } from '../engine/run-dir';
 import { readEventsFrom, START } from './consumers/ndjson';
@@ -54,7 +55,7 @@ export async function followEvents(
     if ('refused' in read) return read;
     for (const event of read.events) {
       onEvent(event);
-      lastWasEnd = event.type === 'run:end';
+      if (event.type !== 'error:consumer') lastWasEnd = event.type === 'run:end';
     }
     cursor = read.next;
     // Only a read that finds nothing new waits: until then the follow is catching up.
