@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createEventsFile, ndjsonConsumer, nextSeq } from '../../../src/events/consumers/ndjson';
+import { createEventsFile, ndjsonConsumer, nextSeq, readEvents } from '../../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../../src/events/types';
 
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
@@ -126,6 +126,31 @@ test.each<[string, string]>([
     refused: expect.stringMatching(/^events\.ndjson:3 can't be read, so the events can't continue: ./),
   });
   expect(contents(dir)).toBe(before);
+});
+
+test('readEvents gives every event of a run in file order, and none for a missing file', () => {
+  const fake1 = join(import.meta.dir, '..', '..', 'fixtures', 'runs', RUN_ID);
+  const events = readEvents(fake1);
+  expect(events.map((each) => each.seq)).toEqual(Array.from({ length: 131 }, (_, index) => index + 1));
+  const last = readFileSync(join(fake1, 'events.ndjson'), 'utf8').trimEnd().split('\n').at(-1) ?? '';
+  expect(events.at(-1)).toEqual(JSON.parse(last));
+  expect(readEvents(runDir())).toEqual([]);
+});
+
+test('readEvents skips a torn tail and every line that is not an event, and leaves the file as it was', () => {
+  const dir = runDir();
+  const junk = ['{ not json', 'null', '["seq",3]', '{"seq":"3","type":"stage:start"}', '{"seq":3}'];
+  const text = `${lines(1, 2)}${junk.join('\n')}\n${lines(3)}${JSON.stringify(event(4)).slice(0, 40)}`;
+  writeFileSync(join(dir, 'events.ndjson'), text);
+  expect(readEvents(dir)).toEqual([event(1), event(2), event(3)]);
+  expect(contents(dir)).toBe(text);
+});
+
+test("readEvents skips a line that doesn't match sail.event.v1, such as a run:end without its replays", () => {
+  const dir = runDir();
+  const end = { seq: 3, ts: '2026-09-28T09:00:03.000Z', type: 'run:end', runId: RUN_ID, status: 'completed' };
+  writeFileSync(join(dir, 'events.ndjson'), `${lines(1, 2)}${JSON.stringify(end)}\n${lines(4)}`);
+  expect(readEvents(dir)).toEqual([event(1), event(2), event(4)]);
 });
 
 test("nextSeq refuses before it cuts: a torn tail after a line it can't read stays", () => {

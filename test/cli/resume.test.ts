@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { edit } from '../helpers/fixture';
-import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
+import { fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
 import {
   copyRun,
   interruptWhenAsleep,
@@ -54,19 +54,66 @@ function runFiles(repoDir: string): Record<string, string[]> {
   );
 }
 
-test('sail resume runs an interrupted run to its end, printing only the calls it runs', async () => {
+/** The sum of the `replays` of every `run:end` in the run's events file. */
+function replaysOf(repoDir: string, runId: string): number {
+  return readFileSync(join(repoDir, '.sail-runs', runId, 'events.ndjson'), 'utf8')
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { type: string; replays?: number })
+    .filter((event) => event.type === 'run:end')
+    .reduce((sum, event) => sum + (event.replays ?? 0), 0);
+}
+
+test('sail resume opens with what already ran, runs the interrupted call as its second try, and ends with the whole run', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const { code, stdout, stderr } = await runCaptured(['resume', runId], repo.dir);
-    expect(stdout.trimEnd().split('\n')).toEqual([
-      'implement#2 passed',
-      'tests#2 passed',
-      'self-review#1 passed',
-      'publish#1 passed',
-      `${runId} completed  .sail-runs/${runId}`,
-    ]);
+    expect(normaliseDurations(stdout)).toBe(
+      [
+        `sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed`,
+        'fix            ↻ iteration 2/3 · feedback from tests#1',
+        'implement#2    ▶ implement · script · try 2',
+        'implement#2      exit 0 → passed · <t>',
+        'implement#2      output valid',
+        'implement#2    ✓ passed · <t>',
+        'tests#2        ▶ tests · script',
+        'tests#2          exit 0 → passed · <t>',
+        'tests#2          output valid',
+        'tests#2        ✓ passed · <t>',
+        'self-review#1  ▶ self-review · script',
+        'self-review#1    exit 0 → passed · <t>',
+        'self-review#1    output valid',
+        'self-review#1  ✓ passed · <t>',
+        'fix            ↻ break after 2/3',
+        'publish#1      ▶ publish · script',
+        'publish#1        exit 0 → passed · <t>',
+        'publish#1        output valid',
+        'publish#1      ✓ passed · <t>',
+        '',
+        'completed · <t>',
+        '  calls    7 · 6 passed, 1 failed',
+        '  loops    fix 2/3',
+        `  replays  ${replaysOf(repo.dir, runId)}`,
+        `  run      .sail-runs/${runId}`,
+        '',
+      ].join('\n'),
+    );
     expect(stderr).toBe('');
     expect(code).toBe(EXIT_OK);
+  });
+}, 30_000);
+
+test('-q with -v is refused with exit 3, and the run is left as it was', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedInto(repo.dir);
+    const before = runFiles(repo.dir);
+    const { code, stdout, stderr } = await runCaptured(['resume', runId, '-qv'], repo.dir);
+    expect({ code, stdout, stderr }).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: "sail resume: -q and -v can't be combined\n",
+    });
+    expect(runFiles(repo.dir)).toEqual(before);
   });
 }, 30_000);
 
@@ -152,9 +199,19 @@ test('a workflow whose keys no longer fit the journal fails the resume with dete
     const runId = await interruptedInto(repo.dir);
     swapImplementAndTests(join(repo.dir, '.sail'));
     const { code, stdout } = await runCaptured(['resume', runId], repo.dir);
-    expect(stdout.trimEnd().split('\n')).toEqual([
-      `${runId} failed determinism_violation: the workflow asked for 'tests#1' where the journal has 'implement#1'  .sail-runs/${runId}`,
-    ]);
+    expect(normaliseDurations(stdout)).toBe(
+      [
+        `sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed`,
+        '',
+        'failed · <t>',
+        "  stop     determinism_violation: the workflow asked for 'tests#1' where the journal has 'implement#1'",
+        '  calls    3 · 2 passed, 1 failed',
+        '  loops    fix 2/3',
+        `  replays  ${replaysOf(repo.dir, runId)}`,
+        `  run      .sail-runs/${runId}`,
+        '',
+      ].join('\n'),
+    );
     expect(code).toBe(EXIT_FAILED);
   });
 }, 30_000);
@@ -166,10 +223,23 @@ test('Ctrl-C during sail resume suspends the run again, and names the resume aga
     const interrupts = fakeInterrupts();
     const resuming = runCaptured(['resume', runId], repo.dir, interrupts);
     const { end, alive } = await interruptWhenAsleep(repo.dir, resuming, interrupts.interrupt);
-    expect(end.stdout.trimEnd().split('\n')).toEqual([
-      `${runId} suspended interrupted: stopped during implement#2  .sail-runs/${runId}`,
-      `resume it with: sail resume ${runId}`,
-    ]);
+    const view = normaliseDurations(end.stdout);
+    expect(view).toContain(
+      '\nimplement#2    ✗ error · <t>\nimplement#2      exit_code: interrupted, then ended by signal SIGTERM\n',
+    );
+    expect(view).toEndWith(
+      [
+        '',
+        'suspended · <t>',
+        '  stop     interrupted: stopped during implement#2',
+        '  calls    3 · 2 passed, 1 failed',
+        '  loops    fix 2/3',
+        `  replays  ${replaysOf(repo.dir, runId)}`,
+        `  run      .sail-runs/${runId}`,
+        `resume it with: sail resume ${runId}`,
+        '',
+      ].join('\n'),
+    );
     expect(end.code).toBe(EXIT_SUSPENDED);
     expect(alive).toEqual([]);
     expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);

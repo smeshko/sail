@@ -1,0 +1,87 @@
+sail · ticket-to-pr v1 · FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
+intake#1            ▶ intake ticket · script
+intake#1              $ builtin:ticket · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
+intake#1              exit 0 → passed · 1.5s
+intake#1              output valid
+intake#1              file brief.md valid · hasSections(Request, Acceptance criteria, Context), untrustedInputWrapped
+intake#1              file ticket.json · 622 B
+intake#1              file brief.md · 674 B
+intake#1            ✓ passed
+intake#1              stdout.log
+intake#1              │ fetched FAKE-1 through the ticket source
+intake#1              │ wrote ticket.json and brief.md
+intake#1              │ {"ticketKey":"FAKE-1","title":"Add a --shout flag to the greet command","url":"fake://tickets/FAKE-1","acceptanceCriteria":["`greet Ada --shout` prints `HELLO, ADA!`","`greet Ada` still prints `Hello, Ada!`","`greet --help` lists `--shout`"]}
+spec#1              ▶ spec · agent · claude-opus-5-5
+spec#1                in brief ← 00-intake/call-1/brief.md
+spec#1                output valid
+spec#1                file spec.md valid · hasSections(Requirements, Tasks), noPlaceholders
+spec#1                file spec.md · 427 B
+spec#1              ✓ done · 10.4s
+fix                 ↻ iteration 1/3
+implement#1         ▶ implement · agent · claude-sonnet-5
+implement#1           in spec ← 01-spec/call-1/spec.md
+implement#1           output valid
+implement#1           file diff.patch · 1.0 KB
+implement#1         ✓ done · 12.6s
+tests#1             ▶ tests · script
+tests#1               $ .sail/stages/tests/run.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
+tests#1               exit 1 → failed · 2.3s
+tests#1               output valid
+tests#1               file junit.xml · 893 B
+tests#1             ✗ failed · 2.5s
+tests#1               stdout.log
+tests#1               │ bun test v1.3.14
+tests#1               │ 5 pass
+tests#1               │ 1 fail
+tests#1               │ (fail) greet --shout › uppercases the name
+tests#1               │ {"ok":false,"total":6,"failed":1,"durationMs":2300,"failures":[{"test":"greet --shout › uppercases the name","file":"test/greet.test.ts","message":"Expected \"HELLO, ADA!\" but received \"HELLO, Ada!\""}]}
+fix                 ↻ iteration 2/3 · feedback from tests#1
+implement#2         ▶ implement · agent · claude-sonnet-5
+implement#2           in spec ← 01-spec/call-1/spec.md
+implement#2           in feedback ← 03-tests/call-1/result.json#/output
+implement#2           output valid
+implement#2           file diff.patch · 613 B
+implement#2         ✓ done · 12.5s
+tests#2             ▶ tests · script
+tests#2               $ .sail/stages/tests/run.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
+tests#2               exit 0 → passed · 2.5s
+tests#2               output valid
+tests#2               file junit.xml · 876 B
+tests#2             ✓ passed · 2.7s
+tests#2               stdout.log
+tests#2               │ bun test v1.3.14
+tests#2               │ 7 pass
+tests#2               │ 0 fail
+tests#2               │ {"ok":true,"total":7,"failed":0,"durationMs":2450,"failures":[]}
+self-review#1       ▶ self-review · agent · claude-opus-5-5
+self-review#1         in spec ← 01-spec/call-1/spec.md
+self-review#1         output valid
+self-review#1         file review.md valid · hasSections(Findings, Verdict), noPlaceholders
+self-review#1         file review.md · 374 B
+self-review#1       ✓ done · 10.5s
+fix                 ↻ break after 2/3
+self-review#1       → publish#1 · on done
+publish#1           ▶ publish · 2 steps
+publish#1             in ticket ← 00-intake/call-1/result.json#/output
+publish#1             in spec ← 01-spec/call-1/spec.md
+publish#1/describe  ▶ describe · step 1/2 · agent · claude-sonnet-5
+publish#1/describe    output valid
+publish#1/describe    file pr-body.md valid · hasSections(Summary, Changes, Testing), noPlaceholders
+publish#1/describe    file pr-body.md · 324 B
+publish#1/describe  ✓ done
+publish#1/open      ▶ open · step 2/2 · script
+publish#1/open        $ .sail/workflows/ticket-to-pr/stages/publish/open.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
+publish#1/open        exit 0 → passed · 1.9s
+publish#1/open        output valid
+publish#1/open      ✓ passed
+publish#1/open        stdout.log
+publish#1/open        │ pushed sail/FAKE-1
+publish#1/open        │ opened fake://codehost/fixture/pull/1
+publish#1/open        │ {"number":1,"url":"fake://codehost/fixture/pull/1","draft":false}
+publish#1           ✓ passed · 14.5s
+
+completed · 1m 11s
+  calls    8 · 3 passed, 4 done, 1 failed
+  loops    fix 2/3
+  replays  8
+  run      .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N

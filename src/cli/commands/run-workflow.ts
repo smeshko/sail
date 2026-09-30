@@ -1,6 +1,7 @@
-// `sail run [--workflow <name>] [--input <json>]`: runs a workflow of the repository sail is run from, to its end. The
-// workflow is type-checked first, so a wrongly wired stage never runs. Every refusal comes before the run directory
-// exists. This module parses, prints and maps the run's status to an exit code; the run is the engine's.
+// `sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]`: runs a workflow of the repository sail is run from, to
+// its end. The workflow is type-checked first, so a wrongly wired stage never runs. Every refusal comes before the run
+// directory exists. This module parses, hands the run's events to the terminal view and maps the run's status to an
+// exit code; the run is the engine's. Everything the command prints during the run comes from its events.
 //
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
 // resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
@@ -8,12 +9,14 @@
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { join, relative } from 'node:path';
 import { type ProjectConfig, readConfig } from '../../engine/config';
-import type { JournalEntry } from '../../engine/journal';
 import { findWorkflowFile } from '../../engine/load-workflow';
+import { runsDir } from '../../engine/run-dir';
 import { type RunEnd, runWorkflow } from '../../engine/runtime';
 import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
+import { type TerminalConsumer, terminalConsumer, type Verbosity } from '../../events/consumers/terminal';
+import type { SailEvent } from '../../events/types';
 import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
@@ -40,6 +43,16 @@ export function parseInputOption(args: Parsed, io: Io, command: string): { input
   } catch (error) {
     return refuseAs(io, command)(`--input is not JSON: ${(error as Error).message}`);
   }
+}
+
+/** The verbosity `-q` and `-v` ask for: `-v` is verbose, and `-vv` or more is trace. `-q` with any `-v` refuses. */
+export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | ExitCode {
+  const quiet = args.values.quiet === true;
+  const verbose = typeof args.values.verbose === 'number' ? args.values.verbose : 0;
+  if (quiet && verbose > 0) return refuseAs(io, command)("-q and -v can't be combined");
+  if (verbose >= 2) return 'trace';
+  if (verbose === 1) return 'verbose';
+  return quiet ? 'quiet' : 'normal';
 }
 
 /** `.sail/`, found from where sail runs, and its config. A config with issues prints each and refuses. */
@@ -87,18 +100,33 @@ export async function interruptibly<T>(io: Io, body: (signal: AbortSignal) => Pr
   }
 }
 
-/** Prints each journaled call as `<key> <outcome>`. */
-export function printCall(io: Io): (entry: JournalEntry) => void {
-  return (entry) => io.stdout(`${entry.key} ${entry.outcome}\n`);
+/**
+ * The terminal view of a run at `verbosity`, written to stdout: coloured, with a live line, only when `io.tty` says
+ * stdout is an interactive terminal. A resume passes the run's earlier events as `prior`, so the view covers the whole
+ * run.
+ */
+export function terminalFor(
+  io: Io,
+  sailDir: string,
+  verbosity: Verbosity,
+  prior?: readonly SailEvent[],
+): TerminalConsumer {
+  const runs = runsDir(sailDir);
+  return terminalConsumer({
+    verbosity,
+    write: (text) => io.stdout(text),
+    ...(io.tty === undefined ? {} : { tty: io.tty }),
+    runsDir: runs,
+    shownRunsDir: at(io, runs),
+    ...(prior === undefined ? {} : { prior }),
+  });
 }
 
 /**
- * Prints how a run ended, `<run id> <status>[ <stop reason>: <message>]  <dir>`, and for a suspended run how to resume
- * it, repeating `--input` quoted for a POSIX shell. Returns the status's exit code.
+ * After the terminal view's final block, prints how to resume a suspended run, repeating `--input` quoted for a POSIX
+ * shell: no event carries the input as given. Returns the status's exit code.
  */
 export function printEnd(end: RunEnd, io: Io, rawInput: string | undefined): ExitCode {
-  const stopped = end.status === 'completed' ? '' : ` ${end.stopReason}: ${end.message}`;
-  io.stdout(`${end.runId} ${end.status}${stopped}  ${at(io, end.dir)}\n`);
   if (end.status === 'suspended') {
     const input = rawInput === undefined ? '' : ` --input '${rawInput.replaceAll("'", "'\\''")}'`;
     io.stdout(`resume it with: sail resume ${end.runId}${input}\n`);
@@ -112,6 +140,8 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   const refuse = refuseAs(io, COMMAND);
   const given = parseInputOption(args, io, COMMAND);
   if (typeof given === 'number') return given;
+  const verbosity = verbosityOf(args, io, COMMAND);
+  if (typeof verbosity === 'number') return verbosity;
   const project = findProject(io, COMMAND);
   if (typeof project === 'number') return project;
 
@@ -123,14 +153,16 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
 
+  const terminal = terminalFor(io, project.sailDir, verbosity);
+  // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     runWorkflow({
       cwd: io.cwd,
       workflow,
       ...(given.input === undefined ? {} : { input: given.input }),
       signal,
-      onCall: printCall(io),
-    }),
+      consumers: [terminal],
+    }).finally(() => terminal.close()),
   );
   if ('refused' in end) return refuse(end.refused);
   return printEnd(end, io, given.raw);

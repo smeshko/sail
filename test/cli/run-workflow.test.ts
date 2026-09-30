@@ -4,9 +4,17 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { verbosityOf } from '../../src/cli/commands/run-workflow';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import type { Parsed } from '../../src/cli/index';
 import { edit } from '../helpers/fixture';
-import { type Captured, fakeInterrupts, runCaptured } from '../helpers/run-captured';
+import {
+  type Captured,
+  type CaptureOptions,
+  fakeInterrupts,
+  normaliseDurations,
+  runCaptured,
+} from '../helpers/run-captured';
 import { interruptWhenAsleep, type StubOptions, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -17,58 +25,175 @@ async function sailIn(
   argv: string[],
   options: StubOptions = {},
   change: (sail: string) => void = () => undefined,
-): Promise<Captured & { lines: string[]; runs: string[] }> {
+  capture: CaptureOptions = {},
+): Promise<Captured & { lines: string[]; runs: string[]; view: string }> {
   return withTempRepo(async (repo) => {
     change(writeStub(repo.dir, options));
-    const captured = await runCaptured(argv, repo.dir);
+    const captured = await runCaptured(argv, repo.dir, capture);
     const runsDir = join(repo.dir, '.sail-runs');
     const runs = existsSync(runsDir) ? readdirSync(runsDir) : [];
-    return { ...captured, lines: captured.stdout.trimEnd().split('\n'), runs };
+    const view = normaliseDurations(captured.stdout);
+    return { ...captured, lines: captured.stdout.trimEnd().split('\n'), runs, view };
   });
 }
 
-test("sail run runs the default workflow to completion, a line per call, then the run's", async () => {
-  const { code, lines, stderr, runs } = await sailIn(['run']);
+/** A head line and a detail line of the stub's terminal view: its key column is 13 wide, for `self-review#1`. */
+const head = (key: string, text: string) => `${key.padEnd(13)}  ${text}`;
+const detail = (key: string, text: string) => `${key.padEnd(13)}    ${text}`;
+
+test('sail run prints the run as the terminal view: each call, its exit, its output, the loop, a failure tail and the final block', async () => {
+  const { code, view, stderr, runs } = await sailIn(['run']);
   expect(runs).toHaveLength(1);
   const [runId] = runs;
   expect(runId).toMatch(/^LOCAL-[0-9A-Z]{26}$/);
-  expect(lines).toEqual([
-    'spec#1 passed',
-    'implement#1 passed',
-    'tests#1 failed',
-    'implement#2 passed',
-    'tests#2 passed',
-    'self-review#1 passed',
-    'publish#1 passed',
-    `${runId} completed  .sail-runs/${runId}`,
-  ]);
+  expect(view).toBe(
+    [
+      `sail · ticket-to-pr v1 · ${runId}`,
+      'spec#1         ▶ spec · script',
+      'spec#1           exit 0 → passed · <t>',
+      'spec#1           output valid',
+      'spec#1         ✓ passed · <t>',
+      'fix            ↻ iteration 1/3',
+      'implement#1    ▶ implement · script',
+      'implement#1      exit 0 → passed · <t>',
+      'implement#1      output valid',
+      'implement#1    ✓ passed · <t>',
+      'tests#1        ▶ tests · script',
+      'tests#1          exit 1 → failed · <t>',
+      'tests#1          output valid',
+      'tests#1        ✗ failed · <t>',
+      'tests#1          stdout.log',
+      'tests#1          │ {"ok":false,"total":1,"failed":1,"durationMs":0,"failures":[{"test":"greets","file":"test/greet.test.ts","message":"expected a greeting"}]}',
+      'fix            ↻ iteration 2/3 · feedback from tests#1',
+      'implement#2    ▶ implement · script',
+      'implement#2      exit 0 → passed · <t>',
+      'implement#2      output valid',
+      'implement#2    ✓ passed · <t>',
+      'tests#2        ▶ tests · script',
+      'tests#2          exit 0 → passed · <t>',
+      'tests#2          output valid',
+      'tests#2        ✓ passed · <t>',
+      'self-review#1  ▶ self-review · script',
+      'self-review#1    exit 0 → passed · <t>',
+      'self-review#1    output valid',
+      'self-review#1  ✓ passed · <t>',
+      'fix            ↻ break after 2/3',
+      'publish#1      ▶ publish · script',
+      'publish#1        exit 0 → passed · <t>',
+      'publish#1        output valid',
+      'publish#1      ✓ passed · <t>',
+      '',
+      'completed · <t>',
+      '  calls    7 · 6 passed, 1 failed',
+      '  loops    fix 2/3',
+      '  replays  8',
+      `  run      .sail-runs/${runId}`,
+      '',
+    ].join('\n'),
+  );
   expect(stderr).toBe('');
   expect(code).toBe(EXIT_OK);
 });
 
-test('a run whose tests never pass exits 1, naming its stop reason and why', async () => {
-  const { code, lines, runs } = await sailIn(['run', '--workflow', 'ticket-to-pr'], { testsPassAt: 99 });
+test('a run whose tests never pass exits 1, its final block naming the stop reason and why', async () => {
+  const { code, view, runs } = await sailIn(['run', '--workflow', 'ticket-to-pr'], { testsPassAt: 99 });
   const [runId] = runs;
-  expect(lines.at(-2)).toBe('tests#3 failed');
-  expect(lines.at(-1)).toBe(`${runId} failed workflow_failed: loop "fix" exceeded 3  .sail-runs/${runId}`);
+  expect(view).toEndWith(
+    [
+      '',
+      'failed · <t>',
+      '  stop     workflow_failed: loop "fix" exceeded 3',
+      '  calls    7 · 4 passed, 3 failed',
+      '  loops    fix 3/3',
+      '  replays  8',
+      `  run      .sail-runs/${runId}`,
+      '',
+    ].join('\n'),
+  );
   expect(code).toBe(EXIT_FAILED);
 });
 
-test('a call that ends in error exits 1 with stage_error', async () => {
-  const { code, lines } = await sailIn(['run'], {}, (sail) =>
+test('sail run -q prints the header, a call that ends in error with its message, and the final block, and exits 1', async () => {
+  const { code, view, runs } = await sailIn(['run', '-q'], {}, (sail) =>
     edit(sail, 'stages/tests/run.sh', 'pass_at=2\n', 'exit 2\n'),
   );
-  expect(lines.at(-2)).toBe('tests#1 error');
-  expect(lines.at(-1)).toContain(
-    ' failed stage_error: tests#1 ended in error: exit_code: exit code 2 is not mapped to passed or failed  .sail-runs/',
+  const [runId] = runs;
+  expect(view).toBe(
+    [
+      `sail · ticket-to-pr v1 · ${runId}`,
+      'tests#1        ✗ error · <t>',
+      'tests#1          exit_code: exit code 2 is not mapped to passed or failed',
+      '',
+      'failed · <t>',
+      '  stop     stage_error: tests#1 ended in error: exit_code: exit code 2 is not mapped to passed or failed',
+      '  calls    3 · 2 passed, 1 error',
+      '  loops    fix 1/3',
+      '  replays  4',
+      `  run      .sail-runs/${runId}`,
+      '',
+    ].join('\n'),
   );
   expect(code).toBe(EXIT_FAILED);
 });
 
 test('a valid --input runs', async () => {
   const input = { ticketKey: 'FAKE-4', title: 'Greet', url: 'fake://tickets/FAKE-4', acceptanceCriteria: [] };
-  const { code, lines } = await sailIn(['run', '--input', JSON.stringify(input)], { testsPassAt: 1 });
-  expect(lines.at(-1)).toContain(' completed  .sail-runs/LOCAL-');
+  const { code, runs } = await sailIn(['run', '--input', JSON.stringify(input)], { testsPassAt: 1 });
+  expect(runs).toHaveLength(1);
+  expect(code).toBe(EXIT_OK);
+});
+
+test('sail run -v adds each command and the tail of every script, and -vv adds each journal line', async () => {
+  const verbose = await sailIn(['run', '-v']);
+  const specTail = [
+    detail('spec#1', 'stdout.log'),
+    detail('spec#1', '│ {"summary":"Add a greeting.","tasks":[{"title":"Add greet()","files":["src/greet.ts"]}]}'),
+  ].join('\n');
+  expect(verbose.view).toContain(`\n${detail('tests#1', '$ .sail/stages/tests/run.sh')}\n`);
+  expect(verbose.view).toContain(`\n${specTail}\n`);
+  expect(verbose.view).not.toContain('journal line');
+
+  const trace = await sailIn(['run', '-vv']);
+  expect(trace.view).toContain(`\n${specTail}\n`);
+  expect(trace.view).toContain(`\n${detail('spec#1', 'journal line 1')}\n`);
+});
+
+test('verbosityOf maps no flag, -q, -v, -vv and -vvv to normal, quiet, verbose, trace and trace', () => {
+  const io = { cwd: '.', stdout: () => undefined, stderr: () => undefined };
+  const of = (values: Parsed['values']) => verbosityOf({ values, positionals: [] }, io, 'sail run');
+  expect([{}, { quiet: true }, { verbose: 1 }, { verbose: 2 }, { verbose: 3 }].map(of)).toEqual([
+    'normal',
+    'quiet',
+    'verbose',
+    'trace',
+    'trace',
+  ]);
+});
+
+test('sail run refuses -q with -v, and sail check takes no -v, each with exit 3 before anything runs', async () => {
+  const { code, stdout, stderr, runs } = await sailIn(['run', '-q', '-v']);
+  expect({ code, stdout, stderr, runs }).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: "sail run: -q and -v can't be combined\n",
+    runs: [],
+  });
+  expect(await runCaptured(['check', '-v'])).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: "sail: unknown argument '-v'\nRun 'sail --help' for usage.\n",
+  });
+});
+
+test('in a terminal, sail run colours its lines and draws the live line, then ends with the final block', async () => {
+  const { code, stdout, runs } = await sailIn(['run'], {}, () => undefined, { tty: { columns: () => 120 } });
+  const [runId] = runs;
+  expect({
+    coloured: stdout.includes('\x1b['),
+    live: stdout.includes(' running · '),
+    blockAfterLastClear: stdout.lastIndexOf('\r\x1b[2K') < stdout.lastIndexOf('completed'),
+    endsWithBlock: stdout.endsWith(`  run      .sail-runs/${runId}\n`),
+  }).toEqual({ coloured: true, live: true, blockAfterLastClear: true, endsWithBlock: true });
   expect(code).toBe(EXIT_OK);
 });
 
@@ -163,16 +288,26 @@ async function interruptedRun(repoDir: string, argv: string[]) {
   return { ...end, lines: end.stdout.trimEnd().split('\n'), runId, alive, interrupts };
 }
 
-test('Ctrl-C during sail run suspends the run, prints how to resume it, and exits 2', async () => {
+test('Ctrl-C during sail run ends the running call in error, suspends the run, prints how to resume it, and exits 2', async () => {
   await withTempRepo(async (repo) => {
-    const { code, lines, stderr, runId, alive, interrupts } = await interruptedRun(repo.dir, ['run']);
-    expect(lines).toEqual([
-      'spec#1 passed',
-      'implement#1 passed',
-      'tests#1 failed',
-      `${runId} suspended interrupted: stopped during implement#2  .sail-runs/${runId}`,
-      `resume it with: sail resume ${runId}`,
-    ]);
+    const { code, stdout, stderr, runId, alive, interrupts } = await interruptedRun(repo.dir, ['run']);
+    const view = normaliseDurations(stdout);
+    expect(view).toContain(
+      `\n${head('implement#2', '✗ error · <t>')}\n${detail('implement#2', 'exit_code: interrupted, then ended by signal SIGTERM')}\n`,
+    );
+    expect(view).toEndWith(
+      [
+        '',
+        'suspended · <t>',
+        '  stop     interrupted: stopped during implement#2',
+        '  calls    3 · 2 passed, 1 failed',
+        '  loops    fix 2/3',
+        '  replays  4',
+        `  run      .sail-runs/${runId}`,
+        `resume it with: sail resume ${runId}`,
+        '',
+      ].join('\n'),
+    );
     expect(stderr).toBe('');
     expect(code).toBe(EXIT_SUSPENDED);
     expect(alive).toEqual([]);

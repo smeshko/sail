@@ -11,7 +11,8 @@
 import { appendFileSync, existsSync, readFileSync, statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFileOnce } from '../../engine/durable';
-import type { Consumer } from '../types';
+import { validateDocument } from '../../engine/schemas';
+import type { Consumer, SailEvent } from '../types';
 
 export const EVENTS_FILE = 'events.ndjson';
 
@@ -50,6 +51,34 @@ export function nextSeq(runDir: string): number | { refused: string } {
   }
   if (end < text.length) truncateSync(path, Buffer.byteLength(text.slice(0, end)));
   return last + 1;
+}
+
+/**
+ * The run's events, in file order: every complete line that is a valid `sail.event.v1` event, so a reader can trust
+ * each one's fields. A torn tail and any other line are skipped, and a missing file gives none. It never truncates:
+ * `nextSeq()` alone cuts a torn tail, and only on a resume that proceeds.
+ */
+export function readEvents(runDir: string): SailEvent[] {
+  const path = join(runDir, EVENTS_FILE);
+  if (!existsSync(path)) return [];
+  const text = readFileSync(path, 'utf8');
+  return text
+    .slice(0, text.lastIndexOf('\n') + 1)
+    .split('\n')
+    .flatMap((line) => {
+      const event = parseEvent(line);
+      return event === undefined ? [] : [event];
+    });
+}
+
+function parseEvent(line: string): SailEvent | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  return validateDocument('sail.event.v1', value).length === 0 ? (value as SailEvent) : undefined;
 }
 
 /**

@@ -1,0 +1,53 @@
+sail · ticket-to-pr v1 · FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
+intake#1            ▶ intake ticket · script
+intake#1              exit 0 → passed · 1.5s
+intake#1              output valid
+intake#1              file brief.md valid
+intake#1            ✓ passed
+spec#1              ▶ spec · agent · claude-opus-5-5
+spec#1                output valid
+spec#1                file spec.md valid
+spec#1              ✓ done · 10.4s
+fix                 ↻ iteration 1/3
+implement#1         ▶ implement · agent · claude-sonnet-5
+implement#1           output valid
+implement#1         ✓ done · 12.6s
+tests#1             ▶ tests · script
+tests#1               exit 1 → failed · 2.3s
+tests#1               output valid
+tests#1             ✗ failed · 2.5s
+tests#1               stdout.log
+tests#1               │ bun test v1.3.14
+tests#1               │ 5 pass
+tests#1               │ 1 fail
+tests#1               │ (fail) greet --shout › uppercases the name
+tests#1               │ {"ok":false,"total":6,"failed":1,"durationMs":2300,"failures":[{"test":"greet --shout › uppercases the name","file":"test/greet.test.ts","message":"Expected \"HELLO, ADA!\" but received \"HELLO, Ada!\""}]}
+fix                 ↻ iteration 2/3 · feedback from tests#1
+implement#2         ▶ implement · agent · claude-sonnet-5
+implement#2           output valid
+implement#2         ✓ done · 12.5s
+tests#2             ▶ tests · script
+tests#2               exit 0 → passed · 2.5s
+tests#2               output valid
+tests#2             ✓ passed · 2.7s
+self-review#1       ▶ self-review · agent · claude-opus-5-5
+self-review#1         output valid
+self-review#1         file review.md valid
+self-review#1       ✓ done · 10.5s
+fix                 ↻ break after 2/3
+publish#1           ▶ publish · 2 steps
+publish#1/describe  ▶ describe · step 1/2 · agent · claude-sonnet-5
+publish#1/describe    output valid
+publish#1/describe    file pr-body.md valid
+publish#1/describe  ✓ done
+publish#1/open      ▶ open · step 2/2 · script
+publish#1/open        exit 0 → passed · 1.9s
+publish#1/open        output valid
+publish#1/open      ✓ passed
+publish#1           ✓ passed · 14.5s
+
+completed · 1m 11s
+  calls    8 · 3 passed, 4 done, 1 failed
+  loops    fix 2/3
+  replays  8
+  run      .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
