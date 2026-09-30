@@ -287,6 +287,22 @@ test('a script that ends in error shows the last 10 non-blank lines of stdout.lo
   );
 });
 
+test('a tail line that holds only escape codes is blank, and a tail line never ends in whitespace', () => {
+  const runs = runsWith({
+    '03-tests/call-1/stdout.log': 'ok 1\n\x1b[0m\n\x1b[2K\nok 2 \x1b[0m\n\x1b[32m\x1b[0m\r\n',
+  });
+  const events = stream([stageStart('tests#1'), stageEnd('tests#1', 'failed', 40, '03-tests/call-1/result.json')]);
+  expect(render(events, 'normal', { runsDir: runs })).toBe(
+    view(
+      head('tests#1', '▶ tests · script'),
+      head('tests#1', '✗ failed · 40ms'),
+      detail('tests#1', 'stdout.log'),
+      detail('tests#1', '│ ok 1'),
+      detail('tests#1', '│ ok 2'),
+    ),
+  );
+});
+
 test.each<[string, NewEvent[], string]>([
   [
     'a failed run names its stop, counts outcomes in order and keeps each loop at its highest',
