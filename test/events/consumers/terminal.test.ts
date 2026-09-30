@@ -704,6 +704,17 @@ test('the final block adds up the replays of every run:end, earlier ones include
   );
 });
 
+test('an earlier event the view cannot read is left out, and the resume still renders', () => {
+  const [start, spec, next] = stream([
+    { type: 'run:start' } as NewEvent,
+    { type: 'journal:append', key: 'spec#1', line: 1, outcome: 'passed' },
+    stageStart('implement#1'),
+  ]) as [SailEvent, SailEvent, SailEvent];
+  expect(render([next], 'normal', { prior: [start, spec] })).toBe(
+    view('sail · RUN-1 · resumed after 1 call, last spec#1 passed', head('implement#1', '▶ implement · script')),
+  );
+});
+
 test('with no earlier events, the resume line names the run from the first live event', () => {
   const events = stream([stageStart('spec#1')], 'RUN-9');
   expect(render(events, 'normal', { prior: [] })).toBe(
