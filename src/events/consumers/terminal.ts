@@ -396,7 +396,14 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   // A resume's earlier events set the header, the key column, the feedback sources and the totals, and print nothing.
   // Nothing of theirs is running any more.
   if (options.prior !== undefined) {
-    for (const event of options.prior) update(event);
+    for (const event of options.prior) {
+      try {
+        update(event);
+      } catch {
+        // An earlier event the view can't read is left out: the events file is observability, and must never stop a
+        // resume the journal allows.
+      }
+    }
     running = [];
     resuming = true;
   }
