@@ -234,7 +234,8 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       case 'stage:end':
       case 'step:end':
         keysByResult.set(event.resultPath, event.key);
-        running = running.filter((each) => each.key !== event.key);
+        // A call's end ends its steps too.
+        running = running.filter((each) => each.key !== event.key && !each.key.startsWith(`${event.key}/`));
         return;
       case 'journal:append':
         if (!event.key.includes('/')) calls.push({ key: event.key, outcome: event.outcome });
