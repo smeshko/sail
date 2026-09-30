@@ -43,19 +43,13 @@ function screen(options: { plain?: boolean; columns?: number } = {}) {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('plain mode writes each segment unstyled, then a newline', () => {
+test('plain mode writes each segment unstyled, then a newline', () => {
   const s = screen({ plain: true });
   s.screen.print(LINE);
   expect(s.out).toBe('a bc\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('plain mode never draws a live line and starts no timer', () => {
+test('plain mode never draws a live line and starts no timer', () => {
   const s = screen({ plain: true });
   s.screen.live(() => 'x');
   s.screen.print(['a']);
@@ -63,19 +57,13 @@ test
   expect({ out: s.out, timers: s.timers.ms }).toEqual({ out: 'a\n', timers: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a terminal wraps each styled segment in its SGR codes, joined by ; for a list', () => {
+test('a terminal wraps each styled segment in its SGR codes, joined by ; for a list', () => {
   const s = screen();
   s.screen.print(LINE);
   expect(s.out).toBe('\x1b[1ma\x1b[0m b\x1b[31;2mc\x1b[0m\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('every segment is cleaned: escape sequences go, and control characters but tab become spaces', () => {
+test('every segment is cleaned: escape sequences go, and control characters but tab become spaces', () => {
   const raw = '\x1b[31mred\x1b[0m|\x1b[2K|\x1b]0;title\x07|\x1b]8;;fake://x\x1b\\|\x1bc|a\rb\x00c\td\x7fe\nf';
   expect(clean(raw)).toBe('red|||| c|a b c\td e f');
 
@@ -88,10 +76,7 @@ test
   expect(terminal.out).toBe('\x1b[1mxy\x1b[0m\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a live line starts one 100 ms timer, draws at once, and redraws on each tick with the next frame', () => {
+test('a live line starts one 100 ms timer, draws at once, and redraws on each tick with the next frame', () => {
   const s = screen();
   let n = 0;
   s.screen.live(() => `x${n}`);
@@ -107,10 +92,7 @@ test
   expect(s.out).toEndWith(' \x1b[2my z\x1b[0m');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a printed line clears the live line first, then redraws it below', () => {
+test('a printed line clears the live line first, then redraws it below', () => {
   const s = screen();
   s.screen.live(() => 'x');
   const drawn = s.out;
@@ -118,10 +100,7 @@ test
   expect(s.out.slice(drawn.length)).toBe(`${CLEAR}a\n${draw('⠋', 'x')}`);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a live line is cut with … to fit one column short of the width, so it never wraps', () => {
+test('a live line is cut with … to fit one column short of the width, so it never wraps', () => {
   const s = screen({ columns: 10 });
   s.screen.live(() => 'abcdefghijklmnopqrst');
   const cut = s.out;
@@ -130,10 +109,7 @@ test
   expect(s.out.slice(cut.length)).toBe(draw('⠋', 'abcdefg'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, (screen: Screen) => void]>([
+test.each<[string, (screen: Screen) => void]>([
   ['live(undefined)', (screen) => screen.live(undefined)],
   ['close()', (screen) => screen.close()],
 ])('%s clears the live line once and stops its timer, and later ticks and closes do nothing', (_, end) => {
@@ -152,10 +128,7 @@ test
   expect(s.timers.cancelled).toBe(1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the default every runs its tick, and what it returns cancels it', async () => {
+test('the default every runs its tick, and what it returns cancels it', async () => {
   let ticks = 0;
   let cancel = (): void => undefined;
   const ticked = new Promise<string>((resolve) => {
