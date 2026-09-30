@@ -76,6 +76,10 @@ test('every segment is cleaned: escape sequences go, and control characters but 
   expect(terminal.out).toBe('\x1b[1mxy\x1b[0m\n');
 });
 
+test("C1 controls become spaces too, so an 8-bit CSI or a next-line can't reach the terminal", () => {
+  expect(clean('a\u009b31mred\u0085b\u0080c\u009fd e')).toBe('a 31mred b c d e');
+});
+
 test('a live line starts one 100 ms timer, draws at once, and redraws on each tick with the next frame', () => {
   const s = screen();
   let n = 0;
