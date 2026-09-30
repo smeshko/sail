@@ -27,7 +27,6 @@ test("sail runs prints a row per run, oldest first, and leaves out what isn't a 
     });
     mkdirSync(join(repo.dir, '.sail-runs', STAGE_RUN, '00-tests', 'call-1'), { recursive: true });
     const captured = await runCaptured(['runs'], repo.dir);
-    console.log(captured.stdout);
     expect(captured).toEqual({
       code: EXIT_OK,
       stdout: text(
@@ -73,6 +72,25 @@ test("sail runs shows ? for a STATUS it can't read, says why on stderr, and exit
     });
     expect(stderr).toStartWith(`sail runs: ${GOLDEN_RUN_ID}: `);
     expect(stderr).toContain('STATUS');
+  });
+});
+
+test("sail runs shows ? for a start that isn't a date, lists that run last, says why on stderr, and exits 0", async () => {
+  await withTempRepo(async (repo) => {
+    emptySailDir(repo.dir);
+    // sail.run.v1's timestamp pattern lets month 13 through.
+    copyGoldenRun(repo.dir, { runId: 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N', startedAt: '2026-13-25T09:00:00.000Z' });
+    copyGoldenRun(repo.dir, { status: 'completed\n' });
+    const { code, stdout, stderr } = await runCaptured(['runs'], repo.dir);
+    expect({ code, stdout, stderr }).toEqual({
+      code: EXIT_OK,
+      stdout: text(
+        'run                                workflow        status     started',
+        'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N  ticket-to-pr@1  completed  2026-09-25T09:00:00Z',
+        'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N  ticket-to-pr@1  completed  ?',
+      ),
+      stderr: `sail runs: FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N: ${join(repo.dir, '.sail-runs', 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N', 'run.json')}'s startedAt '2026-13-25T09:00:00.000Z' is not a date\n`,
+    });
   });
 });
 
