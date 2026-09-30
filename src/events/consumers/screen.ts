@@ -36,8 +36,9 @@ const CLEAR_LINE = '\r\x1b[2K';
 // CSI is ESC [, parameter and intermediate bytes, then a final byte from @ to ~. OSC is ESC ], ended by BEL or ESC \.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching escape sequences is the point
 const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+// C0 but tab, DEL, and C1: some UTF-8 terminals act on U+009B as CSI and on U+0085 as a newline.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
-const CONTROLS = /[\x00-\x08\x0a-\x1f\x7f]/g;
+const CONTROLS = /[\x00-\x08\x0a-\x1f\x7f-\x9f]/g;
 
 /** `text` without escape sequences, and with every other control character but tab as a space. */
 export function clean(text: string): string {
