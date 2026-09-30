@@ -199,8 +199,18 @@ test('a workflow whose keys no longer fit the journal fails the resume with dete
     const runId = await interruptedInto(repo.dir);
     swapImplementAndTests(join(repo.dir, '.sail'));
     const { code, stdout } = await runCaptured(['resume', runId], repo.dir);
-    expect(stdout).toContain(
-      "determinism_violation: the workflow asked for 'tests#1' where the journal has 'implement#1'",
+    expect(normaliseDurations(stdout)).toBe(
+      [
+        `sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed`,
+        '',
+        'failed · <t>',
+        "  stop     determinism_violation: the workflow asked for 'tests#1' where the journal has 'implement#1'",
+        '  calls    3 · 2 passed, 1 failed',
+        '  loops    fix 2/3',
+        `  replays  ${replaysOf(repo.dir, runId)}`,
+        `  run      .sail-runs/${runId}`,
+        '',
+      ].join('\n'),
     );
     expect(code).toBe(EXIT_FAILED);
   });
@@ -213,7 +223,23 @@ test('Ctrl-C during sail resume suspends the run again, and names the resume aga
     const interrupts = fakeInterrupts();
     const resuming = runCaptured(['resume', runId], repo.dir, interrupts);
     const { end, alive } = await interruptWhenAsleep(repo.dir, resuming, interrupts.interrupt);
-    expect(end.stdout).toEndWith(`resume it with: sail resume ${runId}\n`);
+    const view = normaliseDurations(end.stdout);
+    expect(view).toContain(
+      '\nimplement#2    ✗ error · <t>\nimplement#2      exit_code: interrupted, then ended by signal SIGTERM\n',
+    );
+    expect(view).toEndWith(
+      [
+        '',
+        'suspended · <t>',
+        '  stop     interrupted: stopped during implement#2',
+        '  calls    3 · 2 passed, 1 failed',
+        '  loops    fix 2/3',
+        `  replays  ${replaysOf(repo.dir, runId)}`,
+        `  run      .sail-runs/${runId}`,
+        `resume it with: sail resume ${runId}`,
+        '',
+      ].join('\n'),
+    );
     expect(end.code).toBe(EXIT_SUSPENDED);
     expect(alive).toEqual([]);
     expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);
