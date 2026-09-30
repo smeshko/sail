@@ -1,7 +1,7 @@
 // The fsync discipline for the files a run directory keeps: the journal, STATUS, run.json and summary.json. A write is
 // durable once its bytes are synced and so is the directory entry that names them, so every helper here syncs both
 // before it returns.
-import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /** Syncs `dir` itself, so the entries created, renamed or removed in it survive a crash. */
@@ -72,10 +72,16 @@ export function appendLine(path: string, line: string): void {
 export function replaceFile(path: string, text: string, tmp = `${path}.tmp`): void {
   const fd = openSync(tmp, 'w');
   try {
-    writeAndSync(fd, text);
-  } finally {
-    closeSync(fd);
+    try {
+      writeAndSync(fd, text);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, path);
+  } catch (error) {
+    // A temp file that never became `path` goes, so a per-process temp name doesn't leave one behind per failure.
+    rmSync(tmp, { force: true });
+    throw error;
   }
-  renameSync(tmp, path);
   syncDir(dirname(path));
 }
