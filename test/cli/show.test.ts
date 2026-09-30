@@ -56,23 +56,20 @@ async function stubRun(repoDir: string, testsPassAt: number): Promise<string> {
   return ended.runId;
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each([[GOLDEN_RUN_ID], ['FAKE-1']])("sail show %s prints the golden run's calls, loops, totals and cost", async (name) => {
-  await withTempRepo(async (repo) => {
-    emptySailDir(repo.dir);
-    copyGoldenRun(repo.dir);
-    const captured = await runCaptured(['show', name], repo.dir);
-    console.log(captured.stdout);
-    expect(captured).toEqual({ code: EXIT_OK, stdout: GOLDEN, stderr: '' });
-  });
-});
+test.each([[GOLDEN_RUN_ID], ['FAKE-1']])(
+  "sail show %s prints the golden run's calls, loops, totals and cost",
+  async (name) => {
+    await withTempRepo(async (repo) => {
+      emptySailDir(repo.dir);
+      copyGoldenRun(repo.dir);
+      const captured = await runCaptured(['show', name], repo.dir);
+      console.log(captured.stdout);
+      expect(captured).toEqual({ code: EXIT_OK, stdout: GOLDEN, stderr: '' });
+    });
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a failed run shows its stop reason in the title and a stop row, and sail show still exits 0', async () => {
+test('a failed run shows its stop reason in the title and a stop row, and sail show still exits 0', async () => {
   await withTempRepo(async (repo) => {
     const runId = await stubRun(repo.dir, 99);
     const { code, stdout } = await runCaptured(['show', runId], repo.dir);
@@ -88,10 +85,7 @@ test
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a run with no budget shows its cost alone, and no loops row when no loop ran', async () => {
+test('a run with no budget shows its cost alone, and no loops row when no loop ran', async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     runWith(
@@ -122,10 +116,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a run with no calls yet says so', async () => {
+test('a run with no calls yet says so', async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     runWith(repo.dir, ndjson(stamp([0, runStart({ maxUsd: 25, maxMinutes: 90 })])));
@@ -144,10 +135,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail show --rebuild writes summary.json from the events, says where, then shows the run', async () => {
+test('sail show --rebuild writes summary.json from the events, says where, then shows the run', async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     const dir = copyGoldenRun(repo.dir);
@@ -161,10 +149,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail show --rebuild of a stub run writes the summary.json the run wrote, byte for byte', async () => {
+test('sail show --rebuild of a stub run writes the summary.json the run wrote, byte for byte', async () => {
   await withTempRepo(async (repo) => {
     const runId = await stubRun(repo.dir, 1);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -187,10 +172,7 @@ function changedEvents(repoDir: string, change: (lines: string[]) => string[]): 
 
 type Refusal = (repoDir: string) => { argv: string[]; stderr: unknown };
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, Refusal]>([
+test.each<[string, Refusal]>([
   [
     'a run that matches nothing',
     (repoDir) => {
@@ -242,14 +224,20 @@ test
     '--rebuild with --events',
     (repoDir) => {
       copyGoldenRun(repoDir);
-      return { argv: ['show', GOLDEN_RUN_ID, '--rebuild', '--events'], stderr: expect.stringMatching(/^sail show: .*--rebuild.*--events/) };
+      return {
+        argv: ['show', GOLDEN_RUN_ID, '--rebuild', '--events'],
+        stderr: expect.stringMatching(/^sail show: .*--rebuild.*--events/),
+      };
     },
   ],
   [
     '--rebuild with --follow',
     (repoDir) => {
       copyGoldenRun(repoDir);
-      return { argv: ['show', GOLDEN_RUN_ID, '--rebuild', '--follow'], stderr: expect.stringMatching(/^sail show: .*--rebuild.*--follow/) };
+      return {
+        argv: ['show', GOLDEN_RUN_ID, '--rebuild', '--follow'],
+        stderr: expect.stringMatching(/^sail show: .*--rebuild.*--follow/),
+      };
     },
   ],
   [

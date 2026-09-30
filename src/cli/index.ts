@@ -5,6 +5,7 @@ import { check } from './commands/check';
 import { resume } from './commands/resume';
 import { runWorkflowCommand } from './commands/run-workflow';
 import { runs } from './commands/runs';
+import { show } from './commands/show';
 import { stageRun } from './commands/stage-run';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
@@ -26,6 +27,7 @@ Usage:
   sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]  Run a workflow in this repository
   sail resume <run> [--input <json>] [-q|-v|-vv]             Resume a suspended or crashed run
   sail runs                                                  List the runs in .sail-runs/
+  sail show <run> [--events|--follow|--rebuild]              Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one script stage in isolation
   sail --version                                             Print the version
   sail --help                                                Print this help
@@ -132,6 +134,14 @@ const commands = new Map<string, CommandSpec>([
   ],
   ['resume', { options: { input: { type: 'string' }, ...VERBOSITY_OPTIONS }, positionals: 1, command: resume }],
   ['runs', bare(runs)],
+  [
+    'show',
+    {
+      options: { events: { type: 'boolean' }, follow: { type: 'boolean' }, rebuild: { type: 'boolean' } },
+      positionals: 1,
+      command: show,
+    },
+  ],
   ['stage', { options: { bind: { type: 'string', multiple: true } }, positionals: 2, command: stageRun }],
   ['--help', bare(help)],
   ['-h', bare(help)],

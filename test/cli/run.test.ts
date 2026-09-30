@@ -40,12 +40,11 @@ test('the usage lists sail runs', async () => {
   expect(stdout).toMatch(/^ {2}sail runs {2,}List the runs in \.sail-runs\/$/m);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the usage lists sail show', async () => {
+test('the usage lists sail show', async () => {
   const { stdout } = await runCaptured(['--help']);
-  expect(stdout).toMatch(/^ {2}sail show <run> \[--events\|--follow\|--rebuild\].* {2,}Show a run's calls, loops, routes and totals$/m);
+  expect(stdout).toMatch(
+    /^ {2}sail show <run> \[--events\|--follow\|--rebuild\].* {2,}Show a run's calls, loops, routes and totals$/m,
+  );
 });
 
 test.each([

@@ -12,10 +12,7 @@ test('table pads each column to its widest cell, two spaces apart, and ends no l
   ).toEqual(['key               kind   next', 'spec#1            agent', '  publish#1/open         end']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each([
+test.each([
   [0, '0ms'],
   [999, '999ms'],
   [1000, '1.0s'],
@@ -29,10 +26,7 @@ test
   expect(formatDuration(ms)).toBe(text);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each([
+test.each([
   [0, '$0.00'],
   [0.3125, '$0.31'],
   [1.35, '$1.35'],
