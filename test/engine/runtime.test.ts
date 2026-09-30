@@ -810,10 +810,7 @@ const STUB_ROUTES = [
   { at: 'publish#1', value: 'passed', took: 'end' },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the stub's summary.json is rewritten after every call, and ends completed with its loops and routes", async () => {
+test("the stub's summary.json is rewritten after every call, and ends completed with its loops and routes", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const listed: number[] = [];
@@ -843,17 +840,18 @@ test
     console.log(text);
     const summary = JSON.parse(text);
     expect(text).toBe(`${JSON.stringify(summary, null, 2)}\n`);
-    expect(summary).toMatchObject({ status: 'completed', loops: { fix: { iterations: 2, max: 3 } }, totals: { replays: 8 } });
+    expect(summary).toMatchObject({
+      status: 'completed',
+      loops: { fix: { iterations: 2, max: 3 } },
+      totals: { replays: 8 },
+    });
     expect(summary.calls.map((call: { key: string }) => call.key)).toEqual(ALL_KEYS);
     expect(summary.routes).toEqual(STUB_ROUTES);
     expect(validateRunDir(end.dir).issues).toEqual([]);
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("rebuilding the stub's summary.json from its events writes the file the run wrote, byte for byte", async () => {
+test("rebuilding the stub's summary.json from its events writes the file the run wrote, byte for byte", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ran(repo.dir);
@@ -865,10 +863,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("after an interrupt and a resume, summary.json is completed with the retried call's latest try, one route into it and both processes' replays", async () => {
+test("after an interrupt and a resume, summary.json is completed with the retried call's latest try, one route into it and both processes' replays", async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -903,10 +898,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
+test("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     let blocked = false;
@@ -932,10 +924,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a crash leaves summary.json running, with the calls made before it', async () => {
+test('a crash leaves summary.json running, with the calls made before it', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(

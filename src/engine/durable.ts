@@ -1,6 +1,6 @@
-// The fsync discipline for the files a run directory keeps: the journal, STATUS and run.json. A write is durable once
-// its bytes are synced and so is the directory entry that names them, so every helper here syncs both before it
-// returns.
+// The fsync discipline for the files a run directory keeps: the journal, STATUS, run.json and summary.json. A write is
+// durable once its bytes are synced and so is the directory entry that names them, so every helper here syncs both
+// before it returns.
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -64,9 +64,12 @@ export function appendLine(path: string, line: string): void {
   }
 }
 
-/** Replaces `path` with `text` atomically: a reader sees the old file or the new one, never a mix. */
-export function replaceFile(path: string, text: string, _tmp = `${path}.tmp`): void {
-  const tmp = `${path}.tmp`;
+/**
+ * Replaces `path` with `text` atomically: a reader sees the old file or the new one, never a mix. A file two processes
+ * may replace at once, like `summary.json` under a rebuild, passes a `tmp` of each process's own, so neither writes into
+ * the other's temp file.
+ */
+export function replaceFile(path: string, text: string, tmp = `${path}.tmp`): void {
   const fd = openSync(tmp, 'w');
   try {
     writeAndSync(fd, text);

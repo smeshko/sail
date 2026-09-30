@@ -45,10 +45,7 @@ function summaryIn(dir: string): Summary | undefined {
 const stamped = (seq: number, ms: number, event: Parameters<typeof stamp>[0][1]): SailEvent =>
   ({ seq, ts: at(ms), runId: RUN_ID, ...event }) as SailEvent;
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the consumer writes summary.json at run:start, each journal:append, run:end and error:crash, and at nothing else', () => {
+test('the consumer writes summary.json at run:start, each journal:append, run:end and error:crash, and at nothing else', () => {
   const dir = runDir();
   const consumer = summaryConsumer(dir);
   const wrote: string[] = [];
@@ -61,10 +58,7 @@ test
     [320, route('spec#1', 'passed', 'implement#1')],
     [330, { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 }],
     [400, runEnd('suspended', 1, { stopReason: 'interrupted', message: 'stopped before implement#1' })],
-    [
-      450,
-      { type: 'error:consumer', consumer: 'terminal', failed: { seq: 8, type: 'run:end' }, message: 'EPIPE' },
-    ],
+    [450, { type: 'error:consumer', consumer: 'terminal', failed: { seq: 8, type: 'run:end' }, message: 'EPIPE' }],
     [500, start('implement#1')],
     [600, { type: 'error:crash', key: 'implement#1', message: "journal.ndjson:2 can't be read" }],
   )) {
@@ -84,10 +78,7 @@ const FIRST_PROCESS = stamp(
   [400, runEnd('suspended', 2, { stopReason: 'interrupted', message: 'stopped before implement#1' })],
 );
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a consumer that joins a resumed run seeds itself from events.ndjson, and counts the event in hand once', () => {
+test('a consumer that joins a resumed run seeds itself from events.ndjson, and counts the event in hand once', () => {
   const dir = runDir();
   // A resume whose replay ends the run at once: its first event is run:end.
   const resumed = stamped(FIRST_PROCESS.length + 1, 900, runEnd('completed', 1));
@@ -102,10 +93,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a seed that can't read events.ndjson throws, and the next event seeds again", () => {
+test("a seed that can't read events.ndjson throws, and the next event seeds again", () => {
   const dir = runDir();
   const path = join(dir, 'events.ndjson');
   const next = FIRST_PROCESS.length + 1;
@@ -130,10 +118,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, string, unknown]>([
+test.each<[string, string, unknown]>([
   [
     'holds no run:start',
     ndjson(stamp([100, start('spec#1')], [300, end('spec#1', 'passed', 200)])),
