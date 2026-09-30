@@ -2,13 +2,15 @@
 // interrupted, then resumed. Each case has a temp repository of its own: one run per .sail/ in a process, and Bun
 // caches the workflow's modules by path. So a run resumes in a copy of the repository it was interrupted in.
 import { expect, test } from 'bun:test';
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
 import { readStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
+import { rebuildSummary } from '../../src/events/consumers/summary';
+import type { Summary } from '../../src/events/summary';
 import type { Consumer, SailEvent } from '../../src/events/types';
 import { copyFixture, edit } from '../helpers/fixture';
 import {
@@ -499,17 +501,6 @@ test("the stub's run writes its whole event stream to events.ndjson, numbered fr
       list.map((e) => JSON.stringify([e.seq, e.type, 'key' in e ? e.key : 'at' in e ? e.at : null])).join('\n'),
     );
 
-    expect(readdirSync(end.dir).sort()).toEqual([
-      '01-spec',
-      '02-implement',
-      '03-tests',
-      '04-self-review',
-      '05-publish',
-      'STATUS',
-      'events.ndjson',
-      'journal.ndjson',
-      'run.json',
-    ]);
     expect(outline(list)).toEqual(STUB_OUTLINE);
     expect(seqs(list)).toEqual(gapless(list));
     expect(list.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue)).toEqual([]);
@@ -792,5 +783,169 @@ test('consumers passed in receive the events the file holds, in the same order',
     const end = await ran(repo.dir, { consumers: [{ name: 'mirror', onEvent: (event) => seen.push(event) }] });
     expect(outline([seen[0], seen.at(-1)].filter((event) => event !== undefined))).toEqual(['run:start', 'run:end']);
     expect(JSON.parse(JSON.stringify(seen))).toEqual(events(end.dir));
+  });
+});
+
+/** The run's summary.json as written, or '' when it has none. */
+const summaryText = (runDir: string): string =>
+  existsSync(join(runDir, 'summary.json')) ? readFileSync(join(runDir, 'summary.json'), 'utf8') : '';
+
+/** The run's summary, or undefined when it has none. */
+const summaryOf = (runDir: string): Summary | undefined => {
+  const text = summaryText(runDir);
+  return text === '' ? undefined : JSON.parse(text);
+};
+
+/** The only run in `repoDir`'s `.sail-runs/`. */
+const onlyRun = (repoDir: string) => join(repoDir, '.sail-runs', readdirSync(join(repoDir, '.sail-runs'))[0] ?? '');
+
+/** The stub's routes, one per move after a journaled call, tests passing on their second call. */
+const STUB_ROUTES = [
+  { at: 'spec#1', value: 'passed', took: 'implement#1' },
+  { at: 'implement#1', value: 'passed', took: 'tests#1' },
+  { at: 'tests#1', value: 'failed', took: 'implement#2' },
+  { at: 'implement#2', value: 'passed', took: 'tests#2' },
+  { at: 'tests#2', value: 'passed', took: 'self-review#1' },
+  { at: 'self-review#1', value: 'passed', took: 'publish#1' },
+  { at: 'publish#1', value: 'passed', took: 'end' },
+];
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("the stub's summary.json is rewritten after every call, and ends completed with its loops and routes", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const listed: number[] = [];
+    const issues: string[] = [];
+    const end = await ran(repo.dir, {
+      onCall: () => {
+        const summary = summaryOf(onlyRun(repo.dir));
+        issues.push(...validateDocument('sail.summary.v1', summary).map(formatIssue));
+        listed.push(summary?.calls.length ?? 0);
+      },
+    });
+
+    expect(readdirSync(end.dir).sort()).toEqual([
+      '01-spec',
+      '02-implement',
+      '03-tests',
+      '04-self-review',
+      '05-publish',
+      'STATUS',
+      'events.ndjson',
+      'journal.ndjson',
+      'run.json',
+      'summary.json',
+    ]);
+    expect([listed, issues]).toEqual([[1, 2, 3, 4, 5, 6, 7], []]);
+    const text = summaryText(end.dir);
+    console.log(text);
+    const summary = JSON.parse(text);
+    expect(text).toBe(`${JSON.stringify(summary, null, 2)}\n`);
+    expect(summary).toMatchObject({ status: 'completed', loops: { fix: { iterations: 2, max: 3 } }, totals: { replays: 8 } });
+    expect(summary.calls.map((call: { key: string }) => call.key)).toEqual(ALL_KEYS);
+    expect(summary.routes).toEqual(STUB_ROUTES);
+    expect(validateRunDir(end.dir).issues).toEqual([]);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("rebuilding the stub's summary.json from its events writes the file the run wrote, byte for byte", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const end = await ran(repo.dir);
+    const written = summaryText(end.dir);
+    const path = join(end.dir, 'summary.json');
+    rmSync(path, { force: true });
+    const rebuilt = rebuildSummary(end.dir);
+    expect([rebuilt, summaryText(end.dir)]).toEqual([{ summary: JSON.parse(written || 'null'), path }, written]);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("after an interrupt and a resume, summary.json is completed with the retried call's latest try, one route into it and both processes' replays", async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const interrupted = summaryOf(dir);
+    expect([interrupted?.status, interrupted?.stopReason, interrupted?.calls.map((call) => call.key)]).toEqual([
+      'suspended',
+      'interrupted',
+      ['spec#1', 'implement#1', 'tests#1', 'implement#2'],
+    ]);
+
+    expect(await resumeWorkflow({ cwd: repo.dir, runId })).toMatchObject({ status: 'completed' });
+    const written = summaryText(dir);
+    const summary = summaryOf(dir);
+    const replays = events(dir).reduce((sum, event) => sum + (event.type === 'run:end' ? event.replays : 0), 0);
+    expect([summary?.status, summary?.totals.replays, summary?.calls.map((call) => call.key)]).toEqual([
+      'completed',
+      replays,
+      ALL_KEYS,
+    ]);
+    expect(summary?.calls[3]).toMatchObject({
+      key: 'implement#2',
+      outcome: 'passed',
+      resultPath: '02-implement/call-2/try-2/result.json',
+    });
+    expect(summary?.routes?.filter((move) => move.at === 'tests#1')).toEqual([
+      { at: 'tests#1', value: 'failed', took: 'implement#2' },
+    ]);
+
+    rmSync(join(dir, 'summary.json'));
+    expect(rebuildSummary(dir)).toEqual({ summary: summary as Summary, path: join(dir, 'summary.json') });
+    expect(summaryText(dir)).toBe(written);
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    let blocked = false;
+    const end = await ran(repo.dir, {
+      onCall: () => {
+        if (blocked) return;
+        blocked = true;
+        const dir = onlyRun(repo.dir);
+        rmSync(join(dir, 'summary.json'), { force: true });
+        mkdirSync(join(dir, 'summary.json'));
+      },
+    });
+    expect(end.status).toBe('completed');
+    const list = events(end.dir);
+    const failures = list.flatMap((event) =>
+      event.type === 'error:consumer' ? [[event.consumer, event.failed.type]] : [],
+    );
+    expect(failures).toEqual([
+      ...Array<string[]>(6).fill(['summary.json', 'journal:append']),
+      ['summary.json', 'run:end'],
+    ]);
+    expect(outline(list.filter((event) => event.type !== 'error:consumer'))).toEqual(STUB_OUTLINE);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a crash leaves summary.json running, with the calls made before it', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(
+      sail,
+      'workflows/ticket-to-pr/stages/spec/run.sh',
+      "printf '# Spec",
+      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+    );
+    await expect(runWorkflow({ cwd: repo.dir, workflow: 'ticket-to-pr' })).rejects.toThrow(JournalError);
+    const summary = summaryOf(onlyRun(repo.dir));
+    expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['spec#1']]);
   });
 });

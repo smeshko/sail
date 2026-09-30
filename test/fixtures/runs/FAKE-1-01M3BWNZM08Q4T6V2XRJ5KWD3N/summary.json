@@ -162,9 +162,39 @@
   },
   "routes": [
     {
+      "at": "spec#1",
+      "value": "done",
+      "took": "implement#1"
+    },
+    {
+      "at": "implement#1",
+      "value": "done",
+      "took": "tests#1"
+    },
+    {
+      "at": "tests#1",
+      "value": "failed",
+      "took": "implement#2"
+    },
+    {
+      "at": "implement#2",
+      "value": "done",
+      "took": "tests#2"
+    },
+    {
+      "at": "tests#2",
+      "value": "passed",
+      "took": "self-review#1"
+    },
+    {
       "at": "self-review#1",
-      "value": 0,
-      "took": "publish"
+      "value": "done",
+      "took": "publish#1"
+    },
+    {
+      "at": "publish#1",
+      "value": "passed",
+      "took": "end"
     }
   ],
   "totals": {

@@ -52,6 +52,18 @@ test('replaceFile replaces the file whole and leaves no .tmp behind', () => {
   expect(readdirSync(dir)).toEqual(['STATUS']);
 });
 
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("replaceFile through the caller's own temp path leaves no temp file, and never touches <path>.tmp", () => {
+  const dir = tempDir();
+  const path = join(dir, 'summary.json');
+  writeFileSync(`${path}.tmp`, 'another writer\n');
+  replaceFile(path, '{}\n', `${path}.123.tmp`);
+  expect(readdirSync(dir).sort()).toEqual(['summary.json', 'summary.json.tmp']);
+  expect([readFileSync(path, 'utf8'), readFileSync(`${path}.tmp`, 'utf8')]).toEqual(['{}\n', 'another writer\n']);
+});
+
 test('createDir creates the directory, then syncs the one holding it', () => {
   const dir = tempDir();
   const path = join(dir, 'made');
