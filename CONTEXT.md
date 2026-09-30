@@ -272,6 +272,31 @@ _Avoid_: log, feed, bus (the bus is the mechanism)
 Something that receives the event stream and does one thing with it: write the events file, render the terminal view, keep the summary. A consumer that throws is reported as an `error:consumer` event and keeps receiving events. The dashboard reads the files consumers write; it isn't one.
 _Avoid_: listener, sink, subscriber, reporter
 
+**Terminal view**:
+What the terminal consumer prints for a run: one line per event, its key first, at a verbosity, ending with the final block. It is the same text in a terminal, a pipe and a CI log; only a terminal adds colour and the live line.
+_Avoid_: console output, logs, UI
+
+**Verbosity**:
+How much of the event stream the terminal view prints, chosen with `-q`, `-v` or `-vv`:
+- quiet: the run's start, its errors and the final block
+- normal: adds calls, script exits, validation results and loops
+- verbose: adds contract details, routes and every script's output tail
+- trace: every event
+
+_Avoid_: log level, detail level
+
+**Plain mode**:
+The terminal view with no escape codes and no cursor movement. It is used when stdout isn't a terminal, `NO_COLOR` is set, or `TERM` is `dumb`.
+_Avoid_: CI mode, no-TTY mode
+
+**Live line**:
+The one line an interactive terminal redraws below the terminal view, naming the running call and how long it has run. It is cleared before each printed line and never left behind.
+_Avoid_: spinner, progress bar, status line (STATUS is the run's file)
+
+**Final block**:
+The terminal view's closing lines for each `run:end`: status and duration, stop reason, calls, loops, replays and the run directory.
+_Avoid_: result box, summary (the Summary is `summary.json`)
+
 **Route**:
 The move a workflow made after a call: the outcome it received and what it did next, another call, its end or `run.fail()`. sail infers it from the calls the workflow asks for, since routing is the workflow's own code.
 _Avoid_: branch, transition, edge
