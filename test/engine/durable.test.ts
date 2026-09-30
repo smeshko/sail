@@ -1,5 +1,14 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendLine, createDir, createFileOnce, replaceFile, syncDir } from '../../src/engine/durable';
@@ -59,6 +68,15 @@ test("replaceFile through the caller's own temp path leaves no temp file, and ne
   replaceFile(path, '{}\n', `${path}.123.tmp`);
   expect(readdirSync(dir).sort()).toEqual(['summary.json', 'summary.json.tmp']);
   expect([readFileSync(path, 'utf8'), readFileSync(`${path}.tmp`, 'utf8')]).toEqual(['{}\n', 'another writer\n']);
+});
+
+test('replaceFile that fails to rename throws, and removes its temp file', () => {
+  const dir = tempDir();
+  const path = join(dir, 'summary.json');
+  // A directory where the file should go: the rename over it fails.
+  mkdirSync(join(path, 'inside'), { recursive: true });
+  expect(() => replaceFile(path, '{}\n', `${path}.123.tmp`)).toThrow();
+  expect(readdirSync(dir)).toEqual(['summary.json']);
 });
 
 test('createDir creates the directory, then syncs the one holding it', () => {
