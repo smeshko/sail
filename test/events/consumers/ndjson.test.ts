@@ -146,6 +146,13 @@ test('readEvents skips a torn tail and every line that is not an event, and leav
   expect(contents(dir)).toBe(text);
 });
 
+test("readEvents skips a line that doesn't match sail.event.v1, such as a run:end without its replays", () => {
+  const dir = runDir();
+  const end = { seq: 3, ts: '2026-09-28T09:00:03.000Z', type: 'run:end', runId: RUN_ID, status: 'completed' };
+  writeFileSync(join(dir, 'events.ndjson'), `${lines(1, 2)}${JSON.stringify(end)}\n${lines(4)}`);
+  expect(readEvents(dir)).toEqual([event(1), event(2), event(4)]);
+});
+
 test("nextSeq refuses before it cuts: a torn tail after a line it can't read stays", () => {
   const dir = runDir();
   writeFileSync(join(dir, 'events.ndjson'), `${lines(1, 2)}{ not json\n${JSON.stringify(event(4)).slice(0, 40)}`);
