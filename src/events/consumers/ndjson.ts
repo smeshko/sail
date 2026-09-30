@@ -9,7 +9,7 @@
 //   a file whose writes recover, say once a full disk has room again, still holds every `seq` in order.
 // - Streaming chunks arrive with Epic 07, coalesced into whole events: a chunk never takes a `seq`.
 // - `readEventsFrom()` reads it from a cursor, a complete line at a time, so a viewer can replay the file and then follow
-//   it. A torn tail waits for the next read.
+//   it. A torn tail waits for the next read. `readEvents()` reads the same lines, and keeps only the valid events.
 import {
   appendFileSync,
   closeSync,
@@ -44,20 +44,30 @@ export function readEventsFrom(
 ): { events: SailEvent[]; next: EventCursor } | { refused: string } {
   const path = join(runDir, EVENTS_FILE);
   if (!existsSync(path)) return { events: [], next: from };
-  const tail = readTail(path, from.offset);
+  const { lines, end } = completeLines(path, from.offset);
   const events: SailEvent[] = [];
-  let start = 0;
-  // Split on the byte, before decoding: a multi-byte character never holds 0x0A, so a line cut inside one is simply
-  // incomplete, and waits for the next read.
-  for (let end = tail.indexOf(0x0a); end !== -1; end = tail.indexOf(0x0a, start)) {
-    const event = parseEvent(tail.subarray(start, end).toString('utf8'));
+  for (const line of lines) {
+    const event = parseEvent(line);
     if (typeof event === 'string') {
       return { refused: `${EVENTS_FILE}:${from.line + events.length + 1} can't be read: ${event}` };
     }
     events.push(event);
+  }
+  return { events, next: { offset: end, line: from.line + events.length } };
+}
+
+/** The complete lines of `path` from byte `offset` on, and the offset just past the last of them. */
+function completeLines(path: string, offset: number): { lines: string[]; end: number } {
+  const tail = readTail(path, offset);
+  const lines: string[] = [];
+  let start = 0;
+  // Split on the byte, before decoding: a multi-byte character never holds 0x0A, so a line cut inside one is simply
+  // incomplete, and waits for the next read.
+  for (let end = tail.indexOf(0x0a); end !== -1; end = tail.indexOf(0x0a, start)) {
+    lines.push(tail.subarray(start, end).toString('utf8'));
     start = end + 1;
   }
-  return { events, next: { offset: from.offset + start, line: from.line + events.length } };
+  return { lines, end: offset + start };
 }
 
 /** The bytes of `path` from `offset` to its end, read through a descriptor so a follower never rereads the file. */
@@ -131,24 +141,10 @@ export function nextSeq(runDir: string): number | { refused: string } {
 export function readEvents(runDir: string): SailEvent[] {
   const path = join(runDir, EVENTS_FILE);
   if (!existsSync(path)) return [];
-  const text = readFileSync(path, 'utf8');
-  return text
-    .slice(0, text.lastIndexOf('\n') + 1)
-    .split('\n')
-    .flatMap((line) => {
-      const event = validEvent(line);
-      return event === undefined ? [] : [event];
-    });
-}
-
-function validEvent(line: string): SailEvent | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return undefined;
-  }
-  return validateDocument('sail.event.v1', value).length === 0 ? (value as SailEvent) : undefined;
+  return completeLines(path, 0).lines.flatMap((line) => {
+    const event = parseEvent(line);
+    return typeof event !== 'string' && validateDocument('sail.event.v1', event).length === 0 ? [event] : [];
+  });
 }
 
 /**

@@ -27,7 +27,7 @@ Usage:
   sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]  Run a workflow in this repository
   sail resume <run> [--input <json>] [-q|-v|-vv]             Resume a suspended or crashed run
   sail runs                                                  List the runs in .sail-runs/
-  sail show <run> [--events|--follow|--rebuild]              Show a run's calls, loops, routes and totals
+  sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one script stage in isolation
   sail --version                                             Print the version
   sail --help                                                Print this help
@@ -115,7 +115,7 @@ const version: Command = (_, io) => {
 
 const bare = (command: Command): CommandSpec => ({ options: {}, positionals: 0, command });
 
-/** How much of a run `sail run` and `sail resume` print: `-q`, or `-v` given once or twice. */
+/** How much of a run `sail run`, `sail resume` and `sail show --events` print: `-q`, or `-v` given once or twice. */
 const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
   quiet: { type: 'boolean', short: 'q' },
   verbose: { type: 'boolean', short: 'v', multiple: true },
@@ -137,7 +137,12 @@ const commands = new Map<string, CommandSpec>([
   [
     'show',
     {
-      options: { events: { type: 'boolean' }, follow: { type: 'boolean' }, rebuild: { type: 'boolean' } },
+      options: {
+        events: { type: 'boolean' },
+        follow: { type: 'boolean' },
+        rebuild: { type: 'boolean' },
+        ...VERBOSITY_OPTIONS,
+      },
       positionals: 1,
       command: show,
     },

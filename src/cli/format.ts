@@ -2,21 +2,11 @@
 // where the user ran them.
 import type { Diagnostic } from '../engine/typecheck';
 
+// The terminal view's durations, so `sail show`'s table and a run's own output agree.
+export { formatDuration } from '../events/consumers/terminal';
+
 /** `1 stage`, `2 stages`. */
 export const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
-
-/**
- * `999ms`, `1.0s`, `1m 0s`, `1h 0m`: the terminal view's durations, rounded as it rounds them, so `sail show` and a
- * run's own output agree. Each unit is chosen after rounding: 59 950 ms is `1m 0s`, never `60.0s`.
- */
-export function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  const tenths = Math.round(ms / 100);
-  if (tenths < 600) return `${(tenths / 10).toFixed(1)}s`;
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-}
 
 /** `$1.35`: dollars to the cent. */
 export const formatUsd = (usd: number): string => `$${usd.toFixed(2)}`;
