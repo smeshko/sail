@@ -440,6 +440,17 @@ test.each<[string, NewEvent | undefined]>([
   expect({ live: visibleLive(t.out), cancelled: t.timers.cancelled }).toEqual({ live: undefined, cancelled: 1 });
 });
 
+test('in a terminal, a stage that ends while a step of its own runs takes the step off the live line too', () => {
+  const t = inTerminal();
+  const events = stream([
+    stageStart('publish#1', 'stage', { steps: ['open'] }),
+    { type: 'step:start', key: 'publish#1/open', stage: 'publish', step: 'open', index: 1, of: 1, kind: 'script' },
+    stageEnd('publish#1', 'error', 900, '05-publish/call-1/result.json'),
+  ]);
+  for (const event of events) t.terminal.onEvent(event);
+  expect({ live: visibleLive(t.out), cancelled: t.timers.cancelled }).toEqual({ live: undefined, cancelled: 1 });
+});
+
 test('in a terminal, a pass is green, a failure yellow and an error red', () => {
   const t = inTerminal('normal');
   const events = stream([
