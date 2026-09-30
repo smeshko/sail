@@ -303,7 +303,10 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   function finalBlock(event: RunEnd): Line[] {
     const rows: [string, string][] = [];
     if (event.stopReason !== undefined) {
-      rows.push(['stop', event.message === undefined ? event.stopReason : `${event.stopReason}: ${event.message}`]);
+      const stop = event.message === undefined ? event.stopReason : `${event.stopReason}: ${event.message}`;
+      // A message's later lines are rows without a label, their values indented two more.
+      const [first = '', ...more] = textLines(stop);
+      rows.push(['stop', first], ...more.map((line): [string, string] => ['', `  ${line}`]));
     }
     const counts = OUTCOMES.flatMap((outcome) => {
       const n = calls.filter((call) => call.outcome === outcome).length;
