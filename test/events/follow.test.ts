@@ -82,6 +82,25 @@ test('a finished run is delivered whole, once and in order, and the follow ends 
   expect([result, following.seen]).toEqual(['ended', [1, 2, 3]]);
 });
 
+test('a consumer that failed on run:end reports after it, and the follow still ends', async () => {
+  const dir = runDir('completed\n');
+  const failed: SailEvent = {
+    seq: 4,
+    ts: at(400),
+    type: 'error:consumer',
+    runId: RUN_ID,
+    consumer: 'summary.json',
+    failed: { seq: 3, type: 'run:end' },
+    message: 'EISDIR: illegal operation on a directory',
+  };
+  writeFileSync(eventsOf(dir), lines(event(1), event(2), ended(3, 'completed'), failed));
+  const controller = new AbortController();
+  const following = follow(dir, { pollMs: 60_000, signal: controller.signal });
+  const result = await Promise.race([following.done, Bun.sleep(1000).then(() => 'still waiting')]);
+  controller.abort();
+  expect([result, following.seen]).toEqual(['ended', [1, 2, 3, 4]]);
+});
+
 test('a running run delivers what is appended, and the follow ends once run:end comes with a finished STATUS', async () => {
   const dir = runDir('running\n');
   writeFileSync(eventsOf(dir), lines(event(1), event(2)));
