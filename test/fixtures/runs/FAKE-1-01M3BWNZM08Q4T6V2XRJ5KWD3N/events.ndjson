@@ -122,9 +122,9 @@
 {"seq":122,"ts":"2026-09-25T09:01:06.915Z","type":"script:exec","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","command":".sail/workflows/ticket-to-pr/stages/publish/open.sh","cwd":".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace","envKeys":["RUN_ID","STAGE","CALL","TRY","STAGE_OUT","WORKSPACE"]}
 {"seq":123,"ts":"2026-09-25T09:01:07.615Z","type":"codehost:pushed","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","branch":"sail/FAKE-1","headSha":"b4efb0c5de84d87c1455d4504b8b75b095a8e10b"}
 {"seq":124,"ts":"2026-09-25T09:01:08.115Z","type":"codehost:pr_opened","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","number":1,"url":"fake://codehost/fixture/pull/1","draft":false,"base":"main","head":"sail/FAKE-1","ticketKey":"FAKE-1"}
-{"seq":125,"ts":"2026-09-25T09:01:08.265Z","type":"codehost:labelled","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","number":1,"label":"sail"}
+{"seq":125,"ts":"2026-09-25T09:01:08.265Z","type":"codehost:labelled","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","number":1,"label":"sail","change":"added"}
 {"seq":126,"ts":"2026-09-25T09:01:08.465Z","type":"ticket:commented","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","ticketKey":"FAKE-1","body":"Pull request opened: fake://codehost/fixture/pull/1"}
-{"seq":127,"ts":"2026-09-25T09:01:08.645Z","type":"ticket:updated","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","ticketKey":"FAKE-1","change":{"state":"In Review"}}
+{"seq":127,"ts":"2026-09-25T09:01:08.645Z","type":"ticket:updated","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","ticketKey":"FAKE-1","change":{"state":"in-review"},"state":{"type":"started","name":"In Review"}}
 {"seq":128,"ts":"2026-09-25T09:01:10.545Z","type":"script:exit","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","code":0,"outcome":"passed","durationMs":1900,"stdoutBytes":123}
 {"seq":129,"ts":"2026-09-25T09:01:10.585Z","type":"output:validated","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open"}
 {"seq":130,"ts":"2026-09-25T09:01:10.635Z","type":"step:end","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"publish#1/open","step":"open","outcome":"passed","resultPath":"05-publish/call-1/steps/2-open/result.json"}

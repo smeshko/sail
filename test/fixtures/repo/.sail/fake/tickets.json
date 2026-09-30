@@ -1,0 +1,44 @@
+{
+  "tickets": [
+    {
+      "ticketKey": "FAKE-1",
+      "title": "Add a --shout flag to the greet command",
+      "description": "Add a `--shout` flag to the `greet` command. With the flag, the whole greeting is printed in upper case.",
+      "state": { "type": "unstarted", "name": "Todo" },
+      "labels": ["sail"],
+      "comments": [{ "author": "fixture-user", "body": "Upper-case the whole line, the name included." }],
+      "links": [],
+      "attachments": []
+    },
+    {
+      "ticketKey": "FAKE-2",
+      "title": "Print the version with --version",
+      "description": "`greet --version` prints the package version and exits.",
+      "state": { "type": "started", "name": "In Progress" },
+      "labels": ["sail"],
+      "comments": [],
+      "links": [],
+      "attachments": []
+    },
+    {
+      "ticketKey": "FAKE-3",
+      "title": "Document the greet command",
+      "description": "Add a usage section for `greet` to the README.",
+      "state": { "type": "unstarted", "name": "Todo" },
+      "labels": [],
+      "comments": [],
+      "links": [],
+      "attachments": []
+    },
+    {
+      "ticketKey": "FAKE-4",
+      "title": "Add a --whisper flag",
+      "description": "Print the greeting in lower case.",
+      "state": { "type": "canceled", "name": "Canceled" },
+      "labels": ["sail"],
+      "comments": [],
+      "links": [],
+      "attachments": []
+    }
+  ]
+}

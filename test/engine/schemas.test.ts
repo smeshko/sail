@@ -61,7 +61,7 @@ const runStart: Payload<'run:start'> = {
 const event = { ...envelope, type: 'run:start', ...runStart };
 const runEnd = { ...envelope, seq: 2, type: 'run:end', status: 'completed', result: 'done', replays: 1 };
 /** An event of a family a later epic closes. */
-const later = { ...envelope, type: 'workspace:leased' };
+const later = { ...envelope, type: 'run:adopted' };
 const summary = {
   schema: 'sail.summary.v1',
   runId: RUN_ID,
@@ -327,6 +327,90 @@ test.each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) =>
     ]);
   },
 );
+
+const SHA = 'b4efb0c5de84d87c1455d4504b8b75b095a8e10b';
+const OPEN = 'publish#1/open';
+const lease = { remote: 'fake://codehost/fixture', branch: 'sail/FAKE-1' };
+const WORKSPACE = '.sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace';
+
+/** One sample of each provider type, from the golden run where it has one (ports-and-fakes D10). */
+const PROVIDER: NewEvent[] = [
+  {
+    type: 'ticket:fetched',
+    key: 'intake#1',
+    ticketKey: 'FAKE-1',
+    comments: 1,
+    links: 0,
+    attachments: 0,
+    durationMs: 310,
+  },
+  { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: { type: 'started', name: 'In Progress' } },
+  {
+    type: 'ticket:updated',
+    key: OPEN,
+    ticketKey: 'FAKE-1',
+    change: { state: 'in-review' },
+    state: { type: 'started', name: 'In Review' },
+  },
+  {
+    type: 'ticket:commented',
+    key: OPEN,
+    ticketKey: 'FAKE-1',
+    body: 'Pull request opened: fake://codehost/fixture/pull/1',
+  },
+  { type: 'codehost:pushed', key: OPEN, branch: 'sail/FAKE-1', headSha: SHA },
+  {
+    type: 'codehost:pr_opened',
+    key: OPEN,
+    number: 1,
+    url: 'fake://codehost/fixture/pull/1',
+    draft: false,
+    base: 'main',
+    head: 'sail/FAKE-1',
+    ticketKey: 'FAKE-1',
+  },
+  { type: 'codehost:checks', number: 1, headSha: SHA, checks: [{ name: 'ci', status: 'passed' }] },
+  { type: 'codehost:labelled', key: OPEN, number: 1, label: 'sail', change: 'added' },
+  { type: 'codehost:commented', number: 1, body: 'Checks passed.' },
+  { type: 'codehost:merged', number: 1, method: 'squash', sha: 'f569e7f50659194ebd39f2f141e95091f40791da' },
+  { type: 'workspace:leased', ...lease, took: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M' },
+  { type: 'workspace:lease_released', ...lease },
+  {
+    type: 'workspace:created',
+    path: WORKSPACE,
+    branch: 'sail/FAKE-1',
+    baseSha: 'f569e7f50659194ebd39f2f141e95091f40791da',
+    durationMs: 640,
+  },
+  { type: 'workspace:released', path: WORKSPACE, kept: false },
+];
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  .each(PROVIDER.map((sample) => [sample.type, sample] as const))('%s accepts its provider payload, and rejects a field it does not declare', (_, sample) => {
+  expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
+  expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
+    { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('provider events: a key where D10 allows one, and the rules each payload adds', () => {
+  const issue = (path: string, message: string) => [{ schema: 'sail.event.v1' as const, path, message }];
+  const check = (sample: Record<string, unknown>) => validateDocument('sail.event.v1', { ...envelope, ...sample });
+  expect(check({ type: 'workspace:leased', ...lease, key: OPEN })).toEqual(issue('/key', 'is not allowed'));
+  expect(check({ type: 'ticket:claimed', ticketKey: 'FAKE-1' })).toEqual(issue('/state', 'is required'));
+  expect(check({ type: 'codehost:labelled', number: 1, label: 'sail', change: 'swapped' })).toEqual(
+    issue('/change', 'must be equal to one of the allowed values'),
+  );
+  expect(check({ type: 'codehost:merged', number: 1, method: 'squash', sha: 'f569e7f' })).toEqual(
+    issue('/sha', 'must match pattern "^[0-9a-f]{40}$"'),
+  );
+  expect(check({ type: 'codehost:merged', key: OPEN, number: 1, method: 'squash', sha: SHA })).toEqual([]);
+});
 
 test('event: a stop reason, errors and a signal each appear exactly when D5 says', () => {
   const issue = (path: string, message: string) => [{ schema: 'sail.event.v1' as const, path, message }];
