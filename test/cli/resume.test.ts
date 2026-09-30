@@ -64,10 +64,7 @@ function replaysOf(repoDir: string, runId: string): number {
     .reduce((sum, event) => sum + (event.replays ?? 0), 0);
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail resume opens with what already ran, runs the interrupted call as its second try, and ends with the whole run', async () => {
+test('sail resume opens with what already ran, runs the interrupted call as its second try, and ends with the whole run', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const { code, stdout, stderr } = await runCaptured(['resume', runId], repo.dir);

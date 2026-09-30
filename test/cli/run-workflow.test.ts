@@ -41,10 +41,7 @@ async function sailIn(
 const head = (key: string, text: string) => `${key.padEnd(13)}  ${text}`;
 const detail = (key: string, text: string) => `${key.padEnd(13)}    ${text}`;
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail run prints the run as the terminal view: each call, its exit, its output, the loop, a failure tail and the final block', async () => {
+test('sail run prints the run as the terminal view: each call, its exit, its output, the loop, a failure tail and the final block', async () => {
   const { code, view, stderr, runs } = await sailIn(['run']);
   expect(runs).toHaveLength(1);
   const [runId] = runs;
@@ -98,10 +95,7 @@ test
   expect(code).toBe(EXIT_OK);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a run whose tests never pass exits 1, its final block naming the stop reason and why', async () => {
+test('a run whose tests never pass exits 1, its final block naming the stop reason and why', async () => {
   const { code, view, runs } = await sailIn(['run', '--workflow', 'ticket-to-pr'], { testsPassAt: 99 });
   const [runId] = runs;
   expect(view).toEndWith(
@@ -119,10 +113,7 @@ test
   expect(code).toBe(EXIT_FAILED);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail run -q prints the header, a call that ends in error with its message, and the final block, and exits 1', async () => {
+test('sail run -q prints the header, a call that ends in error with its message, and the final block, and exits 1', async () => {
   const { code, view, runs } = await sailIn(['run', '-q'], {}, (sail) =>
     edit(sail, 'stages/tests/run.sh', 'pass_at=2\n', 'exit 2\n'),
   );
@@ -152,10 +143,7 @@ test('a valid --input runs', async () => {
   expect(code).toBe(EXIT_OK);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail run -v adds each command and the tail of every script, and -vv adds each journal line', async () => {
+test('sail run -v adds each command and the tail of every script, and -vv adds each journal line', async () => {
   const verbose = await sailIn(['run', '-v']);
   const specTail = [
     detail('spec#1', 'stdout.log'),
@@ -197,10 +185,7 @@ test('sail run refuses -q with -v, and sail check takes no -v, each with exit 3 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('in a terminal, sail run colours its lines and draws the live line, then ends with the final block', async () => {
+test('in a terminal, sail run colours its lines and draws the live line, then ends with the final block', async () => {
   const { code, stdout, runs } = await sailIn(['run'], {}, () => undefined, { tty: { columns: () => 120 } });
   const [runId] = runs;
   expect({
@@ -303,10 +288,7 @@ async function interruptedRun(repoDir: string, argv: string[]) {
   return { ...end, lines: end.stdout.trimEnd().split('\n'), runId, alive, interrupts };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('Ctrl-C during sail run ends the running call in error, suspends the run, prints how to resume it, and exits 2', async () => {
+test('Ctrl-C during sail run ends the running call in error, suspends the run, prints how to resume it, and exits 2', async () => {
   await withTempRepo(async (repo) => {
     const { code, stdout, stderr, runId, alive, interrupts } = await interruptedRun(repo.dir, ['run']);
     const view = normaliseDurations(stdout);

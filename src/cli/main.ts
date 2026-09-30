@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
 import { run } from './index';
+import { detectTty } from './tty';
+
+const tty = detectTty(process.stdout, process.env);
 
 process.exitCode = await run(process.argv.slice(2), {
   cwd: process.cwd(),
@@ -13,4 +16,5 @@ process.exitCode = await run(process.argv.slice(2), {
       process.off('SIGTERM', handler);
     };
   },
+  ...(tty === undefined ? {} : { tty }),
 });

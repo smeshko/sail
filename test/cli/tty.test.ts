@@ -2,10 +2,7 @@
 import { expect, test } from 'bun:test';
 import { detectTty } from '../../src/cli/tty';
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a TTY with NO_COLOR unset or empty and TERM not dumb gets a Tty that reads its width each time, and nothing else does', () => {
+test('a TTY with NO_COLOR unset or empty and TERM not dumb gets a Tty that reads its width each time, and nothing else does', () => {
   const resized: { isTTY: boolean; columns?: number } = { isTTY: true, columns: 120 };
   const tty = detectTty(resized, {});
   const before = tty?.columns();

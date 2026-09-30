@@ -55,10 +55,7 @@ test('the shim runs check: 0 on a fixture copy, 3 once a binding is wrongly wire
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the shim runs a workflow through a pipe in plain mode, with no escape byte, and exits 0 when the run completes', async () => {
+test('the shim runs a workflow through a pipe in plain mode, with no escape byte, and exits 0 when the run completes', async () => {
   await withTempRepo((repo) => {
     writeStub(repo.dir);
     const result = Bun.spawnSync([process.execPath, shim, 'run'], { cwd: repo.dir, env: repo.env });
@@ -94,10 +91,7 @@ test("a run.fail() in a chain the workflow doesn't await, after the run has ende
 });
 
 // A real signal through the shim: the test sends it to the spawned bin, never to its own process.
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each(['SIGINT', 'SIGTERM'] as const)(
+test.each(['SIGINT', 'SIGTERM'] as const)(
   '%s during sail run suspends the run, and sail resume runs it to its end, both in plain mode',
   async (signal) => {
     await withTempRepo(async (repo) => {
@@ -122,7 +116,9 @@ test
 
       const resumed = Bun.spawnSync([process.execPath, shim, 'resume', runId], { cwd: repo.dir, env: repo.env });
       const resumedOut = resumed.stdout.toString();
-      expect(resumedOut).toStartWith(`sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed\n`);
+      expect(resumedOut).toStartWith(
+        `sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed\n`,
+      );
       expect(resumedOut).toEndWith(`  run      .sail-runs/${runId}\n`);
       expect(resumedOut.includes('\x1b')).toBe(false);
       expect(resumed.exitCode).toBe(0);
