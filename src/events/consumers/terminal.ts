@@ -91,6 +91,12 @@ export function formatSize(bytes: number): string {
   return `${(Math.round((bytes / 1048576) * 10) / 10).toFixed(1)} MB`;
 }
 
+/** `text`'s lines, cleaned and without trailing whitespace, the blank ones after the first left out. */
+function textLines(text: string): string[] {
+  const [first = '', ...more] = text.split('\n').map((line) => clean(line).trimEnd());
+  return [first, ...more.filter((line) => line !== '')];
+}
+
 /** How long the live line's call has run, in whole seconds: `12s`, `1m 12s`. */
 function liveElapsed(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -194,9 +200,9 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   /** A detail line: indented two spaces where a head line has its marker, so the texts line up. */
   const detail = (key: string | undefined, text: string): Line => [column(key), '    ', ['dim', text]];
 
-  /** `message`'s first line through `first`, and each later line as a detail line indented two more. */
+  /** `text`'s first line through `first`, and each later line as a detail line indented two more. */
   const message = (key: string | undefined, text: string, first: (line: string) => Line): Line[] => {
-    const [line = '', ...more] = text.split('\n').map((each) => each.trimEnd());
+    const [line = '', ...more] = textLines(text);
     return [first(line), ...more.map((each) => detail(key, `  ${each}`))];
   };
 
@@ -374,10 +380,10 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
           ? [head(event.loop, '↻', `break after ${event.iterations}/${event.max}`)]
           : [head(event.loop, ['red', '✗ exceeded'], `${event.iterations}/${event.max}`)];
       case 'error:crash':
-        return message(event.key, event.message, (line) => head(event.key, ['red', '✗'], `crash: ${line}`));
+        return message(event.key, `crash: ${event.message}`, (line) => head(event.key, ['red', '✗'], line));
       case 'error:consumer': {
         const failed = `consumer ${event.consumer} failed on ${event.failed.type} #${event.failed.seq}`;
-        return message(undefined, event.message, (line) => head(undefined, ['red', '✗'], `${failed}: ${line}`));
+        return message(undefined, `${failed}: ${event.message}`, (line) => head(undefined, ['red', '✗'], line));
       }
       default:
         return otherLines(event);
@@ -392,7 +398,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     const key = 'key' in event && typeof event.key === 'string' ? event.key : undefined;
     if (!isReported(event.type)) return [head(key, '·', `${event.type} ${payload(event)}`)];
     if ('message' in event && typeof event.message === 'string') {
-      return message(key, event.message, (line) => head(key, ['red', '✗'], `${event.type}: ${line}`));
+      return message(key, `${event.type}: ${event.message}`, (line) => head(key, ['red', '✗'], line));
     }
     return [head(key, ['red', '✗'], `${event.type} ${payload(event)}`)];
   }
