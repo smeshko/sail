@@ -404,6 +404,31 @@ test.each<[string, NewEvent[], string]>([
   expect(render(stream(events), 'quiet')).toBe(expected);
 });
 
+test("the final block's stop row puts a message's later lines under its value, indented two more", () => {
+  const events = stream([
+    fake1Start(),
+    {
+      type: 'run:end',
+      status: 'failed',
+      stopReason: 'stage_error',
+      message: "tests#1 ended in error: invalid_output: the output doesn't match its schema:\n/total must be integer\n",
+      replays: 0,
+    },
+  ]);
+  expect(render(events, 'quiet')).toBe(
+    view(
+      'sail · ticket-to-pr v1 · RUN-1',
+      '',
+      'failed · 100ms',
+      "  stop     stage_error: tests#1 ended in error: invalid_output: the output doesn't match its schema:",
+      `${' '.repeat(13)}/total must be integer`,
+      '  calls    0',
+      '  replays  0',
+      '  run      .sail-runs/RUN-1',
+    ),
+  );
+});
+
 test.each<[number, string]>([
   [0, '0ms'],
   [999, '999ms'],
