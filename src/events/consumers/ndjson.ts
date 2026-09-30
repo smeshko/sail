@@ -11,6 +11,7 @@
 import { appendFileSync, existsSync, readFileSync, statSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFileOnce } from '../../engine/durable';
+import { validateDocument } from '../../engine/schemas';
 import type { Consumer, SailEvent } from '../types';
 
 export const EVENTS_FILE = 'events.ndjson';
@@ -53,9 +54,9 @@ export function nextSeq(runDir: string): number | { refused: string } {
 }
 
 /**
- * The run's events, in file order: every complete line that parses as an object with an integer `seq` and a string
- * `type`. A torn tail and any other line are skipped, and a missing file gives none. It never truncates: `nextSeq()`
- * alone cuts a torn tail, and only on a resume that proceeds.
+ * The run's events, in file order: every complete line that is a valid `sail.event.v1` event, so a reader can trust
+ * each one's fields. A torn tail and any other line are skipped, and a missing file gives none. It never truncates:
+ * `nextSeq()` alone cuts a torn tail, and only on a resume that proceeds.
  */
 export function readEvents(runDir: string): SailEvent[] {
   const path = join(runDir, EVENTS_FILE);
@@ -77,9 +78,7 @@ function parseEvent(line: string): SailEvent | undefined {
   } catch {
     return undefined;
   }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  const { seq, type } = value as { seq?: unknown; type?: unknown };
-  return Number.isInteger(seq) && typeof type === 'string' ? (value as SailEvent) : undefined;
+  return validateDocument('sail.event.v1', value).length === 0 ? (value as SailEvent) : undefined;
 }
 
 /**
