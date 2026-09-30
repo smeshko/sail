@@ -134,11 +134,12 @@ function readLog(file: string): { lines: string[]; cut: boolean } | undefined {
   try {
     fd = openSync(file, 'r');
     const size = fstatSync(fd).size;
-    const from = Math.max(0, size - TAIL_WINDOW);
+    // The window, and the byte before it: a newline there means the window starts on a whole line.
+    const from = Math.max(0, size - TAIL_WINDOW - 1);
     const buffer = Buffer.alloc(size - from);
     readSync(fd, buffer, 0, buffer.length, from);
     const lines = buffer.toString('utf8').split('\n');
-    // A line the window cut off at its start is dropped.
+    // What comes before the first newline is outside the window, or a line the window cut off at its start.
     if (from > 0) lines.shift();
     // Cleaned first, so a line of only escape codes counts as blank and no line ends in whitespace.
     const kept = lines.map((line) => clean(line).trimEnd()).filter((line) => line.trim() !== '');
