@@ -187,7 +187,9 @@ test.each<[string, string, string | null, string | undefined]>([
     'tests/call-1/result.json#/output',
     'tests#1',
   ],
-  ['keeps workflow as it is', 'workflow', 'workflow', 'workflow'],
+  // consumed says workflow for every value no call produced, so the feedback can't be told from the call's other inputs.
+  ['is left out for a feedback the workflow built', 'workflow', 'workflow', undefined],
+  ['is left out for a feedback that is the run input', '--input', '--input', undefined],
   [
     'is a pointer that matches no result, as given',
     'elsewhere/result.json#/output',
@@ -216,6 +218,34 @@ test.each<[string, string, string | null, string | undefined]>([
     ...(feedbackFrom === undefined ? {} : { feedbackFrom }),
     resultPath: 'implement/call-2/result.json',
   });
+});
+
+test("a loop's feedback is held until that loop exits, and an inner loop's exit leaves it", () => {
+  const pointer = 'tests/call-1/result.json#/output';
+  const consuming = (key: string, ms: number): [number, NewEvent][] => [
+    [ms, start(key, { consumed: { feedback: pointer } })],
+    [ms + 50, end(key, 'passed', 50)],
+    [ms + 60, journal(key, 0, 'passed')],
+  ];
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('tests#1')],
+      [200, end('tests#1', 'failed', 100)],
+      [210, journal('tests#1', 1, 'failed')],
+      [220, loopIteration('fix', 2, 3, pointer)],
+      [230, loopIteration('lint', 1, 2)],
+      [240, { type: 'loop:exit', loop: 'lint', iterations: 1, max: 2, reason: 'break' }],
+      ...consuming('implement#2', 300),
+      [400, { type: 'loop:exit', loop: 'fix', iterations: 2, max: 3, reason: 'break' }],
+      ...consuming('publish#1', 500),
+    ),
+  );
+  expect(summary?.calls.map(({ key, feedbackFrom }) => [key, feedbackFrom])).toEqual([
+    ['tests#1', undefined],
+    ['implement#2', 'tests#1'],
+    ['publish#1', undefined],
+  ]);
 });
 
 test("a call's agent facts are its latest try's last session's, and totals sum every session", () => {
