@@ -72,10 +72,7 @@ async function until(following: { readonly settled: boolean }, ready: () => bool
 
 const eventsOf = (dir: string) => join(dir, 'events.ndjson');
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a finished run is delivered whole, once and in order, and the follow ends without waiting', async () => {
+test('a finished run is delivered whole, once and in order, and the follow ends without waiting', async () => {
   const dir = runDir('completed\n');
   writeFileSync(eventsOf(dir), lines(event(1), event(2), ended(3, 'completed')));
   const controller = new AbortController();
@@ -85,10 +82,7 @@ test
   expect([result, following.seen]).toEqual(['ended', [1, 2, 3]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a running run delivers what is appended, and the follow ends once run:end comes with a finished STATUS', async () => {
+test('a running run delivers what is appended, and the follow ends once run:end comes with a finished STATUS', async () => {
   const dir = runDir('running\n');
   writeFileSync(eventsOf(dir), lines(event(1), event(2)));
   const following = follow(dir);
@@ -102,10 +96,7 @@ test
   expect([caughtUp, await following.done, following.seen]).toEqual([false, 'ended', [1, 2, 3, 4, 5]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a resumed run's earlier run:end doesn't end the follow, while STATUS says running or before the last run:end", async () => {
+test("a resumed run's earlier run:end doesn't end the follow, while STATUS says running or before the last run:end", async () => {
   const dir = runDir('running\n');
   writeFileSync(eventsOf(dir), lines(event(1), event(2), ended(3, 'suspended')));
   const following = follow(dir);
@@ -127,10 +118,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a torn line is delivered once it is complete, and only once', async () => {
+test('a torn line is delivered once it is complete, and only once', async () => {
   const dir = runDir('running\n');
   const third = JSON.stringify(event(3));
   writeFileSync(eventsOf(dir), `${lines(event(1), event(2))}${third.slice(0, 30)}`);
@@ -143,10 +131,7 @@ test
   expect([whileTorn, await following.done, following.seen]).toEqual([[1, 2], 'ended', [1, 2, 3, 4]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a missing events file is waited for, then followed', async () => {
+test('a missing events file is waited for, then followed', async () => {
   const dir = runDir('running\n');
   const following = follow(dir);
   await Bun.sleep(50);
@@ -156,10 +141,7 @@ test
   expect([waited, await following.done, following.seen]).toEqual([true, 'ended', [1, 2]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('an abort during the wait ends the follow at once, aborted', async () => {
+test('an abort during the wait ends the follow at once, aborted', async () => {
   const dir = runDir('running\n');
   writeFileSync(eventsOf(dir), lines(event(1)));
   const controller = new AbortController();
@@ -170,10 +152,7 @@ test
   expect([result, following.seen]).toEqual(['aborted', [1]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a line that can't be read ends the follow with the refusal", async () => {
+test("a line that can't be read ends the follow with the refusal", async () => {
   const dir = runDir('running\n');
   writeFileSync(eventsOf(dir), lines(event(1)));
   const following = follow(dir);
