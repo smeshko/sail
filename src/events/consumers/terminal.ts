@@ -18,24 +18,37 @@ export type Verbosity = (typeof VERBOSITIES)[number];
 
 const LEVEL: Record<Verbosity, number> = { quiet: 0, normal: 1, verbose: 2, trace: 3 };
 
-/** The lowest verbosity at which each type prints its own lines. Errors print at every level, apart from a timeout. */
+/**
+ * The lowest verbosity at which each type prints its own lines. Errors print at every level, apart from a timeout. Any
+ * other type, a timeout included, prints only trace's generic line.
+ */
 const SHOWN_FROM: Partial<Record<EventType, Verbosity>> = {
   'run:start': 'quiet',
-  'run:end': 'quiet',
   'intake:start': 'normal',
   'stage:start': 'normal',
   'step:start': 'normal',
-  // At quiet, an end prints only when its outcome is `error`.
-  'intake:end': 'normal',
-  'stage:end': 'normal',
-  'step:end': 'normal',
+  'script:exec': 'verbose',
+  'input:materialised': 'verbose',
   'script:exit': 'normal',
   'output:validated': 'normal',
   'output:invalid': 'normal',
+  // At verbose and above, a file's verdict is followed by its checks.
   'file:validated': 'normal',
+  'file:produced': 'verbose',
+  // At quiet, an end prints only when its outcome is `error`. Its tail: at normal for a script that didn't pass, at
+  // verbose for every script.
+  'intake:end': 'normal',
+  'stage:end': 'normal',
+  'step:end': 'normal',
   'loop:iteration': 'normal',
   'loop:exit': 'normal',
+  'workflow:route': 'verbose',
+  'journal:append': 'trace',
+  'run:end': 'quiet',
 };
+
+/** An error that prints at every level. A timeout's message is always in its call's errors, so it has no line below trace. */
+const isReported = (type: EventType): boolean => type.startsWith('error:') && type !== 'error:timeout';
 
 type Outcome = JournalEntry['outcome'];
 
@@ -71,8 +84,11 @@ export function formatDuration(ms: number): string {
 }
 
 /** A size as the terminal view prints it: `622 B`, `1.0 KB`, `2.5 MB`. */
-export function formatSize(_bytes: number): string {
-  return '';
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = Math.round((bytes / 1024) * 10);
+  if (kb < 10240) return `${(kb / 10).toFixed(1)} KB`;
+  return `${(Math.round((bytes / 1048576) * 10) / 10).toFixed(1)} MB`;
 }
 
 /** How long the live line's call has run, in whole seconds: `12s`, `1m 12s`. */
@@ -180,10 +196,8 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     from === 'workflow' ? 'the workflow' : (keysByResult.get(from.replace(/#.*$/s, '')) ?? from);
 
   function shows(event: SailEvent): boolean {
-    if (isEnd(event) && event.outcome === 'error') return true;
-    if (event.type.startsWith('error:') && event.type !== 'error:timeout') return true;
-    const from = SHOWN_FROM[event.type];
-    return from !== undefined && level >= LEVEL[from];
+    if (isReported(event.type) || (isEnd(event) && event.outcome === 'error')) return true;
+    return level >= LEVEL[SHOWN_FROM[event.type] ?? 'trace'];
   }
 
   /** Keeps what later lines and the final block need, and the live line. */
@@ -193,15 +207,12 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     switch (event.type) {
       case 'run:start': {
         startedAt ??= at;
-        const { intake, stages } = event.roster;
-        const keys = [
-          'intake#1',
-          ...(intake.steps ?? []).map((step) => `intake#1/${step.step}`),
-          ...Object.entries(stages).flatMap(([stage, entry]) => [
-            `${stage}#1`,
-            ...(entry.steps ?? []).map((step) => `${stage}#1/${step.step}`),
-          ]),
-        ];
+        // The longest key the roster allows: each call's first, and each step of a multi-step one.
+        const entries = [['intake', event.roster.intake] as const, ...Object.entries(event.roster.stages)];
+        const keys = entries.flatMap(([name, entry]) => [
+          `${name}#1`,
+          ...(entry.steps ?? []).map((step) => `${name}#1/${step.step}`),
+        ]);
         width = Math.max(...keys.map((key) => key.length));
         return;
       }
@@ -249,7 +260,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     for (const error of event.type === 'stage:end' ? (event.errors ?? []) : []) {
       lines.push(...message(event.key, `${error.reason}: ${error.message}`, (line) => detail(event.key, line)));
     }
-    const tailed = event.outcome === 'failed' || event.outcome === 'error';
+    const tailed = level >= LEVEL.verbose || event.outcome === 'failed' || event.outcome === 'error';
     if (level >= LEVEL.normal && tailed && kinds.get(event.key) === 'script') {
       lines.push(...tail(event.key, join(options.runsDir, event.runId, dirname(event.resultPath))));
     }
@@ -320,12 +331,24 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         const outcome = event.outcome === undefined ? '' : ` → ${event.outcome}`;
         return [detail(event.key, `exit ${event.code}${outcome} · ${duration}`)];
       }
+      case 'script:exec':
+        return [detail(event.key, `$ ${event.command}${event.cwd === '.' ? '' : ` · in ${event.cwd}`}`)];
+      case 'input:materialised':
+        return [detail(event.key, `in ${event.binding} ← ${event.from}`)];
       case 'output:validated':
         return [detail(event.key, 'output valid')];
       case 'output:invalid':
         return [detail(event.key, 'output invalid')];
-      case 'file:validated':
-        return [detail(event.key, `file ${event.name} ${event.ok ? 'valid' : 'invalid'}`)];
+      case 'file:validated': {
+        const checks = level >= LEVEL.verbose && event.checks.length > 0 ? ` · ${event.checks.join(', ')}` : '';
+        return [detail(event.key, `file ${event.name} ${event.ok ? 'valid' : 'invalid'}${checks}`)];
+      }
+      case 'file:produced':
+        return [detail(event.key, `file ${event.name} · ${formatSize(event.bytes)}`)];
+      case 'workflow:route':
+        return [head(event.at, '→', `${event.took} · on ${event.value}`)];
+      case 'journal:append':
+        return [detail(event.key, `journal line ${event.line}`)];
       case 'loop:iteration': {
         const feedback = event.feedback === undefined ? '' : ` · feedback from ${source(event.feedback.from)}`;
         return [head(event.loop, '↻', `iteration ${event.iteration}/${event.max}${feedback}`)];
@@ -341,13 +364,17 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         return message(undefined, event.message, (line) => head(undefined, ['red', '✗'], `${failed}: ${line}`));
       }
       default:
-        return otherError(event);
+        return otherLines(event);
     }
   }
 
-  /** Any other `error:*`: its message when it carries one, or else its payload. */
-  function otherError(event: SailEvent): Line[] {
+  /**
+   * Any other `error:*`: its message when it carries one, or else its payload. Any other event: trace's generic line, so
+   * every event prints at least once there.
+   */
+  function otherLines(event: SailEvent): Line[] {
     const key = 'key' in event && typeof event.key === 'string' ? event.key : undefined;
+    if (!isReported(event.type)) return [head(key, '·', `${event.type} ${payload(event)}`)];
     if ('message' in event && typeof event.message === 'string') {
       return message(key, event.message, (line) => head(key, ['red', '✗'], `${event.type}: ${line}`));
     }

@@ -444,17 +444,11 @@ test('in a terminal, a pass is green, a failure yellow and an error red', () => 
 
 // TASK-004: verbose and trace.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each(['verbose', 'trace'] as const)('FAKE-1 at %s equals its golden view, byte for byte', (verbosity) => {
+test.each(['verbose', 'trace'] as const)('FAKE-1 at %s equals its golden view, byte for byte', (verbosity) => {
   expect(render(fake1(), verbosity)).toBe(golden(verbosity));
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('at trace, an event of every type prints a line of its own', () => {
+test('at trace, an event of every type prints a line of its own', () => {
   const w = 18;
   const cases: [NewEvent, string][] = [
     [fake1Start(), 'sail · ticket-to-pr v1 · RUN-1'],
@@ -475,7 +469,13 @@ test
       head('publish#1/open', '▶ open · step 2/2 · script', w),
     ],
     [
-      { type: 'step:end', key: 'publish#1/open', step: 'open', outcome: 'failed', resultPath: '05-publish/call-1/steps/2-open/result.json' },
+      {
+        type: 'step:end',
+        key: 'publish#1/open',
+        step: 'open',
+        outcome: 'failed',
+        resultPath: '05-publish/call-1/steps/2-open/result.json',
+      },
       head('publish#1/open', '✗ failed', w),
     ],
     [{ type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 }, head('fix', '↻ iteration 1/3', w)],
@@ -496,7 +496,10 @@ test
     ],
     [{ type: 'tool:start', key: 'spec#1', tool: 'Read' }, head('spec#1', '· tool:start {"tool":"Read"}', w)],
     [{ type: 'tool:end', key: 'spec#1', status: 'completed' }, head('spec#1', '· tool:end {"status":"completed"}', w)],
-    [{ type: 'permission:denied', key: 'spec#1', tool: 'Bash' }, head('spec#1', '· permission:denied {"tool":"Bash"}', w)],
+    [
+      { type: 'permission:denied', key: 'spec#1', tool: 'Bash' },
+      head('spec#1', '· permission:denied {"tool":"Bash"}', w),
+    ],
     [
       { type: 'script:exec', key: 'tests#1', command: 'run.sh', cwd: '.', envKeys: [] },
       detail('tests#1', '$ run.sh', w),
@@ -512,7 +515,14 @@ test
     [{ type: 'output:validated', key: 'tests#1' }, detail('tests#1', 'output valid', w)],
     [{ type: 'output:invalid', key: 'tests#2', message: 'bad' }, detail('tests#2', 'output invalid', w)],
     [
-      { type: 'file:produced', key: 'tests#1', name: 'junit.xml', path: '03-tests/call-1/junit.xml', bytes: 893, sha256: 'ab' },
+      {
+        type: 'file:produced',
+        key: 'tests#1',
+        name: 'junit.xml',
+        path: '03-tests/call-1/junit.xml',
+        bytes: 893,
+        sha256: 'ab',
+      },
       detail('tests#1', 'file junit.xml · 893 B', w),
     ],
     [
@@ -538,7 +548,10 @@ test
       head('', '· workspace:lease_released {"branch":"sail/FAKE-1"}', w),
     ],
     [{ type: 'workspace:created', branch: 'sail/FAKE-1' }, head('', '· workspace:created {"branch":"sail/FAKE-1"}', w)],
-    [{ type: 'workspace:released', branch: 'sail/FAKE-1' }, head('', '· workspace:released {"branch":"sail/FAKE-1"}', w)],
+    [
+      { type: 'workspace:released', branch: 'sail/FAKE-1' },
+      head('', '· workspace:released {"branch":"sail/FAKE-1"}', w),
+    ],
     [{ type: 'error:harness', key: 'spec#1', message: 'lost' }, head('spec#1', '✗ error:harness: lost', w)],
     [
       { type: 'error:timeout', key: 'tests#1', message: 'timed out after 30s', timeoutSeconds: 30 },
@@ -558,10 +571,7 @@ test
   expect(missing).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[Verbosity, string]>([
+test.each<[Verbosity, string]>([
   [
     'verbose',
     view(
@@ -581,22 +591,22 @@ test
       detail('tests#1', 'timeout: timed out after 30s'),
     ),
   ],
-])('at %s, a timeout message prints once through its call, and only trace adds the event itself', (verbosity, expected) => {
-  const events = stream([
-    stageStart('tests#1'),
-    { type: 'script:exit', key: 'tests#1', code: null, signal: 'SIGTERM', durationMs: 30000, stdoutBytes: 0 },
-    { type: 'error:timeout', key: 'tests#1', message: 'timed out after 30s', timeoutSeconds: 30 },
-    stageEnd('tests#1', 'error', 30100, '03-tests/call-1/result.json', {
-      errors: [{ reason: 'timeout', message: 'timed out after 30s' }],
-    }),
-  ]);
-  expect(render(events, verbosity)).toBe(expected);
-});
+])(
+  'at %s, a timeout message prints once through its call, and only trace adds the event itself',
+  (verbosity, expected) => {
+    const events = stream([
+      stageStart('tests#1'),
+      { type: 'script:exit', key: 'tests#1', code: null, signal: 'SIGTERM', durationMs: 30000, stdoutBytes: 0 },
+      { type: 'error:timeout', key: 'tests#1', message: 'timed out after 30s', timeoutSeconds: 30 },
+      stageEnd('tests#1', 'error', 30100, '03-tests/call-1/result.json', {
+        errors: [{ reason: 'timeout', message: 'timed out after 30s' }],
+      }),
+    ]);
+    expect(render(events, verbosity)).toBe(expected);
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('verbose leaves the cwd off a command run in the workspace, and routes to the end or a fail', () => {
+test('verbose leaves the cwd off a command run in the workspace, and routes to the end or a fail', () => {
   const events = stream([
     { type: 'script:exec', key: 'tests#1', command: '.sail/stages/tests/run.sh', cwd: '.', envKeys: ['RUN_ID'] },
     { type: 'workflow:route', at: 'tests#1', value: 'passed', took: 'end' },
@@ -611,10 +621,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[number, string]>([
+test.each<[number, string]>([
   [0, '0 B'],
   [1023, '1023 B'],
   [1024, '1.0 KB'],
@@ -625,10 +632,7 @@ test
   expect(formatSize(bytes)).toBe(text);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('verbose shows the tail of a script that passed, and none for an agent call', () => {
+test('verbose shows the tail of a script that passed, and none for an agent call', () => {
   const runs = runsWith({
     '01-spec/call-1/stdout.log': 'agent chatter\n',
     '03-tests/call-1/stdout.log': 'ok 1\n',
