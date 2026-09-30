@@ -44,10 +44,7 @@ const loopIteration = (loop: string, iteration: number, max: number, from?: stri
   ...(from === undefined ? {} : { feedback: { from } }),
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a run with no run:end is running, and lasts until its latest event', () => {
+test('a run with no run:end is running, and lasts until its latest event', () => {
   const summary = folded(
     stamp(
       [0, runStart({ maxMinutes: 90 })],
@@ -65,7 +62,9 @@ test
     status: 'running',
     startedAt: at(0),
     durationMs: 900,
-    calls: [{ key: 'spec#1', kind: 'script', outcome: 'passed', durationMs: 480, resultPath: 'spec/call-1/result.json' }],
+    calls: [
+      { key: 'spec#1', kind: 'script', outcome: 'passed', durationMs: 480, resultPath: 'spec/call-1/result.json' },
+    ],
     loops: {},
     routes: [],
     totals: { stageCalls: 1, steps: 1, toolCalls: 0, denials: 0, replays: 0, usage: { costUsd: 0 } },
@@ -73,10 +72,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each([
+test.each([
   ['failed', 'workflow_failed'],
   ['suspended', 'interrupted'],
 ] as const)('a %s run takes its status and stop reason from its run:end, and ends there', (status, stopReason) => {
@@ -92,10 +88,7 @@ test
   expect(ending(summary)).toEqual({ status, stopReason, endedAt: at(400), durationMs: 400 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('an event after run:end, other than error:consumer, sets the run back to running', () => {
+test('an event after run:end, other than error:consumer, sets the run back to running', () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -106,10 +99,7 @@ test
   expect(ending(summary)).toEqual({ status: 'running', durationMs: 500 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('an error:consumer after run:end leaves the run as it ended', () => {
+test('an error:consumer after run:end leaves the run as it ended', () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -128,10 +118,7 @@ test
   expect(ending(summary)).toEqual({ status: 'completed', endedAt: at(400), durationMs: 400, result: { pr: 1 } });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("replays sum every run:end's, and the last run:end's status wins", () => {
+test("replays sum every run:end's, and the last run:end's status wins", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -151,10 +138,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a key's next try keeps the call's place, and shows only that try's outcome, duration and files", () => {
+test("a key's next try keeps the call's place, and shows only that try's outcome, duration and files", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -183,10 +167,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a call that has started but hasn't ended isn't listed", () => {
+test("a call that has started but hasn't ended isn't listed", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -199,10 +180,7 @@ test
   expect([summary?.calls.map((call) => call.key), summary?.totals.stageCalls]).toEqual([['spec#1'], 1]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, string, string | null, string | undefined]>([
+test.each<[string, string, string | null, string | undefined]>([
   [
     'names the call whose result the feedback came from',
     'tests/call-1/result.json#/output',
@@ -240,10 +218,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a call's agent facts are its latest try's last session's, and totals sum every session", () => {
+test("a call's agent facts are its latest try's last session's, and totals sum every session", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -305,10 +280,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a multi-step call has no kind, costs what its steps cost, and lists each step, its duration from the step's own events", () => {
+test("a multi-step call has no kind, costs what its steps cost, and lists each step, its duration from the step's own events", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -365,10 +337,7 @@ test
   expect(summary?.totals.steps).toBe(3);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a multi-step call that ended before its second step lists no steps', () => {
+test('a multi-step call that ended before its second step lists no steps', () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -386,10 +355,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("an agent fact that isn't a whole number of 0 or more, or dollars of 0 or more, is left out", () => {
+test("an agent fact that isn't a whole number of 0 or more, or dollars of 0 or more, is left out", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -413,10 +379,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("each loop's iterations are the highest its loop:iteration and loop:exit events report, in first-seen order", () => {
+test("each loop's iterations are the highest its loop:iteration and loop:exit events report, in first-seen order", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -432,10 +395,7 @@ test
   expect(Object.keys(summary?.loops ?? {})).toEqual(['review', 'fix']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a route repeated with no journal:append between is dropped, and the same move after one is kept', () => {
+test('a route repeated with no journal:append between is dropped, and the same move after one is kept', () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -460,9 +420,6 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('events with no run:start give no summary', () => {
+test('events with no run:start give no summary', () => {
   expect(summarize(stamp([100, start('spec#1')], [300, end('spec#1', 'passed', 200)]))).toBeUndefined();
 });

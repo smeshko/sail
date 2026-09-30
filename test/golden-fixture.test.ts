@@ -142,10 +142,7 @@ function strip(value: unknown, path: readonly string[]): void {
   else strip(object[head], rest);
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("the golden run's summary is its events, folded", () => {
+test("the golden run's summary is its events, folded", () => {
   const expected = JSON.parse(text('summary.json'));
   for (const path of NOT_DERIVED_YET) strip(expected, path.split('.'));
   const folded = summarize(lines('events.ndjson') as unknown as SailEvent[]);

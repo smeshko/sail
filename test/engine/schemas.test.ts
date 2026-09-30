@@ -368,10 +368,7 @@ test('summary: a stop reason is required when failed or suspended, and forbidden
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('summary: totals may leave out budget, as for a run with no budget.maxUsd', () => {
+test('summary: totals may leave out budget, as for a run with no budget.maxUsd', () => {
   const { budget: _, ...totals } = summary.totals;
   expect(validateDocument('sail.summary.v1', { ...summary, totals })).toEqual([]);
 });
