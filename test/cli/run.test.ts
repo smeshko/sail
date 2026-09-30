@@ -47,6 +47,11 @@ test('the usage lists sail show', async () => {
   );
 });
 
+test('the usage lists -q, -v and -vv on sail show', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toContain('sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]');
+});
+
 test.each([
   [['--bogus'], '--bogus'],
   [['--version', 'extra'], 'extra'],

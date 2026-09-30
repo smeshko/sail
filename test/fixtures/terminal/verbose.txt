@@ -18,11 +18,13 @@ spec#1                file spec.md valid · hasSections(Requirements, Tasks), no
 spec#1                file spec.md · 427 B
 spec#1              ✓ done · 10.4s
 fix                 ↻ iteration 1/3
+spec#1              → implement#1 · on done
 implement#1         ▶ implement · agent · claude-sonnet-5
 implement#1           in spec ← 01-spec/call-1/spec.md
 implement#1           output valid
 implement#1           file diff.patch · 1.0 KB
 implement#1         ✓ done · 12.6s
+implement#1         → tests#1 · on done
 tests#1             ▶ tests · script
 tests#1               $ .sail/stages/tests/run.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
 tests#1               exit 1 → failed · 2.3s
@@ -36,12 +38,14 @@ tests#1               │ 1 fail
 tests#1               │ (fail) greet --shout › uppercases the name
 tests#1               │ {"ok":false,"total":6,"failed":1,"durationMs":2300,"failures":[{"test":"greet --shout › uppercases the name","file":"test/greet.test.ts","message":"Expected \"HELLO, ADA!\" but received \"HELLO, Ada!\""}]}
 fix                 ↻ iteration 2/3 · feedback from tests#1
+tests#1             → implement#2 · on failed
 implement#2         ▶ implement · agent · claude-sonnet-5
 implement#2           in spec ← 01-spec/call-1/spec.md
 implement#2           in feedback ← 03-tests/call-1/result.json#/output
 implement#2           output valid
 implement#2           file diff.patch · 613 B
 implement#2         ✓ done · 12.5s
+implement#2         → tests#2 · on done
 tests#2             ▶ tests · script
 tests#2               $ .sail/stages/tests/run.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
 tests#2               exit 0 → passed · 2.5s
@@ -53,6 +57,7 @@ tests#2               │ bun test v1.3.14
 tests#2               │ 7 pass
 tests#2               │ 0 fail
 tests#2               │ {"ok":true,"total":7,"failed":0,"durationMs":2450,"failures":[]}
+tests#2             → self-review#1 · on passed
 self-review#1       ▶ self-review · agent · claude-opus-5-5
 self-review#1         in spec ← 01-spec/call-1/spec.md
 self-review#1         output valid
@@ -79,6 +84,7 @@ publish#1/open        │ pushed sail/FAKE-1
 publish#1/open        │ opened fake://codehost/fixture/pull/1
 publish#1/open        │ {"number":1,"url":"fake://codehost/fixture/pull/1","draft":false}
 publish#1           ✓ passed · 14.5s
+publish#1           → end · on passed
 
 completed · 1m 11s
   calls    8 · 3 passed, 4 done, 1 failed

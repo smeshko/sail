@@ -139,7 +139,7 @@ test.each<[string, string]>([
 test('readEvents gives every event of a run in file order, and none for a missing file', () => {
   const fake1 = join(import.meta.dir, '..', '..', 'fixtures', 'runs', RUN_ID);
   const events = readEvents(fake1);
-  expect(events.map((each) => each.seq)).toEqual(Array.from({ length: 131 }, (_, index) => index + 1));
+  expect(events.map((each) => each.seq)).toEqual(Array.from({ length: 137 }, (_, index) => index + 1));
   const last = readFileSync(join(fake1, 'events.ndjson'), 'utf8').trimEnd().split('\n').at(-1) ?? '';
   expect(events.at(-1)).toEqual(JSON.parse(last));
   expect(readEvents(runDir())).toEqual([]);
