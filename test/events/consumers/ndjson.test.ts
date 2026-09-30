@@ -176,10 +176,7 @@ const nextOf = (read: ReturnType<typeof readEventsFrom>): EventCursor => ('next'
 
 const bytes = (text: string) => Buffer.byteLength(text);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('readEventsFrom gives nothing for a missing file, then every event once it is written, with next at its end', () => {
+test('readEventsFrom gives nothing for a missing file, then every event once it is written, with next at its end', () => {
   const dir = runDir();
   expect(readEventsFrom(dir, { offset: 5, line: 1 })).toEqual({ events: [], next: { offset: 5, line: 1 } });
   writeFileSync(join(dir, 'events.ndjson'), lines(1, 2, 3));
@@ -189,10 +186,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('reading from next gives only the lines appended since, numbered on', () => {
+test('reading from next gives only the lines appended since, numbered on', () => {
   const dir = runDir();
   writeFileSync(join(dir, 'events.ndjson'), lines(1, 2));
   const first = readEventsFrom(dir);
@@ -203,10 +197,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a torn tail waits for the next read, which gives its line whole once it is complete', () => {
+test('a torn tail waits for the next read, which gives its line whole once it is complete', () => {
   const dir = runDir();
   const path = join(dir, 'events.ndjson');
   const torn = JSON.stringify(event(2));
@@ -219,10 +210,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each(['é', '✓'])('a line whose %s is split across two appends is read whole', (char) => {
+test.each(['é', '✓'])('a line whose %s is split across two appends is read whole', (char) => {
   const dir = runDir();
   const path = join(dir, 'events.ndjson');
   const written = { ...event(1), consumed: { note: `before ${char} after` } } as SailEvent;
@@ -237,10 +225,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, string]>([
+test.each<[string, string]>([
   ['is not JSON', '{ not json'],
   ['has no whole seq', JSON.stringify({ ...event(3), seq: '3' })],
   ['has no type', JSON.stringify({ seq: 3, ts: '2026-09-28T09:00:03.000Z', runId: RUN_ID })],

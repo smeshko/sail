@@ -8,7 +8,19 @@
 // - A write that fails keeps its line for the next event's write, which first cuts whatever the failed write left. So
 //   a file whose writes recover, say once a full disk has room again, still holds every `seq` in order.
 // - Streaming chunks arrive with Epic 07, coalesced into whole events: a chunk never takes a `seq`.
-import { appendFileSync, existsSync, readFileSync, statSync, truncateSync } from 'node:fs';
+// - `readEventsFrom()` reads it from a cursor, a complete line at a time, so a viewer can replay the file and then follow
+//   it. A torn tail waits for the next read.
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  truncateSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { createFileOnce } from '../../engine/durable';
 import { validateDocument } from '../../engine/schemas';
@@ -27,10 +39,51 @@ export const START: EventCursor = { offset: 0, line: 0 };
 
 /** The complete lines from `from` on, as events, with the cursor after them. A line that can't be read refuses. */
 export function readEventsFrom(
-  _runDir: string,
+  runDir: string,
   from: EventCursor = START,
 ): { events: SailEvent[]; next: EventCursor } | { refused: string } {
-  return { events: [], next: from };
+  const path = join(runDir, EVENTS_FILE);
+  if (!existsSync(path)) return { events: [], next: from };
+  const tail = readTail(path, from.offset);
+  const events: SailEvent[] = [];
+  let start = 0;
+  // Split on the byte, before decoding: a multi-byte character never holds 0x0A, so a line cut inside one is simply
+  // incomplete, and waits for the next read.
+  for (let end = tail.indexOf(0x0a); end !== -1; end = tail.indexOf(0x0a, start)) {
+    const event = parseEvent(tail.subarray(start, end).toString('utf8'));
+    if (typeof event === 'string') {
+      return { refused: `${EVENTS_FILE}:${from.line + events.length + 1} can't be read: ${event}` };
+    }
+    events.push(event);
+    start = end + 1;
+  }
+  return { events, next: { offset: from.offset + start, line: from.line + events.length } };
+}
+
+/** The bytes of `path` from `offset` to its end, read through a descriptor so a follower never rereads the file. */
+function readTail(path: string, offset: number): Buffer {
+  const fd = openSync(path, 'r');
+  try {
+    const tail = Buffer.alloc(Math.max(0, fstatSync(fd).size - offset));
+    return tail.subarray(0, readSync(fd, tail, 0, tail.length, offset));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** One line as an event, or why it isn't one. Lines aren't checked against the schema: validateRunDir() does that. */
+function parseEvent(line: string): SailEvent | string {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch (error) {
+    return messageOf(error);
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'it is not a JSON object';
+  const { seq, type } = value as Record<string, unknown>;
+  if (!Number.isInteger(seq) || (seq as number) < 1) return `its seq is ${JSON.stringify(seq)}, not 1 or more`;
+  if (typeof type !== 'string') return `its type is ${JSON.stringify(type)}, not a string`;
+  return value as SailEvent;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -83,12 +136,12 @@ export function readEvents(runDir: string): SailEvent[] {
     .slice(0, text.lastIndexOf('\n') + 1)
     .split('\n')
     .flatMap((line) => {
-      const event = parseEvent(line);
+      const event = validEvent(line);
       return event === undefined ? [] : [event];
     });
 }
 
-function parseEvent(line: string): SailEvent | undefined {
+function validEvent(line: string): SailEvent | undefined {
   let value: unknown;
   try {
     value = JSON.parse(line);
