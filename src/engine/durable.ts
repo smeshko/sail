@@ -65,7 +65,7 @@ export function appendLine(path: string, line: string): void {
 }
 
 /** Replaces `path` with `text` atomically: a reader sees the old file or the new one, never a mix. */
-export function replaceFile(path: string, text: string): void {
+export function replaceFile(path: string, text: string, _tmp = `${path}.tmp`): void {
   const tmp = `${path}.tmp`;
   const fd = openSync(tmp, 'w');
   try {

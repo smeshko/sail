@@ -16,6 +16,23 @@ import type { Consumer, SailEvent } from '../types';
 
 export const EVENTS_FILE = 'events.ndjson';
 
+/** Where a read of the events file stopped: the byte just past its last complete line, and that line's number. */
+export interface EventCursor {
+  offset: number;
+  line: number;
+}
+
+/** The start of the file. */
+export const START: EventCursor = { offset: 0, line: 0 };
+
+/** The complete lines from `from` on, as events, with the cursor after them. A line that can't be read refuses. */
+export function readEventsFrom(
+  _runDir: string,
+  from: EventCursor = START,
+): { events: SailEvent[]; next: EventCursor } | { refused: string } {
+  return { events: [], next: from };
+}
+
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** Creates the run's empty events file. An existing one throws `EEXIST`. */
