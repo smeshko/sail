@@ -11,7 +11,7 @@ import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { JournalEntry } from '../../engine/journal';
 import type { Consumer, EventType, SailEvent } from '../types';
-import { createScreen, type Every, type Line, type Segment, type Style, type Tty } from './screen';
+import { clean, createScreen, type Every, type Line, type Segment, type Style, type Tty } from './screen';
 
 export const VERBOSITIES = ['quiet', 'normal', 'verbose', 'trace'] as const;
 export type Verbosity = (typeof VERBOSITIES)[number];
@@ -140,7 +140,9 @@ function readLog(file: string): { lines: string[]; cut: boolean } | undefined {
     const lines = buffer.toString('utf8').split('\n');
     // A line the window cut off at its start is dropped.
     if (from > 0) lines.shift();
-    return { lines: lines.map((line) => line.trimEnd()).filter((line) => line.trim() !== ''), cut: from > 0 };
+    // Cleaned first, so a line of only escape codes counts as blank and no line ends in whitespace.
+    const kept = lines.map((line) => clean(line).trimEnd()).filter((line) => line.trim() !== '');
+    return { lines: kept, cut: from > 0 };
   } catch {
     return undefined;
   } finally {
