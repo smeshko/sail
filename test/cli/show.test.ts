@@ -66,7 +66,6 @@ test.each([[GOLDEN_RUN_ID], ['FAKE-1']])(
       emptySailDir(repo.dir);
       copyGoldenRun(repo.dir);
       const captured = await runCaptured(['show', name], repo.dir);
-      console.log(captured.stdout);
       expect(captured).toEqual({ code: EXIT_OK, stdout: GOLDEN, stderr: '' });
     });
   },

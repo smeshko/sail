@@ -837,7 +837,6 @@ test("the stub's summary.json is rewritten after every call, and ends completed 
     ]);
     expect([listed, issues]).toEqual([[1, 2, 3, 4, 5, 6, 7], []]);
     const text = summaryText(end.dir);
-    console.log(text);
     const summary = JSON.parse(text);
     expect(text).toBe(`${JSON.stringify(summary, null, 2)}\n`);
     expect(summary).toMatchObject({
