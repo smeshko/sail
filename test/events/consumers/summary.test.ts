@@ -1,11 +1,12 @@
-// summary.json: the summary consumer's writes, its seed on a resume, and a rebuild's refusals, on hand-written events.
+// summary.json: the summary consumer's writes, its seed on a resume, and a rebuild's refusals and race with the run, on
+// hand-written events.
 // A whole run's summary is runtime.test.ts's.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rebuildSummary, summaryConsumer } from '../../../src/events/consumers/summary';
-import type { Summary } from '../../../src/events/summary';
+import { rebuildSummary, summaryConsumer, writeSummary } from '../../../src/events/consumers/summary';
+import { type Summary, summarize } from '../../../src/events/summary';
 import type { SailEvent } from '../../../src/events/types';
 import {
   at,
@@ -134,4 +135,33 @@ test.each<[string, string, unknown]>([
   writeFileSync(join(dir, 'events.ndjson'), events);
   expect(rebuildSummary(dir)).toEqual({ refused: refused as string });
   expect(existsSync(join(dir, 'summary.json'))).toBe(false);
+});
+
+test("a rebuild that the run's last write overtakes reads on and writes again, so the run's end isn't lost", () => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  const running = stamp(
+    [0, runStart()],
+    [100, start('spec#1')],
+    [300, end('spec#1', 'passed', 200)],
+    [310, journal('spec#1', 1, 'passed')],
+  );
+  const ended = stamped(running.length + 1, 400, runEnd('completed', 1));
+  const whole = summarize([...running, ended]) as Summary;
+  writeFileSync(path, ndjson(running));
+  const statuses: string[] = [];
+  const rebuilt = rebuildSummary(dir, (runDir, summary) => {
+    if (statuses.length === 0) {
+      // The run ends between the rebuild's read and its write: it appends run:end, then writes its own summary.
+      appendFileSync(path, ndjson([ended]));
+      writeSummary(runDir, whole);
+    }
+    statuses.push(summary.status);
+    return writeSummary(runDir, summary);
+  });
+  expect([statuses, summaryIn(dir), rebuilt]).toEqual([
+    ['running', 'completed'],
+    whole,
+    { summary: whole, path: join(dir, 'summary.json') },
+  ]);
 });
