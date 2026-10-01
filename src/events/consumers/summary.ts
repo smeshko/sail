@@ -8,8 +8,8 @@
 // - A write that fails throws, and the bus reports it as `error:consumer`. The next write point writes the whole state
 //   again. The prototype's summary consumer swallowed such errors (ADR-0012).
 // - A resumed run's consumer starts with nothing, so it seeds itself from `events.ndjson` on its first event.
-// - A rebuild racing the live run never leaves an older summary over the run's last write: it writes until it has
-//   caught up with the events file.
+// - A rebuild racing the live run never leaves an older summary over the run's last write: it writes again while a
+//   write point has arrived since its last read.
 import { basename, join } from 'node:path';
 import { replaceFile } from '../../engine/durable';
 import { emptyState, foldEvent, type Summary, toSummary } from '../summary';
@@ -59,8 +59,10 @@ function seed(runDir: string, seq: number) {
 
 /**
  * Folds the run's whole events file and writes `summary.json` from it. A live run may write its own summary while this
- * one is being written, the run's last write included, so it reads on after each write and writes again until no event
- * has arrived. The run appends an event before it writes, so the last write here holds every event either has seen.
+ * one is being written, the run's last write included, so it reads on after each write, and writes again while a write
+ * point has arrived. The run appends a write point before it writes, so the run never wrote a newer summary than this
+ * one's last. Other events don't keep it going: a busy run's next write point covers them, and each pass needs a call
+ * to have ended, which bounds the work.
  */
 export function rebuildSummary(
   runDir: string,
@@ -72,7 +74,7 @@ export function rebuildSummary(
   while (true) {
     const read = readEventsFrom(runDir, cursor);
     if ('refused' in read) return read;
-    if (written !== undefined && read.events.length === 0) return written;
+    if (written !== undefined && !read.events.some((event) => WRITE_POINTS.has(event.type))) return written;
     for (const event of read.events) foldEvent(state, event);
     cursor = read.next;
     const summary = toSummary(state);
