@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.event.v1.json",
   "title": "sail event: one line of a run's event stream",
-  "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine emits have closed payloads, and a call-level event requires the key of its call. The families later epics emit keep open payloads until they are built.",
-  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash and error:consumer. Open, and closed as their epics emit them (ADR-0012): run:adopted, run:resumed, all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:*, ticket:*, codehost:*, workspace:* and error:harness. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
+  "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. The families later epics emit keep open payloads until they are built.",
+  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash, error:consumer, ticket:*, codehost:* and workspace:*. Open, and closed as their epics emit them (ADR-0012): run:adopted, run:resumed, all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* and error:harness. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -156,6 +156,62 @@
     {
       "if": { "properties": { "type": { "const": "error:consumer" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/errorConsumer" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:fetched" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketFetched" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:claimed" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketClaimed" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:updated" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketUpdated" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:commented" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketCommented" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:pushed" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostPushed" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:pr_opened" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostPrOpened" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:checks" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostChecks" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:labelled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostLabelled" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:commented" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostCommented" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:merged" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostMerged" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "workspace:leased" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/workspaceLeased" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "workspace:lease_released" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/workspaceLeaseReleased" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "workspace:created" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/workspaceCreated" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "workspace:released" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/workspaceReleased" }
     }
   ],
   "$defs": {
@@ -648,6 +704,204 @@
         "message": { "type": "string" }
       },
       "required": ["consumer", "failed", "message"],
+      "unevaluatedProperties": false
+    },
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "ticketState": {
+      "description": "a ticket's state by type, with the provider's own name for it",
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["unstarted", "started", "completed", "canceled"] },
+        "name": { "type": "string" }
+      },
+      "required": ["type", "name"],
+      "additionalProperties": false
+    },
+    "ticketMove": { "enum": ["unstarted", "in-progress", "in-review", "done"] },
+    "ticketFetched": {
+      "description": "how many comments, links and attachments the ticket came with",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "comments": { "type": "integer", "minimum": 0 },
+        "links": { "type": "integer", "minimum": 0 },
+        "attachments": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "number", "minimum": 0 }
+      },
+      "required": ["ticketKey", "comments", "links", "attachments", "durationMs"],
+      "unevaluatedProperties": false
+    },
+    "ticketClaimed": {
+      "description": "a claim that took, with the state the provider reports",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "state": { "$ref": "#/$defs/ticketState" }
+      },
+      "required": ["ticketKey", "state"],
+      "unevaluatedProperties": false
+    },
+    "ticketUpdated": {
+      "description": "the move asked for, and the state the provider reports",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "change": {
+          "type": "object",
+          "properties": { "state": { "$ref": "#/$defs/ticketMove" } },
+          "required": ["state"],
+          "additionalProperties": false
+        },
+        "state": { "$ref": "#/$defs/ticketState" }
+      },
+      "required": ["ticketKey", "change", "state"],
+      "unevaluatedProperties": false
+    },
+    "ticketCommented": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "body": { "type": "string" }
+      },
+      "required": ["ticketKey", "body"],
+      "unevaluatedProperties": false
+    },
+    "codehostPushed": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "branch": { "type": "string" },
+        "headSha": { "$ref": "#/$defs/sha" }
+      },
+      "required": ["branch", "headSha"],
+      "unevaluatedProperties": false
+    },
+    "codehostPrOpened": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "number": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string" },
+        "draft": { "type": "boolean" },
+        "base": { "type": "string" },
+        "head": { "type": "string" },
+        "ticketKey": { "type": "string" }
+      },
+      "required": ["number", "url", "draft", "base", "head"],
+      "unevaluatedProperties": false
+    },
+    "codehostChecks": {
+      "description": "the checks the host reports on a pull request's head sha",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "number": { "type": "integer", "minimum": 1 },
+        "headSha": { "$ref": "#/$defs/sha" },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "status": { "enum": ["pending", "passed", "failed", "skipped"] }
+            },
+            "required": ["name", "status"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["number", "headSha", "checks"],
+      "unevaluatedProperties": false
+    },
+    "codehostLabelled": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "number": { "type": "integer", "minimum": 1 },
+        "label": { "type": "string" },
+        "change": { "enum": ["added", "removed"] }
+      },
+      "required": ["number", "label", "change"],
+      "unevaluatedProperties": false
+    },
+    "codehostCommented": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "number": { "type": "integer", "minimum": 1 },
+        "body": { "type": "string" }
+      },
+      "required": ["number", "body"],
+      "unevaluatedProperties": false
+    },
+    "codehostMerged": {
+      "description": "a merge the host reports, never one merely requested",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "number": { "type": "integer", "minimum": 1 },
+        "method": { "enum": ["merge", "squash", "rebase"] },
+        "sha": { "$ref": "#/$defs/sha" }
+      },
+      "required": ["number", "method", "sha"],
+      "unevaluatedProperties": false
+    },
+    "workspaceLeased": {
+      "description": "a branch lease taken; took names the stale run whose lease it replaced",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "remote": { "type": "string" },
+        "branch": { "type": "string" },
+        "took": { "type": "string" }
+      },
+      "required": ["remote", "branch"],
+      "unevaluatedProperties": false
+    },
+    "workspaceLeaseReleased": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "remote": { "type": "string" },
+        "branch": { "type": "string" }
+      },
+      "required": ["remote", "branch"],
+      "unevaluatedProperties": false
+    },
+    "workspaceCreated": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "path": { "type": "string" },
+        "branch": { "type": "string" },
+        "baseSha": { "$ref": "#/$defs/sha" },
+        "durationMs": { "type": "number", "minimum": 0 }
+      },
+      "required": ["path", "branch", "baseSha", "durationMs"],
+      "unevaluatedProperties": false
+    },
+    "workspaceReleased": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "path": { "type": "string" },
+        "kept": { "type": "boolean" }
+      },
+      "required": ["path", "kept"],
       "unevaluatedProperties": false
     }
   }

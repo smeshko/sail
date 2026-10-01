@@ -385,20 +385,17 @@ const PROVIDER: NewEvent[] = [
   { type: 'workspace:released', path: WORKSPACE, kept: false },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each(PROVIDER.map((sample) => [sample.type, sample] as const))('%s accepts its provider payload, and rejects a field it does not declare', (_, sample) => {
-  expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
-  expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
-    { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
-  ]);
-});
+test.each(PROVIDER.map((sample) => [sample.type, sample] as const))(
+  '%s accepts its provider payload, and rejects a field it does not declare',
+  (_, sample) => {
+    expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
+    expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
+      { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+    ]);
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('provider events: a key where D10 allows one, and the rules each payload adds', () => {
+test('provider events: a key where D10 allows one, and the rules each payload adds', () => {
   const issue = (path: string, message: string) => [{ schema: 'sail.event.v1' as const, path, message }];
   const check = (sample: Record<string, unknown>) => validateDocument('sail.event.v1', { ...envelope, ...sample });
   expect(check({ type: 'workspace:leased', ...lease, key: OPEN })).toEqual(issue('/key', 'is not allowed'));

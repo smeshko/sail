@@ -1,8 +1,9 @@
 // The event union: every line of a run's event stream, typed. It mirrors `sail.event.v1`, and
 // test/events/types.test.ts keeps the two in step. Each event is the envelope `{ seq, ts, type, runId }` with its
-// payload beside it. The families this phase emits have closed payloads, and a call-level event carries the key of the
-// call it belongs to. The families later epics emit are declared with open payloads, and close as they are built
-// (ADR-0012). Types only, apart from `EVENT_TYPES`, so importing this module does nothing.
+// payload beside it. The families the engine emits have closed payloads, and a call-level event carries the key of the
+// call it belongs to. So do the provider families the port adapters emit: ticket:*, codehost:* and workspace:*. The
+// families later epics emit are declared with open payloads, and close as they are built (ADR-0012). Types only, apart
+// from `EVENT_TYPES`, so importing this module does nothing.
 import type { ContractError } from '../engine/contract';
 import type { JournalEntry } from '../engine/journal';
 import type { IntakeEntry, RosterEntry } from '../engine/roster';
@@ -175,7 +176,6 @@ interface Payloads {
   'error:consumer': { consumer: string; failed: { seq: number; type: EventType }; message: string };
   // The provider families (D10). A ticket or codehost event carries its call's key when a call emitted it, and none at
   // dispatch; a workspace event carries none.
-  // STUB (TASK-003): closed here, while sail.event.v1 still takes them open until TASK-003.
   'ticket:fetched': {
     key?: string;
     ticketKey: string;
