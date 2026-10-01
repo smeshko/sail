@@ -90,10 +90,7 @@ const Spec = z.object({ summary: z.string() });
 const INVALID = { summary: 3 };
 const VALID = { summary: 'Add a --shout flag.' };
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an answer scripted invalid then valid gives invalid output on try 1, and valid output from try 2 on', async () => {
+test('an answer scripted invalid then valid gives invalid output on try 1, and valid output from try 2 on', async () => {
   const harness = createFakeHarness({ script: { spec: [done(INVALID), done(VALID)] } });
   const outputs: unknown[] = [];
   for (const tryNumber of [1, 2, 3]) outputs.push(summary(await harness.run(request('spec#1', tryNumber))));
@@ -101,10 +98,7 @@ test
   expect(outputs.map((output) => Spec.safeParse(output).success)).toEqual([false, true, true]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a call's own key comes before its stage's, and a key with no answer is an error naming it", async () => {
+test("a call's own key comes before its stage's, and a key with no answer is an error naming it", async () => {
   const harness = createFakeHarness({
     script: { spec: [done('spec')], 'spec#2': [done('spec#2')], 'publish/describe': [done('publish/describe')] },
   });
@@ -121,10 +115,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a new instance given the same script answers a try as the first did, though it never ran the tries before', async () => {
+test('a new instance given the same script answers a try as the first did, though it never ran the tries before', async () => {
   const script: HarnessScript = { spec: [done(INVALID), done(VALID)] };
   const resumed = await createFakeHarness({ script }).run(request('spec#1', 2));
   const first = createFakeHarness({ script });
@@ -134,10 +125,7 @@ test
   expect(resumed).toEqual(original);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("an answer's files land in STAGE_OUT, and files with no STAGE_OUT or outside it are an error", async () => {
+test("an answer's files land in STAGE_OUT, and files with no STAGE_OUT or outside it are an error", async () => {
   const harness = createFakeHarness({
     script: {
       spec: [{ outcome: 'done', output: {}, files: { 'spec.md': '# Spec\n' } }],
@@ -155,10 +143,7 @@ test
   expect(existsSync(join(out, '..', 'escape.md'))).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a script path is read on every run, and one that is not JSON is an error naming the file', async () => {
+test('a script path is read on every run, and one that is not JSON is an error naming the file', async () => {
   const path = join(tempDir(), 'harness.json');
   writeFileSync(path, JSON.stringify({ spec: [done('first')] }));
   const harness = createFakeHarness({ script: path });
@@ -171,10 +156,7 @@ test
   expect(String(summary(broken))).toContain(path);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an abort before the run or during its delay ends it at once as aborted, the latter after error:harness', async () => {
+test('an abort before the run or during its delay ends it at once as aborted, the latter after error:harness', async () => {
   const harness = createFakeHarness({ script: { spec: [{ outcome: 'done', output: {}, delayMs: 10_000 }] } });
   expect(summary(await harness.run({ ...request('spec#1'), signal: AbortSignal.abort() }))).toBe('error: aborted');
 
@@ -189,10 +171,7 @@ test
   expect(Date.now() - started).toBeLessThan(5_000);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the session id names the call, and the try after the first', async () => {
+test('the session id names the call, and the try after the first', async () => {
   const harness = createFakeHarness({ script: { spec: [done({})], 'publish/describe': [done({})] } });
   const runs: [string, number][] = [
     ['spec#1', 1],
@@ -204,10 +183,7 @@ test
   expect(ids).toEqual(['fake-session-spec-1', 'fake-session-spec-1-try-2', 'fake-session-publish-1-describe']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a session emits its start, each message, a usage update per turn and its end, and keeps the answer's transcript and usage", async () => {
+test("a session emits its start, each message, a usage update per turn and its end, and keeps the answer's transcript and usage", async () => {
   const answer: ScriptedAnswer = {
     outcome: 'done',
     output: VALID,
@@ -240,12 +216,12 @@ test
   expect({ transcript: bare.transcript, usage: bare.usage }).toEqual({ transcript: '', usage: { costUsd: 0 } });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an error answer, or one over maxTurns, ends as error with its message, after error:harness', async () => {
+test('an error answer, or one over maxTurns, ends as error with its message, after error:harness', async () => {
   const harness = createFakeHarness({
-    script: { implement: [{ outcome: 'error', message: 'model overloaded' }], tests: [{ outcome: 'done', output: {}, turns: 3 }] },
+    script: {
+      implement: [{ outcome: 'error', message: 'model overloaded' }],
+      tests: [{ outcome: 'done', output: {}, turns: 3 }],
+    },
   });
   const failed = captureEvents<HarnessEvent>();
   const error = await harness.run({ ...request('implement#1'), onEvent: failed.emit });
@@ -265,10 +241,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the fake declares structured output, usage, abort and a turns budget, and no permissions', () => {
+test('the fake declares structured output, usage, abort and a turns budget, and no permissions', () => {
   expect(createFakeHarness({ script: {} }).capabilities()).toEqual({
     structuredOutput: true,
     permissions: false,
