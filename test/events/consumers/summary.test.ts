@@ -165,3 +165,19 @@ test("a rebuild that the run's last write overtakes reads on and writes again, s
     { summary: whole, path: join(dir, 'summary.json') },
   ]);
 });
+
+test('a rebuild stops once no write point has arrived, so a busy run appending during every write never keeps it going', () => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  const running = stamp([0, runStart()], [100, start('spec#1')]);
+  writeFileSync(path, ndjson(running));
+  let writes = 0;
+  const rebuilt = rebuildSummary(dir, (runDir, summary) => {
+    writes += 1;
+    if (writes > 20) throw new Error('still rebuilding');
+    // An event the run writes no summary for lands during every write.
+    appendFileSync(path, ndjson([stamped(running.length + writes, 100 + writes, produced('spec#1', `${writes}.md`))]));
+    return writeSummary(runDir, summary);
+  });
+  expect([writes, rebuilt]).toEqual([1, { summary: summarize(running) as Summary, path: join(dir, 'summary.json') }]);
+});
