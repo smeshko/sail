@@ -61,10 +61,7 @@ codeHostSuite('fake', async (emit) => ({
   },
 }));
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('checks scripted pending then failed read pending, then failed from then on', async () => {
+test('checks scripted pending then failed read pending, then failed from then on', async () => {
   const host = createFakeCodeHost(files());
   const reads: unknown[] = [];
   for (let i = 0; i < 3; i++) reads.push((await host.checks(4)).checks);
@@ -75,10 +72,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a merge scripted pending or refused says so, leaves the pull request open, and emits nothing', async () => {
+test('a merge scripted pending or refused says so, leaves the pull request open, and emits nothing', async () => {
   const capture = captureEvents();
   const host = createFakeCodeHost({
     ...files((seed) => {
@@ -96,10 +90,7 @@ test
   expect(capture.events).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('opening from a head never pushed, or pushing from outside a git checkout, is invalid', async () => {
+test('opening from a head never pushed, or pushing from outside a git checkout, is invalid', async () => {
   const host = createFakeCodeHost({ ...files(), env: repo().env });
   const errors = [
     await rejection(host.openPullRequest({ base: 'main', head: 'never-pushed', title: 'Nothing', body: '' })),
@@ -111,10 +102,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a new instance on the same state file carries on where the last left off, and the seed is unchanged', async () => {
+test('a new instance on the same state file carries on where the last left off, and the seed is unchanged', async () => {
   const world = files();
   const seed = readFileSync(world.seed, 'utf8');
   const first = createFakeCodeHost(world);
@@ -127,10 +115,7 @@ test
   expect(readFileSync(world.seed, 'utf8')).toBe(seed);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the fixture seed holds the golden pull request, three designated ones, and every capability', async () => {
+test('the fixture seed holds the golden pull request, three designated ones, and every capability', async () => {
   const host = createFakeCodeHost({ seed: SEED, state: join(tempDir(), 'prs.json') });
   const { number, url, base, head, headSha, ticketKey, state } = await host.getPullRequest(1);
   expect({ number, url, base, head, headSha, ticketKey, state }).toEqual({
@@ -151,10 +136,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("parseRef takes a number, #number or this remote's pull URL, whole, and nothing else", () => {
+test("parseRef takes a number, #number or this remote's pull URL, whole, and nothing else", () => {
   const host = createFakeCodeHost(files());
   const refs = ['7', '#7', 'fake://codehost/fixture/pull/7', 'fake://codehost/other/pull/7', '#x', '7a', 'pull/7'];
   expect(refs.map((ref) => host.parseRef(ref))).toEqual([7, 7, 7, undefined, undefined, undefined, undefined]);

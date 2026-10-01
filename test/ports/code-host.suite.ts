@@ -57,19 +57,13 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     return { capture, ...(await make(capture.emit)) };
   };
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: parseRef gives the number each ref names, and nothing for anything else`, async () => {
+  test(`${label}: parseRef gives the number each ref names, and nothing for anything else`, async () => {
     const { adapter, world } = await start();
     expect(world.refs.map(([ref]) => adapter.parseRef(ref))).toEqual(world.refs.map(([, number]) => number));
     expect(adapter.parseRef('nope')).toBeUndefined();
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: push records the checkout's HEAD on the branch, and emits codehost:pushed`, async () => {
+  test(`${label}: push records the checkout's HEAD on the branch, and emits codehost:pushed`, async () => {
     const { adapter, world, capture } = await start();
     const { cwd, branch, headSha } = await world.pushable();
     const pushed = await adapter.push(cwd, branch);
@@ -79,10 +73,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: a pull request opened from a pushed branch is open, designated, and announced, then labelled`, async () => {
+  test(`${label}: a pull request opened from a pushed branch is open, designated, and announced, then labelled`, async () => {
     const { adapter, world, capture } = await start();
     const { cwd, branch, headSha } = await world.pushable();
     await adapter.push(cwd, branch);
@@ -123,10 +114,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: listDesignated holds the designated pull request, but not the draft`, async () => {
+  test(`${label}: listDesignated holds the designated pull request, but not the draft`, async () => {
     const { adapter, world } = await start();
     const listed = await adapter.listDesignated(world.label);
     expect(listed.flatMap((pr) => parseIssues(PullRequest, pr))).toEqual([]);
@@ -134,10 +122,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expect(numbers(listed)).not.toContain(world.draft);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: every operation on an unknown pull request rejects with not_found, naming the operation`, async () => {
+  test(`${label}: every operation on an unknown pull request rejects with not_found, naming the operation`, async () => {
     const { adapter, world, capture } = await start();
     const { missing } = world;
     const failures = [
@@ -158,15 +143,15 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expect(capture.events).toEqual([]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: checks are read on the pull request's head sha, and emit codehost:checks`, async () => {
+  test(`${label}: checks are read on the pull request's head sha, and emit codehost:checks`, async () => {
     const { adapter, world, capture } = await start();
     const pr = await adapter.getPullRequest(world.designated);
     const checks = await adapter.checks(world.designated);
     expect(parseIssues(Checks, checks)).toEqual([]);
-    expect({ number: checks.number, headSha: checks.headSha }).toEqual({ number: world.designated, headSha: pr.headSha });
+    expect({ number: checks.number, headSha: checks.headSha }).toEqual({
+      number: world.designated,
+      headSha: pr.headSha,
+    });
     expect(capture.events).toEqual([
       {
         type: 'codehost:checks',
@@ -178,10 +163,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: a merge the host reports reads merged, and merging again gives the same merge with no second event`, async () => {
+  test(`${label}: a merge the host reports reads merged, and merging again gives the same merge with no second event`, async () => {
     const { adapter, world, capture } = await start();
     const result = await adapter.merge(world.designated, 'squash');
     expect(parseIssues(MergeResult, result)).toEqual([]);
@@ -194,10 +176,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: a pending merge reads open and emits nothing, until a later merge is reported merged`, async () => {
+  test(`${label}: a pending merge reads open and emits nothing, until a later merge is reported merged`, async () => {
     const { adapter, world, capture } = await start();
     if (world.pendingMerge === undefined) return;
     const first = await adapter.merge(world.pendingMerge, 'squash');
@@ -214,10 +193,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: a label added then removed is reflected each time, and only a change emits codehost:labelled`, async () => {
+  test(`${label}: a label added then removed is reflected each time, and only a change emits codehost:labelled`, async () => {
     const { adapter, world, capture } = await start();
     const added = await adapter.addLabel(world.designated, 'needs-review');
     const removed = await adapter.removeLabel(world.designated, 'needs-review');
@@ -232,10 +208,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: a comment is posted, and emits codehost:commented`, async () => {
+  test(`${label}: a comment is posted, and emits codehost:commented`, async () => {
     const { adapter, world, capture } = await start();
     const posted = await adapter.comment(world.designated, 'Checks passed.');
     expect(parseIssues(Posted, posted)).toEqual([]);
@@ -243,10 +216,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-005
-  test
-    .skip // TDD-PENDING TASK-005
-    (`${label}: capabilities parse, and offer the squash merge the suite uses`, async () => {
+  test(`${label}: capabilities parse, and offer the squash merge the suite uses`, async () => {
     const { adapter } = await start();
     const capabilities = adapter.capabilities();
     expect(parseIssues(CodeHostCapabilities, capabilities)).toEqual([]);
