@@ -60,10 +60,7 @@ function bare(result: { raw: unknown }): Record<string, unknown> {
   return rest;
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a first lease creates its file, and readLease gives it back', () => {
+test('a first lease creates its file, and readLease gives it back', () => {
   const dir = tempDir();
   const r1 = run('r1', process.pid, 'running');
   expect(readLease(dir, REMOTE, BRANCH)).toBeUndefined();
@@ -74,10 +71,7 @@ test
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r1, NOW));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a second run is refused while the first is running, and told who holds the lease', () => {
+test('a second run is refused while the first is running, and told who holds the lease', () => {
   const dir = tempDir();
   const r1 = run('r1', process.pid, 'running');
   takeLease(dir, REMOTE, BRANCH, r1, NOW);
@@ -87,41 +81,39 @@ test
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r1, NOW));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the same run leasing again renews its lease with its new pid and time', () => {
+test('the same run leasing again renews its lease with its new pid and time', () => {
   const dir = tempDir();
   const r1 = run('r1', process.pid, 'suspended', 'interrupted');
   takeLease(dir, REMOTE, BRANCH, r1, NOW);
   const resumed = { ...r1, pid: process.ppid };
-  expect(bare(takeLease(dir, REMOTE, BRANCH, resumed, LATER))).toEqual({ leased: true, lease: leaseOf(resumed, LATER) });
+  expect(bare(takeLease(dir, REMOTE, BRANCH, resumed, LATER))).toEqual({
+    leased: true,
+    lease: leaseOf(resumed, LATER),
+  });
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(resumed, LATER));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
-    ['completed', 'completed', undefined, 'live'],
-    ['failed', 'failed', 'workflow_failed', 'live'],
-    ['running with a dead pid', 'running', undefined, 'dead'],
-    ['without a STATUS, with a dead pid', undefined, undefined, 'dead'],
-  ] as const)('a lease whose run is %s is stale, and taken over with took', async (_, status, stopReason, pid) => {
+test.each([
+  ['completed', 'completed', undefined, 'live'],
+  ['failed', 'failed', 'workflow_failed', 'live'],
+  ['running with a dead pid', 'running', undefined, 'dead'],
+  ['without a STATUS, with a dead pid', undefined, undefined, 'dead'],
+] as const)('a lease whose run is %s is stale, and taken over with took', async (_, status, stopReason, pid) => {
   const dir = tempDir();
   takeLease(dir, REMOTE, BRANCH, run('r1', pid === 'live' ? process.pid : await deadPid(), status, stopReason), NOW);
   const r2 = run('r2', process.pid, 'running');
-  expect(bare(takeLease(dir, REMOTE, BRANCH, r2, LATER))).toEqual({ leased: true, lease: leaseOf(r2, LATER), took: 'r1' });
+  expect(bare(takeLease(dir, REMOTE, BRANCH, r2, LATER))).toEqual({
+    leased: true,
+    lease: leaseOf(r2, LATER),
+    took: 'r1',
+  });
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r2, LATER));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
-    ['suspended, even with a dead pid', 'suspended', 'budget_exceeded', 'dead'],
-    ['without a STATUS yet, with a live pid', undefined, undefined, 'live'],
-  ] as const)('a lease whose run is %s is held, and a second run is refused', async (_, status, stopReason, pid) => {
+test.each([
+  ['suspended, even with a dead pid', 'suspended', 'budget_exceeded', 'dead'],
+  ['without a STATUS yet, with a live pid', undefined, undefined, 'live'],
+] as const)('a lease whose run is %s is held, and a second run is refused', async (_, status, stopReason, pid) => {
   const dir = tempDir();
   const r1 = run('r1', pid === 'live' ? process.pid : await deadPid(), status, stopReason);
   takeLease(dir, REMOTE, BRANCH, r1, NOW);
@@ -129,10 +121,7 @@ test
   expect(bare(refused)).toEqual({ leased: false, holder: leaseOf(r1, NOW) });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('only the holder releases a lease: another run leaves the file where it is', () => {
+test('only the holder releases a lease: another run leaves the file where it is', () => {
   const dir = tempDir();
   takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW);
   const byOther = releaseLease(dir, REMOTE, BRANCH, 'r2');
@@ -147,10 +136,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a lease file that is not a lease is invalid, naming the file', () => {
+test('a lease file that is not a lease is invalid, naming the file', () => {
   const dir = tempDir();
   writeFileSync(leaseFile(dir, REMOTE, BRANCH), '{ "runId": 3 }');
   const error = caught(() => readLease(dir, REMOTE, BRANCH));
@@ -158,17 +144,11 @@ test
   expect(messageOf(error)).toContain(leaseFile(dir, REMOTE, BRANCH));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('leases live in ~/.sail/leases unless a caller names a directory', () => {
+test('leases live in ~/.sail/leases unless a caller names a directory', () => {
   expect(defaultLeasesDir()).toBe(join(homedir(), '.sail', 'leases'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('two runs racing for one stale lease leave exactly one holder, whom the file names', async () => {
+test('two runs racing for one stale lease leave exactly one holder, whom the file names', async () => {
   const dir = tempDir();
   takeLease(dir, REMOTE, BRANCH, run('r0', await deadPid(), 'running'), NOW);
   // Both racers wait for the same instant, then take the lease. Each holds it for this live process's pid.
@@ -206,10 +186,7 @@ test
   expect(readLease(dir, REMOTE, BRANCH)?.runId).toBe(winners[0] as string);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('two branches of one remote, and one branch of two remotes, lease apart', () => {
+test('two branches of one remote, and one branch of two remotes, lease apart', () => {
   const dir = tempDir();
   const r1 = run('r1', process.pid, 'running');
   const r2 = run('r2', process.pid, 'running');
