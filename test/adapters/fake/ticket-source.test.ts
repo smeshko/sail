@@ -63,10 +63,7 @@ ticketSourceSuite('fake', async (emit) => ({
   },
 }));
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a claim made through one instance is read by a new one on the same state file, and the seed is unchanged', async () => {
+test('a claim made through one instance is read by a new one on the same state file, and the seed is unchanged', async () => {
   const world = files();
   const seed = readFileSync(world.seed, 'utf8');
   await createFakeTicketSource(world).claim('FAKE-1');
@@ -77,10 +74,7 @@ test
   expect(readFileSync(world.seed, 'utf8')).toBe(seed);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the fixture seed's FAKE-1 is the golden ticket, read without creating the state file", async () => {
+test("the fixture seed's FAKE-1 is the golden ticket, read without creating the state file", async () => {
   const state = join(tempDir(), 'tickets.json');
   const source = createFakeTicketSource({ seed: SEED, state });
   const { title, description, url, labels, comments } = await source.get('FAKE-1');
@@ -96,10 +90,7 @@ test
   expect(existsSync(state)).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('listDesignated lists only designated unstarted tickets, in ticket-key order', async () => {
+test('listDesignated lists only designated unstarted tickets, in ticket-key order', async () => {
   const todo: TicketState = { type: 'unstarted', name: 'Todo' };
   const seed = seedOf([
     { ticketKey: 'FAKE-10', state: todo, labels: ['sail'] },
@@ -112,10 +103,7 @@ test
   expect(keys(await source.listDesignated('sail'))).toEqual(['FAKE-2', 'FAKE-10']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a seed that isn't JSON, or holds a ticket without a title, is invalid, naming the file", async () => {
+test("a seed that isn't JSON, or holds a ticket without a title, is invalid, naming the file", async () => {
   const dir = tempDir();
   const notJson = join(dir, 'not-json.json');
   writeFileSync(notJson, '{ "tickets": [');
@@ -137,10 +125,7 @@ test
   expect(messageOf(errors[1])).toContain('title');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the fake supports all four moves, and each lands on the fake's state of that name", async () => {
+test("the fake supports all four moves, and each lands on the fake's state of that name", async () => {
   const source = createFakeTicketSource(files());
   const moves: TicketMove[] = ['unstarted', 'in-progress', 'in-review', 'done'];
   expect(source.capabilities()).toEqual({ comments: true, links: true, attachments: true, moves });
@@ -154,10 +139,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a comment is sail's, numbered after the ticket's own comments", async () => {
+test("a comment is sail's, numbered after the ticket's own comments", async () => {
   const source = createFakeTicketSource(files());
   const posted = await source.comment('FAKE-1', 'Pull request opened.');
   expect({ id: posted.id, url: posted.url }).toEqual({ id: 'comment-2', url: 'fake://tickets/FAKE-1#comment-2' });
@@ -165,11 +147,22 @@ test
   expect({ author, body }).toEqual({ author: 'sail', body: 'Pull request opened.' });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('parseKey takes a FAKE ticket key or its fake:// URL, whole, and nothing else', () => {
+test('parseKey takes a FAKE ticket key or its fake:// URL, whole, and nothing else', () => {
   const source = createFakeTicketSource(files());
-  const refs = ['FAKE-7', 'fake://tickets/FAKE-7', 'ADW-7', 'FAKE-7x', 'fake://tickets/FAKE-7/x', 'https://example.com/FAKE-7'];
-  expect(refs.map((ref) => source.parseKey(ref))).toEqual(['FAKE-7', 'FAKE-7', undefined, undefined, undefined, undefined]);
+  const refs = [
+    'FAKE-7',
+    'fake://tickets/FAKE-7',
+    'ADW-7',
+    'FAKE-7x',
+    'fake://tickets/FAKE-7/x',
+    'https://example.com/FAKE-7',
+  ];
+  expect(refs.map((ref) => source.parseKey(ref))).toEqual([
+    'FAKE-7',
+    'FAKE-7',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  ]);
 });

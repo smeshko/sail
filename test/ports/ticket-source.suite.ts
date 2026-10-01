@@ -48,19 +48,13 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     return { capture, ...(await make(capture.emit)) };
   };
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: parseKey gives the ticket key each ref names, and nothing for anything else`, async () => {
+  test(`${label}: parseKey gives the ticket key each ref names, and nothing for anything else`, async () => {
     const { adapter, world } = await start();
     expect(world.refs.map(([ref]) => adapter.parseKey(ref))).toEqual(world.refs.map(([, ticketKey]) => ticketKey));
     expect(adapter.parseKey('not a key')).toBeUndefined();
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: get gives the ticket with raw, and emits one ticket:fetched that counts what it holds`, async () => {
+  test(`${label}: get gives the ticket with raw, and emits one ticket:fetched that counts what it holds`, async () => {
     const { adapter, world, capture } = await start();
     const ticket = await adapter.get(world.designated);
     expect(parseIssues(Ticket, ticket)).toEqual([]);
@@ -78,10 +72,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: every operation on an unknown ticket key rejects with not_found, naming the operation`, async () => {
+  test(`${label}: every operation on an unknown ticket key rejects with not_found, naming the operation`, async () => {
     const { adapter, world, capture } = await start();
     const failures = [
       portFailure(await rejection(adapter.get(world.missing))),
@@ -95,10 +86,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expect(capture.events).toEqual([]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: isDesignated holds for a ticket carrying the label, and only that label`, async () => {
+  test(`${label}: isDesignated holds for a ticket carrying the label, and only that label`, async () => {
     const { adapter, world } = await start();
     const designated = await adapter.get(world.designated);
     const undesignated = await adapter.get(world.undesignated);
@@ -109,10 +97,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     ]).toEqual([true, false, false]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: listDesignated holds the designated ticket, but not a started or an undesignated one`, async () => {
+  test(`${label}: listDesignated holds the designated ticket, but not a started or an undesignated one`, async () => {
     const { adapter, world } = await start();
     const listed = await adapter.listDesignated(world.label);
     expect(listed.flatMap((ticket) => parseIssues(Ticket, ticket))).toEqual([]);
@@ -120,10 +105,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expect(keys(listed).filter((key) => key === world.started || key === world.undesignated)).toEqual([]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: a claim starts the ticket and takes it off listDesignated, and a second claim is not taken`, async () => {
+  test(`${label}: a claim starts the ticket and takes it off listDesignated, and a second claim is not taken`, async () => {
     const { adapter, world, capture } = await start();
     const first = await adapter.claim(world.designated);
     expect(parseIssues(ClaimResult, first)).toEqual([]);
@@ -136,10 +118,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: a claim on a started ticket is not taken, and emits nothing`, async () => {
+  test(`${label}: a claim on a started ticket is not taken, and emits nothing`, async () => {
     const { adapter, world, capture } = await start();
     const result = await adapter.claim(world.started);
     expect(parseIssues(ClaimResult, result)).toEqual([]);
@@ -150,10 +129,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     });
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: update moves the ticket to the state the provider reports, and emits ticket:updated`, async () => {
+  test(`${label}: update moves the ticket to the state the provider reports, and emits ticket:updated`, async () => {
     const { adapter, world, capture } = await start();
     const moved = await adapter.update(world.designated, { state: 'in-review' });
     expect(parseIssues(Moved, moved)).toEqual([]);
@@ -169,10 +145,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: a comment is posted onto the ticket, and emits ticket:commented`, async () => {
+  test(`${label}: a comment is posted onto the ticket, and emits ticket:commented`, async () => {
     const { adapter, world, capture } = await start();
     const posted = await adapter.comment(world.designated, 'Pull request opened.');
     expect(parseIssues(Posted, posted)).toEqual([]);
@@ -185,10 +158,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: capabilities parse, and update takes every move they list`, async () => {
+  test(`${label}: capabilities parse, and update takes every move they list`, async () => {
     const { adapter, world } = await start();
     const capabilities = adapter.capabilities();
     expect(parseIssues(TicketSourceCapabilities, capabilities)).toEqual([]);
