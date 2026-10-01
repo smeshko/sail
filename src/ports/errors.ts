@@ -20,9 +20,10 @@ export class PortError extends Error {
   /** The provider's own answer, when there was one. */
   readonly raw?: unknown;
 
-  // STUB (TASK-002): the message isn't yet `<port>.<op>: <message>`, and the name is still Error's.
+  // Written out, not implicit: Bun reads an implicit subclass constructor as uncovered.
   constructor(port: Port, op: string, code: PortErrorCode, message: string, raw?: unknown) {
-    super(message);
+    super(`${port}.${op}: ${message}`);
+    this.name = 'PortError';
     this.port = port;
     this.op = op;
     this.code = code;

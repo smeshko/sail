@@ -190,25 +190,16 @@ const RESULTS: [string, z.ZodType, { raw: unknown }][] = [
 
 const paths = (schema: z.ZodType, value: unknown): string[] => parseIssues(schema, value).map((issue) => issue.path);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each(SAMPLES)('a valid %s parses as itself', (_, schema, sample) => {
+test.each(SAMPLES)('a valid %s parses as itself', (_, schema, sample) => {
   expect(parsed(schema, sample)).toEqual(sample);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each(RESULTS)('a %s without raw fails, naming raw', (_, schema, result) => {
+test.each(RESULTS)('a %s without raw fails, naming raw', (_, schema, result) => {
   const { raw: _raw, ...rest } = result;
   expect(parseIssues(schema, rest)).toEqual([{ path: 'raw', message: 'raw is required' }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a blocked result needs a reason and an error a message, and neither may be empty', () => {
+test('a blocked result needs a reason and an error a message, and neither may be empty', () => {
   const session = { sessionId: 'fake-session-spec-1', usage: { costUsd: 0 }, transcript: '', raw: null };
   const results = [
     { ...session, outcome: 'blocked' },
@@ -218,26 +209,17 @@ test
   expect(results.map((result) => paths(HarnessResult, result))).toEqual([['reason'], ['reason'], ['message']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("TicketMove is ADR-0015's four moves, never a provider's state name", () => {
+test("TicketMove is ADR-0015's four moves, never a provider's state name", () => {
   const moves = ['unstarted', 'in-progress', 'in-review', 'done', 'In Review', 'started'];
   expect(moves.map((move) => TicketMove.safeParse(move).success)).toEqual([true, true, true, true, false, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a merged result needs its sha, and a pending one its reason', () => {
+test('a merged result needs its sha, and a pending one its reason', () => {
   expect(paths(MergeResult, { state: 'merged', raw: null })).toEqual(['sha']);
   expect(paths(MergeResult, { state: 'pending', raw: null })).toEqual(['reason']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('Usage counts tokens in whole, non-negative numbers', () => {
+test('Usage counts tokens in whole, non-negative numbers', () => {
   expect(paths(Usage, { costUsd: 0, inputTokens: -1 })).toEqual(['inputTokens']);
   expect(paths(Usage, { costUsd: 0, outputTokens: 1.5 })).toEqual(['outputTokens']);
   expect(paths(Usage, { costUsd: 0.01, cacheReadTokens: 0 })).toEqual([]);

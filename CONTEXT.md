@@ -334,7 +334,7 @@ The engine's contract with one kind of external system, stated in sail's languag
 _Avoid_: interface (the TypeScript keyword), SPI, abstraction
 
 **TicketSource**:
-The port to the ticket system: fetch a ticket with its comments, links and attachments; update it; comment on it. v1 adapter: Linear.
+The port to the ticket system: fetch a ticket with its comments, links and attachments; update it; comment on it. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear.
 _Avoid_: tracker, task manager, board, issue source
 
 **CodeHost**:
@@ -356,6 +356,14 @@ _Avoid_: worktree manager, checkout service
 **Adapter**:
 One implementation of a port for one provider, selected by name in the config.
 _Avoid_: plugin, driver, connector, integration, backend
+
+**Port suite**:
+The tests every adapter of a port must pass, shared by the fake and the real one. A real adapter runs them against its provider on demand.
+_Avoid_: contract suite, contract tests (a stage has the contract)
+
+**Capabilities**:
+What an adapter declares it can do, such as the ticket moves it supports or the merge methods it offers. The engine refuses a workflow that needs one its adapter lacks.
+_Avoid_: features, support flags
 
 **Provider**:
 The external system behind an adapter: Linear, GitHub, Anthropic, Jira.
@@ -380,7 +388,7 @@ The machine-level record of watchers in `~/.sail/watchers/`: the repository's `n
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
 
 **Branch lease**:
-A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are machine-wide in `~/.sail/leases/`, keyed by remote and branch, and are stale only once the run is neither running nor suspended. Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
+A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are machine-wide in `~/.sail/leases/`, keyed by remote and branch, and are stale only once the run is neither running nor suspended. A lease whose run has no status yet is stale once its pid is dead, and the same run leasing again renews it (a resume). Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:
