@@ -59,10 +59,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     return { capture, ...(await make(capture.emit)) };
   };
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: a lease on a free branch is taken, and emits workspace:leased`, async () => {
+  test(`${label}: a lease on a free branch is taken, and emits workspace:leased`, async () => {
     const { adapter, world, capture } = await start();
     const result = await adapter.lease(world.remote, BRANCH, await world.run('r1'));
     expect(parseIssues(LeaseResult, result)).toEqual([]);
@@ -71,10 +68,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: a second run is refused the leased branch, naming the holder, and the holder renews it`, async () => {
+  test(`${label}: a second run is refused the leased branch, naming the holder, and the holder renews it`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');
     await adapter.lease(world.remote, BRANCH, r1);
@@ -86,23 +80,22 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: a stale lease is taken over, and the event names the run it took from`, async () => {
+  test(`${label}: a stale lease is taken over, and the event names the run it took from`, async () => {
     const { adapter, world, capture } = await start();
     await adapter.lease(world.remote, BRANCH, await world.run('r1', 'running', false));
     const taken = await adapter.lease(world.remote, BRANCH, await world.run('r2'));
     expect(parseIssues(LeaseResult, taken)).toEqual([]);
     expect({ leased: taken.leased, took: taken.leased ? taken.took : undefined }).toEqual({ leased: true, took: 'r1' });
-    expect(capture.events.at(-1)).toEqual({ type: 'workspace:leased', remote: world.remote, branch: BRANCH, took: 'r1' });
+    expect(capture.events.at(-1)).toEqual({
+      type: 'workspace:leased',
+      remote: world.remote,
+      branch: BRANCH,
+      took: 'r1',
+    });
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: only the holder releases a lease, which frees the branch, and emits workspace:lease_released`, async () => {
+  test(`${label}: only the holder releases a lease, which frees the branch, and emits workspace:lease_released`, async () => {
     const { adapter, world, capture } = await start();
     await adapter.lease(world.remote, BRANCH, await world.run('r1'));
     const byOther = await adapter.releaseLease(world.remote, BRANCH, 'r2');
@@ -118,16 +111,17 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: a workspace is a detached checkout of the base, in the run directory, and emits workspace:created`, async () => {
+  test(`${label}: a workspace is a detached checkout of the base, in the run directory, and emits workspace:created`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');
     const workspace = await adapter.create(r1, { base: world.base, branch: BRANCH });
     expect(parseIssues(Workspace, workspace)).toEqual([]);
     const { path, branch, baseSha } = workspace;
-    expect({ path, branch, baseSha }).toEqual({ path: join(r1.runDir, 'workspace'), branch: BRANCH, baseSha: world.baseSha });
+    expect({ path, branch, baseSha }).toEqual({
+      path: join(r1.runDir, 'workspace'),
+      branch: BRANCH,
+      baseSha: world.baseSha,
+    });
     expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
     expect(world.git(path, 'symbolic-ref', '-q', 'HEAD')).toEqual({ code: 1, stdout: '' });
     expect(timed(capture.events)).toEqual([
@@ -136,10 +130,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: two runs hold workspaces for the same branch name, since neither checks it out`, async () => {
+  test(`${label}: two runs hold workspaces for the same branch name, since neither checks it out`, async () => {
     const { adapter, world } = await start();
     const r1 = await world.run('r1');
     const r2 = await world.run('r2');
@@ -151,10 +142,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     ]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: diff gives the working tree's edits against the base`, async () => {
+  test(`${label}: diff gives the working tree's edits against the base`, async () => {
     const { adapter, world } = await start();
     const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
     writeFileSync(join(workspace.path, world.tracked), 'an edit in the workspace\n', { flag: 'a' });
@@ -164,10 +152,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(diff.patch).toContain('+an edit in the workspace');
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {
+  test(`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');
     const r2 = await world.run('r2');
@@ -187,10 +172,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: sweep removes the workspaces of completed and failed runs, and keeps the rest`, async () => {
+  test(`${label}: sweep removes the workspaces of completed and failed runs, and keeps the rest`, async () => {
     const { adapter, world } = await start();
     const statuses: (Status | 'none')[] = ['completed', 'failed', 'running', 'suspended', 'none'];
     const paths: string[] = [];
@@ -204,10 +186,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-008
-  test
-    .skip // TDD-PENDING TASK-008
-    (`${label}: capabilities parse`, async () => {
+  test(`${label}: capabilities parse`, async () => {
     const { adapter } = await start();
     expect(parseIssues(WorkspaceCapabilities, adapter.capabilities())).toEqual([]);
   });

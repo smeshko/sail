@@ -1,9 +1,15 @@
 // The fake Workspace port: detached worktrees of a local git repository standing in for the remote, one per run at
 // `<runDir>/workspace` (D12), kept apart by the shared branch leases (D9). It differs from `git-worktree` only in
-// fetching nothing.
-// STUB (TASK-008): nothing is leased, created or removed yet.
+// fetching nothing. The branch is never checked out: a workspace records it for the later push of `HEAD:<branch>`, so
+// only the lease keeps two runs of one branch apart (ADR-0018).
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { readStatus } from '../../engine/run-dir';
+import type { ProviderEvent } from '../../events/types';
+import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { WorkspacePort } from '../../ports/workspace';
+import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
 
 export interface FakeWorkspaceOptions extends ProviderOptions {
   /** The local git repository that stands in for the remote. */
@@ -14,19 +20,94 @@ export interface FakeWorkspaceOptions extends ProviderOptions {
   readonly env?: Readonly<Record<string, string>>;
 }
 
-export function createFakeWorkspace(_options: FakeWorkspaceOptions): WorkspacePort {
+interface GitResult {
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Whether the run in `runDir` has ended, so its workspace can go. A run with no STATUS hasn't. */
+function ended(runDir: string): boolean {
+  try {
+    const { status } = readStatus(runDir);
+    return status === 'completed' || status === 'failed';
+  } catch {
+    return false;
+  }
+}
+
+export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePort {
+  const now = () => options.now?.() ?? new Date();
+  const emit = (event: ProviderEvent) => options.emit?.(event);
+  const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
+  const git = (cwd: string, ...args: string[]): GitResult => {
+    try {
+      const result = Bun.spawnSync(['git', ...args], { cwd, ...(options.env ? { env: { ...options.env } } : {}) });
+      return {
+        code: result.exitCode,
+        stdout: result.stdout.toString().trim(),
+        stderr: result.stderr.toString().trim(),
+      };
+    } catch (error) {
+      // No such directory to run in.
+      return { code: -1, stdout: '', stderr: (error as Error).message };
+    }
+  };
+  /** Removes the worktree at `path` from the repository, and fails only when it is still there. */
+  const remove = (op: string, path: string): GitResult => {
+    const removed = git(options.repo, 'worktree', 'remove', '--force', path);
+    git(options.repo, 'worktree', 'prune');
+    if (removed.code !== 0 && existsSync(path)) throw new PortError('workspace', op, 'unavailable', removed.stderr);
+    return removed;
+  };
+
   return {
     name: 'fake',
-    lease: async (remote, branch, holder) => ({
-      leased: false,
-      holder: { remote, branch, ...holder, takenAt: '' },
-      raw: null,
-    }),
-    releaseLease: async () => ({ released: false, raw: null }),
-    create: async (_run, { branch }) => ({ path: '', branch, baseSha: '', raw: null }),
-    diff: async () => ({ patch: '', raw: null }),
-    release: async (_run, keep) => ({ path: '', kept: !keep, raw: null }),
-    sweep: async () => ({ paths: [], raw: null }),
-    capabilities: () => ({ keep: false, sweep: false }),
+    async lease(remote, branch, holder) {
+      const result = takeLease(leasesDir(), remote, branch, holder, now());
+      if (result.leased) {
+        emit({ type: 'workspace:leased', remote, branch, ...(result.took === undefined ? {} : { took: result.took }) });
+      }
+      return result;
+    },
+    async releaseLease(remote, branch, runId) {
+      const result = releaseLease(leasesDir(), remote, branch, runId);
+      if (result.released) emit({ type: 'workspace:lease_released', remote, branch });
+      return result;
+    },
+    async create(run, { base, branch }) {
+      const started = now().getTime();
+      const resolved = git(options.repo, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`);
+      if (resolved.code !== 0) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
+      const baseSha = resolved.stdout;
+      const path = join(run.runDir, 'workspace');
+      const added = git(options.repo, 'worktree', 'add', '--detach', path, baseSha);
+      if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
+      emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
+      return { path, branch, baseSha, raw: added };
+    },
+    async diff(path, from) {
+      const diffed = git(path, 'diff', from);
+      if (diffed.code !== 0) throw new PortError('workspace', 'diff', 'invalid', `${path}: ${diffed.stderr}`);
+      return { patch: diffed.stdout, raw: diffed };
+    },
+    async release(run, keep) {
+      const path = join(run.runDir, 'workspace');
+      const raw = keep ? null : remove('release', path);
+      emit({ type: 'workspace:released', path, kept: keep });
+      return { path, kept: keep, raw };
+    },
+    async sweep(runsDir) {
+      const paths: string[] = [];
+      for (const entry of existsSync(runsDir) ? readdirSync(runsDir) : []) {
+        const runDir = join(runsDir, entry);
+        const path = join(runDir, 'workspace');
+        if (!existsSync(path) || !ended(runDir)) continue;
+        remove('sweep', path);
+        paths.push(path);
+      }
+      return { paths: paths.sort(), raw: null };
+    },
+    capabilities: () => ({ keep: true, sweep: true }),
   };
 }

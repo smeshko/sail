@@ -67,10 +67,7 @@ workspaceSuite('fake', async (emit) => {
   };
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("create from a base that doesn't resolve is invalid, and makes no workspace", async () => {
+test("create from a base that doesn't resolve is invalid, and makes no workspace", async () => {
   const w = world();
   const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
   const run = await w.run('r1');
@@ -79,10 +76,7 @@ test
   expect(existsSync(join(run.runDir, 'workspace'))).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('with no leases directory named, a lease lands in ~/.sail/leases', async () => {
+test('with no leases directory named, a lease lands in ~/.sail/leases', async () => {
   const workspace = createFakeWorkspace({ repo: repo().dir, env: repo().env });
   const run = await world().run('r1');
   await workspace.lease(REMOTE, 'sail/default-dir', run);
@@ -91,10 +85,7 @@ test
   expect([held, readLease(defaultLeasesDir(), REMOTE, 'sail/default-dir')]).toEqual(['r1', undefined]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a released workspace is gone from git worktree list too', async () => {
+test('a released workspace is gone from git worktree list too', async () => {
   const w = world();
   const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
   const run = await w.run('r1');
@@ -105,9 +96,6 @@ test
   expect([before, listed()]).toEqual([true, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('the fake declares keep and sweep', () => {
+test('the fake declares keep and sweep', () => {
   expect(createFakeWorkspace({ repo: repo().dir }).capabilities()).toEqual({ keep: true, sweep: true });
 });
