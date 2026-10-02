@@ -11,7 +11,13 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const root = join(import.meta.dir, '..');
 const CORE = ['src/engine', 'src/kinds', 'src/events', 'src/ports', 'src/sdk'];
-const ADAPTERS = join(root, 'src', 'adapters');
+/** What the core may not import: the adapters, and the composition roots that import them. */
+const OUTSIDE: [string, string][] = [
+  ['src/adapters', 'src/adapters'],
+  ['src/cli', 'a composition root'],
+  ['src/watch', 'a composition root'],
+  ['src/dashboard', 'a composition root'],
+];
 
 /** The bare specifiers the core may import: node and bun built-ins, zod and ajv. */
 const ALLOWED = /^(node:.+|bun:.+|bun|zod|ajv|ajv\/.+)$/;
@@ -87,14 +93,17 @@ function specifiers(source: string): string[] {
 function violations(file: string, source: string): string[] {
   return specifiers(source).flatMap((specifier) => {
     if (specifier.startsWith('.') || isAbsolute(specifier)) {
-      const inside = relative(ADAPTERS, resolve(root, dirname(file), specifier));
-      return inside.startsWith('..') || isAbsolute(inside) ? [] : [`${file}: imports ${specifier} (src/adapters)`];
+      const target = resolve(root, dirname(file), specifier);
+      return OUTSIDE.flatMap(([dir, what]) => {
+        const inside = relative(join(root, dir), target);
+        return inside.startsWith('..') || isAbsolute(inside) ? [] : [`${file}: imports ${specifier} (${what})`];
+      });
     }
     return ALLOWED.test(specifier) ? [] : [`${file}: imports ${specifier} (not allowlisted)`];
   });
 }
 
-test('each planted import of an adapter or an unlisted package is reported, naming the file and the specifier', () => {
+test('each planted import of an adapter, a composition root or an unlisted package is reported, naming the file', () => {
   const planted: [string, string][] = [
     ['src/engine/x.ts', "import { createFakeTicketSource } from '../adapters/fake/index';"],
     ['src/engine/x.ts', "import type { X } from '../adapters/fake';"],
@@ -116,6 +125,10 @@ test('each planted import of an adapter or an unlisted package is reported, nami
     ['src/engine/x.ts', "const leases = require('../adapters/leases');"],
     ['src/engine/x.ts', "import leases = require('../adapters/leases');"],
     ['src/engine/x.ts', "const sdk = import.meta.require('@linear/sdk');"],
+    // A composition root imports adapters, so importing one brings them into the core.
+    ['src/engine/x.ts', "import { EXIT } from '../cli/exit-codes';"],
+    ['src/kinds/x.ts', "import { startWatcher } from '../watch/index';"],
+    ['src/sdk/x.ts', "import type { Board } from '../dashboard/board';"],
   ];
   expect(planted.flatMap(([file, source]) => violations(file, source))).toEqual([
     'src/engine/x.ts: imports ../adapters/fake/index (src/adapters)',
@@ -137,10 +150,13 @@ test('each planted import of an adapter or an unlisted package is reported, nami
     'src/engine/x.ts: imports ../adapters/leases (src/adapters)',
     'src/engine/x.ts: imports ../adapters/leases (src/adapters)',
     'src/engine/x.ts: imports @linear/sdk (not allowlisted)',
+    'src/engine/x.ts: imports ../cli/exit-codes (a composition root)',
+    'src/kinds/x.ts: imports ../watch/index (a composition root)',
+    'src/sdk/x.ts: imports ../dashboard/board (a composition root)',
   ]);
 });
 
-test('the allowlisted packages and relative imports outside src/adapters are not reported', () => {
+test('the allowlisted packages, and relative imports outside src/adapters and the composition roots, are not reported', () => {
   const allowed = [
     "import { readFileSync } from 'node:fs';",
     "import { z } from 'zod';",
@@ -158,7 +174,7 @@ test('the allowlisted packages and relative imports outside src/adapters are not
   expect(allowed.flatMap((source) => violations('src/engine/x.ts', source))).toEqual([]);
 });
 
-test('no core module imports an adapter or an unlisted package', () => {
+test('no core module imports an adapter, a composition root or an unlisted package', () => {
   const scanned: Record<string, number> = {};
   const found: string[] = [];
   for (const dir of CORE) {
