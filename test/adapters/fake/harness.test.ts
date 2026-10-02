@@ -268,6 +268,35 @@ test('a session that fails after spending reports what it spent: the turns it ra
   });
 });
 
+test("a failure the session didn't foresee still carries its spend, and still ends the session", async () => {
+  const usage = { costUsd: 0.4, outputTokens: 300 };
+  const harness = createFakeHarness({
+    script: { spec: [{ outcome: 'done', output: {}, turns: 2, usage, files: { 'notes/spec.md': '# Spec\n' } }] },
+  });
+  // A file named notes stands where the answer's folder would go, so its file can't be written.
+  const out = stageOut();
+  writeFileSync(join(out, 'notes'), 'in the way');
+  const capture = captureEvents<HarnessEvent>();
+  const unwritable = await harness.run({ ...request('spec#1', 1, { STAGE_OUT: out }), onEvent: capture.emit });
+  const deaf = await harness.run({
+    ...request('spec#1'),
+    onEvent: () => {
+      throw new Error('not listening');
+    },
+  });
+  expect({
+    unwritable: [unwritable.outcome, unwritable.usage, labels(capture.events)],
+    deaf: [summary(deaf), deaf.usage],
+  }).toEqual({
+    unwritable: [
+      'error',
+      usage,
+      ['harness:session_start', 'usage:update 1', 'usage:update 2', 'error:harness', 'harness:session_end'],
+    ],
+    deaf: ['error: fake harness: not listening', { costUsd: 0 }],
+  });
+});
+
 test('the fake declares structured output, usage, abort and a turns budget, and no permissions', () => {
   expect(createFakeHarness({ script: {} }).capabilities()).toEqual({
     structuredOutput: true,
