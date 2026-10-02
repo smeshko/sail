@@ -1,0 +1,66 @@
+{
+  "remote": "fake://codehost/fixture",
+  "defaultBranch": "main",
+  "branches": {
+    "main": "f569e7f50659194ebd39f2f141e95091f40791da",
+    "sail/FAKE-1": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b",
+    "sail/FAKE-2": "3c7e1a0d9b2f4e6a8c0b1d3f5a7c9e1b3d5f7a90",
+    "sail/FAKE-3": "5d2b8f4a6c0e1d3b5f7a9c1e3b5d7f9a1c3e5b70",
+    "sail/FAKE-4": "7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a50"
+  },
+  "pullRequests": [
+    {
+      "number": 1,
+      "title": "FAKE-1: Add a --shout flag to the greet command",
+      "body": "Adds `--shout`, which prints the whole greeting in upper case.",
+      "base": "main",
+      "head": "sail/FAKE-1",
+      "headSha": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b",
+      "draft": false,
+      "state": "open",
+      "labels": ["sail"],
+      "ticketKey": "FAKE-1",
+      "checks": [{ "name": "ci", "statuses": ["passed"] }]
+    },
+    {
+      "number": 2,
+      "title": "FAKE-2: Print the version with --version",
+      "body": "Adds `--version`.",
+      "base": "main",
+      "head": "sail/FAKE-2",
+      "headSha": "3c7e1a0d9b2f4e6a8c0b1d3f5a7c9e1b3d5f7a90",
+      "draft": true,
+      "state": "open",
+      "labels": ["sail"],
+      "ticketKey": "FAKE-2",
+      "checks": [{ "name": "ci", "statuses": ["pending"] }]
+    },
+    {
+      "number": 3,
+      "title": "FAKE-3: Document the greet command",
+      "body": "Adds a usage section to the README.",
+      "base": "main",
+      "head": "sail/FAKE-3",
+      "headSha": "5d2b8f4a6c0e1d3b5f7a9c1e3b5d7f9a1c3e5b70",
+      "draft": false,
+      "state": "open",
+      "labels": ["sail"],
+      "ticketKey": "FAKE-3",
+      "checks": [{ "name": "ci", "statuses": ["passed"] }],
+      "merges": ["pending", "merged"]
+    },
+    {
+      "number": 4,
+      "title": "FAKE-4: Add a --whisper flag",
+      "body": "Adds `--whisper`.",
+      "base": "main",
+      "head": "sail/FAKE-4",
+      "headSha": "7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a50",
+      "draft": false,
+      "state": "open",
+      "labels": ["sail"],
+      "ticketKey": "FAKE-4",
+      "checks": [{ "name": "ci", "statuses": ["pending", "failed"] }]
+    }
+  ]
+}

@@ -1,7 +1,15 @@
 // The event union and `sail.event.v1` name the same types, in the same order.
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { EVENT_TYPES } from '../../src/events/types';
+import { EVENT_TYPES, type ProviderEvent } from '../../src/events/types';
+
+// An adapter emits a provider event without a key, and its caller stamps one: a workspace event never has one. Checked
+// by `bun run typecheck`, which fails if the directive goes unused.
+const _workspaceEvents: ProviderEvent[] = [
+  { type: 'workspace:leased', remote: 'fake://codehost/fixture', branch: 'sail/FAKE-1' },
+  // @ts-expect-error TS2353: workspace events carry no key
+  { type: 'workspace:leased', remote: 'fake://codehost/fixture', branch: 'sail/FAKE-1', key: 'spec#1' },
+];
 
 /** The `type` enum wherever the schema keeps it: the first `properties.type.enum` in a depth-first walk. */
 function typeEnum(schema: unknown): unknown {
