@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import {
+  appendFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -12,12 +13,15 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ResolvedAdapters } from '../../src/engine/adapters';
+import type { Port } from '../../src/engine/config';
 import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engine/journal';
 import { findRun, type OpenedRun, openRun, reopenRun } from '../../src/engine/open-run';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
-import { RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
+import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
 import { ulid } from '../../src/engine/run-id';
 import { validateRunDir } from '../../src/engine/schemas';
+import { fakeAdapters } from '../helpers/adapters';
 import { copyFixture, edit } from '../helpers/fixture';
 import { copyRun } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -33,7 +37,7 @@ afterEach(() => {
 
 /** Opens a run of ticket-to-pr from `cwd`, which must not be refused. */
 async function opened(cwd: string, now = NOW): Promise<OpenedRun> {
-  const run = await openRun({ cwd, workflow: 'ticket-to-pr', now });
+  const run = await openRun({ cwd, workflow: 'ticket-to-pr', adapters: await fakeAdapters(cwd), now });
   if ('refused' in run) throw new Error(`refused: ${run.refused}`);
   return run;
 }
@@ -147,8 +151,10 @@ test.each<[string, (sail: string) => void, string]>([
   ],
 ])('%s is refused, and no run directory is created', async (_, breakIt, reason) => {
   await withTempRepo(async (repo) => {
-    breakIt(copyFixture(repo.dir));
-    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr' });
+    const sail = copyFixture(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    breakIt(sail);
+    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', adapters });
     expect(run).toEqual({ refused: expect.stringContaining(reason) });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
@@ -157,7 +163,11 @@ test.each<[string, (sail: string) => void, string]>([
 test('a cwd outside any git repository is refused, and nothing is created', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sail-no-repo-'));
   dirs.push(dir);
-  const run = await openRun({ cwd: dir, workflow: 'ticket-to-pr' });
+  const adapters = await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    return fakeAdapters(repo.dir);
+  });
+  const run = await openRun({ cwd: dir, workflow: 'ticket-to-pr', adapters });
   expect(run).toEqual({ refused: `not inside a git repository: ${dir}` });
   expect(readdirSync(dir)).toEqual([]);
 });
@@ -178,7 +188,12 @@ test('runs opened a millisecond apart sort in the order they started, and a sour
     expect([one.runId, two.runId].sort()).toEqual([one.runId, two.runId]);
 
     const source = { kind: 'ticket', ticketKey: 'FAKE-2', via: 'watch', forced: true } as const;
-    const three = await openRun({ cwd: third, workflow: 'ticket-to-pr', source });
+    const three = await openRun({
+      cwd: third,
+      workflow: 'ticket-to-pr',
+      adapters: await fakeAdapters(third),
+      source,
+    });
     if ('refused' in three) throw new Error(three.refused);
     expect(three.runId).toStartWith('FAKE-2-');
     expect(three.header.source).toEqual(source);
@@ -190,7 +205,11 @@ test('a second run from one .sail/ in a process throws before it writes anything
     const sail = copyFixture(repo.dir);
     const first = await opened(repo.dir);
     mkdirSync(join(repo.dir, 'src'));
-    const second = openRun({ cwd: join(repo.dir, 'src'), workflow: 'ticket-to-pr' });
+    const second = openRun({
+      cwd: join(repo.dir, 'src'),
+      workflow: 'ticket-to-pr',
+      adapters: await fakeAdapters(repo.dir),
+    });
     await expect(second).rejects.toThrow(
       `a run from ${sail} already started in this process: Bun can't reload its modules, so each run needs a process of its own`,
     );
@@ -201,8 +220,11 @@ test('a second run from one .sail/ in a process throws before it writes anything
 test('a .sail/ refused by its project.yaml is not claimed, so a run from it can open once it is fixed', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
     edit(sail, 'project.yaml', 'adapters:\n', 'no-adapters:\n');
-    expect(await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr' })).toEqual({ refused: expect.any(String) });
+    expect(await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', adapters })).toEqual({
+      refused: expect.any(String),
+    });
     edit(sail, 'project.yaml', 'no-adapters:\n', 'adapters:\n');
     const run = await opened(repo.dir);
     expect(readdirSync(join(repo.dir, '.sail-runs'))).toEqual([run.runId]);
@@ -219,7 +241,12 @@ test("an input the intake's schema accepts becomes the run's input, parsed", asy
       acceptanceCriteria: ['greet --shout shouts'],
       ignored: true,
     };
-    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', input });
+    const run = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      adapters: await fakeAdapters(repo.dir),
+      input,
+    });
     if ('refused' in run) throw new Error(run.refused);
     const { ignored: _, ...parsed } = input;
     expect(run.input).toEqual(parsed);
@@ -231,7 +258,12 @@ test("an input the intake's schema accepts becomes the run's input, parsed", asy
 test("an input the intake's schema rejects is refused, and no run directory is created", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
-    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', input: { ticketKey: 3 } });
+    const run = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      adapters: await fakeAdapters(repo.dir),
+      input: { ticketKey: 3 },
+    });
     if (!('refused' in run)) throw new Error('refused');
     expect(run.refused).toStartWith("the input doesn't match intake 'ticket':\n");
     expect(run.refused).toContain('ticketKey');
@@ -314,7 +346,12 @@ test("findRun throws on a STATUS it can't read: sail's own files are broken", as
 test('reopenRun reopens a suspended run with the header on disk, its input parsed, and STATUS running again', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
-    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, input: { ...TICKET, ignored: true } });
+    const reopened = await reopenRun({
+      cwd: repo.dir,
+      runId: run.runId,
+      adapters: await fakeAdapters(repo.dir),
+      input: { ...TICKET, ignored: true },
+    });
     const dir = join(repo.dir, '.sail-runs', run.runId);
     expect(reopened).toMatchObject({
       runId: run.runId,
@@ -331,7 +368,12 @@ test('reopenRun reopens a suspended run with the header on disk, its input parse
 test("reopenRun refuses an input the intake's schema rejects, and STATUS is left as it was", async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
-    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, input: { ticketKey: 3 } });
+    const reopened = await reopenRun({
+      cwd: repo.dir,
+      runId: run.runId,
+      adapters: await fakeAdapters(repo.dir),
+      input: { ticketKey: 3 },
+    });
     expect(reopened).toEqual({ refused: expect.stringMatching(/^the input doesn't match intake 'ticket':\n/) });
     const status = readFileSync(join(repo.dir, '.sail-runs', run.runId, 'STATUS'), 'utf8');
     expect(status).toBe('suspended budget_exceeded\n');
@@ -366,8 +408,119 @@ test.each<[string, (runDir: string) => void, number]>([
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
     prepare(join(repo.dir, '.sail-runs', run.runId));
-    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId });
+    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
     if ('refused' in reopened) throw new Error(reopened.refused);
     expect(reopened.firstSeq).toBe(firstSeq);
+  });
+});
+
+const ECHO: AdapterEntry = {
+  use: './adapters/echo-harness.ts',
+  origin: 'repo:.sail/adapters/echo-harness.ts',
+  versions: { echo: '1.0.0' },
+};
+
+/** `adapters` with `entries` standing in for those it was resolved with. */
+const entriesOf = (adapters: ResolvedAdapters, entries: Partial<Record<Port, AdapterEntry>>): ResolvedAdapters => ({
+  ...adapters,
+  entries: { ...adapters.entries, ...entries },
+});
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('openRun writes the adapter entries it is handed into run.json, and hands the adapters on', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const handed = await fakeAdapters(repo.dir);
+    const run = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      adapters: entriesOf(handed, { harness: ECHO }),
+    });
+    if ('refused' in run) throw new Error(run.refused);
+    expect(run.header.adapters.harness).toEqual(ECHO);
+    expect(readRunHeader(run.dir).adapters.harness).toEqual(ECHO);
+    expect(run.adapters).toBe(handed.ports);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('reopenRun refuses a run whose adapter changed, naming the port and both adapters, and leaves STATUS and events as they were', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    // A torn tail: only a resume that goes ahead may cut it.
+    appendFileSync(join(dir, 'events.ndjson'), '{"seq":1,"ts":"2026-09-2');
+    const before = ['STATUS', 'events.ndjson'].map((file) => readFileSync(join(dir, file), 'utf8'));
+    const handed = await fakeAdapters(repo.dir);
+
+    const refused = await reopenRun({
+      cwd: repo.dir,
+      runId: run.runId,
+      adapters: entriesOf(handed, { harness: ECHO }),
+    });
+    expect(refused).toEqual({ refused: expect.any(String) });
+    if (!('refused' in refused)) return;
+    expect(refused.refused).toStartWith(`run ${run.runId} can't resume on different adapters:`);
+    expect(refused.refused).toContain(
+      'harness: the run started with fake (builtin), and .sail/project.yaml now names ./adapters/echo-harness.ts (repo:.sail/adapters/echo-harness.ts)',
+    );
+    expect(['STATUS', 'events.ndjson'].map((file) => readFileSync(join(dir, file), 'utf8'))).toEqual(before);
+
+    // Only the versions differ: the same adapter, so the run resumes.
+    const upgraded = { use: 'fake', origin: 'builtin', versions: { lib: '2.0.0' } };
+    const reopened = await reopenRun({
+      cwd: repo.dir,
+      runId: run.runId,
+      adapters: entriesOf(handed, { harness: upgraded }),
+    });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    expect(readStatus(dir)).toEqual({ status: 'running' });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('reopenRun gives one line per changed port, in port order', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const handed = await fakeAdapters(repo.dir);
+    const linear = { use: 'linear', origin: 'builtin' };
+    const refused = await reopenRun({
+      cwd: repo.dir,
+      runId: run.runId,
+      adapters: entriesOf(handed, { harness: ECHO, ticketSource: linear }),
+    });
+    expect(refused).toEqual({ refused: expect.any(String) });
+    if (!('refused' in refused)) return;
+    const [head, ...lines] = refused.refused.split('\n');
+    expect(head).toBe(`run ${run.runId} can't resume on different adapters:`);
+    expect(lines.map((line) => line.trim())).toEqual([
+      'ticketSource: the run started with fake (builtin), and .sail/project.yaml now names linear (builtin)',
+      'harness: the run started with fake (builtin), and .sail/project.yaml now names ./adapters/echo-harness.ts (repo:.sail/adapters/echo-harness.ts)',
+    ]);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('openRun refuses agent steps that name an undefined model alias, one line per stage, and makes no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    edit(sail, 'project.yaml', 'models: { default: claude-sonnet-5, deep: claude-opus-5-5 }', 'models: { default: claude-sonnet-5 }');
+    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', adapters });
+    expect(run).toEqual({
+      refused: [
+        "stage 'self-review' names the model alias 'deep', which .sail/project.yaml's models doesn't define",
+        "stage 'spec' names the model alias 'deep', which .sail/project.yaml's models doesn't define",
+      ].join('\n'),
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });

@@ -16,6 +16,8 @@ export interface CaptureOptions {
   onInterrupt?: Io['onInterrupt'];
   /** Handed to the command as `io.tty`, as if stdout were an interactive terminal. */
   tty?: Tty;
+  /** Handed to the command as `io.env`: the environment it runs in, in place of the process's. */
+  env?: Io['env'];
 }
 
 /** `text` with each duration the terminal view prints, such as `850ms`, `2.5s`, `1m 11s` or `2h 2m`, as `<t>`. */
@@ -40,6 +42,7 @@ export async function runCaptured(
     },
     ...(options.onInterrupt === undefined ? {} : { onInterrupt: options.onInterrupt }),
     ...(options.tty === undefined ? {} : { tty: options.tty }),
+    ...(options.env === undefined ? {} : { env: options.env }),
   };
   const code = await run(argv, io);
   return { code, stdout, stderr };
