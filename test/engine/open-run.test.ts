@@ -426,10 +426,7 @@ const entriesOf = (adapters: ResolvedAdapters, entries: Partial<Record<Port, Ada
   entries: { ...adapters.entries, ...entries },
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('openRun writes the adapter entries it is handed into run.json, and hands the adapters on', async () => {
+test('openRun writes the adapter entries it is handed into run.json, and hands the adapters on', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const handed = await fakeAdapters(repo.dir);

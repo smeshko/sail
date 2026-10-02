@@ -2,9 +2,9 @@
 // validated before the run directory exists, so a header that breaks `sail.run.v1` never reaches disk and a refusal
 // leaves nothing behind. Resume and budget raises only ever read it.
 import { readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
-import { type AdapterConfig, PORTS, type Port, type ProjectConfig } from './config';
+import type { Port, ProjectConfig } from './config';
 import { createFileOnce } from './durable';
 import type { LoadedWorkflow } from './load-workflow';
 import { buildRoster, type IntakeEntry, origin, type RosterEntry } from './roster';
@@ -63,18 +63,6 @@ export function workflowHash(sailDir: string, loaded: LoadedWorkflow): string {
   return sha256(lines.join(''));
 }
 
-/**
- * Each port's adapter as `project.yaml` asks for it. A `use` starting `./` or `../` is a module path relative to
- * `.sail/`, the repository's own adapter, and any other is a built-in's name.
- */
-export function adapterEntries(sailDir: string, config: ProjectConfig): Record<Port, AdapterEntry> {
-  const entry = ({ use }: AdapterConfig): AdapterEntry => ({
-    use,
-    origin: use.startsWith('./') || use.startsWith('../') ? origin(dirname(sailDir), resolve(sailDir, use)) : 'builtin',
-  });
-  return Object.fromEntries(PORTS.map((port) => [port, entry(config.adapters[port])])) as Record<Port, AdapterEntry>;
-}
-
 export interface HeaderFields {
   runId: string;
   source: Source;
@@ -86,7 +74,7 @@ export interface HeaderFields {
 }
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
-export function buildRunHeader({ runId, source, sailDir, loaded, config, now }: HeaderFields): RunHeader {
+export function buildRunHeader({ runId, source, sailDir, loaded, config, adapters, now }: HeaderFields): RunHeader {
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
   const budget = config.budgets.run;
@@ -101,7 +89,7 @@ export function buildRunHeader({ runId, source, sailDir, loaded, config, now }: 
       sha256: workflowHash(sailDir, loaded),
     },
     sail: { version: pkg.version, runtime: `bun ${Bun.version}` },
-    adapters: adapterEntries(sailDir, config),
+    adapters,
     intake,
     stages,
     ...(budget !== undefined && Object.keys(budget).length > 0 ? { budget } : {}),

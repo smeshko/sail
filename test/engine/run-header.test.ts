@@ -181,10 +181,7 @@ test('a workflow without a version is version 1, and a config without a run budg
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a header records the adapters it is handed, with the versions a repository adapter declares', async () => {
+test('a header records the adapters it is handed, with the versions a repository adapter declares', async () => {
   const echo: AdapterEntry = {
     use: './adapters/echo-harness.ts',
     origin: 'repo:.sail/adapters/echo-harness.ts',

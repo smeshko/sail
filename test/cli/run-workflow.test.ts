@@ -371,10 +371,7 @@ async function runWith(change: (sail: string) => void, env?: Record<string, stri
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("run.json and run:start record each adapter: four builtin fakes, then the repository's own harness with its origin and versions, and the token stays off disk", async () => {
+test("run.json and run:start record each adapter: four builtin fakes, then the repository's own harness with its origin and versions, and the token stays off disk", async () => {
   const fake = { use: 'fake', origin: 'builtin' };
   const plain = await runWith(() => undefined);
   expect(plain.code).toBe(EXIT_OK);
@@ -389,27 +386,23 @@ test
   expect(swapped.everything).not.toContain(TOKEN);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, Record<string, string>]>([
-    ['unset', {}],
-    ['empty', { ECHO_HARNESS_TOKEN: '' }],
-  ])
-  ('a harness whose token is %s is refused with exit 3, naming the variable and the port, and no run directory', async (_, env) => {
-  const { code, stdout, stderr, ranFrom } = await runWith(useEcho, env);
-  expect({ code, stdout, stderr, ranFrom }).toEqual({
-    code: EXIT_REFUSED,
-    stdout: '',
-    stderr: '.sail/project.yaml  /adapters/harness needs ECHO_HARNESS_TOKEN, which is not set\n',
-    ranFrom: false,
-  });
-});
+test.each<[string, Record<string, string>]>([
+  ['unset', {}],
+  ['empty', { ECHO_HARNESS_TOKEN: '' }],
+])(
+  'a harness whose token is %s is refused with exit 3, naming the variable and the port, and no run directory',
+  async (_, env) => {
+    const { code, stdout, stderr, ranFrom } = await runWith(useEcho, env);
+    expect({ code, stdout, stderr, ranFrom }).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: '.sail/project.yaml  /adapters/harness needs ECHO_HARNESS_TOKEN, which is not set\n',
+      ranFrom: false,
+    });
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an adapter the built-ins do not have is refused with exit 3, naming the port, and no run directory', async () => {
+test('an adapter the built-ins do not have is refused with exit 3, naming the port, and no run directory', async () => {
   const { code, stderr, ranFrom } = await runWith((sail) =>
     edit(sail, 'project.yaml', 'codeHost: { use: fake }', 'codeHost: { use: githb }'),
   );
@@ -421,13 +414,15 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the adapters are resolved before the type-check: a missing token and a type error print the token refusal alone', async () => {
+test('the adapters are resolved before the type-check: a missing token and a type error print the token refusal alone', async () => {
   const { code, stderr } = await runWith((sail) => {
     useEcho(sail);
-    edit(sail, WORKFLOW, "import { workflow } from 'sail';", "import { workflow } from 'sail';\nconst bad: number = 'x';\nexport const unused = bad;");
+    edit(
+      sail,
+      WORKFLOW,
+      "import { workflow } from 'sail';",
+      "import { workflow } from 'sail';\nconst bad: number = 'x';\nexport const unused = bad;",
+    );
   });
   expect(stderr).toContain('/adapters/harness needs ECHO_HARNESS_TOKEN, which is not set');
   expect(stderr).not.toMatch(/TS\d+/);
