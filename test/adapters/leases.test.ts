@@ -186,6 +186,32 @@ test('two runs racing for one stale lease leave exactly one holder, whom the fil
   expect(readLease(dir, REMOTE, BRANCH)?.runId).toBe(winners[0] as string);
 });
 
+const RACE = join(import.meta.dir, '..', 'helpers', 'lease-race.ts');
+
+/** What runs A and B got when B took the lease the moment A had read it, and whom the file names after. */
+async function race(mode: 'release' | 'renew'): Promise<unknown> {
+  const child = Bun.spawn([process.execPath, RACE, mode, tempDir()], { stdout: 'pipe', stderr: 'pipe' });
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+  return JSON.parse(stdout);
+}
+
+test('a release overtaken by a takeover leaves the new holder its lease', async () => {
+  expect(await race('release')).toEqual({ a: { released: false }, b: { leased: true, took: 'A' }, file: 'B' });
+});
+
+test('a renewal overtaken by a takeover is refused, naming the new holder, and never overwrites its lease', async () => {
+  expect(await race('renew')).toEqual({
+    a: { leased: false, holder: 'B' },
+    b: { leased: true, took: 'A' },
+    file: 'B',
+  });
+});
+
 test('two branches of one remote, and one branch of two remotes, lease apart', () => {
   const dir = tempDir();
   const r1 = run('r1', process.pid, 'running');
