@@ -3,7 +3,15 @@ import { afterEach, expect, test } from 'bun:test';
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createEventsFile, ndjsonConsumer, nextSeq, readEvents } from '../../../src/events/consumers/ndjson';
+import {
+  createEventsFile,
+  type EventCursor,
+  ndjsonConsumer,
+  nextSeq,
+  readEvents,
+  readEventsFrom,
+  START,
+} from '../../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../../src/events/types';
 
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
@@ -131,7 +139,7 @@ test.each<[string, string]>([
 test('readEvents gives every event of a run in file order, and none for a missing file', () => {
   const fake1 = join(import.meta.dir, '..', '..', 'fixtures', 'runs', RUN_ID);
   const events = readEvents(fake1);
-  expect(events.map((each) => each.seq)).toEqual(Array.from({ length: 131 }, (_, index) => index + 1));
+  expect(events.map((each) => each.seq)).toEqual(Array.from({ length: 137 }, (_, index) => index + 1));
   const last = readFileSync(join(fake1, 'events.ndjson'), 'utf8').trimEnd().split('\n').at(-1) ?? '';
   expect(events.at(-1)).toEqual(JSON.parse(last));
   expect(readEvents(runDir())).toEqual([]);
@@ -161,4 +169,72 @@ test("nextSeq refuses before it cuts: a torn tail after a line it can't read sta
     refused: expect.stringMatching(/^events\.ndjson:3 can't be read, so the events can't continue: ./),
   });
   expect(contents(dir)).toBe(before);
+});
+
+/** Where a read left off, or the start when it refused. */
+const nextOf = (read: ReturnType<typeof readEventsFrom>): EventCursor => ('next' in read ? read.next : START);
+
+const bytes = (text: string) => Buffer.byteLength(text);
+
+test('readEventsFrom gives nothing for a missing file, then every event once it is written, with next at its end', () => {
+  const dir = runDir();
+  expect(readEventsFrom(dir, { offset: 5, line: 1 })).toEqual({ events: [], next: { offset: 5, line: 1 } });
+  writeFileSync(join(dir, 'events.ndjson'), lines(1, 2, 3));
+  expect(readEventsFrom(dir)).toEqual({
+    events: [event(1), event(2), event(3)],
+    next: { offset: bytes(lines(1, 2, 3)), line: 3 },
+  });
+});
+
+test('reading from next gives only the lines appended since, numbered on', () => {
+  const dir = runDir();
+  writeFileSync(join(dir, 'events.ndjson'), lines(1, 2));
+  const first = readEventsFrom(dir);
+  appendFileSync(join(dir, 'events.ndjson'), lines(3, 4));
+  expect(readEventsFrom(dir, nextOf(first))).toEqual({
+    events: [event(3), event(4)],
+    next: { offset: bytes(lines(1, 2, 3, 4)), line: 4 },
+  });
+});
+
+test('a torn tail waits for the next read, which gives its line whole once it is complete', () => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  const torn = JSON.stringify(event(2));
+  writeFileSync(path, `${lines(1)}${torn.slice(0, 40)}`);
+  const first = readEventsFrom(dir);
+  appendFileSync(path, `${torn.slice(40)}\n`);
+  expect([first, readEventsFrom(dir, nextOf(first))]).toEqual([
+    { events: [event(1)], next: { offset: bytes(lines(1)), line: 1 } },
+    { events: [event(2)], next: { offset: bytes(lines(1, 2)), line: 2 } },
+  ]);
+});
+
+test.each(['é', '✓'])('a line whose %s is split across two appends is read whole', (char) => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  const written = { ...event(1), consumed: { note: `before ${char} after` } } as SailEvent;
+  const line = Buffer.from(`${JSON.stringify(written)}\n`);
+  const inside = line.indexOf(Buffer.from(char)) + 1;
+  writeFileSync(path, line.subarray(0, inside));
+  const first = readEventsFrom(dir);
+  appendFileSync(path, line.subarray(inside));
+  expect([first, readEventsFrom(dir, nextOf(first))]).toEqual([
+    { events: [], next: START },
+    { events: [written], next: { offset: line.length, line: 1 } },
+  ]);
+});
+
+test.each<[string, string]>([
+  ['is not JSON', '{ not json'],
+  ['has no whole seq', JSON.stringify({ ...event(3), seq: '3' })],
+  ['has no type', JSON.stringify({ seq: 3, ts: '2026-09-28T09:00:03.000Z', runId: RUN_ID })],
+])('readEventsFrom refuses a line that %s, numbering it across reads', (_, bad) => {
+  const dir = runDir();
+  writeFileSync(join(dir, 'events.ndjson'), lines(1, 2));
+  const first = readEventsFrom(dir);
+  appendFileSync(join(dir, 'events.ndjson'), `${bad}\n`);
+  expect(readEventsFrom(dir, nextOf(first))).toEqual({
+    refused: expect.stringMatching(/^events\.ndjson:3 can't be read: ./),
+  });
 });

@@ -1,7 +1,7 @@
-// The fsync discipline for the files a run directory keeps: the journal, STATUS and run.json. A write is durable once
-// its bytes are synced and so is the directory entry that names them, so every helper here syncs both before it
-// returns.
-import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeSync } from 'node:fs';
+// The fsync discipline for the files a run directory keeps: the journal, STATUS, run.json and summary.json. A write is
+// durable once its bytes are synced and so is the directory entry that names them, so every helper here syncs both
+// before it returns.
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /** Syncs `dir` itself, so the entries created, renamed or removed in it survive a crash. */
@@ -64,15 +64,24 @@ export function appendLine(path: string, line: string): void {
   }
 }
 
-/** Replaces `path` with `text` atomically: a reader sees the old file or the new one, never a mix. */
-export function replaceFile(path: string, text: string): void {
-  const tmp = `${path}.tmp`;
+/**
+ * Replaces `path` with `text` atomically: a reader sees the old file or the new one, never a mix. A file two processes
+ * may replace at once, like `summary.json` under a rebuild, passes a `tmp` of each process's own, so neither writes into
+ * the other's temp file.
+ */
+export function replaceFile(path: string, text: string, tmp = `${path}.tmp`): void {
   const fd = openSync(tmp, 'w');
   try {
-    writeAndSync(fd, text);
-  } finally {
-    closeSync(fd);
+    try {
+      writeAndSync(fd, text);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(tmp, path);
+  } catch (error) {
+    // A temp file that never became `path` goes, so a per-process temp name doesn't leave one behind per failure.
+    rmSync(tmp, { force: true });
+    throw error;
   }
-  renameSync(tmp, path);
   syncDir(dirname(path));
 }

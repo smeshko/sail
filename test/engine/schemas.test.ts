@@ -368,6 +368,11 @@ test('summary: a stop reason is required when failed or suspended, and forbidden
   ]);
 });
 
+test('summary: totals may leave out budget, as for a run with no budget.maxUsd', () => {
+  const { budget: _, ...totals } = summary.totals;
+  expect(validateDocument('sail.summary.v1', { ...summary, totals })).toEqual([]);
+});
+
 test('summary: a suspended run may be stopped by an interrupt', () => {
   expect(validateDocument('sail.summary.v1', { ...summary, status: 'suspended', stopReason: 'interrupted' })).toEqual(
     [],

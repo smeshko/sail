@@ -87,6 +87,7 @@
         "replays": { "type": "integer", "minimum": 0 },
         "usage": { "$ref": "#/$defs/usage" },
         "budget": {
+          "description": "the run's dollar budget and how much of it the run used; present exactly when the run has a budget.maxUsd",
           "type": "object",
           "properties": {
             "maxUsd": { "type": "number", "minimum": 0 },
@@ -96,7 +97,7 @@
           "additionalProperties": false
         }
       },
-      "required": ["stageCalls", "steps", "toolCalls", "denials", "replays", "usage", "budget"],
+      "required": ["stageCalls", "steps", "toolCalls", "denials", "replays", "usage"],
       "additionalProperties": false
     },
     "version": { "type": "integer", "minimum": 1 }

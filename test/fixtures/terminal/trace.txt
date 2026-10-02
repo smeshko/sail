@@ -32,6 +32,7 @@ spec#1                file spec.md · 427 B
 spec#1              ✓ done · 10.4s
 spec#1                journal line 2
 fix                 ↻ iteration 1/3
+spec#1              → implement#1 · on done
 implement#1         ▶ implement · agent · claude-sonnet-5
 implement#1           in spec ← 01-spec/call-1/spec.md
 implement#1         · harness:session_start {"adapter":"fake","sessionId":"fake-session-implement-1","model":"claude-sonnet-5"}
@@ -50,6 +51,7 @@ implement#1           output valid
 implement#1           file diff.patch · 1.0 KB
 implement#1         ✓ done · 12.6s
 implement#1           journal line 3
+implement#1         → tests#1 · on done
 tests#1             ▶ tests · script
 tests#1               $ .sail/stages/tests/run.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
 tests#1               exit 1 → failed · 2.3s
@@ -64,6 +66,7 @@ tests#1               │ (fail) greet --shout › uppercases the name
 tests#1               │ {"ok":false,"total":6,"failed":1,"durationMs":2300,"failures":[{"test":"greet --shout › uppercases the name","file":"test/greet.test.ts","message":"Expected \"HELLO, ADA!\" but received \"HELLO, Ada!\""}]}
 tests#1               journal line 4
 fix                 ↻ iteration 2/3 · feedback from tests#1
+tests#1             → implement#2 · on failed
 implement#2         ▶ implement · agent · claude-sonnet-5
 implement#2           in spec ← 01-spec/call-1/spec.md
 implement#2           in feedback ← 03-tests/call-1/result.json#/output
@@ -80,6 +83,7 @@ implement#2           output valid
 implement#2           file diff.patch · 613 B
 implement#2         ✓ done · 12.5s
 implement#2           journal line 5
+implement#2         → tests#2 · on done
 tests#2             ▶ tests · script
 tests#2               $ .sail/stages/tests/run.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
 tests#2               exit 0 → passed · 2.5s
@@ -92,6 +96,7 @@ tests#2               │ 7 pass
 tests#2               │ 0 fail
 tests#2               │ {"ok":true,"total":7,"failed":0,"durationMs":2450,"failures":[]}
 tests#2               journal line 6
+tests#2             → self-review#1 · on passed
 self-review#1       ▶ self-review · agent · claude-opus-5-5
 self-review#1         in spec ← 01-spec/call-1/spec.md
 self-review#1       · harness:session_start {"adapter":"fake","sessionId":"fake-session-self-review-1","model":"claude-opus-5-5"}
@@ -145,6 +150,7 @@ publish#1/open        │ {"number":1,"url":"fake://codehost/fixture/pull/1","dr
 publish#1/open        journal line 9
 publish#1           ✓ passed · 14.5s
 publish#1             journal line 10
+publish#1           → end · on passed
                     · workspace:released {"path":".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace","kept":false}
                     · workspace:lease_released {"remote":"fake://codehost/fixture","branch":"sail/FAKE-1"}
 

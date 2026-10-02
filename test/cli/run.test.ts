@@ -35,6 +35,23 @@ test('the usage lists -q, -v and -vv on run and resume, and what each prints', a
   );
 });
 
+test('the usage lists sail runs', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toMatch(/^ {2}sail runs {2,}List the runs in \.sail-runs\/$/m);
+});
+
+test('the usage lists sail show', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toMatch(
+    /^ {2}sail show <run> \[--events\|--follow\|--rebuild\].* {2,}Show a run's calls, loops, routes and totals$/m,
+  );
+});
+
+test('the usage lists -q, -v and -vv on sail show', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toContain('sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]');
+});
+
 test.each([
   [['--bogus'], '--bogus'],
   [['--version', 'extra'], 'extra'],

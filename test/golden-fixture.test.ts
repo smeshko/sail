@@ -5,6 +5,8 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { formatIssue, validateProjectFile, validateRunDir } from '../src/engine/schemas';
+import { summarize } from '../src/events/summary';
+import type { SailEvent } from '../src/events/types';
 
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const fixture = join(import.meta.dir, 'fixtures', 'runs', RUN_ID);
@@ -45,7 +47,13 @@ test('the golden run directory is valid against every run-directory schema', () 
     .map(([schema, n]) => `${schema}: ${n}`)
     .join(', ');
   console.log(`${basename(fixture)}: ${total} documents valid (${perSchema})`);
-  expect(counts).toMatchObject({ 'sail.run.v1': 1, 'sail.journal.v1': 10, 'sail.summary.v1': 1, 'sail.result.v1': 10 });
+  expect(counts).toMatchObject({
+    'sail.run.v1': 1,
+    'sail.journal.v1': 10,
+    'sail.event.v1': 137,
+    'sail.summary.v1': 1,
+    'sail.result.v1': 10,
+  });
 });
 
 test('the fixture repository config is valid', () => {
@@ -91,6 +99,54 @@ test('events are numbered without a gap, never go back in time, and all belong t
   expect(times).toEqual([...times].sort((a, b) => a - b));
   expect(new Set(events.map((event) => event.runId))).toEqual(new Set([basename(fixture)]));
   expect(text('STATUS')).toBe('completed\n');
+});
+
+/** The move after each stage call, as `[at, value, took]`: the engine routes once per journaled call, but not the intake. */
+const MOVES = [
+  ['spec#1', 'done', 'implement#1'],
+  ['implement#1', 'done', 'tests#1'],
+  ['tests#1', 'failed', 'implement#2'],
+  ['implement#2', 'done', 'tests#2'],
+  ['tests#2', 'passed', 'self-review#1'],
+  ['self-review#1', 'done', 'publish#1'],
+  ['publish#1', 'passed', 'end'],
+];
+
+test("the golden run's routes are the moves after each stage call", () => {
+  const routes = lines('events.ndjson').filter((event) => event.type === 'workflow:route');
+  expect(routes.map((event) => [event.at, event.value, event.took])).toEqual(MOVES);
+  expect(JSON.parse(text('summary.json')).routes).toEqual(MOVES.map(([at, value, took]) => ({ at, value, took })));
+});
+
+/** The summary fields no event carries yet, each with what would bring it. The golden fold leaves them out. */
+const NOT_DERIVED_YET = [
+  // The fetched ticket's key and title: ticket:fetched, once intake runs (Epic 06).
+  'ticket',
+  // A call's one-line result: an event of each step kind that reports one.
+  'calls[].summary',
+  // The commits an agent call made: its harness reports them (Epic 07).
+  'calls[].commits',
+  // A step's one-line result, as for a call.
+  'calls[].steps[].summary',
+];
+
+/** Deletes the field `path` names, where `name[]` walks every item of the list `name`. Key order is kept. */
+function strip(value: unknown, path: readonly string[]): void {
+  const [head, ...rest] = path;
+  if (head === undefined || typeof value !== 'object' || value === null) return;
+  const object = value as Record<string, unknown>;
+  if (head.endsWith('[]')) {
+    const items = object[head.slice(0, -2)];
+    for (const item of Array.isArray(items) ? items : []) strip(item, rest);
+  } else if (rest.length === 0) delete object[head];
+  else strip(object[head], rest);
+}
+
+test("the golden run's summary is its events, folded", () => {
+  const expected = JSON.parse(text('summary.json'));
+  for (const path of NOT_DERIVED_YET) strip(expected, path.split('.'));
+  const folded = summarize(lines('events.ndjson') as unknown as SailEvent[]);
+  expect(JSON.stringify(folded, null, 2)).toBe(JSON.stringify(expected, null, 2));
 });
 
 test('every result records its files by size and hash, and its duration by its timestamps', () => {

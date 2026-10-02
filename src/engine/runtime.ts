@@ -10,7 +10,8 @@
 // An exception inside sail, such as a journal that can't be trusted or a bug in a call, propagates and leaves STATUS
 // `running`: writing it may be what failed, and a `running` run with no process is how a dead one looks.
 //
-// Every event of the run goes through one bus to `events.ndjson` and any consumers passed in. The runtime emits
+// Every event of the run goes through one bus to `events.ndjson`, then to `summary.json`, which is rewritten after every
+// call, and then to any consumers passed in. The runtime emits
 // `run:start` for a fresh run, `journal:append` for each call it journals, `run:end` once STATUS says how the run
 // ended, and `error:crash` before an exception inside sail propagates. The call emits its own events, and the replay
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
@@ -19,6 +20,7 @@
 import { dirname, join } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
+import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, SailEvent } from '../events/types';
 import { callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
@@ -29,7 +31,7 @@ import { type StopReason, writeStatus } from './run-dir';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
 interface EventOptions {
-  /** Consumers that receive every event after the events file. */
+  /** Consumers that receive every event after the events file and the summary. */
   consumers?: readonly Consumer[];
   /** Where a consumer's throw on an `error:consumer` event goes. Stderr by default. */
   unreported?: (error: unknown, consumer: Consumer, event: SailEvent) => void;
@@ -137,7 +139,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   const bus = createBus({
     runId,
     firstSeq: opened.firstSeq,
-    consumers: [ndjsonConsumer(dir), ...(options.consumers ?? [])],
+    // The events file first: the summary seeds itself from it on a resume, and it must already hold the event in hand.
+    consumers: [ndjsonConsumer(dir), summaryConsumer(dir), ...(options.consumers ?? [])],
     ...(options.unreported === undefined ? {} : { unreported: options.unreported }),
   });
   let replays = 0;

@@ -22,7 +22,7 @@ import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
 
 /** Every path a command prints goes through here, relative to where the user ran it. */
-function at(io: Io, path: string): string {
+export function at(io: Io, path: string): string {
   return relative(io.cwd, path) || '.';
 }
 
