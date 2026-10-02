@@ -5,7 +5,15 @@
 import { expect, test } from 'bun:test';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
 import type { TicketSource } from '../../src/ports/ticket-source';
-import { ClaimResult, Moved, Posted, Ticket, type TicketMove, TicketSourceCapabilities } from '../../src/ports/types';
+import {
+  ClaimResult,
+  Moved,
+  Posted,
+  Ticket,
+  type TicketMove,
+  TicketSourceCapabilities,
+  type TicketStateType,
+} from '../../src/ports/types';
 import {
   type Captured,
   captureEvents,
@@ -35,6 +43,14 @@ export interface TicketWorld {
 export type MakeTicketSource = (emit: ProviderEmit) => Promise<{ adapter: TicketSource; world: TicketWorld }>;
 
 const keys = (tickets: readonly Ticket[]): string[] => tickets.map((ticket) => ticket.ticketKey);
+
+/** The state type each move lands on, whatever the provider names the state (D8). */
+const MOVE_TYPES: Record<TicketMove, TicketStateType> = {
+  unstarted: 'unstarted',
+  'in-progress': 'started',
+  'in-review': 'started',
+  done: 'completed',
+};
 
 /** Every captured event validates against sail.event.v1, stamped with a call's key and without one. */
 function expectValidEvents(capture: Pick<Captured<ProviderEvent>, 'stamped'>): void {
@@ -168,15 +184,19 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expectValidEvents(capture);
   });
 
-  test(`${label}: capabilities parse, and update takes every move they list`, async () => {
+  test(`${label}: capabilities parse, and update takes every move they list to a state of that move's type`, async () => {
     const { adapter, world } = await start();
     const capabilities = adapter.capabilities();
     expect(parseIssues(TicketSourceCapabilities, capabilities)).toEqual([]);
     expect(capabilities.moves).not.toEqual([]);
-    const issues: unknown[] = [];
+    const moved: unknown[] = [];
     for (const move of capabilities.moves) {
-      issues.push(parseIssues(Moved, await adapter.update(world.designated, { state: move })));
+      const result = await adapter.update(world.designated, { state: move });
+      const read = await adapter.get(world.designated);
+      moved.push({ move, issues: parseIssues(Moved, result), type: result.state.type, read: read.state.type });
     }
-    expect(issues).toEqual(capabilities.moves.map(() => []));
+    expect(moved).toEqual(
+      capabilities.moves.map((move) => ({ move, issues: [], type: MOVE_TYPES[move], read: MOVE_TYPES[move] })),
+    );
   });
 }

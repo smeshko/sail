@@ -195,6 +195,12 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
       { path: kept.path, kept: true },
     ]);
     expect([existsSync(removed.path), existsSync(kept.path)]).toEqual([false, true]);
+    // The removed worktree is gone from the repository's list too, not only from the disk.
+    const listed = world.git(kept.path, 'worktree', 'list', '--porcelain').stdout.split('\n');
+    expect([listed.includes(`worktree ${removed.path}`), listed.includes(`worktree ${kept.path}`)]).toEqual([
+      false,
+      true,
+    ]);
     expect(capture.events.filter((event) => event.type === 'workspace:released')).toEqual([
       { type: 'workspace:released', path: removed.path, kept: false },
       { type: 'workspace:released', path: kept.path, kept: true },

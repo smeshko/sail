@@ -28,7 +28,10 @@ export interface CodeHostWorld {
   readonly draft: number;
   /** No such pull request. */
   readonly missing: number;
-  /** One whose first merge the host reports pending, and a later one merged. Left out where that can't be arranged. */
+  /**
+   * One whose first merge the host reports pending, and a later one merged. Where that can't be arranged, it is left
+   * out and named unarranged.
+   */
   readonly pendingMerge?: number;
   /** Refs the adapter accepts, each with the number it names. */
   readonly refs: readonly (readonly [string, number])[];
@@ -52,7 +55,11 @@ function expectValidEvents(capture: Pick<Captured<ProviderEvent>, 'stamped'>): v
   expect(eventIssues(capture.stamped())).toEqual([]);
 }
 
-export function codeHostSuite(label: string, make: MakeCodeHost): void {
+/**
+ * Runs the suite. A case the world can't arrange is named in `unarranged`, and shows as skipped: a world that leaves
+ * one out without naming it fails that case.
+ */
+export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: readonly 'pendingMerge'[] = []): void {
   const start = async () => {
     const capture = captureEvents();
     return { capture, ...(await make(capture.emit)) };
@@ -207,31 +214,39 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expect(capture.events).toEqual([]);
   });
 
-  test(`${label}: a pending merge reads open and emits nothing, until a later merge is reported merged`, async () => {
-    const { adapter, world, capture } = await start();
-    if (world.pendingMerge === undefined) return;
-    const first = await adapter.merge(world.pendingMerge, 'squash');
-    expect(parseIssues(MergeResult, first)).toEqual([]);
-    expect(first.state).toBe('pending');
-    expect((await adapter.getPullRequest(world.pendingMerge)).state).toBe('open');
-    expect(capture.events).toEqual([]);
+  test.skipIf(unarranged.includes('pendingMerge'))(
+    `${label}: a pending merge reads open and emits nothing, until a later merge is reported merged`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const pending = world.pendingMerge;
+      if (pending === undefined) throw new Error('no pendingMerge in the world, and none named unarranged');
+      const first = await adapter.merge(pending, 'squash');
+      expect(parseIssues(MergeResult, first)).toEqual([]);
+      expect(first.state).toBe('pending');
+      expect((await adapter.getPullRequest(pending)).state).toBe('open');
+      expect(capture.events).toEqual([]);
 
-    const later = await adapter.merge(world.pendingMerge, 'squash');
-    expect(later.state).toBe('merged');
-    expect(capture.events).toEqual([
-      { type: 'codehost:merged', number: world.pendingMerge, method: 'squash', sha: merge(later).sha as string },
-    ]);
-    expectValidEvents(capture);
-  });
+      const later = await adapter.merge(pending, 'squash');
+      expect(later.state).toBe('merged');
+      expect(capture.events).toEqual([
+        { type: 'codehost:merged', number: pending, method: 'squash', sha: merge(later).sha as string },
+      ]);
+      expectValidEvents(capture);
+    },
+  );
 
   test(`${label}: a label added then removed is reflected each time, and only a change emits codehost:labelled`, async () => {
     const { adapter, world, capture } = await start();
+    const labelsNow = async () => (await adapter.getPullRequest(world.designated)).labels.includes('needs-review');
     const added = await adapter.addLabel(world.designated, 'needs-review');
+    const readAdded = await labelsNow();
     const removed = await adapter.removeLabel(world.designated, 'needs-review');
+    const readRemoved = await labelsNow();
     await adapter.removeLabel(world.designated, 'needs-review');
     await adapter.addLabel(world.designated, world.label);
     expect([added, removed].flatMap((result) => parseIssues(Labelled, result))).toEqual([]);
     expect([added.labels.includes('needs-review'), removed.labels.includes('needs-review')]).toEqual([true, false]);
+    expect([readAdded, readRemoved]).toEqual([true, false]);
     expect(capture.events).toEqual([
       { type: 'codehost:labelled', number: world.designated, label: 'needs-review', change: 'added' },
       { type: 'codehost:labelled', number: world.designated, label: 'needs-review', change: 'removed' },

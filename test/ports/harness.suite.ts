@@ -11,7 +11,7 @@ import { captureEvents, eventIssues, parseIssues } from '../helpers/ports';
 export interface HarnessWorld {
   /** One the harness completes. */
   readonly done: HarnessRequest;
-  /** One the agent reports blocked. */
+  /** One the agent reports blocked. Left out, and named unarranged, where that can't be arranged; as are the next two. */
   readonly blocked?: HarnessRequest;
   /** One the harness fails. */
   readonly error?: HarnessRequest;
@@ -28,7 +28,21 @@ async function run(adapter: Harness, request: HarnessRequest) {
   return { result, capture, types: capture.events.map((event) => event.type) };
 }
 
-export function harnessSuite(label: string, make: MakeHarness): void {
+/** The cases a world may be unable to arrange. */
+type Optional = 'blocked' | 'error' | 'overTurns';
+
+/** The world's request for `name`: a world leaves one out only when the suite is told it is unarranged. */
+function arranged(world: HarnessWorld, name: Optional): HarnessRequest {
+  const request = world[name];
+  if (request === undefined) throw new Error(`no ${name} in the world, and none named unarranged`);
+  return request;
+}
+
+/**
+ * Runs the suite. A case the world can't arrange is named in `unarranged`, and shows as skipped: a world that leaves
+ * one out without naming it fails that case.
+ */
+export function harnessSuite(label: string, make: MakeHarness, unarranged: readonly Optional[] = []): void {
   test(`${label}: a completed session gives its result with a session id and usage, between session_start and session_end`, async () => {
     const { adapter, world } = await make();
     const { result, capture, types } = await run(adapter, world.done);
@@ -39,27 +53,29 @@ export function harnessSuite(label: string, make: MakeHarness): void {
     expect(eventIssues(capture.stamped(world.done.key))).toEqual([]);
   });
 
-  test(`${label}: a blocked session gives its reason`, async () => {
+  test.skipIf(unarranged.includes('blocked'))(`${label}: a blocked session gives its reason`, async () => {
     const { adapter, world } = await make();
-    if (world.blocked === undefined) return;
-    const { result } = await run(adapter, world.blocked);
+    const { result } = await run(adapter, arranged(world, 'blocked'));
     expect({ outcome: result.outcome, issues: parseIssues(HarnessResult, result) }).toEqual({
       outcome: 'blocked',
       issues: [],
     });
   });
 
-  test(`${label}: a failed session resolves as error with its message, and emits error:harness`, async () => {
-    const { adapter, world } = await make();
-    if (world.error === undefined) return;
-    const { result, capture, types } = await run(adapter, world.error);
-    expect({ outcome: result.outcome, issues: parseIssues(HarnessResult, result) }).toEqual({
-      outcome: 'error',
-      issues: [],
-    });
-    expect(types).toContain('error:harness');
-    expect(eventIssues(capture.stamped(world.error.key))).toEqual([]);
-  });
+  test.skipIf(unarranged.includes('error'))(
+    `${label}: a failed session resolves as error with its message, and emits error:harness`,
+    async () => {
+      const { adapter, world } = await make();
+      const request = arranged(world, 'error');
+      const { result, capture, types } = await run(adapter, request);
+      expect({ outcome: result.outcome, issues: parseIssues(HarnessResult, result) }).toEqual({
+        outcome: 'error',
+        issues: [],
+      });
+      expect(types).toContain('error:harness');
+      expect(eventIssues(capture.stamped(request.key))).toEqual([]);
+    },
+  );
 
   test(`${label}: a request whose signal is already aborted resolves as error`, async () => {
     const { adapter, world } = await make();
@@ -70,12 +86,14 @@ export function harnessSuite(label: string, make: MakeHarness): void {
     });
   });
 
-  test(`${label}: a session over its maxTurns resolves as error, naming maxTurns`, async () => {
-    const { adapter, world } = await make();
-    if (world.overTurns === undefined) return;
-    const { result } = await run(adapter, world.overTurns);
-    expect(result.outcome === 'error' ? result.message : result.outcome).toContain('maxTurns');
-  });
+  test.skipIf(unarranged.includes('overTurns'))(
+    `${label}: a session over its maxTurns resolves as error, naming maxTurns`,
+    async () => {
+      const { adapter, world } = await make();
+      const { result } = await run(adapter, arranged(world, 'overTurns'));
+      expect(result.outcome === 'error' ? result.message : result.outcome).toContain('maxTurns');
+    },
+  );
 
   test(`${label}: capabilities parse, with structured output, usage and abort, which every harness needs`, async () => {
     const { adapter } = await make();
