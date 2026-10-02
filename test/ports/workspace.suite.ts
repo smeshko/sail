@@ -152,6 +152,17 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(diff.patch).toContain('+an edit in the workspace');
   });
 
+  test(`${label}: diff's patch is whole, so it applies to a fresh checkout of the base`, async () => {
+    const { adapter, world } = await start();
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    writeFileSync(join(workspace.path, world.tracked), 'an edit, then a blank line\n\n', { flag: 'a' });
+    const { patch } = await adapter.diff(workspace.path, workspace.baseSha);
+    const fresh = await adapter.create(await world.run('r2'), { base: world.base, branch: BRANCH });
+    const file = join(world.runsDir, 'r2', 'edit.patch');
+    writeFileSync(file, patch);
+    expect(world.git(fresh.path, 'apply', '--check', file)).toEqual({ code: 0, stdout: '' });
+  });
+
   test(`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');
