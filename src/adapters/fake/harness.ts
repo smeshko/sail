@@ -52,6 +52,19 @@ async function wait(ms: number, signal: AbortSignal | undefined): Promise<boolea
 const sessionIdOf = (request: HarnessRequest): string =>
   `fake-session-${request.key.replaceAll(/[#/]/g, '-')}${request.try > 1 ? `-try-${request.try}` : ''}`;
 
+/**
+ * What a session scripted to spend `usage` over `wanted` turns has spent after `turn` of them: the golden run's shape,
+ * spread evenly, with whole token counts.
+ */
+function spentBy(usage: Usage, turn: number, wanted: number): Usage {
+  const spent: Usage = { costUsd: (usage.costUsd * turn) / wanted };
+  for (const key of ['inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens'] as const) {
+    const count = usage[key];
+    if (count !== undefined) spent[key] = Math.round((count * turn) / wanted);
+  }
+  return spent;
+}
+
 /** Where each of `files` lands in `out`, or the first name that would land outside it. */
 function placeFiles(out: string, files: Record<string, string>): { paths: [string, string][] } | { outside: string } {
   const paths: [string, string][] = [];
@@ -76,11 +89,11 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
   };
 
   async function session(request: HarnessRequest, sessionId: string): Promise<HarnessResult> {
-    const fail = (message: string, raw: HarnessResult['raw'] = null): HarnessResult => ({
+    const fail = (message: string, raw: HarnessResult['raw'] = null, usage: Usage = { costUsd: 0 }): HarnessResult => ({
       outcome: 'error',
       message,
       sessionId,
-      usage: { costUsd: 0 },
+      usage,
       transcript: '',
       raw,
     });
@@ -97,9 +110,10 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
       emit({ type: 'harness:session_end', outcome: result.outcome });
       return result;
     };
-    const failed = (message: string): HarnessResult => {
+    /** Fails with what the session has spent so far, so a failure after turns still counts their cost. */
+    const failed = (message: string, spent?: Usage): HarnessResult => {
       emit({ type: 'error:harness', message });
-      return end(fail(message, answer));
+      return end(fail(message, answer, spent));
     };
 
     emit({ type: 'harness:session_start', adapter: 'fake', sessionId, model: request.model });
@@ -110,30 +124,31 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     const wanted = answer.turns ?? 1;
     const { maxTurns } = request.budget;
     for (let turn = 1; turn <= Math.min(wanted, maxTurns); turn++) {
-      // The golden run's shape: the tokens and cost spent so far, spread evenly over the turns.
-      const soFar = (count = 0) => Math.round((count * turn) / wanted);
+      const soFar = spentBy(usage, turn, wanted);
       emit({
         type: 'usage:update',
         turn,
         tokens: {
-          input: soFar(usage.inputTokens),
-          cacheRead: soFar(usage.cacheReadTokens),
-          cacheWrite: soFar(usage.cacheWriteTokens),
-          output: soFar(usage.outputTokens),
+          input: soFar.inputTokens ?? 0,
+          cacheRead: soFar.cacheReadTokens ?? 0,
+          cacheWrite: soFar.cacheWriteTokens ?? 0,
+          output: soFar.outputTokens ?? 0,
         },
-        costUsdSoFar: (usage.costUsd * turn) / wanted,
+        costUsdSoFar: soFar.costUsd,
       });
     }
-    if (wanted > maxTurns) return failed(`budget exceeded: maxTurns ${maxTurns}`);
+    if (wanted > maxTurns) {
+      return failed(`budget exceeded: maxTurns ${maxTurns}`, spentBy(usage, maxTurns, wanted));
+    }
 
     if (answer.outcome === 'done' && answer.delayMs !== undefined && (await wait(answer.delayMs, request.signal))) {
-      return failed('aborted');
+      return failed('aborted', usage);
     }
     if (answer.outcome === 'done' && answer.files !== undefined) {
       const out = request.env.STAGE_OUT;
-      if (out === undefined) return failed('fake harness: files need STAGE_OUT');
+      if (out === undefined) return failed('fake harness: files need STAGE_OUT', usage);
       const placed = placeFiles(out, answer.files);
-      if ('outside' in placed) return failed(`fake harness: ${placed.outside} is outside STAGE_OUT`);
+      if ('outside' in placed) return failed(`fake harness: ${placed.outside} is outside STAGE_OUT`, usage);
       for (const [path, text] of placed.paths) {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, text);
