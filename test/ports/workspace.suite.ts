@@ -2,7 +2,7 @@
 // test/adapters/fake/workspace.test.ts, and a real adapter's test runs it on demand (SAIL_LIVE_WORKSPACE=1). Each case
 // starts from a fresh make(), and every event it captures must validate against sail.event.v1 with no key.
 import { expect, test } from 'bun:test';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Status } from '../../src/engine/run-dir';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
@@ -161,6 +161,25 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     const file = join(world.runsDir, 'r2', 'edit.patch');
     writeFileSync(file, patch);
     expect(world.git(fresh.path, 'apply', '--check', file)).toEqual({ code: 0, stdout: '' });
+  });
+
+  test(`${label}: diff includes the files the run created, so its patch creates them, but not the ignored ones`, async () => {
+    const { adapter, world } = await start();
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    mkdirSync(join(workspace.path, 'src', 'new dir'), { recursive: true });
+    writeFileSync(join(workspace.path, 'src', 'new dir', 'created.ts'), 'export const created = true;\n');
+    writeFileSync(join(workspace.path, '.gitignore'), '\n*.log\n', { flag: 'a' });
+    writeFileSync(join(workspace.path, 'run.log'), 'noise\n');
+    const { patch } = await adapter.diff(workspace.path, workspace.baseSha);
+    expect(patch).toContain('+++ b/src/new dir/created.ts');
+    expect(patch).not.toContain('run.log');
+    const fresh = await adapter.create(await world.run('r2'), { base: world.base, branch: BRANCH });
+    const file = join(world.runsDir, 'r2', 'created.patch');
+    writeFileSync(file, patch);
+    expect(world.git(fresh.path, 'apply', file)).toEqual({ code: 0, stdout: '' });
+    expect(readFileSync(join(fresh.path, 'src', 'new dir', 'created.ts'), 'utf8')).toBe(
+      'export const created = true;\n',
+    );
   });
 
   test(`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {
