@@ -77,6 +77,25 @@ export function harnessSuite(label: string, make: MakeHarness, unarranged: reado
     },
   );
 
+  test(`${label}: a session aborted while it runs, from its first event, resolves as error and still ends`, async () => {
+    const { adapter, world } = await make();
+    const controller = new AbortController();
+    const types: string[] = [];
+    const result = await adapter.run({
+      ...world.done,
+      signal: controller.signal,
+      onEvent: (event) => {
+        types.push(event.type);
+        controller.abort();
+      },
+    });
+    expect({ outcome: result.outcome, issues: parseIssues(HarnessResult, result) }).toEqual({
+      outcome: 'error',
+      issues: [],
+    });
+    expect(types.at(-1)).toBe('harness:session_end');
+  });
+
   test(`${label}: a request whose signal is already aborted resolves as error`, async () => {
     const { adapter, world } = await make();
     const { result } = await run(adapter, { ...world.done, signal: AbortSignal.abort() });

@@ -268,6 +268,33 @@ test('a session that fails after spending reports what it spent: the turns it ra
   });
 });
 
+test('an abort from a usage update stops the session there: no more turns, no files, and the spend so far', async () => {
+  const usage = { costUsd: 0.75, outputTokens: 300 };
+  const harness = createFakeHarness({
+    script: { spec: [{ outcome: 'done', output: {}, turns: 3, usage, files: { 'spec.md': '# Spec\n' } }] },
+  });
+  const controller = new AbortController();
+  const capture = captureEvents<HarnessEvent>();
+  const out = stageOut();
+  const result = await harness.run({
+    ...request('spec#1', 1, { STAGE_OUT: out }),
+    signal: controller.signal,
+    onEvent: (event) => {
+      capture.emit(event);
+      if (event.type === 'usage:update') controller.abort();
+    },
+  });
+  expect({
+    result: [summary(result), result.usage],
+    events: labels(capture.events),
+    written: existsSync(join(out, 'spec.md')),
+  }).toEqual({
+    result: ['error: aborted', { costUsd: 0.25, outputTokens: 100 }],
+    events: ['harness:session_start', 'usage:update 1', 'error:harness', 'harness:session_end'],
+    written: false,
+  });
+});
+
 test("a failure the session didn't foresee still carries its spend, and still ends the session", async () => {
   const usage = { costUsd: 0.4, outputTokens: 300 };
   const harness = createFakeHarness({
