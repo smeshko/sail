@@ -28,10 +28,7 @@ async function thrown(make: () => unknown): Promise<string> {
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the ticket source reads its seed, keeps its state under runsDir, and a second adapter sees the claim', async () => {
+test('the ticket source reads its seed, keeps its state under runsDir, and a second adapter sees the claim', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
     const seed = join(ctx.sailDir, 'fake', 'tickets.json');
@@ -51,10 +48,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('with no options the ticket and pull-request fakes read .sail/fake/tickets.json and .sail/fake/prs.json', async () => {
+test('with no options the ticket and pull-request fakes read .sail/fake/tickets.json and .sail/fake/prs.json', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
     const tickets = await fakeAdapters.ticketSource.create({}, ctx);
@@ -64,10 +58,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the pull-request fake merges #3 as pending, then merged, with its state in runsDir', async () => {
+test('the pull-request fake merges #3 as pending, then merged, with its state in runsDir', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
     const options = { seed: './fake/prs.json' };
@@ -79,10 +70,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the harness fake is created with no script, resolves as an error naming the file, and answers once one is written', async () => {
+test('the harness fake is created with no script, resolves as an error naming the file, and answers once one is written', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
     const harness = await fakeAdapters.harness.create({}, ctx);
@@ -107,10 +95,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the workspace fake defaults its repo to context.root: it leases and creates a worktree of the temp repository', async () => {
+test('the workspace fake defaults its repo to context.root: it leases and creates a worktree of the temp repository', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
     const workspace = await fakeAdapters.workspace.create({}, ctx);
@@ -125,18 +110,14 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[Port, Record<string, unknown>, string]>([
-    ['ticketSource', { seeds: 'x' }, 'seeds'],
-    ['ticketSource', { seed: 3 }, 'seed'],
-    ['codeHost', { seed: 3 }, 'seed'],
-    ['harness', { script: 3 }, 'script'],
-    ['workspace', { repo: 3 }, 'repo'],
-    ['harness', { seed: './fake/tickets.json' }, 'seed'],
-  ])
-  ('%s created with %j throws, naming %s', async (port, options, name) => {
+test.each<[Port, Record<string, unknown>, string]>([
+  ['ticketSource', { seeds: 'x' }, 'seeds'],
+  ['ticketSource', { seed: 3 }, 'seed'],
+  ['codeHost', { seed: 3 }, 'seed'],
+  ['harness', { script: 3 }, 'script'],
+  ['workspace', { repo: 3 }, 'repo'],
+  ['harness', { seed: './fake/tickets.json' }, 'seed'],
+])('%s created with %j throws, naming %s', async (port, options, name) => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
     const message = await thrown(() => fakeAdapters[port].create(options, ctx));
@@ -145,10 +126,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('an emit in the context receives ticket:fetched from the ticket source', async () => {
+test('an emit in the context receives ticket:fetched from the ticket source', async () => {
   await withTempRepo(async (repo) => {
     const capture = captureEvents();
     const ctx = context(repo, { emit: capture.emit });
@@ -158,10 +136,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('BUILTINS holds the fake for every port, each a definition with create alone: no requires, no versions', () => {
+test('BUILTINS holds the fake for every port, each a definition with create alone: no requires, no versions', () => {
   expect(Object.keys(BUILTINS)).toEqual(['fake']);
   const definitions = Object.entries(BUILTINS.fake ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(definitions)).toEqual({
