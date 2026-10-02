@@ -116,6 +116,12 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       }
       store.change((world) => {
         world.branches[branch] = headSha;
+        // An open pull request from the branch moves to the new head, whose checks start again.
+        for (const pr of world.pullRequests) {
+          if (pr.state !== 'open' || pr.head !== branch || pr.headSha === headSha) continue;
+          pr.headSha = headSha;
+          pr.reads.checks = 0;
+        }
       });
       emit({ type: 'codehost:pushed', branch, headSha });
       return { branch, headSha, raw: { branch, headSha } };
