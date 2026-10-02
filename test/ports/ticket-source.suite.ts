@@ -5,7 +5,7 @@
 import { expect, test } from 'bun:test';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
 import type { TicketSource } from '../../src/ports/ticket-source';
-import { ClaimResult, Moved, Posted, Ticket, TicketSourceCapabilities } from '../../src/ports/types';
+import { ClaimResult, Moved, Posted, Ticket, type TicketMove, TicketSourceCapabilities } from '../../src/ports/types';
 import {
   type Captured,
   captureEvents,
@@ -143,6 +143,16 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       state: moved.state,
     });
     expectValidEvents(capture);
+  });
+
+  test(`${label}: update with a move that isn't one rejects as invalid, and leaves the ticket and later reads alone`, async () => {
+    const { adapter, world, capture } = await start();
+    const before = (await adapter.get(world.designated)).state;
+    const error = await rejection(adapter.update(world.designated, { state: 'closed' as TicketMove }));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'update', code: 'invalid' });
+    expect((await adapter.get(world.started)).ticketKey).toBe(world.started);
+    expect((await adapter.get(world.designated)).state).toEqual(before);
+    expect(capture.events.map((event) => event.type)).toEqual(['ticket:fetched', 'ticket:fetched', 'ticket:fetched']);
   });
 
   test(`${label}: a comment is posted onto the ticket, and emits ticket:commented`, async () => {

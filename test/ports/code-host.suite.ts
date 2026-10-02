@@ -8,6 +8,7 @@ import {
   Checks,
   CodeHostCapabilities,
   Labelled,
+  type MergeMethod,
   MergeResult,
   Posted,
   PullRequest,
@@ -174,6 +175,14 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
       { type: 'codehost:merged', number: world.designated, method: 'squash', sha: merge(result).sha as string },
     ]);
     expectValidEvents(capture);
+  });
+
+  test(`${label}: a merge by a method that isn't one rejects as invalid, merges nothing, and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const error = await rejection(adapter.merge(world.designated, 'fast-forward' as MergeMethod));
+    expect(portFailure(error)).toEqual({ port: 'codeHost', op: 'merge', code: 'invalid' });
+    expect((await adapter.getPullRequest(world.designated)).state).toBe('open');
+    expect(capture.events).toEqual([]);
   });
 
   test(`${label}: a pending merge reads open and emits nothing, until a later merge is reported merged`, async () => {
