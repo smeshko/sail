@@ -139,6 +139,13 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
         if (headSha === undefined) {
           throw new PortError('codeHost', 'openPullRequest', 'invalid', `${request.head} was never pushed`);
         }
+        const open = world.pullRequests.find(
+          (each) => each.state === 'open' && each.head === request.head && each.base === request.base,
+        );
+        if (open !== undefined) {
+          const message = `#${open.number} is already open from ${request.head} into ${request.base}`;
+          throw new PortError('codeHost', 'openPullRequest', 'conflict', message);
+        }
         const stored = StoredPullRequest.parse({
           number: Math.max(0, ...world.pullRequests.map((each) => each.number)) + 1,
           title: request.title,
@@ -199,8 +206,9 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
         if (pr.state === 'merged') {
           return { result: { state: 'merged', sha: mergeSha(pr), raw: structuredClone(pr) }, merged: false };
         }
-        if (pr.state === 'closed') {
-          const reason = `fake: pull request #${number} is closed`;
+        // A host merges neither a closed pull request nor a draft.
+        if (pr.state === 'closed' || pr.draft) {
+          const reason = `fake: pull request #${number} is ${pr.draft ? 'a draft' : 'closed'}`;
           return { result: { state: 'refused', reason, raw: structuredClone(pr) }, merged: false };
         }
         const answer = scripted(pr.merges, pr.reads.merges);
