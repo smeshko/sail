@@ -13,10 +13,11 @@ import { formatIssue, type SchemaIssue, validateDocument } from './schemas';
 
 export const RUN_HEADER_FILE = 'run.json';
 
-/** Which adapter fills a port, and where it comes from. Phase 5.2 adds the versions it ran with. */
+/** Which adapter fills a port, where it comes from, and the versions it runs with when it declares any. */
 export interface AdapterEntry {
   use: string;
   origin: string;
+  versions?: Record<string, string>;
 }
 
 /** The `sail.run.v1` fields a run header holds when the run starts. */
@@ -80,6 +81,7 @@ export interface HeaderFields {
   sailDir: string;
   loaded: LoadedWorkflow;
   config: ProjectConfig;
+  adapters: Record<Port, AdapterEntry>;
   now: Date;
 }
 

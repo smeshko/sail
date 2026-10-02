@@ -12,6 +12,7 @@ import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/
 import { rebuildSummary } from '../../src/events/consumers/summary';
 import type { Summary } from '../../src/events/summary';
 import type { Consumer, SailEvent } from '../../src/events/types';
+import { fakeAdapters } from '../helpers/adapters';
 import { copyFixture, edit } from '../helpers/fixture';
 import {
   copyRun,
@@ -27,7 +28,12 @@ const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 
 /** Runs ticket-to-pr from `cwd`, which must not be refused. */
 async function ran(cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> {
-  const end = await runWorkflow({ cwd, workflow: 'ticket-to-pr', ...options });
+  const end = await runWorkflow({
+    cwd,
+    adapters: await fakeAdapters(cwd),
+    workflow: 'ticket-to-pr',
+    ...options,
+  });
   if ('refused' in end) throw new Error(`refused: ${end.refused}`);
   return end;
 }
@@ -200,7 +206,7 @@ test('a journal that breaks mid-run is an exception inside sail, and STATUS stay
       "printf '# Spec",
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
-    const running = runWorkflow({ cwd: repo.dir, workflow: 'ticket-to-pr' });
+    const running = runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'ticket-to-pr' });
     await expect(running).rejects.toThrow(JournalError);
     const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
     expect(readStatus(join(repo.dir, '.sail-runs', runId))).toEqual({ status: 'running' });
@@ -211,9 +217,9 @@ test('a second run from the same .sail/ in a process throws before it writes any
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const first = await ran(repo.dir);
-    await expect(runWorkflow({ cwd: repo.dir, workflow: 'ticket-to-pr' })).rejects.toThrow(
-      'already started in this process',
-    );
+    await expect(
+      runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'ticket-to-pr' }),
+    ).rejects.toThrow('already started in this process');
     expect(readdirSync(join(repo.dir, '.sail-runs'))).toEqual([first.runId]);
   });
 });
@@ -221,7 +227,7 @@ test('a second run from the same .sail/ in a process throws before it writes any
 test('a refused open passes through, and nothing runs', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    expect(await runWorkflow({ cwd: repo.dir, workflow: 'nope' })).toEqual({
+    expect(await runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'nope' })).toEqual({
       refused: expect.stringContaining('no workflow'),
     });
     expect(stubExecutions(repo.dir)).toEqual([]);
@@ -338,7 +344,7 @@ test('a resume runs the interrupted call again as its next try, and nothing jour
     const runId = await interruptedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
     const header = sha256(join(dir, RUN_HEADER_FILE));
-    const end = await resumeWorkflow({ cwd: repo.dir, runId });
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
     expect(end).toMatchObject({ runId, dir, status: 'completed' });
     expect(keys(dir)).toEqual(ALL_KEYS);
     expect(stubExecutions(repo.dir)).toEqual([
@@ -365,7 +371,7 @@ test('a workflow whose keys no longer fit the journal fails the resume with dete
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
     swapImplementAndTests(join(repo.dir, '.sail'));
-    const end = await resumeWorkflow({ cwd: repo.dir, runId });
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
     expect(end).toMatchObject({
       runId,
       status: 'failed',
@@ -383,7 +389,7 @@ test('a run left running, as after a crash, resumes', async () => {
     const runId = await interruptedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
     writeFileSync(join(dir, 'STATUS'), 'running\n');
-    const end = await resumeWorkflow({ cwd: repo.dir, runId });
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
     expect(end).toMatchObject({ runId, status: 'completed' });
     expect(keys(dir)).toEqual(ALL_KEYS);
   });
@@ -400,7 +406,7 @@ test('a refused resume passes through, and neither STATUS nor the journal change
     const dir = join(repo.dir, '.sail-runs', runId);
     const before = [readFileSync(join(dir, 'STATUS'), 'utf8'), readFileSync(join(dir, 'journal.ndjson'), 'utf8')];
     const ranBefore = stubExecutions(repo.dir);
-    expect(await resumeWorkflow({ cwd: repo.dir, runId })).toEqual({
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toEqual({
       refused: `run ${runId} has completed: there is nothing to resume`,
     });
     expect([readFileSync(join(dir, 'STATUS'), 'utf8'), readFileSync(join(dir, 'journal.ndjson'), 'utf8')]).toEqual(
@@ -414,9 +420,9 @@ test('resuming from a .sail/ this process already ran from throws before it writ
   await withTempRepo(async (repo) => {
     const { end } = await interruptedIn(repo.dir);
     const status = readFileSync(join(end.dir, 'STATUS'), 'utf8');
-    await expect(resumeWorkflow({ cwd: repo.dir, runId: end.runId })).rejects.toThrow(
-      'already started in this process',
-    );
+    await expect(
+      resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: end.runId }),
+    ).rejects.toThrow('already started in this process');
     expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe(status);
   });
 }, 20_000);
@@ -430,7 +436,7 @@ test('the input given again on resume is run.input', async () => {
       "  return run.stage(publish, { spec: s.files['spec.md'] });",
       '  return run.input;',
     );
-    const end = await resumeWorkflow({ cwd: repo.dir, runId, input: INPUT });
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId, input: INPUT });
     expect(end).toEqual({ runId, dir: join(repo.dir, '.sail-runs', runId), status: 'completed', result: INPUT });
   });
 }, 30_000);
@@ -582,7 +588,9 @@ test("a resume appends to the interrupted run's events, continuing seq with no m
       message: 'stopped during implement#2',
     });
 
-    expect(await resumeWorkflow({ cwd: repo.dir, runId })).toMatchObject({ status: 'completed' });
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
     expect(eventsText(dir).startsWith(before)).toBe(true);
     const list = events(dir);
     expect(seqs(list)).toEqual(gapless(list));
@@ -607,7 +615,9 @@ test('a torn tail is cut before a resume, and seq continues from the last comple
     const torn = '{"seq":99,"ts":"2026-09-28T';
     appendFileSync(join(dir, 'events.ndjson'), torn);
 
-    expect(await resumeWorkflow({ cwd: repo.dir, runId })).toMatchObject({ status: 'completed' });
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
     const after = eventsText(dir);
     expect(after).not.toContain(torn);
     expect(after.startsWith(before)).toBe(true);
@@ -624,7 +634,9 @@ test('a resume refused for its input leaves a torn tail as it was', async () => 
     appendFileSync(join(dir, 'events.ndjson'), '{"seq":99,"ts":"2026-09-28T');
     const before = eventsText(dir);
 
-    expect(await resumeWorkflow({ cwd: repo.dir, runId, input: { ticketKey: 5 } })).toEqual({
+    expect(
+      await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId, input: { ticketKey: 5 } }),
+    ).toEqual({
       refused: expect.stringMatching(/^the input doesn't match intake 'ticket'/),
     });
     expect(eventsText(dir)).toBe(before);
@@ -639,7 +651,7 @@ test("an events file whose last line can't be read refuses the resume, and leave
     appendFileSync(join(dir, 'events.ndjson'), 'not json\n');
     const ranBefore = stubExecutions(repo.dir);
 
-    expect(await resumeWorkflow({ cwd: repo.dir, runId })).toEqual({
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toEqual({
       refused: expect.stringMatching(
         new RegExp(`^events\\.ndjson:${line} can't be read, so the events can't continue: `),
       ),
@@ -688,7 +700,11 @@ test('an exception inside sail leaves error:crash as the last event, and still p
       "printf '# Spec",
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
-    const error = await runWorkflow({ cwd: repo.dir, workflow: 'ticket-to-pr' }).catch((thrown: unknown) => thrown);
+    const error = await runWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      workflow: 'ticket-to-pr',
+    }).catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(JournalError);
     const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -873,7 +889,9 @@ test("after an interrupt and a resume, summary.json is completed with the retrie
       ['spec#1', 'implement#1', 'tests#1', 'implement#2'],
     ]);
 
-    expect(await resumeWorkflow({ cwd: repo.dir, runId })).toMatchObject({ status: 'completed' });
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
     const written = summaryText(dir);
     const summary = summaryOf(dir);
     const replays = events(dir).reduce((sum, event) => sum + (event.type === 'run:end' ? event.replays : 0), 0);
@@ -932,7 +950,9 @@ test('a crash leaves summary.json running, with the calls made before it', async
       "printf '# Spec",
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
-    await expect(runWorkflow({ cwd: repo.dir, workflow: 'ticket-to-pr' })).rejects.toThrow(JournalError);
+    await expect(
+      runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'ticket-to-pr' }),
+    ).rejects.toThrow(JournalError);
     const summary = summaryOf(onlyRun(repo.dir));
     expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['spec#1']]);
   });

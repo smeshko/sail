@@ -5,7 +5,7 @@ import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
-import { edit } from '../helpers/fixture';
+import { edit, FIXTURE_SAIL, write } from '../helpers/fixture';
 import { fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
 import {
   copyRun,
@@ -245,5 +245,33 @@ test('Ctrl-C during sail resume suspends the run again, and names the resume aga
     expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);
     const tryTwo = join(repo.dir, '.sail-runs', runId, '02-implement', 'call-2', 'try-2', 'result.json');
     expect(existsSync(tryTwo)).toBe(true);
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('sail resume refuses a run whose harness the config now swaps, leaves the run as it was, and resumes once the config is swapped back', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedInto(repo.dir);
+    const sail = join(repo.dir, '.sail');
+    write(sail, 'adapters/echo-harness.ts', readFileSync(join(FIXTURE_SAIL, 'adapters', 'echo-harness.ts'), 'utf8'));
+    edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/echo-harness.ts }');
+    const before = runFiles(repo.dir);
+
+    const env = { ECHO_HARNESS_TOKEN: 'echo-token-3b8e51' };
+    const refused = await runCaptured(['resume', runId], repo.dir, { env });
+    expect(refused.code).toBe(EXIT_REFUSED);
+    expect(refused.stdout).toBe('');
+    expect(refused.stderr).toStartWith(`sail resume: run ${runId} can't resume on different adapters:`);
+    expect(refused.stderr).toContain(
+      'harness: the run started with fake (builtin), and .sail/project.yaml now names ./adapters/echo-harness.ts (repo:.sail/adapters/echo-harness.ts)',
+    );
+    expect(runFiles(repo.dir)).toEqual(before);
+
+    edit(sail, 'project.yaml', 'harness: { use: ./adapters/echo-harness.ts }', 'harness: { use: fake }');
+    const resumed = await runCaptured(['resume', runId], repo.dir);
+    expect(resumed.code).toBe(EXIT_OK);
+    expect(resumed.stderr).toBe('');
   });
 }, 30_000);

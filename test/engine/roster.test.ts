@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { type ProjectConfig, readConfig } from '../../src/engine/config';
 import { type LoadedWorkflow, loadWorkflow } from '../../src/engine/load-workflow';
-import { buildRoster, origin } from '../../src/engine/roster';
+import { buildRoster, modelProblems, origin } from '../../src/engine/roster';
 import { validateDocument } from '../../src/engine/schemas';
 import { agent, intake, type StageDefinition, script, stage, type Workflow, z } from '../../src/sdk/index';
 import * as intakes from '../../src/sdk/intakes';
@@ -130,15 +130,21 @@ test("the fixture's roster is its intake and the five stages ticket-to-pr reache
   });
 });
 
-test('a model alias resolves through models, and one missing from it is recorded as written', () => {
+test('a model alias resolves through models, and an agent step without one uses default', () => {
   const deep = agent('deep', { prompt: './p.md', output: Out, model: 'deep', permissions, budget });
-  const fast = agent('fast', { prompt: './p.md', output: Out, model: 'fast', permissions, budget });
   const plain = agent('plain', { prompt: './p.md', output: Out, permissions, budget });
   expect(entryOf(deep)?.model).toBe('model-deep');
-  expect(entryOf(fast)?.model).toBe('fast');
   expect(entryOf(plain)?.model).toBe('model-default');
-  const noDefault = { ...CONFIG, models: {} };
-  expect(entryOf(plain, noDefault)).not.toHaveProperty('model');
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('an alias that models does not define is left out of the entry, never recorded as written', () => {
+  const fast = agent('fast', { prompt: './p.md', output: Out, model: 'fast', permissions, budget });
+  const plain = agent('plain', { prompt: './p.md', output: Out, permissions, budget });
+  expect(entryOf(fast)).not.toHaveProperty('model');
+  expect(entryOf(plain, { ...CONFIG, models: {} })).not.toHaveProperty('model');
 });
 
 test("an agent records its permissions as declared, network included, and leaves out what it doesn't produce", () => {
@@ -239,4 +245,55 @@ test("a repository's intake records its origin, and its steps like a stage's", (
       { step: 'brief', kind: 'agent', model: 'model-default', output: 'Input', permissions, budget },
     ],
   });
+});
+
+const agentOf = (name: string, model?: string) =>
+  agent(name, { prompt: './p.md', output: Out, permissions, budget, ...(model === undefined ? {} : { model }) });
+
+const undefinedAlias = (where: string, alias: string) =>
+  `${where} names the model alias '${alias}', which .sail/project.yaml's models doesn't define`;
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('modelProblems names a stage whose agent step has an alias models does not define, and is empty when every alias is defined', () => {
+  expect(modelProblems(loadedOf([agentOf('fast', 'fast')]), CONFIG)).toEqual([undefinedAlias("stage 'fast'", 'fast')]);
+  expect(modelProblems(loadedOf([agentOf('own', 'toString')]), CONFIG)).toEqual([undefinedAlias("stage 'own'", 'toString')]);
+  expect(modelProblems(loadedOf([agentOf('deep', 'deep'), agentOf('plain')]), CONFIG)).toEqual([]);
+  const lint = script('lint', { run: './r.sh', output: Out });
+  expect(modelProblems(loadedOf([lint]), { ...CONFIG, models: {} })).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('an agent step with no model, under models with no default, names the missing default', () => {
+  const problems = modelProblems(loadedOf([agentOf('plain')]), { ...CONFIG, models: { deep: 'model-deep' } });
+  expect(problems).toEqual(["stage 'plain' has an agent step with no model, and .sail/project.yaml's models defines no 'default'"]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('a step of a multi-step stage is named with its stage and step, and an agent step of an intake with its intake', () => {
+  const lint = script('lint', { run: './r.sh', output: Out });
+  const two = stage('two', { output: Out, steps: [lint, agentOf('first', 'fast')] });
+  const brief = intake('brief', { accepts: ['ticket'], output: Out, steps: [agentOf('write', 'slow')] });
+  const own = { definition: brief, path: '/r/.sail/workflows/unit/intake.ts', module: { Out, brief } };
+  expect(modelProblems(loadedOf([two]), CONFIG)).toEqual([undefinedAlias("stage 'two' step 'first'", 'fast')]);
+  expect(modelProblems(loadedOf([], {}, own), CONFIG)).toEqual([undefinedAlias("intake 'brief'", 'slow')]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('problems come with the intake first, then the stages sorted by name', () => {
+  const brief = intake('brief', { accepts: ['ticket'], output: Out, steps: [agentOf('write', 'slow')] });
+  const own = { definition: brief, path: '/r/.sail/workflows/unit/intake.ts', module: { Out, brief } };
+  const loaded = loadedOf([agentOf('zeta', 'z'), agentOf('alpha', 'a')], { Out }, own);
+  expect(modelProblems(loaded, CONFIG)).toEqual([
+    undefinedAlias("intake 'brief'", 'slow'),
+    undefinedAlias("stage 'alpha'", 'a'),
+    undefinedAlias("stage 'zeta'", 'z'),
+  ]);
 });
