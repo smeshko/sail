@@ -124,11 +124,19 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
       return end(fail(message, answer));
     };
 
+    // An abort can come from anything the session awaits or calls back into: a scripted delay, or the caller's onEvent.
+    // So the signal is checked after every event, and the session goes no further once it is aborted.
+    const stopped = () => request.signal?.aborted === true;
+
     progress.started = true;
     emit({ type: 'harness:session_start', adapter: 'fake', sessionId, model: request.model });
+    if (stopped()) return failed('aborted');
     if (answer.outcome === 'error') return failed(answer.message);
 
-    for (const text of answer.messages ?? []) emit({ type: 'agent:message', text });
+    for (const text of answer.messages ?? []) {
+      emit({ type: 'agent:message', text });
+      if (stopped()) return failed('aborted');
+    }
     const usage = answer.usage ?? { costUsd: 0 };
     const wanted = answer.turns ?? 1;
     const { maxTurns } = request.budget;
@@ -146,6 +154,7 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
         },
         costUsdSoFar: soFar.costUsd,
       });
+      if (stopped()) return failed('aborted');
     }
     if (wanted > maxTurns) return failed(`budget exceeded: maxTurns ${maxTurns}`);
     // Every turn ran, so all of it is spent, exactly as scripted.
