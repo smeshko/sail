@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions, TicketSource } from '../../ports/ticket-source';
-import { Attachment, Comment, Link, type Ticket, type TicketMove, TicketState } from '../../ports/types';
+import { Attachment, Comment, Link, type Ticket, TicketMove, TicketState } from '../../ports/types';
 import { createStore } from './store';
 
 export interface FakeTicketSourceOptions extends ProviderOptions {
@@ -95,6 +95,10 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       return result;
     },
     async update(ticketKey, change) {
+      // A move from outside TypeScript, such as `sail port`, is checked before it reaches the state file.
+      if (!TicketMove.safeParse(change.state).success) {
+        throw new PortError('ticketSource', 'update', 'invalid', `${String(change.state)} is not a move`);
+      }
       const moved = store.change((world) => {
         const ticket = find(world, 'update', ticketKey);
         ticket.state = { ...STATES[change.state] };

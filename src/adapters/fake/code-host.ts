@@ -6,7 +6,14 @@ import type { ProviderEvent } from '../../events/types';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
-import { CheckStatus, Comment, type Labelled, type MergeResult, type PullRequest } from '../../ports/types';
+import {
+  CheckStatus,
+  Comment,
+  type Labelled,
+  MergeMethod,
+  type MergeResult,
+  type PullRequest,
+} from '../../ports/types';
 import { createStore } from './store';
 
 export interface FakeCodeHostOptions extends ProviderOptions {
@@ -182,6 +189,10 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       return checks;
     },
     async merge(number, method) {
+      // A method from outside TypeScript, such as `sail port`, is checked before anything merges.
+      if (!MergeMethod.safeParse(method).success) {
+        throw new PortError('codeHost', 'merge', 'invalid', `${String(method)} is not a merge method`);
+      }
       const { result, merged } = store.change((world): { result: MergeResult; merged: boolean } => {
         const pr = find(world, 'merge', number);
         // A merge already reported is reported again, but announced only the first time.
