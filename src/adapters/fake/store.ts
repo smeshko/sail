@@ -3,8 +3,8 @@
 // next. The seed is never written, so running the fixture repository in place leaves git clean.
 //
 // A change holds `<state>.lock` from its read to its write, so changes made in several processes at once each see the
-// one before: two claims of one ticket can't both take it. A lock left by a process that died holding it is taken over.
-import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+// one before: two claims of one ticket can't both take it. A lock left by a process that died holding it is broken.
+import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { z } from 'zod';
 import type { Port } from '../../engine/config';
@@ -44,40 +44,40 @@ function holderOf(lock: string): number | undefined {
   return Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
-/**
- * Takes `lock` for this process, by linking a written file to it so it never holds a partial pid. False when another
- * process holds it. A dead holder's lock is moved aside, checked to be the one judged dead, and dropped, and the caller
- * tries again.
- */
-function tryLock(lock: string): boolean {
-  const mine = `${lock}.${process.pid}`;
+/** Creates `file` holding this process's pid, by linking a written file to it so it never holds a partial pid. */
+function create(file: string): boolean {
+  const mine = `${file}.${process.pid}`;
   writeFileSync(mine, `${process.pid}\n`);
   try {
-    linkSync(mine, lock);
+    linkSync(mine, file);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw error;
   } finally {
     rmSync(mine, { force: true });
   }
+}
+
+/**
+ * Takes `lock` for this process. False when another process holds it. A lock whose holder has died is removed, and the
+ * caller tries again. Only the process holding `<lock>.break` removes one, after checking the lock still names the dead
+ * pid, so a live writer's lock is never moved or removed. A breaker left by a process that died breaking stays, and the
+ * changes that find a dead holder fail as `unavailable` until it is removed by hand.
+ */
+function tryLock(lock: string): boolean {
+  if (create(lock)) return true;
   const dead = holderOf(lock);
   if (dead === undefined || isAlive(dead)) return false;
-  const aside = `${lock}.${process.pid}.stale`;
+  const breaker = `${lock}.break`;
+  if (!create(breaker)) return false;
   try {
-    renameSync(lock, aside);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw error;
+    // While this process holds the breaker the lock can't change: its holder is dead, no other process may break it,
+    // and a new lock is only made where there is none.
+    if (holderOf(lock) === dead) rmSync(lock, { force: true });
+  } finally {
+    rmSync(breaker, { force: true });
   }
-  // Another process's fresh lock moved aside in the dead one's place goes back, unless a third has locked meanwhile.
-  if (holderOf(aside) !== dead) {
-    try {
-      linkSync(aside, lock);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-  }
-  rmSync(aside, { force: true });
   return false;
 }
 
