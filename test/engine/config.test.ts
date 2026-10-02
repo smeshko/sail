@@ -104,10 +104,10 @@ test
 test
   .skip // TDD-PENDING TASK-001
   ('the grammar accepts caret, tilde, x-ranges, wildcards, equals, unions and hyphen ranges, and the version still decides', () => {
-  const ranges = ['^1', '~1.2', '1.x', '*', '=1.5.0', '>=1.0 <2 || >=3', '1.0.0 - 2.0.0', '^2'];
+  const ranges = ['^1', '~1.5', '1.x', '*', '=1.5.0', '>=1.0 <2 || >=3', '1.0.0 - 2.0.0', '^2'];
   expect(Object.fromEntries(ranges.map((range) => [range, verdict(range)]))).toEqual({
     '^1': 'accepted',
-    '~1.2': 'accepted',
+    '~1.5': 'accepted',
     '1.x': 'accepted',
     '*': 'accepted',
     '=1.5.0': 'accepted',
