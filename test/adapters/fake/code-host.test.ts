@@ -90,6 +90,19 @@ test('a merge scripted pending or refused says so, leaves the pull request open,
   expect(capture.events).toEqual([]);
 });
 
+test("a push to an open pull request's branch moves its head, and its scripted checks start again", async () => {
+  const host = createFakeCodeHost({ ...files(), env: repo().env });
+  const reads = [(await host.checks(4)).checks, (await host.checks(4)).checks];
+  const { headSha } = await host.push(repo().dir, 'sail/FAKE-4');
+  const after = await host.checks(4);
+  expect({
+    reads: reads.map((checks) => checks[0]?.status),
+    pushed: headSha === repo().git('rev-parse', 'HEAD'),
+    pr: (await host.getPullRequest(4)).headSha,
+    checks: [after.headSha, after.checks[0]?.status],
+  }).toEqual({ reads: ['pending', 'failed'], pushed: true, pr: headSha, checks: [headSha, 'pending'] });
+});
+
 test('opening from a head never pushed, or pushing from outside a git checkout, is invalid', async () => {
   const host = createFakeCodeHost({ ...files(), env: repo().env });
   const errors = [
