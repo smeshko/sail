@@ -105,7 +105,8 @@ export type MergeResult = z.infer<typeof MergeResult>;
 
 // Leases
 
-export const LeaseHolder = z.object({ runId: z.string(), runDir: z.string(), pid: z.number().int() });
+/** The run taking a lease. `pid` names a process: 0 and below would signal a process group, which always reads alive. */
+export const LeaseHolder = z.object({ runId: z.string().min(1), runDir: z.string(), pid: z.number().int().positive() });
 export type LeaseHolder = z.infer<typeof LeaseHolder>;
 
 export const Lease = LeaseHolder.extend({ remote: z.string(), branch: z.string(), takenAt: z.string() });

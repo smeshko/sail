@@ -10,7 +10,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readStatus } from '../engine/run-dir';
 import { PortError } from '../ports/errors';
-import { Lease, type LeaseHolder, type LeaseResult, type Released } from '../ports/types';
+import { Lease, LeaseHolder, type LeaseResult, type Released } from '../ports/types';
 
 /** Where leases live unless a caller names a directory. Computed per call, so importing this reads nothing. */
 export function defaultLeasesDir(): string {
@@ -130,9 +130,15 @@ export function takeLease(
   holder: LeaseHolder,
   now = new Date(),
 ): LeaseResult {
+  // A holder that isn't one would write a file every later taker reads as invalid, blocking the branch.
+  const checked = LeaseHolder.safeParse(holder);
+  if (!checked.success) {
+    const [issue] = checked.error.issues;
+    throw new PortError('workspace', 'lease', 'invalid', `holder: ${issue?.path.join('.')} ${issue?.message}`);
+  }
   mkdirSync(dir, { recursive: true });
   const file = leaseFile(dir, remote, branch);
-  const { runId, runDir, pid } = holder;
+  const { runId, runDir, pid } = checked.data;
   const lease: Lease = { remote, branch, runId, runDir, pid, takenAt: now.toISOString() };
   // A second round only follows another taker winning a step of the first.
   for (let round = 0; round < 2; round++) {
