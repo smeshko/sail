@@ -144,6 +144,30 @@ test('a lease file that is not a lease is invalid, naming the file', () => {
   expect(messageOf(error)).toContain(leaseFile(dir, REMOTE, BRANCH));
 });
 
+test.each([
+  ['a pid of 0', { pid: 0 }, 'holder: pid'],
+  ['a negative pid', { pid: -1 }, 'holder: pid'],
+  ['no pid', { pid: undefined }, 'holder: pid'],
+  ['an empty run id', { runId: '' }, 'holder: runId'],
+] as const)('a holder with %s is invalid, and leaves no lease file to block the branch', (_, change, message) => {
+  const dir = tempDir();
+  const holder = { ...run('r1', process.pid, 'running'), ...change } as LeaseHolder;
+  const error = caught(() => takeLease(dir, REMOTE, BRANCH, holder, NOW));
+  expect(portFailure(error)).toEqual({ port: 'workspace', op: 'lease', code: 'invalid' });
+  expect(messageOf(error)).toContain(message);
+  expect(existsSync(leaseFile(dir, REMOTE, BRANCH))).toBe(false);
+});
+
+test('a lease file naming pid 0 is invalid: it would read alive forever', () => {
+  const dir = tempDir();
+  writeFileSync(leaseFile(dir, REMOTE, BRANCH), JSON.stringify(leaseOf(run('r1', 0, 'running'), NOW)));
+  expect(portFailure(caught(() => readLease(dir, REMOTE, BRANCH)))).toEqual({
+    port: 'workspace',
+    op: 'lease',
+    code: 'invalid',
+  });
+});
+
 test('leases live in ~/.sail/leases unless a caller names a directory', () => {
   expect(defaultLeasesDir()).toBe(join(homedir(), '.sail', 'leases'));
 });
