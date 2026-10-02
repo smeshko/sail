@@ -14,11 +14,12 @@ import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import type { PortAdapters } from '../ports/adapter';
 import type { ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
-import { type ProjectConfig, readConfig } from './config';
+import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { createJournal } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { createRunDir, LOCAL_SOURCE, type RunStatus, readStatus, runsDir, type Source, writeStatus } from './run-dir';
 import {
+  type AdapterEntry,
   assertRunHeader,
   buildRunHeader,
   RUN_HEADER_FILE,
@@ -172,6 +173,18 @@ export function findRun(
   return { dir, header: readRunHeader(dir), status };
 }
 
+/** One line per port whose adapter, by `use` or `origin`, differs from the one the run started with. */
+export function changedAdapters(header: RunHeader, entries: Record<Port, AdapterEntry>): string[] {
+  const named = ({ use, origin }: AdapterEntry) => `${use} (${origin})`;
+  return PORTS.filter((port) => {
+    const was = header.adapters[port];
+    return was.use !== entries[port].use || was.origin !== entries[port].origin;
+  }).map(
+    (port) =>
+      `${port}: the run started with ${named(header.adapters[port])}, and .sail/project.yaml now names ${named(entries[port])}`,
+  );
+}
+
 /** Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. */
 export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, runId } = options;
@@ -179,6 +192,8 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in found) return found;
   const run = findRun(found.dir, runId);
   if ('refused' in run) return run;
+  const changed = changedAdapters(run.header, options.adapters.entries);
+  if (changed.length > 0) return { refused: `run ${runId} can't resume on different adapters:\n${changed.join('\n')}` };
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, run.header.workflow.name);
   if ('refused' in loaded) return loaded;

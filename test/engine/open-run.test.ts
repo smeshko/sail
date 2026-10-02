@@ -442,10 +442,7 @@ test('openRun writes the adapter entries it is handed into run.json, and hands t
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('reopenRun refuses a run whose adapter changed, naming the port and both adapters, and leaves STATUS and events as they were', async () => {
+test('reopenRun refuses a run whose adapter changed, naming the port and both adapters, and leaves STATUS and events as they were', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', run.runId);
@@ -479,10 +476,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('reopenRun gives one line per changed port, in port order', async () => {
+test('reopenRun gives one line per changed port, in port order', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
     const handed = await fakeAdapters(repo.dir);

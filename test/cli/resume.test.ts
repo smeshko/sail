@@ -248,10 +248,7 @@ test('Ctrl-C during sail resume suspends the run again, and names the resume aga
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail resume refuses a run whose harness the config now swaps, leaves the run as it was, and resumes once the config is swapped back', async () => {
+test('sail resume refuses a run whose harness the config now swaps, leaves the run as it was, and resumes once the config is swapped back', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const sail = join(repo.dir, '.sail');
