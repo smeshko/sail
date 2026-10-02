@@ -80,10 +80,7 @@ function verdict(range: string, version = '1.5.0'): unknown {
   return 'issues' in config ? config.issues : 'accepted';
 }
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a range the running sail does not satisfy is one issue at /sail, naming the range and the version', () => {
+test('a range the running sail does not satisfy is one issue at /sail, naming the range and the version', () => {
   const issue = (version: string) => [
     { path: '/sail', message: `is '>=1.0 <2', which sail ${version} doesn't satisfy` },
   ];
@@ -92,18 +89,14 @@ test
   expect(config).toEqual({ issues: issue(pkg.version) });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each(['latest', '>=abc', 'not a range', '1.2.3.4'])
-  ('%s is one issue at /sail saying it is not a version range', (range) => {
-  expect(verdict(range)).toEqual([{ path: '/sail', message: `is '${range}', which is not a version range` }]);
-});
+test.each(['latest', '>=abc', 'not a range', '1.2.3.4'])(
+  '%s is one issue at /sail saying it is not a version range',
+  (range) => {
+    expect(verdict(range)).toEqual([{ path: '/sail', message: `is '${range}', which is not a version range` }]);
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('the grammar accepts caret, tilde, x-ranges, wildcards, equals, unions and hyphen ranges, and the version still decides', () => {
+test('the grammar accepts caret, tilde, x-ranges, wildcards, equals, unions and hyphen ranges, and the version still decides', () => {
   const ranges = ['^1', '~1.5', '1.x', '*', '=1.5.0', '>=1.0 <2 || >=3', '1.0.0 - 2.0.0', '^2'];
   expect(Object.fromEntries(ranges.map((range) => [range, verdict(range)]))).toEqual({
     '^1': 'accepted',
@@ -117,10 +110,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a project.yaml that breaks the schema returns the schema issues alone, and the range is checked once the schema holds', () => {
+test('a project.yaml that breaks the schema returns the schema issues alone, and the range is checked once the schema holds', () => {
   const broken = bare('latest').replace(/ {2}harness:.*\n/, '');
   expect(readConfig(sailDir(broken), '1.5.0')).toEqual({
     issues: [expect.objectContaining({ path: '/adapters/harness', message: 'is required' })],

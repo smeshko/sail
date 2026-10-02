@@ -402,10 +402,7 @@ test.each([[['stage']], [['stage', 'run']], [['stage', 'walk', 'x']]])(
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a sail range the running version does not satisfy is refused before anything is written', async () => {
+test('a sail range the running version does not satisfy is refused before anything is written', async () => {
   await withTempRepo(async (repo) => {
     const project = join(fixtureCopy(repo), 'project.yaml');
     writeFileSync(project, readFileSync(project, 'utf8').replace('>=0.0.0 <1', '>=1.0 <2'));

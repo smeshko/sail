@@ -276,10 +276,7 @@ test('a workflow that throws on import is refused, naming the file', async () =>
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a sail range the running version does not satisfy is refused, naming the file and /sail', async () => {
+test('a sail range the running version does not satisfy is refused, naming the file and /sail', async () => {
   await withTempRepo(async (repo) => {
     const project = join(copyFixture(repo.dir), 'project.yaml');
     writeFileSync(project, readFileSync(project, 'utf8').replace('>=0.0.0 <1', '>=1.0 <2'));
