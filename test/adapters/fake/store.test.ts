@@ -1,5 +1,5 @@
 // A file-backed fake's store (D1): a change holds the state file's lock from its read to its write, so changes made in
-// several processes at once each see the one before. A lock a dead process left is taken over, and a live one waited on.
+// several processes at once each see the one before. A lock a dead process left is broken, and a live one waited on.
 import { afterEach, expect, test } from 'bun:test';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,7 @@ import { caught, messageOf, portFailure } from '../../helpers/ports';
 
 const TICKET_SOURCE = join(import.meta.dir, '..', '..', '..', 'src', 'adapters', 'fake', 'ticket-source.ts');
 const SEED = join(import.meta.dir, '..', '..', 'fixtures', 'repo', '.sail', 'fake', 'tickets.json');
+const RACE = join(import.meta.dir, '..', '..', 'helpers', 'store-race.ts');
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -106,6 +107,30 @@ test('a lock left by a process that died holding it is taken over, and the chang
   ).toBe('changed');
   expect(JSON.parse(readFileSync(state, 'utf8'))).toEqual({ count: 1 });
   expect(existsSync(lock)).toBe(false);
+});
+
+test("breaking a dead holder's lock never touches a live one: a lock taken meanwhile is still its taker's", async () => {
+  const child = Bun.spawn([process.execPath, RACE, tempDir()], { stdout: 'pipe', stderr: 'pipe' });
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+  expect(JSON.parse(stdout)).toEqual({ a: 'unavailable', lock: 'B' });
+});
+
+test('a breaker left by a process that died breaking stops the dead lock being broken, and the change is unavailable', async () => {
+  const { store, state, lock } = counter(20);
+  const pid = `${await deadPid()}\n`;
+  writeFileSync(lock, pid);
+  writeFileSync(`${lock}.break`, pid);
+  expect(portFailure(caught(() => store.change(() => undefined)))).toEqual({
+    port: 'ticketSource',
+    op: 'change',
+    code: 'unavailable',
+  });
+  expect([readFileSync(lock, 'utf8'), existsSync(`${lock}.break`), existsSync(state)]).toEqual([pid, true, false]);
 });
 
 test('a lock a live process holds is waited on, then the change fails as unavailable, naming the lock and its pid', () => {
