@@ -8,7 +8,6 @@
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { replaceFile } from '../engine/durable';
 import { readStatus } from '../engine/run-dir';
 import { PortError } from '../ports/errors';
 import { Lease, type LeaseHolder, type LeaseResult, type Released } from '../ports/types';
@@ -94,8 +93,35 @@ function create(file: string, lease: Lease): boolean {
 }
 
 /**
+ * Drops the lease in `file` when it is still `read`: moves it aside under a name only `runId` uses, then checks that what
+ * moved is that lease, and not one another taker has just written in its place. False when the file held another lease,
+ * which is put back unless a third taker has created the file meanwhile, or when there was no file.
+ */
+function dropIfStill(file: string, read: Lease, runId: string): boolean {
+  const aside = `${file}.${runId}.aside`;
+  try {
+    renameSync(file, aside);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
+  }
+  const moved = readFile(aside);
+  const same = moved !== undefined && JSON.stringify(moved) === JSON.stringify(read);
+  if (!same) {
+    try {
+      linkSync(aside, file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+  }
+  rmSync(aside, { force: true });
+  return same;
+}
+
+/**
  * Leases `branch` of `remote` to `holder`: a new lease, a renewal by the same run (a resume), or a stale lease taken
- * over, with `took` naming the run it replaced. A lease a live run holds is refused, naming it.
+ * over, with `took` naming the run it replaced. A lease a live run holds is refused, naming it. A renewal or a takeover
+ * replaces only the lease it read, so one landing in between is never overwritten.
  */
 export function takeLease(
   dir: string,
@@ -115,46 +141,22 @@ export function takeLease(
       if (create(file, lease)) return { leased: true, lease, raw: lease };
       continue;
     }
-    if (held.runId === runId) {
-      replaceFile(file, text(lease));
-      return { leased: true, lease, raw: lease };
+    const renewal = held.runId === runId;
+    if (!renewal && !isStale(held)) return { leased: false, holder: held, raw: held };
+    if (dropIfStill(file, held, runId) && create(file, lease)) {
+      return renewal ? { leased: true, lease, raw: lease } : { leased: true, lease, took: held.runId, raw: lease };
     }
-    if (!isStale(held)) return { leased: false, holder: held, raw: held };
-
-    // Take the stale lease over: move it aside under a name only this run uses, then check that what moved is the
-    // lease judged stale, and not one another taker has just written in its place.
-    const aside = `${file}.${runId}.stale`;
-    try {
-      renameSync(file, aside);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-      throw error;
-    }
-    const moved = readFile(aside);
-    if (moved !== undefined && JSON.stringify(moved) === JSON.stringify(held)) {
-      const took = create(file, lease);
-      rmSync(aside, { force: true });
-      if (took) return { leased: true, lease, took: held.runId, raw: lease };
-      continue;
-    }
-    // Another taker's fresh lease: put it back, unless a third has created the file meanwhile.
-    try {
-      linkSync(aside, file);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    rmSync(aside, { force: true });
   }
   const current = readFile(file);
   if (current !== undefined) return { leased: false, holder: current, raw: current };
   throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
 }
 
-/** Removes the lease, only when `runId` holds it. */
+/** Removes the lease, only when `runId` holds it: a lease taken over since it was read is left to its new holder. */
 export function releaseLease(dir: string, remote: string, branch: string, runId: string): Released {
   const file = leaseFile(dir, remote, branch);
   const held = readFile(file);
   if (held === undefined || held.runId !== runId) return { released: false, raw: held ?? null };
-  rmSync(file, { force: true });
-  return { released: true, raw: held };
+  if (dropIfStill(file, held, runId)) return { released: true, raw: held };
+  return { released: false, raw: readFile(file) ?? null };
 }
