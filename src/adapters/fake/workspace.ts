@@ -3,7 +3,7 @@
 // fetching nothing. The branch is never checked out: a workspace records it for the later push of `HEAD:<branch>`, so
 // only the lease keeps two runs of one branch apart (ADR-0018).
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { readStatus } from '../../engine/run-dir';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
@@ -54,9 +54,10 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       return { code: -1, stdout: '', stderr: (error as Error).message };
     }
   };
+  // git runs in the repository, but a caller's paths are its own, relative to where it runs: git is handed them resolved.
   /** Removes the worktree at `path` from the repository, and fails only when it is still there. */
   const remove = (op: string, path: string): GitResult => {
-    const removed = git(options.repo, 'worktree', 'remove', '--force', path);
+    const removed = git(options.repo, 'worktree', 'remove', '--force', resolve(path));
     git(options.repo, 'worktree', 'prune');
     if (removed.code !== 0 && existsSync(path)) throw new PortError('workspace', op, 'unavailable', removed.stderr);
     return removed;
@@ -82,7 +83,7 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       if (resolved.code !== 0) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
       const baseSha = resolved.stdout.trim();
       const path = join(run.runDir, 'workspace');
-      const added = git(options.repo, 'worktree', 'add', '--detach', path, baseSha);
+      const added = git(options.repo, 'worktree', 'add', '--detach', resolve(path), baseSha);
       if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
       emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
       return { path, branch, baseSha, raw: added };
