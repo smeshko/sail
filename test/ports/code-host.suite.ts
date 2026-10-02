@@ -115,6 +115,28 @@ export function codeHostSuite(label: string, make: MakeCodeHost): void {
     expectValidEvents(capture);
   });
 
+  test(`${label}: a second pull request from an open one's head into its base rejects as a conflict`, async () => {
+    const { adapter, world, capture } = await start();
+    const { cwd, branch } = await world.pushable();
+    await adapter.push(cwd, branch);
+    const request = { base: world.base, head: branch, title: 'Add a --shout flag', body: '' };
+    const first = await adapter.openPullRequest(request);
+    const opened = capture.events.length;
+    const error = await rejection(adapter.openPullRequest({ ...request, title: 'Again' }));
+    expect(portFailure(error)).toEqual({ port: 'codeHost', op: 'openPullRequest', code: 'conflict' });
+    expect((await adapter.getPullRequest(first.number)).title).toBe('Add a --shout flag');
+    expect(capture.events).toHaveLength(opened);
+  });
+
+  test(`${label}: a draft's merge is refused, and it stays open with nothing emitted`, async () => {
+    const { adapter, world, capture } = await start();
+    const result = await adapter.merge(world.draft, 'squash');
+    expect(parseIssues(MergeResult, result)).toEqual([]);
+    expect(result.state).toBe('refused');
+    expect((await adapter.getPullRequest(world.draft)).state).toBe('open');
+    expect(capture.events).toEqual([]);
+  });
+
   test(`${label}: listDesignated holds the designated pull request, but not the draft`, async () => {
     const { adapter, world } = await start();
     const listed = await adapter.listDesignated(world.label);
