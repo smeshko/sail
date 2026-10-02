@@ -193,7 +193,8 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
       } catch (error) {
         // A harness never rejects (ADR-0008): a file that can't be written, or an onEvent that throws, is an error. It
         // carries what the session spent, and a session that started still ends, unless its onEvent won't listen.
-        const message = `fake harness: ${(error as Error).message}`;
+        // Whatever was thrown, an Error or not, null and undefined included.
+        const message = `fake harness: ${error instanceof Error ? error.message : String(error)}`;
         if (progress.started && !progress.ended) {
           try {
             request.onEvent?.({ type: 'error:harness', message });
