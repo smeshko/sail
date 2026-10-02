@@ -17,6 +17,7 @@ import { isPlainName } from './call-dir';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { createJournal } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
+import { modelProblems } from './roster';
 import { createRunDir, LOCAL_SOURCE, type RunStatus, readStatus, runsDir, type Source, writeStatus } from './run-dir';
 import {
   type AdapterEntry,
@@ -116,6 +117,8 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, workflow);
   if ('refused' in loaded) return loaded;
+  const models = modelProblems(loaded, config);
+  if (models.length > 0) return { refused: models.join('\n') };
   const parsed = parseInput(loaded, options.input);
   if ('refused' in parsed) return parsed;
   const { input } = parsed;

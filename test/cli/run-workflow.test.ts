@@ -429,13 +429,15 @@ test('the adapters are resolved before the type-check: a missing token and a typ
   expect(code).toBe(EXIT_REFUSED);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a model alias the config does not define refuses the run with exit 3, naming the stages and the alias', async () => {
+test('a model alias the config does not define refuses the run with exit 3, naming the stages and the alias', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
-    edit(sail, 'project.yaml', 'models: { default: claude-sonnet-5, deep: claude-opus-5-5 }', 'models: { default: claude-sonnet-5 }');
+    edit(
+      sail,
+      'project.yaml',
+      'models: { default: claude-sonnet-5, deep: claude-opus-5-5 }',
+      'models: { default: claude-sonnet-5 }',
+    );
     const { code, stderr } = await runCaptured(['run'], repo.dir);
     expect(stderr).toContain("sail run: stage 'self-review' names the model alias 'deep'");
     expect(stderr).toContain("stage 'spec' names the model alias 'deep'");

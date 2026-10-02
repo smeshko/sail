@@ -497,14 +497,16 @@ test('reopenRun gives one line per changed port, in port order', async () => {
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('openRun refuses agent steps that name an undefined model alias, one line per stage, and makes no run directory', async () => {
+test('openRun refuses agent steps that name an undefined model alias, one line per stage, and makes no run directory', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const adapters = await fakeAdapters(repo.dir);
-    edit(sail, 'project.yaml', 'models: { default: claude-sonnet-5, deep: claude-opus-5-5 }', 'models: { default: claude-sonnet-5 }');
+    edit(
+      sail,
+      'project.yaml',
+      'models: { default: claude-sonnet-5, deep: claude-opus-5-5 }',
+      'models: { default: claude-sonnet-5 }',
+    );
     const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', adapters });
     expect(run).toEqual({
       refused: [
