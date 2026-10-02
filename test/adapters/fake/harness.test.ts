@@ -241,6 +241,33 @@ test('an error answer, or one over maxTurns, ends as error with its message, aft
   ]);
 });
 
+test('a session that fails after spending reports what it spent: the turns it ran, or all of them', async () => {
+  const usage = { costUsd: 0.4, inputTokens: 1000, outputTokens: 300 };
+  const harness = createFakeHarness({
+    script: {
+      tests: [{ outcome: 'done', output: {}, turns: 4, usage }],
+      review: [{ outcome: 'done', output: {}, turns: 2, usage, files: { 'review.md': 'ok' } }],
+    },
+  });
+  const over = captureEvents<HarnessEvent>();
+  const overTurns = await harness.run({
+    ...request('tests#1'),
+    budget: { maxTurns: 2, maxUsd: 1, maxMinutes: 5 },
+    onEvent: over.emit,
+  });
+  const noOut = await harness.run(request('review#1', 1, { STAGE_IN: tempDir() }));
+  const lastUpdate = over.events.findLast((event) => event.type === 'usage:update');
+  expect({
+    over: [overTurns.outcome, overTurns.usage],
+    lastCost: lastUpdate?.type === 'usage:update' ? lastUpdate.costUsdSoFar : undefined,
+    noOut: [noOut.outcome, noOut.usage],
+  }).toEqual({
+    over: ['error', { costUsd: 0.2, inputTokens: 500, outputTokens: 150 }],
+    lastCost: 0.2,
+    noOut: ['error', usage],
+  });
+});
+
 test('the fake declares structured output, usage, abort and a turns budget, and no permissions', () => {
   expect(createFakeHarness({ script: {} }).capabilities()).toEqual({
     structuredOutput: true,
