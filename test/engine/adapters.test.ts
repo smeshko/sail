@@ -371,25 +371,18 @@ async function withHarness(definition: object, env: Env = {}, made: string[] = [
 
 const harness = (members: object = {}) => ({ create: () => stubAdapter('harness'), ...members });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, Env]>([
-    ['unset', {}],
-    ['undefined', { A_TOKEN: undefined }],
-    ['empty', { A_TOKEN: '' }],
-  ])
-  ('a required variable that is %s is one issue, and no port is created', async (_, env) => {
+test.each<[string, Env]>([
+  ['unset', {}],
+  ['undefined', { A_TOKEN: undefined }],
+  ['empty', { A_TOKEN: '' }],
+])('a required variable that is %s is one issue, and no port is created', async (_, env) => {
   const made: string[] = [];
   const result = await withHarness(harness({ requires: () => ['A_TOKEN'] }), env, made);
   expect(result).toEqual(issue('harness', 'needs A_TOKEN, which is not set'));
   expect(made).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('every missing variable is reported, one issue each, in port order', async () => {
+test('every missing variable is reported, one issue each, in port order', async () => {
   const { sailDir } = repo();
   const builtins = {
     ...builtin('needy', 'ticketSource', { create: () => stubAdapter('ticketSource'), requires: () => ['T_KEY'] }),
@@ -405,10 +398,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("requires gets the entry's options and the environment, so one adapter can need a key unless a flag is set", async () => {
+test("requires gets the entry's options and the environment, so one adapter can need a key unless a flag is set", async () => {
   const seen: unknown[][] = [];
   const definition = harness({
     requires: (options: unknown, env: Env) => {
@@ -427,10 +417,7 @@ test
   expect(direct).toEqual(issue('harness', 'needs A_TOKEN, which is not set'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('with the variable set it resolves, and its value is in no entry', async () => {
+test('with the variable set it resolves, and its value is in no entry', async () => {
   const resolved = resolvedOrThrow(
     await withHarness(harness({ requires: () => ['A_TOKEN'] }), { A_TOKEN: 's3cr3t-token-value' }),
   );
@@ -438,36 +425,31 @@ test
   expect(JSON.stringify(resolved.entries)).not.toContain('s3cr3t-token-value');
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, () => unknown, string]>([
-    ['throws', () => { throw new Error('kaput'); }, "only's requires() failed: kaput"],
-    ['returns a string', () => 'A_TOKEN', "only's requires() must return environment variable names"],
-    ['returns an empty name', () => [''], "only's requires() must return environment variable names"],
-  ])
-  ('a requires that %s is one issue', async (_, requires, message) => {
+test.each<[string, () => unknown, string]>([
+  [
+    'throws',
+    () => {
+      throw new Error('kaput');
+    },
+    "only's requires() failed: kaput",
+  ],
+  ['returns a string', () => 'A_TOKEN', "only's requires() must return environment variable names"],
+  ['returns an empty name', () => [''], "only's requires() must return environment variable names"],
+])('a requires that %s is one issue', async (_, requires, message) => {
   expect(await withHarness(harness({ requires }))).toEqual(issue('harness', message));
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a declared versions is recorded in the entry, and a header carrying it validates against sail.run.v1', async () => {
+test('a declared versions is recorded in the entry, and a header carrying it validates against sail.run.v1', async () => {
   const resolved = resolvedOrThrow(await withHarness(harness({ versions: () => ({ echo: '1.0.0' }) })));
   expect(resolved.entries.harness).toEqual({ use: 'only', origin: 'builtin', versions: { echo: '1.0.0' } });
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as RunHeader;
   expect(validateRunHeader({ ...golden, adapters: resolved.entries })).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, object]>([
-    ['declares none', harness()],
-    ['declares an empty one', harness({ versions: () => ({}) })],
-  ])
-  ('an adapter that %s has an entry with no versions key, beside one that does', async (_, plain) => {
+test.each<[string, object]>([
+  ['declares none', harness()],
+  ['declares an empty one', harness({ versions: () => ({}) })],
+])('an adapter that %s has an entry with no versions key, beside one that does', async (_, plain) => {
   const { sailDir } = repo();
   const builtins = {
     ...builtin('plain', 'harness', plain),
@@ -483,13 +465,15 @@ test
   expect(Object.keys(resolved.entries.harness).sort()).toEqual(['origin', 'use']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, () => unknown, string]>([
-    ['throws', () => { throw new Error('oops'); }, "only's versions() failed: oops"],
-    ['returns a number as a version', () => ({ echo: 1 }), "only's versions() must return names and versions"],
-  ])
-  ('a versions that %s is one issue', async (_, versions, message) => {
+test.each<[string, () => unknown, string]>([
+  [
+    'throws',
+    () => {
+      throw new Error('oops');
+    },
+    "only's versions() failed: oops",
+  ],
+  ['returns a number as a version', () => ({ echo: 1 }), "only's versions() must return names and versions"],
+])('a versions that %s is one issue', async (_, versions, message) => {
   expect(await withHarness(harness({ versions }))).toEqual(issue('harness', message));
 });

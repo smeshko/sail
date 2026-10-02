@@ -81,6 +81,38 @@ async function find(port: Port, use: string, options: ResolveOptions): Promise<F
   return { definition, origin: origin(root, path) };
 }
 
+/** Pass 2: the issues for each environment variable `found` needs and `env` lacks. */
+function preflight(use: string, found: Found, options: AdapterOptions, env: Env): string[] {
+  if (found.definition.requires === undefined) return [];
+  let names: unknown;
+  try {
+    names = found.definition.requires(options, env);
+  } catch (error) {
+    return [`${use}'s requires() failed: ${message(error)}`];
+  }
+  if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || name === '')) {
+    return [`${use}'s requires() must return environment variable names`];
+  }
+  return names
+    .filter((name: string) => env[name] === undefined || env[name] === '')
+    .map((name) => `needs ${name}, which is not set`);
+}
+
+/** The versions `found` declares: none, or why its versions() can't be read. */
+function declared(use: string, found: Found): Record<string, string> | { issue: string } {
+  if (found.definition.versions === undefined) return {};
+  let versions: unknown;
+  try {
+    versions = found.definition.versions();
+  } catch (error) {
+    return { issue: `${use}'s versions() failed: ${message(error)}` };
+  }
+  if (!isObject(versions) || Object.values(versions).some((version) => typeof version !== 'string')) {
+    return { issue: `${use}'s versions() must return names and versions` };
+  }
+  return versions as Record<string, string>;
+}
+
 /** Pass 3: creates the adapter and checks it is its port's, or gives the issue. */
 async function build(
   port: Port,
@@ -138,17 +170,33 @@ export async function resolveAdapters(options: ResolveOptions): Promise<Resolved
   }
   if (issues.length > 0) return { issues };
 
+  for (const port of PORTS) {
+    const { use } = options.config.adapters[port];
+    for (const text of preflight(use, found[port], optionsOf(options.config.adapters[port]), options.env))
+      issue(port, text);
+  }
+  if (issues.length > 0) return { issues };
+
   const ports = {} as Record<Port, unknown>;
   const entries = {} as Record<Port, AdapterEntry>;
   for (const port of PORTS) {
     const { use } = options.config.adapters[port];
+    const versions = declared(use, found[port]);
+    if ('issue' in versions) {
+      issue(port, versions.issue);
+      continue;
+    }
     const built = await build(port, use, found[port], optionsOf(options.config.adapters[port]), options);
     if ('issue' in built) {
       issue(port, built.issue);
       continue;
     }
     ports[port] = built.adapter;
-    entries[port] = { use, origin: found[port].origin };
+    entries[port] = {
+      use,
+      origin: found[port].origin,
+      ...(Object.keys(versions).length === 0 ? {} : { versions }),
+    };
   }
   if (issues.length > 0) return { issues };
   return { ports: ports as unknown as PortAdapters, entries };
