@@ -35,7 +35,7 @@ type AsWritten = Omit<ProjectConfig, 'models' | 'budgets'> & Partial<Pick<Projec
  * Reads `<sailDir>/project.yaml`, or gives every way it is missing or breaks `sail.project.v1`. The caller sets each
  * issue's `file`, relative to where the user ran the command.
  */
-export function readConfig(sailDir: string): ProjectConfig | { issues: SchemaIssue[] } {
+export function readConfig(sailDir: string, _version?: string): ProjectConfig | { issues: SchemaIssue[] } {
   const issues = projectIssues(sailDir);
   if (issues.length > 0) return { issues };
   const data = Bun.YAML.parse(readFileSync(join(sailDir, 'project.yaml'), 'utf8')) as AsWritten;

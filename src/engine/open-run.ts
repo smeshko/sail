@@ -11,6 +11,8 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { z } from 'zod';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
+import type { PortAdapters } from '../ports/adapter';
+import type { ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
 import { type ProjectConfig, readConfig } from './config';
 import { createJournal } from './journal';
@@ -38,6 +40,8 @@ export interface OpenedRun {
   header: RunHeader;
   /** The absolute `.sail/` the run started from. */
   sailDir: string;
+  /** The adapters the run was opened with, one per port. */
+  adapters: PortAdapters;
   /** The workflow, with the stages it reaches: what the run replays. */
   loaded: LoadedWorkflow;
   /** `run.input`: the input, parsed with the intake's schema, or undefined when none was given. */
@@ -57,6 +61,8 @@ export interface OpenRunOptions {
   now?: Date;
   /** The run's input, checked against the intake's schema. It stands in for what intake builds until intake exists. */
   input?: unknown;
+  /** The four adapters, resolved from the config before anything else. */
+  adapters: ResolvedAdapters;
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */
@@ -114,7 +120,15 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const { input } = parsed;
 
   const runId = newRunId(source.ticketKey, now.getTime());
-  const header = buildRunHeader({ runId, source, sailDir: found.dir, loaded, config, now });
+  const header = buildRunHeader({
+    runId,
+    source,
+    sailDir: found.dir,
+    loaded,
+    config,
+    adapters: options.adapters.entries,
+    now,
+  });
   assertRunHeader(header);
 
   const dir = createRunDir(found.dir, runId);
@@ -122,7 +136,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   createJournal(dir);
   createEventsFile(dir);
   writeStatus(dir, 'running');
-  return { runId, dir, header, sailDir: found.dir, loaded, input, firstSeq: 1 };
+  return { runId, dir, header, sailDir: found.dir, adapters: options.adapters.ports, loaded, input, firstSeq: 1 };
 }
 
 export interface ReopenRunOptions {
@@ -132,6 +146,8 @@ export interface ReopenRunOptions {
   runId: string;
   /** The run's input, checked against the intake's schema as on a fresh start. */
   input?: unknown;
+  /** The four adapters, resolved from the config before anything else. */
+  adapters: ResolvedAdapters;
 }
 
 /**
@@ -173,5 +189,14 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if (typeof firstSeq !== 'number') return firstSeq;
 
   writeStatus(run.dir, 'running');
-  return { runId, dir: run.dir, header: run.header, sailDir: found.dir, loaded, input: parsed.input, firstSeq };
+  return {
+    runId,
+    dir: run.dir,
+    header: run.header,
+    sailDir: found.dir,
+    adapters: options.adapters.ports,
+    loaded,
+    input: parsed.input,
+    firstSeq,
+  };
 }

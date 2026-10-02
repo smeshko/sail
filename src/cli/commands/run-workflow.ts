@@ -8,6 +8,8 @@
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { join, relative } from 'node:path';
+import { BUILTINS } from '../../adapters/index';
+import { type ResolvedAdapters, resolveAdapters } from '../../engine/adapters';
 import { type ProjectConfig, readConfig } from '../../engine/config';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { runsDir } from '../../engine/run-dir';
@@ -55,17 +57,33 @@ export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | 
   return quiet ? 'quiet' : 'normal';
 }
 
-/** `.sail/`, found from where sail runs, and its config. A config with issues prints each and refuses. */
-export function findProject(io: Io, command: string): { sailDir: string; config: ProjectConfig } | ExitCode {
+/**
+ * `.sail/`, found from where sail runs, its config and the adapters it names. A config or an adapter with issues prints
+ * each and refuses.
+ */
+export async function findProject(
+  io: Io,
+  command: string,
+): Promise<{ sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters } | ExitCode> {
   const found = findSailDir(io.cwd);
   if ('refused' in found) return refuseAs(io, command)(found.refused);
   const config = readConfig(found.dir);
+  const file = at(io, join(found.dir, 'project.yaml'));
   if ('issues' in config) {
-    const file = at(io, join(found.dir, 'project.yaml'));
     for (const issue of config.issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);
     return EXIT_REFUSED;
   }
-  return { sailDir: found.dir, config };
+  const adapters = await resolveAdapters({
+    sailDir: found.dir,
+    config,
+    builtins: BUILTINS,
+    env: io.env ?? process.env,
+  });
+  if ('issues' in adapters) {
+    for (const issue of adapters.issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);
+    return EXIT_REFUSED;
+  }
+  return { sailDir: found.dir, config, adapters };
 }
 
 /**
@@ -142,7 +160,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   if (typeof given === 'number') return given;
   const verbosity = verbosityOf(args, io, COMMAND);
   if (typeof verbosity === 'number') return verbosity;
-  const project = findProject(io, COMMAND);
+  const project = await findProject(io, COMMAND);
   if (typeof project === 'number') return project;
 
   const named = args.values.workflow;
@@ -160,6 +178,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
       cwd: io.cwd,
       workflow,
       ...(given.input === undefined ? {} : { input: given.input }),
+      adapters: project.adapters,
       signal,
       consumers: [terminal],
     }).finally(() => terminal.close()),

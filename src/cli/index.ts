@@ -18,6 +18,8 @@ export interface Io {
   onInterrupt?(handler: () => void): () => void;
   /** Present when stdout is an interactive terminal: colour and the live line. */
   tty?: Tty;
+  /** The environment the command runs in. Falls back to `process.env` when left out. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.

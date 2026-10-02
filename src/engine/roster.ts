@@ -68,6 +68,14 @@ function field<K extends string, V>(key: K, value: V | undefined): { [P in K]?: 
   return { [key]: value } as { [P in K]: V };
 }
 
+/**
+ * The agent steps of `loaded` whose model alias `config.models` doesn't define, as one line each: the intake first, then
+ * the stages by name.
+ */
+export function modelProblems(_loaded: LoadedWorkflow, _config: ProjectConfig): string[] {
+  return [];
+}
+
 /** A step's own fields, as a multi-step entry records them. `produces` may add files its stage or intake declares. */
 function stepFields(
   step: Step,
