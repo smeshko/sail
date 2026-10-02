@@ -65,6 +65,13 @@ function spentBy(usage: Usage, turn: number, wanted: number): Usage {
   return spent;
 }
 
+/** How far a session has got, so a failure it didn't foresee can still report what it spent and end it. */
+interface Progress {
+  started: boolean;
+  ended: boolean;
+  spent: Usage;
+}
+
 /** Where each of `files` lands in `out`, or the first name that would land outside it. */
 function placeFiles(out: string, files: Record<string, string>): { paths: [string, string][] } | { outside: string } {
   const paths: [string, string][] = [];
@@ -88,12 +95,12 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     }
   };
 
-  async function session(request: HarnessRequest, sessionId: string): Promise<HarnessResult> {
-    const fail = (message: string, raw: HarnessResult['raw'] = null, usage: Usage = { costUsd: 0 }): HarnessResult => ({
+  async function session(request: HarnessRequest, sessionId: string, progress: Progress): Promise<HarnessResult> {
+    const fail = (message: string, raw: HarnessResult['raw'] = null): HarnessResult => ({
       outcome: 'error',
       message,
       sessionId,
-      usage,
+      usage: progress.spent,
       transcript: '',
       raw,
     });
@@ -107,15 +114,17 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
 
     const emit = (event: HarnessEvent) => request.onEvent?.(event);
     const end = (result: HarnessResult): HarnessResult => {
+      progress.ended = true;
       emit({ type: 'harness:session_end', outcome: result.outcome });
       return result;
     };
     /** Fails with what the session has spent so far, so a failure after turns still counts their cost. */
-    const failed = (message: string, spent?: Usage): HarnessResult => {
+    const failed = (message: string): HarnessResult => {
       emit({ type: 'error:harness', message });
-      return end(fail(message, answer, spent));
+      return end(fail(message, answer));
     };
 
+    progress.started = true;
     emit({ type: 'harness:session_start', adapter: 'fake', sessionId, model: request.model });
     if (answer.outcome === 'error') return failed(answer.message);
 
@@ -125,6 +134,7 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     const { maxTurns } = request.budget;
     for (let turn = 1; turn <= Math.min(wanted, maxTurns); turn++) {
       const soFar = spentBy(usage, turn, wanted);
+      progress.spent = soFar;
       emit({
         type: 'usage:update',
         turn,
@@ -137,18 +147,18 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
         costUsdSoFar: soFar.costUsd,
       });
     }
-    if (wanted > maxTurns) {
-      return failed(`budget exceeded: maxTurns ${maxTurns}`, spentBy(usage, maxTurns, wanted));
-    }
+    if (wanted > maxTurns) return failed(`budget exceeded: maxTurns ${maxTurns}`);
+    // Every turn ran, so all of it is spent, exactly as scripted.
+    progress.spent = usage;
 
     if (answer.outcome === 'done' && answer.delayMs !== undefined && (await wait(answer.delayMs, request.signal))) {
-      return failed('aborted', usage);
+      return failed('aborted');
     }
     if (answer.outcome === 'done' && answer.files !== undefined) {
       const out = request.env.STAGE_OUT;
-      if (out === undefined) return failed('fake harness: files need STAGE_OUT', usage);
+      if (out === undefined) return failed('fake harness: files need STAGE_OUT');
       const placed = placeFiles(out, answer.files);
-      if ('outside' in placed) return failed(`fake harness: ${placed.outside} is outside STAGE_OUT`, usage);
+      if ('outside' in placed) return failed(`fake harness: ${placed.outside} is outside STAGE_OUT`);
       for (const [path, text] of placed.paths) {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, text);
@@ -168,12 +178,22 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     name: 'fake',
     async run(request) {
       const sessionId = sessionIdOf(request);
+      const progress: Progress = { started: false, ended: false, spent: { costUsd: 0 } };
       try {
-        return await session(request, sessionId);
+        return await session(request, sessionId, progress);
       } catch (error) {
-        // A harness never rejects (ADR-0008): a file that can't be written, or an onEvent that throws, is an error.
+        // A harness never rejects (ADR-0008): a file that can't be written, or an onEvent that throws, is an error. It
+        // carries what the session spent, and a session that started still ends, unless its onEvent won't listen.
         const message = `fake harness: ${(error as Error).message}`;
-        return { outcome: 'error', message, sessionId, usage: { costUsd: 0 }, transcript: '', raw: null };
+        if (progress.started && !progress.ended) {
+          try {
+            request.onEvent?.({ type: 'error:harness', message });
+            request.onEvent?.({ type: 'harness:session_end', outcome: 'error' });
+          } catch {
+            // An onEvent that throws hears no more.
+          }
+        }
+        return { outcome: 'error', message, sessionId, usage: progress.spent, transcript: '', raw: null };
       }
     },
     capabilities: () => ({ structuredOutput: true, permissions: false, usage: true, abort: true, budgets: ['turns'] }),
