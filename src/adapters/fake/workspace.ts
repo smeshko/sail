@@ -88,9 +88,25 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       return { path, branch, baseSha, raw: added };
     },
     async diff(path, from) {
-      const diffed = git(path, 'diff', from);
-      if (diffed.code !== 0) throw new PortError('workspace', 'diff', 'invalid', `${path}: ${diffed.stderr}`);
-      return { patch: diffed.stdout, raw: diffed };
+      const resolved = git(path, 'rev-parse', '--verify', '--quiet', `${from}^{commit}`);
+      if (resolved.code !== 0) {
+        throw new PortError('workspace', 'diff', 'invalid', `${path}: ${from} names no commit ${resolved.stderr}`);
+      }
+      const tracked = git(path, 'diff', '--binary', resolved.stdout.trim(), '--');
+      if (tracked.code !== 0) throw new PortError('workspace', 'diff', 'unavailable', `${path}: ${tracked.stderr}`);
+      // A file the run created is part of the working tree too. Each new file that isn't ignored is diffed against
+      // nothing, which leaves the index alone; `--no-index` exits 1 when the two differ, as a new file always does.
+      const listed = git(path, 'ls-files', '--others', '--exclude-standard', '-z');
+      const created = listed.stdout
+        .split('\0')
+        .filter((file) => file !== '')
+        .map((file) => git(path, 'diff', '--no-index', '--binary', '--', '/dev/null', file));
+      const failed = created.find((result) => result.code !== 1);
+      if (listed.code !== 0 || failed !== undefined) {
+        throw new PortError('workspace', 'diff', 'unavailable', `${path}: ${(failed ?? listed).stderr}`);
+      }
+      const patch = tracked.stdout + created.map((result) => result.stdout).join('');
+      return { patch, raw: { tracked, created } };
     },
     async release(run, keep) {
       const path = join(run.runDir, 'workspace');

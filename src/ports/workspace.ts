@@ -25,7 +25,7 @@ export interface WorkspacePort {
   releaseLease(remote: string, branch: string, runId: string): Promise<Released>;
   /** A detached checkout of `base`, recording `branch` for the later push. Emits `workspace:created`. */
   create(run: RunRef, from: { readonly base: string; readonly branch: string }): Promise<Workspace>;
-  /** The working tree at `path` against `from`. */
+  /** The working tree at `path` against `from`, as a patch that applies to `from`: new files included, ignored ones not. */
   diff(path: string, from: string): Promise<Diff>;
   /** Removes the run's workspace unless `keep`. Emits `workspace:released`. */
   release(run: RunRef, keep: boolean): Promise<WorkspaceReleased>;
