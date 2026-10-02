@@ -3,7 +3,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { createFakeWorkspace } from '../../../src/adapters/fake/workspace';
 import { defaultLeasesDir, readLease } from '../../../src/adapters/leases';
 import { writeStatus } from '../../../src/engine/run-dir';
@@ -94,6 +94,19 @@ test('a released workspace is gone from git worktree list too', async () => {
   const before = listed();
   await workspace.release(run, false);
   expect([before, listed()]).toEqual([true, false]);
+});
+
+test("a relative run directory is the caller's, not the stand-in repository's: the workspace lands, diffs and goes there", async () => {
+  const w = world();
+  const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
+  const absolute = await w.run('r1');
+  const run = { ...absolute, runDir: relative(process.cwd(), absolute.runDir) };
+  const created = await workspace.create(run, { base: 'main', branch: 'sail/FAKE-1' });
+  expect(created.path).toBe(join(run.runDir, 'workspace'));
+  expect(w.git(join(absolute.runDir, 'workspace'), 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: created.baseSha });
+  expect((await workspace.diff(created.path, created.baseSha)).patch).toBe('');
+  await workspace.release(run, false);
+  expect(existsSync(join(absolute.runDir, 'workspace'))).toBe(false);
 });
 
 test('the fake declares keep and sweep', () => {
