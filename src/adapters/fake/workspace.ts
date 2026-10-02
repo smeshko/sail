@@ -22,6 +22,7 @@ export interface FakeWorkspaceOptions extends ProviderOptions {
 
 interface GitResult {
   readonly code: number;
+  /** As git wrote it: a patch's trailing newline and whitespace are part of it. */
   readonly stdout: string;
   readonly stderr: string;
 }
@@ -45,7 +46,7 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       const result = Bun.spawnSync(['git', ...args], { cwd, ...(options.env ? { env: { ...options.env } } : {}) });
       return {
         code: result.exitCode,
-        stdout: result.stdout.toString().trim(),
+        stdout: result.stdout.toString(),
         stderr: result.stderr.toString().trim(),
       };
     } catch (error) {
@@ -79,7 +80,7 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       const started = now().getTime();
       const resolved = git(options.repo, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`);
       if (resolved.code !== 0) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
-      const baseSha = resolved.stdout;
+      const baseSha = resolved.stdout.trim();
       const path = join(run.runDir, 'workspace');
       const added = git(options.repo, 'worktree', 'add', '--detach', path, baseSha);
       if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
