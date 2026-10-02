@@ -102,20 +102,14 @@ const harnessModule = (extra = '') =>
 
 // TASK-004
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('all four ports on the fake resolve to four adapters named fake, and four builtin entries', async () => {
+test('all four ports on the fake resolve to four adapters named fake, and four builtin entries', async () => {
   const { sailDir } = repo();
   const resolved = resolvedOrThrow(await resolve(sailDir, {}));
   expect(PORTS.map((port) => resolved.ports[port]?.name)).toEqual(['fake', 'fake', 'fake', 'fake']);
   expect(resolved.entries).toEqual({ ticketSource: FAKE, codeHost: FAKE, harness: FAKE, workspace: FAKE });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a module harness gets its entry's options and a context, and its entry names the module as its origin", async () => {
+test("a module harness gets its entry's options and a context, and its entry names the module as its origin", async () => {
   const { root, sailDir } = repo();
   write(
     sailDir,
@@ -140,10 +134,7 @@ test
   expect(seen.context.emit).toBe(emit);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a module whose create is async is awaited, and a module that imports sail loads', async () => {
+test('a module whose create is async is awaited, and a module that imports sail loads', async () => {
   const { sailDir } = repo();
   write(
     sailDir,
@@ -158,10 +149,7 @@ test
   expect(resolved.ports.harness?.name).toBe('later');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a module outside .sail/ but inside the repository records its origin from the repository's root", async () => {
+test("a module outside .sail/ but inside the repository records its origin from the repository's root", async () => {
   const { root, sailDir } = repo();
   write(root, 'shared/harness.ts', harnessModule());
   const resolved = resolvedOrThrow(await resolve(sailDir, { harness: { use: '../shared/harness.ts' } }));
@@ -292,49 +280,52 @@ const broken: Broken[] = [
   },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each(broken)
-  ('$label is one issue at its port, with no run directory made', async ({ port, use, module, builtins, message }) => {
-  const { root, sailDir } = repo();
-  if (module !== undefined) write(sailDir, ...module);
-  const result = await resolve(sailDir, { [port]: { use } }, builtins === undefined ? {} : { builtins });
-  expect(result).toEqual(issue(port, message));
-  expect(JSON.stringify(readdirDeep(root))).not.toContain('.sail-runs');
-});
+test.each(broken)(
+  '$label is one issue at its port, with no run directory made',
+  async ({ port, use, module, builtins, message }) => {
+    const { root, sailDir } = repo();
+    if (module !== undefined) write(sailDir, ...module);
+    const result = await resolve(sailDir, { [port]: { use } }, builtins === undefined ? {} : { builtins });
+    expect(result).toEqual(issue(port, message));
+    expect(JSON.stringify(readdirDeep(root))).not.toContain('.sail-runs');
+  },
+);
 
 /** Every path under `root`, relative: what a refused resolve must not have added to. */
 function readdirDeep(root: string): string[] {
   return [...new Bun.Glob('**/*').scanSync({ cwd: root, dot: true, onlyFiles: false })];
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
-    ['capabilities() that throws', () => { throw new Error('no capabilities'); }, ''],
-    ['capabilities() that returns {}', () => ({}), 'structuredOutput'],
-  ])
-  ('a harness with %s is one issue saying its capabilities are not harness capabilities', async (_, capabilities, named) => {
-  const { sailDir } = repo();
-  const builtins = builtin('weak', 'harness', { create: () => stubAdapter('harness', (a) => (a.capabilities = capabilities)) });
-  const result = await resolve(sailDir, { harness: { use: 'weak' } }, { builtins });
-  expect(result).toEqual({
-    issues: [
-      {
-        path: '/adapters/harness',
-        message: expect.stringMatching(/^weak's capabilities\(\) are not harness capabilities: /),
-      },
-    ],
-  });
-  expect('issues' in result ? result.issues[0]?.message : '').toContain(named);
-});
+test.each([
+  [
+    'capabilities() that throws',
+    () => {
+      throw new Error('no capabilities');
+    },
+    '',
+  ],
+  ['capabilities() that returns {}', () => ({}), 'structuredOutput'],
+])(
+  'a harness with %s is one issue saying its capabilities are not harness capabilities',
+  async (_, capabilities, named) => {
+    const { sailDir } = repo();
+    const builtins = builtin('weak', 'harness', {
+      create: () => stubAdapter('harness', (a) => (a.capabilities = capabilities)),
+    });
+    const result = await resolve(sailDir, { harness: { use: 'weak' } }, { builtins });
+    expect(result).toEqual({
+      issues: [
+        {
+          path: '/adapters/harness',
+          message: expect.stringMatching(/^weak's capabilities\(\) are not harness capabilities: /),
+        },
+      ],
+    });
+    expect('issues' in result ? result.issues[0]?.message : '').toContain(named);
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the built-in fake harness, which reports no permissions, resolves, and a built-in that is not the fake is refused for the same', async () => {
+test('the built-in fake harness, which reports no permissions, resolves, and a built-in that is not the fake is refused for the same', async () => {
   const { sailDir } = repo();
   const fake = resolvedOrThrow(await resolve(sailDir, {}));
   expect(fake.ports.harness?.capabilities().permissions).toBe(false);
@@ -343,10 +334,7 @@ test
   expect(refused).toEqual(issue('harness', 'open enforces no permissions, which only the built-in fake may'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('two ports broken at pass one give two issues in port order, and no definition is created', async () => {
+test('two ports broken at pass one give two issues in port order, and no definition is created', async () => {
   const { sailDir } = repo();
   const made: string[] = [];
   const result = await resolve(
@@ -356,8 +344,14 @@ test
   );
   expect(result).toEqual({
     issues: [
-      { path: '/adapters/ticketSource', message: "no built-in adapter 'nope1' fills ticketSource: the built-ins that do are fake" },
-      { path: '/adapters/harness', message: "no built-in adapter 'nope2' fills harness: the built-ins that do are fake" },
+      {
+        path: '/adapters/ticketSource',
+        message: "no built-in adapter 'nope1' fills ticketSource: the built-ins that do are fake",
+      },
+      {
+        path: '/adapters/harness',
+        message: "no built-in adapter 'nope2' fills harness: the built-ins that do are fake",
+      },
     ],
   });
   expect(made).toEqual([]);
