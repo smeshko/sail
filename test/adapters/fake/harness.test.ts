@@ -324,6 +324,30 @@ test("a failure the session didn't foresee still carries its spend, and still en
   });
 });
 
+test.each([
+  ['null', null],
+  ['undefined', undefined],
+  ['a string', 'no'],
+])(
+  'an onEvent that throws %s after a usage update still gets an error result with the spend, and the end',
+  async (_, thrown) => {
+    const usage = { costUsd: 0.5 };
+    const harness = createFakeHarness({ script: { spec: [{ outcome: 'done', output: {}, turns: 2, usage }] } });
+    const capture = captureEvents<HarnessEvent>();
+    const result = await harness.run({
+      ...request('spec#1'),
+      onEvent: (event) => {
+        capture.emit(event);
+        if (event.type === 'usage:update') throw thrown;
+      },
+    });
+    expect({ result: [summary(result), result.usage], events: labels(capture.events) }).toEqual({
+      result: [`error: fake harness: ${String(thrown)}`, { costUsd: 0.25 }],
+      events: ['harness:session_start', 'usage:update 1', 'error:harness', 'harness:session_end'],
+    });
+  },
+);
+
 test('the fake declares structured output, usage, abort and a turns budget, and no permissions', () => {
   expect(createFakeHarness({ script: {} }).capabilities()).toEqual({
     structuredOutput: true,
