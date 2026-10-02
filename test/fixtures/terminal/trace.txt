@@ -137,9 +137,9 @@ publish#1/open      ▶ open · step 2/2 · script
 publish#1/open        $ .sail/workflows/ticket-to-pr/stages/publish/open.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
 publish#1/open      · codehost:pushed {"branch":"sail/FAKE-1","headSha":"b4efb0c5de84d87c1455d4504b8b75b095a8e10b"}
 publish#1/open      · codehost:pr_opened {"number":1,"url":"fake://codehost/fixture/pull/1","draft":false,"base":"main","head":"sail/FAKE-1","ticketKey":"FAKE-1"}
-publish#1/open      · codehost:labelled {"number":1,"label":"sail"}
+publish#1/open      · codehost:labelled {"number":1,"label":"sail","change":"added"}
 publish#1/open      · ticket:commented {"ticketKey":"FAKE-1","body":"Pull request opened: fake://codehost/fixture/pull/1"}
-publish#1/open      · ticket:updated {"ticketKey":"FAKE-1","change":{"state":"In Review"}}
+publish#1/open      · ticket:updated {"ticketKey":"FAKE-1","change":{"state":"in-review"},"state":{"type":"started","name":"In Review"}}
 publish#1/open        exit 0 → passed · 1.9s
 publish#1/open        output valid
 publish#1/open      ✓ passed

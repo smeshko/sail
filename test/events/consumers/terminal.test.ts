@@ -624,25 +624,71 @@ test('at trace, an event of every type prints a line of its own', () => {
     [{ type: 'usage:update', key: 'spec#1', turn: 1 }, head('spec#1', '· usage:update {"turn":1}', w)],
     [{ type: 'budget:warning', key: 'spec#1', usd: 4 }, head('spec#1', '· budget:warning {"usd":4}', w)],
     [{ type: 'budget:exceeded', key: 'spec#1', usd: 6 }, head('spec#1', '· budget:exceeded {"usd":6}', w)],
-    [{ type: 'ticket:fetched', ticketKey: 'FAKE-1' }, head('', '· ticket:fetched {"ticketKey":"FAKE-1"}', w)],
-    [{ type: 'ticket:claimed', ticketKey: 'FAKE-1' }, head('', '· ticket:claimed {"ticketKey":"FAKE-1"}', w)],
-    [{ type: 'ticket:updated', ticketKey: 'FAKE-1' }, head('', '· ticket:updated {"ticketKey":"FAKE-1"}', w)],
-    [{ type: 'ticket:commented', ticketKey: 'FAKE-1' }, head('', '· ticket:commented {"ticketKey":"FAKE-1"}', w)],
-    [{ type: 'codehost:pushed', number: 1 }, head('', '· codehost:pushed {"number":1}', w)],
-    [{ type: 'codehost:pr_opened', number: 1 }, head('', '· codehost:pr_opened {"number":1}', w)],
-    [{ type: 'codehost:checks', number: 1 }, head('', '· codehost:checks {"number":1}', w)],
-    [{ type: 'codehost:labelled', number: 1 }, head('', '· codehost:labelled {"number":1}', w)],
-    [{ type: 'codehost:commented', number: 1 }, head('', '· codehost:commented {"number":1}', w)],
-    [{ type: 'codehost:merged', number: 1 }, head('', '· codehost:merged {"number":1}', w)],
-    [{ type: 'workspace:leased', branch: 'sail/FAKE-1' }, head('', '· workspace:leased {"branch":"sail/FAKE-1"}', w)],
+    // The provider families are closed, so each sample carries its whole payload.
     [
-      { type: 'workspace:lease_released', branch: 'sail/FAKE-1' },
-      head('', '· workspace:lease_released {"branch":"sail/FAKE-1"}', w),
+      { type: 'ticket:fetched', ticketKey: 'FAKE-1', comments: 1, links: 0, attachments: 0, durationMs: 310 },
+      head('', '· ticket:fetched {"ticketKey":"FAKE-1","comments":1,"links":0,"attachments":0,"durationMs":310}', w),
     ],
-    [{ type: 'workspace:created', branch: 'sail/FAKE-1' }, head('', '· workspace:created {"branch":"sail/FAKE-1"}', w)],
     [
-      { type: 'workspace:released', branch: 'sail/FAKE-1' },
-      head('', '· workspace:released {"branch":"sail/FAKE-1"}', w),
+      { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: { type: 'started', name: 'In Progress' } },
+      head('', '· ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}', w),
+    ],
+    [
+      {
+        type: 'ticket:updated',
+        ticketKey: 'FAKE-1',
+        change: { state: 'done' },
+        state: { type: 'completed', name: 'Done' },
+      },
+      head(
+        '',
+        '· ticket:updated {"ticketKey":"FAKE-1","change":{"state":"done"},"state":{"type":"completed","name":"Done"}}',
+        w,
+      ),
+    ],
+    [
+      { type: 'ticket:commented', ticketKey: 'FAKE-1', body: 'hi' },
+      head('', '· ticket:commented {"ticketKey":"FAKE-1","body":"hi"}', w),
+    ],
+    [
+      { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'b4efb0c' },
+      head('', '· codehost:pushed {"branch":"sail/FAKE-1","headSha":"b4efb0c"}', w),
+    ],
+    [
+      { type: 'codehost:pr_opened', number: 1, url: 'pr/1', draft: false, base: 'main', head: 'sail/FAKE-1' },
+      head('', '· codehost:pr_opened {"number":1,"url":"pr/1","draft":false,"base":"main","head":"sail/FAKE-1"}', w),
+    ],
+    [
+      { type: 'codehost:checks', number: 1, headSha: 'b4efb0c', checks: [{ name: 'ci', status: 'passed' }] },
+      head('', '· codehost:checks {"number":1,"headSha":"b4efb0c","checks":[{"name":"ci","status":"passed"}]}', w),
+    ],
+    [
+      { type: 'codehost:labelled', number: 1, label: 'sail', change: 'added' },
+      head('', '· codehost:labelled {"number":1,"label":"sail","change":"added"}', w),
+    ],
+    [
+      { type: 'codehost:commented', number: 1, body: 'hi' },
+      head('', '· codehost:commented {"number":1,"body":"hi"}', w),
+    ],
+    [
+      { type: 'codehost:merged', number: 1, method: 'squash', sha: 'f569e7f' },
+      head('', '· codehost:merged {"number":1,"method":"squash","sha":"f569e7f"}', w),
+    ],
+    [
+      { type: 'workspace:leased', remote: 'origin', branch: 'sail/FAKE-1' },
+      head('', '· workspace:leased {"remote":"origin","branch":"sail/FAKE-1"}', w),
+    ],
+    [
+      { type: 'workspace:lease_released', remote: 'origin', branch: 'sail/FAKE-1' },
+      head('', '· workspace:lease_released {"remote":"origin","branch":"sail/FAKE-1"}', w),
+    ],
+    [
+      { type: 'workspace:created', path: 'ws', branch: 'sail/FAKE-1', baseSha: 'f569e7f', durationMs: 640 },
+      head('', '· workspace:created {"path":"ws","branch":"sail/FAKE-1","baseSha":"f569e7f","durationMs":640}', w),
+    ],
+    [
+      { type: 'workspace:released', path: 'ws', kept: false },
+      head('', '· workspace:released {"path":"ws","kept":false}', w),
     ],
     [{ type: 'error:harness', key: 'spec#1', message: 'lost' }, head('spec#1', '✗ error:harness: lost', w)],
     [
