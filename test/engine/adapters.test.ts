@@ -181,10 +181,10 @@ interface Broken {
 const NO_DEFINITION = 'default-exports no adapter definition: an object with create()';
 const OPEN_HARNESS = {
   create: () =>
-    stubAdapter(
-      'harness',
-      (a) => (a.capabilities = () => ({ ...(a.capabilities as () => object)(), permissions: false })),
-    ),
+    stubAdapter('harness', (a) => {
+      const base = a.capabilities as () => object;
+      a.capabilities = () => ({ ...base(), permissions: false });
+    }),
 };
 
 const broken: Broken[] = [
