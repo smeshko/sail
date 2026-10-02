@@ -24,24 +24,19 @@ const FAKES: Record<Port, object> = {
   workspace: createFakeWorkspace({ repo: FIXTURE }),
 };
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each([...PORTS])
-  ("%s: the operations table is the fake adapter's methods, with capabilities in and name out", (port) => {
-  const table: string[] = [...PORT_OPERATIONS[port]].sort();
-  expect(table).toEqual(OPERATIONS[port]);
-  expect(new Set(table).size).toBe(table.length);
-  const fake = FAKES[port] as Record<string, unknown>;
-  expect(table.filter((name) => typeof fake[name] !== 'function')).toEqual([]);
-  expect(table).not.toContain('name');
-});
+test.each([...PORTS])(
+  "%s: the operations table is the fake adapter's methods, with capabilities in and name out",
+  (port) => {
+    const table: string[] = [...PORT_OPERATIONS[port]].sort();
+    expect(table).toEqual(OPERATIONS[port]);
+    expect(new Set(table).size).toBe(table.length);
+    const fake = FAKES[port] as Record<string, unknown>;
+    expect(table.filter((name) => typeof fake[name] !== 'function')).toEqual([]);
+    expect(table).not.toContain('name');
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each([...PORTS])
-  ("%s: the capabilities schema parses the fake's capabilities()", (port) => {
+test.each([...PORTS])("%s: the capabilities schema parses the fake's capabilities()", (port) => {
   const fake = FAKES[port] as { capabilities(): unknown };
   const parsed = PORT_CAPABILITIES[port].safeParse(fake.capabilities());
   expect(parsed.success).toBe(true);
