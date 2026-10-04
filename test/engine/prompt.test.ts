@@ -33,10 +33,7 @@ function renderError(fn: () => unknown): RenderError {
   return caught as RenderError;
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('with no shadowing file readFragment gives each built-in, with no variable in it', () => {
+test('with no shadowing file readFragment gives each built-in, with no variable in it', () => {
   const [about, finish] = FRAGMENTS.map((name) => readFragment(fixtureSailDir, name));
   expect(FRAGMENTS).toEqual(['untrusted-input', 'finish']);
   expect(about?.origin).toBe('builtin');
@@ -46,10 +43,7 @@ test
   expect(`${about?.text}${finish?.text}`).not.toContain('{{');
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a repository file shadows one fragment, and the other stays the built-in', async () => {
+test('a repository file shadows one fragment, and the other stays the built-in', async () => {
   await withTempRepo((repo) => {
     const sailDir = join(repo.dir, '.sail');
     write(join(sailDir, 'prompts', '_shared', 'finish.md'), 'Submit for {{ticket.ticketKey}}.\n');
@@ -63,10 +57,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('renderPrompt ends a prompt with the untrusted-input fragment and the finish fragment', () => {
+test('renderPrompt ends a prompt with the untrusted-input fragment and the finish fragment', () => {
   const sailDir = fixtureSailDir;
   const file = join(fixtures, 'repo', '.sail', 'stages', 'implement', 'prompt.md');
   const prompt = readFileSync(file, 'utf8');
@@ -82,10 +73,7 @@ test
   expect(rendered.untrusted).toBe(0);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a shadowing finish fragment has its variables filled', async () => {
+test('a shadowing finish fragment has its variables filled', async () => {
   await withTempRepo((repo) => {
     const sailDir = join(repo.dir, '.sail');
     write(join(sailDir, 'prompts', '_shared', 'finish.md'), 'Submit for {{ticket.ticketKey}}.\n');
@@ -96,10 +84,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a render error names the file it is in and the line within that file', async () => {
+test('a render error names the file it is in and the line within that file', async () => {
   await withTempRepo((repo) => {
     const sailDir = join(repo.dir, '.sail');
     const file = write(join(sailDir, 'stages', 'spec', 'prompt.md'), 'Intro\n\nKey: {{ticket.keey}}\n');
@@ -117,10 +102,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an unclosed block in a prompt is an error in the prompt, though a fragment closes it', async () => {
+test('an unclosed block in a prompt is an error in the prompt, though a fragment closes it', async () => {
   await withTempRepo((repo) => {
     const sailDir = join(repo.dir, '.sail');
     write(join(sailDir, 'prompts', '_shared', 'finish.md'), '{{/if}}\n');
@@ -131,10 +113,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an empty shadowing file adds nothing, and one blank line still separates the parts that remain', async () => {
+test('an empty shadowing file adds nothing, and one blank line still separates the parts that remain', async () => {
   await withTempRepo((repo) => {
     const sailDir = join(repo.dir, '.sail');
     write(join(sailDir, 'prompts', '_shared', 'finish.md'), '');
@@ -146,18 +125,12 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a prompt file that does not exist is an error naming the file', () => {
+test('a prompt file that does not exist is an error naming the file', () => {
   const file = join(fixtures, 'repo', '.sail', 'stages', 'nowhere', 'prompt.md');
   expect(() => renderPrompt({ sailDir: fixtureSailDir, file, values: {} })).toThrow(file);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the spec prompt rendered with the fixture ticket equals the golden prompt', () => {
+test('the spec prompt rendered with the fixture ticket equals the golden prompt', () => {
   const dir = join(fixtures, 'render');
   const ticket = TicketInput.parse(JSON.parse(readFileSync(join(dir, 'ticket.json'), 'utf8')));
   const values = {

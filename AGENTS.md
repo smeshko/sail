@@ -70,6 +70,7 @@ including as examples in this file.
 
 - `src/sdk`: what a repository imports from `sail`: `workflow()`, `stage()`, `agent()`, `script()`, `intake()` and the
   run helpers. `src/sdk/intakes.ts` is `sail/intakes`, the built-in intakes.
+- `src/builtins`: what ships inside sail for a repository to shadow: the shared prompt fragments so far.
 - `src/engine`: loads `project.yaml`, claims a source, leases its branch, runs intake and stages, validates and
   journals.
 - `src/ports`: the interfaces to outside systems: TicketSource, CodeHost, Harness, Workspace.

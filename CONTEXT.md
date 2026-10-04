@@ -167,8 +167,12 @@ A check the engine runs on a document after the step ends, such as required sect
 _Avoid_: linter, assertion, gate, check
 
 **Prompt**:
-An agent step's instructions, rendered with the step's bindings. The engine appends the shared fragments about untrusted input and submitting.
+An agent step's instructions, rendered with the step's bindings. The engine appends both shared fragments, about untrusted input and submitting, to every prompt.
 _Avoid_: system prompt, instructions file
+
+**Fragment**:
+A piece of prompt text sail appends to every agent step's prompt: one about untrusted input, one about submitting. Each is a built-in that a repository may shadow.
+_Avoid_: partial, include, snippet, footer
 
 **Submit**:
 How an agent hands in its output, exactly once, validated against the step's schema. Each harness provides it its own way.
