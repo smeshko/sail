@@ -30,20 +30,14 @@ const WRAPPER_TAG = /<\s*\/?\s*untrusted-input/gi;
 
 // TASK-001: variables, placeholders and render errors
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('render fills a path from the values, spaces inside the braces or not', () => {
+test('render fills a path from the values, spaces inside the braces or not', () => {
   const values = { ticket, count: 3, ok: true, tasks: [{ title: 'first' }, { title: 'second' }] };
   expect(render('Key: {{ticket.ticketKey}}', values).text).toBe('Key: FAKE-9');
   expect(render('Key: {{ ticket.ticketKey }}', values).text).toBe('Key: FAKE-9');
   expect(render('{{count}} {{ok}} {{tasks.0.title}} {{tasks.1.title}}', values).text).toBe('3 true first second');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('an unknown path is a render error holding the path and its line', () => {
+test('an unknown path is a render error holding the path and its line', () => {
   const error = renderError('one\ntwo\nKey: {{ticket.titel}}');
   expect(error.message).toStartWith('line 3:');
   expect(error.message).toContain('ticket.titel');
@@ -51,18 +45,12 @@ test
   expect(error.path).toBe('ticket.titel');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('only an own key is a value, so a key on the prototype is an unknown path', () => {
+test('only an own key is a value, so a key on the prototype is an unknown path', () => {
   expect(renderError('{{ticket.constructor}}').path).toBe('ticket.constructor');
   expect(renderError('{{ticket.toString}}').path).toBe('ticket.toString');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a variable with no text to print is a render error naming its path', () => {
+test('a variable with no text to print is a render error naming its path', () => {
   const values = { empty: null, missing: undefined, ticket, tasks: ['a'] };
   expect(renderError('{{empty}}', values).path).toBe('empty');
   expect(renderError('{{missing}}', values).path).toBe('missing');
@@ -70,10 +58,7 @@ test
   expect(renderError('{{tasks}}', values).path).toBe('tasks');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a placeholder comes out byte for byte, whatever the values hold', () => {
+test('a placeholder comes out byte for byte, whatever the values hold', () => {
   const templates = [
     '{{goal: one paragraph}}',
     '{{ open-questions: "none" or a list }}',
@@ -89,35 +74,23 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a tag that is not a variable, a block or a placeholder is a render error with its line', () => {
+test('a tag that is not a variable, a block or a placeholder is a render error with its line', () => {
   const lines = ['{{task title}}', '{{}}', '{{> header}}', '{{a..b}}'].map((tag) => renderError(`x\n${tag}`).line);
   expect(lines).toEqual([2, 2, 2, 2]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a tag that is never closed is a render error with its line', () => {
+test('a tag that is never closed is a render error with its line', () => {
   const error = renderError('one\ntwo {{ticket.ticketKey');
   expect(error.line).toBe(2);
   expect(error.message).toStartWith('line 2:');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a value holding braces is printed as it is and never read as a template', () => {
+test('a value holding braces is printed as it is and never read as a template', () => {
   const values = { note: 'see {{ticket.url}} and {{x: y}} and {{#if x}}', ticket };
   expect(render('{{note}}', values).text).toBe('see {{ticket.url}} and {{x: y}} and {{#if x}}');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a lone brace, a lone closing pair and a JSON object stay as written', () => {
+test('a lone brace, a lone closing pair and a JSON object stay as written', () => {
   const template = 'a { b } c }} d\n{"a": {"b": 1}}';
   expect(render(template, {}).text).toBe(template);
 });

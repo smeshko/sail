@@ -154,8 +154,12 @@ _Avoid_: artifact, markdown, report
 The skeleton of a document. The engine renders it before an agent step starts, leaving placeholders for the agent.
 _Avoid_: skeleton, scaffold, boilerplate
 
+**Variable**:
+A `{{path}}` in a template or a prompt, which the renderer fills from the values it is given. An unknown one fails the render.
+_Avoid_: placeholder (the agent fills that), parameter, token
+
 **Placeholder**:
-A marked slot in a template that the agent must replace. A document with one left is invalid.
+A marked slot in a template, written `{{name: hint}}`, that the agent must replace. Any tag with a colon is one. A document with one left is invalid.
 _Avoid_: variable (what the renderer fills), TODO, slot
 
 **Validator**:
