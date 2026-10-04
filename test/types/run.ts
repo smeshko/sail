@@ -1,7 +1,7 @@
 // Run-level type cases: what run.stage(), run.loop() and workflow() refuse, and what must compile.
 // test/types/expect-error.test.ts proves that each directive's line fails with the code it names. Cases import only
 // from `sail` and `sail/intakes`, because the harness checks a copy of this file in a temp directory.
-import { agent, file, fromStep, gitDiff, script, stage, value, workflow, z } from 'sail';
+import { agent, file, fromStep, gitDiff, script, stage, type Untrusted, untrusted, value, workflow, z } from 'sail';
 import { TicketInput, ticket } from 'sail/intakes';
 
 /** Marks a value as read, so a case can be one expression. */
@@ -43,6 +43,8 @@ const review = agent('review', {
   permissions,
   budget,
 });
+const Quote = z.object({ text: untrusted() });
+const quote = script('quote', { run: './quote.sh', consumes: { quote: value(Quote) }, output: TestReport });
 const measure = script('measure', { run: './measure.sh', consumes: { text: value(Length) }, output: TestReport });
 const publish = stage('publish', {
   consumes: { ticket: value(TicketInput), spec: file('spec.md') },
@@ -84,6 +86,10 @@ export const compiles = workflow('compiles', { intake: ticket }, async (run) => 
 
   // A value binding takes what its schema parses, and a loop's feedback goes in raw and comes back parsed.
   await run.stage(measure, { text: 'abc' });
+  // An untrusted() field is still a string to read, and a workflow supplies a plain string for it.
+  const shown: string = run.input.title;
+  read(shown);
+  await run.stage(quote, { quote: { text: 'plain text' } });
   for (const iteration of run.loop('measure', { max: 2, feedback: Length })) {
     const previous: number | undefined = iteration.previous;
     read(previous);
@@ -154,6 +160,9 @@ export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
     iteration.fail({ reason: 'flaky' });
   }
 
+  // @ts-expect-error TS2322: a plain string is not Untrusted until its schema parses it
+  const forged: Untrusted = 'plain text';
+  read(forged);
   // @ts-expect-error TS2322: Length parses a string, so a number is what it parses to, not what it takes
   await run.stage(measure, { text: 3 });
   for (const iteration of run.loop('measure', { max: 2, feedback: Length })) {
