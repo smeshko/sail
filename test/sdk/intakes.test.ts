@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TicketInput, ticket } from '../../src/sdk/intakes';
+import { isUntrusted } from '../../src/sdk/untrusted';
 
 const goldenIntake = join(
   import.meta.dir,
@@ -34,4 +35,14 @@ test('TicketInput refuses a ticket without its acceptance criteria', () => {
   const result = TicketInput.safeParse({ ticketKey: 'FAKE-1', title: 'Title', url: 'fake://tickets/FAKE-1' });
   expect(result.success).toBe(false);
   expect(result.error?.issues.map((issue) => issue.path.join('.'))).toEqual(['acceptanceCriteria']);
+});
+
+test('TicketInput marks its title and each acceptance criterion as untrusted, and nothing else', () => {
+  const { shape } = TicketInput;
+  expect(isUntrusted(shape.title)).toBe(true);
+  expect(isUntrusted(shape.acceptanceCriteria.element)).toBe(true);
+  expect(isUntrusted(shape.ticketKey)).toBe(false);
+  expect(isUntrusted(shape.url)).toBe(false);
+  const { output } = JSON.parse(readFileSync(goldenIntake, 'utf8'));
+  expect(TicketInput.parse(output)).toEqual(output);
 });

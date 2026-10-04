@@ -70,6 +70,7 @@ including as examples in this file.
 
 - `src/sdk`: what a repository imports from `sail`: `workflow()`, `stage()`, `agent()`, `script()`, `intake()` and the
   run helpers. `src/sdk/intakes.ts` is `sail/intakes`, the built-in intakes.
+- `src/builtins`: what ships inside sail for a repository to shadow: the shared prompt fragments so far.
 - `src/engine`: loads `project.yaml`, claims a source, leases its branch, runs intake and stages, validates and
   journals.
 - `src/ports`: the interfaces to outside systems: TicketSource, CodeHost, Harness, Workspace.
@@ -82,5 +83,6 @@ including as examples in this file.
   and `src/cli/exit-codes.ts` holds the exit codes every command returns.
 - `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
 - `types/`: generated from `src/sdk` by `bun run types`. `sail check` type-checks a repository against it.
-- `test/fixtures/`: `repo/` is the fixture repository, `runs/` the golden run directories, and `terminal/` the golden
-  terminal views, one per verbosity. All are data, edited by hand when a schema or a line format changes.
+- `test/fixtures/`: `repo/` is the fixture repository, `runs/` the golden run directories, `terminal/` the golden
+  terminal views, one per verbosity, and `render/` the templates and their expected renders. All are data, edited by
+  hand when a schema or a line format changes.

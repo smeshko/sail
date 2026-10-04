@@ -2,13 +2,14 @@
 
 import { z } from 'zod';
 import { intake } from './intake';
+import { untrusted } from './untrusted';
 
 /** A ticket as the `ticket` intake hands it to the workflow: `run.input`. */
 export const TicketInput = z.object({
   ticketKey: z.string(),
-  title: z.string(),
+  title: untrusted(),
   url: z.url(),
-  acceptanceCriteria: z.array(z.string()),
+  acceptanceCriteria: z.array(untrusted()),
 });
 export type TicketInput = z.infer<typeof TicketInput>;
 

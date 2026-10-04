@@ -207,7 +207,7 @@ test('a workflow that returns once every call is journaled completes with its va
 test('run.input and a journaled output are frozen, so a workflow that changes either fails the run', async () => {
   const input = { ticketKey: 'FAKE-1', title: 'a ticket', url: 'fake://tickets/FAKE-1', acceptanceCriteria: ['one'] };
   const flow = workflow('flow', { intake: ticket }, async (run) => {
-    run.input.acceptanceCriteria.push('two');
+    (run.input.acceptanceCriteria as string[]).push('two');
   });
   const changesInput = await replay({ workflow: flow as never, stages: STAGES, entries: [], runDir: RUN_DIR, input });
   const threw = failed('workflow_failed', expect.stringMatching(/^workflow threw: /));

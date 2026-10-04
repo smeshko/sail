@@ -53,7 +53,7 @@ Intake's rendering of a ticket for agents: request, acceptance criteria and cont
 _Avoid_: summary, context document
 
 **Untrusted input**:
-Text written by people outside the run, such as ticket bodies, comments and linked pages. It is delimited so an agent reads it as data about what to build, never as instructions.
+Text written by people outside the run, such as ticket bodies, comments and linked pages. A schema marks such a string with `untrusted()`. It is delimited by `<untrusted-input source="…">` and `</untrusted-input>` so an agent reads it as data about what to build, never as instructions. A lookalike delimiter inside the text is escaped.
 _Avoid_: user content, external text, raw ticket text
 
 ### Workflow and stages
@@ -154,8 +154,12 @@ _Avoid_: artifact, markdown, report
 The skeleton of a document. The engine renders it before an agent step starts, leaving placeholders for the agent.
 _Avoid_: skeleton, scaffold, boilerplate
 
+**Variable**:
+A `{{path}}` in a template or a prompt, which the renderer fills from the values it is given. An unknown one fails the render.
+_Avoid_: placeholder (the agent fills that), parameter, token
+
 **Placeholder**:
-A marked slot in a template that the agent must replace. A document with one left is invalid.
+A marked slot in a template, written `{{name: hint}}`, that the agent must replace. Any tag with a colon is one. A document with one left is invalid.
 _Avoid_: variable (what the renderer fills), TODO, slot
 
 **Validator**:
@@ -163,8 +167,12 @@ A check the engine runs on a document after the step ends, such as required sect
 _Avoid_: linter, assertion, gate, check
 
 **Prompt**:
-An agent step's instructions, rendered with the step's bindings. The engine appends the shared fragments about untrusted input and submitting.
+An agent step's instructions, rendered with the step's bindings. The engine appends both shared fragments, about untrusted input and submitting, to every prompt.
 _Avoid_: system prompt, instructions file
+
+**Fragment**:
+A piece of prompt text sail appends to every agent step's prompt: one about untrusted input, one about submitting. Each is a built-in that a repository may shadow.
+_Avoid_: partial, include, snippet, footer
 
 **Submit**:
 How an agent hands in its output, exactly once, validated against the step's schema. Each harness provides it its own way.
