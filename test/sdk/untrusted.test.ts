@@ -3,10 +3,7 @@ import { z } from 'zod';
 import * as sail from '../../src/sdk';
 import { isUntrusted, untrusted } from '../../src/sdk/untrusted';
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('isUntrusted is true for untrusted() and false for every other schema, and only untrusted is public', () => {
+test('isUntrusted is true for untrusted() and false for every other schema, and only untrusted is public', () => {
   const parsed: string = untrusted().parse('text');
   expect(parsed).toBe('text');
   expect(untrusted().safeParse(3).success).toBe(false);
@@ -23,10 +20,7 @@ test
   expect(sail).not.toHaveProperty('isUntrusted');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the mark survives the string methods, which still apply, and leaves no trace in JSON Schema', () => {
+test('the mark survives the string methods, which still apply, and leaves no trace in JSON Schema', () => {
   const chained = [
     untrusted().max(400),
     untrusted().min(1),

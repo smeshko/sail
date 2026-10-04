@@ -37,10 +37,7 @@ test('TicketInput refuses a ticket without its acceptance criteria', () => {
   expect(result.error?.issues.map((issue) => issue.path.join('.'))).toEqual(['acceptanceCriteria']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('TicketInput marks its title and each acceptance criterion as untrusted, and nothing else', () => {
+test('TicketInput marks its title and each acceptance criterion as untrusted, and nothing else', () => {
   const { shape } = TicketInput;
   expect(isUntrusted(shape.title)).toBe(true);
   expect(isUntrusted(shape.acceptanceCriteria.element)).toBe(true);

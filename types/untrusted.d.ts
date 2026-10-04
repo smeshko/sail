@@ -5,4 +5,4 @@ export declare function untrusted(): z.core.$ZodBranded<z.ZodString, "untrusted"
 /** The output type of `untrusted()`: still a string wherever one is expected. */
 export type Untrusted = z.infer<ReturnType<typeof untrusted>>;
 /** Whether `schema` is a string schema that carries the mark. */
-export declare function isUntrusted(_schema: z.ZodType): boolean;
+export declare function isUntrusted(schema: z.ZodType): boolean;
