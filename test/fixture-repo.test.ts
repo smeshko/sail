@@ -76,7 +76,7 @@ test('the typecheck includes every fixture .ts file, though tsc skips dot-direct
   );
   expect(tsc.exitCode).toBe(0);
   const listed = new Set(tsc.stdout.toString().split('\n'));
-  expect(sources.length).toBe(6);
+  expect(sources.length).toBe(7);
   expect(sources.filter((path) => !listed.has(join(sail, path)))).toEqual([]);
 });
 

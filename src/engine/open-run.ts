@@ -11,12 +11,16 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { z } from 'zod';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
+import type { PortAdapters } from '../ports/adapter';
+import type { ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
-import { type ProjectConfig, readConfig } from './config';
+import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { createJournal } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
+import { modelProblems } from './roster';
 import { createRunDir, LOCAL_SOURCE, type RunStatus, readStatus, runsDir, type Source, writeStatus } from './run-dir';
 import {
+  type AdapterEntry,
   assertRunHeader,
   buildRunHeader,
   RUN_HEADER_FILE,
@@ -38,6 +42,8 @@ export interface OpenedRun {
   header: RunHeader;
   /** The absolute `.sail/` the run started from. */
   sailDir: string;
+  /** The adapters the run was opened with, one per port. */
+  adapters: PortAdapters;
   /** The workflow, with the stages it reaches: what the run replays. */
   loaded: LoadedWorkflow;
   /** `run.input`: the input, parsed with the intake's schema, or undefined when none was given. */
@@ -57,6 +63,8 @@ export interface OpenRunOptions {
   now?: Date;
   /** The run's input, checked against the intake's schema. It stands in for what intake builds until intake exists. */
   input?: unknown;
+  /** The four adapters, resolved from the config before anything else. */
+  adapters: ResolvedAdapters;
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */
@@ -109,12 +117,22 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, workflow);
   if ('refused' in loaded) return loaded;
+  const models = modelProblems(loaded, config);
+  if (models.length > 0) return { refused: models.join('\n') };
   const parsed = parseInput(loaded, options.input);
   if ('refused' in parsed) return parsed;
   const { input } = parsed;
 
   const runId = newRunId(source.ticketKey, now.getTime());
-  const header = buildRunHeader({ runId, source, sailDir: found.dir, loaded, config, now });
+  const header = buildRunHeader({
+    runId,
+    source,
+    sailDir: found.dir,
+    loaded,
+    config,
+    adapters: options.adapters.entries,
+    now,
+  });
   assertRunHeader(header);
 
   const dir = createRunDir(found.dir, runId);
@@ -122,7 +140,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   createJournal(dir);
   createEventsFile(dir);
   writeStatus(dir, 'running');
-  return { runId, dir, header, sailDir: found.dir, loaded, input, firstSeq: 1 };
+  return { runId, dir, header, sailDir: found.dir, adapters: options.adapters.ports, loaded, input, firstSeq: 1 };
 }
 
 export interface ReopenRunOptions {
@@ -132,6 +150,8 @@ export interface ReopenRunOptions {
   runId: string;
   /** The run's input, checked against the intake's schema as on a fresh start. */
   input?: unknown;
+  /** The four adapters, resolved from the config before anything else. */
+  adapters: ResolvedAdapters;
 }
 
 /**
@@ -156,6 +176,18 @@ export function findRun(
   return { dir, header: readRunHeader(dir), status };
 }
 
+/** One line per port whose adapter, by `use` or `origin`, differs from the one the run started with. */
+export function changedAdapters(header: RunHeader, entries: Record<Port, AdapterEntry>): string[] {
+  const named = ({ use, origin }: AdapterEntry) => `${use} (${origin})`;
+  return PORTS.filter((port) => {
+    const was = header.adapters[port];
+    return was.use !== entries[port].use || was.origin !== entries[port].origin;
+  }).map(
+    (port) =>
+      `${port}: the run started with ${named(header.adapters[port])}, and .sail/project.yaml now names ${named(entries[port])}`,
+  );
+}
+
 /** Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. */
 export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, runId } = options;
@@ -163,6 +195,8 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in found) return found;
   const run = findRun(found.dir, runId);
   if ('refused' in run) return run;
+  const changed = changedAdapters(run.header, options.adapters.entries);
+  if (changed.length > 0) return { refused: `run ${runId} can't resume on different adapters:\n${changed.join('\n')}` };
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, run.header.workflow.name);
   if ('refused' in loaded) return loaded;
@@ -173,5 +207,14 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if (typeof firstSeq !== 'number') return firstSeq;
 
   writeStatus(run.dir, 'running');
-  return { runId, dir: run.dir, header: run.header, sailDir: found.dir, loaded, input: parsed.input, firstSeq };
+  return {
+    runId,
+    dir: run.dir,
+    header: run.header,
+    sailDir: found.dir,
+    adapters: options.adapters.ports,
+    loaded,
+    input: parsed.input,
+    firstSeq,
+  };
 }

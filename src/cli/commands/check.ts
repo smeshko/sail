@@ -2,10 +2,11 @@
 // the layout's rules, in that order. The first step with a problem refuses, with every problem it found located
 // relative to where the user ran it.
 import { basename, dirname, join, relative } from 'node:path';
+import { readConfig } from '../../engine/config';
 import { byFile, type Definitions, loadDefinitions, type StageEntry } from '../../engine/definitions';
 import { type ImportGraph, importGraph } from '../../engine/imports';
 import { layoutProblems, reach } from '../../engine/layout';
-import { findSailDir, projectIssues } from '../../engine/sail-dir';
+import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
@@ -84,7 +85,8 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
   }
   const sail = `${at(found.dir)}/`;
 
-  const issues = projectIssues(found.dir);
+  const config = readConfig(found.dir);
+  const issues = 'issues' in config ? config.issues : [];
   if (issues.length > 0) {
     const file = at(join(found.dir, 'project.yaml'));
     for (const issue of issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);

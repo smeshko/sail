@@ -3,11 +3,11 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeF
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
-import { type ProjectConfig, readConfig } from '../../src/engine/config';
+import { type Port, type ProjectConfig, readConfig } from '../../src/engine/config';
 import { type LoadedWorkflow, loadWorkflow } from '../../src/engine/load-workflow';
 import { LOCAL_SOURCE } from '../../src/engine/run-dir';
 import {
-  adapterEntries,
+  type AdapterEntry,
   buildRunHeader,
   RUN_HEADER_FILE,
   type RunHeader,
@@ -51,8 +51,11 @@ async function hashAfter(change: (sail: string) => void = () => {}): Promise<str
   });
 }
 
-/** The fixture's header, built on a fresh copy. */
-async function fixtureHeader(): Promise<RunHeader> {
+const FAKE: AdapterEntry = { use: 'fake', origin: 'builtin' };
+const FAKE_ENTRIES: Record<Port, AdapterEntry> = { ticketSource: FAKE, codeHost: FAKE, harness: FAKE, workspace: FAKE };
+
+/** The fixture's header, built on a fresh copy, recording `adapters`. */
+async function fixtureHeader(adapters: Record<Port, AdapterEntry> = FAKE_ENTRIES): Promise<RunHeader> {
   return withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const { loaded, config } = await load(sail);
@@ -62,6 +65,7 @@ async function fixtureHeader(): Promise<RunHeader> {
       sailDir: sail,
       loaded,
       config,
+      adapters,
       now: NOW,
     });
   });
@@ -162,28 +166,31 @@ test('a workflow without a version is version 1, and a config without a run budg
     edit(sail, WORKFLOW, ' version: 1,', '');
     edit(sail, 'project.yaml', 'budgets: { run: { maxUsd: 25, maxMinutes: 90 } }', 'budgets: { run: {} }');
     const { loaded, config } = await load(sail);
-    const header = buildRunHeader({ runId: 'LOCAL-1', source: LOCAL_SOURCE, sailDir: sail, loaded, config, now: NOW });
+    const header = buildRunHeader({
+      runId: 'LOCAL-1',
+      source: LOCAL_SOURCE,
+      sailDir: sail,
+      loaded,
+      config,
+      adapters: FAKE_ENTRIES,
+      now: NOW,
+    });
     expect(header.workflow.version).toBe(1);
     expect(header).not.toHaveProperty('budget');
     expect(validateRunHeader(header)).toEqual([]);
   });
 });
 
-test("an adapter by module path records the module's origin, and one by name is builtin", () => {
-  const config = {
-    adapters: {
-      ticketSource: { use: 'linear', team: 'ADW' },
-      codeHost: { use: './adapters/echo.ts' },
-      harness: { use: '../shared/harness.ts' },
-      workspace: { use: 'git-worktree' },
-    },
-  } as unknown as ProjectConfig;
-  expect(adapterEntries('/r/.sail', config)).toEqual({
-    ticketSource: { use: 'linear', origin: 'builtin' },
-    codeHost: { use: './adapters/echo.ts', origin: 'repo:.sail/adapters/echo.ts' },
-    harness: { use: '../shared/harness.ts', origin: 'repo:shared/harness.ts' },
-    workspace: { use: 'git-worktree', origin: 'builtin' },
-  });
+test('a header records the adapters it is handed, with the versions a repository adapter declares', async () => {
+  const echo: AdapterEntry = {
+    use: './adapters/echo-harness.ts',
+    origin: 'repo:.sail/adapters/echo-harness.ts',
+    versions: { echo: '1.0.0' },
+  };
+  const entries: Record<Port, AdapterEntry> = { ...FAKE_ENTRIES, harness: echo };
+  const header = await fixtureHeader(entries);
+  expect(header.adapters).toEqual(entries);
+  expect(validateRunHeader(header)).toEqual([]);
 });
 
 test('run.json is written once, read-only, and reads back equal', async () => {

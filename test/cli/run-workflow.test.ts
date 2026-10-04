@@ -2,12 +2,13 @@
 // Ctrl-C through a fake `io.onInterrupt`. Each case has a temp repository of its own, because a process opens one run
 // per .sail/.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { verbosityOf } from '../../src/cli/commands/run-workflow';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import type { Parsed } from '../../src/cli/index';
-import { edit } from '../helpers/fixture';
+import type { RunHeader } from '../../src/engine/run-header';
+import { copyFixture, edit, FIXTURE_SAIL, write } from '../helpers/fixture';
 import {
   type Captured,
   type CaptureOptions,
@@ -338,5 +339,109 @@ test('the interrupt handler is unregistered even when the run throws', async () 
     const { code } = await runCaptured(['run'], repo.dir, interrupts);
     expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);
     expect(code).toBe(EXIT_INTERNAL);
+  });
+});
+
+const TOKEN = 'echo-token-9c1f7d2a';
+const ECHO_HARNESS = { use: './adapters/echo-harness.ts' };
+const ECHO_ORIGIN = 'repo:.sail/adapters/echo-harness.ts';
+
+/** Gives the stub the fixture's echo harness, and names it for the harness port. */
+function useEcho(sail: string): void {
+  write(sail, 'adapters/echo-harness.ts', readFileSync(join(FIXTURE_SAIL, 'adapters', 'echo-harness.ts'), 'utf8'));
+  edit(sail, 'project.yaml', 'harness: { use: fake }', `harness: { use: ${ECHO_HARNESS.use} }`);
+}
+
+/** `sail run` in a stub repository changed by `change`, with `env` as the command's environment. */
+async function runWith(change: (sail: string) => void, env?: Record<string, string>) {
+  return withTempRepo(async (repo) => {
+    change(writeStub(repo.dir));
+    const captured = await runCaptured(['run'], repo.dir, env === undefined ? {} : { env });
+    const runs = join(repo.dir, '.sail-runs');
+    const [runId] = existsSync(runs) ? readdirSync(runs) : [];
+    const read = (file: string) => (runId === undefined ? '' : readFileSync(join(runs, runId, file), 'utf8'));
+    const files = runId === undefined ? [] : [...new Bun.Glob('**/*').scanSync({ cwd: runs, dot: true })];
+    return {
+      ...captured,
+      ranFrom: existsSync(runs),
+      header: runId === undefined ? undefined : (JSON.parse(read('run.json')) as RunHeader),
+      started: runId === undefined ? undefined : (JSON.parse(read('events.ndjson').split('\n')[0] ?? '') as RunHeader),
+      everything: files.map((file) => readFileSync(join(runs, file), 'utf8')).join('\n'),
+    };
+  });
+}
+
+test("run.json and run:start record each adapter: four builtin fakes, then the repository's own harness with its origin and versions, and the token stays off disk", async () => {
+  const fake = { use: 'fake', origin: 'builtin' };
+  const plain = await runWith(() => undefined);
+  expect(plain.code).toBe(EXIT_OK);
+  expect(plain.header?.adapters).toEqual({ ticketSource: fake, codeHost: fake, harness: fake, workspace: fake });
+
+  const echo = { use: ECHO_HARNESS.use, origin: ECHO_ORIGIN, versions: { echo: '1.0.0' } };
+  const swapped = await runWith(useEcho, { ECHO_HARNESS_TOKEN: TOKEN });
+  expect(swapped.code).toBe(EXIT_OK);
+  expect(swapped.header?.adapters).toEqual({ ticketSource: fake, codeHost: fake, harness: echo, workspace: fake });
+  expect(swapped.started?.adapters).toEqual(swapped.header?.adapters);
+  expect(swapped.everything).not.toBe('');
+  expect(swapped.everything).not.toContain(TOKEN);
+});
+
+test.each<[string, Record<string, string>]>([
+  ['unset', {}],
+  ['empty', { ECHO_HARNESS_TOKEN: '' }],
+])(
+  'a harness whose token is %s is refused with exit 3, naming the variable and the port, and no run directory',
+  async (_, env) => {
+    const { code, stdout, stderr, ranFrom } = await runWith(useEcho, env);
+    expect({ code, stdout, stderr, ranFrom }).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: '.sail/project.yaml  /adapters/harness needs ECHO_HARNESS_TOKEN, which is not set\n',
+      ranFrom: false,
+    });
+  },
+);
+
+test('an adapter the built-ins do not have is refused with exit 3, naming the port, and no run directory', async () => {
+  const { code, stderr, ranFrom } = await runWith((sail) =>
+    edit(sail, 'project.yaml', 'codeHost: { use: fake }', 'codeHost: { use: githb }'),
+  );
+  expect({ code, stderr, ranFrom }).toEqual({
+    code: EXIT_REFUSED,
+    stderr:
+      ".sail/project.yaml  /adapters/codeHost no built-in adapter 'githb' fills codeHost: the built-ins that do are fake\n",
+    ranFrom: false,
+  });
+});
+
+test('the adapters are resolved before the type-check: a missing token and a type error print the token refusal alone', async () => {
+  const { code, stderr } = await runWith((sail) => {
+    useEcho(sail);
+    edit(
+      sail,
+      WORKFLOW,
+      "import { workflow } from 'sail';",
+      "import { workflow } from 'sail';\nconst bad: number = 'x';\nexport const unused = bad;",
+    );
+  });
+  expect(stderr).toContain('/adapters/harness needs ECHO_HARNESS_TOKEN, which is not set');
+  expect(stderr).not.toMatch(/TS\d+/);
+  expect(code).toBe(EXIT_REFUSED);
+});
+
+test('a model alias the config does not define refuses the run with exit 3, naming the stages and the alias', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    edit(
+      sail,
+      'project.yaml',
+      'models: { default: claude-sonnet-5, deep: claude-opus-5-5 }',
+      'models: { default: claude-sonnet-5 }',
+    );
+    const { code, stderr } = await runCaptured(['run'], repo.dir);
+    expect(stderr).toContain("sail run: stage 'self-review' names the model alias 'deep'");
+    expect(stderr).toContain("stage 'spec' names the model alias 'deep'");
+    expect(code).toBe(EXIT_REFUSED);
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });

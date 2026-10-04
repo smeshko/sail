@@ -34,7 +34,7 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   if (typeof given === 'number') return given;
   const verbosity = verbosityOf(args, io, COMMAND);
   if (typeof verbosity === 'number') return verbosity;
-  const project = findProject(io, COMMAND);
+  const project = await findProject(io, COMMAND);
   if (typeof project === 'number') return project;
 
   const run = findRun(project.sailDir, runId);
@@ -51,6 +51,7 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
       cwd: io.cwd,
       runId,
       ...(given.input === undefined ? {} : { input: given.input }),
+      adapters: project.adapters,
       signal,
       consumers: [terminal],
     }).finally(() => terminal.close()),

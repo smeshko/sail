@@ -5,10 +5,11 @@ import { existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import type { Supplied } from '../../engine/bindings';
 import { callProblems, runCall } from '../../engine/call';
+import { readConfig } from '../../engine/config';
 import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
 import { runsDir } from '../../engine/run-dir';
 import { newRunId } from '../../engine/run-id';
-import { findSailDir, projectIssues } from '../../engine/sail-dir';
+import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
 import type { StageDefinition } from '../../sdk/steps';
@@ -80,7 +81,8 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   }
   const workspace = dirname(found.dir);
 
-  const issues = projectIssues(found.dir);
+  const config = readConfig(found.dir);
+  const issues = 'issues' in config ? config.issues : [];
   if (issues.length > 0) {
     const file = at(join(found.dir, 'project.yaml'));
     for (const issue of issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);

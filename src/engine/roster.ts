@@ -68,6 +68,32 @@ function field<K extends string, V>(key: K, value: V | undefined): { [P in K]?: 
   return { [key]: value } as { [P in K]: V };
 }
 
+/**
+ * The agent steps of `loaded` whose model alias `config.models` doesn't define, as one line each: the intake first, then
+ * the stages by name.
+ */
+export function modelProblems(loaded: LoadedWorkflow, config: ProjectConfig): string[] {
+  const problems = (where: string, definition: StageDefinition | Intake): string[] => {
+    const steps: readonly Step[] =
+      definition.kind === 'agent' || definition.kind === 'script' ? [definition] : (definition.steps ?? []);
+    return steps.flatMap((step) => {
+      if (step.kind !== 'agent') return [];
+      const at = steps.length > 1 ? `${where} step '${step.name}'` : where;
+      const alias = step.model ?? 'default';
+      if (Object.hasOwn(config.models, alias)) return [];
+      return step.model === undefined
+        ? [`${at} has an agent step with no model, and .sail/project.yaml's models defines no 'default'`]
+        : [`${at} names the model alias '${alias}', which .sail/project.yaml's models doesn't define`];
+    });
+  };
+  const { definition } = loaded.intake;
+  const stages = [...loaded.stages].sort((a, b) => (a.definition.name < b.definition.name ? -1 : 1));
+  return [
+    ...problems(`intake '${definition.name}'`, definition),
+    ...stages.flatMap((stage) => problems(`stage '${stage.definition.name}'`, stage.definition)),
+  ];
+}
+
 /** A step's own fields, as a multi-step entry records them. `produces` may add files its stage or intake declares. */
 function stepFields(
   step: Step,
@@ -77,7 +103,7 @@ function stepFields(
 ): Omit<StepRosterEntry, 'step'> {
   const own = { ...field('output', name(step.output)), ...field('produces', produces) };
   if (step.kind === 'agent') {
-    const model = config.models[step.model ?? 'default'] ?? step.model;
+    const model = config.models[step.model ?? 'default'];
     return { kind: 'agent', ...field('model', model), ...own, permissions: step.permissions, budget: step.budget };
   }
   const network = step.network === 'none' ? [] : step.network;

@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
@@ -400,3 +401,16 @@ test.each([[['stage']], [['stage', 'run']], [['stage', 'walk', 'x']]])(
     expect(await runCaptured(argv)).toEqual({ code: EXIT_REFUSED, stdout: '', stderr: USAGE });
   },
 );
+
+test('a sail range the running version does not satisfy is refused before anything is written', async () => {
+  await withTempRepo(async (repo) => {
+    const project = join(fixtureCopy(repo), 'project.yaml');
+    writeFileSync(project, readFileSync(project, 'utf8').replace('>=0.0.0 <1', '>=1.0 <2'));
+    expect(await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `.sail/project.yaml  /sail is '>=1.0 <2', which sail ${pkg.version} doesn't satisfy\n`,
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});

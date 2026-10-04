@@ -4,8 +4,8 @@ sail: ">=0.0.0 <1"
 label: sail
 defaultWorkflow: ticket-to-pr
 adapters:
-  ticketSource: { use: fake }
-  codeHost: { use: fake }
+  ticketSource: { use: fake, seed: ./fake/tickets.json }
+  codeHost: { use: fake, seed: ./fake/prs.json }
   harness: { use: fake }
   workspace: { use: fake }
 models: { default: claude-sonnet-5, deep: claude-opus-5-5 }

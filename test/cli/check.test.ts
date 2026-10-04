@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -271,6 +272,18 @@ test('a workflow that throws on import is refused, naming the file', async () =>
       code: EXIT_REFUSED,
       stdout: '',
       stderr: '.sail/workflows/boom/workflow.ts  boom\n',
+    });
+  });
+});
+
+test('a sail range the running version does not satisfy is refused, naming the file and /sail', async () => {
+  await withTempRepo(async (repo) => {
+    const project = join(copyFixture(repo.dir), 'project.yaml');
+    writeFileSync(project, readFileSync(project, 'utf8').replace('>=0.0.0 <1', '>=1.0 <2'));
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `.sail/project.yaml  /sail is '>=1.0 <2', which sail ${pkg.version} doesn't satisfy\n`,
     });
   });
 });

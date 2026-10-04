@@ -354,8 +354,20 @@ The port that gives a run its workspace and takes it away again. v1 adapter: `gi
 _Avoid_: worktree manager, checkout service
 
 **Adapter**:
-One implementation of a port for one provider, selected by name in the config.
+One implementation of a port for one provider, selected in the config: by name for a built-in, by module path for the repository's own.
 _Avoid_: plugin, driver, connector, integration, backend
+
+**Adapter registry**:
+Resolves the adapter that fills each port from the config, a built-in by name or the repository's own by module path.
+_Avoid_: plugin loader, factory, registry (alone)
+
+**Adapter definition**:
+What makes an adapter: the environment variables it requires, the versions it runs with, and how it is created from its options.
+_Avoid_: factory, plugin, provider
+
+**Preflight**:
+The checks before a run starts that need no run directory: the config, the adapters and their credentials. A failed one is a refusal.
+_Avoid_: startup check, validation, health check
 
 **Port suite**:
 The tests every adapter of a port must pass, shared by the fake and the real one. A real adapter runs them against its provider on demand.

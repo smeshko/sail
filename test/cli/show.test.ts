@@ -10,6 +10,7 @@ import { type Io, run } from '../../src/cli/index';
 import { runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import type { Tty } from '../../src/events/consumers/screen';
+import { fakeAdapters } from '../helpers/adapters';
 import { end, journal, ndjson, runEnd, runStart, stamp, start } from '../helpers/events';
 import { copyGoldenRun, emptySailDir, GOLDEN_RUN, GOLDEN_RUN_ID } from '../helpers/golden-run';
 import { type Captured, fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
@@ -54,7 +55,7 @@ function runWith(repoDir: string, events: string): string {
 /** A stub run of ticket-to-pr in `repoDir`, to its end. Its run id. */
 async function stubRun(repoDir: string, testsPassAt: number): Promise<string> {
   writeStub(repoDir, { testsPassAt });
-  const ended = await runWorkflow({ cwd: repoDir, workflow: 'ticket-to-pr' });
+  const ended = await runWorkflow({ cwd: repoDir, adapters: await fakeAdapters(repoDir), workflow: 'ticket-to-pr' });
   if ('refused' in ended) throw new Error(`refused: ${ended.refused}`);
   return ended.runId;
 }

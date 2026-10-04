@@ -16,5 +16,6 @@ process.exitCode = await run(process.argv.slice(2), {
       process.off('SIGTERM', handler);
     };
   },
+  env: process.env,
   ...(tty === undefined ? {} : { tty }),
 });
