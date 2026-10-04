@@ -531,6 +531,16 @@ test.each<[string, () => unknown, string]>([
     "only's versions() failed: oops",
   ],
   ['returns a number as a version', () => ({ echo: 1 }), "only's versions() must return names and versions"],
+  ['returns an array', () => ['1.0.0'], "only's versions() must return names and versions"],
+  ['returns an empty name', () => ({ '': '1.0.0' }), "only's versions() must return names and versions"],
+  ['returns a promise', async () => ({ echo: '1.0.0' }), "only's versions() must return names and versions"],
 ])('a versions that %s is one issue', async (_, versions, message) => {
   expect(await withHarness(harness({ versions }))).toEqual(issue('harness', message));
+});
+
+test("a version named 'issue' is recorded like any other", async () => {
+  const resolved = resolvedOrThrow(await withHarness(harness({ versions: () => ({ issue: '4.2.0' }) })));
+  expect(resolved.entries.harness).toEqual({ use: 'only', origin: 'builtin', versions: { issue: '4.2.0' } });
+  const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as RunHeader;
+  expect(validateRunHeader({ ...golden, adapters: resolved.entries })).toEqual([]);
 });
