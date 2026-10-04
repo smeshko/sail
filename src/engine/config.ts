@@ -32,9 +32,20 @@ export interface ProjectConfig {
 /** `project.yaml` as written, where `models` and `budgets` may be left out. */
 type AsWritten = Omit<ProjectConfig, 'models' | 'budgets'> & Partial<Pick<ProjectConfig, 'models' | 'budgets'>>;
 
-const VERSION = String.raw`(?:[x*]|\d+(?:\.(?:[x*]|\d+)(?:\.(?:[x*]|\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)?)?)`;
-const COMPARATOR = `(?:(?:\\^|~|>=|<=|>|<|=)?${VERSION})`;
-const COMPARATOR_SET = `(?:${VERSION} +- +${VERSION}|${COMPARATOR}(?: +${COMPARATOR})*)`;
+// The grammar leaves out the forms `Bun.semver` reads differently from npm:
+// - A number of 2^64 or more matches every version, so a number has at most 15 digits, which is within npm's bound too.
+// - `>x` and `<*` match every version where npm matches none, and `^x` and `~*` miss versions npm matches. So these
+//   four operators take a version that starts with a number.
+// - A number after a wildcard, as in `1.x.3`, which npm ignores, breaks a hyphen range. So a wildcard ends a version.
+// - A version with no operator, or with `=`, after another comparator in its set starts an alternative: `>=5.0.0 0.x`
+//   holds for 0.1.0. So such a version may only come first.
+const NUMBER = String.raw`\d{1,15}`;
+const WILDCARDS = String.raw`\.[x*](?:\.[x*])?`;
+const NUMBERED = String.raw`(?:${NUMBER}(?:${WILDCARDS}|\.${NUMBER}(?:\.[x*]|\.${NUMBER}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)?)?)`;
+const VERSION = `(?:[x*]|${NUMBERED})`;
+/** A comparator with an operator other than `=`. */
+const BOUND = `(?:(?:>=|<=)${VERSION}|(?:\\^|~|>|<)${NUMBERED})`;
+const COMPARATOR_SET = `(?:${VERSION} +- +${VERSION}|(?:=?${VERSION}|${BOUND})(?: +${BOUND})*)`;
 const RANGE = new RegExp(`^ *${COMPARATOR_SET}(?: *\\|\\| *${COMPARATOR_SET})* *$`);
 
 /**
