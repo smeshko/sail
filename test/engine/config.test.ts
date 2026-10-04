@@ -89,12 +89,43 @@ test('a range the running sail does not satisfy is one issue at /sail, naming th
   expect(config).toEqual({ issues: issue(pkg.version) });
 });
 
-test.each(['latest', '>=abc', 'not a range', '1.2.3.4'])(
-  '%s is one issue at /sail saying it is not a version range',
-  (range) => {
-    expect(verdict(range)).toEqual([{ path: '/sail', message: `is '${range}', which is not a version range` }]);
-  },
-);
+test.each([
+  'latest',
+  '>=abc',
+  'not a range',
+  '1.2.3.4',
+  '>=5.0.0 0.x',
+  '>=1.0.0 =1.x',
+  '1.x 2.x',
+  '>x',
+  '<*',
+  '^x',
+  '~*',
+  '>=18446744073709551616.0.0',
+  '>=1000000000000000.0.0',
+  '1.x.3',
+  '2.*.3 - 2',
+])('%s is one issue at /sail saying it is not a version range', (range) => {
+  expect(verdict(range)).toEqual([{ path: '/sail', message: `is '${range}', which is not a version range` }]);
+});
+
+test('a version first in its set, a wildcard under >= or <=, and a 15-digit number are ranges, and the version decides', () => {
+  const ranges = ['1.x >=1.0.0', '=1.5.0 >=1.0.0', '>=x', '<=*', '>=999999999999999.0.0', '1.x - 2', '1.5.x - 3.x'];
+  expect(Object.fromEntries(ranges.map((range) => [range, verdict(range)]))).toEqual({
+    '1.x >=1.0.0': 'accepted',
+    '=1.5.0 >=1.0.0': 'accepted',
+    '>=x': 'accepted',
+    '<=*': 'accepted',
+    '>=999999999999999.0.0': [
+      { path: '/sail', message: "is '>=999999999999999.0.0', which sail 1.5.0 doesn't satisfy" },
+    ],
+    '1.x - 2': 'accepted',
+    '1.5.x - 3.x': 'accepted',
+  });
+  expect(verdict('1.x >=1.0.0', '2.0.0')).toEqual([
+    { path: '/sail', message: "is '1.x >=1.0.0', which sail 2.0.0 doesn't satisfy" },
+  ]);
+});
 
 test('the grammar accepts caret, tilde, x-ranges, wildcards, equals, unions and hyphen ranges, and the version still decides', () => {
   const ranges = ['^1', '~1.5', '1.x', '*', '=1.5.0', '>=1.0 <2 || >=3', '1.0.0 - 2.0.0', '^2'];
