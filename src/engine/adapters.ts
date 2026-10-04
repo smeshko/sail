@@ -49,6 +49,15 @@ const isBelow = (root: string, path: string) => {
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
+/**
+ * `value`, which an adapter's `requires()`, `versions()` or `capabilities()` returned. The registry refuses a promise
+ * where it wants a value, and one that rejects later must not crash sail after the refusal.
+ */
+function unawaited(value: unknown): unknown {
+  if (isObject(value) && typeof value.then === 'function') Promise.resolve(value).catch(() => undefined);
+  return value;
+}
+
 /** The definition a module default-exports, or why it isn't one. */
 function asDefinition(value: unknown): AdapterDefinition<unknown> | undefined {
   if (!isObject(value) || typeof value.create !== 'function') return undefined;
@@ -94,7 +103,7 @@ function preflight(use: string, found: Found, options: AdapterOptions, env: Env)
   if (found.definition.requires === undefined) return [];
   let names: unknown;
   try {
-    names = found.definition.requires(options, env);
+    names = unawaited(found.definition.requires(options, env));
   } catch (error) {
     return [`${use}'s requires() failed: ${message(error)}`];
   }
@@ -115,7 +124,7 @@ function declared(use: string, found: Found): { versions: Record<string, string>
   if (found.definition.versions === undefined) return { versions: {} };
   let versions: unknown;
   try {
-    versions = found.definition.versions();
+    versions = unawaited(found.definition.versions());
   } catch (error) {
     return { issue: `${use}'s versions() failed: ${message(error)}` };
   }
@@ -156,7 +165,7 @@ async function build(
     return fail(`${use} doesn't implement ${port}: ${missing.map((name) => `${name}()`).join(', ')} is missing`);
   let capabilities: unknown;
   try {
-    capabilities = (adapter.capabilities as () => unknown)();
+    capabilities = unawaited((adapter.capabilities as () => unknown)());
   } catch (error) {
     return fail(`${use}'s capabilities() are not ${port} capabilities: ${message(error)}`);
   }
