@@ -538,6 +538,37 @@ test.each<[string, () => unknown, string]>([
   expect(await withHarness(harness({ versions }))).toEqual(issue('harness', message));
 });
 
+const rejects = async () => {
+  throw new Error('probe failed');
+};
+
+test.each<[string, object, string]>([
+  ['requires', harness({ requires: rejects }), "only's requires() must return environment variable names"],
+  ['versions', harness({ versions: rejects }), "only's versions() must return names and versions"],
+  [
+    'capabilities',
+    { create: () => stubAdapter('harness', (a) => (a.capabilities = rejects)) },
+    "only's capabilities() are not harness capabilities: ",
+  ],
+])(
+  'a %s that returns a rejected promise is one issue, and its rejection goes nowhere',
+  async (_, definition, message) => {
+    const unhandled: unknown[] = [];
+    const listen = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', listen);
+    try {
+      const result = await withHarness(definition);
+      expect('issues' in result ? result.issues : result).toEqual([
+        { path: '/adapters/harness', message: expect.stringMatching(new RegExp(`^${RegExp.escape(message)}`)) },
+      ]);
+      await Bun.sleep(20);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', listen);
+    }
+  },
+);
+
 test("a version named 'issue' is recorded like any other", async () => {
   const resolved = resolvedOrThrow(await withHarness(harness({ versions: () => ({ issue: '4.2.0' }) })));
   expect(resolved.entries.harness).toEqual({ use: 'only', origin: 'builtin', versions: { issue: '4.2.0' } });
