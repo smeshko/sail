@@ -53,7 +53,7 @@ Intake's rendering of a ticket for agents: request, acceptance criteria and cont
 _Avoid_: summary, context document
 
 **Untrusted input**:
-Text written by people outside the run, such as ticket bodies, comments and linked pages. It is delimited so an agent reads it as data about what to build, never as instructions.
+Text written by people outside the run, such as ticket bodies, comments and linked pages. It is delimited by `<untrusted-input source="…">` and `</untrusted-input>` so an agent reads it as data about what to build, never as instructions. A lookalike delimiter inside the text is escaped.
 _Avoid_: user content, external text, raw ticket text
 
 ### Workflow and stages

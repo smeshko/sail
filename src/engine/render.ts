@@ -28,18 +28,44 @@ export interface UntrustedInput {
   readonly source: string;
 }
 
-/** Marks `text` as written by someone outside the run: the renderer wraps it wherever a template prints it. */
-export function untrustedInput(_text: string, _source: string): UntrustedInput {
-  return { text: '', source: '' };
+/** What `untrustedInput()` makes, and the only thing that is one: an object read back from JSON is not. */
+class Marked implements UntrustedInput {
+  readonly text: string;
+  readonly source: string;
+
+  constructor(text: string, source: string) {
+    this.text = text;
+    this.source = source;
+  }
 }
 
-export function isUntrustedInput(_value: unknown): _value is UntrustedInput {
-  return false;
+/** Marks `text` as written by someone outside the run: the renderer wraps it wherever a template prints it. */
+export function untrustedInput(text: string, source: string): UntrustedInput {
+  return new Marked(text, source);
+}
+
+export function isUntrustedInput(value: unknown): value is UntrustedInput {
+  return value instanceof Marked;
+}
+
+/** `<` becomes `&lt;` wherever `untrusted-input` follows it, so the text can't close the wrapper or open another. */
+const LOOKALIKE = /<(?=\s*\/?\s*untrusted-input)/gi;
+
+function escapeSource(source: string): string {
+  return source
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replace(/\r?\n|\r/g, '&#10;');
 }
 
 /** `text` inside `<untrusted-input source="…">`: three lines as a block, one line inline. */
-export function wrapUntrusted(_text: string, _source: string, _form: 'block' | 'inline' = 'block'): string {
-  return '';
+export function wrapUntrusted(text: string, source: string, form: 'block' | 'inline' = 'block'): string {
+  const open = `<untrusted-input source="${escapeSource(source)}">`;
+  const safe = text.replace(LOOKALIKE, '&lt;');
+  if (form === 'inline') return `${open}${safe}</untrusted-input>`;
+  return `${open}\n${safe.replace(/\r?\n$/, '')}\n</untrusted-input>`;
 }
 
 type Node =
@@ -131,7 +157,7 @@ function parse(template: string): Node[] {
 type Scope = readonly unknown[];
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && !isUntrustedInput(value);
 }
 
 /** The child of `from` at `key`: an own key of an object, or an index of a list. */
@@ -165,12 +191,15 @@ function lookup(path: string, line: number, values: RenderValues, items: Scope):
 }
 
 function truthy(value: unknown): boolean {
+  if (isUntrustedInput(value)) return value.text !== '';
   if (Array.isArray(value)) return value.length > 0;
   return Boolean(value);
 }
 
 /** Renders `template` with `values`. The template is parsed whole before any value is read. */
 export function render(template: string, values: RenderValues): Rendered {
+  let untrusted = 0;
+
   const fill = (nodes: Node[], items: Scope): string => {
     let out = '';
     for (const node of nodes) {
@@ -178,7 +207,10 @@ export function render(template: string, values: RenderValues): Rendered {
         out += node.text;
       } else if (node.type === 'var') {
         const value = lookup(node.path, node.line, values, items);
-        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        if (isUntrustedInput(value)) {
+          untrusted += 1;
+          out += wrapUntrusted(value.text, value.source, node.alone ? 'block' : 'inline');
+        } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
           out += String(value);
         } else {
           throw new RenderError(`\`${node.path}\` has no text to print`, node.line, node.path);
@@ -196,5 +228,5 @@ export function render(template: string, values: RenderValues): Rendered {
     return out;
   };
 
-  return { text: fill(parse(template), []), untrusted: -1 };
+  return { text: fill(parse(template), []), untrusted: untrusted };
 }

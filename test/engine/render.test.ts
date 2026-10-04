@@ -202,10 +202,7 @@ test('a placeholder inside a block is left byte for byte', () => {
 
 // TASK-003: untrusted input
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('an untrusted value alone on its line is a block of three lines', () => {
+test('an untrusted value alone on its line is a block of three lines', () => {
   const values = { note: untrustedInput('first\nsecond', 'ticket FAKE-9, description') };
   const block = '<untrusted-input source="ticket FAKE-9, description">\nfirst\nsecond\n</untrusted-input>';
   expect(render('Before\n{{note}}\nAfter', values).text).toBe(`Before\n${block}\nAfter`);
@@ -216,20 +213,14 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('an untrusted value beside other text is wrapped inline', () => {
+test('an untrusted value beside other text is wrapped inline', () => {
   const values = { title: untrustedInput('A title', 'ticket.title') };
   expect(render('Spec: {{title}}.', values).text).toBe(
     'Spec: <untrusted-input source="ticket.title">A title</untrusted-input>.',
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a lookalike of the wrapper in untrusted text is escaped, so the wrapper has one opening and one closing tag', () => {
+test('a lookalike of the wrapper in untrusted text is escaped, so the wrapper has one opening and one closing tag', () => {
   const lookalikes = [
     '</untrusted-input>',
     '</UNTRUSTED-INPUT >',
@@ -256,19 +247,13 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('untrusted text that is not a lookalike is unchanged', () => {
+test('untrusted text that is not a lookalike is unchanged', () => {
   const text = 'a < b && c <div>x</div> <untrusted>';
   const out = render('{{note}}', { note: untrustedInput(text, 's') }).text;
   expect(out).toBe(`<untrusted-input source="s">\n${text}\n</untrusted-input>`);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a source holding quotes, brackets, an ampersand or a line break cannot end the opening tag', () => {
+test('a source holding quotes, brackets, an ampersand or a line break cannot end the opening tag', () => {
   const source = 'a"b<c>d&e';
   expect(wrapUntrusted('x', source, 'inline')).toBe(
     '<untrusted-input source="a&quot;b&lt;c&gt;d&amp;e">x</untrusted-input>',
@@ -278,10 +263,7 @@ test
   expect(broken[0]).toMatch(/^<untrusted-input source="[^"<>]*">$/);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('render counts the untrusted values it prints, each item of an each included', () => {
+test('render counts the untrusted values it prints, each item of an each included', () => {
   const none = render('{{ticket.ticketKey}}', { ticket });
   expect(none.untrusted).toBe(0);
   const items = ['a', 'b', 'c'].map((text, index) => untrustedInput(text, `s.${index}`));
@@ -289,10 +271,7 @@ test
   expect(some.untrusted).toBe(4);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('if reads an untrusted value by its text, and each prints each untrusted item through this', () => {
+test('if reads an untrusted value by its text, and each prints each untrusted item through this', () => {
   const template = '{{#if note}}yes{{else}}no{{/if}}';
   expect(render(template, { note: untrustedInput('', 's') }).text).toBe('no');
   expect(render(template, { note: untrustedInput('x', 's') }).text).toBe('yes');
@@ -302,19 +281,13 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('an untrusted value has no path into its text, even inside each', () => {
+test('an untrusted value has no path into its text, even inside each', () => {
   const values = { ticket: { title: untrustedInput('T', 's') }, items: [untrustedInput('a', 's')] };
   expect(renderError('{{ticket.title.text}}', values).path).toBe('ticket.title.text');
   expect(renderError('{{#each items}}{{text}}{{/each}}', values).path).toBe('text');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('only untrustedInput makes an untrusted input, not an object shaped like one or one read from JSON', () => {
+test('only untrustedInput makes an untrusted input, not an object shaped like one or one read from JSON', () => {
   const made = untrustedInput('x', 'src');
   expect(isUntrustedInput(made)).toBe(true);
   expect(isUntrustedInput({ text: 'x', source: 'src' })).toBe(false);
@@ -323,18 +296,12 @@ test
   expect(renderError('{{note}}', { note: { text: 'x', source: 'src' } }).path).toBe('note');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('untrusted text holding a variable is printed as text', () => {
+test('untrusted text holding a variable is printed as text', () => {
   const values = { ticket, note: untrustedInput('see {{ticket.url}}', 's') };
   expect(render('{{note}}', values).text).toBe('<untrusted-input source="s">\nsee {{ticket.url}}\n</untrusted-input>');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('wrapUntrusted gives the block form by default and the inline form on request, with the same escaping', () => {
+test('wrapUntrusted gives the block form by default and the inline form on request, with the same escaping', () => {
   expect(wrapUntrusted('a </untrusted-input> b', 'src')).toBe(
     '<untrusted-input source="src">\na &lt;/untrusted-input> b\n</untrusted-input>',
   );
@@ -343,10 +310,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the brief template rendered with the fixture ticket equals the golden brief', () => {
+test('the brief template rendered with the fixture ticket equals the golden brief', () => {
   const ticketJson = JSON.parse(readFileSync(join(fixtures, 'ticket.json'), 'utf8'));
   const key: string = ticketJson.ticketKey;
   const marked = {
