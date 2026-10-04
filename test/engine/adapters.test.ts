@@ -5,7 +5,7 @@
 //
 // Each test has a repository of its own: a module's path is its own, because Bun caches a failed import per path.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BUILTINS } from '../../src/adapters/index';
@@ -295,6 +295,63 @@ test.each(broken)(
 function readdirDeep(root: string): string[] {
   return [...new Bun.Glob('**/*').scanSync({ cwd: root, dot: true, onlyFiles: false })];
 }
+
+test.each<[string, string, string]>([
+  ['the repository itself', '../', "'../' is outside the repository"],
+  ['a folder', './adapters', '.sail/adapters is not a file'],
+])('a module path to %s is one issue at its port', async (_, use, message) => {
+  const { sailDir } = repo();
+  write(sailDir, 'adapters/echo.ts', harnessModule());
+  expect(await resolve(sailDir, { harness: { use } })).toEqual(issue('harness', message));
+});
+
+test("a folder in the repository whose name starts with '..' is inside it", async () => {
+  const { root, sailDir } = repo();
+  write(root, '..shared/harness.ts', harnessModule());
+  const resolved = resolvedOrThrow(await resolve(sailDir, { harness: { use: '../..shared/harness.ts' } }));
+  expect(resolved.entries.harness).toEqual({ use: '../..shared/harness.ts', origin: 'repo:..shared/harness.ts' });
+});
+
+/** A folder outside every repository, holding a harness module that marks `flag` on `globalThis` when it is imported. */
+function outside(flag: string): { dir: string; file: string } {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'sail-outside-')));
+  roots.push(dir);
+  const file = join(dir, 'harness.ts');
+  writeFileSync(file, `globalThis.${flag} = true;\n${harnessModule()}`);
+  return { dir, file };
+}
+
+const marked = (flag: string) => (globalThis as Record<string, unknown>)[flag];
+
+test('a module path that is a symlink to a file outside the repository is refused before it is imported', async () => {
+  const { root, sailDir } = repo();
+  const { file } = outside('__importedThroughFileLink');
+  mkdirSync(join(sailDir, 'adapters'));
+  symlinkSync(file, join(sailDir, 'adapters', 'link.ts'));
+  const result = await resolve(sailDir, { harness: { use: './adapters/link.ts' } });
+  expect(result).toEqual(issue('harness', '.sail/adapters/link.ts links outside the repository'));
+  expect(marked('__importedThroughFileLink')).toBeUndefined();
+  expect(JSON.stringify(readdirDeep(root))).not.toContain('.sail-runs');
+});
+
+test('a module path through a symlinked folder outside the repository is refused before it is imported', async () => {
+  const { sailDir } = repo();
+  const { dir } = outside('__importedThroughFolderLink');
+  symlinkSync(dir, join(sailDir, 'linked'));
+  const result = await resolve(sailDir, { harness: { use: './linked/harness.ts' } });
+  expect(result).toEqual(issue('harness', '.sail/linked/harness.ts links outside the repository'));
+  expect(marked('__importedThroughFolderLink')).toBeUndefined();
+});
+
+test('a symlink to a module inside the repository resolves, and its origin is the path project.yaml names', async () => {
+  const { root, sailDir } = repo();
+  write(root, 'shared/harness.ts', harnessModule());
+  mkdirSync(join(sailDir, 'adapters'));
+  symlinkSync(join(root, 'shared', 'harness.ts'), join(sailDir, 'adapters', 'link.ts'));
+  const resolved = resolvedOrThrow(await resolve(sailDir, { harness: { use: './adapters/link.ts' } }));
+  expect(resolved.ports.harness?.name).toBe('echo');
+  expect(resolved.entries.harness).toEqual({ use: './adapters/link.ts', origin: 'repo:.sail/adapters/link.ts' });
+});
 
 test.each([
   [
