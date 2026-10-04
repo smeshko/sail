@@ -22,10 +22,7 @@ const input = {
   acceptanceCriteria: ['one', 'two'],
 };
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('markUntrusted marks a ticket title and each criterion with its path, and nothing else', () => {
+test('markUntrusted marks a ticket title and each criterion with its path, and nothing else', () => {
   const copy = structuredClone(input);
   const marked = markUntrusted(TicketInput, input, 'ticket');
   expect(shown(marked)).toEqual({
@@ -37,10 +34,7 @@ test
   expect(input).toEqual(copy);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a template prints the marked title wrapped and the ticket key bare', () => {
+test('a template prints the marked title wrapped and the ticket key bare', () => {
   const rendered = render('{{ticket.title}} {{ticket.ticketKey}}', {
     ticket: markUntrusted(TicketInput, input, 'ticket'),
   });
@@ -48,17 +42,11 @@ test
   expect(rendered.untrusted).toBe(1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an untrusted string schema marks a string value with the source as given', () => {
+test('an untrusted string schema marks a string value with the source as given', () => {
   expect(shown(markUntrusted(untrusted(), 'text', 'binding'))).toBe('<binding>text');
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a marked string is found under each wrapper and container a schema can hold', () => {
+test('a marked string is found under each wrapper and container a schema can hold', () => {
   const Tree: z.ZodType = z.object({ name: untrusted(), kids: z.lazy(() => z.array(Tree)) });
   const cases: Record<string, [z.ZodType, unknown, unknown]> = {
     optional: [z.object({ a: untrusted().optional() }), { a: 'x' }, { a: '<s.a>x' }],
@@ -89,7 +77,14 @@ test
     'pipe out': [z.string().pipe(untrusted() as never), 'x', '<s>x'],
     // a string with no mark stays plain, and so does anything the schema can't see
     unmarked: [
-      z.object({ s: z.string(), e: z.enum(['a', 'b']), l: z.literal('c'), any: z.any(), unknown: z.unknown(), m: untrusted() }),
+      z.object({
+        s: z.string(),
+        e: z.enum(['a', 'b']),
+        l: z.literal('c'),
+        any: z.any(),
+        unknown: z.unknown(),
+        m: untrusted(),
+      }),
       { s: 'x', e: 'a', l: 'c', any: 'y', unknown: 'z', m: 'w' },
       { s: 'x', e: 'a', l: 'c', any: 'y', unknown: 'z', m: '<s.m>w' },
     ],
@@ -110,10 +105,7 @@ test
   expect(actual).toEqual(expected);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('in a union and a discriminated union a string is marked when any option marks it', () => {
+test('in a union and a discriminated union a string is marked when any option marks it', () => {
   const union = z.union([z.object({ note: z.string() }), z.object({ note: untrusted() })]);
   expect(shown(markUntrusted(union, { note: 'x' }, 's'))).toEqual({ note: '<s.note>x' });
   const discriminated = z.discriminatedUnion('kind', [
@@ -123,18 +115,12 @@ test
   expect(shown(markUntrusted(discriminated, { kind: 'a', note: 'x' }, 's'))).toEqual({ kind: 'a', note: '<s.note>x' });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a key the schema does not declare is kept as it is', () => {
+test('a key the schema does not declare is kept as it is', () => {
   const schema = z.object({ a: untrusted() });
   expect(shown(markUntrusted(schema, { a: 'x', other: 'y', n: 1 }, 's'))).toEqual({ a: '<s.a>x', other: 'y', n: 1 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('marking twice changes nothing', () => {
+test('marking twice changes nothing', () => {
   const once = markUntrusted(TicketInput, input, 'ticket');
   const twice = markUntrusted(TicketInput, once, 'other');
   expect(shown(once)).toMatchObject({ title: '<ticket.title>A title' });
