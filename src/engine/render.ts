@@ -42,59 +42,159 @@ export function wrapUntrusted(_text: string, _source: string, _form: 'block' | '
   return '';
 }
 
-type Node = { type: 'text'; text: string } | { type: 'var'; path: string; line: number };
+type Node =
+  | { type: 'text'; text: string }
+  | { type: 'var'; path: string; line: number; alone: boolean }
+  | { type: 'if'; path: string; line: number; taken: Node[]; otherwise: Node[] | undefined }
+  | { type: 'each'; path: string; line: number; body: Node[] };
 
-const PATH = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+const PATH = /^(?:[A-Za-z0-9_-]+)(?:\.[A-Za-z0-9_-]+)*$/;
+const BLOCK_PATH = /^#(if|each)\s+(\S+)$/;
+
+interface Open {
+  kind: 'if' | 'each';
+  line: number;
+  node: Extract<Node, { type: 'if' | 'each' }>;
+  into: Node[];
+}
 
 function parse(template: string): Node[] {
-  const nodes: Node[] = [];
+  const root: Node[] = [];
+  const stack: Open[] = [];
+  let into = root;
   let pos = 0;
+  const lineAt = (index: number) => template.slice(0, index).split('\n').length;
+
   while (pos < template.length) {
     const start = template.indexOf('{{', pos);
     if (start === -1) break;
-    const line = template.slice(0, start).split('\n').length;
+    const line = lineAt(start);
     const close = template.indexOf('}}', start + 2);
     if (close === -1) throw new RenderError('`{{` is never closed', line);
     const end = close + 2;
     const body = template.slice(start + 2, close).trim();
+
+    const lineStart = template.lastIndexOf('\n', start - 1) + 1;
+    const before = template.slice(lineStart, start);
+    const after = /^[ \t]*(\r?\n|$)/.exec(template.slice(end));
+    const alone = /^[ \t]*$/.test(before) && after !== null;
+
     if (body.includes(':')) {
-      nodes.push({ type: 'text', text: template.slice(pos, end) });
-    } else {
-      if (!PATH.test(body)) throw new RenderError(`\`{{${body}}}\` is not a variable or a placeholder`, line);
-      nodes.push({ type: 'text', text: template.slice(pos, start) });
-      nodes.push({ type: 'var', path: body, line });
+      into.push({ type: 'text', text: template.slice(pos, end) });
+      pos = end;
+      continue;
     }
-    pos = end;
+
+    const block = BLOCK_PATH.exec(body);
+    const isBlockTag = block !== null || body === 'else' || body === '/if' || body === '/each';
+    const textEnd = isBlockTag && alone ? lineStart : start;
+    const next = isBlockTag && alone && after !== null ? end + after[0].length : end;
+    into.push({ type: 'text', text: template.slice(pos, textEnd) });
+
+    if (block !== null) {
+      const [, kind, path] = block as unknown as [string, 'if' | 'each', string];
+      if (!PATH.test(path)) throw new RenderError(`\`${path}\` is not a path`, line, path);
+      const node: Open['node'] =
+        kind === 'if'
+          ? { type: 'if', path, line, taken: [], otherwise: undefined }
+          : { type: 'each', path, line, body: [] };
+      into.push(node);
+      stack.push({ kind, line, node, into });
+      into = node.type === 'if' ? node.taken : node.body;
+    } else if (body === 'else') {
+      const open = stack.at(-1);
+      if (open === undefined || open.node.type !== 'if') throw new RenderError('`{{else}}` has no `{{#if}}`', line);
+      if (open.node.otherwise !== undefined) throw new RenderError('`{{else}}` comes twice', line);
+      open.node.otherwise = [];
+      into = open.node.otherwise;
+    } else if (body === '/if' || body === '/each') {
+      const open = stack.pop();
+      if (open === undefined) throw new RenderError(`\`{{${body}}}\` closes nothing`, line);
+      if (`/${open.kind}` !== body) {
+        throw new RenderError(`\`{{${body}}}\` closes the \`{{#${open.kind}}}\` of line ${open.line}`, line);
+      }
+      into = open.into;
+    } else if (body === 'this' || (PATH.test(body) && !body.startsWith('#'))) {
+      into.push({ type: 'var', path: body, line, alone });
+    } else {
+      throw new RenderError(`\`{{${body}}}\` is not a variable, a block or a placeholder`, line);
+    }
+    pos = next;
   }
-  nodes.push({ type: 'text', text: template.slice(pos) });
-  return nodes;
+
+  const open = stack.at(-1);
+  if (open !== undefined) throw new RenderError(`\`{{#${open.kind}}}\` is never closed`, open.line);
+  into.push({ type: 'text', text: template.slice(pos) });
+  return root;
 }
 
-function lookup(path: string, line: number, values: RenderValues): unknown {
-  let current: unknown = values;
-  for (const key of path.split('.')) {
-    if (
-      typeof current !== 'object' ||
-      current === null ||
-      (Array.isArray(current) && !/^\d+$/.test(key)) ||
-      !Object.hasOwn(current, key)
-    ) {
-      throw new RenderError(`unknown path \`${path}\``, line, path);
-    }
-    current = (current as Record<string, unknown>)[key];
+type Scope = readonly unknown[];
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** The child of `from` at `key`: an own key of an object, or an index of a list. */
+function child(from: unknown, key: string): { found: true; value: unknown } | { found: false } {
+  if (Array.isArray(from)) {
+    if (/^\d+$/.test(key) && Object.hasOwn(from, key)) return { found: true, value: from[Number(key)] };
+  } else if (isObject(from) && Object.hasOwn(from, key)) {
+    return { found: true, value: from[key] };
+  }
+  return { found: false };
+}
+
+function lookup(path: string, line: number, values: RenderValues, items: Scope): unknown {
+  const [first = '', ...rest] = path.split('.');
+  let current: unknown;
+  if (first === 'this') {
+    if (items.length === 0) throw new RenderError('`this` is only known inside `{{#each}}`', line, path);
+    current = items.at(-1);
+  } else {
+    const container = [...items].reverse().find((item) => child(item, first).found);
+    const found = child(container ?? values, first);
+    if (!found.found) throw new RenderError(`unknown path \`${path}\``, line, path);
+    current = found.value;
+  }
+  for (const key of rest) {
+    const found = child(current, key);
+    if (!found.found) throw new RenderError(`unknown path \`${path}\``, line, path);
+    current = found.value;
   }
   return current;
 }
 
+function truthy(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return Boolean(value);
+}
+
 /** Renders `template` with `values`. The template is parsed whole before any value is read. */
 export function render(template: string, values: RenderValues): Rendered {
-  const text = parse(template)
-    .map((node) => {
-      if (node.type === 'text') return node.text;
-      const value = lookup(node.path, node.line, values);
-      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
-      throw new RenderError(`\`${node.path}\` has no text to print`, node.line, node.path);
-    })
-    .join('');
-  return { text, untrusted: -1 };
+  const fill = (nodes: Node[], items: Scope): string => {
+    let out = '';
+    for (const node of nodes) {
+      if (node.type === 'text') {
+        out += node.text;
+      } else if (node.type === 'var') {
+        const value = lookup(node.path, node.line, values, items);
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          out += String(value);
+        } else {
+          throw new RenderError(`\`${node.path}\` has no text to print`, node.line, node.path);
+        }
+      } else if (node.type === 'if') {
+        const branch = truthy(lookup(node.path, node.line, values, items)) ? node.taken : node.otherwise;
+        if (branch !== undefined) out += fill(branch, items);
+      } else {
+        const list = lookup(node.path, node.line, values, items);
+        if (list === null || list === undefined) continue;
+        if (!Array.isArray(list)) throw new RenderError(`\`${node.path}\` is not a list`, node.line, node.path);
+        for (const item of list) out += fill(node.body, [...items, item]);
+      }
+    }
+    return out;
+  };
+
+  return { text: fill(parse(template), []), untrusted: -1 };
 }

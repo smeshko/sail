@@ -102,10 +102,7 @@ test('render.ts imports nothing', () => {
 
 // TASK-002: blocks
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('if prints its branch by the value truth, and nothing when false with no else', () => {
+test('if prints its branch by the value truth, and nothing when false with no else', () => {
   const template = '{{#if feedback}}A{{else}}B{{/if}}';
   const truthy = ['text', 1, true, { a: 1 }, ['x']];
   const falsy = [false, null, undefined, '', 0, []];
@@ -114,28 +111,19 @@ test
   expect(render('x{{#if feedback}}A{{/if}}y', { feedback: false }).text).toBe('xy');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('if over an unknown path is a render error naming the path', () => {
+test('if over an unknown path is a render error naming the path', () => {
   const error = renderError('a\n{{#if feedbck}}x{{/if}}', { feedback: 'text' });
   expect(error.path).toBe('feedbck');
   expect(error.line).toBe(2);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('each prints its body once per item, with this as the item', () => {
+test('each prints its body once per item, with this as the item', () => {
   const values = { ticket: { acceptanceCriteria: ['one', 'two'] } };
   const template = '{{#each ticket.acceptanceCriteria}}- {{this}}\n{{/each}}';
   expect(render(template, values).text).toBe('- one\n- two\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('inside each an item field is found before the outer values, and outer values stay in reach', () => {
+test('inside each an item field is found before the outer values, and outer values stay in reach', () => {
   const values = { ticket, title: 'outer', rows: [{ title: 'inner' }, { name: 'no title' }] };
   const both = '{{#each rows}}[{{title}}|{{this.title}}|{{ticket.ticketKey}}]{{/each}}';
   expect(render(both, { ...values, rows: [{ title: 'inner' }] }).text).toBe('[inner|inner|FAKE-9]');
@@ -144,10 +132,7 @@ test
   expect(renderError(both, values).path).toBe('this.title');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('in a nested each this is the innermost item', () => {
+test('in a nested each this is the innermost item', () => {
   const values = {
     groups: [
       { name: 'g1', items: ['a', 'b'] },
@@ -158,10 +143,7 @@ test
   expect(render(template, values).text).toBe('g1:ab;g2:c;');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('each over an empty list or null prints nothing, and over anything else is a render error', () => {
+test('each over an empty list or null prints nothing, and over anything else is a render error', () => {
   expect(render('a{{#each xs}}-{{this}}{{/each}}b', { xs: [] }).text).toBe('ab');
   expect(render('a{{#each xs}}-{{this}}{{/each}}b', { xs: null }).text).toBe('ab');
   expect(renderError('{{#each xs}}-{{/each}}', { xs: 'text' }).path).toBe('xs');
@@ -169,18 +151,12 @@ test
   expect(renderError('{{#each nope}}-{{/each}}', { xs: [] }).path).toBe('nope');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the branch not taken is not filled', () => {
+test('the branch not taken is not filled', () => {
   expect(render('a{{#if feedback}}{{feedback.summary}}{{/if}}b', { feedback: null }).text).toBe('ab');
   expect(render('a{{#if feedback}}{{else}}{{missing}}{{/if}}b', { feedback: 1 }).text).toBe('ab');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a line holding only a block tag is dropped with its line break', () => {
+test('a line holding only a block tag is dropped with its line break', () => {
   const template = 'Intro\n{{#if feedback}}\nFix this first.\n{{else}}\nStart fresh.\n{{/if}}\nOutro\n';
   expect(render(template, { feedback: true }).text).toBe('Intro\nFix this first.\nOutro\n');
   expect(render(template, { feedback: false }).text).toBe('Intro\nStart fresh.\nOutro\n');
@@ -190,18 +166,12 @@ test
   expect(render(crlf, { x: true }).text).toBe('Intro\r\nBody\r\nOutro');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a block tag with text beside it leaves its line as written', () => {
+test('a block tag with text beside it leaves its line as written', () => {
   expect(render('a {{#if x}}b{{/if}} c', { x: true }).text).toBe('a b c');
   expect(render('- {{#if x}}b{{else}}c{{/if}}\n', { x: false }).text).toBe('- c\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a block that is malformed is a render error with its line', () => {
+test('a block that is malformed is a render error with its line', () => {
   const lines = [
     '\n{{#if x}}\nbody',
     '\n{{#each xs}}\nbody',
@@ -217,24 +187,15 @@ test
   expect(lines).toEqual([2, 2, 2, 2, 2, 3, 3, 6, 2, 2]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a syntax error in the branch not taken is still reported', () => {
+test('a syntax error in the branch not taken is still reported', () => {
   expect(renderError('{{#if x}}ok{{else}}{{#unless y}}{{/if}}', { x: true }).line).toBe(1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('this outside each is a render error', () => {
+test('this outside each is a render error', () => {
   expect(renderError('{{this}}', { ticket }).path).toBe('this');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a placeholder inside a block is left byte for byte', () => {
+test('a placeholder inside a block is left byte for byte', () => {
   const template = '{{#each xs}}{{goal: one paragraph}} {{/each}}';
   expect(render(template, { xs: [1, 2] }).text).toBe('{{goal: one paragraph}} {{goal: one paragraph}} ');
 });
