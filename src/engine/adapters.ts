@@ -106,19 +106,24 @@ function preflight(use: string, found: Found, options: AdapterOptions, env: Env)
     .map((name) => `needs ${name}, which is not set`);
 }
 
-/** The versions `found` declares: none, or why its versions() can't be read. */
-function declared(use: string, found: Found): Record<string, string> | { issue: string } {
-  if (found.definition.versions === undefined) return {};
+/** An object written as `{ … }`: not an array, a promise or any other class's instance. */
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  isObject(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
+
+/** The versions `found` declares, empty when it declares none, or why its versions() can't be read. */
+function declared(use: string, found: Found): { versions: Record<string, string> } | { issue: string } {
+  if (found.definition.versions === undefined) return { versions: {} };
   let versions: unknown;
   try {
     versions = found.definition.versions();
   } catch (error) {
     return { issue: `${use}'s versions() failed: ${message(error)}` };
   }
-  if (!isObject(versions) || Object.values(versions).some((version) => typeof version !== 'string')) {
+  const named = isPlainObject(versions) ? Object.entries(versions) : undefined;
+  if (named === undefined || named.some(([name, version]) => name === '' || typeof version !== 'string')) {
     return { issue: `${use}'s versions() must return names and versions` };
   }
-  return versions as Record<string, string>;
+  return { versions: Object.fromEntries(named) as Record<string, string> };
 }
 
 /** Pass 3: creates the adapter and checks it is its port's, or gives the issue. */
@@ -189,11 +194,12 @@ export async function resolveAdapters(options: ResolveOptions): Promise<Resolved
   const entries = {} as Record<Port, AdapterEntry>;
   for (const port of PORTS) {
     const { use } = options.config.adapters[port];
-    const versions = declared(use, found[port]);
-    if ('issue' in versions) {
-      issue(port, versions.issue);
+    const read = declared(use, found[port]);
+    if ('issue' in read) {
+      issue(port, read.issue);
       continue;
     }
+    const { versions } = read;
     const built = await build(port, use, found[port], optionsOf(options.config.adapters[port]), options);
     if ('issue' in built) {
       issue(port, built.issue);
