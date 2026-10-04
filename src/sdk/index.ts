@@ -43,6 +43,7 @@ export {
   script,
   stage,
 } from './steps';
+export { type Untrusted, untrusted } from './untrusted';
 export {
   type AgentResult,
   type BindingsOf,
