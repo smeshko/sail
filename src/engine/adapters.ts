@@ -1,8 +1,8 @@
 // The adapter registry: turns the config's four adapter entries into four adapters. A built-in is found by name among
 // the definitions it is handed, and the repository's own is imported by module path. Anything it can't resolve, create
 // or recognise as its port is an issue at `/adapters/<port>`.
-import { existsSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ProviderEmit } from '../events/types';
 import {
   type AdapterDefinition,
@@ -41,6 +41,11 @@ interface Found {
 }
 
 const isModulePath = (use: string) => use.startsWith('./') || use.startsWith('../');
+/** Whether `path` is below `root`: the root itself is not. */
+const isBelow = (root: string, path: string) => {
+  const inside = relative(root, path);
+  return inside !== '' && inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
+};
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
@@ -65,14 +70,17 @@ async function find(port: Port, use: string, options: ResolveOptions): Promise<F
   }
   const root = dirname(options.sailDir);
   const path = resolve(options.sailDir, use);
-  const inside = relative(root, path);
-  if (inside.startsWith('..') || isAbsolute(inside)) return `'${use}' is outside the repository`;
+  if (!isBelow(root, path)) return `'${use}' is outside the repository`;
   const at = origin(root, path).slice('repo:'.length);
   if (!existsSync(path)) return `${at} doesn't exist`;
+  if (!statSync(path).isFile()) return `${at} is not a file`;
+  // A symlink on the way can lead out of the repository, which the path alone doesn't show.
+  const real = realpathSync(path);
+  if (!isBelow(realpathSync(root), real)) return `${at} links outside the repository`;
   registerSail();
   let loaded: { default?: unknown };
   try {
-    loaded = await import(path);
+    loaded = await import(real);
   } catch (error) {
     return `${at} failed to load: ${message(error)}`;
   }
