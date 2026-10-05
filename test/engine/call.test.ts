@@ -1,7 +1,17 @@
 // The script step's contract end to end: runCall() in a temporary repository, each result.json read back from disk.
 import { expect, spyOn, test } from 'bun:test';
 import * as fs from 'node:fs';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createFakeHarness, type ScriptedAnswer } from '../../src/adapters/fake/harness';
 import type { Supplied } from '../../src/engine/bindings';
@@ -1263,5 +1273,40 @@ test('a result from before a try recorded its place in validation used the corre
       validationTry: 2,
       validationFailed: false,
     });
+  });
+});
+
+test("the engine's own files in a call directory are written new: a link its step left under one of their names is replaced, and what it points at is untouched", async () => {
+  await withTempRepo(async (repo) => {
+    const kept = join(repo.dir, 'keep.txt');
+    writeFileSync(kept, 'kept\n');
+    /** What is at `path` itself: a link is not followed. */
+    const kind = (path: string): string => {
+      const stat = lstatSync(path, { throwIfNoEntry: false });
+      if (stat === undefined) return 'nothing';
+      return stat.isSymbolicLink() ? 'link' : 'file';
+    };
+
+    // An agent session may write to its `$STAGE_OUT`, and leaves links there for all the engine writes after it.
+    const s = specStage(repo);
+    const names = ['session.log', 'result.json', 'result.json.tmp'];
+    const harness = fake([submits(SPEC, 0.25, { messages: ['Spec written.'] })], {
+      after: (request) => {
+        for (const name of names) symlinkSync(kept, join(request.env.STAGE_OUT ?? '', name));
+      },
+    });
+    const { result, paths } = await runCall(s.request(specStep(), harness));
+    expect(readFileSync(kept, 'utf8')).toBe('kept\n');
+    expect(names.map((name) => kind(join(paths.dir, name)))).toEqual(['file', 'file', 'nothing']);
+    expect(textAt(join(paths.dir, 'session.log'))).toBe('assistant: Spec written.\n');
+    expect(written(result)).toEqual(readBack(paths.result));
+
+    // A script may write anywhere, and its result is written the same way.
+    const t = tests(repo);
+    t.run(`ln -s "$WORKSPACE/keep.txt" "$STAGE_OUT/result.json"\n${PASSES}`);
+    const ran = await runCall(t.request(plainStep()));
+    expect(readFileSync(kept, 'utf8')).toBe('kept\n');
+    expect(kind(ran.paths.result)).toBe('file');
+    expect(readBack(ran.paths.result)).toMatchObject({ outcome: 'passed' });
   });
 });
