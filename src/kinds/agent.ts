@@ -100,6 +100,9 @@ interface Seen {
   spent: Usage | undefined;
 }
 
+/** A whole number of 0 or more: the only count a result takes. A harness's events are typed, and never checked. */
+const isCount = (value: unknown): value is number => Number.isInteger(value) && (value as number) >= 0;
+
 const tokenCount = z.number().int().nonnegative();
 
 /** The running total a usage update gives, as the port types it. */
@@ -132,10 +135,10 @@ function listen(emit: CallEmit): { seen: Seen; onEvent: (event: HarnessEvent) =>
         seen.spent = Usage.safeParse(event.usage).data ?? seen.spent;
         return;
       case 'harness:session_start':
-        seen.sessionId = event.sessionId;
+        if (typeof event.sessionId === 'string') seen.sessionId = event.sessionId;
         break;
       case 'usage:update':
-        seen.turns = Math.max(seen.turns, event.turn);
+        if (isCount(event.turn)) seen.turns = Math.max(seen.turns, event.turn);
         seen.spent = spentBy(event) ?? seen.spent;
         break;
       case 'tool:start':
@@ -258,11 +261,14 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
   // a session that reported what it had spent, and then failed to return, still spent it.
   const usage = reported.usage ?? seen.spent ?? { costUsd: 0 };
   const sessionId = reported.sessionId ?? seen.sessionId;
+  // The session's own end counts for it, where what it gives is a count: one that isn't would break `result.json`.
+  const counted = (said: unknown, heard: number): number => (isCount(said) ? said : heard);
   const counters = {
-    turns: seen.end?.turns ?? seen.turns,
-    toolCalls: seen.end?.toolCalls ?? seen.toolCalls,
-    denials: seen.end?.denials ?? seen.denials,
+    turns: counted(seen.end?.turns, seen.turns),
+    toolCalls: counted(seen.end?.toolCalls, seen.toolCalls),
+    denials: counted(seen.end?.denials, seen.denials),
   };
+  const reason = seen.end?.reason;
   const record = {
     ...place,
     prompt: rendered,
@@ -278,7 +284,7 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     type: 'harness:session_end',
     ...(sessionId === undefined ? {} : { sessionId }),
     outcome: result?.outcome ?? (reasonless ? 'blocked' : 'error'),
-    ...(seen.end?.reason === undefined ? {} : { reason: seen.end.reason }),
+    ...(typeof reason === 'string' ? { reason } : {}),
     ...counters,
     usage,
   });
