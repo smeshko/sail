@@ -4,11 +4,21 @@
 import { dirname } from 'node:path';
 import type { CallEmit, Emit, NewEvent } from '../events/types';
 import { KINDS } from '../kinds/index';
+import type { Harness } from '../ports/harness';
 import type { StageDefinition } from '../sdk/steps';
 import { bindingProblems, materialise, type Supplied } from './bindings';
 import { type CallPaths, callPaths, createCallDir, runRelative } from './call-dir';
 import type { JournalEntry } from './journal';
 import { buildResult, writeResult } from './result';
+
+/** What an agent call runs on, resolved by its caller before anything is written. */
+export interface AgentExecution {
+  harness: Harness;
+  /** The model id the step's alias resolved to. A resumed run passes the one its roster froze. */
+  model: string;
+  /** `project.yaml`'s `conventions`. Left out, the defaults are appended. */
+  conventions?: readonly string[];
+}
 
 export interface CallRequest {
   runDir: string;
@@ -16,7 +26,10 @@ export interface CallRequest {
   /** The stage's `NN` in the run directory. */
   stageIndex: number;
   call: number;
-  /** The call's try: 1, the default, unless an earlier try was interrupted. */
+  /**
+   * The try the call starts at: 1, the default, unless an earlier try was interrupted. An agent call that corrects
+   * invalid output goes on to the next try itself.
+   */
   try?: number;
   definition: StageDefinition;
   /** The `stage.ts` that exported the definition: a script's `run` is relative to its directory. */
@@ -29,10 +42,16 @@ export interface CallRequest {
   graceMs?: number;
   /** Where the call's events go, each keyed `<stage>#<call>`. `sail stage run` passes none. */
   emit?: Emit;
+  /** What an agent call runs on. A script call takes none. */
+  agent?: AgentExecution;
 }
 
 /** Why the definition can't run with what is supplied, found before anything is written. */
-export function callProblems(definition: StageDefinition, supplied: Readonly<Record<string, Supplied>>): string[] {
+export function callProblems(
+  definition: StageDefinition,
+  supplied: Readonly<Record<string, Supplied>>,
+  _agent?: AgentExecution,
+): string[] {
   if (definition.kind === 'agent') return ["agent steps can't run yet"];
   if (definition.kind === 'stage') return ["multi-step stages can't run yet"];
   return [...KINDS[definition.kind].problems(definition), ...bindingProblems(definition.consumes, supplied)];
@@ -41,6 +60,10 @@ export function callProblems(definition: StageDefinition, supplied: Readonly<Rec
 /** Runs one call and writes its `result.json`. Callers check `callProblems` first: any problem throws here. */
 export async function runCall(request: CallRequest): Promise<{ result: Record<string, unknown>; paths: CallPaths }> {
   const { definition, runDir, runId, call } = request;
+  // A stub until agent calls run: nothing is written, and nothing is returned.
+  if (definition.kind === 'agent' && request.agent !== undefined) {
+    return { result: {}, paths: callPaths(runDir, request.stageIndex, definition.name, call, request.try ?? 1) };
+  }
   const problems = callProblems(definition, request.supplied);
   if (problems.length > 0 || definition.kind !== 'script') throw new Error(problems.join('\n'));
 

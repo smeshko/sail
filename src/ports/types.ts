@@ -152,11 +152,19 @@ export type Usage = z.infer<typeof Usage>;
 
 const session = { sessionId: z.string(), usage: Usage, transcript: z.string(), raw: Raw };
 
+/** Why a session ended in `error`. Left out, it is `harness`. */
+export type HarnessFailure = 'harness' | 'budget_exceeded' | 'timeout';
+
 /** How an agent step's session ended: its submitted output, a blocked reason, or an error's message. */
 export const HarnessResult = z.discriminatedUnion('outcome', [
   z.object({ outcome: z.literal('done'), output: z.unknown(), ...session }),
   z.object({ outcome: z.literal('blocked'), reason: z.string().min(1), ...session }),
-  z.object({ outcome: z.literal('error'), message: z.string().min(1), ...session }),
+  z.object({
+    outcome: z.literal('error'),
+    message: z.string().min(1),
+    reason: z.custom<HarnessFailure>().optional(),
+    ...session,
+  }),
 ]);
 export type HarnessResult = z.infer<typeof HarnessResult>;
 

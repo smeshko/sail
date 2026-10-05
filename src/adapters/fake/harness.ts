@@ -115,7 +115,14 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     const emit = (event: HarnessEvent) => request.onEvent?.(event);
     const end = (result: HarnessResult): HarnessResult => {
       progress.ended = true;
-      emit({ type: 'harness:session_end', outcome: result.outcome });
+      emit({
+        type: 'harness:session_end',
+        outcome: result.outcome,
+        turns: 0,
+        toolCalls: 0,
+        denials: 0,
+        usage: { costUsd: 0 },
+      });
       return result;
     };
     /** Fails with what the session has spent so far, so a failure after turns still counts their cost. */
@@ -198,7 +205,14 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
         if (progress.started && !progress.ended) {
           try {
             request.onEvent?.({ type: 'error:harness', message });
-            request.onEvent?.({ type: 'harness:session_end', outcome: 'error' });
+            request.onEvent?.({
+              type: 'harness:session_end',
+              outcome: 'error',
+              turns: 0,
+              toolCalls: 0,
+              denials: 0,
+              usage: { costUsd: 0 },
+            });
           } catch {
             // An onEvent that throws hears no more.
           }

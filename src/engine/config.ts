@@ -27,6 +27,11 @@ export interface ProjectConfig {
   models: Record<string, string>;
   /** Empty when `project.yaml` has none. */
   budgets: { run?: { maxUsd?: number; maxMinutes?: number } };
+  /**
+   * The convention files appended to every agent prompt, each relative to the repository's root. Left out, `AGENTS.md`
+   * and `CLAUDE.md` are appended where they exist. An empty list appends none.
+   */
+  conventions?: string[];
 }
 
 /** `project.yaml` as written, where `models` and `budgets` may be left out. */

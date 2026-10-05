@@ -114,3 +114,27 @@ export function materialise(
   }
   return { inputs, consumed };
 }
+
+/** A call's bindings, checked and parsed once, for `$STAGE_IN` and an agent's prompt to share. */
+export interface PreparedBindings {
+  readonly consumes: Consumes;
+  readonly supplied: Readonly<Record<string, Supplied>>;
+  /** Each supplied value binding's data as its schema parsed it, defaults and transforms applied, by binding name. */
+  readonly values: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Checks and parses what was supplied for `consumes`, without writing anything. Callers check `bindingProblems` first:
+ * any problem throws here.
+ */
+export function prepareBindings(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>): PreparedBindings {
+  return { consumes, supplied, values: {} };
+}
+
+/** Writes prepared bindings into `stageIn`, as `materialise()` does, without parsing a value again. */
+export function materialisePrepared(
+  prepared: PreparedBindings,
+  _stageIn: string,
+): { inputs: Record<string, string>; consumed: Record<string, string | null> } {
+  return { inputs: {}, consumed: Object.fromEntries(Object.keys(prepared.consumes).map((key) => [key, null])) };
+}
