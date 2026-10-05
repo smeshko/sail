@@ -1057,3 +1057,75 @@ test('a session whose end the events file lost is ended from its durable result,
     expect(summary?.totals.usage).toEqual({ costUsd: 0.375 });
   });
 });
+
+/** A try said whole from its result: its start, the end of its session, and its own. */
+const WHOLE: SailEvent['type'][] = ['stage:start', 'harness:session_end', 'stage:end'];
+
+test.each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
+  ["the first session's start", (event) => event.type === 'harness:session_start', WHOLE.slice(1)],
+  ["the first try's start", (event) => event.type === 'stage:start', WHOLE.slice(1)],
+  ["the run's start", (event) => event.type === 'run:start', WHOLE],
+])(
+  'tries whose events were lost after %s are said from their durable results, each once, and every session is counted',
+  async (_, last, first) => {
+    await withTempRepo(async (repo) => {
+      const s = specStage(repo);
+      const answers = [submits({ summary: 3 }, 0.125), submits({ summary: null }, 0.25)];
+      const emit = stream(s.runDir);
+      emit(runStart());
+      const ran = fake(answers);
+      await runCall(s.request(specStep(), ran, { emit }));
+      expect(ran.requests).toHaveLength(2);
+      const live = readEvents(s.runDir).filter((event) => event.type === 'stage:start');
+
+      // A power loss took the events' tail, and with it all of the second try: both results had reached the disk.
+      const cut = readEvents(s.runDir).findIndex(last);
+      cutEventsAfter(s.runDir, (event) => event.seq === cut + 1);
+      const kept = readEvents(s.runDir).length;
+
+      const recovered = fake(answers);
+      const second = await runCall(s.request(specStep(), recovered, { emit: stream(s.runDir) }));
+      expect(recovered.requests).toEqual([]);
+      expect(second.paths.dir).toBe(s.dir(2));
+      const appended = readEvents(s.runDir).slice(kept);
+      expect(appended.map((event) => event.type)).toEqual([...first, ...WHOLE]);
+      expect(stageEvents(appended).slice(-3)).toEqual(['end 1 error', 'start 2', 'end 2 error']);
+      expect(sessionEnds(appended).map((end) => [end.sessionId, end.turns, end.usage])).toEqual([
+        ['fake-session-spec-1', 1, { costUsd: 0.125 }],
+        ['fake-session-spec-1-try-2', 1, { costUsd: 0.25 }],
+      ]);
+      // A start said again is the one the try gave: what it ran on, and what it consumed.
+      const said = appended.filter((event) => event.type === 'stage:start');
+      const payload = ({ seq: _seq, ts: _ts, ...rest }: SailEvent) => rest;
+      expect(said.map(payload)).toEqual(live.slice(-said.length).map(payload));
+
+      await runCall(s.request(specStep(), recovered, { emit: stream(s.runDir) }));
+      const events = readEvents(s.runDir);
+      expect([events.length, recovered.requests.length]).toEqual([kept + appended.length, 0]);
+      const summary = summarize(events);
+      expect(summary?.calls.map((call) => [call.key, call.outcome, call.resultPath])).toEqual([
+        [KEY, 'error', '01-spec/call-1/try-2/result.json'],
+      ]);
+      expect(summary?.totals.usage).toEqual({ costUsd: 0.375 });
+    });
+  },
+);
+
+test('a try that never reached a session, and whose events were lost, is said from its result with no session to end', async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    const unrendered = specStep({ prompt: './unknown.md' });
+    const emit = stream(s.runDir);
+    emit(runStart());
+    const harness = fake([submits(SPEC, 0.25)]);
+    await runCall(s.request(unrendered, harness, { emit }));
+    cutEventsAfter(s.runDir, (event) => event.type === 'run:start');
+
+    // Its failure was never journaled, so the call runs again: what the first try left unsaid comes first.
+    await runCall(s.request(unrendered, harness, { emit: stream(s.runDir) }));
+    const events = readEvents(s.runDir).slice(1);
+    expect(harness.requests).toEqual([]);
+    expect(stageEvents(events)).toEqual(['start 1', 'end 1 error', 'start 2', 'end 2 error']);
+    expect(sessionEnds(events)).toEqual([]);
+  });
+});
