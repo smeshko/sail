@@ -150,10 +150,7 @@ const ends = (events: readonly CallEvent[]): object[] =>
 /** What a try that never reached a session records: no session id, no turns, no usage. */
 const UNSTARTED = { adapter: 'scripted', model: MODEL, turns: 0, toolCalls: 0, denials: 0 };
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('problems() reports a produced name the engine writes, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
+test('problems() reports a produced name the engine writes, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
   expect(agentKind.kind).toBe('agent');
   expect(agentKind.problems(spec())).toEqual([]);
   expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 0 }, onInvalidOutput: 'fail' }))).toEqual([]);
@@ -184,10 +181,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the harness receives the rendered prompt with its feedback, the preamble alone as its environment, the resolved model, the step permissions and budget, the signal, and a draft-07 schema of what to submit', async () => {
+test('the harness receives the rendered prompt with its feedback, the preamble alone as its environment, the resolved model, the step permissions and budget, the signal, and a draft-07 schema of what to submit', async () => {
   // A transform and a refinement: the schema the agent submits against is the input's, and says nothing of either.
   const Submission = z.object({
     summary: z.string().max(400),
@@ -247,10 +241,7 @@ test
   expect(run.record).toMatchObject({ try: 3, validationTry: 2, validationFailed: false });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a done session gives its output and the hashes of its files, and records its try, its prompt, the harness and the usage, with the transcript in session.log', async () => {
+test('a done session gives its output and the hashes of its files, and records its try, its prompt, the harness and the usage, with the transcript in session.log', async () => {
   const step = spec();
   const s = setup(step);
   write(join(s.workspace, 'AGENTS.md'), 'Indent with tabs.\n');
@@ -296,10 +287,7 @@ test
   expect(JSON.stringify(result)).not.toContain('payload');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a blocked session gives its reason and no output, and owes none of its files; one with no reason, or a blank one, is invalid output', async () => {
+test('a blocked session gives its reason and no output, and owes none of its files; one with no reason, or a blank one, is invalid output', async () => {
   const reason = 'The brief has no acceptance criteria.';
   const blocked = await tried(spec(), scripted({ resolves: { outcome: 'blocked', reason, ...session } }));
   expect(blocked.run).toMatchObject({
@@ -311,7 +299,10 @@ test
   });
   expect(types(blocked.s.events)).toEqual(['prompt:rendered', 'harness:session_end']);
 
-  for (const without of [{ outcome: 'blocked', ...session }, { outcome: 'blocked', reason: ' \n\t', ...session }]) {
+  for (const without of [
+    { outcome: 'blocked', ...session },
+    { outcome: 'blocked', reason: ' \n\t', ...session },
+  ]) {
     const { run } = await tried(spec(), scripted({ resolves: without, files: { 'spec.md': '# Spec\n' } }));
     expect({ outcome: run.outcome, output: run.output, reasons: run.errors.map((error) => error.reason) }).toEqual({
       outcome: 'error',
@@ -324,10 +315,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a done session whose output breaks its schema, or that leaves a declared file out, ends in error with each problem, and the try runs no second session', async () => {
+test('a done session whose output breaks its schema, or that leaves a declared file out, ends in error with each problem, and the try runs no second session', async () => {
   const zod = '✖ Invalid input: expected string, received number\n  → at summary';
   const missing: ContractError = { reason: 'missing_file', message: "'spec.md' was not produced in $STAGE_OUT" };
   const wrong = { summary: 3, tasks: ['greet()'] };
@@ -353,10 +341,7 @@ test
   expect(both.run.errors).toEqual([{ reason: 'invalid_output', message: expect.stringContaining(zod) }, missing]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the engine checks what a JSON Schema cannot say: a refinement that fails, and a parsed output JSON cannot hold, are invalid output', async () => {
+test('the engine checks what a JSON Schema cannot say: a refinement that fails, and a parsed output JSON cannot hold, are invalid output', async () => {
   const Approved = z.object({ approved: z.boolean().refine((value) => value, { message: 'must be approved' }) });
   const refused = await tried(bare(Approved), scripted({ resolves: done({ approved: false }) }));
   expect(refused.run.errors).toEqual([
@@ -383,10 +368,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a prompt that cannot be rendered, or a convention that cannot be read, ends the try as not_started before any session: no prompt:rendered, an empty session.log and no usage', async () => {
+test('a prompt that cannot be rendered, or a convention that cannot be read, ends the try as not_started before any session: no prompt:rendered, an empty session.log and no usage', async () => {
   const unrendered = scripted({ resolves: done(VALID) });
   const first = await tried(spec(), unrendered, 'Intro\n\nKey: {{ticket.keey}}\n');
   expect(first.run).toEqual({
@@ -414,15 +396,17 @@ test
   expect([unread.requests, s.events, s.read('session.log')]).toEqual([[], [], '']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a failed session, a harness that rejects or throws, and an answer that is no result are harness errors that keep their message, and a budget failure is budget_exceeded', async () => {
+test('a failed session, a harness that rejects or throws, and an answer that is no result are harness errors that keep their message, and a budget failure is budget_exceeded', async () => {
   const reported = { ...UNSTARTED, sessionId: 'session-7' };
   const nothing = { costUsd: 0 };
   /** Each harness, the error its try ends with, and the session and usage the try records. */
   const cases: [Harness, ContractError, object, object][] = [
-    [scripted({ resolves: failed('model overloaded') }), { reason: 'harness', message: 'model overloaded' }, reported, USAGE],
+    [
+      scripted({ resolves: failed('model overloaded') }),
+      { reason: 'harness', message: 'model overloaded' },
+      reported,
+      USAGE,
+    ],
     [
       scripted({ resolves: failed('budget exceeded: maxTurns 1', { reason: 'budget_exceeded' }) }),
       { reason: 'budget_exceeded', message: 'budget exceeded: maxTurns 1' },
@@ -488,10 +472,7 @@ const WORKING: HarnessEvent[] = [
   { type: 'usage:update', turn: 2, tokens: { ...TOKENS, input: 90 }, costUsdSoFar: 0.09375 },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('every session ends exactly once, after its other events, with the usage the harness returned and the turns, tool calls and denials seen on the way', async () => {
+test('every session ends exactly once, after its other events, with the usage the harness returned and the turns, tool calls and denials seen on the way', async () => {
   const counted = { sessionId: 'session-7', outcome: 'done', turns: 2, toolCalls: 2, denials: 1, usage: USAGE };
   const end = { type: 'harness:session_end' as const, outcome: 'done' as const, turns: 2, toolCalls: 2, denials: 1 };
   const files = { 'spec.md': '# Spec\n' };
@@ -521,16 +502,18 @@ test
 
   // A harness that emits nothing still has its session ended, with what it returned, and no start is made up.
   const silent = await tried(spec(), scripted({ resolves: done(VALID), files }));
-  expect(types(silent.s.events)).toEqual(['prompt:rendered', 'harness:session_end', 'output:validated', 'file:produced']);
+  expect(types(silent.s.events)).toEqual([
+    'prompt:rendered',
+    'harness:session_end',
+    'output:validated',
+    'file:produced',
+  ]);
   expect(ends(silent.s.events)).toEqual([
     { type: 'harness:session_end', ...counted, turns: 0, toolCalls: 0, denials: 0 },
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a failed session reports error:harness once, before its end; a session out of turns reports its budget first, and its partial usage', async () => {
+test('a failed session reports error:harness once, before its end; a session out of turns reports its budget first, and its partial usage', async () => {
   const start = WORKING[0] as HarnessEvent;
   const message: HarnessEvent = { type: 'agent:message', text: 'Reading the brief.' };
 

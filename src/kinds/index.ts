@@ -1,11 +1,12 @@
 // Step kinds: how the engine runs a step of one kind and checks its contract. `StepKind` is the extension point, and
-// the script kind is its first implementation. Epic 05 adds `agent`.
+// `script` and `agent` are its implementations.
 import type { PreparedBindings } from '../engine/bindings';
 import type { CallPaths } from '../engine/call-dir';
 import type { ContractError, FileEntry } from '../engine/contract';
 import type { CallEmit } from '../events/types';
 import type { Harness } from '../ports/harness';
 import type { Step } from '../sdk/steps';
+import { agentKind } from './agent';
 import { scriptKind } from './script';
 
 /** What one try of an agent step runs on: the harness and model its caller resolved, and what its call prepared. */
@@ -66,4 +67,4 @@ export interface StepKind<S extends Step> {
 }
 
 /** Every step kind the engine runs, by `kind`. */
-export const KINDS = { script: scriptKind };
+export const KINDS = { script: scriptKind, agent: agentKind };
