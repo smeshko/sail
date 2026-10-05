@@ -7,13 +7,14 @@
 //   NN-<stage>/call-N/result.json the engine's record of the call
 //   NN-<stage>/call-N/prompt.md   an agent step's prompt, as its session was sent it
 //   NN-<stage>/call-N/session.log an agent step's transcript
-//   NN-<stage>/call-N/try-M/      a later try of the same call, after an interruption (and, from Epic 05, a retry),
-//                                 with its own in/, logs and result.json
+//   NN-<stage>/call-N/try-M/      a later try of the same call, after an interruption or to correct an agent step's
+//                                 output, with its own in/, logs and result.json
 //
 // $STAGE_OUT is the call directory itself, not an `out/` below it, because the golden run directory records produced
 // files beside the logs (`03-tests/call-1/junit.xml`). So the engine's own names are reserved there.
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
+import { createDir, syncDir } from './durable';
 
 /** The absolute paths of one call's directory and what the engine writes in it. */
 export interface CallPaths {
@@ -67,21 +68,38 @@ export function callPaths(runDir: string, index: number, stage: string, call: nu
   };
 }
 
-/** The try a call runs as next: 1 when `call-N/` doesn't exist, else one more than its highest try. */
-export function nextTry(runDir: string, index: number, stage: string, call: number): number {
+/** The tries a call has a directory for, in order: none when `call-N/` doesn't exist. */
+export function existingTries(runDir: string, index: number, stage: string, call: number): number[] {
   const callDir = callPaths(runDir, index, stage, call).dir;
-  if (!existsSync(callDir)) return 1;
-  const tries = readdirSync(callDir)
+  if (!existsSync(callDir)) return [];
+  const later = readdirSync(callDir)
     .filter(isTryName)
     .map((name) => Number(name.slice('try-'.length)));
-  return Math.max(1, ...tries) + 1;
+  return [1, ...later.sort((a, b) => a - b)];
 }
 
-/** Creates the call directory and `$STAGE_IN`. A call directory is written once, so an existing one throws. */
-export function createCallDir(paths: CallPaths): void {
-  mkdirSync(dirname(paths.dir), { recursive: true });
-  mkdirSync(paths.dir);
-  mkdirSync(paths.stageIn);
+/** The try a call runs as next: 1 when `call-N/` doesn't exist, else one more than its highest try. */
+export function nextTry(runDir: string, index: number, stage: string, call: number): number {
+  return (existingTries(runDir, index, stage, call).at(-1) ?? 0) + 1;
+}
+
+/**
+ * Creates the call directory and `$STAGE_IN`. A call directory is written once, so an existing one throws. A `durable`
+ * one has its entries synced before this returns: the tries an agent call has on disk are where a resume reads how far
+ * the call got.
+ */
+export function createCallDir(paths: CallPaths, options: { durable?: boolean } = {}): void {
+  const parent = dirname(paths.dir);
+  mkdirSync(parent, { recursive: true });
+  if (!options.durable) {
+    mkdirSync(paths.dir);
+    mkdirSync(paths.stageIn);
+    return;
+  }
+  // The stage's directory may be new too, and its entry is its own parent's.
+  syncDir(dirname(parent));
+  createDir(paths.dir);
+  createDir(paths.stageIn);
 }
 
 /** A POSIX path relative to the run directory, as `result.json` records a file. */

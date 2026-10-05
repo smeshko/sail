@@ -219,10 +219,7 @@ test('a multi-step stage is refused, and gets no call directory', async () => {
 
 const UNRESOLVED = "agent steps need a harness and a model, which weren't resolved";
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an agent call with no harness and model resolved is refused, and gets no call directory; with them, its problems are its step and its bindings', async () => {
+test('an agent call with no harness and model resolved is refused, and gets no call directory; with them, its problems are its step and its bindings', async () => {
   await withTempRepo(async (repo) => {
     const s = tests(repo);
     expect(callProblems(spec, {})).toEqual([UNRESOLVED]);
@@ -565,10 +562,7 @@ function cutEventsAfter(runDir: string, last: (event: SailEvent) => boolean): vo
 const sessionEnds = (events: readonly SailEvent[]) =>
   events.flatMap((event) => (event.type === 'harness:session_end' ? [event] : []));
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('invalid output is corrected once: a second try in try-2/, with bindings of its own and the messages of the first in its prompt, ends the call done', async () => {
+test('invalid output is corrected once: a second try in try-2/, with bindings of its own and the messages of the first in its prompt, ends the call done', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const draft = submits({ summary: 3 }, 0.125, { files: { 'spec.md': '# Draft\n' } });
@@ -631,10 +625,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('invalid output twice ends the call in error on its second try, listing the problems of both tries in order, each once', async () => {
+test('invalid output twice ends the call in error on its second try, listing the problems of both tries in order, each once', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const harness = recording(
@@ -670,10 +661,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('onInvalidOutput fail ends the call in error after one session, with one result', async () => {
+test('onInvalidOutput fail ends the call in error after one session, with one result', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const harness = fake([submits({ summary: 3 }, 0.125), submits(SPEC, 0.25)]);
@@ -688,10 +676,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a declared file left out is corrected as invalid output is, and the second try is told which file', async () => {
+test('a declared file left out is corrected as invalid output is, and the second try is told which file', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const harness = fake([submits(SPEC, 0.125, { files: {} }), submits(SPEC, 0.25)]);
@@ -711,10 +696,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a session that fails, one out of turns and a prompt that cannot be rendered are not corrected: one result each, and no second try', async () => {
+test('a session that fails, one out of turns and a prompt that cannot be rendered are not corrected: one result each, and no second try', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const harness = recording(
@@ -757,10 +739,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('no corrective try starts once the call is aborted: after a try that ended invalid, and during a session', async () => {
+test('no corrective try starts once the call is aborted: after a try that ended invalid, and during a session', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const stopped = new AbortController();
@@ -794,10 +773,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a call resumed after an invalid try and an interrupted correction keeps its one correction: the next try is its second validation, told the original problems, and its failure is final', async () => {
+test('a call resumed after an invalid try and an interrupted correction keeps its one correction: the next try is its second validation, told the original problems, and its failure is final', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [
@@ -847,10 +823,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an interruption before any output was checked does not use the correction', async () => {
+test('an interruption before any output was checked does not use the correction', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [
@@ -880,10 +853,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a prior result that cannot be read fails the resumed call, naming it, and no session starts', async () => {
+test('a prior result that cannot be read fails the resumed call, naming it, and no session starts', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [submits({ summary: 3 }, 0.125), submits(SPEC, 0.25)];
@@ -901,10 +871,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the directory and the result of a try are synced to disk before the next session starts', async () => {
+test('the directory and the result of a try are synced to disk before the next session starts', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     // Every fsync, by the path its descriptor was opened on, and every rename: a file written under another name and
@@ -959,10 +926,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a result whose stage:end was lost is ended once when the call is recovered, with no session and no usage counted again', async () => {
+test('a result whose stage:end was lost is ended once when the call is recovered, with no session and no usage counted again', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [submits({ summary: 3 }, 0.125), submits({ summary: null }, 0.25)];
@@ -1002,10 +966,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a session a killed process left open is ended once when its call is recovered, with the last usage it had reported', async () => {
+test('a session a killed process left open is ended once when its call is recovered, with the last usage it had reported', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const emit = stream(s.runDir);
@@ -1056,10 +1017,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a session whose end the events file lost is ended from its durable result, once, however often the call is recovered', async () => {
+test('a session whose end the events file lost is ended from its durable result, once, however often the call is recovered', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [submits({ summary: 3 }, 0.125), submits({ summary: null }, 0.25)];
