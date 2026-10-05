@@ -316,10 +316,7 @@ function summaries(dir: string): { written: Summary; rebuilt: unknown; same: boo
   return { written: JSON.parse(text), rebuilt, same: readFileSync(path, 'utf8') === text };
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail resume takes up a correction it was interrupted in: the next try is still the second validation, told the original problems, on the model the run started with, and every session is counted once', async () => {
+test('sail resume takes up a correction it was interrupted in: the next try is still the second validation, told the original problems, on the model the run started with, and every session is counted once', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeAgentFixture(from.dir, [
@@ -380,10 +377,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a run whose process was killed in a session resumes: the session is ended with the usage it had reported, and its usage and that of the next are each counted once', async () => {
+test('a run whose process was killed in a session resumes: the session is ended with the usage it had reported, and its usage and that of the next are each counted once', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(SPEC, 0.5, { turns: 2, delayMs: 60_000 }), submits(SPEC, 0.25)]);
     const child = Bun.spawn([process.execPath, shim, ...RUN_ARGV], {

@@ -484,10 +484,7 @@ const marked = (view: string): string[] => view.split('\n').filter((line) => /^\
 const summaryIn = (dir: string): Summary => JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
 const callIn = (summary: Summary, key: string) => summary.calls.find((call) => call.key === key);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail run takes a script-to-agent workflow to its end on the fake harness, correcting an invalid output once: both tries in the view, exit 0, a run directory that validates and each session counted once', async () => {
+test('sail run takes a script-to-agent workflow to its end on the fake harness, correcting an invalid output once: both tries in the view, exit 0, a run directory that validates and each session counted once', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125, { turns: 2 }), submits(SPEC, 0.25)]);
     const { code, stderr, view, dir, runId } = await agentRun(repo.dir);
@@ -518,7 +515,13 @@ test
 
     expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
-    expect([1, 2].map((n) => readdirSync(specDir(dir, n)).filter((name) => name !== 'try-2').sort())).toEqual([
+    expect(
+      [1, 2].map((n) =>
+        readdirSync(specDir(dir, n))
+          .filter((name) => name !== 'try-2')
+          .sort(),
+      ),
+    ).toEqual([
       ['in', 'prompt.md', 'result.json', 'session.log', 'spec.md'],
       ['in', 'prompt.md', 'result.json', 'session.log', 'spec.md'],
     ]);
@@ -566,10 +569,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail run fails with stage_error once the output is invalid twice, naming the problems of both tries in order', async () => {
+test('sail run fails with stage_error once the output is invalid twice, naming the problems of both tries in order', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125), submits(NO_SUMMARY, 0.25), submits(SPEC, 0.5)]);
     const { code, view, dir } = await agentRun(repo.dir);
@@ -577,7 +577,11 @@ test
     expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'stage_error' });
     expect(code).toBe(EXIT_FAILED);
     const reason = entryOf(dir, 'spec#1')?.reason ?? '';
-    const at = [reason.indexOf('invalid_output: '), reason.indexOf(NO_TASKS_MESSAGE), reason.indexOf(NO_SUMMARY_MESSAGE)];
+    const at = [
+      reason.indexOf('invalid_output: '),
+      reason.indexOf(NO_TASKS_MESSAGE),
+      reason.indexOf(NO_SUMMARY_MESSAGE),
+    ];
     expect(at).not.toContain(-1);
     expect(at).toEqual([...at].sort((a, b) => a - b));
     expect(marked(view).slice(2)).toEqual([
@@ -593,16 +597,20 @@ test
     ]);
     expect(existsSync(specDir(dir, 3))).toBe(false);
     const summary = summaryIn(dir);
-    expect([summary.status, summary.stopReason, summary.totals.usage.costUsd]).toEqual(['failed', 'stage_error', 0.375]);
-    expect(callIn(summary, 'spec#1')).toMatchObject({ outcome: 'error', resultPath: '02-spec/call-1/try-2/result.json' });
+    expect([summary.status, summary.stopReason, summary.totals.usage.costUsd]).toEqual([
+      'failed',
+      'stage_error',
+      0.375,
+    ]);
+    expect(callIn(summary, 'spec#1')).toMatchObject({
+      outcome: 'error',
+      resultPath: '02-spec/call-1/try-2/result.json',
+    });
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail run fails the workflow with the reason of a blocked agent stage', async () => {
+test('sail run fails the workflow with the reason of a blocked agent stage', async () => {
   await withTempRepo(async (repo) => {
     const reason = 'The brief has no acceptance criteria.';
     writeAgentFixture(repo.dir, [{ outcome: 'blocked', reason, usage: usageOf(0.125) }]);
@@ -610,7 +618,10 @@ test
 
     expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'workflow_failed' });
     expect(view).toContain(`  stop     workflow_failed: spec blocked: ${reason}`);
-    expect(marked(view).slice(2)).toEqual(['spec#1     ▶ spec · agent · claude-opus-5-5', 'spec#1     ⊘ blocked · <t>']);
+    expect(marked(view).slice(2)).toEqual([
+      'spec#1     ▶ spec · agent · claude-opus-5-5',
+      'spec#1     ⊘ blocked · <t>',
+    ]);
     expect(view).toContain('  calls    2 · 1 passed, 1 blocked');
     expect(code).toBe(EXIT_FAILED);
     expect(summaryIn(dir).totals.usage).toEqual(usageOf(0.125));
@@ -618,10 +629,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail run fails with stage_error when the harness fails, keeping its message and reporting error:harness once', async () => {
+test('sail run fails with stage_error when the harness fails, keeping its message and reporting error:harness once', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [{ outcome: 'error', message: 'model overloaded' }, submits(SPEC, 0.25)]);
     const { code, view, dir } = await agentRun(repo.dir);
@@ -637,10 +645,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail run stops an agent stage at its maxTurns: budget_exceeded, the usage of the turns it ran, and no second try', async () => {
+test('sail run stops an agent stage at its maxTurns: budget_exceeded, the usage of the turns it ran, and no second try', async () => {
   await withTempRepo(async (repo) => {
     // The step allows 4 turns, and the session needs 8.
     writeAgentFixture(repo.dir, [submits(SPEC, 0.5, { turns: 8 }), submits(SPEC, 0.25)]);

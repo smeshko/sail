@@ -1170,10 +1170,7 @@ test('a resume replays a journaled agent call from the journal, and starts no se
   });
 }, 40_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a try whose last events were lost is counted once, from its result, however often the run resumes', async () => {
+test('a try whose last events were lost is counted once, from its result, however often the run resumes', async () => {
   await withTempRepo(async (repo) => {
     const answers = [
       submits(NO_TASKS, 0.125, { turns: 2 }),
@@ -1201,7 +1198,13 @@ test
         const lines = readFileSync(path, 'utf8').trimEnd().split('\n');
         const kept = lines.findIndex((line) => JSON.parse(line).type === 'usage:update') + 1;
         expect(kept).toBeGreaterThan(0);
-        writeFileSync(path, lines.slice(0, kept).map((line) => `${line}\n`).join(''));
+        writeFileSync(
+          path,
+          lines
+            .slice(0, kept)
+            .map((line) => `${line}\n`)
+            .join(''),
+        );
         copyRun(first.dir, second.dir);
         return end.runId;
       });
@@ -1209,7 +1212,13 @@ test
       // The first resume is interrupted in its corrective session.
       const controller = new AbortController();
       const adapters = await fakeAdapters(second.dir);
-      const running = resumeWorkflow({ cwd: second.dir, adapters, runId: id, input: TICKET, signal: controller.signal });
+      const running = resumeWorkflow({
+        cwd: second.dir,
+        adapters,
+        runId: id,
+        input: TICKET,
+        signal: controller.signal,
+      });
       expect(await interruptInSession(second.dir, running, () => controller.abort(), 2)).toMatchObject({
         status: 'suspended',
       });
