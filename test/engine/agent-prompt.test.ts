@@ -201,6 +201,22 @@ test('a conventions list replaces the defaults and is appended in its own order,
   });
 });
 
+test('a convention file is appended once, under the first name that leads to it, however many do', async () => {
+  await withTempRepo((repo) => {
+    const s = scratch(repo);
+    write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
+    symlinkSync('AGENTS.md', join(repo.dir, 'CLAUDE.md'));
+
+    const defaults = s.prepare('Write the spec.\n');
+    expect(defaults.ok && defaults.conventions).toEqual(['AGENTS.md']);
+    expect(places(textOf(defaults), 'Indent with tabs.')).not.toContain(-1);
+
+    const listed = s.prepare('Write the spec.\n', { conventions: ['CLAUDE.md', './AGENTS.md', 'AGENTS.md'] });
+    expect(listed.ok && listed.conventions).toEqual(['CLAUDE.md']);
+    expect(places(textOf(listed), 'Indent with tabs.', '## Repository conventions: CLAUDE.md')).not.toContain(-1);
+  });
+});
+
 test('a listed convention that is missing, not a regular file, absolute or outside the repository fails the prompt, naming it', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
