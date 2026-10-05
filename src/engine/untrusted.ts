@@ -26,6 +26,8 @@ interface Def {
   out?: z.ZodType;
   /** A codec's decoder: a pipe that has one transforms what its `in` parsed, as a `transform` out does. */
   transform?: unknown;
+  /** A template literal's parts: its fixed text, and the schemas of what goes between. */
+  parts?: unknown[];
 }
 
 const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
@@ -33,6 +35,8 @@ const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonop
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+const isSchema = (part: unknown): part is z.ZodType => isRecord(part) && 'def' in part;
 
 /** Whether `schema` marks a string anywhere in it. `seen` holds the schemas already read: one may hold itself. */
 function marksAny(schema: z.ZodType, seen = new Set<z.ZodType>()): boolean {
@@ -54,16 +58,19 @@ function marksAny(schema: z.ZodType, seen = new Set<z.ZodType>()): boolean {
     ...Object.values(def.shape ?? {}),
     ...(def.options ?? []),
     ...(def.items ?? []),
+    ...(def.parts ?? []).filter(isSchema),
   ];
   return children.some((child) => child !== undefined && child !== null && marksAny(child, seen));
 }
 
-/** `value` with every string in it marked, however deep. What isn't a string, a list or a plain object is left whole. */
+/**
+ * `value` with every string in it marked, however deep: in a list, and under each own key of an object of any kind,
+ * which is where a template reaches. An object comes back as plain data, which is all a template reads of it.
+ */
 function markAll(value: unknown, source: string): unknown {
   if (typeof value === 'string') return untrustedInput(value, source);
   if (Array.isArray(value)) return value.map((item, index) => markAll(item, `${source}.${index}`));
   if (!isRecord(value) || isUntrustedInput(value)) return value;
-  if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, markAll(item, `${source}.${key}`)]));
 }
 
@@ -107,6 +114,9 @@ export function markUntrusted(schema: z.ZodType, value: unknown, source: string)
       return markUntrusted(def.right as z.ZodType, markUntrusted(def.left as z.ZodType, value, source), source);
     case 'lazy':
       return markUntrusted((def.getter as () => z.ZodType)(), value, source);
+    case 'template_literal':
+      // One string made of its parts: no part of it can be marked alone.
+      return typeof value === 'string' && marksAny(schema) ? untrustedInput(value, source) : value;
     case 'pipe': {
       const marked = markUntrusted(def.out as z.ZodType, markUntrusted(def.in as z.ZodType, value, source), source);
       const transformed = (def.out as z.ZodType).def.type === 'transform' || def.transform !== undefined;
