@@ -9,7 +9,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { readEvents } from '../events/consumers/ndjson';
-import type { CallEmit, CallEvent, Emit, NewEvent } from '../events/types';
+import type { CallEmit, CallEvent, Emit, NewEvent, SailEvent } from '../events/types';
 import { KINDS, type StepRun } from '../kinds/index';
 import type { Harness } from '../ports/harness';
 import type { Usage } from '../ports/types';
@@ -230,47 +230,64 @@ function sessionEndOf(result: Record<string, unknown>): CallEvent {
   };
 }
 
+/** The end of a session a killed process left open, from what `own`, its try's events, hold of it. */
+function interruptedEnd(sessionId: string, own: readonly SailEvent[]): CallEvent {
+  const updated = own.findLast((event) => event.type === 'usage:update');
+  return {
+    type: 'harness:session_end',
+    sessionId,
+    outcome: 'error',
+    reason: 'interrupted',
+    turns: updated?.turn ?? 0,
+    toolCalls: own.filter((event) => event.type === 'tool:start').length,
+    denials: own.filter((event) => event.type === 'permission:denied').length,
+    usage:
+      updated === undefined
+        ? { costUsd: 0 }
+        : {
+            inputTokens: updated.tokens.input,
+            cacheReadTokens: updated.tokens.cacheRead,
+            cacheWriteTokens: updated.tokens.cacheWrite,
+            outputTokens: updated.tokens.output,
+            costUsd: updated.costUsdSoFar,
+          },
+  };
+}
+
 /**
- * Says what a crash left unsaid of the tries already made: the end of a session that started and never ended, and the
- * `stage:end` of a result that has none. The events file is never synced, so a result on disk is the authority on its
- * session, and the session's last usage update stands in only for a try that left no result. Each event is emitted
- * once: the next recovery finds it in the events.
+ * Says what a crash left unsaid of the tries already made: the end of a session that never ended, the `stage:end` of a
+ * result that has none, and the `stage:start` of a try whose events were lost whole. The events file is never synced,
+ * so a result on disk is the authority on its try, whatever the events kept of it, and a session's last usage update
+ * stands in only for a try that left no result. Each event is emitted once: the next recovery finds it in the events,
+ * after the start of its try.
  */
-function reconcile(request: CallRequest, stage: string, key: string, tries: readonly PriorTry[], emit: CallEmit): void {
+function reconcile(
+  request: CallRequest,
+  stage: string,
+  tries: readonly PriorTry[],
+  start: (tryNumber: number) => CallEvent,
+  emit: CallEmit,
+): void {
+  const key = `${stage}#${request.call}`;
   const events = readEvents(request.runDir).filter((event) => 'key' in event && event.key === key);
   for (const prior of tries) {
+    const { result } = prior;
     // A try's events run from its `stage:start` to the next. The last one for the try: an earlier one is what a crash
     // left before the try had a directory.
     const from = events.findLastIndex((event) => event.type === 'stage:start' && event.try === prior.try);
-    if (from < 0) continue;
     const next = events.findIndex((event, index) => index > from && event.type === 'stage:start');
-    const own = events.slice(from, next < 0 ? undefined : next);
+    const own = from < 0 ? [] : events.slice(from, next < 0 ? undefined : next);
+    if (from < 0) {
+      // Nothing in the events, and nothing on disk to say what the try did.
+      if (result === undefined) continue;
+      emit(start(prior.try));
+    }
     const started = own.findLast((event) => event.type === 'harness:session_start');
-    const { result } = prior;
-    if (started !== undefined && !own.some((event) => event.type === 'harness:session_end')) {
-      if (result !== undefined) emit(sessionEndOf(result));
-      else {
-        const updated = own.findLast((event) => event.type === 'usage:update');
-        emit({
-          type: 'harness:session_end',
-          sessionId: started.sessionId,
-          outcome: 'error',
-          reason: 'interrupted',
-          turns: updated?.turn ?? 0,
-          toolCalls: own.filter((event) => event.type === 'tool:start').length,
-          denials: own.filter((event) => event.type === 'permission:denied').length,
-          usage:
-            updated === undefined
-              ? { costUsd: 0 }
-              : {
-                  inputTokens: updated.tokens.input,
-                  cacheReadTokens: updated.tokens.cacheRead,
-                  cacheWriteTokens: updated.tokens.cacheWrite,
-                  outputTokens: updated.tokens.output,
-                  costUsd: updated.costUsdSoFar,
-                },
-        });
-      }
+    if (!own.some((event) => event.type === 'harness:session_end')) {
+      // A try with a prompt asked its harness, whether or not the events kept the session's start.
+      if (result === undefined) {
+        if (started !== undefined) emit(interruptedEnd(started.sessionId, own));
+      } else if (result.prompt !== undefined || started !== undefined) emit(sessionEndOf(result));
     }
     if (result !== undefined && !own.some((event) => event.type === 'stage:end')) {
       const of = { stage, call: request.call, try: prior.try };
@@ -288,9 +305,21 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
   const key = `${definition.name}#${call}`;
   const emit: CallEmit = (event) => request.emit?.({ ...event, key } as NewEvent);
   const corrects = (definition.onInvalidOutput ?? 'retry-once') === 'retry-once';
+  /** A try's `stage:start`: what it runs on, and what it consumes. */
+  const start = (tryNumber: number): CallEvent => ({
+    type: 'stage:start',
+    stage: definition.name,
+    call,
+    try: tryNumber,
+    kind: 'agent',
+    model: agent.model,
+    consumed: suppliedFrom(definition, request.supplied),
+    permissions: definition.permissions,
+    budget: definition.budget,
+  });
   const tries = priorTries(request, definition.name);
   // A call with nowhere to emit has no events to set right.
-  if (tries.length > 0 && request.emit !== undefined) reconcile(request, definition.name, key, tries, emit);
+  if (tries.length > 0 && request.emit !== undefined) reconcile(request, definition.name, tries, start, emit);
 
   /** The problems of the try whose output was checked and found wanting, which the next try is told. */
   let found: ContractError[] | undefined;
@@ -307,15 +336,7 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
   while (true) {
     const stage = { stage: definition.name, call, try: tryNumber };
     // Before the call directory exists, so a call that crashes creating it still shows it started.
-    emit({
-      type: 'stage:start',
-      ...stage,
-      kind: 'agent',
-      model: agent.model,
-      consumed: suppliedFrom(definition, request.supplied),
-      permissions: definition.permissions,
-      budget: definition.budget,
-    });
+    emit(start(tryNumber));
     const paths = callPaths(runDir, request.stageIndex, definition.name, call, tryNumber);
     createCallDir(paths, { durable: true });
     const { inputs, consumed } = materialisePrepared(bindings, paths.stageIn);
