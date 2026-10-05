@@ -638,3 +638,44 @@ test('a session whose harness rejects, or returns a usage the port refuses, is r
   expect(misreported.run.record.usage).toEqual(spent);
   expect(resultIssues(misreported.run)).toEqual([]);
 });
+
+test("what a harness's events say of its session is recorded only where it is a count or an id, so the try's result is always one its call can write", async () => {
+  const files = { 'spec.md': '# Spec\n' };
+  const seen = { adapter: 'scripted', model: MODEL, sessionId: 'session-7', turns: 2, toolCalls: 2, denials: 1 };
+  const end = { type: 'harness:session_end', sessionId: 'session-7', outcome: 'done', usage: USAGE };
+  const ending = (said: object): HarnessEvent[] => [...WORKING, { ...end, ...said } as unknown as HarnessEvent];
+
+  // An end whose counts are no counts, and whose reason is no word: the try keeps what it counted itself.
+  const miscounted = ending({ turns: -1, toolCalls: 1.5, denials: 'none', reason: 7 });
+  const first = await tried(spec(), scripted({ resolves: done(VALID), emits: miscounted, files }));
+  expect([first.run.outcome, first.run.record.harness]).toEqual(['done', seen]);
+  expect(resultIssues(first.run)).toEqual([]);
+  expect(first.s.events.filter((event) => event.type === 'harness:session_end')).toEqual([
+    {
+      type: 'harness:session_end',
+      sessionId: 'session-7',
+      outcome: 'done',
+      turns: 2,
+      toolCalls: 2,
+      denials: 1,
+      usage: USAGE,
+    },
+  ]);
+
+  // Each count stands or falls on its own, and a reason that is a word is kept.
+  const mixed = ending({ turns: 5, toolCalls: Number.NaN, denials: 0, reason: 'submitted' });
+  const second = await tried(spec(), scripted({ resolves: done(VALID), emits: mixed, files }));
+  expect(second.run.record.harness).toEqual({ ...seen, turns: 5, denials: 0 });
+  expect(second.s.events.at(-3)).toMatchObject({ type: 'harness:session_end', reason: 'submitted', turns: 5 });
+
+  // A start that names no session, and updates whose turn is no count, say nothing of the session.
+  const garbled = [
+    { type: 'harness:session_start', adapter: 'scripted', sessionId: 7, model: MODEL },
+    { type: 'usage:update', turn: 1.5, tokens: TOKENS, costUsdSoFar: 0.0625 },
+    { type: 'usage:update', turn: -3, tokens: TOKENS, costUsdSoFar: 0.0625 },
+    { type: 'usage:update', turn: 'two', tokens: TOKENS, costUsdSoFar: 0.0625 },
+  ] as unknown as HarnessEvent[];
+  const third = await tried(spec(), scripted({ resolves: new Error('socket hang up'), emits: garbled }));
+  expect(third.run.record.harness).toEqual(UNSTARTED);
+  expect(resultIssues(third.run)).toEqual([]);
+});
