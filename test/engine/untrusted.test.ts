@@ -120,6 +120,70 @@ test('a key the schema does not declare is kept as it is', () => {
   expect(shown(markUntrusted(schema, { a: 'x', other: 'y', n: 1 }, 's'))).toEqual({ a: '<s.a>x', other: 'y', n: 1 });
 });
 
+test('every string a transform makes of untrusted input is marked, whatever shape it gives it, and nothing outside it', () => {
+  const Body = z.object({ id: z.string(), body: untrusted() });
+  const renamed = Body.transform((brief) => ({ text: brief.body }));
+  const listed = z.codec(untrusted(), z.array(z.string()), {
+    decode: (text) => text.split(','),
+    encode: (items) => items.join(',') as never,
+  });
+  // Each value is what its schema parsed: the transform's output, which the schema's own shape no longer describes.
+  const cases: Record<string, [z.ZodType, unknown, unknown]> = {
+    renamed: [renamed, { text: 'x' }, { text: '<s.text>x' }],
+    'made a list': [
+      z.object({ tags: untrusted().transform((text) => text.split(',')) }),
+      { tags: ['a', 'b'] },
+      { tags: ['<s.tags.0>a', '<s.tags.1>b'] },
+    ],
+    'made a string': [Body.transform((brief) => brief.body), 'x', '<s>x'],
+    'made deeper': [
+      Body.transform((brief) => ({ notes: [{ text: brief.body, length: brief.body.length }] })),
+      { notes: [{ text: 'x', length: 1 }] },
+      { notes: [{ text: '<s.notes.0.text>x', length: 1 }] },
+    ],
+    // What came from the untrusted field can't be told from what came from beside it, so the id is marked too.
+    'beside it': [
+      Body.transform((brief) => ({ ...brief, count: 1 })),
+      { id: '1', body: 'x', count: 1 },
+      { id: '<s.id>1', body: '<s.body>x', count: 1 },
+    ],
+    'below the transform alone': [
+      z.object({ id: z.string(), brief: renamed }),
+      { id: '1', brief: { text: 'x' } },
+      { id: '1', brief: { text: '<s.brief.text>x' } },
+    ],
+    'piped on': [renamed.pipe(z.object({ text: z.string().max(9) }) as never), { text: 'x' }, { text: '<s.text>x' }],
+    codec: [listed, ['a', 'b'], ['<s.0>a', '<s.1>b']],
+    'in a union': [z.union([z.number(), renamed]), { text: 'x' }, { text: '<s.text>x' }],
+    'no untrusted input': [
+      z.object({ id: z.string() }).transform((row) => ({ key: row.id })),
+      { key: '1' },
+      { key: '1' },
+    ],
+    // A transform that runs before the schema changes what is parsed, not what the schema says of it.
+    preprocessed: [z.preprocess((given) => given, Body), { id: '1', body: 'x' }, { id: '1', body: '<s.body>x' }],
+  };
+  const actual = Object.fromEntries(
+    Object.entries(cases).map(([name, [schema, value]]) => [name, shown(markUntrusted(schema, value, 's'))]),
+  );
+  const expected = Object.fromEntries(Object.entries(cases).map(([name, [, , marked]]) => [name, marked]));
+  expect(actual).toEqual(expected);
+
+  // A schema that holds itself is read once, and what isn't plain data is left whole.
+  const Tree: z.ZodType = z.object({ name: untrusted(), kids: z.lazy(() => z.array(Tree)) });
+  const flat = Tree.transform((tree) => (tree as { name: string }).name);
+  expect(shown(markUntrusted(flat, 'root', 's'))).toBe('<s>root');
+  const at = new Date(0);
+  const dated = { at, seen: new Map([['k', 'v']]) };
+  const marked = markUntrusted(
+    untrusted().transform(() => dated),
+    dated,
+    's',
+  ) as typeof dated;
+  expect([marked.at, marked.seen]).toEqual([at, dated.seen]);
+  expect(marked.at).toBe(at);
+});
+
 test('marking twice changes nothing', () => {
   const once = markUntrusted(TicketInput, input, 'ticket');
   const twice = markUntrusted(TicketInput, once, 'other');
