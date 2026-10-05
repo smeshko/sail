@@ -22,7 +22,7 @@ import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, SailEvent } from '../events/types';
-import { callProblems, runCall } from './call';
+import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
 import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
@@ -69,20 +69,38 @@ interface DriveOptions extends EventOptions {
   onCall?(entry: JournalEntry): void;
 }
 
-/** The journal entry of a call that ran, from its `result.json`. An error's `reason` is its errors' messages. */
+/** Why a call ended as it did, for the workflow: an error's problems, each with its reason, or a blocked agent's own. */
+function reasonOf(result: Record<string, unknown>): string | null {
+  if (result.outcome === 'blocked') return String(result.reason);
+  if (result.outcome !== 'error') return null;
+  const errors = (result.errors ?? []) as { reason: string; message: string }[];
+  return errors.map(({ reason, message }) => `${reason}: ${message}`).join('; ');
+}
+
+/** The journal entry of a call that ran, from its `result.json`. */
 function entryFrom(runDir: string, result: Record<string, unknown>, paths: CallPaths): NewJournalEntry {
   const files = result.files as Record<string, { path: string }>;
-  const errors = (result.errors ?? []) as { reason: string; message: string }[];
   return {
     key: result.key as string,
     stage: result.stage as string,
     call: result.call as number,
     outcome: result.outcome as JournalEntry['outcome'],
     output: result.output,
-    reason: result.outcome === 'error' ? errors.map(({ reason, message }) => `${reason}: ${message}`).join('; ') : null,
+    reason: reasonOf(result),
     files: Object.fromEntries(Object.entries(files).map(([name, file]) => [name, file.path])),
     resultPath: runRelative(runDir, paths.result),
   };
+}
+
+/**
+ * What an agent call runs on: the run's harness, the conventions `project.yaml` lists now, and the model the run's
+ * roster froze at its start, which a resume keeps whatever the alias names by then.
+ */
+function executionOf(opened: OpenedRun, stage: string): AgentExecution {
+  const model = opened.header.stages[stage]?.model;
+  if (model === undefined) throw new Error(`run.json's roster holds no model for the agent stage '${stage}'`);
+  const { conventions } = opened.config;
+  return { harness: opened.adapters.harness, model, ...(conventions === undefined ? {} : { conventions }) };
 }
 
 /**
@@ -202,7 +220,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
 
       const { call } = end;
       running = call.key;
-      const problems = callProblems(call.definition, call.supplied);
+      const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
+      const problems = callProblems(call.definition, call.supplied, agent);
       if (problems.length > 0) return failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
       if (signal?.aborted) return suspended(`stopped before ${call.key}`);
       const { result, paths } = await runCall({
@@ -217,6 +236,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         config: join(sailDir, 'project.yaml'),
         supplied: call.supplied,
         ...(signal === undefined ? {} : { signal }),
+        ...(agent === undefined ? {} : { agent }),
         emit: bus.emit,
       });
       if (signal?.aborted) return suspended(`stopped during ${call.key}`);

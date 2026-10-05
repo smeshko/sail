@@ -184,10 +184,7 @@ test('a call that asks for its error routes on it', async () => {
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("the fixture's ticket-to-pr still can't run: its spec has no brief until intake leaves one, so the run fails before its first call", async () => {
+test("the fixture's ticket-to-pr still can't run: its spec has no brief until intake leaves one, so the run fails before its first call", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const end = await ran(repo.dir);
@@ -991,10 +988,7 @@ test('a crash leaves summary.json running, with the calls made before it', async
 const ranAgent = (cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> =>
   ran(cwd, { workflow: AGENT_WORKFLOW, input: TICKET, ...options });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an agent call is journaled once, with the output, the files and the result of its last try, and ran on the model its alias names', async () => {
+test('an agent call is journaled once, with the output, the files and the result of its last try, and ran on the model its alias names', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125), submits(SPEC, 0.25)]);
     writeFileSync(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
@@ -1035,10 +1029,7 @@ test
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the conventions project.yaml lists, and not the defaults, reach the agent prompts of a run', async () => {
+test('the conventions project.yaml lists, and not the defaults, reach the agent prompts of a run', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
     edit(sail, 'project.yaml', 'budgets:', 'conventions: [docs/STYLE.md]\nbudgets:');
@@ -1050,14 +1041,14 @@ test
     expect(end).toMatchObject({ status: 'completed' });
     expect(specResult(end.dir)).toMatchObject({ prompt: { conventions: ['docs/STYLE.md'] } });
     const prompt = specFile(end.dir, 'prompt.md') ?? '';
-    expect([prompt.includes('Sentence case in headings.'), prompt.includes('Indent with tabs.')]).toEqual([true, false]);
+    expect([prompt.includes('Sentence case in headings.'), prompt.includes('Indent with tabs.')]).toEqual([
+      true,
+      false,
+    ]);
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a blocked agent call is journaled with its reason, which reaches the workflow, and its run.fail', async () => {
+test('a blocked agent call is journaled with its reason, which reaches the workflow, and its run.fail', async () => {
   await withTempRepo(async (repo) => {
     const reason = 'The brief has no acceptance criteria.';
     writeAgentFixture(repo.dir, [{ outcome: 'blocked', reason, usage: usageOf(0.125) }]);
@@ -1077,10 +1068,7 @@ test
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an agent call that ends in error fails the run with stage_error and its message, unless the workflow asked for its error', async () => {
+test('an agent call that ends in error fails the run with stage_error and its message, unless the workflow asked for its error', async () => {
   const overloaded = 'harness: model overloaded';
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [{ outcome: 'error', message: 'model overloaded' }]);
@@ -1104,10 +1092,7 @@ test
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an abort during an agent session suspends the run with the call unjournaled, and a resume runs it as its next try on the model the run started with', async () => {
+test('an abort during an agent session suspends the run with the call unjournaled, and a resume runs it as its next try on the model the run started with', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeAgentFixture(from.dir, [submits(SPEC, 0.5, { turns: 2, delayMs: 30_000 }), submits(SPEC, 0.25)]);
@@ -1156,10 +1141,7 @@ test
   });
 }, 40_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a resume replays a journaled agent call from the journal, and starts no session for it', async () => {
+test('a resume replays a journaled agent call from the journal, and starts no session for it', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeAgentFixture(from.dir, [submits(SPEC, 0.25)]);

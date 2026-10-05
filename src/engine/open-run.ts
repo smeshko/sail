@@ -44,6 +44,8 @@ export interface OpenedRun {
   sailDir: string;
   /** The adapters the run was opened with, one per port. */
   adapters: PortAdapters;
+  /** `project.yaml` as it reads now. What the run froze of it, such as each stage's model, is in `header`. */
+  config: ProjectConfig;
   /** The workflow, with the stages it reaches: what the run replays. */
   loaded: LoadedWorkflow;
   /** `run.input`: the input, parsed with the intake's schema, or undefined when none was given. */
@@ -140,7 +142,17 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   createJournal(dir);
   createEventsFile(dir);
   writeStatus(dir, 'running');
-  return { runId, dir, header, sailDir: found.dir, adapters: options.adapters.ports, loaded, input, firstSeq: 1 };
+  return {
+    runId,
+    dir,
+    header,
+    sailDir: found.dir,
+    adapters: options.adapters.ports,
+    config,
+    loaded,
+    input,
+    firstSeq: 1,
+  };
 }
 
 export interface ReopenRunOptions {
@@ -213,6 +225,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     header: run.header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    config: found.config,
     loaded,
     input: parsed.input,
     firstSeq,

@@ -432,10 +432,7 @@ function agentRepo(repo: TempRepo, answers: Parameters<typeof writeAgentFixture>
   return writeAgentFixture(repo.dir, answers);
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("the fixture's agent stage spec, given no brief, is refused for its binding, and leaves no run directory", async () => {
+test("the fixture's agent stage spec, given no brief, is refused for its binding, and leaves no run directory", async () => {
   await withTempRepo(async (repo) => {
     fixtureCopy(repo);
     const argv = ['stage', 'run', '.sail/workflows/ticket-to-pr/stages/spec'];
@@ -448,10 +445,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an agent stage runs in isolation on the harness project.yaml names and the model its alias names: done exits 0, and leaves its prompt, transcript and result', async () => {
+test('an agent stage runs in isolation on the harness project.yaml names and the model its alias names: done exits 0, and leaves its prompt, transcript and result', async () => {
   await withTempRepo(async (repo) => {
     agentRepo(repo, [submits(SPEC, 0.25)]);
     const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir);
@@ -472,10 +466,7 @@ test
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a blocked agent stage exits 1 and prints its reason, and one that ends in error exits 1 and prints its errors', async () => {
+test('a blocked agent stage exits 1 and prints its reason, and one that ends in error exits 1 and prints its errors', async () => {
   const reason = 'The brief has no acceptance criteria.';
   await withTempRepo(async (repo) => {
     agentRepo(repo, [{ outcome: 'blocked', reason }]);
@@ -498,10 +489,7 @@ test
 
 type Change = (sail: string) => void;
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, Change, string]>([
+test.each<[string, Change, string]>([
   ['a budget of no turns', (sail) => edit(sail, `${SPEC_STAGE}/stage.ts`, 'maxTurns: 4', 'maxTurns: 0'), 'maxTurns'],
   [
     'a model alias project.yaml does not define',
@@ -513,15 +501,19 @@ test
     (sail) => edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/echo-harness.ts }'),
     'ECHO_HARNESS_TOKEN',
   ],
-])('an agent stage with %s is refused with exit 3, naming it, and leaves no run directory', async (_, change, named) => {
-  await withTempRepo(async (repo) => {
-    change(agentRepo(repo, [submits(SPEC, 0.25)]));
-    const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir, { env: {} });
-    expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
-    expect(stderr).toContain(named);
-    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
-  });
-}, 20_000);
+])(
+  'an agent stage with %s is refused with exit 3, naming it, and leaves no run directory',
+  async (_, change, named) => {
+    await withTempRepo(async (repo) => {
+      change(agentRepo(repo, [submits(SPEC, 0.25)]));
+      const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir, { env: {} });
+      expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+      expect(stderr).toContain(named);
+      expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+    });
+  },
+  20_000,
+);
 
 const NEEDY_TICKETS = `// A ticket source that needs a credential: a run can't start without it, and an isolated stage never asks.
 export default {
@@ -532,14 +524,16 @@ export default {
 };
 `;
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an isolated agent stage needs its harness and nothing else: a ticket source without its credential does not refuse it, and it runs on a harness of the repository', async () => {
+test('an isolated agent stage needs its harness and nothing else: a ticket source without its credential does not refuse it, and it runs on a harness of the repository', async () => {
   await withTempRepo(async (repo) => {
     const sail = agentRepo(repo, [submits(SPEC, 0.25)]);
     write(sail, 'adapters/needy-tickets.ts', NEEDY_TICKETS);
-    edit(sail, 'project.yaml', 'ticketSource: { use: fake, seed: ./fake/tickets.json }', 'ticketSource: { use: ./adapters/needy-tickets.ts }');
+    edit(
+      sail,
+      'project.yaml',
+      'ticketSource: { use: fake, seed: ./fake/tickets.json }',
+      'ticketSource: { use: ./adapters/needy-tickets.ts }',
+    );
     const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir, { env: {} });
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
     expect(stdout).toMatch(new RegExp(`^spec#1 done {2}${SPEC_RUN}\n$`));

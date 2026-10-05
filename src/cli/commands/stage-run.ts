@@ -1,18 +1,25 @@
-// `sail stage run <stage-dir> [--bind name=value]...`: runs one script stage in isolation, with its whole contract
+// `sail stage run <stage-dir> [--bind name=value]...`: runs one one-step stage in isolation, with its whole contract
 // enforced, into `.sail-runs/<stage>-<ulid>/00-<stage>/call-1/` beside its `.sail/`. Every refusal comes before anything
 // is written. This module parses, prints and maps the outcome to an exit code; the work is the engine's.
+//
+// An agent stage runs on the harness `project.yaml` names, with the model its alias names there. Only the harness is
+// resolved: a stage in isolation reaches no ticket source, code host or workspace, so it needs none of their
+// credentials. A script stage resolves no adapter at all.
 import { existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { BUILTINS } from '../../adapters/index';
+import { resolveAdapters } from '../../engine/adapters';
 import type { Supplied } from '../../engine/bindings';
-import { callProblems, runCall } from '../../engine/call';
-import { readConfig } from '../../engine/config';
+import { type AgentExecution, callProblems, runCall } from '../../engine/call';
+import { type ProjectConfig, readConfig } from '../../engine/config';
 import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
+import { modelProblemsOf } from '../../engine/roster';
 import { runsDir } from '../../engine/run-dir';
 import { newRunId } from '../../engine/run-id';
 import { findSailDir } from '../../engine/sail-dir';
-import { formatIssue } from '../../engine/schemas';
+import { formatIssue, type SchemaIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
-import type { StageDefinition } from '../../sdk/steps';
+import type { AgentStep, StageDefinition } from '../../sdk/steps';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
@@ -58,6 +65,34 @@ function supply(
   return { supplied: Object.fromEntries(supplied) };
 }
 
+/**
+ * What an agent stage run in isolation runs on, resolved before anything is written: the model its alias names in
+ * `project.yaml`, then the harness alone. An alias `models` doesn't define refuses, and so does a harness with issues.
+ */
+async function executionOf(
+  definition: AgentStep,
+  sailDir: string,
+  config: ProjectConfig,
+  env: Io['env'],
+): Promise<AgentExecution | { refused: string } | { issues: SchemaIssue[] }> {
+  const undefinedAlias = modelProblemsOf(`stage '${definition.name}'`, definition, config);
+  if (undefinedAlias.length > 0) return { refused: undefinedAlias.join('\n') };
+  const adapters = await resolveAdapters({
+    sailDir,
+    config,
+    builtins: BUILTINS,
+    env: env ?? process.env,
+    ports: ['harness'],
+  });
+  if ('issues' in adapters) return adapters;
+  const { conventions } = config;
+  return {
+    harness: adapters.ports.harness,
+    model: config.models[definition.model ?? 'default'] as string,
+    ...(conventions === undefined ? {} : { conventions }),
+  };
+}
+
 export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   /** Every path the command prints goes through here, relative to where the user ran it. */
   const at = (path: string) => relative(io.cwd, path) || '.';
@@ -81,13 +116,14 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   }
   const workspace = dirname(found.dir);
 
-  const config = readConfig(found.dir);
-  const issues = 'issues' in config ? config.issues : [];
-  if (issues.length > 0) {
+  /** Refuses with each issue of `project.yaml`, as `sail run` prints them. */
+  const refuseConfig = (issues: readonly SchemaIssue[]): ExitCode => {
     const file = at(join(found.dir, 'project.yaml'));
     for (const issue of issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);
     return EXIT_REFUSED;
-  }
+  };
+  const config = readConfig(found.dir);
+  if ('issues' in config) return refuseConfig(config.issues);
 
   // What runs is type-checked: the stage's own files, so a half-edited workflow elsewhere doesn't block it.
   const types = await typecheck(found.dir, { files: [stageFile] });
@@ -108,10 +144,14 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   const [definition] = loaded.definitions;
   if (problem !== undefined || definition === undefined) return refuse(`${at(stageFile)}: ${problem}`);
 
+  const agent = definition.kind === 'agent' ? await executionOf(definition, found.dir, config, io.env) : undefined;
+  if (agent !== undefined && 'refused' in agent) return refuse(agent.refused);
+  if (agent !== undefined && 'issues' in agent) return refuseConfig(agent.issues);
+
   const binds = args.values.bind;
   const given = supply(Array.isArray(binds) ? binds : [], definition, io.cwd, workspace);
   if ('refused' in given) return refuse(given.refused);
-  const problems = callProblems(definition, given.supplied);
+  const problems = callProblems(definition, given.supplied, agent);
   if (problems.length > 0) {
     return refuse(`${definition.name} can't run:\n${problems.map((problem) => `  ${hanging(problem, 2)}`).join('\n')}`);
   }
@@ -132,6 +172,7 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
       config: join(found.dir, 'project.yaml'),
       supplied: given.supplied,
       signal: controller.signal,
+      ...(agent === undefined ? {} : { agent }),
     });
   } finally {
     unregister?.();
@@ -141,5 +182,7 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   io.stdout(`${result.key} ${result.outcome}  ${at(paths.dir)}\n`);
   const errors = (result.errors ?? []) as { reason: string; message: string }[];
   for (const { reason, message } of errors) io.stdout(`  ${reason}  ${hanging(message, reason.length + 4)}\n`);
-  return result.outcome === 'passed' ? EXIT_OK : EXIT_FAILED;
+  // A blocked agent kept its contract and says why it stopped: its reason is all there is to print.
+  if (result.outcome === 'blocked') io.stdout(`  ${hanging(String(result.reason), 2)}\n`);
+  return result.outcome === 'passed' || result.outcome === 'done' ? EXIT_OK : EXIT_FAILED;
 }

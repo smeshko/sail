@@ -69,28 +69,33 @@ function field<K extends string, V>(key: K, value: V | undefined): { [P in K]?: 
 }
 
 /**
+ * The agent steps of `definition` whose model alias `config.models` doesn't define, as one line each. `where` names the
+ * definition, such as `stage 'spec'`.
+ */
+export function modelProblemsOf(where: string, definition: StageDefinition | Intake, config: ProjectConfig): string[] {
+  const steps: readonly Step[] =
+    definition.kind === 'agent' || definition.kind === 'script' ? [definition] : (definition.steps ?? []);
+  return steps.flatMap((step) => {
+    if (step.kind !== 'agent') return [];
+    const at = steps.length > 1 ? `${where} step '${step.name}'` : where;
+    const alias = step.model ?? 'default';
+    if (Object.hasOwn(config.models, alias)) return [];
+    return step.model === undefined
+      ? [`${at} has an agent step with no model, and .sail/project.yaml's models defines no 'default'`]
+      : [`${at} names the model alias '${alias}', which .sail/project.yaml's models doesn't define`];
+  });
+}
+
+/**
  * The agent steps of `loaded` whose model alias `config.models` doesn't define, as one line each: the intake first, then
  * the stages by name.
  */
 export function modelProblems(loaded: LoadedWorkflow, config: ProjectConfig): string[] {
-  const problems = (where: string, definition: StageDefinition | Intake): string[] => {
-    const steps: readonly Step[] =
-      definition.kind === 'agent' || definition.kind === 'script' ? [definition] : (definition.steps ?? []);
-    return steps.flatMap((step) => {
-      if (step.kind !== 'agent') return [];
-      const at = steps.length > 1 ? `${where} step '${step.name}'` : where;
-      const alias = step.model ?? 'default';
-      if (Object.hasOwn(config.models, alias)) return [];
-      return step.model === undefined
-        ? [`${at} has an agent step with no model, and .sail/project.yaml's models defines no 'default'`]
-        : [`${at} names the model alias '${alias}', which .sail/project.yaml's models doesn't define`];
-    });
-  };
   const { definition } = loaded.intake;
   const stages = [...loaded.stages].sort((a, b) => (a.definition.name < b.definition.name ? -1 : 1));
   return [
-    ...problems(`intake '${definition.name}'`, definition),
-    ...stages.flatMap((stage) => problems(`stage '${stage.definition.name}'`, stage.definition)),
+    ...modelProblemsOf(`intake '${definition.name}'`, definition, config),
+    ...stages.flatMap((stage) => modelProblemsOf(`stage '${stage.definition.name}'`, stage.definition, config)),
   ];
 }
 
