@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { prepareAgentPrompt } from '../engine/agent-prompt';
-import { runRelative } from '../engine/call-dir';
+import { runRelative, writeOwnFile } from '../engine/call-dir';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { preamble } from '../engine/preamble';
 import type { CallEmit } from '../events/types';
@@ -276,7 +276,8 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     usage,
   };
   const transcript = reported.transcript ?? seen.messages.map((text) => `assistant: ${text}`).join('\n');
-  writeFileSync(sessionLog, transcript === '' ? '' : `${transcript}\n`);
+  // The session has had the directory to write in, so the transcript is made a new file, whatever it left by the name.
+  writeOwnFile(sessionLog, transcript === '' ? '' : `${transcript}\n`);
 
   const failure = broken ?? (result?.outcome === 'error' ? result.message : undefined);
   if (failure !== undefined && !seen.failed) emit({ type: 'error:harness', message: failure });

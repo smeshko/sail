@@ -1,7 +1,7 @@
 // result.json: the engine's record of one call, built from how its step ran and validated before it is written.
-import { writeFileSync } from 'node:fs';
 import type { StepRun } from '../kinds/index';
-import { replaceFile } from './durable';
+import { writeOwnFile } from './call-dir';
+import { replaceFileAnew } from './durable';
 import { formatIssue, validateDocument } from './schemas';
 
 export interface ResultFields {
@@ -47,6 +47,7 @@ export function writeResult(path: string, result: Record<string, unknown>, optio
     throw new Error(`result.json breaks sail.result.v1, a bug in sail:\n${issues.map(formatIssue).join('\n')}`);
   }
   const text = `${JSON.stringify(result, null, 2)}\n`;
-  if (options.durable) replaceFile(path, text);
-  else writeFileSync(path, text);
+  // Either way a new file: the call directory is where the step wrote, and may hold a link under the result's name.
+  if (options.durable) replaceFileAnew(path, text);
+  else writeOwnFile(path, text);
 }

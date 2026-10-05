@@ -70,7 +70,23 @@ export function appendLine(path: string, line: string): void {
  * the other's temp file.
  */
 export function replaceFile(path: string, text: string, tmp = `${path}.tmp`): void {
-  const fd = openSync(tmp, 'w');
+  replaceThrough(path, text, tmp, 'w');
+}
+
+/**
+ * `replaceFile()` in a directory a step may write to, as a call directory is its step's `$STAGE_OUT`. The temp file's
+ * name can be guessed, and a link left under it would take the write to wherever it points. So whatever is there is
+ * removed and the temp file is made new, which anything put in its place refuses. The rename replaces a link at `path`
+ * itself, and never follows it.
+ */
+export function replaceFileAnew(path: string, text: string): void {
+  const tmp = `${path}.tmp`;
+  rmSync(tmp, { force: true });
+  replaceThrough(path, text, tmp, 'wx');
+}
+
+function replaceThrough(path: string, text: string, tmp: string, flag: 'w' | 'wx'): void {
+  const fd = openSync(tmp, flag);
   try {
     try {
       writeAndSync(fd, text);

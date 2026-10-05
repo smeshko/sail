@@ -12,7 +12,7 @@
 //
 // $STAGE_OUT is the call directory itself, not an `out/` below it, because the golden run directory records produced
 // files beside the logs (`03-tests/call-1/junit.xml`). So the engine's own names are reserved there.
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { createDir, syncDir } from './durable';
 
@@ -104,6 +104,16 @@ export function createCallDir(paths: CallPaths, options: { durable?: boolean } =
   syncDir(dirname(parent));
   createDir(paths.dir);
   createDir(paths.stageIn);
+}
+
+/**
+ * Writes one of the engine's own files into a call directory once its step has run. The directory is the `$STAGE_OUT`
+ * the step wrote to, and the step may have left anything under the name, a link out of the directory included. So what
+ * is there is removed and the file is made new: the write never goes through it, to wherever it points.
+ */
+export function writeOwnFile(path: string, text: string): void {
+  rmSync(path, { force: true });
+  writeFileSync(path, text, { flag: 'wx' });
 }
 
 /** A POSIX path relative to the run directory, as `result.json` records a file. */
