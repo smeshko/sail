@@ -96,21 +96,47 @@ interface Seen {
   failed: boolean;
   /** The last end the harness emitted, held back. */
   end?: Extract<HarnessEvent, { type: 'harness:session_end' }>;
+  /** What the session last said it had spent: the running total of a usage update, or its own end's. */
+  spent: Usage | undefined;
+}
+
+const tokenCount = z.number().int().nonnegative();
+
+/** The running total a usage update gives, as the port types it. */
+const RunningTotal = z.object({
+  tokens: z.object({ input: tokenCount, cacheRead: tokenCount, cacheWrite: tokenCount, output: tokenCount }),
+  costUsdSoFar: Usage.shape.costUsd,
+});
+
+/** What a usage update says its session has spent so far, or undefined when what it says is no usage. */
+function spentBy(update: unknown): Usage | undefined {
+  const said = RunningTotal.safeParse(update);
+  if (!said.success) return undefined;
+  const { tokens, costUsdSoFar } = said.data;
+  return {
+    inputTokens: tokens.input,
+    cacheReadTokens: tokens.cacheRead,
+    cacheWriteTokens: tokens.cacheWrite,
+    outputTokens: tokens.output,
+    costUsd: costUsdSoFar,
+  };
 }
 
 /** Listens to a session: each event goes on to `emit` as it comes, apart from the session's end, which is held back. */
 function listen(emit: CallEmit): { seen: Seen; onEvent: (event: HarnessEvent) => void } {
-  const seen: Seen = { turns: 0, toolCalls: 0, denials: 0, messages: [], failed: false };
+  const seen: Seen = { turns: 0, toolCalls: 0, denials: 0, messages: [], failed: false, spent: undefined };
   const onEvent = (event: HarnessEvent): void => {
     switch (event.type) {
       case 'harness:session_end':
         seen.end = event;
+        seen.spent = Usage.safeParse(event.usage).data ?? seen.spent;
         return;
       case 'harness:session_start':
         seen.sessionId = event.sessionId;
         break;
       case 'usage:update':
         seen.turns = Math.max(seen.turns, event.turn);
+        seen.spent = spentBy(event) ?? seen.spent;
         break;
       case 'tool:start':
         seen.toolCalls++;
@@ -228,8 +254,9 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     onEvent,
   });
 
-  // What the harness returned is the authority on its session, and what its events said stands in where it gave none.
-  const usage = reported.usage ?? { costUsd: 0 };
+  // What the harness returned is the authority on its session, and what its events said stands in where it gave none:
+  // a session that reported what it had spent, and then failed to return, still spent it.
+  const usage = reported.usage ?? seen.spent ?? { costUsd: 0 };
   const sessionId = reported.sessionId ?? seen.sessionId;
   const counters = {
     turns: seen.end?.turns ?? seen.turns,
