@@ -169,19 +169,40 @@ test('every string a transform makes of untrusted input is marked, whatever shap
   const expected = Object.fromEntries(Object.entries(cases).map(([name, [, , marked]]) => [name, marked]));
   expect(actual).toEqual(expected);
 
-  // A schema that holds itself is read once, and what isn't plain data is left whole.
+  // A schema that holds itself is read once.
   const Tree: z.ZodType = z.object({ name: untrusted(), kids: z.lazy(() => z.array(Tree)) });
   const flat = Tree.transform((tree) => (tree as { name: string }).name);
   expect(shown(markUntrusted(flat, 'root', 's'))).toBe('<s>root');
-  const at = new Date(0);
-  const dated = { at, seen: new Map([['k', 'v']]) };
-  const marked = markUntrusted(
-    untrusted().transform(() => dated),
-    dated,
+
+  // A template reaches the own keys of any object, so the strings of one that isn't plain data are marked too.
+  class Note {
+    constructor(
+      readonly text: string,
+      readonly at: Date,
+    ) {}
+  }
+  const note = new Note('x', new Date(0));
+  const made = markUntrusted(
+    untrusted().transform(() => note),
+    note,
     's',
-  ) as typeof dated;
-  expect([marked.at, marked.seen]).toEqual([at, dated.seen]);
-  expect(marked.at).toBe(at);
+  );
+  expect(shown(made)).toEqual({ text: '<s.text>x', at: {} });
+  expect(note.text).toBe('x');
+});
+
+test('a template literal with an untrusted part is marked whole, wherever a schema holds it', () => {
+  const Ref = z.templateLiteral(['ticket-', untrusted()]);
+  expect(shown(markUntrusted(Ref, 'ticket-x', 's'))).toBe('<s>ticket-x');
+  expect(shown(markUntrusted(z.object({ ref: Ref.optional() }), { ref: 'ticket-x' }, 's'))).toEqual({
+    ref: '<s.ref>ticket-x',
+  });
+  // A transform's input holds an untrusted string when a template literal in it does.
+  const renamed = z.object({ ref: Ref }).transform((ticket) => ({ id: ticket.ref }));
+  expect(shown(markUntrusted(renamed, { id: 'ticket-x' }, 's'))).toEqual({ id: '<s.id>ticket-x' });
+
+  expect(markUntrusted(z.templateLiteral(['ticket-', z.string()]), 'ticket-x', 's')).toBe('ticket-x');
+  expect(markUntrusted(Ref, 7, 's')).toBe(7);
 });
 
 test('marking twice changes nothing', () => {
