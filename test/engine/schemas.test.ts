@@ -929,10 +929,7 @@ test('project.yaml: invalid YAML or an unreadable file is one issue, not a throw
   expect(issue?.message).toContain('ENOENT');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('project.yaml: conventions is a list of distinct file paths, and may be empty', async () => {
+test('project.yaml: conventions is a list of distinct file paths, and may be empty', async () => {
   const text = await Bun.file(fixtureProject).text();
   expect(projectIssues(`${text}conventions: [AGENTS.md, docs/STYLE.md]\n`)).toEqual([]);
   expect(projectIssues(`${text}conventions: []\n`)).toEqual([]);

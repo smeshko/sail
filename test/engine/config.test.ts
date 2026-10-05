@@ -149,10 +149,7 @@ test('a project.yaml that breaks the schema returns the schema issues alone, and
   expect(verdict('latest')).toEqual([{ path: '/sail', message: "is 'latest', which is not a version range" }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('conventions reads as the list project.yaml gives, empty included, and is left out when project.yaml has none', () => {
+test('conventions reads as the list project.yaml gives, empty included, and is left out when project.yaml has none', () => {
   /** The config's conventions, or the paths of its issues. */
   const read = (extra: string): unknown => {
     const config = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}${extra}`));

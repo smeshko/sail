@@ -170,10 +170,7 @@ test('every problem is reported, in consumes order, and materialise refuses to w
   expect(existsSync(join(s.stageIn, 'note.txt'))).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('prepared bindings hold each value as its schema parsed it, and write it into $STAGE_IN without parsing it again', () => {
+test('prepared bindings hold each value as its schema parsed it, and write it into $STAGE_IN without parsing it again', () => {
   const s = scratch();
   let parses = 0;
   const Note = z.string().transform((text) => {
@@ -210,10 +207,7 @@ test
   expect(parses).toBe(1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('preparing bindings with a problem throws it, as materialise() does', () => {
+test('preparing bindings with a problem throws it, as materialise() does', () => {
   const consumes: Consumes = { ticket: value(TicketInput), spec: file('spec.md') };
   expect(() => prepareBindings(consumes, { ticket: given({ key: 7 }) })).toThrow("'spec' is required");
 });

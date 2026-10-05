@@ -5,6 +5,8 @@
 //   NN-<stage>/call-N/stdout.log  what it printed, in full
 //   NN-<stage>/call-N/stderr.log
 //   NN-<stage>/call-N/result.json the engine's record of the call
+//   NN-<stage>/call-N/prompt.md   an agent step's prompt, as its session was sent it
+//   NN-<stage>/call-N/session.log an agent step's transcript
 //   NN-<stage>/call-N/try-M/      a later try of the same call, after an interruption (and, from Epic 05, a retry),
 //                                 with its own in/, logs and result.json
 //
@@ -25,7 +27,14 @@ export interface CallPaths {
 }
 
 /** The names in a call directory that are the engine's. No `produces` may declare one. */
-export const RESERVED_NAMES: ReadonlySet<string> = new Set(['in', 'stdout.log', 'stderr.log', 'result.json']);
+export const RESERVED_NAMES: ReadonlySet<string> = new Set([
+  'in',
+  'stdout.log',
+  'stderr.log',
+  'result.json',
+  'prompt.md',
+  'session.log',
+]);
 
 /** A name that stays directly inside the directory it is joined to: no separator, and not `.` or `..`. */
 export function isPlainName(name: string): boolean {

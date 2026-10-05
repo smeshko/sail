@@ -68,10 +68,7 @@ const places = (text: string, ...parts: string[]): number[] =>
 
 const ascending = (numbers: readonly number[]): number[] => [...numbers].sort((a, b) => a - b);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a prompt prints a value as its schema parsed it, wrapped where the schema marks it untrusted, a file as its copy in $STAGE_IN, and an optional binding left unbound as null', async () => {
+test('a prompt prints a value as its schema parsed it, wrapped where the schema marks it untrusted, a file as its copy in $STAGE_IN, and an optional binding left unbound as null', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     write(join(s.sailDir, 'prompts', '_shared', 'finish.md'), 'Submit once.\n');
@@ -133,15 +130,15 @@ test
     const text = textOf(prompt);
     expect(text.slice(0, head.length)).toBe(head);
     // Both fragments once each, and nothing after the last: no conventions, and no feedback.
-    expect(places(text, UNTRUSTED_HEADING, 'Submit once.')).toEqual([head.indexOf(UNTRUSTED_HEADING), text.length - 13]);
+    expect(places(text, UNTRUSTED_HEADING, 'Submit once.')).toEqual([
+      head.indexOf(UNTRUSTED_HEADING),
+      text.length - 13,
+    ]);
     expect(parses).toBe(1);
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('with no conventions configured, AGENTS.md then CLAUDE.md are appended after the fragments where they exist, as they are', async () => {
+test('with no conventions configured, AGENTS.md then CLAUDE.md are appended after the fragments where they exist, as they are', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     const none = s.prepare('Write the spec.\n');
@@ -166,10 +163,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a conventions list replaces the defaults and is appended in its own order, and an empty one appends nothing', async () => {
+test('a conventions list replaces the defaults and is appended in its own order, and an empty one appends nothing', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
@@ -190,10 +184,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a listed convention that is missing, not a regular file, absolute or outside the repository fails the prompt, naming it', async () => {
+test('a listed convention that is missing, not a regular file, absolute or outside the repository fails the prompt, naming it', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
@@ -206,14 +197,13 @@ test
     const failures = refused.map((convention) =>
       s.prepare('Write the spec.\n', { conventions: ['AGENTS.md', convention] }),
     );
-    expect(failures).toEqual(refused.map((convention) => ({ ok: false, message: expect.stringContaining(convention) })));
+    expect(failures).toEqual(
+      refused.map((convention) => ({ ok: false, message: expect.stringContaining(convention) })),
+    );
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a prompt that cannot be rendered fails with its file, line and path, and one that cannot be read with its file', async () => {
+test('a prompt that cannot be rendered fails with its file, line and path, and one that cannot be read with its file', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     expect(s.prepare('Intro\n\nKey: {{ticket.keey}}\n')).toEqual({
@@ -230,10 +220,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the feedback of a corrective try is appended last, after the conventions, and none of it is rendered', async () => {
+test('the feedback of a corrective try is appended last, after the conventions, and none of it is rendered', async () => {
   await withTempRepo((repo) => {
     const s = scratch(repo);
     write(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');

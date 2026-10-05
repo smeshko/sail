@@ -35,6 +35,12 @@
       "propertyNames": { "$ref": "#/$defs/slug" },
       "additionalProperties": { "type": "string", "minLength": 1 }
     },
+    "conventions": {
+      "description": "the convention files appended to every agent prompt, each a path inside the repository; AGENTS.md and CLAUDE.md when absent, none when empty",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "budgets": {
       "type": "object",
       "properties": {

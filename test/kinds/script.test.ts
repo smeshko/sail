@@ -428,10 +428,7 @@ test('a declared file that is missing reports no file:produced, while the output
   expect(events[1]).toMatchObject({ code: 0, outcome: 'passed', stdoutBytes: PASSING.length + 1 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('problems() refuses a script that would produce prompt.md or session.log: the engine writes both, whatever the kind', () => {
+test('problems() refuses a script that would produce prompt.md or session.log: the engine writes both, whatever the kind', () => {
   const reserved = script('tests', {
     run: './run.sh',
     produces: { 'prompt.md': 'file', 'session.log': 'file', 'notes.md': 'file' },
