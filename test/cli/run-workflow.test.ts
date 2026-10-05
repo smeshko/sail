@@ -2,12 +2,34 @@
 // Ctrl-C through a fake `io.onInterrupt`. Each case has a temp repository of its own, because a process opens one run
 // per .sail/.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { verbosityOf } from '../../src/cli/commands/run-workflow';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import type { Parsed } from '../../src/cli/index';
+import { readStatus } from '../../src/engine/run-dir';
 import type { RunHeader } from '../../src/engine/run-header';
+import { formatIssue, validateRunDir } from '../../src/engine/schemas';
+import { readEvents } from '../../src/events/consumers/ndjson';
+import { rebuildSummary } from '../../src/events/consumers/summary';
+import type { Summary } from '../../src/events/summary';
+import {
+  entryOf,
+  journaled,
+  NO_SUMMARY,
+  NO_SUMMARY_MESSAGE,
+  NO_TASKS,
+  NO_TASKS_MESSAGE,
+  RUN_ARGV,
+  runDirIn,
+  SPEC,
+  sessions,
+  specDir,
+  specFile,
+  submits,
+  usageOf,
+  writeAgentFixture,
+} from '../helpers/agent-fixture';
 import { copyFixture, edit, FIXTURE_SAIL, write } from '../helpers/fixture';
 import {
   type Captured,
@@ -445,3 +467,197 @@ test('a model alias the config does not define refuses the run with exit 3, nami
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
+
+// Agent stages end to end: `sail run` of brief-to-spec on the fake harness, at no cost. Each case scripts what the
+// tries of spec#1 do, then reads the terminal view, the exit code and the run directory.
+
+/** `sail run` of brief-to-spec in `repoDir`: what it printed, with durations normalised, and its run directory. */
+async function agentRun(repoDir: string): Promise<Captured & { view: string; dir: string; runId: string }> {
+  const captured = await runCaptured(RUN_ARGV, repoDir);
+  const dir = runDirIn(repoDir);
+  return { ...captured, view: normaliseDurations(captured.stdout), dir, runId: basename(dir) };
+}
+
+/** The view's lines that start or end a call, in a key column 9 wide: `publish#1`. */
+const marked = (view: string): string[] => view.split('\n').filter((line) => /^\S+ +[▶✓✗⊘] /.test(line));
+
+const summaryIn = (dir: string): Summary => JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+const callIn = (summary: Summary, key: string) => summary.calls.find((call) => call.key === key);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('sail run takes a script-to-agent workflow to its end on the fake harness, correcting an invalid output once: both tries in the view, exit 0, a run directory that validates and each session counted once', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125, { turns: 2 }), submits(SPEC, 0.25)]);
+    const { code, stderr, view, dir, runId } = await agentRun(repo.dir);
+
+    expect(marked(view)).toEqual([
+      'brief#1    ▶ brief · script',
+      'brief#1    ✓ passed · <t>',
+      'spec#1     ▶ spec · agent · claude-opus-5-5',
+      'spec#1     ✗ error · <t>',
+      'spec#1     ▶ spec · agent · claude-opus-5-5 · try 2',
+      'spec#1     ✓ done · <t>',
+      'publish#1  ▶ publish · script',
+      'publish#1  ✓ passed · <t>',
+    ]);
+    expect(view.split('\n').filter((line) => line.startsWith('spec#1       output'))).toEqual([
+      'spec#1       output invalid',
+      'spec#1       output valid',
+    ]);
+    expect(view).toContain('expected array to have >=1 items');
+    expect(view.split('\n').slice(-5)).toEqual([
+      'completed · <t>',
+      '  calls    3 · 2 passed, 1 done',
+      expect.stringMatching(/^ {2}replays {2}\d+$/),
+      `  run      .sail-runs/${runId}`,
+      '',
+    ]);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+    expect([1, 2].map((n) => readdirSync(specDir(dir, n)).filter((name) => name !== 'try-2').sort())).toEqual([
+      ['in', 'prompt.md', 'result.json', 'session.log', 'spec.md'],
+      ['in', 'prompt.md', 'result.json', 'session.log', 'spec.md'],
+    ]);
+    expect(specFile(dir, 'prompt.md', 2)).toContain(NO_TASKS_MESSAGE);
+
+    // Usage: each session's last update is what it ended with, the run's totals hold both sessions once, and the
+    // call's own facts are its last session's.
+    const events = readEvents(dir);
+    expect(sessions(events)).toEqual([
+      'start fake-session-spec-1',
+      'end fake-session-spec-1 done 0.125',
+      'start fake-session-spec-1-try-2',
+      'end fake-session-spec-1-try-2 done 0.25',
+    ]);
+    let last = Number.NaN;
+    const agreed: [number, number][] = [];
+    for (const event of events) {
+      if (event.type === 'usage:update') last = event.costUsdSoFar;
+      if (event.type === 'harness:session_end') agreed.push([last, event.usage.costUsd]);
+    }
+    expect(agreed).toEqual([
+      [0.125, 0.125],
+      [0.25, 0.25],
+    ]);
+    const summary = summaryIn(dir);
+    expect(summary.totals).toMatchObject({
+      stageCalls: 3,
+      steps: 3,
+      usage: { inputTokens: 3000, outputTokens: 300, costUsd: 0.375 },
+    });
+    expect(callIn(summary, 'spec#1')).toMatchObject({
+      kind: 'agent',
+      outcome: 'done',
+      turns: 1,
+      toolCalls: 0,
+      denials: 0,
+      costUsd: 0.25,
+      resultPath: '02-spec/call-1/try-2/result.json',
+    });
+    // Rebuilt from the events alone, the summary is the file the run wrote.
+    const written = readFileSync(join(dir, 'summary.json'), 'utf8');
+    rmSync(join(dir, 'summary.json'));
+    expect(rebuildSummary(dir)).toEqual({ summary, path: join(dir, 'summary.json') });
+    expect(readFileSync(join(dir, 'summary.json'), 'utf8')).toBe(written);
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('sail run fails with stage_error once the output is invalid twice, naming the problems of both tries in order', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125), submits(NO_SUMMARY, 0.25), submits(SPEC, 0.5)]);
+    const { code, view, dir } = await agentRun(repo.dir);
+
+    expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'stage_error' });
+    expect(code).toBe(EXIT_FAILED);
+    const reason = entryOf(dir, 'spec#1')?.reason ?? '';
+    const at = [reason.indexOf('invalid_output: '), reason.indexOf(NO_TASKS_MESSAGE), reason.indexOf(NO_SUMMARY_MESSAGE)];
+    expect(at).not.toContain(-1);
+    expect(at).toEqual([...at].sort((a, b) => a - b));
+    expect(marked(view).slice(2)).toEqual([
+      'spec#1     ▶ spec · agent · claude-opus-5-5',
+      'spec#1     ✗ error · <t>',
+      'spec#1     ▶ spec · agent · claude-opus-5-5 · try 2',
+      'spec#1     ✗ error · <t>',
+    ]);
+    expect(view).toContain('  stop     stage_error: spec#1 ended in error: invalid_output: ');
+    expect([view.includes('expected array to have >=1 items'), view.includes('received undefined')]).toEqual([
+      true,
+      true,
+    ]);
+    expect(existsSync(specDir(dir, 3))).toBe(false);
+    const summary = summaryIn(dir);
+    expect([summary.status, summary.stopReason, summary.totals.usage.costUsd]).toEqual(['failed', 'stage_error', 0.375]);
+    expect(callIn(summary, 'spec#1')).toMatchObject({ outcome: 'error', resultPath: '02-spec/call-1/try-2/result.json' });
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('sail run fails the workflow with the reason of a blocked agent stage', async () => {
+  await withTempRepo(async (repo) => {
+    const reason = 'The brief has no acceptance criteria.';
+    writeAgentFixture(repo.dir, [{ outcome: 'blocked', reason, usage: usageOf(0.125) }]);
+    const { code, view, dir } = await agentRun(repo.dir);
+
+    expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'workflow_failed' });
+    expect(view).toContain(`  stop     workflow_failed: spec blocked: ${reason}`);
+    expect(marked(view).slice(2)).toEqual(['spec#1     ▶ spec · agent · claude-opus-5-5', 'spec#1     ⊘ blocked · <t>']);
+    expect(view).toContain('  calls    2 · 1 passed, 1 blocked');
+    expect(code).toBe(EXIT_FAILED);
+    expect(summaryIn(dir).totals.usage).toEqual(usageOf(0.125));
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('sail run fails with stage_error when the harness fails, keeping its message and reporting error:harness once', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [{ outcome: 'error', message: 'model overloaded' }, submits(SPEC, 0.25)]);
+    const { code, view, dir } = await agentRun(repo.dir);
+
+    expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'stage_error' });
+    expect(view).toContain('  stop     stage_error: spec#1 ended in error: harness: model overloaded');
+    expect(view.split('\n').filter((line) => line.includes('error:harness'))).toEqual([
+      'spec#1     ✗ error:harness: model overloaded',
+    ]);
+    expect(code).toBe(EXIT_FAILED);
+    expect(existsSync(specDir(dir, 2))).toBe(false);
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('sail run stops an agent stage at its maxTurns: budget_exceeded, the usage of the turns it ran, and no second try', async () => {
+  await withTempRepo(async (repo) => {
+    // The step allows 4 turns, and the session needs 8.
+    writeAgentFixture(repo.dir, [submits(SPEC, 0.5, { turns: 8 }), submits(SPEC, 0.25)]);
+    const { code, view, dir } = await agentRun(repo.dir);
+
+    expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'stage_error' });
+    expect(view).toContain(
+      '  stop     stage_error: spec#1 ended in error: budget_exceeded: budget exceeded: maxTurns 4',
+    );
+    expect(code).toBe(EXIT_FAILED);
+    const exceeded = readEvents(dir).flatMap((event) => (event.type === 'budget:exceeded' ? [event] : []));
+    expect(exceeded.map(({ key, budget, limit, used }) => ({ key, budget, limit, used }))).toEqual([
+      { key: 'spec#1', budget: 'turns', limit: 4, used: 4 },
+    ]);
+    expect(sessions(readEvents(dir))).toEqual(['start fake-session-spec-1', 'end fake-session-spec-1 error 0.25']);
+    expect(existsSync(specDir(dir, 2))).toBe(false);
+    expect(summaryIn(dir).totals.usage).toEqual(usageOf(0.25));
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 30_000);

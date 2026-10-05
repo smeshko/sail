@@ -82,8 +82,18 @@ test('createCallDir creates the call directory and in/, and refuses to reuse one
   expect(() => createCallDir(paths)).toThrow('EEXIST');
 });
 
-test('no produced file may take the name of what the engine writes beside it', () => {
-  expect([...RESERVED_NAMES].sort()).toEqual(['in', 'result.json', 'stderr.log', 'stdout.log']);
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('no produced file may take the name of what the engine writes beside it, the prompt and transcript of an agent included', () => {
+  expect([...RESERVED_NAMES].sort()).toEqual([
+    'in',
+    'prompt.md',
+    'result.json',
+    'session.log',
+    'stderr.log',
+    'stdout.log',
+  ]);
 });
 
 test('isPlainName takes a name that stays directly inside a directory', () => {

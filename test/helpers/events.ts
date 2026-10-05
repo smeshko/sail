@@ -116,14 +116,16 @@ export const produced = (key: string, name: string): NewEvent => ({
   sha256: '0'.repeat(64),
 });
 
-/** An agent session's end, with the facts it reports. */
-export const session = (key: string, facts: Record<string, unknown>): NewEvent => ({
-  type: 'harness:session_end',
-  key,
-  sessionId: `session-${key}`,
-  reason: 'submitted',
-  ...facts,
-});
+/** The end of an agent session that submitted, with the facts it reports: any at all, as an events file may hold. */
+export const session = (key: string, facts: Record<string, unknown>): NewEvent =>
+  ({
+    type: 'harness:session_end',
+    key,
+    sessionId: `session-${key}`,
+    outcome: 'done',
+    reason: 'submitted',
+    ...facts,
+  }) as NewEvent;
 
 export const route = (from: string, value: Outcome, took: string): NewEvent => ({
   type: 'workflow:route',

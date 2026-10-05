@@ -192,7 +192,8 @@ test.each(['quiet', 'normal'] as const)(
         message: 'disk full',
       },
       { type: 'error:harness', key: 'spec#1', message: 'session lost' },
-      { type: 'error:harness', key: 'spec#1', adapter: 'fake', code: 7 },
+      // As an events file may hold it: an adapter's own fields, and no message.
+      { type: 'error:harness', key: 'spec#1', adapter: 'fake', code: 7 } as unknown as NewEvent,
     ]);
     // Each through a consumer of its own, so no error can stop the ones after it from printing.
     expect(events.map((event) => render([event], verbosity)).join('')).toBe(
@@ -578,19 +579,51 @@ test('at trace, an event of every type prints a line of its own', () => {
     [{ type: 'journal:append', key: 'tests#1', line: 1, outcome: 'done' }, detail('tests#1', 'journal line 1', w)],
     [{ type: 'agent:message', key: 'spec#1', text: 'hi' }, head('spec#1', '· agent:message {"text":"hi"}', w)],
     [{ type: 'agent:thinking', key: 'spec#1', text: 'hm' }, head('spec#1', '· agent:thinking {"text":"hm"}', w)],
+    // The harness families are closed, so each sample carries its whole payload.
     [
-      { type: 'harness:session_start', key: 'spec#1', adapter: 'fake' },
-      head('spec#1', '· harness:session_start {"adapter":"fake"}', w),
+      { type: 'harness:session_start', key: 'spec#1', adapter: 'fake', sessionId: 's-1', model: 'm' },
+      head('spec#1', '· harness:session_start {"adapter":"fake","sessionId":"s-1","model":"m"}', w),
     ],
     [
-      { type: 'harness:session_end', key: 'spec#1', reason: 'submitted' },
-      head('spec#1', '· harness:session_end {"reason":"submitted"}', w),
+      {
+        type: 'harness:session_end',
+        key: 'spec#1',
+        outcome: 'done',
+        reason: 'submitted',
+        turns: 1,
+        toolCalls: 0,
+        denials: 0,
+        usage: { costUsd: 0 },
+      },
+      head(
+        'spec#1',
+        '· harness:session_end {"outcome":"done","reason":"submitted","turns":1,"toolCalls":0,"denials":0,"usage":{"costUsd":0}}',
+        w,
+      ),
     ],
-    [{ type: 'tool:start', key: 'spec#1', tool: 'Read' }, head('spec#1', '· tool:start {"tool":"Read"}', w)],
-    [{ type: 'tool:end', key: 'spec#1', status: 'completed' }, head('spec#1', '· tool:end {"status":"completed"}', w)],
     [
-      { type: 'permission:denied', key: 'spec#1', tool: 'Bash' },
-      head('spec#1', '· permission:denied {"tool":"Bash"}', w),
+      { type: 'tool:start', key: 'spec#1', callId: 'tool-1', tool: 'Read', input: {} },
+      head('spec#1', '· tool:start {"callId":"tool-1","tool":"Read","input":{}}', w),
+    ],
+    [
+      { type: 'tool:end', key: 'spec#1', callId: 'tool-1', status: 'completed', durationMs: 40 },
+      head('spec#1', '· tool:end {"callId":"tool-1","status":"completed","durationMs":40}', w),
+    ],
+    [
+      {
+        type: 'permission:denied',
+        key: 'spec#1',
+        callId: 'tool-1',
+        tool: 'Bash',
+        rule: 'commands',
+        permissions: { commands: [] },
+        reason: 'no',
+      },
+      head(
+        'spec#1',
+        '· permission:denied {"callId":"tool-1","tool":"Bash","rule":"commands","permissions":{"commands":[]},"reason":"no"}',
+        w,
+      ),
     ],
     [
       { type: 'script:exec', key: 'tests#1', command: 'run.sh', cwd: '.', envKeys: [] },
@@ -603,6 +636,22 @@ test('at trace, an event of every type prints a line of its own', () => {
     [
       { type: 'input:materialised', key: 'tests#1', binding: 'spec', from: '01-spec/call-1/spec.md' },
       detail('tests#1', 'in spec ← 01-spec/call-1/spec.md', w),
+    ],
+    [
+      {
+        type: 'prompt:rendered',
+        key: 'spec#1',
+        try: 1,
+        path: '01-spec/call-1/prompt.md',
+        untrusted: 0,
+        fragments: [],
+        conventions: [],
+      },
+      head(
+        'spec#1',
+        '· prompt:rendered {"try":1,"path":"01-spec/call-1/prompt.md","untrusted":0,"fragments":[],"conventions":[]}',
+        w,
+      ),
     ],
     [{ type: 'output:validated', key: 'tests#1' }, detail('tests#1', 'output valid', w)],
     [{ type: 'output:invalid', key: 'tests#2', message: 'bad' }, detail('tests#2', 'output invalid', w)],
@@ -621,9 +670,28 @@ test('at trace, an event of every type prints a line of its own', () => {
       { type: 'file:validated', key: 'tests#1', name: 'junit.xml', ok: false, checks: ['wellFormed'] },
       detail('tests#1', 'file junit.xml invalid · wellFormed', w),
     ],
-    [{ type: 'usage:update', key: 'spec#1', turn: 1 }, head('spec#1', '· usage:update {"turn":1}', w)],
-    [{ type: 'budget:warning', key: 'spec#1', usd: 4 }, head('spec#1', '· budget:warning {"usd":4}', w)],
-    [{ type: 'budget:exceeded', key: 'spec#1', usd: 6 }, head('spec#1', '· budget:exceeded {"usd":6}', w)],
+    [
+      {
+        type: 'usage:update',
+        key: 'spec#1',
+        turn: 1,
+        tokens: { input: 1, cacheRead: 0, cacheWrite: 0, output: 2 },
+        costUsdSoFar: 0.5,
+      },
+      head(
+        'spec#1',
+        '· usage:update {"turn":1,"tokens":{"input":1,"cacheRead":0,"cacheWrite":0,"output":2},"costUsdSoFar":0.5}',
+        w,
+      ),
+    ],
+    [
+      { type: 'budget:warning', key: 'spec#1', budget: 'usd', limit: 5, used: 4 },
+      head('spec#1', '· budget:warning {"budget":"usd","limit":5,"used":4}', w),
+    ],
+    [
+      { type: 'budget:exceeded', key: 'spec#1', budget: 'usd', limit: 5, used: 6 },
+      head('spec#1', '· budget:exceeded {"budget":"usd","limit":5,"used":6}', w),
+    ],
     // The provider families are closed, so each sample carries its whole payload.
     [
       { type: 'ticket:fetched', ticketKey: 'FAKE-1', comments: 1, links: 0, attachments: 0, durationMs: 310 },

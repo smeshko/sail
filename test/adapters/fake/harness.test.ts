@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { createFakeHarness, type HarnessScript, type ScriptedAnswer } from '../../../src/adapters/fake/harness';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import type { HarnessResult } from '../../../src/ports/types';
-import { captureEvents } from '../../helpers/ports';
+import { captureEvents, eventIssues } from '../../helpers/ports';
 import { harnessSuite } from '../../ports/harness.suite';
 
 const dirs: string[] = [];
@@ -50,6 +50,14 @@ const done = (output: unknown): ScriptedAnswer => ({ outcome: 'done', output });
 function summary(result: HarnessResult): unknown {
   if (result.outcome === 'done') return result.output;
   return `${result.outcome}: ${result.outcome === 'blocked' ? result.reason : result.message}`;
+}
+
+/** The session's last event, a session end without its `reason`: that is the harness's own word. */
+function sessionEnd(events: readonly HarnessEvent[]): unknown {
+  const last = events.at(-1);
+  if (last?.type !== 'harness:session_end') return last;
+  const { reason: _reason, ...end } = last;
+  return end;
 }
 
 /** Each event's type, with a usage update's turn and a message's text. */
@@ -202,10 +210,12 @@ test("a session emits its start, each message, a usage update per turn and its e
     'usage:update 2',
     'harness:session_end',
   ]);
-  expect([capture.events[0], capture.events.at(-1)]).toEqual([
-    { type: 'harness:session_start', adapter: 'fake', sessionId: 'fake-session-spec-1', model: 'fake-model' },
-    { type: 'harness:session_end', outcome: 'done' },
-  ]);
+  expect(capture.events[0]).toEqual({
+    type: 'harness:session_start',
+    adapter: 'fake',
+    sessionId: 'fake-session-spec-1',
+    model: 'fake-model',
+  });
   expect({ transcript: result.transcript, usage: result.usage, raw: result.raw }).toEqual({
     transcript: 'assistant: Reading the brief.\nassistant: Spec written.',
     usage: { costUsd: 0.25, outputTokens: 900 },
@@ -235,10 +245,125 @@ test('an error answer, or one over maxTurns, ends as error with its message, aft
     'error: model overloaded',
     'error: budget exceeded: maxTurns 1',
   ]);
-  expect([labels(failed.events), labels(over.events)]).toEqual([
+  expect([labels(failed.events), labels(over.events).slice(-2)]).toEqual([
     ['harness:session_start', 'error:harness', 'harness:session_end'],
-    ['harness:session_start', 'usage:update 1', 'error:harness', 'harness:session_end'],
+    ['error:harness', 'harness:session_end'],
   ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a done, blocked or failed session ends with its session id, its outcome, the turns it ran and all it spent', async () => {
+  const usage = { costUsd: 0.25, inputTokens: 1200, outputTokens: 900 };
+  const harness = createFakeHarness({
+    script: {
+      spec: [{ outcome: 'done', output: VALID, turns: 2, usage }],
+      review: [{ outcome: 'blocked', reason: 'The brief has no acceptance criteria.', usage: { costUsd: 0.125 } }],
+      implement: [{ outcome: 'error', message: 'model overloaded' }],
+    },
+  });
+  const ends: unknown[] = [];
+  for (const key of ['spec#1', 'review#1', 'implement#1']) {
+    const capture = captureEvents<HarnessEvent>();
+    await harness.run({ ...request(key), onEvent: capture.emit });
+    ends.push(sessionEnd(capture.events));
+  }
+  const counted = { toolCalls: 0, denials: 0 };
+  expect(ends).toEqual([
+    { type: 'harness:session_end', sessionId: 'fake-session-spec-1', outcome: 'done', turns: 2, ...counted, usage },
+    {
+      type: 'harness:session_end',
+      sessionId: 'fake-session-review-1',
+      outcome: 'blocked',
+      turns: 1,
+      ...counted,
+      usage: { costUsd: 0.125 },
+    },
+    {
+      type: 'harness:session_end',
+      sessionId: 'fake-session-implement-1',
+      outcome: 'error',
+      turns: 0,
+      ...counted,
+      usage: { costUsd: 0 },
+    },
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a session over maxTurns fails as budget_exceeded: budget:exceeded, then error:harness, then its end with what it spent', async () => {
+  const usage = { costUsd: 0.75, outputTokens: 300 };
+  const harness = createFakeHarness({ script: { tests: [{ outcome: 'done', output: {}, turns: 3, usage }] } });
+  const capture = captureEvents<HarnessEvent>();
+  const result = await harness.run({
+    ...request('tests#1'),
+    budget: { maxTurns: 1, maxUsd: 1, maxMinutes: 5 },
+    onEvent: capture.emit,
+  });
+  expect({ result: summary(result), reason: result.outcome === 'error' ? result.reason : undefined }).toEqual({
+    result: 'error: budget exceeded: maxTurns 1',
+    reason: 'budget_exceeded',
+  });
+  expect(labels(capture.events)).toEqual([
+    'harness:session_start',
+    'usage:update 1',
+    'budget:exceeded',
+    'error:harness',
+    'harness:session_end',
+  ]);
+  expect(capture.events.filter((event) => event.type === 'budget:exceeded')).toEqual([
+    { type: 'budget:exceeded', budget: 'turns', limit: 1, used: 1 },
+  ]);
+  expect(sessionEnd(capture.events)).toEqual({
+    type: 'harness:session_end',
+    sessionId: 'fake-session-tests-1',
+    outcome: 'error',
+    turns: 1,
+    toolCalls: 0,
+    denials: 0,
+    usage: { costUsd: 0.25, outputTokens: 100 },
+  });
+  expect(eventIssues(capture.stamped('tests#1'))).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a session that fails keeps the messages it had sent as its transcript, and ends with what it had spent', async () => {
+  const usage = { costUsd: 0.5, outputTokens: 200 };
+  const harness = createFakeHarness({
+    script: {
+      spec: [{ outcome: 'done', output: {}, messages: ['Reading the brief.', 'Spec written.'], turns: 2, usage }],
+    },
+  });
+  const controller = new AbortController();
+  const capture = captureEvents<HarnessEvent>();
+  const result = await harness.run({
+    ...request('spec#1'),
+    signal: controller.signal,
+    onEvent: (event) => {
+      capture.emit(event);
+      if (event.type === 'usage:update') controller.abort();
+    },
+  });
+  const spent = { costUsd: 0.25, outputTokens: 100 };
+  expect({ result: summary(result), transcript: result.transcript, usage: result.usage }).toEqual({
+    result: 'error: aborted',
+    transcript: 'assistant: Reading the brief.\nassistant: Spec written.',
+    usage: spent,
+  });
+  expect(sessionEnd(capture.events)).toEqual({
+    type: 'harness:session_end',
+    sessionId: 'fake-session-spec-1',
+    outcome: 'error',
+    turns: 1,
+    toolCalls: 0,
+    denials: 0,
+    usage: spent,
+  });
 });
 
 test('a session that fails after spending reports what it spent: the turns it ran, or all of them', async () => {
