@@ -15,7 +15,7 @@ import type { Harness } from '../ports/harness';
 import type { Usage } from '../ports/types';
 import type { AgentStep, StageDefinition } from '../sdk/steps';
 import { bindingProblems, materialise, materialisePrepared, prepareBindings, type Supplied } from './bindings';
-import { type CallPaths, callPaths, createCallDir, existingTries, runRelative } from './call-dir';
+import { type CallPaths, callPaths, createCallDir, existingTries, nextTry, runRelative } from './call-dir';
 import type { ContractError } from './contract';
 import type { JournalEntry } from './journal';
 import { buildResult, writeResult } from './result';
@@ -192,12 +192,15 @@ const CORRECTABLE = new Set(['invalid_output', 'missing_file']);
 
 /**
  * Whether a try's output was checked and found wanting. A result from before the field existed counts when every one
- * of its errors is one a correction is for.
+ * of its errors is one a correction is for. Only a try that ended in `error` failed anything: a later try's directory
+ * is inside `$STAGE_OUT`, where a session can write, and a record that says it failed and is `done` is none of the
+ * engine's.
  */
 function failedValidation(result: Record<string, unknown>): boolean {
+  if (result.outcome !== 'error') return false;
   if (typeof result.validationFailed === 'boolean') return result.validationFailed;
   const errors = errorsOf(result);
-  return result.outcome === 'error' && errors.length > 0 && errors.every((error) => CORRECTABLE.has(error.reason));
+  return errors.length > 0 && errors.every((error) => CORRECTABLE.has(error.reason));
 }
 
 /** `errors` without the ones that repeat an earlier one. */
@@ -389,6 +392,7 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
     // Checked again now that the try has ended: whoever heard its end may have aborted the call.
     if (!corrected || request.signal?.aborted === true) return { result, paths };
     found = ran.errors;
-    tryNumber++;
+    // From disk, not the try after this one: a session may have left a directory of that name in its `$STAGE_OUT`.
+    tryNumber = nextTry(runDir, request.stageIndex, definition.name, call);
   }
 }

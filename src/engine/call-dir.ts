@@ -68,14 +68,18 @@ export function callPaths(runDir: string, index: number, stage: string, call: nu
   };
 }
 
-/** The tries a call has a directory for, in order: none when `call-N/` doesn't exist. */
+/**
+ * The tries a call has a directory for, in order, each once: none when `call-N/` doesn't exist. `call-N/` is
+ * `$STAGE_OUT`, where a step may leave a directory of any name, so only `try-M` for M ≥ 2 is a later try.
+ */
 export function existingTries(runDir: string, index: number, stage: string, call: number): number[] {
   const callDir = callPaths(runDir, index, stage, call).dir;
   if (!existsSync(callDir)) return [];
   const later = readdirSync(callDir)
     .filter(isTryName)
-    .map((name) => Number(name.slice('try-'.length)));
-  return [1, ...later.sort((a, b) => a - b)];
+    .map((name) => Number(name.slice('try-'.length)))
+    .filter((tryNumber) => tryNumber >= 2);
+  return [1, ...[...new Set(later)].sort((a, b) => a - b)];
 }
 
 /** The try a call runs as next: 1 when `call-N/` doesn't exist, else one more than its highest try. */
