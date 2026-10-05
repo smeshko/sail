@@ -875,11 +875,12 @@ test('the directory and the result of a try are synced to disk before the next s
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     // Every fsync, by the path its descriptor was opened on, and every rename: a file written under another name and
-    // renamed is synced under the first.
+    // renamed is synced under the first. `ops` holds them in order, with every directory made.
     const synced: string[] = [];
     const renamed: [string, string][] = [];
+    const ops: string[] = [];
     const opened = new Map<number, string>();
-    const real = { open: fs.openSync, fsync: fs.fsyncSync, rename: fs.renameSync };
+    const real = { open: fs.openSync, fsync: fs.fsyncSync, rename: fs.renameSync, mkdir: fs.mkdirSync };
     const spies = [
       spyOn(fs, 'openSync').mockImplementation((...args: Parameters<typeof fs.openSync>) => {
         const fd = real.open(...args);
@@ -888,41 +889,65 @@ test('the directory and the result of a try are synced to disk before the next s
       }),
       spyOn(fs, 'fsyncSync').mockImplementation((fd: number) => {
         synced.push(opened.get(fd) ?? '');
+        ops.push(`sync ${opened.get(fd) ?? ''}`);
         real.fsync(fd);
       }),
       spyOn(fs, 'renameSync').mockImplementation((from: fs.PathLike, to: fs.PathLike) => {
         renamed.push([String(from), String(to)]);
+        ops.push(`rename ${String(to)}`);
         real.rename(from, to);
       }),
+      spyOn(fs, 'mkdirSync').mockImplementation(((path: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+        ops.push(`mkdir ${String(path)}`);
+        return real.mkdir(path, options);
+      }) as typeof fs.mkdirSync),
     ];
     /** Whether `path`'s bytes were synced, under its own name or the one it was renamed from. */
     const durable = (path: string): boolean =>
       synced.includes(path) || renamed.some(([from, to]) => to === path && synced.includes(from));
+    /** Whether `dir` was synced after `op` made or renamed an entry in it: until then, a crash can lose the entry. */
+    const syncedAfter = (op: string, dir: string): boolean => {
+      const at = ops.indexOf(op);
+      return at >= 0 && ops.indexOf(`sync ${dir}`, at + 1) > at;
+    };
+    const stageDir = dirname(s.dir(1));
+    const results = [join(s.dir(1), 'result.json'), join(s.dir(2), 'result.json')];
 
-    let atSecond: { result: boolean; entries: boolean[]; text: string | null } | undefined;
+    let atSecond: Record<string, unknown> | undefined;
     const harness = fake([submits({ summary: 3 }, 0.125), submits(SPEC, 0.25)], {
       before: (_, earlier) => {
         if (earlier !== 1) return;
         atSecond = {
-          result: durable(join(s.dir(1), 'result.json')),
-          // call-1/'s own entry, in its stage's directory, then the entry of its result.json.
-          entries: [synced.includes(dirname(s.dir(1))), synced.includes(s.dir(1))],
-          text: textAt(join(s.dir(1), 'result.json')),
+          text: textAt(results[0] ?? ''),
+          result: durable(results[0] ?? ''),
+          // Each entry on the way to the result: the stage's in the run directory, call-1/'s in its stage's, and the
+          // result's own in call-1/, synced once the result has its name.
+          stage: syncedAfter(`mkdir ${stageDir}`, s.runDir),
+          call: syncedAfter(`mkdir ${s.dir(1)}`, stageDir),
+          entry: syncedAfter(`rename ${results[0]}`, s.dir(1)),
         };
       },
     });
-    let atEnd: boolean[] = [];
+    let atEnd: Record<string, boolean> = {};
     try {
       await runCall(s.request(specStep(), harness));
-      atEnd = [durable(join(s.dir(2), 'result.json')), synced.includes(s.dir(2))];
+      atEnd = {
+        result: durable(results[1] ?? ''),
+        // try-2/'s entry is in call-1/, which was last synced before the try existed.
+        try: syncedAfter(`mkdir ${s.dir(2)}`, s.dir(1)),
+        entry: syncedAfter(`rename ${results[1]}`, s.dir(2)),
+      };
     } finally {
       for (const spy of spies) spy.mockRestore();
     }
 
     expect(harness.requests).toHaveLength(2);
-    expect(JSON.parse(atSecond?.text ?? '{}')).toMatchObject({ outcome: 'error', try: 1, validationFailed: true });
-    expect({ result: atSecond?.result, entries: atSecond?.entries }).toEqual({ result: true, entries: [true, true] });
-    expect(atEnd).toEqual([true, true]);
+    const { text, ...first } = atSecond ?? {};
+    expect(JSON.parse(String(text ?? '{}'))).toMatchObject({ outcome: 'error', try: 1, validationFailed: true });
+    expect({ atSecond: first, atEnd }).toEqual({
+      atSecond: { result: true, stage: true, call: true, entry: true },
+      atEnd: { result: true, try: true, entry: true },
+    });
   });
 });
 
