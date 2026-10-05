@@ -26,8 +26,6 @@ interface Def {
   out?: z.ZodType;
   /** A codec's decoder: a pipe that has one transforms what its `in` parsed, as a `transform` out does. */
   transform?: unknown;
-  /** A template literal's parts: its fixed text, and the schemas of what goes between. */
-  parts?: unknown[];
 }
 
 const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
@@ -36,31 +34,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-const isSchema = (part: unknown): part is z.ZodType => isRecord(part) && 'def' in part;
+/** A schema, by the `def` every one has. */
+const isSchema = (held: unknown): held is z.ZodType =>
+  isRecord(held) && isRecord(held.def) && typeof held.def.type === 'string';
+
+/**
+ * The schemas `def` holds, under whatever key zod keeps them: alone, in a list as a union's options are, or by name as
+ * an object's shape is. Every key is read, not the ones the marking walk knows: a record's keys and a template
+ * literal's parts are schemas too, and so is whatever a later zod adds.
+ */
+function heldBy(def: Def): z.ZodType[] {
+  const kept = Object.values(def).flatMap((held) => (isRecord(held) && !isSchema(held) ? Object.values(held) : held));
+  // A lazy schema keeps its schema behind a getter, which is called for it alone: a transform's function is one too.
+  const lazy = def.type === 'lazy' && def.getter !== undefined ? [def.getter()] : [];
+  return [...kept, ...lazy].filter(isSchema);
+}
 
 /** Whether `schema` marks a string anywhere in it. `seen` holds the schemas already read: one may hold itself. */
 function marksAny(schema: z.ZodType, seen = new Set<z.ZodType>()): boolean {
   if (isUntrusted(schema)) return true;
   if (seen.has(schema)) return false;
   seen.add(schema);
-  const def = schema.def as Def;
-  const children = [
-    def.innerType,
-    def.catchall,
-    def.element,
-    def.valueType,
-    def.left,
-    def.right,
-    def.rest,
-    def.in,
-    def.out,
-    def.getter?.(),
-    ...Object.values(def.shape ?? {}),
-    ...(def.options ?? []),
-    ...(def.items ?? []),
-    ...(def.parts ?? []).filter(isSchema),
-  ];
-  return children.some((child) => child !== undefined && child !== null && marksAny(child, seen));
+  return heldBy(schema.def as Def).some((held) => marksAny(held, seen));
 }
 
 /**
