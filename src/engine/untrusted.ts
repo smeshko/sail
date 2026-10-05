@@ -1,5 +1,9 @@
 // markUntrusted(): reads a schema beside a value and turns each string the schema marks into an `untrustedInput`, so the
 // renderer wraps it wherever a template prints it. The walk follows the value, which is finite.
+//
+// The value is what the schema parsed, so a transform has already run, and its output has whatever shape it was given:
+// no schema says which of its strings came from an untrusted one. So every string a transform makes of input that holds
+// an untrusted string is marked. That can mark a trusted string beside it, and never leaves an untrusted one bare.
 import type { z } from 'zod';
 import { isUntrusted } from '../sdk/untrusted';
 import { isUntrustedInput, untrustedInput } from './render';
@@ -20,12 +24,47 @@ interface Def {
   getter?: () => z.ZodType;
   in?: z.ZodType;
   out?: z.ZodType;
+  /** A codec's decoder: a pipe that has one transforms what its `in` parsed, as a `transform` out does. */
+  transform?: unknown;
 }
 
 const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Whether `schema` marks a string anywhere in it. `seen` holds the schemas already read: one may hold itself. */
+function marksAny(schema: z.ZodType, seen = new Set<z.ZodType>()): boolean {
+  if (isUntrusted(schema)) return true;
+  if (seen.has(schema)) return false;
+  seen.add(schema);
+  const def = schema.def as Def;
+  const children = [
+    def.innerType,
+    def.catchall,
+    def.element,
+    def.valueType,
+    def.left,
+    def.right,
+    def.rest,
+    def.in,
+    def.out,
+    def.getter?.(),
+    ...Object.values(def.shape ?? {}),
+    ...(def.options ?? []),
+    ...(def.items ?? []),
+  ];
+  return children.some((child) => child !== undefined && child !== null && marksAny(child, seen));
+}
+
+/** `value` with every string in it marked, however deep. What isn't a string, a list or a plain object is left whole. */
+function markAll(value: unknown, source: string): unknown {
+  if (typeof value === 'string') return untrustedInput(value, source);
+  if (Array.isArray(value)) return value.map((item, index) => markAll(item, `${source}.${index}`));
+  if (!isRecord(value) || isUntrustedInput(value)) return value;
+  if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, markAll(item, `${source}.${key}`)]));
 }
 
 /** `value` with each string `schema` marks as untrusted input from `source`. `value` itself is not changed. */
@@ -68,8 +107,11 @@ export function markUntrusted(schema: z.ZodType, value: unknown, source: string)
       return markUntrusted(def.right as z.ZodType, markUntrusted(def.left as z.ZodType, value, source), source);
     case 'lazy':
       return markUntrusted((def.getter as () => z.ZodType)(), value, source);
-    case 'pipe':
-      return markUntrusted(def.out as z.ZodType, markUntrusted(def.in as z.ZodType, value, source), source);
+    case 'pipe': {
+      const marked = markUntrusted(def.out as z.ZodType, markUntrusted(def.in as z.ZodType, value, source), source);
+      const transformed = (def.out as z.ZodType).def.type === 'transform' || def.transform !== undefined;
+      return transformed && marksAny(def.in as z.ZodType) ? markAll(marked, source) : marked;
+    }
     default:
       return value;
   }
