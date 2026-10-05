@@ -36,6 +36,7 @@
         "script:exec",
         "script:exit",
         "input:materialised",
+        "prompt:rendered",
         "output:validated",
         "output:invalid",
         "file:produced",
@@ -212,6 +213,54 @@
     {
       "if": { "properties": { "type": { "const": "workspace:released" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/workspaceReleased" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "prompt:rendered" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/promptRendered" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "harness:session_start" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/harnessSessionStart" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "harness:session_end" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/harnessSessionEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent:message" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/agentText" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent:thinking" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/agentText" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "tool:start" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/toolStart" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "tool:end" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/toolEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "permission:denied" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/permissionDenied" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "usage:update" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/usageUpdate" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "budget:warning" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/budgetEvent" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "budget:exceeded" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/budgetEvent" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "error:harness" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/errorHarness" }
     }
   ],
   "$defs": {
@@ -902,6 +951,150 @@
         "kept": { "type": "boolean" }
       },
       "required": ["path", "kept"],
+      "unevaluatedProperties": false
+    },
+    "count": { "type": "integer", "minimum": 0 },
+    "usage": {
+      "description": "tokens and cost, as sail.result.v1 records them",
+      "type": "object",
+      "properties": {
+        "inputTokens": { "$ref": "#/$defs/count" },
+        "cacheReadTokens": { "$ref": "#/$defs/count" },
+        "cacheWriteTokens": { "$ref": "#/$defs/count" },
+        "outputTokens": { "$ref": "#/$defs/count" },
+        "costUsd": { "type": "number", "minimum": 0 }
+      },
+      "required": ["costUsd"],
+      "additionalProperties": false
+    },
+    "promptRendered": {
+      "description": "the prompt of a try, rendered and kept as prompt.md: what it printed and what was appended to it",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "try": { "type": "integer", "minimum": 1 },
+        "path": { "$ref": "#/$defs/resultPath" },
+        "untrusted": { "$ref": "#/$defs/count" },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "name": { "type": "string" }, "origin": { "$ref": "#/$defs/origin" } },
+            "required": ["name", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "conventions": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["try", "path", "untrusted", "fragments", "conventions"],
+      "unevaluatedProperties": false
+    },
+    "harnessSessionStart": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "adapter": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "model": { "type": "string" }
+      },
+      "required": ["adapter", "sessionId", "model"],
+      "unevaluatedProperties": false
+    },
+    "harnessSessionEnd": {
+      "description": "one per session, with all it spent; sessionId is left out only when the harness reported none",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "outcome": { "enum": ["done", "blocked", "error"] },
+        "reason": { "type": "string" },
+        "turns": { "$ref": "#/$defs/count" },
+        "toolCalls": { "$ref": "#/$defs/count" },
+        "denials": { "$ref": "#/$defs/count" },
+        "usage": { "$ref": "#/$defs/usage" }
+      },
+      "required": ["outcome", "turns", "toolCalls", "denials", "usage"],
+      "unevaluatedProperties": false
+    },
+    "agentText": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": { "text": { "type": "string" } },
+      "required": ["text"],
+      "unevaluatedProperties": false
+    },
+    "toolStart": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": { "callId": { "type": "string" }, "tool": { "type": "string" }, "input": true },
+      "required": ["callId", "tool", "input"],
+      "unevaluatedProperties": false
+    },
+    "toolEnd": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "callId": { "type": "string" },
+        "status": { "enum": ["completed", "denied", "failed"] },
+        "durationMs": { "type": "number", "minimum": 0 }
+      },
+      "required": ["callId", "status", "durationMs"],
+      "unevaluatedProperties": false
+    },
+    "permissionDenied": {
+      "description": "a tool call a step's permissions refused: the rule, and the step's permissions under it",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "callId": { "type": "string" },
+        "tool": { "type": "string" },
+        "rule": { "enum": ["read", "write", "commands", "network"] },
+        "permissions": { "$ref": "#/$defs/permissions" },
+        "reason": { "type": "string" }
+      },
+      "required": ["callId", "tool", "rule", "permissions", "reason"],
+      "unevaluatedProperties": false
+    },
+    "usageUpdate": {
+      "description": "cumulative within its session: the last one before the session's end is what it spent",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "turn": { "type": "integer", "minimum": 1 },
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": { "$ref": "#/$defs/count" },
+            "cacheRead": { "$ref": "#/$defs/count" },
+            "cacheWrite": { "$ref": "#/$defs/count" },
+            "output": { "$ref": "#/$defs/count" }
+          },
+          "required": ["input", "cacheRead", "cacheWrite", "output"],
+          "additionalProperties": false
+        },
+        "costUsdSoFar": { "type": "number", "minimum": 0 }
+      },
+      "required": ["turn", "tokens", "costUsdSoFar"],
+      "unevaluatedProperties": false
+    },
+    "budgetEvent": {
+      "description": "a budget at its threshold or its limit: a step's carries its call's key, and the run's none",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "budget": { "enum": ["turns", "usd", "minutes"] },
+        "limit": { "type": "number", "minimum": 0 },
+        "used": { "type": "number", "minimum": 0 }
+      },
+      "required": ["budget", "limit", "used"],
+      "unevaluatedProperties": false
+    },
+    "errorHarness": {
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": { "message": { "type": "string" } },
+      "required": ["message"],
       "unevaluatedProperties": false
     }
   }

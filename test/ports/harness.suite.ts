@@ -53,10 +53,7 @@ export function harnessSuite(label: string, make: MakeHarness, unarranged: reado
     expect(eventIssues(capture.stamped(world.done.key))).toEqual([]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
-  test
-    .skip // TDD-PENDING TASK-001
-    (`${label}: a session ends once, reporting its result's outcome, session id and usage`, async () => {
+  test(`${label}: a session ends once, reporting its result's outcome, session id and usage`, async () => {
     const { adapter, world } = await make();
     const { result, capture } = await run(adapter, world.done);
     const ends = capture.events.flatMap((event) => (event.type === 'harness:session_end' ? [event] : []));

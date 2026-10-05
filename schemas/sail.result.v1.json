@@ -74,7 +74,27 @@
         "toolCalls": { "type": "integer", "minimum": 0 },
         "denials": { "type": "integer", "minimum": 0 }
       },
-      "required": ["adapter", "model", "provider", "sessionId", "turns", "toolCalls", "denials"],
+      "required": ["adapter", "model", "turns", "toolCalls", "denials"],
+      "additionalProperties": false
+    },
+    "prompt": {
+      "description": "the prompt a try's session was sent: prompt.md, what it printed and what was appended to it",
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "untrusted": { "type": "integer", "minimum": 0 },
+        "fragments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": { "name": { "type": "string" }, "origin": { "type": "string" } },
+            "required": ["name", "origin"],
+            "additionalProperties": false
+          }
+        },
+        "conventions": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["path", "untrusted", "fragments", "conventions"],
       "additionalProperties": false
     },
     "network": {
@@ -196,6 +216,10 @@
         "errors": { "$ref": "#/$defs/errors" },
         "output": true,
         "reason": { "type": "string" },
+        "try": { "type": "integer", "minimum": 1 },
+        "validationTry": { "enum": [1, 2] },
+        "validationFailed": { "type": "boolean" },
+        "prompt": { "$ref": "#/$defs/prompt" },
         "files": { "$ref": "#/$defs/files" },
         "consumed": { "$ref": "#/$defs/consumed" },
         "startedAt": { "$ref": "#/$defs/ts" },
@@ -232,9 +256,17 @@
         "harness",
         "usage"
       ],
-      "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
-      "then": { "properties": { "errors": true }, "required": ["errors"] },
-      "else": { "properties": { "errors": false } },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+          "then": { "properties": { "errors": true }, "required": ["errors"] },
+          "else": { "properties": { "errors": false } }
+        },
+        {
+          "if": { "properties": { "outcome": { "const": "blocked" } }, "required": ["outcome"] },
+          "then": { "properties": { "reason": { "type": "string", "pattern": "\\S" } }, "required": ["reason"] }
+        }
+      ],
       "additionalProperties": false
     },
     "multiStepStageResult": {

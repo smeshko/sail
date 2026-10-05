@@ -251,10 +251,7 @@ test('an error answer, or one over maxTurns, ends as error with its message, aft
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a done, blocked or failed session ends with its session id, its outcome, the turns it ran and all it spent', async () => {
+test('a done, blocked or failed session ends with its session id, its outcome, the turns it ran and all it spent', async () => {
   const usage = { costUsd: 0.25, inputTokens: 1200, outputTokens: 900 };
   const harness = createFakeHarness({
     script: {
@@ -291,10 +288,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a session over maxTurns fails as budget_exceeded: budget:exceeded, then error:harness, then its end with what it spent', async () => {
+test('a session over maxTurns fails as budget_exceeded: budget:exceeded, then error:harness, then its end with what it spent', async () => {
   const usage = { costUsd: 0.75, outputTokens: 300 };
   const harness = createFakeHarness({ script: { tests: [{ outcome: 'done', output: {}, turns: 3, usage }] } });
   const capture = captureEvents<HarnessEvent>();
@@ -329,10 +323,7 @@ test
   expect(eventIssues(capture.stamped('tests#1'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a session that fails keeps the messages it had sent as its transcript, and ends with what it had spent', async () => {
+test('a session that fails keeps the messages it had sent as its transcript, and ends with what it had spent', async () => {
   const usage = { costUsd: 0.5, outputTokens: 200 };
   const harness = createFakeHarness({
     script: {

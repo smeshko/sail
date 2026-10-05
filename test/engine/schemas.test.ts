@@ -397,10 +397,7 @@ const AGENT: NewEvent[] = [
   { type: 'error:harness', key: SPEC, message: 'model overloaded' },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each(AGENT.map((sample) => [sample.type, sample] as const))(
+test.each(AGENT.map((sample) => [sample.type, sample] as const))(
   '%s accepts its agent payload, and rejects a field it does not declare',
   (_, sample) => {
     expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
@@ -410,10 +407,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each(AGENT.filter((sample) => !sample.type.startsWith('budget:')).map((sample) => [sample.type, sample] as const))(
+test.each(AGENT.filter((sample) => !sample.type.startsWith('budget:')).map((sample) => [sample.type, sample] as const))(
   '%s requires the key of its call, which a harness leaves to the agent step',
   (_, sample) => {
     expect(validateDocument('sail.event.v1', omit(stamped(sample), 'key'))).toEqual([
@@ -422,10 +416,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('agent events: a session end is complete, usage is never negative, and a budget event may belong to the run', () => {
+test('agent events: a session end is complete, usage is never negative, and a budget event may belong to the run', () => {
   const check = (sample: Record<string, unknown>) => paths('sail.event.v1', { ...envelope, ...sample }).sort();
   // The fake's end before this phase: an outcome and nothing else.
   expect(check({ type: 'harness:session_end', key: SPEC, outcome: 'done' })).toEqual([
@@ -588,10 +579,7 @@ test('result: dispatch reports only the branch the document claims to be', () =>
   expect(paths('sail.result.v1', { ...multiStepResult, steps: [describeStep] })).toEqual(['/steps']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('result: an agent result records its try, its place in validation and its prompt, and only the session facts it has', () => {
+test('result: an agent result records its try, its place in validation and its prompt, and only the session facts it has', () => {
   const prompt = { path: '01-spec/call-1/try-3/prompt.md', untrusted: 2, fragments, conventions: ['AGENTS.md'] };
   const recorded = { ...agentResult, try: 3, validationTry: 2, validationFailed: false, prompt };
   expect(paths('sail.result.v1', recorded)).toEqual([]);
@@ -611,10 +599,7 @@ test
   expect(paths('sail.result.v1', { ...recorded, usage: { costUsd: -0.01 } })).toEqual(['/usage/costUsd']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('result: a blocked agent result gives its reason, and whitespace is not one', () => {
+test('result: a blocked agent result gives its reason, and whitespace is not one', () => {
   const blocked = { ...agentResult, outcome: 'blocked', output: null };
   expect(validateDocument('sail.result.v1', blocked)).toEqual([
     { schema: 'sail.result.v1', path: '/reason', message: 'is required' },

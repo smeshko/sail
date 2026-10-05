@@ -1,13 +1,14 @@
 // The fake Harness: answers scripted per call key and try, keeping no state, so a resume, a parallel call or a new
 // process gets the same answer (D2). It writes an answer's files into `$STAGE_OUT`, honours `maxTurns` and an abort,
 // and never rejects. It never checks `output` against the schema: invalid output is scripted as a `done` answer whose
-// output doesn't conform, which the agent kind rejects.
+// output doesn't conform, which the agent kind rejects. Every session that starts ends once, with its id, the turns it
+// ran and what it spent.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
-import { type HarnessResult, Usage } from '../../ports/types';
+import { type HarnessFailure, type HarnessResult, Usage } from '../../ports/types';
 
 const messages = z.array(z.string()).optional();
 const turns = z.number().int().min(1).optional();
@@ -70,7 +71,31 @@ interface Progress {
   started: boolean;
   ended: boolean;
   spent: Usage;
+  /** The turns it has run. */
+  turns: number;
+  /** The messages it has sent. */
+  said: string[];
 }
+
+/** What a session's messages make of its transcript. */
+const transcriptOf = (messages: readonly string[]): string => messages.map((text) => `assistant: ${text}`).join('\n');
+
+/** The end of a session that got as far as `progress`. */
+const endOf = (
+  sessionId: string,
+  outcome: HarnessResult['outcome'],
+  reason: string,
+  progress: Progress,
+): HarnessEvent => ({
+  type: 'harness:session_end',
+  sessionId,
+  outcome,
+  reason,
+  turns: progress.turns,
+  toolCalls: 0,
+  denials: 0,
+  usage: progress.spent,
+});
 
 /** Where each of `files` lands in `out`, or the first name that would land outside it. */
 function placeFiles(out: string, files: Record<string, string>): { paths: [string, string][] } | { outside: string } {
@@ -96,12 +121,13 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
   };
 
   async function session(request: HarnessRequest, sessionId: string, progress: Progress): Promise<HarnessResult> {
-    const fail = (message: string, raw: HarnessResult['raw'] = null): HarnessResult => ({
+    const fail = (message: string, raw: HarnessResult['raw'] = null, reason?: HarnessFailure): HarnessResult => ({
       outcome: 'error',
       message,
+      ...(reason === undefined ? {} : { reason }),
       sessionId,
       usage: progress.spent,
-      transcript: '',
+      transcript: transcriptOf(progress.said),
       raw,
     });
     if (request.signal?.aborted) return fail('aborted');
@@ -113,22 +139,15 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     if (answer === undefined) return fail(`fake harness: nothing scripted for ${request.key}`);
 
     const emit = (event: HarnessEvent) => request.onEvent?.(event);
-    const end = (result: HarnessResult): HarnessResult => {
+    const end = (result: HarnessResult, reason: string): HarnessResult => {
       progress.ended = true;
-      emit({
-        type: 'harness:session_end',
-        outcome: result.outcome,
-        turns: 0,
-        toolCalls: 0,
-        denials: 0,
-        usage: { costUsd: 0 },
-      });
+      emit(endOf(sessionId, result.outcome, reason, progress));
       return result;
     };
     /** Fails with what the session has spent so far, so a failure after turns still counts their cost. */
-    const failed = (message: string): HarnessResult => {
+    const failed = (message: string, reason?: HarnessFailure): HarnessResult => {
       emit({ type: 'error:harness', message });
-      return end(fail(message, answer));
+      return end(fail(message, answer, reason), reason ?? 'failed');
     };
 
     // An abort can come from anything the session awaits or calls back into: a scripted delay, or the caller's onEvent.
@@ -141,6 +160,7 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     if (answer.outcome === 'error') return failed(answer.message);
 
     for (const text of answer.messages ?? []) {
+      progress.said.push(text);
       emit({ type: 'agent:message', text });
       if (stopped()) return failed('aborted');
     }
@@ -150,6 +170,7 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     for (let turn = 1; turn <= Math.min(wanted, maxTurns); turn++) {
       const soFar = spentBy(usage, turn, wanted);
       progress.spent = soFar;
+      progress.turns = turn;
       emit({
         type: 'usage:update',
         turn,
@@ -163,7 +184,10 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
       });
       if (stopped()) return failed('aborted');
     }
-    if (wanted > maxTurns) return failed(`budget exceeded: maxTurns ${maxTurns}`);
+    if (wanted > maxTurns) {
+      emit({ type: 'budget:exceeded', budget: 'turns', limit: maxTurns, used: progress.turns });
+      return failed(`budget exceeded: maxTurns ${maxTurns}`, 'budget_exceeded');
+    }
     // Every turn ran, so all of it is spent, exactly as scripted.
     progress.spent = usage;
 
@@ -181,20 +205,17 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
       }
     }
 
-    const transcript = (answer.messages ?? []).map((text) => `assistant: ${text}`).join('\n');
-    const kept = { sessionId, usage, transcript, raw: answer };
-    return end(
-      answer.outcome === 'done'
-        ? { outcome: 'done', output: answer.output, ...kept }
-        : { outcome: 'blocked', reason: answer.reason, ...kept },
-    );
+    const kept = { sessionId, usage, transcript: transcriptOf(progress.said), raw: answer };
+    return answer.outcome === 'done'
+      ? end({ outcome: 'done', output: answer.output, ...kept }, 'submitted')
+      : end({ outcome: 'blocked', reason: answer.reason, ...kept }, 'blocked');
   }
 
   return {
     name: 'fake',
     async run(request) {
       const sessionId = sessionIdOf(request);
-      const progress: Progress = { started: false, ended: false, spent: { costUsd: 0 } };
+      const progress: Progress = { started: false, ended: false, spent: { costUsd: 0 }, turns: 0, said: [] };
       try {
         return await session(request, sessionId, progress);
       } catch (error) {
@@ -205,19 +226,13 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
         if (progress.started && !progress.ended) {
           try {
             request.onEvent?.({ type: 'error:harness', message });
-            request.onEvent?.({
-              type: 'harness:session_end',
-              outcome: 'error',
-              turns: 0,
-              toolCalls: 0,
-              denials: 0,
-              usage: { costUsd: 0 },
-            });
+            request.onEvent?.(endOf(sessionId, 'error', 'failed', progress));
           } catch {
             // An onEvent that throws hears no more.
           }
         }
-        return { outcome: 'error', message, sessionId, usage: progress.spent, transcript: '', raw: null };
+        const transcript = transcriptOf(progress.said);
+        return { outcome: 'error', message, sessionId, usage: progress.spent, transcript, raw: null };
       }
     },
     capabilities: () => ({ structuredOutput: true, permissions: false, usage: true, abort: true, budgets: ['turns'] }),

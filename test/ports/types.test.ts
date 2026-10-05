@@ -225,20 +225,14 @@ test('Usage counts tokens in whole, non-negative numbers', () => {
   expect(paths(Usage, { costUsd: 0.01, cacheReadTokens: 0 })).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('Usage costs dollars of 0 or more, and never NaN or an infinity', () => {
+test('Usage costs dollars of 0 or more, and never NaN or an infinity', () => {
   expect(paths(Usage, { costUsd: -0.01 })).toEqual(['costUsd']);
   expect(paths(Usage, { costUsd: Number.NaN })).toEqual(['costUsd']);
   expect(paths(Usage, { costUsd: Number.POSITIVE_INFINITY })).toEqual(['costUsd']);
   expect(paths(Usage, { costUsd: 0 })).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a blocked reason of only whitespace fails, and an error reason is harness, budget_exceeded or timeout', () => {
+test('a blocked reason of only whitespace fails, and an error reason is harness, budget_exceeded or timeout', () => {
   const session = { sessionId: 'fake-session-spec-1', usage: { costUsd: 0 }, transcript: '', raw: null };
   const failed = { ...session, outcome: 'error', message: 'budget exceeded: maxTurns 1' };
   const results = [
