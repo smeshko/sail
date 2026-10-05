@@ -572,3 +572,69 @@ test('a failed session reports error:harness once, before its end; a session out
     },
   ]);
 });
+
+/** What is wrong with the result a call would write from `run`: nothing, when it is one. */
+function resultIssues(run: StepRun): string[] {
+  const at = new Date('2026-10-05T10:00:00.000Z');
+  const consumed = { brief: 'docs/brief.md' };
+  const result = buildResult({
+    runId: RUN_ID,
+    stage: 'spec',
+    call: 1,
+    kind: 'agent',
+    run,
+    consumed,
+    startedAt: at,
+    finishedAt: at,
+  });
+  return validateDocument('sail.result.v1', result).map(formatIssue);
+}
+
+test('a session whose harness rejects, or returns a usage the port refuses, is recorded with what it last said it had spent', async () => {
+  // WORKING reports two turns, the second at $0.09375.
+  const spent = { inputTokens: 90, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 12, costUsd: 0.09375 };
+  const hungUp = new Error('socket hang up');
+
+  const rejected = await tried(spec(), scripted({ resolves: hungUp, emits: WORKING }));
+  expect(rejected.run.errors).toEqual([{ reason: 'harness', message: expect.stringContaining('socket hang up') }]);
+  expect(rejected.run.record).toMatchObject({ harness: { sessionId: 'session-7', turns: 2 }, usage: spent });
+  expect(ends(rejected.s.events)).toEqual([
+    {
+      type: 'harness:session_end',
+      sessionId: 'session-7',
+      outcome: 'error',
+      turns: 2,
+      toolCalls: 2,
+      denials: 1,
+      usage: spent,
+    },
+  ]);
+  expect(resultIssues(rejected.run)).toEqual([]);
+
+  const refused = scripted({ resolves: { ...done(VALID), usage: { costUsd: -1 } }, emits: WORKING });
+  expect((await tried(spec(), refused)).run.record.usage).toEqual(spent);
+
+  // The session's own end is its last word on what it spent, and says more than the update before it.
+  const end: HarnessEvent = {
+    type: 'harness:session_end',
+    sessionId: 'session-7',
+    outcome: 'error',
+    turns: 2,
+    toolCalls: 2,
+    denials: 1,
+    usage: { costUsd: 0.125 },
+  };
+  const ended = await tried(spec(), scripted({ resolves: hungUp, emits: [...WORKING, end] }));
+  expect(ended.run.record.usage).toEqual({ costUsd: 0.125 });
+
+  // An update, or an end, that says no usage is not counted: the last that did stands.
+  const garbled = [
+    { type: 'usage:update', turn: 2, tokens: TOKENS, costUsdSoFar: -4 },
+    { type: 'usage:update', turn: 2, costUsdSoFar: 9 },
+    { type: 'usage:update', turn: 2, tokens: { ...TOKENS, output: 1.5 }, costUsdSoFar: 9 },
+    { ...end, usage: { costUsd: Number.NaN } },
+  ] as unknown as HarnessEvent[];
+  const misreported = await tried(spec(), scripted({ resolves: hungUp, emits: [...WORKING, ...garbled] }));
+  expect(misreported.run.record.usage).toEqual(spent);
+  expect(resultIssues(misreported.run)).toEqual([]);
+});
