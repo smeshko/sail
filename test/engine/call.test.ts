@@ -1129,3 +1129,114 @@ test('a try that never reached a session, and whose events were lost, is said fr
     expect(sessionEnds(events)).toEqual([]);
   });
 });
+
+/**
+ * A record a session could write into its `$STAGE_OUT` as its call's try 2: a real result that validates, said to be
+ * `done` after a second validation that failed, with an output its step's schema refuses.
+ */
+async function forgedTry(s: SpecStage): Promise<string> {
+  const real = await runCall(s.request(specStep(), fake([submits(SPEC, 0.25)]), { call: 9 }));
+  const forged = {
+    ...real.result,
+    key: KEY,
+    call: 1,
+    try: 2,
+    validationTry: 2,
+    validationFailed: true,
+    output: { summary: 12345 },
+    files: {},
+  };
+  expect(validateDocument('sail.result.v1', forged).map(formatIssue)).toEqual([]);
+  return `${JSON.stringify(forged, null, 2)}\n`;
+}
+
+test("a directory a session left where its call's next try goes does not stop the correction, which takes the try after it", async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    const forged = await forgedTry(s);
+    const planting = submits({ summary: 3 }, 0.125, { files: { 'spec.md': '# Draft\n', 'try-2/result.json': forged } });
+    const harness = fake([planting, submits({ summary: null }, 0.5), submits(SPEC, 0.25)]);
+    const { result, paths } = await runCall(s.request(specStep(), harness));
+
+    expect(harness.requests.map((request) => request.try)).toEqual([1, 3]);
+    expect(paths.dir).toBe(s.dir(3));
+    expect(placeOf(readBack(paths.result))).toEqual({
+      outcome: 'done',
+      try: 3,
+      validationTry: 2,
+      validationFailed: false,
+    });
+    expect(result.output).toEqual(SPEC);
+    // What the session wrote there is as it left it: the engine made no try of it.
+    expect(readdirSync(s.dir(2))).toEqual(['result.json']);
+    expect(textAt(join(s.dir(2), 'result.json'))).toBe(forged);
+  });
+});
+
+test('a resumed call does not take a record its session planted as its last word: it is corrected, and what it submits is checked', async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    const forged = await forgedTry(s);
+    const planting = submits({ summary: 3 }, 0.125, { files: { 'spec.md': '# Draft\n', 'try-2/result.json': forged } });
+    const answers = [planting, submits({ summary: null }, 0.5), submits(SPEC, 0.25)];
+    const stopped = new AbortController();
+    const first = fake(answers, { after: () => stopped.abort() });
+    await runCall(s.request(specStep(), first, { signal: stopped.signal }));
+    expect(first.requests).toHaveLength(1);
+    expect(readBack(join(s.dir(2), 'result.json'))).toMatchObject({ outcome: 'done', output: { summary: 12345 } });
+
+    const resumed = fake(answers);
+    const { result, paths } = await runCall(s.request(specStep(), resumed));
+    expect(resumed.requests.map((request) => request.try)).toEqual([3]);
+    expect(resumed.requests[0]?.prompt).toContain(NOT_A_STRING);
+    expect(paths.dir).toBe(s.dir(3));
+    expect([result.outcome, result.output]).toEqual(['done', SPEC]);
+    expect(placeOf(readBack(paths.result))).toEqual({
+      outcome: 'done',
+      try: 3,
+      validationTry: 2,
+      validationFailed: false,
+    });
+  });
+});
+
+test('a result from before a try recorded its place in validation used the correction when every one of its errors is one a correction is for', async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    /** Rewrites the result at `path` as one from before the fields existed. */
+    const age = (path: string): void => {
+      const { validationTry: _try, validationFailed: _failed, ...older } = readBack(path);
+      writeFileSync(path, `${JSON.stringify(older, null, 2)}\n`);
+    };
+
+    const answers = [submits({ summary: 3 }, 0.125), submits(SPEC, 0.25)];
+    const stopped = new AbortController();
+    await runCall(s.request(specStep(), fake(answers, { after: () => stopped.abort() }), { signal: stopped.signal }));
+    age(join(s.dir(1), 'result.json'));
+    const corrected = fake(answers);
+    const first = await runCall(s.request(specStep(), corrected));
+    expect(corrected.requests.map((request) => request.try)).toEqual([2]);
+    expect(corrected.requests[0]?.prompt).toContain(NOT_A_STRING);
+    expect(placeOf(readBack(first.paths.result))).toEqual({
+      outcome: 'done',
+      try: 2,
+      validationTry: 2,
+      validationFailed: false,
+    });
+
+    // One that ended for another reason checked no output, and used nothing.
+    const failing: ScriptedAnswer[] = [{ outcome: 'error', message: 'model overloaded' }, ...answers];
+    await runCall(s.request(specStep(), fake(failing), { call: 2 }));
+    age(join(s.dir(1, 2), 'result.json'));
+    const again = fake(failing);
+    const second = await runCall(s.request(specStep(), again, { call: 2 }));
+    expect(again.requests.map((request) => request.try)).toEqual([2, 3]);
+    expect(again.requests[0]?.prompt).not.toContain('model overloaded');
+    expect(placeOf(readBack(second.paths.result))).toEqual({
+      outcome: 'done',
+      try: 3,
+      validationTry: 2,
+      validationFailed: false,
+    });
+  });
+});
