@@ -64,13 +64,16 @@ function isWithin(root: string, path: string): boolean {
 
 /**
  * Reads the convention files: the listed ones, each of which must be a regular file inside the workspace, or the
- * defaults that exist when none is listed.
+ * defaults that exist when none is listed. A file two names lead to, as a `CLAUDE.md` linked to `AGENTS.md` does, is
+ * read once, under the first.
  */
 function readConventions(
   workspace: string,
   listed: readonly string[] | undefined,
 ): { files: { path: string; text: string }[] } | { message: string } {
   const files: { path: string; text: string }[] = [];
+  /** The real path of each file read. */
+  const read = new Set<string>();
   for (const name of listed ?? DEFAULT_CONVENTIONS) {
     const refused = (why: string) => ({ message: `convention ${name} ${why}` });
     if (isAbsolute(name)) return refused('is absolute: a convention is a path inside the repository');
@@ -84,6 +87,8 @@ function readConventions(
       // A symlink on the way can lead out of the repository, which the path alone doesn't show.
       const real = realpathSync(path);
       if (!isWithin(realpathSync(workspace), real)) return refused('is outside the repository');
+      if (read.has(real)) continue;
+      read.add(real);
       files.push({ path: name, text: readFileSync(real, 'utf8') });
     } catch (error) {
       return refused(`can't be read: ${messageOf(error)}`);
