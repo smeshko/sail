@@ -213,16 +213,122 @@ test("a transform's input holds an untrusted string wherever its schema keeps on
   expect(shown(markUntrusted(keyed, ['x'], 's'))).toEqual(['<s.0>x']);
   const plain = z.record(z.string(), z.number()).transform((counts) => Object.keys(counts));
   expect(markUntrusted(plain, ['x'], 's')).toEqual(['x']);
+});
 
-  // A schema zod keeps under a key this module has never read is found all the same: alone, in a list, or by name.
-  const transform = { def: { type: 'transform' } };
-  const holding = (held: unknown) =>
-    ({ def: { type: 'pipe', in: { def: { type: 'novel', held } }, out: transform } }) as unknown as z.ZodType;
-  const marks = [untrusted(), [z.number(), untrusted()], { note: untrusted() }];
-  expect(marks.map((held) => shown(markUntrusted(holding(held), 'x', 's')))).toEqual(['<s>x', '<s>x', '<s>x']);
-  // What it keeps that is no schema says nothing: a default that happens to have a `def`, or text.
-  const none = [z.number(), { def: null }, { def: { type: 7 } }, 'untrusted', [{ def: 'string' }], () => untrusted()];
-  expect(none.map((held) => markUntrusted(holding(held), 'x', 's'))).toEqual(Array(none.length).fill('x'));
+/** A schema of each kind zod builds that can hold another, with `leaf` in each place it can hold one. */
+const holders = (leaf: z.ZodType): Record<string, z.ZodType> => ({
+  optional: leaf.optional(),
+  nullable: leaf.nullable(),
+  default: leaf.default('d' as never),
+  prefault: leaf.prefault('d' as never),
+  catch: leaf.catch('c' as never),
+  nonoptional: leaf.optional().nonoptional(),
+  readonly: leaf.readonly(),
+  promise: z.promise(leaf),
+  success: z.success(leaf),
+  array: z.array(leaf),
+  'object field': z.object({ id: z.number(), body: leaf }),
+  'object catchall': z.object({ id: z.number() }).catchall(leaf),
+  union: z.union([z.number(), leaf]),
+  'discriminated union': z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('a') }),
+    z.object({ kind: z.literal('b'), body: leaf }),
+  ]),
+  'intersection left': z.intersection(z.object({ body: leaf }), z.object({ id: z.number() })),
+  'intersection right': z.intersection(z.object({ id: z.number() }), z.object({ body: leaf })),
+  'tuple item': z.tuple([z.number(), leaf]),
+  'tuple rest': z.tuple([z.number()], leaf),
+  'record key': z.record(leaf as never, z.number()),
+  'record value': z.record(z.string(), leaf),
+  'map key': z.map(leaf, z.number()),
+  'map value': z.map(z.number(), leaf),
+  set: z.set(leaf),
+  lazy: z.lazy(() => leaf),
+  'pipe in': leaf.pipe(z.string() as never),
+  'pipe out': z.string().pipe(leaf as never),
+  'codec in': z.codec(leaf, z.number(), { decode: () => 1, encode: () => 'x' as never }),
+  'codec out': z.codec(z.number(), leaf, { decode: () => 'x' as never, encode: () => 1 }),
+  'template literal': z.templateLiteral(['ticket-', leaf as never]),
+  nested: z.object({ notes: z.array(z.object({ by: z.number(), text: leaf.optional() })) }),
+});
+
+test('an untrusted string is found in every place a schema of any kind can hold one, and a plain string in none', () => {
+  // What a transform makes of each holder is one string, marked when the holder holds an untrusted one.
+  const made = (holder: z.ZodType) => shown(markUntrusted(holder.transform(() => 'made') as z.ZodType, 'made', 's'));
+  const kinds = Object.keys(holders(untrusted()));
+  expect(kinds.map((kind) => [kind, made(holders(untrusted())[kind] as z.ZodType)])).toEqual(
+    kinds.map((kind) => [kind, '<s>made']),
+  );
+  expect(kinds.map((kind) => [kind, made(holders(z.string())[kind] as z.ZodType)])).toEqual(
+    kinds.map((kind) => [kind, 'made']),
+  );
+
+  // The keys zod keeps a schema under, read from each holder: one this list lacks is one markUntrusted() has to learn.
+  const isSchema = (held: unknown): held is z.ZodType => held instanceof z.ZodType;
+  const under = new Set<string>();
+  const read = (schema: z.ZodType, seen = new Set<unknown>()): void => {
+    if (seen.has(schema)) return;
+    seen.add(schema);
+    const def = schema.def as unknown as Record<string, unknown>;
+    for (const key of Object.keys(def)) {
+      // A default's value is behind a getter that runs its factory, and no schema: it is not read here either.
+      if (key === 'defaultValue') continue;
+      // An object's shape is its fields by name, and any other key holds one schema or a list of them.
+      const held = key === 'shape' ? Object.values(def[key] as object) : [def[key]].flat();
+      const schemas = held.filter(isSchema);
+      if (schemas.length > 0) under.add(key);
+      for (const child of schemas) read(child, seen);
+    }
+  };
+  for (const holder of Object.values(holders(untrusted()))) read(holder);
+  expect([...under].sort()).toEqual([
+    'catchall',
+    'element',
+    'in',
+    'innerType',
+    'items',
+    'keyType',
+    'left',
+    'options',
+    'out',
+    'parts',
+    'rest',
+    'right',
+    'shape',
+    'valueType',
+  ]);
+});
+
+test("the search for an untrusted string reads a schema's fields by name, and none of its data", () => {
+  // A field can have the name of anything a schema keeps of its own.
+  const Named = z.object({
+    def: z.string(),
+    type: z.string(),
+    shape: z.string(),
+    _zod: z.string(),
+    innerType: z.number(),
+    body: untrusted(),
+  });
+  const renamed = Named.transform((brief) => ({ text: brief.body }));
+  expect(shown(markUntrusted(renamed, { text: 'x' }, 's'))).toEqual({ text: '<s.text>x' });
+  const plain = z.object({ def: z.string(), type: z.string() }).transform((brief) => ({ text: brief.def }));
+  expect(markUntrusted(plain, { text: 'x' }, 's')).toEqual({ text: 'x' });
+
+  // A default, a prefault and a catch keep a value or a factory for parsing to call. Marking calls none of them.
+  let calls = 0;
+  const factory = (): never => {
+    calls++;
+    throw new Error('a factory was called');
+  };
+  const Defaulted = z.object({
+    note: z.string().default(factory),
+    hint: z.string().prefault(factory),
+    kept: z.string().catch(factory),
+    body: untrusted(),
+  });
+  const body = Defaulted.transform((brief) => brief.body);
+  expect(String(body.parse({ note: 'n', hint: 'h', kept: 'k', body: 'x' }))).toBe('x');
+  expect([shown(markUntrusted(body, 'x', 's')), calls]).toEqual(['<s>x', 0]);
 });
 
 test('marking twice changes nothing', () => {
