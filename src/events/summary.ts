@@ -23,10 +23,13 @@ export interface StepEntry {
   summary?: string;
 }
 
-/** One call, the intake or a stage's, at its latest try. A multi-step call has no kind: its steps do. */
+/**
+ * One call, the intake or a stage's, at its latest try. A multi-step call has no kind: its steps do. Only a built-in
+ * intake's call is `builtin`.
+ */
 export interface CallEntry {
   key: string;
-  kind?: 'agent' | 'script';
+  kind?: 'agent' | 'script' | 'builtin';
   outcome: Outcome;
   durationMs: number;
   turns?: number;
@@ -107,7 +110,7 @@ interface StepState {
 /** A call at its latest try: a new try starts it over, in the same place. */
 interface CallState {
   key: string;
-  kind: 'agent' | 'script' | 'stage';
+  kind: 'agent' | 'script' | 'stage' | 'builtin';
   startedAt: string;
   end?: Ended & { resultPath: string };
   facts: Facts;

@@ -12,7 +12,7 @@ import { dirname, join, relative } from 'node:path';
 import { z } from 'zod';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import type { PortAdapters } from '../ports/adapter';
-import type { ResolvedAdapters } from './adapters';
+import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { createJournal } from './journal';
@@ -44,6 +44,8 @@ export interface OpenedRun {
   sailDir: string;
   /** The adapters the run was opened with, one per port. */
   adapters: PortAdapters;
+  /** Where those adapters emit: the runtime attaches the run's stream to it. */
+  relay: ProviderRelay;
   /** `project.yaml` as it reads now. What the run froze of it, such as each stage's model, is in `header`. */
   config: ProjectConfig;
   /** The workflow, with the stages it reaches: what the run replays. */
@@ -148,6 +150,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    relay: options.adapters.relay,
     config,
     loaded,
     input,
@@ -225,6 +228,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     header: run.header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    relay: options.adapters.relay,
     config: found.config,
     loaded,
     input: parsed.input,

@@ -3,7 +3,7 @@
 // or recognise as its port is an issue at `/adapters/<port>`.
 import { existsSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import type { ProviderEmit } from '../events/types';
+import type { ProviderEmit, ProviderEvent } from '../events/types';
 import {
   type AdapterDefinition,
   type AdapterOptions,
@@ -31,9 +31,26 @@ export interface ResolveOptions<P extends Port = Port> {
   ports?: readonly P[];
 }
 
+/**
+ * Where the adapters emit before a run exists to receive it: a run attaches its sink while it runs, and what is
+ * emitted with none attached is dropped.
+ */
+export interface ProviderRelay {
+  readonly emit: ProviderEmit;
+  /** Hands every event to `sink` until the returned function is called. A second sink while one holds throws. */
+  attach(sink: (event: ProviderEvent) => void): () => void;
+}
+
 export interface ResolvedAdapters<P extends Port = Port> {
   ports: Pick<PortAdapters, P>;
   entries: Record<P, AdapterEntry>;
+  /** What every adapter created here emits into. */
+  relay: ProviderRelay;
+}
+
+/** A relay with no sink attached. */
+export function providerRelay(): ProviderRelay {
+  return { emit: () => {}, attach: () => () => {} };
 }
 
 /** A definition found for a port, with where it came from. */
@@ -230,5 +247,5 @@ export async function resolveAdapters<P extends Port = Port>(
     };
   }
   if (issues.length > 0) return { issues };
-  return { ports: ports as unknown as Pick<PortAdapters, P>, entries };
+  return { ports: ports as unknown as Pick<PortAdapters, P>, entries, relay: providerRelay() };
 }

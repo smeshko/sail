@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
+import { port } from './commands/port';
 import { resume } from './commands/resume';
 import { runWorkflowCommand } from './commands/run-workflow';
 import { runs } from './commands/runs';
@@ -20,6 +21,8 @@ export interface Io {
   tty?: Tty;
   /** The environment the command runs in. Falls back to `process.env` when left out. */
   env?: Readonly<Record<string, string | undefined>>;
+  /** All of stdin, as text. Present when the command may read it. */
+  stdin?: () => Promise<string>;
 }
 
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.
@@ -150,6 +153,14 @@ const commands = new Map<string, CommandSpec>([
     },
   ],
   ['stage', { options: { bind: { type: 'string', multiple: true } }, positionals: 2, command: stageRun }],
+  [
+    'port',
+    {
+      options: { untrusted: { type: 'boolean' }, source: { type: 'string' }, inline: { type: 'boolean' } },
+      positionals: 3,
+      command: port,
+    },
+  ],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],

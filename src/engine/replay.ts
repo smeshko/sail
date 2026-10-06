@@ -57,8 +57,10 @@ export interface ReplayOptions {
   entries: readonly JournalEntry[];
   /** The absolute run directory, which a journaled file's path is relative to. */
   runDir: string;
-  /** `run.input`. */
-  input: unknown;
+  /** `run.input`, for a run with no intake. Given together with `intake`, it throws. */
+  input?: unknown;
+  /** The journaled `intake#1`: `run.input` is its output, and `run.intake.files` its files. Never among `entries`. */
+  intake?: JournalEntry;
   /** Where the loop and route events of moves past the journal's end go. */
   emit?: Emit;
 }
