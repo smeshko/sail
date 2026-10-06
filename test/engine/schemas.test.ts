@@ -328,6 +328,117 @@ test.each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) =>
   },
 );
 
+const SPEC = 'spec#1';
+const specUsage = {
+  inputTokens: 5200,
+  cacheReadTokens: 18400,
+  cacheWriteTokens: 3100,
+  outputTokens: 1450,
+  costUsd: 0.3125,
+};
+const sessionEnd = {
+  type: 'harness:session_end',
+  key: SPEC,
+  sessionId: 'fake-session-spec-1',
+  outcome: 'done',
+  reason: 'submitted',
+  turns: 4,
+  toolCalls: 2,
+  denials: 0,
+  usage: specUsage,
+} as const;
+const usageUpdate = {
+  type: 'usage:update',
+  key: SPEC,
+  turn: 4,
+  tokens: { input: 5200, cacheRead: 18400, cacheWrite: 3100, output: 1450 },
+  costUsdSoFar: 0.3125,
+} as const;
+const fragments = [
+  { name: 'untrusted-input', origin: 'builtin' },
+  { name: 'finish', origin: 'repo:.sail/prompts/_shared/finish.md' },
+];
+
+/** One sample of each type the agent step closes, from the golden run where it has one. */
+const AGENT: NewEvent[] = [
+  {
+    type: 'prompt:rendered',
+    key: SPEC,
+    try: 2,
+    path: '01-spec/call-1/try-2/prompt.md',
+    untrusted: 2,
+    fragments,
+    conventions: ['AGENTS.md', 'CLAUDE.md'],
+  },
+  {
+    type: 'harness:session_start',
+    key: SPEC,
+    adapter: 'fake',
+    sessionId: 'fake-session-spec-1',
+    model: 'claude-opus-5-5',
+  },
+  sessionEnd,
+  { type: 'agent:message', key: SPEC, text: 'Spec written: two tasks, greet() and the CLI first, then the tests.' },
+  { type: 'agent:thinking', key: SPEC, text: 'The brief asks for one flag.' },
+  { type: 'tool:start', key: SPEC, callId: 'tool-1', tool: 'Read', input: { path: 'src/greet.ts' } },
+  { type: 'tool:end', key: SPEC, callId: 'tool-1', status: 'completed', durationMs: 40 },
+  {
+    type: 'permission:denied',
+    key: 'implement#1',
+    callId: 'tool-3',
+    tool: 'Bash',
+    rule: 'commands',
+    permissions: { commands: ['bun test*', 'git add *', 'git commit *', 'git diff *'] },
+    reason: "'git push origin HEAD' matches none of the step's commands",
+  },
+  usageUpdate,
+  { type: 'budget:warning', key: SPEC, budget: 'usd', limit: 2, used: 1.6 },
+  { type: 'budget:exceeded', key: SPEC, budget: 'turns', limit: 40, used: 40 },
+  { type: 'error:harness', key: SPEC, message: 'model overloaded' },
+];
+
+test.each(AGENT.map((sample) => [sample.type, sample] as const))(
+  '%s accepts its agent payload, and rejects a field it does not declare',
+  (_, sample) => {
+    expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
+    expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
+      { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+    ]);
+  },
+);
+
+test.each(AGENT.filter((sample) => !sample.type.startsWith('budget:')).map((sample) => [sample.type, sample] as const))(
+  '%s requires the key of its call, which a harness leaves to the agent step',
+  (_, sample) => {
+    expect(validateDocument('sail.event.v1', omit(stamped(sample), 'key'))).toEqual([
+      { schema: 'sail.event.v1', path: '/key', message: 'is required' },
+    ]);
+  },
+);
+
+test('agent events: a session end is complete, usage is never negative, and a budget event may belong to the run', () => {
+  const check = (sample: Record<string, unknown>) => paths('sail.event.v1', { ...envelope, ...sample }).sort();
+  // The fake's end before this phase: an outcome and nothing else.
+  expect(check({ type: 'harness:session_end', key: SPEC, outcome: 'done' })).toEqual([
+    '/denials',
+    '/toolCalls',
+    '/turns',
+    '/usage',
+  ]);
+  // The golden run's end before this phase: everything but the outcome.
+  expect(check(omit(sessionEnd, 'outcome'))).toEqual(['/outcome']);
+  expect(check(omit(omit(sessionEnd, 'sessionId'), 'reason'))).toEqual([]);
+  expect(check({ ...sessionEnd, outcome: 'passed' })).toEqual(['/outcome']);
+  expect(check({ ...sessionEnd, turns: -1 })).toEqual(['/turns']);
+  expect(check({ ...sessionEnd, usage: { ...specUsage, costUsd: -0.01 } })).toEqual(['/usage/costUsd']);
+  expect(check({ ...sessionEnd, usage: { ...specUsage, outputTokens: 1.5 } })).toEqual(['/usage/outputTokens']);
+  expect(check({ ...usageUpdate, costUsdSoFar: -0.01 })).toEqual(['/costUsdSoFar']);
+  expect(check({ ...usageUpdate, tokens: { ...usageUpdate.tokens, input: -1 } })).toEqual(['/tokens/input']);
+  expect(check({ type: 'tool:end', key: SPEC, callId: 'tool-1', status: 'ok', durationMs: 40 })).toEqual(['/status']);
+  expect(check({ type: 'budget:exceeded', budget: 'usd', limit: 25, used: 25.5 })).toEqual([]);
+  expect(check({ type: 'budget:exceeded', key: SPEC, budget: 'tokens', limit: 1, used: 1 })).toEqual(['/budget']);
+});
+
 const SHA = 'b4efb0c5de84d87c1455d4504b8b75b095a8e10b';
 const OPEN = 'publish#1/open';
 const lease = { remote: 'fake://codehost/fixture', branch: 'sail/FAKE-1' };
@@ -466,6 +577,36 @@ test('result: dispatch reports only the branch the document claims to be', () =>
   ]);
   expect(paths('sail.result.v1', { ...agentResult, outcome: 'passed' })).toEqual(['/outcome']);
   expect(paths('sail.result.v1', { ...multiStepResult, steps: [describeStep] })).toEqual(['/steps']);
+});
+
+test('result: an agent result records its try, its place in validation and its prompt, and only the session facts it has', () => {
+  const prompt = { path: '01-spec/call-1/try-3/prompt.md', untrusted: 2, fragments, conventions: ['AGENTS.md'] };
+  const recorded = { ...agentResult, try: 3, validationTry: 2, validationFailed: false, prompt };
+  expect(paths('sail.result.v1', recorded)).toEqual([]);
+  // A try that never reached a session has no session id, and no adapter names its provider yet.
+  const { provider: _provider, sessionId: _sessionId, ...neverStarted } = agentResult.harness;
+  expect(paths('sail.result.v1', { ...recorded, harness: neverStarted })).toEqual([]);
+  expect(paths('sail.result.v1', { ...recorded, try: 0 })).toEqual(['/try']);
+  expect(paths('sail.result.v1', { ...recorded, validationTry: 3 })).toEqual(['/validationTry']);
+  expect(paths('sail.result.v1', { ...recorded, validationFailed: 'yes' })).toEqual(['/validationFailed']);
+  expect(paths('sail.result.v1', { ...recorded, prompt: { ...prompt, text: 'Read the brief.' } })).toEqual([
+    '/prompt/text',
+  ]);
+  expect(paths('sail.result.v1', { ...recorded, prompt: omit(prompt, 'conventions') })).toEqual([
+    '/prompt/conventions',
+  ]);
+  expect(paths('sail.result.v1', { ...recorded, harness: { ...neverStarted, raw: {} } })).toEqual(['/harness/raw']);
+  expect(paths('sail.result.v1', { ...recorded, usage: { costUsd: -0.01 } })).toEqual(['/usage/costUsd']);
+});
+
+test('result: a blocked agent result gives its reason, and whitespace is not one', () => {
+  const blocked = { ...agentResult, outcome: 'blocked', output: null };
+  expect(validateDocument('sail.result.v1', blocked)).toEqual([
+    { schema: 'sail.result.v1', path: '/reason', message: 'is required' },
+  ]);
+  expect(paths('sail.result.v1', { ...blocked, reason: '' })).toEqual(['/reason']);
+  expect(paths('sail.result.v1', { ...blocked, reason: ' \n\t' })).toEqual(['/reason']);
+  expect(paths('sail.result.v1', { ...blocked, reason: 'The brief has no acceptance criteria.' })).toEqual([]);
 });
 
 const invalidOutput = { reason: 'invalid_output', message: 'the last stdout line is not JSON' };
@@ -786,4 +927,14 @@ test('project.yaml: invalid YAML or an unreadable file is one issue, not a throw
   const [issue] = validateProjectFile(join(tempDir({}), 'missing.yaml'));
   expect(issue).toMatchObject({ schema: 'sail.project.v1', path: '/' });
   expect(issue?.message).toContain('ENOENT');
+});
+
+test('project.yaml: conventions is a list of distinct file paths, and may be empty', async () => {
+  const text = await Bun.file(fixtureProject).text();
+  expect(projectIssues(`${text}conventions: [AGENTS.md, docs/STYLE.md]\n`)).toEqual([]);
+  expect(projectIssues(`${text}conventions: []\n`)).toEqual([]);
+  expect(projectIssues(`${text}conventions: AGENTS.md\n`)).toEqual(['/conventions']);
+  expect(projectIssues(`${text}conventions: [AGENTS.md, AGENTS.md]\n`)).toEqual(['/conventions']);
+  expect(projectIssues(`${text}conventions: [AGENTS.md, ""]\n`)).toEqual(['/conventions/1']);
+  expect(projectIssues(`${text}conventions: [AGENTS.md, 7]\n`)).toEqual(['/conventions/1']);
 });

@@ -5,6 +5,7 @@
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
+import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
 import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
@@ -40,21 +41,6 @@ function problems(step: ScriptStep): string[] {
     found.push(`timeoutSeconds must be a positive number: ${timeout}`);
   }
   return found;
-}
-
-/** The variables every script gets, in order, and which of them are paths. */
-function preamble(context: StepContext): { name: string; value: string; path: boolean }[] {
-  return [
-    { name: 'RUN_ID', value: context.runId, path: false },
-    { name: 'STAGE', value: context.stage, path: false },
-    { name: 'CALL', value: String(context.call), path: false },
-    { name: 'TRY', value: String(context.try), path: false },
-    { name: 'STAGE_IN', value: context.paths.stageIn, path: true },
-    { name: 'STAGE_OUT', value: context.paths.dir, path: true },
-    { name: 'WORKSPACE', value: context.workspace, path: true },
-    { name: 'SAIL_CONFIG', value: context.config, path: true },
-    ...Object.entries(context.inputs).map(([name, value]) => ({ name, value, path: true })),
-  ];
 }
 
 const CHUNK = 64 * 1024;

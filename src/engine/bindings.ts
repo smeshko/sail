@@ -33,10 +33,12 @@ interface Planned {
   write: { copy: string } | { text: string };
 }
 
-/** Checks every binding and plans what each writes, without writing anything. */
+/** Checks every binding and plans what each writes, without writing anything. `values` holds each parsed value. */
 function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) {
   const problems: string[] = [];
   const planned: Planned[] = [];
+  // Entries, not assignment: `values['__proto__'] = …` would set the prototype.
+  const values: [string, unknown][] = [];
   for (const key of Object.keys(supplied)) {
     if (!Object.hasOwn(consumes, key)) problems.push(`'${key}' is not a binding of this stage`);
   }
@@ -61,9 +63,12 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
       else planned.push({ key, name: binding.name, write: { copy: given.path } });
     } else if (binding.kind === 'value' && given.kind === 'value') {
       const checked = checkValue(binding, given.value);
-      if (!checked.ok) problems.push(`'${key}': ${checked.message}`);
-      else if (typeof checked.data === 'string')
-        planned.push({ key, name: `${key}.txt`, write: { text: checked.data } });
+      if (!checked.ok) {
+        problems.push(`'${key}': ${checked.message}`);
+        continue;
+      }
+      values.push([key, checked.data]);
+      if (typeof checked.data === 'string') planned.push({ key, name: `${key}.txt`, write: { text: checked.data } });
       else planned.push({ key, name: `${key}.json`, write: { text: `${JSON.stringify(checked.data, null, 2)}\n` } });
     }
   }
@@ -83,7 +88,7 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
       problems.push(`'${first}' and '${key}' are both written to $STAGE_IN as '${name}'`);
     } else byName.set(name, key);
   }
-  return { problems, planned };
+  return { problems, planned, values: Object.fromEntries(values) };
 }
 
 /** Every problem with what was supplied for `consumes`, one message each. Nothing is written. */
@@ -91,26 +96,56 @@ export function bindingProblems(consumes: Consumes, supplied: Readonly<Record<st
   return plan(consumes, supplied).problems;
 }
 
+/** A call's bindings, checked and parsed once, for `$STAGE_IN` and an agent's prompt to share. */
+export interface PreparedBindings {
+  readonly consumes: Consumes;
+  readonly supplied: Readonly<Record<string, Supplied>>;
+  /** Each supplied value binding's data as its schema parsed it, defaults and transforms applied, by binding name. */
+  readonly values: Readonly<Record<string, unknown>>;
+  /** What each supplied binding writes into `$STAGE_IN`. */
+  readonly planned: readonly Planned[];
+}
+
 /**
- * Writes each supplied binding into `stageIn`. Returns the `INPUT_<NAME>` variables, pointing at what was written, and
- * `consumed`: where each binding came from, or null for an optional one left unbound. Callers check `bindingProblems`
- * first: any problem throws here, before anything is written.
+ * Checks and parses what was supplied for `consumes`, without writing anything. Callers check `bindingProblems` first:
+ * any problem throws here.
+ */
+export function prepareBindings(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>): PreparedBindings {
+  const { problems, planned, values } = plan(consumes, supplied);
+  if (problems.length > 0) throw new Error(`bindings can't be materialised:\n${problems.join('\n')}`);
+  return { consumes, supplied, values, planned };
+}
+
+/**
+ * Writes prepared bindings into `stageIn`, without parsing a value again. Returns the `INPUT_<NAME>` variables, pointing
+ * at what was written, and `consumed`: where each binding came from, or null for an optional one left unbound.
+ */
+export function materialisePrepared(
+  prepared: PreparedBindings,
+  stageIn: string,
+): { inputs: Record<string, string>; consumed: Record<string, string | null> } {
+  const inputs: Record<string, string> = {};
+  const consumed: Record<string, string | null> = Object.fromEntries(
+    Object.keys(prepared.consumes).map((key) => [key, null]),
+  );
+  for (const { key, name, write } of prepared.planned) {
+    const path = join(stageIn, name);
+    if ('copy' in write) copyFileSync(write.copy, path);
+    else writeFileSync(path, write.text);
+    inputs[inputVar(key)] = path;
+    consumed[key] = prepared.supplied[key]?.from ?? null;
+  }
+  return { inputs, consumed };
+}
+
+/**
+ * Writes each supplied binding into `stageIn`, as `materialisePrepared()` does. Callers check `bindingProblems` first:
+ * any problem throws here, before anything is written.
  */
 export function materialise(
   consumes: Consumes,
   supplied: Readonly<Record<string, Supplied>>,
   stageIn: string,
 ): { inputs: Record<string, string>; consumed: Record<string, string | null> } {
-  const { problems, planned } = plan(consumes, supplied);
-  if (problems.length > 0) throw new Error(`bindings can't be materialised:\n${problems.join('\n')}`);
-  const inputs: Record<string, string> = {};
-  const consumed: Record<string, string | null> = Object.fromEntries(Object.keys(consumes).map((key) => [key, null]));
-  for (const { key, name, write } of planned) {
-    const path = join(stageIn, name);
-    if ('copy' in write) copyFileSync(write.copy, path);
-    else writeFileSync(path, write.text);
-    inputs[inputVar(key)] = path;
-    consumed[key] = supplied[key]?.from ?? null;
-  }
-  return { inputs, consumed };
+  return materialisePrepared(prepareBindings(consumes, supplied), stageIn);
 }

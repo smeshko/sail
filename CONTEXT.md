@@ -99,7 +99,7 @@ One invocation of a stage by the workflow, numbered per stage. A loop that runs 
 _Avoid_: attempt, execution, stage run, invocation
 
 **Try**:
-One execution of a call's body. A call has a second try only when the engine retries it after invalid output or a failed validator.
+One execution of a call's body, in a directory of its own. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects.
 _Avoid_: attempt, retry (as a noun)
 
 **Key**:
@@ -167,16 +167,28 @@ A check the engine runs on a document after the step ends, such as required sect
 _Avoid_: linter, assertion, gate, check
 
 **Prompt**:
-An agent step's instructions, rendered with the step's bindings. The engine appends both shared fragments, about untrusted input and submitting, to every prompt.
+An agent step's instructions, rendered with the step's bindings. The engine appends both shared fragments, about untrusted input and submitting, to every prompt, and then the repository's conventions.
 _Avoid_: system prompt, instructions file
 
 **Fragment**:
 A piece of prompt text sail appends to every agent step's prompt: one about untrusted input, one about submitting. Each is a built-in that a repository may shadow.
 _Avoid_: partial, include, snippet, footer
 
+**Conventions**:
+The repository's own instruction files for agents, such as `AGENTS.md`. The engine appends each one as it is, after the fragments, to every agent step's prompt. The config lists them, and an empty list appends none. With no list, they are `AGENTS.md` and `CLAUDE.md`, where those exist.
+_Avoid_: rules, guidelines, context files, memory
+
 **Submit**:
 How an agent hands in its output, exactly once, validated against the step's schema. Each harness provides it its own way.
 _Avoid_: finish, return, report, done tool
+
+**Session**:
+What the harness starts for one try of an agent step: the agent works in turns until it submits, is blocked or fails, and the session ends once, with its usage. The harness names it with a session id. A try that fails before the harness is called has no session.
+_Avoid_: conversation, thread, chat, run (the workflow's word)
+
+**Transcript**:
+What was said in a session, as the harness returns it. The engine keeps it as `session.log` beside the try's result.
+_Avoid_: log, history, conversation
 
 ### Definitions and extension
 
@@ -205,7 +217,7 @@ The intake and stages a run resolved at start: the intake its workflow names and
 _Avoid_: stage list, manifest, plan, registry
 
 **Config**:
-The repository's `.sail/project.yaml`: its `name`, which adapter fills each port, model aliases, budgets, the designation label and the default workflow. It is validated against a JSON Schema before anything runs, and sail commands run only in a clone that has it (ADR-0020).
+The repository's `.sail/project.yaml`: its `name`, which adapter fills each port, model aliases, budgets, the conventions, the designation label and the default workflow. It is validated against a JSON Schema before anything runs, and sail commands run only in a clone that has it (ADR-0020).
 _Avoid_: settings, project file, manifest, config.ts
 
 ### Runs

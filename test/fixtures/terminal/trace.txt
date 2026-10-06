@@ -25,7 +25,7 @@ spec#1              · tool:start {"callId":"tool-2","tool":"Read","input":{"pat
 spec#1              · tool:end {"callId":"tool-2","status":"completed","durationMs":35}
 spec#1              · agent:message {"text":"Spec written: two tasks, greet() and the CLI first, then the tests."}
 spec#1              · usage:update {"turn":4,"tokens":{"input":5200,"cacheRead":18400,"cacheWrite":3100,"output":1450},"costUsdSoFar":0.3125}
-spec#1              · harness:session_end {"sessionId":"fake-session-spec-1","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":5200,"cacheReadTokens":18400,"cacheWriteTokens":3100,"outputTokens":1450,"costUsd":0.3125}}
+spec#1              · harness:session_end {"sessionId":"fake-session-spec-1","outcome":"done","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":5200,"cacheReadTokens":18400,"cacheWriteTokens":3100,"outputTokens":1450,"costUsd":0.3125}}
 spec#1                output valid
 spec#1                file spec.md valid · hasSections(Requirements, Tasks), noPlaceholders
 spec#1                file spec.md · 427 B
@@ -46,7 +46,7 @@ implement#1         · permission:denied {"callId":"tool-3","tool":"Bash","rule"
 implement#1         · tool:end {"callId":"tool-3","status":"denied","durationMs":0}
 implement#1         · agent:message {"text":"Implemented both tasks in two commits. Pushing is not allowed here, so the branch stays local."}
 implement#1         · usage:update {"turn":5,"tokens":{"input":9800,"cacheRead":64000,"cacheWrite":7400,"output":3900},"costUsdSoFar":0.476}
-implement#1         · harness:session_end {"sessionId":"fake-session-implement-1","reason":"submitted","turns":5,"toolCalls":3,"denials":1,"usage":{"inputTokens":9800,"cacheReadTokens":64000,"cacheWriteTokens":7400,"outputTokens":3900,"costUsd":0.476}}
+implement#1         · harness:session_end {"sessionId":"fake-session-implement-1","outcome":"done","reason":"submitted","turns":5,"toolCalls":3,"denials":1,"usage":{"inputTokens":9800,"cacheReadTokens":64000,"cacheWriteTokens":7400,"outputTokens":3900,"costUsd":0.476}}
 implement#1           output valid
 implement#1           file diff.patch · 1.0 KB
 implement#1         ✓ done · 12.6s
@@ -78,7 +78,7 @@ implement#2         · tool:start {"callId":"tool-2","tool":"Bash","input":{"com
 implement#2         · tool:end {"callId":"tool-2","status":"completed","durationMs":2100}
 implement#2         · agent:message {"text":"Fixed: the whole line is upper-cased. Added a test for the help text."}
 implement#2         · usage:update {"turn":4,"tokens":{"input":6100,"cacheRead":71500,"cacheWrite":2200,"output":1700},"costUsdSoFar":0.239}
-implement#2         · harness:session_end {"sessionId":"fake-session-implement-2","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":6100,"cacheReadTokens":71500,"cacheWriteTokens":2200,"outputTokens":1700,"costUsd":0.239}}
+implement#2         · harness:session_end {"sessionId":"fake-session-implement-2","outcome":"done","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":6100,"cacheReadTokens":71500,"cacheWriteTokens":2200,"outputTokens":1700,"costUsd":0.239}}
 implement#2           output valid
 implement#2           file diff.patch · 613 B
 implement#2         ✓ done · 12.5s
@@ -107,7 +107,7 @@ self-review#1       · tool:start {"callId":"tool-2","tool":"Read","input":{"pat
 self-review#1       · tool:end {"callId":"tool-2","status":"completed","durationMs":30}
 self-review#1       · agent:message {"text":"Every requirement is met. One low finding and one nit."}
 self-review#1       · usage:update {"turn":4,"tokens":{"input":4300,"cacheRead":22800,"cacheWrite":1900,"output":1100},"costUsdSoFar":0.2215}
-self-review#1       · harness:session_end {"sessionId":"fake-session-self-review-1","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":4300,"cacheReadTokens":22800,"cacheWriteTokens":1900,"outputTokens":1100,"costUsd":0.2215}}
+self-review#1       · harness:session_end {"sessionId":"fake-session-self-review-1","outcome":"done","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":4300,"cacheReadTokens":22800,"cacheWriteTokens":1900,"outputTokens":1100,"costUsd":0.2215}}
 self-review#1         output valid
 self-review#1         file review.md valid · hasSections(Findings, Verdict), noPlaceholders
 self-review#1         file review.md · 374 B
@@ -127,7 +127,7 @@ publish#1/describe  · tool:start {"callId":"tool-2","tool":"Bash","input":{"com
 publish#1/describe  · tool:end {"callId":"tool-2","status":"completed","durationMs":70}
 publish#1/describe  · agent:message {"text":"PR description written."}
 publish#1/describe  · usage:update {"turn":4,"tokens":{"input":3000,"cacheRead":12500,"cacheWrite":900,"output":800},"costUsdSoFar":0.101}
-publish#1/describe  · harness:session_end {"sessionId":"fake-session-publish-1-describe","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":3000,"cacheReadTokens":12500,"cacheWriteTokens":900,"outputTokens":800,"costUsd":0.101}}
+publish#1/describe  · harness:session_end {"sessionId":"fake-session-publish-1-describe","outcome":"done","reason":"submitted","turns":4,"toolCalls":2,"denials":0,"usage":{"inputTokens":3000,"cacheReadTokens":12500,"cacheWriteTokens":900,"outputTokens":800,"costUsd":0.101}}
 publish#1/describe    output valid
 publish#1/describe    file pr-body.md valid · hasSections(Summary, Changes, Testing), noPlaceholders
 publish#1/describe    file pr-body.md · 324 B

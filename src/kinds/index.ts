@@ -1,10 +1,28 @@
 // Step kinds: how the engine runs a step of one kind and checks its contract. `StepKind` is the extension point, and
-// the script kind is its first implementation. Epic 05 adds `agent`.
+// `script` and `agent` are its implementations.
+import type { PreparedBindings } from '../engine/bindings';
 import type { CallPaths } from '../engine/call-dir';
 import type { ContractError, FileEntry } from '../engine/contract';
 import type { CallEmit } from '../events/types';
+import type { Harness } from '../ports/harness';
 import type { Step } from '../sdk/steps';
+import { agentKind } from './agent';
 import { scriptKind } from './script';
+
+/** What one try of an agent step runs on: the harness and model its caller resolved, and what its call prepared. */
+export interface AgentTry {
+  harness: Harness;
+  /** The model id the step's alias resolved to. */
+  model: string;
+  /** The call's bindings, parsed once: the prompt's values come from them. */
+  bindings: PreparedBindings;
+  /** `project.yaml`'s `conventions`. Left out, the defaults are appended. */
+  conventions?: readonly string[];
+  /** 1, or 2 for the try that corrects a completed validation failure. Interruptions don't advance it. */
+  validationTry: 1 | 2;
+  /** The messages of the validation failure this try corrects, appended to its prompt as they are. */
+  feedback?: readonly string[];
+}
 
 /** Everything a kind needs to run one step of one call. Paths are absolute. */
 export interface StepContext {
@@ -27,6 +45,8 @@ export interface StepContext {
   graceMs?: number;
   /** Where the step's events go. The call stamps each with its key. */
   emit?: CallEmit;
+  /** What an agent step runs on. A script step takes none. */
+  agent?: AgentTry;
 }
 
 /** How a step ended. `record` holds the kind's own `result.json` fields, such as a script's `exit`, `command` and `env`. */
@@ -47,4 +67,4 @@ export interface StepKind<S extends Step> {
 }
 
 /** Every step kind the engine runs, by `kind`. */
-export const KINDS = { script: scriptKind };
+export const KINDS = { script: scriptKind, agent: agentKind };

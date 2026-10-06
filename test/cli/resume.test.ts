@@ -3,8 +3,28 @@
 // the workflow's modules by path, so the run and its resume never share a .sail/.
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import { readStatus } from '../../src/engine/run-dir';
+import { formatIssue, validateRunDir } from '../../src/engine/schemas';
+import { readEvents } from '../../src/events/consumers/ndjson';
+import { rebuildSummary } from '../../src/events/consumers/summary';
+import type { Summary } from '../../src/events/summary';
+import {
+  interruptInSession,
+  journaled,
+  NO_TASKS,
+  NO_TASKS_MESSAGE,
+  RUN_ARGV,
+  runDirIn,
+  SPEC,
+  sessions,
+  specFile,
+  specResult,
+  submits,
+  TICKET,
+  writeAgentFixture,
+} from '../helpers/agent-fixture';
 import { edit, FIXTURE_SAIL, write } from '../helpers/fixture';
 import { fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
 import {
@@ -272,3 +292,122 @@ test('sail resume refuses a run whose harness the config now swaps, leaves the r
     expect(resumed.stderr).toBe('');
   });
 }, 30_000);
+
+// Agent stages across a resume: brief-to-spec on the fake harness, interrupted or killed while a session of spec#1 sits
+// in the delay its answer scripts, then resumed.
+
+const RESUME_INPUT = ['--input', JSON.stringify(TICKET)];
+const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
+
+/** A result's outcome and its place among its call's tries. */
+const placeOf = (result: Record<string, unknown>) => ({
+  outcome: result.outcome,
+  try: result.try,
+  validationTry: result.validationTry,
+  validationFailed: result.validationFailed,
+});
+
+/** The run's summary.json, then the same file rebuilt from the run's events alone. */
+function summaries(dir: string): { written: Summary; rebuilt: unknown; same: boolean } {
+  const path = join(dir, 'summary.json');
+  const text = readFileSync(path, 'utf8');
+  rmSync(path);
+  const rebuilt = rebuildSummary(dir);
+  return { written: JSON.parse(text), rebuilt, same: readFileSync(path, 'utf8') === text };
+}
+
+test('sail resume takes up a correction it was interrupted in: the next try is still the second validation, told the original problems, on the model the run started with, and every session is counted once', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeAgentFixture(from.dir, [
+        submits(NO_TASKS, 0.125),
+        submits(SPEC, 0.5, { turns: 2, delayMs: 30_000 }),
+        submits(SPEC, 0.25),
+      ]);
+      const interrupts = fakeInterrupts();
+      const running = runCaptured(RUN_ARGV, from.dir, interrupts);
+      const { code, stdout } = await interruptInSession(from.dir, running, interrupts.interrupt, 2);
+      expect(code).toBe(EXIT_SUSPENDED);
+      const id = basename(runDirIn(from.dir));
+      expect(stdout).toContain(`resume it with: sail resume ${id} --input '${JSON.stringify(TICKET)}'\n`);
+      copyRun(from.dir, repo.dir);
+      return id;
+    });
+
+    // The alias names another model by now. The run goes on with the one its roster froze.
+    edit(join(repo.dir, '.sail'), 'project.yaml', 'deep: claude-opus-5-5', 'deep: claude-next');
+    const { code, stdout, stderr } = await runCaptured(['resume', runId, ...RESUME_INPUT], repo.dir);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const view = normaliseDurations(stdout).split('\n');
+    expect(view[0]).toBe(`sail · brief-to-spec v1 · ${runId} · resumed after 1 call, last brief#1 passed`);
+    expect(view.filter((line) => line.startsWith('spec#1'))).toEqual([
+      'spec#1     ▶ spec · agent · claude-opus-5-5 · try 3',
+      'spec#1       output valid',
+      'spec#1     ✓ done · <t>',
+    ]);
+
+    const dir = join(repo.dir, '.sail-runs', runId);
+    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect([1, 2, 3].map((n) => placeOf(specResult(dir, n)))).toEqual([
+      { outcome: 'error', try: 1, validationTry: 1, validationFailed: true },
+      { outcome: 'error', try: 2, validationTry: 2, validationFailed: false },
+      { outcome: 'done', try: 3, validationTry: 2, validationFailed: false },
+    ]);
+    expect(specResult(dir, 3)).toMatchObject({ harness: { model: 'claude-opus-5-5' } });
+    const prompt = specFile(dir, 'prompt.md', 3) ?? '';
+    expect([prompt.includes(NO_TASKS_MESSAGE), prompt.includes('aborted')]).toEqual([true, false]);
+
+    expect(sessions(readEvents(dir))).toEqual([
+      'start fake-session-spec-1',
+      'end fake-session-spec-1 done 0.125',
+      'start fake-session-spec-1-try-2',
+      'end fake-session-spec-1-try-2 error 0.5',
+      'start fake-session-spec-1-try-3',
+      'end fake-session-spec-1-try-3 done 0.25',
+    ]);
+    const { written, rebuilt, same } = summaries(dir);
+    expect(written.totals.usage).toEqual({ inputTokens: 7000, outputTokens: 700, costUsd: 0.875 });
+    expect(written.calls.find((call) => call.key === 'spec#1')).toMatchObject({
+      outcome: 'done',
+      costUsd: 0.25,
+      resultPath: '02-spec/call-1/try-3/result.json',
+    });
+    expect([rebuilt, same]).toEqual([{ summary: written, path: join(dir, 'summary.json') }, true]);
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 60_000);
+
+test('a run whose process was killed in a session resumes: the session is ended with the usage it had reported, and its usage and that of the next are each counted once', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [submits(SPEC, 0.5, { turns: 2, delayMs: 60_000 }), submits(SPEC, 0.25)]);
+    const child = Bun.spawn([process.execPath, shim, ...RUN_ARGV], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    await interruptInSession(repo.dir, child.exited, () => child.kill('SIGKILL'));
+    expect(child.signalCode).toBe('SIGKILL');
+
+    // A killed run looks as it did when it ran: nothing wrote how it ended, not even its session.
+    const dir = runDirIn(repo.dir);
+    expect(readStatus(dir)).toEqual({ status: 'running' });
+    expect(sessions(readEvents(dir))).toEqual(['start fake-session-spec-1']);
+    expect(specFile(dir, 'result.json')).toBeNull();
+
+    const { code, stderr } = await runCaptured(['resume', basename(dir), ...RESUME_INPUT], repo.dir);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    // The kill used none of the correction: nothing the session submitted was ever checked.
+    expect(placeOf(specResult(dir, 2))).toEqual({ outcome: 'done', try: 2, validationTry: 1, validationFailed: false });
+    expect(sessions(readEvents(dir))).toEqual([
+      'start fake-session-spec-1',
+      'end fake-session-spec-1 error 0.5',
+      'start fake-session-spec-1-try-2',
+      'end fake-session-spec-1-try-2 done 0.25',
+    ]);
+    const { written, rebuilt, same } = summaries(dir);
+    expect(written.totals.usage).toMatchObject({ inputTokens: 6000, outputTokens: 600, costUsd: 0.75 });
+    expect([rebuilt, same]).toEqual([{ summary: written, path: join(dir, 'summary.json') }, true]);
+  });
+}, 90_000);

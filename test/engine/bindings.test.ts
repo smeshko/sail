@@ -2,7 +2,14 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bindingProblems, inputVar, materialise, type Supplied } from '../../src/engine/bindings';
+import {
+  bindingProblems,
+  inputVar,
+  materialise,
+  materialisePrepared,
+  prepareBindings,
+  type Supplied,
+} from '../../src/engine/bindings';
 import { type Consumes, file, fromStep, gitDiff, value, z } from '../../src/sdk/index';
 
 const dirs: string[] = [];
@@ -161,4 +168,46 @@ test('every problem is reported, in consumes order, and materialise refuses to w
   expect(() => materialise(consumes, supplied, s.stageIn)).toThrow("'spec' is required");
   expect(readdirSync(s.stageIn)).toEqual([]);
   expect(existsSync(join(s.stageIn, 'note.txt'))).toBe(false);
+});
+
+test('prepared bindings hold each value as its schema parsed it, and write it into $STAGE_IN without parsing it again', () => {
+  const s = scratch();
+  let parses = 0;
+  const Note = z.string().transform((text) => {
+    parses++;
+    return `${text}!`;
+  });
+  const consumes: Consumes = {
+    note: value(Note),
+    ticket: value(TicketInput),
+    spec: file('spec.md'),
+    hint: value(z.string()).optional(),
+  };
+  const supplied = {
+    note: given('go'),
+    ticket: given({ key: 'FAKE-1' }),
+    spec: fileAt(s.source('draft.md', '# spec\n'), 'draft.md'),
+  };
+  const prepared = prepareBindings(consumes, supplied);
+  expect(prepared.values).toEqual({ note: 'go!', ticket: { key: 'FAKE-1', labels: [] } });
+
+  const { inputs, consumed } = materialisePrepared(prepared, s.stageIn);
+  expect(inputs).toEqual({
+    INPUT_NOTE: join(s.stageIn, 'note.txt'),
+    INPUT_TICKET: join(s.stageIn, 'ticket.json'),
+    INPUT_SPEC: join(s.stageIn, 'spec.md'),
+  });
+  expect(consumed).toEqual({ note: '--bind', ticket: '--bind', spec: 'draft.md', hint: null });
+  const written = readdirSync(s.stageIn).sort();
+  expect(Object.fromEntries(written.map((name) => [name, readFileSync(join(s.stageIn, name), 'utf8')]))).toEqual({
+    'note.txt': 'go!',
+    'spec.md': '# spec\n',
+    'ticket.json': '{\n  "key": "FAKE-1",\n  "labels": []\n}\n',
+  });
+  expect(parses).toBe(1);
+});
+
+test('preparing bindings with a problem throws it, as materialise() does', () => {
+  const consumes: Consumes = { ticket: value(TicketInput), spec: file('spec.md') };
+  expect(() => prepareBindings(consumes, { ticket: given({ key: 7 }) })).toThrow("'spec' is required");
 });

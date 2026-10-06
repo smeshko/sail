@@ -4,20 +4,44 @@
 import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readConfig } from '../../src/engine/config';
 import { type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
 import { readStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
+import { readEvents } from '../../src/events/consumers/ndjson';
 import { rebuildSummary } from '../../src/events/consumers/summary';
 import type { Summary } from '../../src/events/summary';
 import type { Consumer, SailEvent } from '../../src/events/types';
 import { fakeAdapters } from '../helpers/adapters';
-import { copyFixture, edit } from '../helpers/fixture';
+import {
+  AGENT_WORKFLOW,
+  entryOf,
+  interruptInSession,
+  journaled,
+  NO_TASKS,
+  NO_TASKS_MESSAGE,
+  SPEC,
+  SPEC_CALL,
+  SPEC_CALL_RETURNING_ERRORS,
+  sessions,
+  specDir,
+  specFile,
+  specResult,
+  submits,
+  TICKET,
+  usageOf,
+  WORKFLOW_FILE,
+  writeAgentFixture,
+  writeHarnessScript,
+} from '../helpers/agent-fixture';
+import { copyFixture, edit, write } from '../helpers/fixture';
 import {
   copyRun,
   interruptWhenAsleep,
   type StubOptions,
+  setSleepAt,
   stubExecutions,
   swapImplementAndTests,
   writeStub,
@@ -160,14 +184,14 @@ test('a call that asks for its error routes on it', async () => {
   );
 });
 
-test("the fixture's agent stages can't run yet, so the run fails before its first call", async () => {
+test("the fixture's ticket-to-pr still can't run: its spec has no brief until intake leaves one, so the run fails before its first call", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const end = await ran(repo.dir);
     expect(end).toMatchObject({
       status: 'failed',
       stopReason: 'workflow_failed',
-      message: "spec#1 can't run: agent steps can't run yet",
+      message: "spec#1 can't run: 'brief' is required",
     });
     expect(readJournal(end.dir).entries).toEqual([]);
     expect(existsSync(join(end.dir, '01-spec'))).toBe(false);
@@ -957,3 +981,281 @@ test('a crash leaves summary.json running, with the calls made before it', async
     expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['spec#1']]);
   });
 });
+
+// Agent calls in a run: brief-to-spec on the fake harness, whose script says what each try of spec#1 does.
+
+/** Runs brief-to-spec from `cwd` on TICKET, which must not be refused. */
+const ranAgent = (cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> =>
+  ran(cwd, { workflow: AGENT_WORKFLOW, input: TICKET, ...options });
+
+test('an agent call is journaled once, with the output, the files and the result of its last try, and ran on the model its alias names', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125), submits(SPEC, 0.25)]);
+    writeFileSync(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
+    const end = await ranAgent(repo.dir);
+
+    expect(end).toMatchObject({
+      status: 'completed',
+      result: { outcome: 'passed', output: { published: true, bytes: 17 } },
+    });
+    expect(journaled(end.dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(entryOf(end.dir, 'spec#1')).toMatchObject({
+      stage: 'spec',
+      call: 1,
+      output: SPEC,
+      reason: null,
+      files: { 'spec.md': '02-spec/call-1/try-2/spec.md' },
+      resultPath: '02-spec/call-1/try-2/result.json',
+    });
+    expect(specResult(end.dir, 2)).toMatchObject({
+      outcome: 'done',
+      try: 2,
+      validationTry: 2,
+      harness: { adapter: 'fake', model: 'claude-opus-5-5', sessionId: 'fake-session-spec-1-try-2' },
+      prompt: { path: '02-spec/call-1/try-2/prompt.md', untrusted: 1, conventions: ['AGENTS.md'] },
+      usage: usageOf(0.25),
+    });
+    // The prompt the second session was sent: the ticket's title wrapped, the brief where this try holds it, the
+    // repository's conventions and what the first try got wrong.
+    const prompt = specFile(end.dir, 'prompt.md', 2) ?? '';
+    const title = '<untrusted-input source="ticket.title">Add a --shout flag</untrusted-input>';
+    const brief = join(specDir(end.dir, 2), 'in', 'brief.md');
+    expect(prompt).toStartWith(`Write a spec for FAKE-1: ${title}\n\nRead the brief at ${brief}.`);
+    expect([prompt.includes('Indent with tabs.'), prompt.includes(NO_TASKS_MESSAGE)]).toEqual([true, true]);
+    // publish read the file the journal holds: the second try's.
+    const publish = JSON.parse(readFileSync(join(end.dir, '03-publish', 'call-1', 'result.json'), 'utf8'));
+    expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/spec.md' });
+    expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 20_000);
+
+test('the conventions project.yaml lists, and not the defaults, reach the agent prompts of a run', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
+    edit(sail, 'project.yaml', 'budgets:', 'conventions: [docs/STYLE.md]\nbudgets:');
+    expect(readConfig(sail)).toMatchObject({ conventions: ['docs/STYLE.md'] });
+    writeFileSync(join(repo.dir, 'AGENTS.md'), 'Indent with tabs.\n');
+    write(repo.dir, 'docs/STYLE.md', 'Sentence case in headings.\n');
+
+    const end = await ranAgent(repo.dir);
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(specResult(end.dir)).toMatchObject({ prompt: { conventions: ['docs/STYLE.md'] } });
+    const prompt = specFile(end.dir, 'prompt.md') ?? '';
+    expect([prompt.includes('Sentence case in headings.'), prompt.includes('Indent with tabs.')]).toEqual([
+      true,
+      false,
+    ]);
+  });
+}, 20_000);
+
+test('a blocked agent call is journaled with its reason, which reaches the workflow, and its run.fail', async () => {
+  await withTempRepo(async (repo) => {
+    const reason = 'The brief has no acceptance criteria.';
+    writeAgentFixture(repo.dir, [{ outcome: 'blocked', reason, usage: usageOf(0.125) }]);
+    const end = await ranAgent(repo.dir);
+
+    expect(end).toMatchObject({ status: 'failed', stopReason: 'workflow_failed', message: `spec blocked: ${reason}` });
+    expect(journaled(end.dir)).toEqual(['brief#1 passed', 'spec#1 blocked']);
+    expect(entryOf(end.dir, 'spec#1')).toMatchObject({
+      output: null,
+      reason,
+      files: {},
+      resultPath: '02-spec/call-1/result.json',
+    });
+    expect(specResult(end.dir)).toMatchObject({ outcome: 'blocked', output: null, reason, usage: usageOf(0.125) });
+    expect(readStatus(end.dir)).toEqual({ status: 'failed', stopReason: 'workflow_failed' });
+    expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 20_000);
+
+test('an agent call that ends in error fails the run with stage_error and its message, unless the workflow asked for its error', async () => {
+  const overloaded = 'harness: model overloaded';
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [{ outcome: 'error', message: 'model overloaded' }]);
+    const end = await ranAgent(repo.dir);
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'stage_error',
+      message: `spec#1 ended in error: ${overloaded}`,
+    });
+    expect(entryOf(end.dir, 'spec#1')).toMatchObject({ outcome: 'error', output: null, reason: overloaded, files: {} });
+    const reported = readEvents(end.dir).flatMap((event) => (event.type === 'error:harness' ? [event] : []));
+    expect(reported.map(({ key, message }) => ({ key, message }))).toEqual([
+      { key: 'spec#1', message: 'model overloaded' },
+    ]);
+  });
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, [{ outcome: 'error', message: 'model overloaded' }]);
+    edit(sail, WORKFLOW_FILE, SPEC_CALL, SPEC_CALL_RETURNING_ERRORS);
+    const end = await ranAgent(repo.dir);
+    expect(end).toMatchObject({ status: 'failed', stopReason: 'workflow_failed', message: `handled: ${overloaded}` });
+  });
+}, 20_000);
+
+test('an abort during an agent session suspends the run with the call unjournaled, and a resume runs it as its next try on the model the run started with', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeAgentFixture(from.dir, [submits(SPEC, 0.5, { turns: 2, delayMs: 30_000 }), submits(SPEC, 0.25)]);
+      const controller = new AbortController();
+      const running = ranAgent(from.dir, { signal: controller.signal });
+      const end = await interruptInSession(from.dir, running, () => controller.abort());
+
+      expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during spec#1' });
+      expect(journaled(end.dir)).toEqual(['brief#1 passed']);
+      // What the session had spent is kept, and nothing it submitted was checked.
+      expect(specResult(end.dir)).toMatchObject({
+        outcome: 'error',
+        errors: [{ reason: 'harness', message: 'aborted' }],
+        validationTry: 1,
+        validationFailed: false,
+        harness: { model: 'claude-opus-5-5' },
+        usage: usageOf(0.5),
+      });
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+
+    // The alias names another model by now. The run goes on with the one its roster froze.
+    edit(join(repo.dir, '.sail'), 'project.yaml', 'deep: claude-opus-5-5', 'deep: claude-next');
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const adapters = await fakeAdapters(repo.dir);
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, input: TICKET })).toMatchObject({
+      status: 'completed',
+    });
+    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(entryOf(dir, 'spec#1')?.resultPath).toBe('02-spec/call-1/try-2/result.json');
+    expect(specResult(dir, 2)).toMatchObject({
+      outcome: 'done',
+      try: 2,
+      validationTry: 1,
+      harness: { model: 'claude-opus-5-5' },
+    });
+    expect(sessions(readEvents(dir))).toEqual([
+      'start fake-session-spec-1',
+      'end fake-session-spec-1 error 0.5',
+      'start fake-session-spec-1-try-2',
+      'end fake-session-spec-1-try-2 done 0.25',
+    ]);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1']);
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 40_000);
+
+test('a resume replays a journaled agent call from the journal, and starts no session for it', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeAgentFixture(from.dir, [submits(SPEC, 0.25)]);
+      setSleepAt(from.dir, 'publish#1');
+      const controller = new AbortController();
+      const running = ranAgent(from.dir, { signal: controller.signal });
+      const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort());
+      expect(end).toMatchObject({ status: 'suspended', message: 'stopped during publish#1' });
+      expect(journaled(end.dir)).toEqual(['brief#1 passed', 'spec#1 done']);
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+
+    // Any session from here on would fail, and the run with it.
+    writeHarnessScript(repo.dir, { spec: [{ outcome: 'error', message: 'a session the journal made needless' }] });
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const adapters = await fakeAdapters(repo.dir);
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, input: TICKET })).toMatchObject({
+      status: 'completed',
+      result: { outcome: 'passed', output: { published: true, bytes: 17 } },
+    });
+    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(sessions(readEvents(dir))).toEqual(['start fake-session-spec-1', 'end fake-session-spec-1 done 0.25']);
+    expect(existsSync(specDir(dir, 2))).toBe(false);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1', 'publish#1']);
+  });
+}, 40_000);
+
+test('a try whose last events were lost is counted once, from its result, however often the run resumes', async () => {
+  await withTempRepo(async (repo) => {
+    const answers = [
+      submits(NO_TASKS, 0.125, { turns: 2 }),
+      submits(SPEC, 0.5, { turns: 2, delayMs: 30_000 }),
+      submits(SPEC, 0.25),
+    ];
+    const runId = await withTempRepo(async (second) => {
+      const id = await withTempRepo(async (first) => {
+        writeAgentFixture(first.dir, answers);
+        // Stopped as the first try ends: its result is on disk, and no corrective try has started.
+        const controller = new AbortController();
+        const stop: Consumer = {
+          name: 'stop',
+          onEvent: (event) => {
+            if (event.type === 'stage:end' && event.key === 'spec#1') controller.abort();
+          },
+        };
+        const end = await ranAgent(first.dir, { signal: controller.signal, consumers: [stop] });
+        expect(end).toMatchObject({ status: 'suspended', message: 'stopped during spec#1' });
+        expect(specResult(end.dir)).toMatchObject({ outcome: 'error', try: 1, validationFailed: true });
+        expect(existsSync(specDir(end.dir, 2))).toBe(false);
+
+        // A power loss took the unsynced tail of the events: all that followed the session's first usage update.
+        const path = join(end.dir, 'events.ndjson');
+        const lines = readFileSync(path, 'utf8').trimEnd().split('\n');
+        const kept = lines.findIndex((line) => JSON.parse(line).type === 'usage:update') + 1;
+        expect(kept).toBeGreaterThan(0);
+        writeFileSync(
+          path,
+          lines
+            .slice(0, kept)
+            .map((line) => `${line}\n`)
+            .join(''),
+        );
+        copyRun(first.dir, second.dir);
+        return end.runId;
+      });
+
+      // The first resume is interrupted in its corrective session.
+      const controller = new AbortController();
+      const adapters = await fakeAdapters(second.dir);
+      const running = resumeWorkflow({
+        cwd: second.dir,
+        adapters,
+        runId: id,
+        input: TICKET,
+        signal: controller.signal,
+      });
+      expect(await interruptInSession(second.dir, running, () => controller.abort(), 2)).toMatchObject({
+        status: 'suspended',
+      });
+      copyRun(second.dir, repo.dir);
+      return id;
+    });
+
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const adapters = await fakeAdapters(repo.dir);
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, input: TICKET })).toMatchObject({
+      status: 'completed',
+    });
+    const all = readEvents(dir);
+    const ends = all.flatMap((event) =>
+      event.type === 'harness:session_end' ? [[event.sessionId, event.usage.costUsd]] : [],
+    );
+    expect(ends).toEqual([
+      ['fake-session-spec-1', 0.125],
+      ['fake-session-spec-1-try-2', 0.5],
+      ['fake-session-spec-1-try-3', 0.25],
+    ]);
+    const stageEnds = all.flatMap((event) =>
+      event.type === 'stage:end' && event.key === 'spec#1' ? [`${event.try} ${event.outcome}`] : [],
+    );
+    expect(stageEnds).toEqual(['1 error', '2 error', '3 done']);
+    expect(specResult(dir, 3)).toMatchObject({ outcome: 'done', try: 3, validationTry: 2 });
+
+    const written = summaryText(dir);
+    const summary = summaryOf(dir);
+    expect(summary?.totals.usage).toEqual({ inputTokens: 7000, outputTokens: 700, costUsd: 0.875 });
+    expect(summary?.calls.map((call) => `${call.key} ${call.outcome}`)).toEqual([
+      'brief#1 passed',
+      'spec#1 done',
+      'publish#1 passed',
+    ]);
+    rmSync(join(dir, 'summary.json'));
+    expect(rebuildSummary(dir)).toEqual({ summary: summary as Summary, path: join(dir, 'summary.json') });
+    expect(summaryText(dir)).toBe(written);
+  });
+}, 60_000);

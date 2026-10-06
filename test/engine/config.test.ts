@@ -148,3 +148,15 @@ test('a project.yaml that breaks the schema returns the schema issues alone, and
   });
   expect(verdict('latest')).toEqual([{ path: '/sail', message: "is 'latest', which is not a version range" }]);
 });
+
+test('conventions reads as the list project.yaml gives, empty included, and is left out when project.yaml has none', () => {
+  /** The config's conventions, or the paths of its issues. */
+  const read = (extra: string): unknown => {
+    const config = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}${extra}`));
+    return 'issues' in config ? config.issues.map((issue) => issue.path) : config.conventions;
+  };
+  expect(read('conventions: [docs/STYLE.md, AGENTS.md]\n')).toEqual(['docs/STYLE.md', 'AGENTS.md']);
+  expect(read('conventions: []\n')).toEqual([]);
+  expect(read('')).toBeUndefined();
+  expect(read('conventions: [AGENTS.md, AGENTS.md]\n')).toEqual(['/conventions']);
+});

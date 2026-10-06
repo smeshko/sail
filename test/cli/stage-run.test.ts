@@ -17,6 +17,8 @@ import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
+import { SPEC, SPEC_STAGE, submits, TICKET, writeAgentFixture } from '../helpers/agent-fixture';
+import { edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -281,11 +283,6 @@ test.each([
     "sail stage run: 'ticket' is bound twice\n",
   ],
   [
-    'the agent stage spec',
-    ['.sail/workflows/ticket-to-pr/stages/spec'],
-    "sail stage run: spec can't run:\n  agent steps can't run yet\n",
-  ],
-  [
     'the multi-step stage publish',
     ['.sail/workflows/ticket-to-pr/stages/publish'],
     "sail stage run: publish can't run:\n  multi-step stages can't run yet\n",
@@ -414,3 +411,146 @@ test('a sail range the running version does not satisfy is refused before anythi
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
+
+// Agent stages in isolation: brief-to-spec's spec stage on the fake harness, whose script says what its session does.
+
+/** `sail stage run` of the fixture's spec stage, with a brief and the ticket bound. */
+const SPEC_ARGV = [
+  'stage',
+  'run',
+  `.sail/${SPEC_STAGE}`,
+  '--bind',
+  'brief=docs/brief.md',
+  '--bind',
+  `ticket=${JSON.stringify(TICKET)}`,
+];
+const SPEC_RUN = String.raw`\.sail-runs\/spec-[0-9A-HJKMNP-TV-Z]{26}\/00-spec\/call-1`;
+
+/** The agent fixture in `repo`, its harness scripted with `answers`, and a brief to bind. Returns its `.sail/`. */
+function agentRepo(repo: TempRepo, answers: Parameters<typeof writeAgentFixture>[1]): string {
+  write(repo.dir, 'docs/brief.md', '# Brief\n');
+  return writeAgentFixture(repo.dir, answers);
+}
+
+test("the fixture's agent stage spec, given no brief, is refused for its binding, and leaves no run directory", async () => {
+  await withTempRepo(async (repo) => {
+    fixtureCopy(repo);
+    const argv = ['stage', 'run', '.sail/workflows/ticket-to-pr/stages/spec'];
+    expect(await runCaptured(argv, repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: "sail stage run: spec can't run:\n  'brief' is required\n",
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('an agent stage runs in isolation on the harness project.yaml names and the model its alias names: done exits 0, and leaves its prompt, transcript and result', async () => {
+  await withTempRepo(async (repo) => {
+    agentRepo(repo, [submits(SPEC, 0.25)]);
+    const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir);
+    expect(stderr).toBe('');
+    expect(code).toBe(EXIT_OK);
+    expect(stdout).toMatch(new RegExp(`^spec#1 done {2}${SPEC_RUN}\n$`));
+    const callDir = callDirOf(stdout, repo.dir);
+    expect(readdirSync(callDir).sort()).toEqual(['in', 'prompt.md', 'result.json', 'session.log', 'spec.md']);
+    expect(readdirSync(join(callDir, 'in')).sort()).toEqual(['brief.md', 'ticket.json']);
+    expect(readResult(callDir)).toMatchObject({
+      key: 'spec#1',
+      outcome: 'done',
+      output: SPEC,
+      consumed: { brief: 'docs/brief.md', ticket: '--bind' },
+      harness: { adapter: 'fake', model: 'claude-opus-5-5' },
+    });
+    expect(readFileSync(join(callDir, 'session.log'), 'utf8').trimEnd()).toBe('assistant: Spec written.');
+  });
+}, 20_000);
+
+test('a blocked agent stage exits 1 and prints its reason, and one that ends in error exits 1 and prints its errors', async () => {
+  const reason = 'The brief has no acceptance criteria.';
+  await withTempRepo(async (repo) => {
+    agentRepo(repo, [{ outcome: 'blocked', reason }]);
+    const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir);
+    expect({ code, stderr }).toEqual({ code: EXIT_FAILED, stderr: '' });
+    const [first = '', ...rest] = stdout.split('\n');
+    expect(first).toMatch(new RegExp(`^spec#1 blocked {2}${SPEC_RUN}$`));
+    expect(rest.join('\n')).toContain(reason);
+    expect(readResult(callDirOf(stdout, repo.dir))).toMatchObject({ outcome: 'blocked', output: null, reason });
+  });
+  await withTempRepo(async (repo) => {
+    agentRepo(repo, [{ outcome: 'error', message: 'model overloaded' }]);
+    const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir);
+    expect({ code, stderr }).toEqual({ code: EXIT_FAILED, stderr: '' });
+    const [first = '', ...rest] = stdout.split('\n');
+    expect(first).toMatch(new RegExp(`^spec#1 error {2}${SPEC_RUN}$`));
+    expect(rest).toEqual(['  harness  model overloaded', '']);
+  });
+}, 30_000);
+
+type Change = (sail: string) => void;
+
+test.each<[string, Change, string]>([
+  ['a budget of no turns', (sail) => edit(sail, `${SPEC_STAGE}/stage.ts`, 'maxTurns: 4', 'maxTurns: 0'), 'maxTurns'],
+  [
+    'a model alias project.yaml does not define',
+    (sail) => edit(sail, `${SPEC_STAGE}/stage.ts`, "model: 'deep'", "model: 'huge'"),
+    "'huge'",
+  ],
+  [
+    'a harness whose credential is not set',
+    (sail) => edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/echo-harness.ts }'),
+    'ECHO_HARNESS_TOKEN',
+  ],
+])(
+  'an agent stage with %s is refused with exit 3, naming it, and leaves no run directory',
+  async (_, change, named) => {
+    await withTempRepo(async (repo) => {
+      change(agentRepo(repo, [submits(SPEC, 0.25)]));
+      const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir, { env: {} });
+      expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+      expect(stderr).toContain(named);
+      expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+    });
+  },
+  20_000,
+);
+
+const NEEDY_TICKETS = `// A ticket source that needs a credential: a run can't start without it, and an isolated stage never asks.
+export default {
+  requires: () => ['TICKETS_TOKEN'],
+  create: () => {
+    throw new Error('an isolated stage creates no ticket source');
+  },
+};
+`;
+
+test('an isolated agent stage needs its harness and nothing else: a ticket source without its credential does not refuse it, and it runs on a harness of the repository', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = agentRepo(repo, [submits(SPEC, 0.25)]);
+    write(sail, 'adapters/needy-tickets.ts', NEEDY_TICKETS);
+    edit(
+      sail,
+      'project.yaml',
+      'ticketSource: { use: fake, seed: ./fake/tickets.json }',
+      'ticketSource: { use: ./adapters/needy-tickets.ts }',
+    );
+    const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir, { env: {} });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(stdout).toMatch(new RegExp(`^spec#1 done {2}${SPEC_RUN}\n$`));
+  });
+  await withTempRepo(async (repo) => {
+    const sail = agentRepo(repo, [submits(SPEC, 0.25)]);
+    edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/echo-harness.ts }');
+    // A script stage takes no harness, so it runs whatever the harness needs.
+    const script = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir, { env: {} });
+    expect({ code: script.code, stderr: script.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    // The echo harness submits its prompt, which is no spec: twice, so the stage ends in error on its second try.
+    const env = { ECHO_HARNESS_TOKEN: 'set' };
+    const { code, stdout, stderr } = await runCaptured(SPEC_ARGV, repo.dir, { env });
+    expect({ code, stderr }).toEqual({ code: EXIT_FAILED, stderr: '' });
+    expect(stdout.split('\n')[0]).toMatch(new RegExp(`^spec#1 error {2}${SPEC_RUN}\\/try-2$`));
+    const result = readResult(callDirOf(stdout, repo.dir));
+    expect(result).toMatchObject({ outcome: 'error', try: 2, harness: { adapter: 'echo', sessionId: 'echo-1' } });
+  });
+}, 40_000);

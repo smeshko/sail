@@ -30,7 +30,7 @@ Usage:
   sail resume <run> [--input <json>] [-q|-v|-vv]             Resume a suspended or crashed run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
-  sail stage run <stage-dir> [--bind name=value]...          Run one script stage in isolation
+  sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
   sail --version                                             Print the version
   sail --help                                                Print this help
 

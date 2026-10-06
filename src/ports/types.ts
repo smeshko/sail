@@ -140,23 +140,35 @@ export type Swept = z.infer<typeof Swept>;
 
 const count = z.number().int().nonnegative().optional();
 
-/** Tokens and cost, as `sail.result.v1#/$defs/usage` records them: whole, non-negative counts. */
+/** Tokens and cost, as `sail.result.v1#/$defs/usage` records them: whole, non-negative counts, and dollars of 0 or more. */
 export const Usage = z.object({
   inputTokens: count,
   cacheReadTokens: count,
   cacheWriteTokens: count,
   outputTokens: count,
-  costUsd: z.number(),
+  costUsd: z.number().nonnegative(),
 });
 export type Usage = z.infer<typeof Usage>;
 
 const session = { sessionId: z.string(), usage: Usage, transcript: z.string(), raw: Raw };
 
+/** Why a session ended in `error`. Left out, it is `harness`. */
+export const HarnessFailure = z.enum(['harness', 'budget_exceeded', 'timeout']);
+export type HarnessFailure = z.infer<typeof HarnessFailure>;
+
+/** A blocked reason says something: whitespace alone is no reason. */
+const reason = z.string().refine((text) => text.trim() !== '', { message: 'a reason is required' });
+
 /** How an agent step's session ended: its submitted output, a blocked reason, or an error's message. */
 export const HarnessResult = z.discriminatedUnion('outcome', [
   z.object({ outcome: z.literal('done'), output: z.unknown(), ...session }),
-  z.object({ outcome: z.literal('blocked'), reason: z.string().min(1), ...session }),
-  z.object({ outcome: z.literal('error'), message: z.string().min(1), ...session }),
+  z.object({ outcome: z.literal('blocked'), reason, ...session }),
+  z.object({
+    outcome: z.literal('error'),
+    message: z.string().min(1),
+    reason: HarnessFailure.optional(),
+    ...session,
+  }),
 ]);
 export type HarnessResult = z.infer<typeof HarnessResult>;
 

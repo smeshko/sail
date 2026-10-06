@@ -224,3 +224,25 @@ test('Usage counts tokens in whole, non-negative numbers', () => {
   expect(paths(Usage, { costUsd: 0, outputTokens: 1.5 })).toEqual(['outputTokens']);
   expect(paths(Usage, { costUsd: 0.01, cacheReadTokens: 0 })).toEqual([]);
 });
+
+test('Usage costs dollars of 0 or more, and never NaN or an infinity', () => {
+  expect(paths(Usage, { costUsd: -0.01 })).toEqual(['costUsd']);
+  expect(paths(Usage, { costUsd: Number.NaN })).toEqual(['costUsd']);
+  expect(paths(Usage, { costUsd: Number.POSITIVE_INFINITY })).toEqual(['costUsd']);
+  expect(paths(Usage, { costUsd: 0 })).toEqual([]);
+});
+
+test('a blocked reason of only whitespace fails, and an error reason is harness, budget_exceeded or timeout', () => {
+  const session = { sessionId: 'fake-session-spec-1', usage: { costUsd: 0 }, transcript: '', raw: null };
+  const failed = { ...session, outcome: 'error', message: 'budget exceeded: maxTurns 1' };
+  const results = [
+    { ...session, outcome: 'blocked', reason: ' \n\t' },
+    { ...session, outcome: 'blocked', reason: ' The brief has no acceptance criteria. ' },
+    { ...failed, reason: 'out of turns' },
+    { ...failed, reason: 'budget_exceeded' },
+    { ...failed, reason: 'timeout' },
+    { ...failed, reason: 'harness' },
+    failed,
+  ];
+  expect(results.map((result) => paths(HarnessResult, result))).toEqual([['reason'], [], ['reason'], [], [], [], []]);
+});

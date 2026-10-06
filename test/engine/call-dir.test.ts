@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   callPaths,
   createCallDir,
+  existingTries,
   isPlainName,
   nextTry,
   RESERVED_NAMES,
@@ -73,6 +74,23 @@ test("nextTry numbers a call's tries from what is on disk", () => {
   expect(nextTry(runDir, 3, 'tests', 2)).toBe(1);
 });
 
+test("a call's later tries are try-2 and up, each once: a directory named otherwise is no try", () => {
+  const runDir = tempDir();
+  const callDir = join(runDir, '03-tests', 'call-1');
+  mkdirSync(join(callDir, 'try-0'), { recursive: true });
+  mkdirSync(join(callDir, 'try-1'));
+  mkdirSync(join(callDir, 'retry-2'));
+  expect(existingTries(runDir, 3, 'tests', 1)).toEqual([1]);
+  expect(nextTry(runDir, 3, 'tests', 1)).toBe(2);
+
+  mkdirSync(join(callDir, 'try-10'));
+  mkdirSync(join(callDir, 'try-3'));
+  mkdirSync(join(callDir, 'try-03'));
+  expect(existingTries(runDir, 3, 'tests', 1)).toEqual([1, 3, 10]);
+  expect(nextTry(runDir, 3, 'tests', 1)).toBe(11);
+  expect(existingTries(runDir, 3, 'tests', 2)).toEqual([]);
+});
+
 test('createCallDir creates the call directory and in/, and refuses to reuse one', () => {
   const paths = callPaths(tempDir(), 0, 'tests', 1);
   createCallDir(paths);
@@ -82,8 +100,15 @@ test('createCallDir creates the call directory and in/, and refuses to reuse one
   expect(() => createCallDir(paths)).toThrow('EEXIST');
 });
 
-test('no produced file may take the name of what the engine writes beside it', () => {
-  expect([...RESERVED_NAMES].sort()).toEqual(['in', 'result.json', 'stderr.log', 'stdout.log']);
+test('no produced file may take the name of what the engine writes beside it, the prompt and transcript of an agent included', () => {
+  expect([...RESERVED_NAMES].sort()).toEqual([
+    'in',
+    'prompt.md',
+    'result.json',
+    'session.log',
+    'stderr.log',
+    'stdout.log',
+  ]);
 });
 
 test('isPlainName takes a name that stays directly inside a directory', () => {
