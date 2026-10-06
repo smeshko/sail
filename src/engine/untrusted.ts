@@ -4,11 +4,14 @@
 // The value is what the schema parsed, so a transform has already run, and its output has whatever shape it was given:
 // no schema says which of its strings came from an untrusted one. So every string a transform makes of input that holds
 // an untrusted string is marked. That can mark a trusted string beside it, and never leaves an untrusted one bare.
-import type { z } from 'zod';
+import { z } from 'zod';
 import { isUntrusted } from '../sdk/untrusted';
 import { isUntrustedInput, untrustedInput } from './render';
 
-/** The children zod's `def` keeps, by `def.type`: probed on zod 4.6.5. */
+/**
+ * The children zod's `def` keeps, by `def.type`: probed on zod 4.6.5. test/engine/untrusted.test.ts reads the keys zod
+ * keeps a schema under from every kind it builds, and fails when one is missing here.
+ */
 interface Def {
   type: string;
   shape?: Record<string, z.ZodType>;
@@ -18,6 +21,7 @@ interface Def {
   options?: z.ZodType[];
   left?: z.ZodType;
   right?: z.ZodType;
+  keyType?: z.ZodType;
   valueType?: z.ZodType;
   items?: z.ZodType[];
   rest?: z.ZodType | null;
@@ -26,6 +30,8 @@ interface Def {
   out?: z.ZodType;
   /** A codec's decoder: a pipe that has one transforms what its `in` parsed, as a `transform` out does. */
   transform?: unknown;
+  /** A template literal's parts: its fixed text, and the schemas of what goes between. */
+  parts?: unknown[];
 }
 
 const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
@@ -34,20 +40,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** A schema, by the `def` every one has. */
-const isSchema = (held: unknown): held is z.ZodType =>
-  isRecord(held) && isRecord(held.def) && typeof held.def.type === 'string';
-
 /**
- * The schemas `def` holds, under whatever key zod keeps them: alone, in a list as a union's options are, or by name as
- * an object's shape is. Every key is read, not the ones the marking walk knows: a record's keys and a template
- * literal's parts are schemas too, and so is whatever a later zod adds.
+ * The schemas `def` holds, each read from the key zod keeps it under. Only those keys are read, never every value of
+ * the `def`: a default's value is behind a getter that runs its factory, and an object's shape is its fields by name,
+ * which may be any name at all.
  */
 function heldBy(def: Def): z.ZodType[] {
-  const kept = Object.values(def).flatMap((held) => (isRecord(held) && !isSchema(held) ? Object.values(held) : held));
-  // A lazy schema keeps its schema behind a getter, which is called for it alone: a transform's function is one too.
-  const lazy = def.type === 'lazy' && def.getter !== undefined ? [def.getter()] : [];
-  return [...kept, ...lazy].filter(isSchema);
+  const held = [
+    def.innerType,
+    def.catchall,
+    def.element,
+    def.keyType,
+    def.valueType,
+    def.left,
+    def.right,
+    def.rest,
+    def.in,
+    def.out,
+    // A lazy schema keeps its schema behind a function of its own, called for it alone.
+    def.type === 'lazy' ? def.getter?.() : undefined,
+    ...Object.values(def.shape ?? {}),
+    ...(def.options ?? []),
+    ...(def.items ?? []),
+    ...(def.parts ?? []),
+  ];
+  // A template literal's parts hold text beside schemas, and the keys a `def` lacks are undefined. `$ZodType` is what
+  // every schema is, of whichever of zod's flavours.
+  return held.filter((schema): schema is z.ZodType => schema instanceof z.core.$ZodType);
 }
 
 /** Whether `schema` marks a string anywhere in it. `seen` holds the schemas already read: one may hold itself. */
