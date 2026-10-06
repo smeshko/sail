@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { isUntrustedInput, render } from '../../src/engine/render';
 import { markUntrusted } from '../../src/engine/untrusted';
@@ -249,6 +252,8 @@ const holders = (leaf: z.ZodType): Record<string, z.ZodType> => ({
   'codec in': z.codec(leaf, z.number(), { decode: () => 1, encode: () => 'x' as never }),
   'codec out': z.codec(z.number(), leaf, { decode: () => 'x' as never, encode: () => 1 }),
   'template literal': z.templateLiteral(['ticket-', leaf as never]),
+  'function input': z.function({ input: [leaf], output: z.number() }),
+  'function output': z.function({ input: [z.number()], output: leaf }),
   nested: z.object({ notes: z.array(z.object({ by: z.number(), text: leaf.optional() })) }),
 });
 
@@ -286,17 +291,34 @@ test('an untrusted string is found in every place a schema of any kind can hold 
     'element',
     'in',
     'innerType',
+    'input',
     'items',
     'keyType',
     'left',
     'options',
     'out',
+    'output',
     'parts',
     'rest',
     'right',
     'shape',
     'valueType',
   ]);
+
+  // Every kind of schema zod defines, read from its own type definitions. The holders above are the kinds that keep a
+  // schema, with `lazy` behind its getter, and the rest keep none. A kind a later zod adds is in neither list until
+  // someone says which it is, and fails here.
+  const zod = dirname(createRequire(import.meta.url).resolve('zod'));
+  const definitions = readFileSync(join(zod, 'v4', 'core', 'schemas.d.ts'), 'utf8');
+  const kindsOf = [...definitions.matchAll(/^\s+type: "([a-z_]+)";$/gm)].map((match) => match[1]);
+  const keeping =
+    'array catch default function intersection lazy map nonoptional nullable object optional pipe prefault';
+  const keepingToo = 'promise readonly record set success template_literal tuple union';
+  const none = 'any bigint boolean custom date enum file literal nan never null number string symbol transform';
+  const noneToo = 'undefined unknown void';
+  expect([...new Set(kindsOf)].sort()).toEqual(`${keeping} ${keepingToo} ${none} ${noneToo}`.split(' ').sort());
+  const tabled = new Set(Object.values(holders(untrusted())).map((holder) => holder.def.type as string));
+  expect([...tabled].sort()).toEqual(`${keeping} ${keepingToo}`.split(' '));
 });
 
 test("the search for an untrusted string reads a schema's fields by name, and none of its data", () => {
@@ -329,6 +351,306 @@ test("the search for an untrusted string reads a schema's fields by name, and no
   const body = Defaulted.transform((brief) => brief.body);
   expect(String(body.parse({ note: 'n', hint: 'h', kept: 'k', body: 'x' }))).toBe('x');
   expect([shown(markUntrusted(body, 'x', 's')), calls]).toEqual(['<s>x', 0]);
+});
+
+test('what a schema makes of untrusted input stays marked however the change is written: in the schema a pipe leads to, by coercion, or by an overwrite', () => {
+  const Body = z.object({ id: z.string(), body: untrusted() });
+  const renames = z.object({ body: z.string() }).transform((brief) => ({ text: brief.body }));
+  const cases: Record<string, [z.ZodType, unknown, unknown]> = {
+    // The transform is in the schema the pipe leads to, where no field is untrusted: the untrusted one is upstream.
+    'piped into a transform': [Body.pipe(renames as never), { text: 'x' }, { text: '<s.text>x' }],
+    'piped into a wrapped one': [Body.pipe(renames.optional() as never), { text: 'x' }, { text: '<s.text>x' }],
+    'piped into a field of one': [
+      Body.pipe(z.object({ id: z.string(), body: z.string().transform((text) => text.split(',')) }) as never),
+      { id: '1', body: ['a', 'b'] },
+      { id: '<s.id>1', body: ['<s.body.0>a', '<s.body.1>b'] },
+    ],
+    // A pipe into a schema that changes nothing leaves each string where its schema says it is.
+    'piped into none': [
+      Body.pipe(z.object({ id: z.string(), body: z.string().max(9) }) as never),
+      { id: '1', body: 'x' },
+      { id: '1', body: '<s.body>x' },
+    ],
+    // Coercion makes one string of a list of them, with no transform in sight.
+    coerced: [z.array(untrusted()).pipe(z.coerce.string() as never), 'a,b', '<s>a,b'],
+    // An overwrite puts what it likes where the schema says something else is.
+    overwritten: [
+      Body.overwrite((brief) => ({ id: brief.body, body: brief.id }) as never),
+      { id: 'x', body: '1' },
+      { id: '<s.id>x', body: '<s.body>1' },
+    ],
+    'overwritten with no untrusted field': [
+      z.object({ id: z.string() }).overwrite((row) => ({ id: `${row.id}!` })),
+      { id: '1!' },
+      { id: '1!' },
+    ],
+    // A function a schema built is called by a transform: what it gives back is marked as its output schema says.
+    'called from a function': [
+      z.preprocess((text) => () => text, z.function({ output: untrusted() })).transform((made) => String(made())),
+      'x',
+      '<s>x',
+    ],
+  };
+  const actual = Object.fromEntries(
+    Object.entries(cases).map(([name, [schema, value]]) => [name, shown(markUntrusted(schema, value, 's'))]),
+  );
+  const expected = Object.fromEntries(Object.entries(cases).map(([name, [, , marked]]) => [name, marked]));
+  expect(actual).toEqual(expected);
+
+  // A template reaches every own key of an object, and so marking keeps every one: a key that isn't enumerable too.
+  const hidden = Object.defineProperty({ seen: 'y' }, 'text', { value: 'x' });
+  const kept = markUntrusted(
+    untrusted().transform(() => hidden),
+    hidden,
+    'brief',
+  );
+  expect(render('{{brief.text}} {{brief.seen}}', { brief: kept })).toEqual({
+    text: '<untrusted-input source="brief.text">x</untrusted-input> <untrusted-input source="brief.seen">y</untrusted-input>',
+    untrusted: 2,
+  });
+  const plain = markUntrusted(
+    z.object({ seen: z.string() }).transform(() => hidden),
+    hidden,
+    'brief',
+  );
+  expect(render('{{brief.text}} {{brief.seen}}', { brief: plain })).toEqual({ text: 'x y', untrusted: 0 });
+});
+
+// A fuzz of markUntrusted(): schemas composed at random from the ways zod holds a value and the ways it changes one,
+// around strings from untrusted() schemas that each hold a sentinel. It is seeded, so every run builds the same ones.
+
+const SENTINEL = '§U';
+
+interface Built {
+  schema: z.ZodType;
+  /** An input the schema parses. */
+  input: unknown;
+  /** The composition, for a failure to name. */
+  text: string;
+  /** Whether a string in it is from an untrusted() schema. */
+  untrusted: boolean;
+}
+
+/** Every string in a value: under each own key, the keys themselves, and inside a map or a set. */
+function everyString(value: unknown, seen = new Set<unknown>()): string[] {
+  if (typeof value === 'string') return [value];
+  if (typeof value !== 'object' || value === null || seen.has(value)) return [];
+  seen.add(value);
+  if (value instanceof Map) return [...value].flat().flatMap((item) => everyString(item, seen));
+  if (value instanceof Set || Array.isArray(value)) return [...value].flatMap((item) => everyString(item, seen));
+  const own = value as Record<string, unknown>;
+  return Object.getOwnPropertyNames(own).flatMap((key) => [key, ...everyString(own[key], seen)]);
+}
+
+class Box {
+  constructor(readonly held: unknown) {}
+}
+
+/** What a transform, a codec or the schema a pipe leads to may make of a value. */
+const CHANGES: [string, (value: unknown) => unknown][] = [
+  ['same', (value) => value],
+  ['wrapped', (value) => ({ w: value })],
+  ['listed', (value) => [value, 1]],
+  ['strings', (value) => everyString(value)],
+  ['joined', (value) => everyString(value).join('|')],
+  ['first', (value) => everyString(value)[0] ?? 0],
+  ['json', (value) => JSON.stringify(value) ?? 'none'],
+  ['boxed', (value) => new Box(value)],
+  ['hidden', (value) => Object.defineProperty({}, 'h', { value })],
+];
+
+/** An overwrite that keeps a value's kind and moves what it holds: a list reversed, an object's values turned round. */
+function moved(value: unknown): unknown {
+  if (Array.isArray(value)) return [...value].reverse();
+  if (typeof value !== 'object' || value === null || Object.getPrototypeOf(value) !== Object.prototype) return value;
+  const entries = Object.entries(value);
+  return Object.fromEntries(entries.map(([key], index) => [key, entries[(index + 1) % entries.length]?.[1]]));
+}
+
+/** Builds compositions from `next`, a source of numbers in [0, 1). */
+function builder(next: () => number): (depth: number) => Built {
+  let leaves = 0;
+  const pick = <T>(from: readonly T[]): T => from[Math.floor(next() * from.length)] as T;
+  const text = (): Built => {
+    const n = leaves++;
+    return next() < 0.6
+      ? { schema: untrusted(), input: `${SENTINEL}${n}`, text: `U${n}`, untrusted: true }
+      : { schema: z.string(), input: `t${n}`, text: `s${n}`, untrusted: false };
+  };
+  const leaf = (): Built =>
+    next() < 0.85 ? text() : { schema: z.number(), input: leaves++, text: 'n', untrusted: false };
+  const of = (name: string, schema: z.ZodType, input: unknown, ...from: Built[]): Built => ({
+    schema,
+    input,
+    text: `${name}(${from.map((built) => built.text).join(', ')})`,
+    untrusted: from.some((built) => built.untrusted),
+  });
+  /** An object of one to three fields, some named as a schema's own keys are. */
+  const object = (depth: number, names: readonly string[]): Built => {
+    const fields = names.slice(0, 1 + Math.floor(next() * 3)).map((name) => [name, build(depth)] as const);
+    const shape = Object.fromEntries(fields.map(([name, built]) => [name, built.schema]));
+    const input = Object.fromEntries(fields.map(([name, built]) => [name, built.input]));
+    return of('object', z.object(shape), input, ...fields.map(([, built]) => built));
+  };
+
+  /** The ways a schema holds another, each with an input the result parses. */
+  const HOLDS: ((depth: number) => Built)[] = [
+    (depth) =>
+      object(
+        depth,
+        pick([
+          ['a', 'b', 'c'],
+          ['def', 'type', 'text'],
+          ['shape', 'in', 'out'],
+        ]),
+      ),
+    (depth) => {
+      const one = build(depth);
+      return of('array', z.array(one.schema), [one.input, one.input], one);
+    },
+    (depth) => {
+      const [one, two] = [build(depth), build(depth)];
+      return next() < 0.5
+        ? of('tuple', z.tuple([one.schema, two.schema]), [one.input, two.input], one, two)
+        : of('rest', z.tuple([one.schema], two.schema), [one.input, two.input, two.input], one, two);
+    },
+    (depth) => {
+      const [key, one] = [text(), build(depth)];
+      return of('record', z.record(key.schema as never, one.schema), { [String(key.input)]: one.input }, key, one);
+    },
+    (depth) => {
+      const [key, one] = [text(), build(depth)];
+      return of('map', z.map(key.schema, one.schema), new Map([[key.input, one.input]]), key, one);
+    },
+    (depth) => {
+      const one = build(depth);
+      return of('set', z.set(one.schema), new Set([one.input]), one);
+    },
+    (depth) => {
+      const one = build(depth);
+      const wrap = pick<[string, (schema: z.ZodType) => z.ZodType]>([
+        ['optional', (schema) => schema.optional()],
+        ['nullable', (schema) => schema.nullable()],
+        ['readonly', (schema) => schema.readonly()],
+        ['nonoptional', (schema) => schema.optional().nonoptional()],
+        ['default', (schema) => schema.default(one.input as never)],
+        ['prefault', (schema) => schema.prefault(one.input as never)],
+        ['catch', (schema) => schema.catch(one.input as never)],
+        ['lazy', (schema) => z.lazy(() => schema)],
+        ['union', (schema) => z.union([z.boolean(), schema])],
+        ['preprocess', (schema) => z.preprocess((given) => given, schema)],
+      ]);
+      return of(wrap[0], wrap[1](one.schema), one.input, one);
+    },
+    (depth) => {
+      const [left, right] = [object(depth, ['l', 'm']), object(depth, ['r', 'q'])];
+      const input = { ...(left.input as object), ...(right.input as object) };
+      return of('intersection', z.intersection(left.schema, right.schema), input, left, right);
+    },
+    () => {
+      const part = text();
+      return of('template', z.templateLiteral(['p-', part.schema as never]), `p-${part.input}`, part);
+    },
+  ];
+
+  /** The ways a schema changes what another parsed. */
+  const CHANGED: ((one: Built) => Built)[] = [
+    (one) => {
+      const [name, change] = pick(CHANGES);
+      return of(`transform:${name}`, one.schema.transform(change), one.input, one);
+    },
+    (one) => {
+      const [name, change] = pick(CHANGES);
+      const made = z.unknown().transform(change);
+      const [how, into] = pick<[string, z.ZodType]>([
+        ['pipe', made],
+        ['pipe-optional', made.optional()],
+        ['pipe-lazy', z.lazy(() => made)],
+        ['pipe-union', z.union([z.never(), made])],
+        ['pipe-field', z.object({ f: made }).or(made)],
+      ]);
+      return of(`${how}:${name}`, one.schema.pipe(into as never), one.input, one);
+    },
+    (one) => of('pipe-plain', one.schema.pipe(z.unknown().optional() as never), one.input, one),
+    (one) => of('coerced', one.schema.pipe(z.coerce.string() as never), one.input, one),
+    (one) => {
+      const [name, decode] = pick(CHANGES);
+      const codec = z.codec(one.schema, z.unknown(), { decode: decode as never, encode: (value) => value as never });
+      return of(`codec:${name}`, codec, one.input, one);
+    },
+    (one) => of('overwrite', one.schema.overwrite(moved as never), one.input, one),
+  ];
+
+  function build(depth: number): Built {
+    if (depth <= 0) return leaf();
+    return next() < 0.4 ? pick(CHANGED)(build(depth - 1)) : pick(HOLDS)(depth - 1);
+  }
+  return build;
+}
+
+/** What a template can print of a value, as render() reaches it: by an own key of an object or an index of a list. */
+function reached(value: unknown): { bare: string[]; wrapped: number; paths: string[] } {
+  const found = { bare: [] as string[], wrapped: 0, paths: [] as string[] };
+  const seen = new Set<unknown>();
+  const reach = (item: unknown, path: string): void => {
+    if (isUntrustedInput(item)) {
+      found.wrapped++;
+      found.paths.push(path);
+    } else if (typeof item === 'string') {
+      found.bare.push(item);
+      found.paths.push(path);
+    } else if (typeof item === 'number' || typeof item === 'boolean') {
+      found.paths.push(path);
+    } else if (Array.isArray(item)) {
+      for (const [index, child] of item.entries()) reach(child, `${path}.${index}`);
+    } else if (typeof item === 'object' && item !== null && !seen.has(item)) {
+      seen.add(item);
+      const own = item as Record<string, unknown>;
+      for (const key of Object.getOwnPropertyNames(own)) reach(own[key], `${path}.${key}`);
+    }
+  };
+  reach(value, 's');
+  return found;
+}
+
+test('no composition of schemas lets a string from an untrusted one reach a template bare, loses a path a template could print, or marks where nothing is untrusted', () => {
+  let state = 20261005;
+  const next = (): number => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+  const build = builder(next);
+  const unparsed: string[] = [];
+  const bare: string[] = [];
+  const lost: string[] = [];
+  const overmarked: string[] = [];
+  let wrapped = 0;
+  let changed = 0;
+  const COMPOSITIONS = 4000;
+  for (let n = 0; n < COMPOSITIONS; n++) {
+    const built = build(1 + Math.floor(next() * 4));
+    const parsed = built.schema.safeParse(built.input);
+    if (!parsed.success) {
+      unparsed.push(built.text);
+      continue;
+    }
+    const before = reached(parsed.data);
+    const after = reached(markUntrusted(built.schema, parsed.data, 's'));
+    if (after.bare.some((string) => string.includes(SENTINEL))) bare.push(built.text);
+    if (after.paths.join() !== before.paths.join()) lost.push(built.text);
+    if (!built.untrusted && after.wrapped > 0) overmarked.push(built.text);
+    if (after.wrapped > 0) wrapped++;
+    if (built.untrusted && /transform|pipe|codec|coerced|overwrite/.test(built.text)) changed++;
+  }
+  expect({ unparsed, bare: bare.slice(0, 5), lost: lost.slice(0, 5), overmarked: overmarked.slice(0, 5) }).toEqual({
+    unparsed: [],
+    bare: [],
+    lost: [],
+    overmarked: [],
+  });
+  expect([bare.length, lost.length, overmarked.length]).toEqual([0, 0, 0]);
+  // The fuzz has to have had something to find: compositions that mark, and ones that change an untrusted string.
+  expect([wrapped > COMPOSITIONS / 4, changed > COMPOSITIONS / 4]).toEqual([true, true]);
 });
 
 test('marking twice changes nothing', () => {
