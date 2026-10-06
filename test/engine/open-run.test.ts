@@ -17,12 +17,12 @@ import type { ResolvedAdapters } from '../../src/engine/adapters';
 import type { Port } from '../../src/engine/config';
 import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engine/journal';
 import { findRun, type OpenedRun, openRun, reopenRun } from '../../src/engine/open-run';
-import { readStatus, writeStatus } from '../../src/engine/run-dir';
+import { readStatus, type Source, writeStatus } from '../../src/engine/run-dir';
 import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
 import { ulid } from '../../src/engine/run-id';
 import { validateRunDir } from '../../src/engine/schemas';
 import { fakeAdapters } from '../helpers/adapters';
-import { copyFixture, edit } from '../helpers/fixture';
+import { copyFixture, edit, write } from '../helpers/fixture';
 import { copyRun } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -231,7 +231,10 @@ test('a .sail/ refused by its project.yaml is not claimed, so a run from it can 
   });
 });
 
-test("an input the intake's schema accepts becomes the run's input, parsed", async () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("an input the intake's schema accepts becomes the run's input, parsed", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const input = {
@@ -239,6 +242,9 @@ test("an input the intake's schema accepts becomes the run's input, parsed", asy
       title: 'Greet loudly',
       url: 'fake://tickets/FAKE-3',
       acceptanceCriteria: ['greet --shout shouts'],
+      labels: ['cli'],
+      links: [{ url: 'https://example.com/shout' }],
+      attachments: [],
       ignored: true,
     };
     const run = await openRun({
@@ -279,7 +285,15 @@ test('a run opened without an input has none', async () => {
   });
 });
 
-const TICKET = { ticketKey: 'FAKE-7', title: 'Greet', url: 'fake://tickets/FAKE-7', acceptanceCriteria: [] };
+const TICKET = {
+  ticketKey: 'FAKE-7',
+  title: 'Greet',
+  url: 'fake://tickets/FAKE-7',
+  acceptanceCriteria: [],
+  labels: ['cli'],
+  links: [],
+  attachments: [],
+};
 
 /** A run of the fixture opened in a repository of its own and suspended, then copied into `to` to be reopened there. */
 function suspendedCopy(to: string): Promise<OpenedRun> {
@@ -343,7 +357,10 @@ test("findRun throws on a STATUS it can't read: sail's own files are broken", as
   });
 });
 
-test('reopenRun reopens a suspended run with the header on disk, its input parsed, and STATUS running again', async () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('reopenRun reopens a suspended run with the header on disk, its input parsed, and STATUS running again', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
     const reopened = await reopenRun({
@@ -515,5 +532,118 @@ test('openRun refuses agent steps that name an undefined model alias, one line p
       ].join('\n'),
     });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+// A run from a ticket (D2, D4, D7): what openRun() refuses before a run directory exists, and reopenRun() before
+// STATUS changes.
+
+const FAKE_1: Source = { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false };
+/** An intake of the repository's own, in a file of its own. */
+const OWN_INTAKE =
+  "import { intake, z } from 'sail';\n" +
+  "export const own = intake('own', { accepts: ['ticket'], output: z.object({ ticketKey: z.string() }) });\n";
+
+/** Gives the fixture's ticket-to-pr an intake of the repository's own in place of the built-in. */
+function useOwnIntake(sail: string): void {
+  write(sail, 'workflows/ticket-to-pr/intake.ts', OWN_INTAKE);
+  edit(sail, WORKFLOW, "import { ticket } from 'sail/intakes';", "import { own as ticket } from './intake';");
+}
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('openRun refuses an input given beside a ticket: the run gets its input from its intake, and no run directory is created', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const run = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      adapters: await fakeAdapters(repo.dir),
+      source: FAKE_1,
+      input: TICKET,
+    });
+    expect(run).toEqual({ refused: 'a run from ticket FAKE-1 gets its input from its intake, so it takes none' });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('openRun refuses a ticket for a workflow that names an intake of its own, which still starts with no ticket', async () => {
+  await withTempRepo(async (repo) => {
+    useOwnIntake(copyFixture(repo.dir));
+    const run = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      adapters: await fakeAdapters(repo.dir),
+      source: FAKE_1,
+    });
+    expect(run).toEqual({
+      refused:
+        ".sail/workflows/ticket-to-pr/workflow.ts: its intake 'own' is the repository's own, and only a built-in intake runs",
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+  await withTempRepo(async (repo) => {
+    useOwnIntake(copyFixture(repo.dir));
+    const local = await opened(repo.dir);
+    expect(local.runId).toStartWith('LOCAL-');
+    expect(local.loaded.intake.definition.name).toBe('own');
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ("openRun refuses a workflow that reaches a stage named intake, whatever the run starts from: its first call's key would be the intake's", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    write(
+      sail,
+      'stages/intake/stage.ts',
+      "import { script, z } from 'sail';\nexport const intake = script('intake', { run: './run.sh', output: z.object({ ok: z.boolean() }) });\n",
+    );
+    edit(
+      sail,
+      WORKFLOW,
+      "import { tests } from '../../stages/tests/stage';",
+      "import { intake as fetch } from '../../stages/intake/stage';\nimport { tests } from '../../stages/tests/stage';\nvoid fetch;",
+    );
+    const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', adapters: await fakeAdapters(repo.dir) });
+    expect(run).toEqual({
+      refused:
+        ".sail/stages/intake/stage.ts: a stage can't be named 'intake': its first call's key would be the intake's, intake#1",
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-009
+test
+  .skip // TDD-PENDING TASK-009
+  ('reopenRun refuses an input for a run that started from a ticket, and leaves STATUS and a torn tail of its events as they were', async () => {
+  await withTempRepo(async (repo) => {
+    const TORN = '{"seq":1,"ts":"2026-10-06T09:';
+    const runId = await withTempRepo(async (from) => {
+      copyFixture(from.dir);
+      const run = await openRun({
+        cwd: from.dir,
+        workflow: 'ticket-to-pr',
+        adapters: await fakeAdapters(from.dir),
+        source: FAKE_1,
+      });
+      if ('refused' in run) throw new Error(run.refused);
+      writeStatus(run.dir, 'suspended', 'interrupted');
+      appendFileSync(join(run.dir, 'events.ndjson'), TORN);
+      copyRun(from.dir, repo.dir);
+      return run.runId;
+    });
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const reopened = await reopenRun({ cwd: repo.dir, runId, adapters: await fakeAdapters(repo.dir), input: TICKET });
+    expect(reopened).toEqual({ refused: `run ${runId} got its input from intake#1, so --input doesn't apply` });
+    expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
+    expect(readFileSync(join(dir, 'events.ndjson'), 'utf8')).toBe(TORN);
   });
 });

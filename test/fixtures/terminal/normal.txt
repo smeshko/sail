@@ -1,6 +1,5 @@
 sail · ticket-to-pr v1 · FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
-intake#1            ▶ intake ticket · script
-intake#1              exit 0 → passed · 1.5s
+intake#1            ▶ intake ticket · builtin
 intake#1              output valid
 intake#1              file brief.md valid
 intake#1            ✓ passed

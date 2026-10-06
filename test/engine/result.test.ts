@@ -87,3 +87,43 @@ test('writeResult throws on a result that breaks the schema, and writes nothing'
   );
   expect(existsSync(path)).toBe(false);
 });
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("a built-in intake's result has no fields of a kind's own, and writeResult accepts it, passed or failed by its port", () => {
+  const consumed = { source: 'run.json#/source' };
+  const fields = { runId: RUN_ID, stage: 'intake', call: 1, kind: 'builtin', consumed, startedAt, finishedAt };
+  const run: StepRun = { outcome: 'passed', output: { ticketKey: 'FAKE-1' }, files: {}, errors: [], record: {} };
+  const result = buildResult({ ...fields, run });
+  expect(validateDocument('sail.result.v1', result)).toEqual([]);
+  expect(Object.keys(result)).toEqual([
+    'schema',
+    'runId',
+    'stage',
+    'call',
+    'key',
+    'kind',
+    'outcome',
+    'output',
+    'files',
+    'consumed',
+    'startedAt',
+    'finishedAt',
+    'durationMs',
+  ]);
+  expect(result).toMatchObject({ key: 'intake#1', kind: 'builtin', outcome: 'passed', consumed });
+
+  const errors = [{ reason: 'port' as const, message: 'ticketSource.get: no ticket FAKE-9 (not_found)' }];
+  const failed = buildResult({ ...fields, run: { ...run, outcome: 'error', output: null, errors } });
+  expect(validateDocument('sail.result.v1', failed)).toEqual([]);
+  expect(failed.errors).toEqual(errors);
+
+  const dir = mkdtempSync(join(tmpdir(), 'sail-result-'));
+  dirs.push(dir);
+  for (const [name, written] of Object.entries({ passed: result, failed })) {
+    const path = join(dir, `${name}.json`);
+    writeResult(path, written);
+    expect(readFileSync(path, 'utf8')).toBe(`${JSON.stringify(written, null, 2)}\n`);
+  }
+});

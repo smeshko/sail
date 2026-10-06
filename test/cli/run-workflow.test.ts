@@ -160,7 +160,15 @@ test('sail run -q prints the header, a call that ends in error with its message,
 });
 
 test('a valid --input runs', async () => {
-  const input = { ticketKey: 'FAKE-4', title: 'Greet', url: 'fake://tickets/FAKE-4', acceptanceCriteria: [] };
+  const input = {
+    ticketKey: 'FAKE-4',
+    title: 'Greet',
+    url: 'fake://tickets/FAKE-4',
+    acceptanceCriteria: [],
+    labels: [],
+    links: [],
+    attachments: [],
+  };
   const { code, runs } = await sailIn(['run', '--input', JSON.stringify(input)], { testsPassAt: 1 });
   expect(runs).toHaveLength(1);
   expect(code).toBe(EXIT_OK);
@@ -340,10 +348,18 @@ test('Ctrl-C during sail run ends the running call in error, suspends the run, p
 
 test('the resume hint repeats --input, quoted for the shell', async () => {
   await withTempRepo(async (repo) => {
-    const input = { ticketKey: 'FAKE-6', title: "Greet O'Brien", url: 'fake://tickets/FAKE-6', acceptanceCriteria: [] };
+    const input = {
+      ticketKey: 'FAKE-6',
+      title: "Greet O'Brien",
+      url: 'fake://tickets/FAKE-6',
+      acceptanceCriteria: [],
+      labels: [],
+      links: [],
+      attachments: [],
+    };
     const { lines, runId } = await interruptedRun(repo.dir, ['run', '--input', JSON.stringify(input)]);
     expect(lines.at(-1)).toBe(
-      `resume it with: sail resume ${runId} --input '{"ticketKey":"FAKE-6","title":"Greet O'\\''Brien","url":"fake://tickets/FAKE-6","acceptanceCriteria":[]}'`,
+      `resume it with: sail resume ${runId} --input '{"ticketKey":"FAKE-6","title":"Greet O'\\''Brien","url":"fake://tickets/FAKE-6","acceptanceCriteria":[],"labels":[],"links":[],"attachments":[]}'`,
     );
   });
 }, 20_000);

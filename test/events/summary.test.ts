@@ -453,3 +453,48 @@ test('a route repeated with no journal:append between is dropped, and the same m
 test('events with no run:start give no summary', () => {
   expect(summarize(stamp([100, start('spec#1')], [300, end('spec#1', 'passed', 200)]))).toBeUndefined();
 });
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("a built-in intake's call is an entry of kind builtin, which no step of a call may be", () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [
+        100,
+        {
+          type: 'intake:start',
+          key: 'intake#1',
+          intake: 'ticket',
+          kind: 'builtin',
+          origin: 'builtin',
+          consumed: { source: 'run.json#/source' },
+        },
+      ],
+      [300, produced('intake#1', 'brief.md')],
+      [400, { type: 'intake:end', key: 'intake#1', outcome: 'passed', resultPath: '00-intake/call-1/result.json' }],
+      [420, journal('intake#1', 1, 'passed')],
+    ),
+  );
+  expect(summary?.calls).toEqual([
+    {
+      key: 'intake#1',
+      kind: 'builtin',
+      outcome: 'passed',
+      durationMs: 300,
+      files: ['brief.md'],
+      resultPath: '00-intake/call-1/result.json',
+    },
+  ]);
+  const step = { kind: 'builtin', outcome: 'passed', durationMs: 1 };
+  const steps = [
+    { key: 'publish#1/describe', ...step },
+    { key: 'publish#1/open', ...step },
+  ];
+  const multiStep = { ...summary, calls: [{ key: 'publish#1', outcome: 'passed', durationMs: 2, steps }] };
+  expect(validateDocument('sail.summary.v1', multiStep).map((issue) => issue.path)).toEqual([
+    '/calls/0/steps/0/kind',
+    '/calls/0/steps/1/kind',
+  ]);
+});

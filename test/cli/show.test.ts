@@ -23,17 +23,17 @@ const text = (...lines: string[]) => lines.map((line) => `${line}\n`).join('');
 const GOLDEN = text(
   `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 1m 11s`,
   '',
-  'key                   kind    outcome  duration  cost   next',
-  'intake#1              script  passed   2.1s',
-  'spec#1                agent   done     10.4s     $0.31  implement#1',
-  'implement#1           agent   done     12.6s     $0.48  tests#1',
-  'tests#1               script  failed   2.5s             implement#2',
-  'implement#2           agent   done     12.5s     $0.24  tests#2',
-  'tests#2               script  passed   2.7s             self-review#1',
-  'self-review#1         agent   done     10.5s     $0.22  publish#1',
-  'publish#1                     passed   14.5s     $0.10  end',
-  '  publish#1/describe  agent   done     10.4s     $0.10',
-  '  publish#1/open      script  passed   3.8s',
+  'key                   kind     outcome  duration  cost   next',
+  'intake#1              builtin  passed   2.1s',
+  'spec#1                agent    done     10.4s     $0.31  implement#1',
+  'implement#1           agent    done     12.6s     $0.48  tests#1',
+  'tests#1               script   failed   2.5s             implement#2',
+  'implement#2           agent    done     12.5s     $0.24  tests#2',
+  'tests#2               script   passed   2.7s             self-review#1',
+  'self-review#1         agent    done     10.5s     $0.22  publish#1',
+  'publish#1                      passed   14.5s     $0.10  end',
+  '  publish#1/describe  agent    done     10.4s     $0.10',
+  '  publish#1/open      script   passed   3.8s',
   '',
   'loops   fix 2/3',
   'totals  8 calls · 9 steps · 11 tool calls · 1 denial · 8 replays',
@@ -138,7 +138,10 @@ test('a run with no calls yet says so', async () => {
   });
 });
 
-test('sail show --rebuild writes summary.json from the events, says where, then shows the run', async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('sail show --rebuild writes summary.json from the events, says where, then shows the run', async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     const dir = copyGoldenRun(repo.dir);
@@ -465,3 +468,29 @@ test.each([['--events'], ['--follow']])(
     });
   },
 );
+
+// biome-ignore format: TDD-PENDING TASK-012
+test
+  .skip // TDD-PENDING TASK-012
+  ("sail show lists a ticket run's intake#1 first, with its kind, its outcome and its duration, and --events prints what the run printed, the intake's lines included", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
+    const helper = join(import.meta.dir, '..', 'helpers', 'ticket-run.ts');
+    const ran = Bun.spawnSync([process.execPath, helper, 'FAKE-1'], { cwd: repo.dir, env: repo.env });
+    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
+
+    const shown = await runCaptured(['show', runId], repo.dir);
+    const rows = normaliseDurations(shown.stdout).split('\n');
+    expect(rows[0]).toBe(`${runId} · ticket-to-pr@1 · completed · <t>`);
+    expect(rows[2]).toMatch(/^key +kind +outcome +duration\b/);
+    expect(rows[3]).toMatch(/^intake#1 +builtin +passed +<t>$/);
+    expect(rows[4]).toMatch(/^spec#1 +script +passed +<t> +implement#1$/);
+    expect(shown.stdout).toContain('\ntotals  6 calls · ');
+    expect({ code: shown.code, stderr: shown.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const replayed = await runCaptured(['show', runId, '--events'], repo.dir);
+    expect(replayed.stdout).toContain(`${'intake#1'.padEnd(13)}  ▶ intake ticket · builtin\n`);
+    expect(normaliseDurations(replayed.stdout)).toBe(normaliseDurations(ran.stdout.toString()));
+    expect(ran.exitCode).toBe(0);
+  });
+}, 30_000);

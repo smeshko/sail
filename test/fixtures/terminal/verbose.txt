@@ -1,16 +1,10 @@
 sail · ticket-to-pr v1 · FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
-intake#1            ▶ intake ticket · script
-intake#1              $ builtin:ticket · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
-intake#1              exit 0 → passed · 1.5s
+intake#1            ▶ intake ticket · builtin
 intake#1              output valid
 intake#1              file brief.md valid · hasSections(Request, Acceptance criteria, Context), untrustedInputWrapped
-intake#1              file ticket.json · 622 B
-intake#1              file brief.md · 674 B
+intake#1              file ticket.json · 1.4 KB
+intake#1              file brief.md · 1.1 KB
 intake#1            ✓ passed
-intake#1              stdout.log
-intake#1              │ fetched FAKE-1 through the ticket source
-intake#1              │ wrote ticket.json and brief.md
-intake#1              │ {"ticketKey":"FAKE-1","title":"Add a --shout flag to the greet command","url":"fake://tickets/FAKE-1","acceptanceCriteria":["`greet Ada --shout` prints `HELLO, ADA!`","`greet Ada` still prints `Hello, Ada!`","`greet --help` lists `--shout`"]}
 spec#1              ▶ spec · agent · claude-opus-5-5
 spec#1                in brief ← 00-intake/call-1/brief.md
 spec#1                output valid

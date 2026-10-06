@@ -90,6 +90,11 @@ export const compiles = workflow('compiles', { intake: ticket }, async (run) => 
   const shown: string = run.input.title;
   read(shown);
   await run.stage(quote, { quote: { text: 'plain text' } });
+  // The ticket's labels, links and attachments reach the workflow, and each provider string is still a string to read.
+  const label: string | undefined = run.input.labels[0];
+  const link: { url: string; title?: string | undefined } | undefined = run.input.links[0];
+  const attachment: { name: string; url: string; mimeType?: string | undefined } | undefined = run.input.attachments[0];
+  read(label, link, attachment);
   for (const iteration of run.loop('measure', { max: 2, feedback: Length })) {
     const previous: number | undefined = iteration.previous;
     read(previous);
@@ -121,7 +126,7 @@ export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
   await run.stage(spec, {});
   // @ts-expect-error TS2554: the required binding `brief` is left out, with the bindings
   await run.stage(spec);
-  // @ts-expect-error TS2739: a produced file where a value() is declared
+  // @ts-expect-error TS2740: a produced file where a value() is declared
   await run.stage(publish, { ticket: t.files['junit.xml'], spec: run.intake.files['brief.md'] });
   // @ts-expect-error TS2353: the engine resolves gitDiff(), so the workflow can't pass it
   await run.stage(review, { spec: run.intake.files['brief.md'], diff: run.intake.files['brief.md'] });
@@ -163,6 +168,10 @@ export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
   // @ts-expect-error TS2322: a plain string is not Untrusted until its schema parses it
   const forged: Untrusted = 'plain text';
   read(forged);
+  // @ts-expect-error TS2339: the ticket has no id: its key is what every port operation takes
+  read(run.input.id);
+  // @ts-expect-error TS2345: an intake is no stage: the engine runs it before any workflow code
+  await run.stage(ticket);
   // @ts-expect-error TS2322: Length parses a string, so a number is what it parses to, not what it takes
   await run.stage(measure, { text: 3 });
   for (const iteration of run.loop('measure', { max: 2, feedback: Length })) {

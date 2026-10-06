@@ -287,3 +287,21 @@ test('a sail range the running version does not satisfy is refused, naming the f
     });
   });
 });
+
+test('run.stage() given an intake is a type error sail check reports with exit 3, at its line in workflow.ts', async () => {
+  await withTempRepo(async (repo) => {
+    const workflow = join(copyFixture(repo.dir), 'workflows', 'ticket-to-pr', 'workflow.ts');
+    const first = '    const s = await run.stage(spec,';
+    const text = readFileSync(workflow, 'utf8').replace(first, `    await run.stage(ticket);\n${first}`);
+    writeFileSync(workflow, text);
+    const line = text.split('\n').findIndex((each) => each.includes('run.stage(ticket)')) + 1;
+    expect(line).toBeGreaterThan(1);
+
+    const { code, stdout, stderr } = await runCaptured(['check'], repo.dir);
+    expect(code).toBe(EXIT_REFUSED);
+    expect(stdout).toBe('');
+    expect(stderr).toStartWith(`.sail/workflows/ticket-to-pr/workflow.ts:${line}:`);
+    expect(stderr).toContain('  TS2345  ');
+    expect(stderr).toEndWith('sail check: 1 type error in .sail/\n');
+  });
+});

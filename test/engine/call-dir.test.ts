@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -121,4 +121,24 @@ test('runRelative gives a run-relative POSIX path, as result.json records files'
   expect(runRelative(runDir, join(callPaths(runDir, 3, 'tests', 1).dir, 'junit.xml'))).toBe(
     '03-tests/call-1/junit.xml',
   );
+});
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('createCallDir leaves in/ out when told to, for a first try and a durable later one, and still refuses to reuse the directory', () => {
+  const dir = tempDir();
+  const first = callPaths(dir, 0, 'intake', 1);
+  createCallDir(first, { stageIn: false });
+  expect(readdirSync(first.dir)).toEqual([]);
+  expect(() => createCallDir(first, { stageIn: false })).toThrow();
+
+  const second = callPaths(dir, 0, 'intake', 1, 2);
+  createCallDir(second, { durable: true, stageIn: false });
+  expect(readdirSync(second.dir)).toEqual([]);
+  expect(readdirSync(first.dir)).toEqual(['try-2']);
+  // Left out, the option keeps in/: a step's call still gets its $STAGE_IN.
+  const step = callPaths(dir, 1, 'spec', 1);
+  createCallDir(step);
+  expect(readdirSync(step.dir)).toEqual(['in']);
 });

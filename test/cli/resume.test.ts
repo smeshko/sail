@@ -5,11 +5,14 @@ import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import { readJournal } from '../../src/engine/journal';
 import { readStatus } from '../../src/engine/run-dir';
+import { runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { rebuildSummary } from '../../src/events/consumers/summary';
 import type { Summary } from '../../src/events/summary';
+import { fakeAdapters } from '../helpers/adapters';
 import {
   interruptInSession,
   journaled,
@@ -411,3 +414,129 @@ test('a run whose process was killed in a session resumes: the session is ended 
     expect([rebuilt, same]).toEqual([{ summary: written, path: join(dir, 'summary.json') }, true]);
   });
 }, 90_000);
+
+// A run from a ticket (D4): it resumes with no --input, and refuses one.
+
+/**
+ * A run of the ticket stub from `FAKE-1`, interrupted during `implement#2` in a repository of its own, then copied into
+ * `to`. It starts through the engine: no command starts a run from a ticket yet.
+ */
+function interruptedTicketRunInto(to: string): Promise<string> {
+  return withTempRepo(async (from) => {
+    writeStub(from.dir, { ticket: true, sleepAt: 'implement#2' });
+    const controller = new AbortController();
+    const running = runWorkflow({
+      cwd: from.dir,
+      workflow: 'ticket-to-pr',
+      adapters: await fakeAdapters(from.dir),
+      source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false },
+      signal: controller.signal,
+    });
+    await interruptWhenAsleep(from.dir, running, () => controller.abort());
+    copyRun(from.dir, to);
+    return runIdIn(to);
+  });
+}
+
+// biome-ignore format: TDD-PENDING TASK-009
+test
+  .skip // TDD-PENDING TASK-009
+  ('sail resume refuses --input for a run from a ticket with exit 3, and leaves its STATUS and events as they were', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedTicketRunInto(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const files = () => ['STATUS', 'events.ndjson', 'journal.ndjson'].map((name) => readFileSync(join(dir, name), 'utf8'));
+    const before = files();
+    expect(await runCaptured(['resume', runId, '--input', '{}'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `sail resume: run ${runId} got its input from intake#1, so --input doesn't apply\n`,
+    });
+    expect(files()).toEqual(before);
+    expect(before[0]).toBe('suspended interrupted\n');
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-009
+test
+  .skip // TDD-PENDING TASK-009
+  ('sail resume runs a run from a ticket to its end with no --input, counting intake#1 among the calls that already ran', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedTicketRunInto(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const [first] = readFileSync(join(dir, 'journal.ndjson'), 'utf8').split('\n');
+    const { code, stdout, stderr } = await runCaptured(['resume', runId], repo.dir);
+    const lines = normaliseDurations(stdout).split('\n');
+    expect(lines[0]).toBe(`sail · ticket-to-pr v1 · ${runId} · resumed after 4 calls, last tests#1 failed`);
+    expect(lines.slice(-7)).toEqual([
+      '',
+      'completed · <t>',
+      '  calls    8 · 7 passed, 1 failed',
+      '  loops    fix 2/3',
+      `  replays  ${replaysOf(repo.dir, runId)}`,
+      `  run      .sail-runs/${runId}`,
+      '',
+    ]);
+    expect(stderr).toBe('');
+    expect(code).toBe(EXIT_OK);
+    const { entries } = readJournal(dir);
+    expect(entries.map((entry) => entry.key)).toEqual([
+      'intake#1',
+      'spec#1',
+      'implement#1',
+      'tests#1',
+      'implement#2',
+      'tests#2',
+      'self-review#1',
+      'publish#1',
+    ]);
+    expect(readFileSync(join(dir, 'journal.ndjson'), 'utf8').split('\n')[0]).toBe(first ?? '');
+    expect(readEvents(dir).filter((event) => event.type === 'ticket:fetched')).toHaveLength(1);
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-012
+test
+  .skip // TDD-PENDING TASK-012
+  ('a run from a ticket sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched once', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { ticket: true, sleepAt: 'implement#2' });
+    const helper = join(import.meta.dir, '..', 'helpers', 'ticket-run.ts');
+    const started = Bun.spawn([process.execPath, helper, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const { end: code, alive } = await interruptWhenAsleep(repo.dir, started.exited, () => started.kill('SIGINT'));
+    const runId = runIdIn(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const suspended = await new Response(started.stdout).text();
+    expect(suspended).toEndWith(`  run      .sail-runs/${runId}\nresume it with: sail resume ${runId}\n`);
+    expect(suspended).toContain('\n  stop     interrupted: stopped during implement#2\n');
+    expect(await new Response(started.stderr).text()).toBe('');
+    expect({ code, alive }).toEqual({ code: 2, alive: [] });
+
+    const resumed = Bun.spawnSync([process.execPath, shim, 'resume', runId], { cwd: repo.dir, env: repo.env });
+    expect(resumed.stdout.toString()).toStartWith(
+      `sail · ticket-to-pr v1 · ${runId} · resumed after 4 calls, last tests#1 failed\n`,
+    );
+    expect(resumed.stderr.toString()).toBe('');
+    expect(resumed.exitCode).toBe(0);
+    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    const fetched = readEvents(dir).filter((event) => event.type === 'ticket:fetched');
+    expect(fetched).toMatchObject([{ key: 'intake#1', ticketKey: 'FAKE-1' }]);
+    expect(readJournal(dir).entries.map((entry) => entry.key)).toEqual([
+      'intake#1',
+      'spec#1',
+      'implement#1',
+      'tests#1',
+      'implement#2',
+      'tests#2',
+      'self-review#1',
+      'publish#1',
+    ]);
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 60_000);

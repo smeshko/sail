@@ -9,13 +9,15 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BUILTINS } from '../../src/adapters/index';
-import { type ResolvedAdapters, resolveAdapters } from '../../src/engine/adapters';
-import { type AdapterConfig, PORTS, type Port, type ProjectConfig } from '../../src/engine/config';
+import { providerRelay, type ResolvedAdapters, resolveAdapters } from '../../src/engine/adapters';
+import { type AdapterConfig, PORTS, type Port, type ProjectConfig, readConfig } from '../../src/engine/config';
 import { runsDir } from '../../src/engine/run-dir';
 import { type AdapterEntry, type RunHeader, validateRunHeader } from '../../src/engine/run-header';
 import type { SchemaIssue } from '../../src/engine/schemas';
+import type { ProviderEvent } from '../../src/events/types';
 import type { Builtins, Env } from '../../src/ports/adapter';
 import { stubAdapter } from '../helpers/adapters';
+import { timed } from '../helpers/ports';
 
 const GOLDEN = join(import.meta.dir, '..', 'fixtures', 'runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N', 'run.json');
 const FAKE: AdapterEntry = { use: 'fake', origin: 'builtin' };
@@ -120,7 +122,8 @@ test("a module harness gets its entry's options and a context, and its entry nam
     } };`,
   );
   const env = { SAIL_TEST: '1' };
-  const emit = () => undefined;
+  const emitted: unknown[] = [];
+  const emit = (event: unknown) => emitted.push(event);
   const resolved = resolvedOrThrow(
     await resolve(sailDir, { harness: { use: './adapters/echo.ts', greeting: 'hi' } }, { env, emit }),
   );
@@ -129,9 +132,12 @@ test("a module harness gets its entry's options and a context, and its entry nam
   const seen = (globalThis as unknown as { __seenByEcho: { options: unknown; context: Record<string, unknown> } })
     .__seenByEcho;
   expect(seen.options).toEqual({ greeting: 'hi' });
-  expect(seen.context).toEqual({ root, sailDir, runsDir: runsDir(sailDir), env, emit });
+  expect(seen.context).toEqual({ root, sailDir, runsDir: runsDir(sailDir), env, emit: expect.any(Function) });
   expect(seen.context.env).toBe(env);
-  expect(seen.context.emit).toBe(emit);
+  // What the adapter emits reaches the emit the registry was given.
+  const leased = { type: 'workspace:leased', remote: 'fake://codehost/fixture', branch: 'sail/FAKE-1' };
+  (seen.context.emit as (event: unknown) => void)(leased);
+  expect(emitted).toEqual([leased]);
 });
 
 test('a module whose create is async is awaited, and a module that imports sail loads', async () => {
@@ -574,4 +580,101 @@ test("a version named 'issue' is recorded like any other", async () => {
   expect(resolved.entries.harness).toEqual({ use: 'only', origin: 'builtin', versions: { issue: '4.2.0' } });
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as RunHeader;
   expect(validateRunHeader({ ...golden, adapters: resolved.entries })).toEqual([]);
+});
+
+// The relay (D8): what the adapters emit, on its way to the run that is going.
+
+const FETCHED: ProviderEvent = {
+  type: 'ticket:fetched',
+  ticketKey: 'FAKE-1',
+  comments: 1,
+  links: 0,
+  attachments: 0,
+  durationMs: 3,
+};
+const LEASED: ProviderEvent = { type: 'workspace:leased', remote: 'fake://codehost/fixture', branch: 'sail/FAKE-1' };
+const FIXTURE_SAIL = join(import.meta.dir, '..', 'fixtures', 'repo', '.sail');
+
+/** Resolves `ports` of the fixture repository's config, with `emit` when one is given. */
+async function resolveFixture<P extends Port = Port>(
+  options: { ports?: readonly P[]; emit?: (event: ProviderEvent) => void } = {},
+) {
+  const config = readConfig(FIXTURE_SAIL);
+  if ('issues' in config) throw new Error(JSON.stringify(config.issues));
+  const resolved = await resolveAdapters({ sailDir: FIXTURE_SAIL, config, builtins: BUILTINS, env: {}, ...options });
+  if ('issues' in resolved) throw new Error(JSON.stringify(resolved.issues));
+  return resolved;
+}
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a relay hands each event to the sink attached to it, drops what it is given with none, and takes a new sink once the first is detached', () => {
+  const relay = providerRelay();
+  expect(() => relay.emit(FETCHED)).not.toThrow();
+  const first: ProviderEvent[] = [];
+  const detach = relay.attach((event) => first.push(event));
+  relay.emit(FETCHED);
+  relay.emit(LEASED);
+  expect(first).toEqual([FETCHED, LEASED]);
+  expect(first[0]).toBe(FETCHED);
+
+  detach();
+  relay.emit(FETCHED);
+  expect(first).toHaveLength(2);
+  const second: ProviderEvent[] = [];
+  relay.attach((event) => second.push(event));
+  relay.emit(LEASED);
+  expect(second).toEqual([LEASED]);
+  expect(first).toHaveLength(2);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a second sink while one is attached throws, and the first keeps receiving', () => {
+  const relay = providerRelay();
+  const first: ProviderEvent[] = [];
+  relay.attach((event) => first.push(event));
+  expect(() => relay.attach(() => undefined)).toThrow(/already attached/);
+  relay.emit(FETCHED);
+  expect(first).toEqual([FETCHED]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("resolveAdapters gives a relay its adapters emit into: an attached sink sees a get's ticket:fetched, and an emit given in the options receives every event, sink or not", async () => {
+  const given: ProviderEvent[] = [];
+  const resolved = await resolveFixture({ emit: (event) => given.push(event) });
+  await resolved.ports.ticketSource.get('FAKE-1');
+  const seen: ProviderEvent[] = [];
+  const detach = resolved.relay.attach((event) => seen.push(event));
+  await resolved.ports.ticketSource.get('FAKE-1');
+  detach();
+  await resolved.ports.ticketSource.get('FAKE-1');
+
+  expect(timed(seen)).toEqual([
+    { type: 'ticket:fetched', ticketKey: 'FAKE-1', comments: 1, links: 0, attachments: 0, durationMs: 'ms' },
+  ]);
+  expect(given.map((event) => event.type)).toEqual(['ticket:fetched', 'ticket:fetched', 'ticket:fetched']);
+  expect(given[1]).toBe(seen[0] as ProviderEvent);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('resolving a subset of the ports gives a relay too, which the adapters resolved emit into', async () => {
+  const resolved = await resolveFixture({ ports: ['ticketSource'] });
+  expect(Object.keys(resolved.ports)).toEqual(['ticketSource']);
+  const seen: ProviderEvent[] = [];
+  resolved.relay.attach((event) => seen.push(event));
+  await resolved.ports.ticketSource.get('FAKE-2');
+  expect(seen).toMatchObject([{ type: 'ticket:fetched', ticketKey: 'FAKE-2', comments: 0 }]);
+
+  // A harness alone emits nothing through it, and still has one to attach to.
+  const harness = await resolveFixture({ ports: ['harness'] });
+  const detach = harness.relay.attach(() => undefined);
+  expect(() => harness.relay.attach(() => undefined)).toThrow(/already attached/);
+  detach();
 });
