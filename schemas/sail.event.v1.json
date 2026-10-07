@@ -300,7 +300,8 @@
               "exit_code",
               "not_started",
               "budget_exceeded",
-              "harness"
+              "harness",
+              "port"
             ]
           },
           "message": { "type": "string", "minLength": 1 }
