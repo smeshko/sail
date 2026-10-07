@@ -3,6 +3,9 @@
 // directory exists. This module parses, hands the run's events to the terminal view and maps the run's status to an
 // exit code; the run is the engine's. Everything the command prints during the run comes from its events.
 //
+// `sail run` names no source, so it starts a run with no ticket, whose input is `--input`. The engine decides what an
+// input means for a run: neither command asks whether a run came from a ticket.
+//
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
 // resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
 //

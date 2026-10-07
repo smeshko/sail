@@ -195,7 +195,7 @@ export interface ReopenRunOptions {
   cwd: string;
   /** The run's id, its directory under `.sail-runs/`. */
   runId: string;
-  /** The input of a run with no ticket, given again and checked as on a fresh start. */
+  /** The input of a run with no ticket, given again and checked as on a fresh start. A run from a ticket takes none. */
   input?: unknown;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
@@ -242,6 +242,9 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in found) return found;
   const run = findRun(found.dir, runId);
   if ('refused' in run) return run;
+  if (options.input !== undefined && !isLocalSource(run.header.source)) {
+    return { refused: `run ${runId} got its input from ${INTAKE_KEY}, so --input doesn't apply` };
+  }
   const changed = changedAdapters(run.header, options.adapters.entries);
   if (changed.length > 0) return { refused: `run ${runId} can't resume on different adapters:\n${changed.join('\n')}` };
   claim(found.dir);

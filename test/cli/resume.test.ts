@@ -438,14 +438,12 @@ function interruptedTicketRunInto(to: string): Promise<string> {
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('sail resume refuses --input for a run from a ticket with exit 3, and leaves its STATUS and events as they were', async () => {
+test('sail resume refuses --input for a run from a ticket with exit 3, and leaves its STATUS and events as they were', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedTicketRunInto(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
-    const files = () => ['STATUS', 'events.ndjson', 'journal.ndjson'].map((name) => readFileSync(join(dir, name), 'utf8'));
+    const files = () =>
+      ['STATUS', 'events.ndjson', 'journal.ndjson'].map((name) => readFileSync(join(dir, name), 'utf8'));
     const before = files();
     expect(await runCaptured(['resume', runId, '--input', '{}'], repo.dir)).toEqual({
       code: EXIT_REFUSED,
@@ -457,10 +455,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('sail resume runs a run from a ticket to its end with no --input, counting intake#1 among the calls that already ran', async () => {
+test('sail resume runs a run from a ticket to its end with no --input, counting intake#1 among the calls that already ran', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedTicketRunInto(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);

@@ -89,10 +89,7 @@ test('a command that throws exits 4 and names the error', async () => {
   expect(stderr).toContain('at ');
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('the usage says what --input is for: a run with no ticket, started or resumed', async () => {
+test('the usage says what --input is for: a run with no ticket, started or resumed', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toContain(
     '\nInput of run and resume:\n' +

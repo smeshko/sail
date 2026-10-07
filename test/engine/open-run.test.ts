@@ -605,10 +605,7 @@ test("openRun refuses a workflow that reaches a stage named intake, whatever the
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('reopenRun refuses an input for a run that started from a ticket, and leaves STATUS and a torn tail of its events as they were', async () => {
+test('reopenRun refuses an input for a run that started from a ticket, and leaves STATUS and a torn tail of its events as they were', async () => {
   await withTempRepo(async (repo) => {
     const TORN = '{"seq":1,"ts":"2026-10-06T09:';
     const runId = await withTempRepo(async (from) => {

@@ -37,6 +37,9 @@ Usage:
   sail --version                                             Print the version
   sail --help                                                Print this help
 
+Input of run and resume:
+  --input <json>  Starts, and resumes, a run with no ticket. A run from a ticket gets its input from its intake
+
 Output of run and resume:
   -q, --quiet    Only the run's start, its errors and the final block
   -v, --verbose  Adds contract details, routes and every script's output tail; -vv prints every event

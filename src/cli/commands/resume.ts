@@ -3,6 +3,9 @@
 // wired stage never runs, and every refusal comes before the run's STATUS changes. A workflow changed since the run
 // started isn't refused: the determinism guard decides whether the journal still fits it.
 //
+// `--input` is passed through as given: the engine takes it again for a run with no ticket, and refuses it for a run
+// that got its input from its intake.
+//
 // Ctrl-C or SIGTERM suspends the run again, as it does during `sail run`, and the command prints how to resume it.
 //
 // The terminal view shows the whole run: it reads the run's earlier events first, prints nothing for them, and opens
