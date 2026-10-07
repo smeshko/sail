@@ -211,21 +211,27 @@ const CASES: Case[] = [
   },
   {
     rule: 'a no-break space after the heading leaves it the heading, and after a bold line leaves it bold alone',
-    description: lines('Intro.', '**Acceptance criteria:** ', '- one', '**Notes** ', '- no criterion'),
-    request: lines('Intro.', '**Notes** ', '- no criterion'),
+    description: lines('Intro.', '**Acceptance criteria:**\u00a0', '- one', '**Notes**\u00a0', '- no criterion'),
+    request: lines('Intro.', '**Notes**\u00a0', '- no criterion'),
     criteria: ['one'],
   },
   {
     rule: "a no-break space between the heading's words, after a marker or a checkbox, or as an indent, is a space",
-    description: lines('Acceptance criteria:', '- one', '  more', '1. two', '- [x] three'),
+    description: lines(
+      'Acceptance\u00a0criteria:',
+      '-\u00a0one',
+      '\u00a0\u00a0more',
+      '1.\u00a0two',
+      '- [x]\u00a0three',
+    ),
     request: '',
     criteria: [lines('one', 'more'), 'two', 'three'],
   },
   {
     rule: 'an item whose text holds a line separator is one criterion, whole',
-    description: lines('## Acceptance criteria', '- one more', '- two'),
+    description: lines('## Acceptance criteria', '- one\u2028more', '- two'),
     request: '',
-    criteria: ['one more', 'two'],
+    criteria: ['one\u2028more', 'two'],
   },
   {
     rule: 'a line ending with a stray carriage return before its CRLF ends the same',
@@ -235,7 +241,7 @@ const CASES: Case[] = [
   },
   {
     rule: 'a line of no-break spaces alone is a blank line',
-    description: lines('Intro.', ' ', '## Acceptance criteria', '- one', ' ', 'Outro.'),
+    description: lines('Intro.', '\u00a0', '## Acceptance criteria', '- one', '\u00a0', 'Outro.'),
     request: lines('Intro.', '', 'Outro.'),
     criteria: ['one'],
   },
@@ -292,8 +298,8 @@ const BARE_FENCE = /^(?:`{3,}|~{3,})$/;
 
 /** The lines a generated description is made of: every form of the heading, of an item, of a section's end and of a fence. */
 const POOL = [
-  '## Acceptance criteria ',
-  '- no-break item',
+  '## Acceptance criteria\u00a0',
+  '-\u00a0no-break item',
   '```',
   '```sh',
   '  ```',
