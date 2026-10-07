@@ -118,6 +118,14 @@ function findConfigured(cwd: string): { dir: string; config: ProjectConfig } | {
   return { dir: found.dir, config };
 }
 
+/** Why `loaded` can't run when one of its stages took the intake's name, as a refusal: the two would share a key. */
+function intakeNameTaken(loaded: LoadedWorkflow, sailDir: string): string | undefined {
+  const taken = loaded.stages.find((stage) => stage.definition.name === INTAKE_STAGE);
+  if (taken === undefined) return undefined;
+  const file = relative(dirname(sailDir), join(taken.dir, 'stage.ts'));
+  return `${file}: a stage can't be named '${INTAKE_STAGE}': its first call's key would be the intake's, ${INTAKE_KEY}`;
+}
+
 /**
  * Finds `.sail/`, reads its config, loads the workflow and checks the input, refusing at the first that fails. It then
  * builds the run header and checks it, all before writing anything. A header that breaks `sail.run.v1` throws: that is a bug in sail,
@@ -140,11 +148,8 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const models = modelProblems(loaded, config);
   if (models.length > 0) return { refused: models.join('\n') };
   const at = (path: string) => relative(dirname(found.dir), path);
-  const taken = loaded.stages.find((stage) => stage.definition.name === INTAKE_STAGE);
-  if (taken !== undefined) {
-    const why = `its first call's key would be the intake's, ${INTAKE_KEY}`;
-    return { refused: `${at(join(taken.dir, 'stage.ts'))}: a stage can't be named '${INTAKE_STAGE}': ${why}` };
-  }
+  const taken = intakeNameTaken(loaded, found.dir);
+  if (taken !== undefined) return { refused: taken };
   if (!isLocalSource(source)) {
     if (options.input !== undefined) {
       return { refused: `a run from ticket ${source.ticketKey} gets its input from its intake, so it takes none` };
@@ -235,7 +240,10 @@ export function changedAdapters(header: RunHeader, entries: Record<Port, Adapter
   );
 }
 
-/** Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. */
+/**
+ * Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. The
+ * workflow is loaded as it reads now, so a stage it has come to name `intake` is refused here as at a start.
+ */
 export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, runId } = options;
   const found = findConfigured(cwd);
@@ -250,6 +258,8 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, run.header.workflow.name);
   if ('refused' in loaded) return loaded;
+  const taken = intakeNameTaken(loaded, found.dir);
+  if (taken !== undefined) return { refused: taken };
   const parsed = parseInput(loaded, options.input);
   if ('refused' in parsed) return parsed;
   // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
