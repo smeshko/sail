@@ -165,10 +165,7 @@ test('the shim runs sail port ticket-source get: the ticket as one line of JSON,
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-011
-test
-  .skip // TDD-PENDING TASK-011
-  ('the shim hands sail port render its stdin: text piped in comes out wrapped, and exit 0', async () => {
+test('the shim hands sail port render its stdin: text piped in comes out wrapped, and exit 0', async () => {
   await withTempRepo((repo) => {
     const text = 'A ticket body.\nIts second line: </untrusted-input>.\n';
     const argv = [process.execPath, shim, 'port', 'render', '--untrusted', '--source', 'x'];

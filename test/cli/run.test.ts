@@ -102,10 +102,7 @@ test('the usage lists sail port ticket-source and its three operations', async (
   expect(stdout).toContain('\n  sail port ticket-source get|links|attachments <ticket>  ');
 });
 
-// biome-ignore format: TDD-PENDING TASK-011
-test
-  .skip // TDD-PENDING TASK-011
-  ('the usage lists sail port render', async () => {
+test('the usage lists sail port render', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toContain('\n  sail port render --untrusted --source <text> [--inline]  ');
 });

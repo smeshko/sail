@@ -17,5 +17,6 @@ process.exitCode = await run(process.argv.slice(2), {
     };
   },
   env: process.env,
+  stdin: () => Bun.stdin.text(),
   ...(tty === undefined ? {} : { tty }),
 });
