@@ -605,6 +605,30 @@ test("openRun refuses a workflow that reaches a stage named intake, whatever the
   });
 });
 
+test('reopenRun refuses a workflow that has come to reach a stage named intake, and leaves STATUS as it was', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const sail = join(repo.dir, '.sail');
+    write(
+      sail,
+      'stages/intake/stage.ts',
+      "import { script, z } from 'sail';\nexport const intake = script('intake', { run: './run.sh', output: z.object({ ok: z.boolean() }) });\n",
+    );
+    edit(
+      sail,
+      WORKFLOW,
+      "import { tests } from '../../stages/tests/stage';",
+      "import { intake as fetch } from '../../stages/intake/stage';\nimport { tests } from '../../stages/tests/stage';\nvoid fetch;",
+    );
+    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
+    expect(reopened).toEqual({
+      refused:
+        ".sail/stages/intake/stage.ts: a stage can't be named 'intake': its first call's key would be the intake's, intake#1",
+    });
+    expect(readFileSync(join(repo.dir, '.sail-runs', run.runId, 'STATUS'), 'utf8')).toBe('suspended budget_exceeded\n');
+  });
+});
+
 test('reopenRun refuses an input for a run that started from a ticket, and leaves STATUS and a torn tail of its events as they were', async () => {
   await withTempRepo(async (repo) => {
     const TORN = '{"seq":1,"ts":"2026-10-06T09:';
