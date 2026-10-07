@@ -295,6 +295,50 @@ const CASES: Case[] = [
     request: lines('```', '## Notes'),
     criteria: [lines('one', '```', '# code'), 'two'],
   },
+  {
+    rule: 'a marker alone on its line is an item too: a heading in a fence under it, before the section, is no heading',
+    description: lines(
+      '-',
+      '    ```md',
+      '  ## Acceptance criteria',
+      '  - fake',
+      '    ```',
+      '## Acceptance criteria',
+      '- real',
+    ),
+    request: lines('-', '    ```md', '  ## Acceptance criteria', '  - fake', '    ```'),
+    criteria: ['real'],
+  },
+  {
+    rule: 'a fence under a marker alone on its line, in the section, keeps its lines to itself',
+    description: lines('## Acceptance criteria', '-', '    ```', '  ## Notes', '  - fake', '    ```', '- real'),
+    request: lines('-', '    ```', '  ## Notes', '  - fake', '    ```'),
+    criteria: ['real'],
+  },
+  {
+    rule: 'a blank line right under a marker alone ends its item, so backticks indented below it are no fence',
+    description: lines('## Acceptance criteria', '-', '', '    ```', '  ## Notes', '- no criterion'),
+    request: lines('## Acceptance criteria', '-', '', '    ```', '  ## Notes', '- no criterion'),
+    criteria: [],
+  },
+  {
+    rule: "a marker alone right under a paragraph's line is more of the paragraph, and opens no item",
+    description: lines('## Acceptance criteria', 'Some prose', '*', '    ```', '  ## Notes', '- no criterion'),
+    request: lines('## Acceptance criteria', 'Some prose', '*', '    ```', '  ## Notes', '- no criterion'),
+    criteria: [],
+  },
+  {
+    rule: 'a marker alone that falls short of the item above it starts an item of its own',
+    description: lines('## Acceptance criteria', '- one', '*', '    ```', '  ## Notes', '    ```', '- two'),
+    request: lines('*', '    ```', '  ## Notes', '    ```'),
+    criteria: ['one', 'two'],
+  },
+  {
+    rule: 'a numbered marker alone holds a fence at the column past it',
+    description: lines('## Acceptance criteria', '1.', '   ```', '   ## Notes', '   ```', '- real'),
+    request: lines('1.', '   ```', '   ## Notes', '   ```'),
+    criteria: ['real'],
+  },
 ];
 
 test.each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { description, request, criteria }) => {
