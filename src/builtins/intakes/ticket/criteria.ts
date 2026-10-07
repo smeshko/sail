@@ -73,18 +73,18 @@ export function splitDescription(description: string): SplitDescription {
 
   const taken = new Set<number>([at]);
   const criteria: string[][] = [];
-  /** The item the lines below may belong to: its indent, and the column its text starts at. */
+  /**
+   * The item the lines below may belong to: its indent, and the column its text starts at. An item indented further
+   * is nested in it, and one indented as far or less is the next criterion.
+   */
   let open: { indent: number; column: number; lines: string[] } | undefined;
-  /** The indent of the section's first item: an item indented further is nested in the one above it. */
-  let top: number | undefined;
   for (let index = at + 1; index < lines.length; index++) {
     const line = lines[index] ?? '';
     if (!code[index] && endsSection(line, level)) break;
     if (line.trim() === '') continue;
     const indent = indentOf(line);
     const text = code[index] ? undefined : ITEM.exec(line)?.[1];
-    if (text !== undefined && (open === undefined || indent <= (top ?? indent))) {
-      top ??= indent;
+    if (text !== undefined && (open === undefined || indent <= open.indent)) {
       open = { indent, column: line.length - text.length, lines: [text.replace(CHECKBOX, '').trimEnd()] };
       criteria.push(open.lines);
       taken.add(index);
