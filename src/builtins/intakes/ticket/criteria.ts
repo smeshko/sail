@@ -9,24 +9,28 @@ export interface SplitDescription {
   criteria: string[];
 }
 
-const TEXT = 'acceptance criteria';
+// Whitespace is whatever `\s` takes, a no-break space included: a description pasted from rich text holds them. A
+// line never holds its own ending, so `\s` can't run past it.
+
+/** The heading's text, as a pattern: its two words, with whitespace between. */
+const TEXT = 'acceptance\\s+criteria';
 
 /** An ATX heading of any text: `## Notes`. Its level is how many `#` it has. */
-const ATX = /^ {0,3}(#{1,6})(?:[ \t]|$)/;
+const ATX = /^ {0,3}(#{1,6})(?:\s|$)/;
 /** The ATX form of the heading: `### Acceptance criteria:`. */
-const ATX_HEADING = new RegExp(`^ {0,3}(#{1,6})[ \\t]+${TEXT}[ \\t]*:?[ \\t]*$`, 'i');
+const ATX_HEADING = new RegExp(`^ {0,3}(#{1,6})\\s+${TEXT}\\s*:?\\s*$`, 'i');
 /** A line that is bold and nothing else: `**Notes**`, `__Notes:__`. */
-const BOLD = /^[ \t]*(\*\*|__)\S(?:.*\S)?\1:?[ \t]*$/;
+const BOLD = /^\s*(\*\*|__)\S(?:.*\S)?\1:?\s*$/s;
 /** The bold form of the heading: `**Acceptance criteria**`, with a colon inside or after. */
-const BOLD_HEADING = new RegExp(`^[ \\t]*(\\*\\*|__)${TEXT}:?\\1:?[ \\t]*$`, 'i');
+const BOLD_HEADING = new RegExp(`^\\s*(\\*\\*|__)${TEXT}:?\\1:?\\s*$`, 'i');
 /** The plain form of the heading, which needs its colon: `Acceptance criteria:`. */
-const PLAIN_HEADING = new RegExp(`^[ \\t]*${TEXT}:[ \\t]*$`, 'i');
+const PLAIN_HEADING = new RegExp(`^\\s*${TEXT}:\\s*$`, 'i');
 /** A list item, whose text is the capture: `- text`, `* text`, `+ text`, `1. text`, `1) text`. */
-const ITEM = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]+(\S.*)$/;
+const ITEM = /^\s*(?:[-*+]|\d+[.)])\s+(\S.*)$/s;
 /** A task checkbox at the start of an item's text: `[ ] `, `[x] `. */
-const CHECKBOX = /^\[[ xX]\][ \t]+(?=\S)/;
+const CHECKBOX = /^\[[ xX]\]\s+(?=\S)/;
 /** A code fence's line, whose marker is the capture: three or more backticks with no backtick after, or tildes. */
-const FENCE = /^[ \t]*(`{3,}(?=[^`]*$)|~{3,})/;
+const FENCE = /^\s*(`{3,}(?=[^`]*$)|~{3,})/;
 
 const indentOf = (line: string): number => line.length - line.trimStart().length;
 
@@ -64,7 +68,8 @@ function endsSection(line: string, level: number): boolean {
 
 /** Splits `description` into the request and the acceptance criteria it lists. */
 export function splitDescription(description: string): SplitDescription {
-  const lines = description.split(/\r?\n/);
+  // A line ends at its line feed, with whatever carriage returns came before it.
+  const lines = description.split(/\r*\n/);
   // Nothing in a code fence is a heading, a section's end or an item: `# build` there is a comment.
   const code = fenced(lines);
   const at = lines.findIndex((line, index) => !code[index] && headingLevel(line) !== undefined);
@@ -100,7 +105,7 @@ export function splitDescription(description: string): SplitDescription {
   const kept = lines.filter((_, index) => !taken.has(index));
   const request = kept
     .join('\n')
-    .replace(/\n[ \t]*(?:\n[ \t]*)+\n/g, '\n\n')
+    .replace(/\n[^\S\n]*(?:\n[^\S\n]*)+\n/g, '\n\n')
     .trim();
   return { request, criteria: criteria.map((each) => each.join('\n')) };
 }
