@@ -245,6 +245,56 @@ const CASES: Case[] = [
     request: lines('Intro.', '', 'Outro.'),
     criteria: ['one'],
   },
+  {
+    rule: "a code fence that opens on an item's own line is the item's, and the items after it are still criteria",
+    description: lines(
+      '## Acceptance criteria',
+      '- ```sh',
+      '  # build first',
+      '  make',
+      '  ```',
+      '- second',
+      '- third',
+    ),
+    request: '',
+    criteria: [lines('```sh', '# build first', 'make', '```'), 'second', 'third'],
+  },
+  {
+    rule: 'backticks indented four spaces, or by a tab, are an indented code block and open no code fence',
+    description: lines('Intro.', '', '    ```', '', '\t~~~', '', '## Acceptance criteria', '- one'),
+    request: lines('Intro.', '', '    ```', '', '\t~~~'),
+    criteria: ['one'],
+  },
+  {
+    rule: 'a code fence left open in an item ends with the item',
+    description: lines('## Acceptance criteria', '- one', '  ```', '  # code', '- two', '## Notes', '- no criterion'),
+    request: lines('## Notes', '- no criterion'),
+    criteria: [lines('one', '```', '# code'), 'two'],
+  },
+  {
+    rule: "backticks indented four spaces past an item's text are the item's code, and open no code fence",
+    description: lines('## Acceptance criteria', '- one', '', '      ```', '', '- two', '## Notes'),
+    request: '## Notes',
+    criteria: [lines('one', '    ```'), 'two'],
+  },
+  {
+    rule: "a line of text right under an item goes on with its paragraph, so a fence indented under it is the item's",
+    description: lines('## Acceptance criteria', '- one', 'goes on', '  ```', '# Notes', '- no criterion'),
+    request: lines('goes on', '  ```', '# Notes', '- no criterion'),
+    criteria: ['one'],
+  },
+  {
+    rule: "a fence's marker indented four spaces past its block is the fence's own code, and closes nothing",
+    description: lines('## Acceptance criteria', '- one', '```', '    ```', '- no item', '```', '- two'),
+    request: lines('```', '    ```', '- no item', '```'),
+    criteria: ['one', 'two'],
+  },
+  {
+    rule: "a fence left open in an item is closed by its own marker at the margin, as Bun's Markdown parser reads it",
+    description: lines('## Acceptance criteria', '- one', '  ```', '  # code', '```', '- two', '## Notes'),
+    request: lines('```', '## Notes'),
+    criteria: [lines('one', '```', '# code'), 'two'],
+  },
 ];
 
 test.each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { description, request, criteria }) => {
@@ -356,4 +406,224 @@ test('no line is lost: every non-blank line of a description is in the request, 
   const withCriteria = descriptions.filter((description) => splitDescription(description).criteria.length > 0);
   expect(withCriteria.length).toBeGreaterThan(50);
   expect(descriptions.length - withCriteria.length).toBeGreaterThan(50);
+});
+
+// A section built from parts, so the criteria it holds are known as it is made, with no second splitter to say so. Each
+// part is a shape of fence that a line-by-line reading gets wrong, and every fence holds lines that would be a heading
+// or an item outside one. Bun's own Markdown parser then confirms the parts are what Markdown says they are.
+
+interface Built {
+  description: string;
+  criteria: string[];
+  /** The description's lines that belong to the request, the blank ones left out. */
+  kept: string[];
+  /** The headings a Markdown reader sees, in order. */
+  headings: string[];
+}
+
+function built(seed: number): Built {
+  const random = seeded(seed);
+  const pick = <T>(of: readonly T[]): T => of[Math.floor(random() * of.length)] as T;
+  let named = 0;
+  /** A name no other line holds, so a line is found again in what a parser makes of it. */
+  const token = () => `L${named++}`;
+  const fence = () => pick(['```', '~~~', '````']);
+  /** What a fence must keep to itself: a heading that would end the section, an item, and the heading itself. */
+  const hostile = () => [`# Top ${token()}`, `- dash ${token()}`, '## Acceptance criteria'];
+
+  const out: string[] = [];
+  const criteria: string[] = [];
+  const kept: string[] = [];
+  const keep = (...each: string[]) => {
+    out.push(...each);
+    kept.push(...each);
+  };
+  /** An item and the lines under it: one criterion. */
+  const item = (text: string, ...under: string[]) => {
+    out.push(`- ${text}`, ...under.map((line) => `  ${line}`));
+    criteria.push([text, ...under].join('\n'));
+  };
+  const fencedUnder = () => {
+    const marker = fence();
+    item(`item ${token()}`, marker, ...hostile(), marker);
+  };
+  const fencedOnItsLine = () => {
+    const marker = fence();
+    item(`${marker}${token()}`, ...hostile(), marker);
+  };
+  /** A fence left open in an item, which the next item ends. */
+  const leftOpen = () => {
+    item(`item ${token()}`, fence(), ...hostile());
+    item(`item ${token()}`);
+  };
+  const atTheMargin = () => {
+    const marker = fence();
+    keep(marker, ...hostile(), marker);
+  };
+  const parts = [
+    () => item(`item ${token()}`),
+    () => item(`item ${token()}`, `more ${token()}`),
+    fencedUnder,
+    fencedOnItsLine,
+    leftOpen,
+    atTheMargin,
+    // A longer fence that holds a shorter one.
+    () => keep('````', '```', ...hostile(), '````'),
+    () => keep(`prose ${token()}`),
+    // Backticks indented as code, which open no fence.
+    () => keep('', `prose ${token()}`, '', `    \`\`\`${token()}`, ''),
+  ];
+
+  keep(`Intro ${token()}`);
+  // Before the section: a template in a fence, indented backticks, and a fence left open in an item.
+  if (random() < 0.5) keep('```md', '## Acceptance criteria', `- sample ${token()}`, '```');
+  if (random() < 0.3) keep('', `    \`\`\`${token()}`, '');
+  if (random() < 0.3) keep(`- before ${token()}`, '  ~~~', '  ## Acceptance criteria', `prose ${token()}`);
+  out.push('## Acceptance criteria');
+  const count = 1 + Math.floor(random() * 6);
+  for (let index = 0; index < count; index++) pick(parts)();
+  const headings = ['Acceptance criteria'];
+  if (random() < 0.5) {
+    const notes = `Notes ${token()}`;
+    keep(`## ${notes}`, `- no criterion ${token()}`);
+    headings.push(notes);
+  }
+  // With no criterion nothing is removed, the heading included.
+  const request = criteria.length === 0 ? out : kept;
+  return { description: out.join('\n'), criteria, kept: request.filter((line) => line.trim() !== ''), headings };
+}
+
+const BUILT = Array.from({ length: 300 }, (_, seed) => built(seed));
+
+test('a section built from fenced parts gives the criteria it was built with, whatever its fences hold', () => {
+  const wrong = BUILT.flatMap(({ description, criteria, kept }) => {
+    const split = splitDescription(description);
+    const request = split.request.split('\n').filter((line) => line.trim() !== '');
+    const same = Bun.deepEquals(split.criteria, criteria) && Bun.deepEquals(request, kept);
+    return same ? [] : [{ description, split, criteria, kept }];
+  });
+  expect(wrong).toEqual([]);
+  // The built sections reach the shapes a flat reading of fences gets wrong.
+  const holding = (pattern: RegExp) => BUILT.filter(({ description }) => pattern.test(description)).length;
+  expect(holding(/^- (?:`{3,}|~{3,})L\d+$/m)).toBeGreaterThan(50);
+  expect(holding(/^ {4}`{3}L\d+$/m)).toBeGreaterThan(50);
+  expect(BUILT.filter(({ criteria }) => criteria.length === 0).length).toBeGreaterThan(5);
+});
+
+/** A line's own name, as the built and the random descriptions give one. */
+const TOKEN = /L\d+/;
+
+interface Read {
+  heading?: { text: string; level: number };
+  /** A top-level list item's text, with the code under it. */
+  item?: string;
+}
+
+/** What Bun's Markdown parser makes of `description`: its headings and its top-level list items, in order. */
+function readByBun(description: string): Read[] {
+  const seen: Read[] = [];
+  Bun.markdown.render(description, {
+    heading: (children, meta) => {
+      seen.push({ heading: { text: children, level: meta.level } });
+      return children;
+    },
+    // The info string goes first: it is the name of a fence that opens on an item's own line.
+    code: (children, meta) => `${meta?.language ?? ''}\n${children}`,
+    listItem: (children, meta) => {
+      if (meta.depth === 0) seen.push({ item: children });
+      return children;
+    },
+  });
+  return seen;
+}
+
+/** The name of each top-level item between the heading and the next one of its level or higher. */
+function sectionItems(seen: readonly Read[]): (string | undefined)[] {
+  const at = seen.findIndex((each) => each.heading?.text === 'Acceptance criteria');
+  if (at === -1) return [];
+  const level = seen[at]?.heading?.level ?? 0;
+  const section = seen.slice(at + 1);
+  const end = section.findIndex((each) => each.heading !== undefined && each.heading.level <= level);
+  return (end === -1 ? section : section.slice(0, end))
+    .filter((each) => each.item !== undefined)
+    .map((each) => TOKEN.exec(each.item ?? '')?.[0]);
+}
+
+test("Bun's Markdown parser reads each built section as it was built: its headings, and one item per criterion", () => {
+  const wrong = BUILT.flatMap(({ description, criteria, headings }) => {
+    const seen = readByBun(description);
+    const read = { headings: seen.flatMap((each) => each.heading?.text ?? []), items: sectionItems(seen) };
+    const expected = { headings, items: criteria.map((each) => TOKEN.exec(each)?.[0]) };
+    return Bun.deepEquals(read, expected) ? [] : [{ description, read, expected }];
+  });
+  expect(wrong).toEqual([]);
+});
+
+// Random descriptions of fence shapes, read by the splitter and by Bun's Markdown parser. The pool holds only lines on
+// which D3 and Markdown agree about what a top-level item is, so the two can differ only over where a fence runs.
+
+/** `@` is where a line's own name goes. A fence line with none can close a fence as well as open one. */
+const FENCE_POOL = [
+  '- item @',
+  '- item @',
+  '- item @',
+  '* item @',
+  '1. item @',
+  '-   item @',
+  'prose @',
+  '  more @',
+  '   more @',
+  '    more @',
+  '',
+  '',
+  '```',
+  ' ```',
+  '  ```',
+  '   ```',
+  '    ```',
+  '     ```',
+  '      ```',
+  '\t```',
+  '~~~',
+  '  ~~~',
+  '   ~~~',
+  '````',
+  '  ````',
+  '`````',
+  '```@',
+  '  ```@',
+  '    ```@',
+  '- ```@',
+  '- ~~~@',
+  '1. ```@',
+  '- - item @',
+  '- - ```@',
+  '## Notes @',
+  '### Deeper @',
+  '## Acceptance criteria',
+  '# Top @',
+];
+
+/** A section of 2 to 13 lines from the fence pool, under the heading. */
+function fencedAtRandom(seed: number): string {
+  const random = seeded(seed);
+  const count = 2 + Math.floor(random() * 12);
+  const section = Array.from({ length: count }, (_, index) =>
+    (FENCE_POOL[Math.floor(random() * FENCE_POOL.length)] ?? '').replace('@', `L${index}`),
+  );
+  return ['Intro L99', '## Acceptance criteria', ...section].join('\n');
+}
+
+test("over random fence shapes, the criteria are the section's top-level items as Bun's Markdown parser reads them", () => {
+  const descriptions = Array.from({ length: 3000 }, (_, seed) => fencedAtRandom(seed));
+  const differing = descriptions.flatMap((description) => {
+    const criteria = splitDescription(description).criteria.map((each) => TOKEN.exec(each)?.[0]);
+    const items = sectionItems(readByBun(description));
+    return Bun.deepEquals(criteria, items) ? [] : [{ description, criteria, items }];
+  });
+  expect(differing).toEqual([]);
+  // The descriptions reach both sides: sections that list criteria, and sections whose fences leave none.
+  const withCriteria = descriptions.filter((description) => splitDescription(description).criteria.length > 0);
+  expect(withCriteria.length).toBeGreaterThan(500);
+  expect(descriptions.length - withCriteria.length).toBeGreaterThan(100);
 });
