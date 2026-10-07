@@ -34,7 +34,8 @@ Usage:
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
-  sail --version                                             Print the version
+  sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
+  sail --version                                            Print the version
   sail --help                                                Print this help
 
 Input of run and resume:

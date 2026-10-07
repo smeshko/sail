@@ -78,10 +78,7 @@ function oneLine(stdout: string): unknown {
   return JSON.parse(stdout);
 }
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("sail port ticket-source get prints the ticket as one line of JSON, the port's Ticket with its raw, and writes nothing", async () => {
+test("sail port ticket-source get prints the ticket as one line of JSON, the port's Ticket with its raw, and writes nothing", async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
     const { code, stdout, stderr } = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-5'], repo.dir);
@@ -95,10 +92,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("the ticket argument goes through the adapter's parseKey: a URL the provider owns names the same ticket, from any directory of the repository", async () => {
+test("the ticket argument goes through the adapter's parseKey: a URL the provider owns names the same ticket, from any directory of the repository", async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
     const deep = join(repo.dir, 'src', 'deep');
@@ -109,13 +103,11 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("links and attachments print the ticket's lists as JSON arrays, and [] for a ticket that has none", async () => {
+test("links and attachments print the ticket's lists as JSON arrays, and [] for a ticket that has none", async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
-    const printed = async (operation: string, ticket: string) => runCaptured(['port', 'ticket-source', operation, ticket], repo.dir);
+    const printed = async (operation: string, ticket: string) =>
+      runCaptured(['port', 'ticket-source', operation, ticket], repo.dir);
     expect(await printed('links', 'FAKE-5')).toEqual({
       code: EXIT_OK,
       stdout: `${JSON.stringify(LINKED.links)}\n`,
@@ -131,10 +123,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("a ticket the ticket source does not have exits 1, with the port's message and code on stderr and nothing on stdout", async () => {
+test("a ticket the ticket source does not have exits 1, with the port's message and code on stderr and nothing on stdout", async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
     for (const operation of ['get', 'links', 'attachments']) {
@@ -147,14 +136,15 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  .each<[string, string[], string]>([
+test.each<[string, string[], string]>([
   ['no port', [], 'no port given'],
   ['an unknown port', ['teapot', 'get', 'FAKE-1'], "unknown port 'teapot'"],
   ['no operation', ['ticket-source'], 'no operation given for ticket-source'],
-  ['an operation outside this phase', ['ticket-source', 'claim', 'FAKE-1'], "unknown operation 'claim' of ticket-source"],
+  [
+    'an operation outside this phase',
+    ['ticket-source', 'claim', 'FAKE-1'],
+    "unknown operation 'claim' of ticket-source",
+  ],
   ['no ticket', ['ticket-source', 'get'], 'ticket-source get needs a ticket'],
 ])('sail port given %s exits 3, saying so, with the usage', async (_, argv, problem) => {
   await withTempRepo(async (repo) => {
@@ -165,10 +155,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("an argument the adapter's parseKey does not take exits 3, naming it, and no port call is made", async () => {
+test("an argument the adapter's parseKey does not take exits 3, naming it, and no port call is made", async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
     const { code, stdout, stderr } = await runCaptured(['port', 'ticket-source', 'get', 'ADW-7'], repo.dir);
@@ -178,10 +165,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('outside a repository, with no .sail/, with a project.yaml that breaks its schema or a ticketSource no adapter fills, sail port exits 3 saying which', async () => {
+test('outside a repository, with no .sail/, with a project.yaml that breaks its schema or a ticketSource no adapter fills, sail port exits 3 saying which', async () => {
   const get = ['port', 'ticket-source', 'get', 'FAKE-1'];
   const dir = outside();
   expect(await runCaptured(get, dir, { env: {} })).toEqual({
@@ -212,10 +196,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('SAIL_CONFIG names the project.yaml whose ticket source answers, whatever the working directory, and one that names no file exits 3', async () => {
+test('SAIL_CONFIG names the project.yaml whose ticket source answers, whatever the working directory, and one that names no file exits 3', async () => {
   await withTempRepo(async (other) => {
     const sail = fixtureWithLinked(other.dir);
     edit(sail, 'fake/tickets.json', '"title": "Link the changelog"', '"title": "From the other repository"');
@@ -240,10 +221,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('only the ticket source is resolved: a harness entry that names a module which does not exist does not refuse a get', async () => {
+test('only the ticket source is resolved: a harness entry that names a module which does not exist does not refuse a get', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureWithLinked(repo.dir);
     edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/no-such-harness.ts }');
@@ -253,10 +231,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("a claim made through the fake elsewhere shows in get's state, and the get leaves the state file as it was", async () => {
+test("a claim made through the fake elsewhere shows in get's state, and the get leaves the state file as it was", async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureWithLinked(repo.dir);
     const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
@@ -270,10 +245,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("an answer that is no Ticket, from a repository's own adapter, exits 1 naming the port and the operation", async () => {
+test("an answer that is no Ticket, from a repository's own adapter, exits 1 naming the port and the operation", async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureWithLinked(repo.dir);
     const fake = join(import.meta.dir, '..', '..', 'src', 'adapters', 'fake', 'ticket-source');

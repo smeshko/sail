@@ -147,10 +147,7 @@ test.each(['SIGINT', 'SIGTERM'] as const)(
   60_000,
 );
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('the shim runs sail port ticket-source get: the ticket as one line of JSON, and exit 0', async () => {
+test('the shim runs sail port ticket-source get: the ticket as one line of JSON, and exit 0', async () => {
   await withTempRepo((repo) => {
     copyFixture(repo.dir);
     const argv = [process.execPath, shim, 'port', 'ticket-source', 'get', 'FAKE-1'];

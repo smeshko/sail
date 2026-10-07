@@ -8,22 +8,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { render, untrustedInput } from '../../../engine/render';
-import { PortError } from '../../../ports/errors';
-import { Ticket } from '../../../ports/types';
+import { getTicket } from '../../../ports/ticket-source';
+import type { Ticket } from '../../../ports/types';
 import type { IntakeContext } from '../index';
 import { splitDescription } from './criteria';
 
 /** `ticket.json`: the port's ticket, with the criteria the description listed. */
 export type TicketFile = Ticket & { acceptanceCriteria: string[] };
-
-/** What `get` answered, as the port's Ticket, or a PortError saying where it isn't one. */
-function asTicket(ticketKey: string, answer: unknown): Ticket {
-  const parsed = Ticket.safeParse(answer);
-  if (parsed.success) return parsed.data;
-  const [issue] = parsed.error.issues;
-  const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
-  throw new PortError('ticketSource', 'get', 'invalid', `ticket ${ticketKey} is not a Ticket: ${where}`, answer);
-}
 
 /** The brief's values: every provider string marked with where it came from, so the renderer wraps each one. */
 function briefValues(key: string, ticket: Ticket, request: string, criteria: readonly string[]) {
@@ -53,10 +44,13 @@ function briefValues(key: string, ticket: Ticket, request: string, criteria: rea
   };
 }
 
-/** Runs the `ticket` intake once: one `get`, the two files, the output. A failed port call leaves it as a PortError. */
+/**
+ * Runs the `ticket` intake once: one `get`, the two files, the output. A failed port call leaves it as a PortError, and
+ * so does an answer that is no Ticket, before any file is written.
+ */
 export async function ticketIntake(context: IntakeContext): Promise<unknown> {
   const key = context.source.ticketKey;
-  const ticket = asTicket(key, await context.ticketSource.get(key));
+  const ticket = await getTicket(context.ticketSource, key);
   const { request, criteria } = splitDescription(ticket.description);
 
   const file: TicketFile = { ...ticket, acceptanceCriteria: criteria };

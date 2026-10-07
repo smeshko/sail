@@ -3,13 +3,80 @@
 //   sail port ticket-source get <ticket>            the ticket, as the port's Ticket
 //   sail port ticket-source links <ticket>          its links
 //   sail port ticket-source attachments <ticket>    its attachments
-//   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
 //
 // A result is one line of JSON on stdout. A failed port call exits 1 with the port's message, and anything refused
 // before a call is made exits 3. It emits no events: no run is attached to the adapters it resolves.
-import { EXIT_OK, type ExitCode } from '../exit-codes';
+//
+// `.sail/` is the directory of `SAIL_CONFIG` when the environment sets it, as the preamble does for every script step,
+// and is found from the working directory otherwise. Only the port asked for is resolved, so no other adapter is
+// loaded or asked for its credentials.
+import { statSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { findSailDir } from '../../engine/sail-dir';
+import { PortError } from '../../ports/errors';
+import { getTicket, type TicketSource } from '../../ports/ticket-source';
+import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
+import { findProject, refuseAs } from './run-workflow';
 
-export async function port(_args: Parsed, _io: Io): Promise<ExitCode> {
-  return EXIT_OK;
+const COMMAND = 'sail port';
+
+const USAGE = 'usage: sail port ticket-source get|links|attachments <ticket>';
+
+/**
+ * Each port by its name on the command line, with the operations this command runs: the one place either is named.
+ * `links` and `attachments` are no operations of the port: they read `get`'s answer.
+ */
+const PORTS = {
+  'ticket-source': {
+    port: 'ticketSource',
+    operations: {
+      get: getTicket,
+      links: async (source: TicketSource, ticketKey: string) => (await getTicket(source, ticketKey)).links,
+      attachments: async (source: TicketSource, ticketKey: string) => (await getTicket(source, ticketKey)).attachments,
+    },
+  },
+} as const;
+
+/** `.sail/`: the directory of `SAIL_CONFIG` when it is set, found from the working directory otherwise. */
+function findSail(io: Io): { dir: string } | { refused: string } {
+  const configured = (io.env ?? process.env).SAIL_CONFIG;
+  if (configured === undefined || configured === '') return findSailDir(io.cwd);
+  const file = resolve(io.cwd, configured);
+  if (!statSync(file, { throwIfNoEntry: false })?.isFile()) {
+    return { refused: `SAIL_CONFIG names ${configured}, which is no file` };
+  }
+  return { dir: dirname(file) };
+}
+
+export async function port(args: Parsed, io: Io): Promise<ExitCode> {
+  const refuse = refuseAs(io, COMMAND);
+  const usage = (message: string) => refuse(`${message}\n${USAGE}`);
+  const [name, operation, ref] = args.positionals;
+  if (name === undefined) return usage('no port given');
+  const entry = Object.hasOwn(PORTS, name) ? PORTS[name as keyof typeof PORTS] : undefined;
+  if (entry === undefined) return usage(`unknown port '${name}'`);
+  if (operation === undefined) return usage(`no operation given for ${name}`);
+  const run = Object.hasOwn(entry.operations, operation)
+    ? entry.operations[operation as keyof typeof entry.operations]
+    : undefined;
+  if (run === undefined) return usage(`unknown operation '${operation}' of ${name}`);
+  if (ref === undefined) return usage(`${name} ${operation} needs a ticket`);
+
+  const project = await findProject(io, COMMAND, { found: findSail(io), ports: [entry.port] });
+  if (typeof project === 'number') return project;
+  const source = project.adapters.ports[entry.port];
+  const ticketKey = source.parseKey(ref);
+  if (ticketKey === undefined) {
+    return refuse(`'${ref}' is not a ticket of the ${source.name} ticket source: a ticket key, or a URL it owns`);
+  }
+  try {
+    io.stdout(`${JSON.stringify(await run(source, ticketKey))}\n`);
+    return EXIT_OK;
+  } catch (error) {
+    // A port that failed is this command's failure. Anything else is a bug in sail, and run() reports it.
+    if (!(error instanceof PortError)) throw error;
+    io.stderr(`${COMMAND}: ${error.message} (${error.code})\n`);
+    return EXIT_FAILED;
+  }
 }

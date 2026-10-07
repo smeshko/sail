@@ -97,10 +97,7 @@ test('the usage says what --input is for: a run with no ticket, started or resum
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('the usage lists sail port ticket-source and its three operations', async () => {
+test('the usage lists sail port ticket-source and its three operations', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toContain('\n  sail port ticket-source get|links|attachments <ticket>  ');
 });
