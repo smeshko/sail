@@ -144,6 +144,59 @@ const CASES: Case[] = [
     request: lines('Intro.', '', 'Outro.'),
     criteria: ['one'],
   },
+  {
+    rule: "a # line in a code fence under an item is the item's, and the items after the fence are still criteria",
+    description: lines(
+      '## Acceptance criteria',
+      '- the script works:',
+      '  ```sh',
+      '  # build first',
+      '  make',
+      '  ```',
+      '- second',
+      '- third',
+    ),
+    request: '',
+    criteria: [lines('the script works:', '```sh', '# build first', 'make', '```'), 'second', 'third'],
+  },
+  {
+    rule: 'a code fence between two items stays in the request whole, and ends neither the section nor the list',
+    description: lines('## Acceptance criteria', '- one', '```sh', '# build', '- no item', '```', '- two', '## Notes'),
+    request: lines('```sh', '# build', '- no item', '```', '## Notes'),
+    criteria: ['one', 'two'],
+  },
+  {
+    rule: 'a heading inside a code fence is no heading: the section is the one outside it',
+    description: lines(
+      'Template:',
+      '~~~md',
+      '## Acceptance criteria',
+      '- sample',
+      '~~~',
+      '## Acceptance criteria',
+      '- real',
+    ),
+    request: lines('Template:', '~~~md', '## Acceptance criteria', '- sample', '~~~'),
+    criteria: ['real'],
+  },
+  {
+    rule: 'a code fence closes only on its own marker, at least as long as the one that opened it',
+    description: lines('## Acceptance criteria', '- one', '````', '```', '# still code', '~~~', '````', '- two'),
+    request: lines('````', '```', '# still code', '~~~', '````'),
+    criteria: ['one', 'two'],
+  },
+  {
+    rule: 'a code fence that never closes runs to the end',
+    description: lines('## Acceptance criteria', '- one', '```', '- no item', '## no heading'),
+    request: lines('```', '- no item', '## no heading'),
+    criteria: ['one'],
+  },
+  {
+    rule: 'a line that starts with code in three backticks opens no code fence',
+    description: lines('## Acceptance criteria', '- one', '```make``` builds it:', '- two'),
+    request: '```make``` builds it:',
+    criteria: ['one', 'two'],
+  },
 ];
 
 test.each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { description, request, criteria }) => {
@@ -192,8 +245,15 @@ function seeded(seed: number): () => number {
   };
 }
 
-/** The lines a generated description is made of: every form of the heading, of an item and of a section's end. */
+/** A code fence's line with no info string: one that can close a fence as well as open one. */
+const BARE_FENCE = /^(?:`{3,}|~{3,})$/;
+
+/** The lines a generated description is made of: every form of the heading, of an item, of a section's end and of a fence. */
 const POOL = [
+  '```',
+  '```sh',
+  '  ```',
+  '~~~',
   'Some prose',
   'More prose:',
   '## Acceptance criteria',
@@ -216,13 +276,16 @@ const POOL = [
   '',
 ];
 
-/** A description of 1 to 14 lines from the pool, each line of text numbered so that no two are alike. */
+/**
+ * A description of 1 to 14 lines from the pool, each line of text numbered so that no two are alike. A bare fence stays
+ * bare, or it could close nothing.
+ */
 function generated(seed: number): string {
   const random = seeded(seed);
   const count = 1 + Math.floor(random() * 14);
   return Array.from({ length: count }, (_, index) => {
     const line = POOL[Math.floor(random() * POOL.length)] ?? '';
-    return line === '' || HEADING.test(line.trim()) ? line : `${line} ${index}`;
+    return line === '' || HEADING.test(line.trim()) || BARE_FENCE.test(line.trim()) ? line : `${line} ${index}`;
   }).join('\n');
 }
 
