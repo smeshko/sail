@@ -146,10 +146,7 @@ const CASES: Case[] = [
   },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { description, request, criteria }) => {
+test.each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { description, request, criteria }) => {
   expect(splitDescription(description)).toEqual({ request, criteria });
 });
 
@@ -229,11 +226,11 @@ function generated(seed: number): string {
   }).join('\n');
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('no line is lost: every non-blank line of a description is in the request, in a criterion, or is the heading', () => {
-  const descriptions = [...CASES.map((each) => each.description), ...Array.from({ length: 400 }, (_, i) => generated(i))];
+test('no line is lost: every non-blank line of a description is in the request, in a criterion, or is the heading', () => {
+  const descriptions = [
+    ...CASES.map((each) => each.description),
+    ...Array.from({ length: 400 }, (_, i) => generated(i)),
+  ];
   const broken = descriptions.flatMap((description) => {
     const split = splitDescription(description);
     const gone = lost(description, split);
