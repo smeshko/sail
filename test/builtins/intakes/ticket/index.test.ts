@@ -262,10 +262,7 @@ test("a PortError from get reaches the caller as it is, an answer that is no Tic
   expect(readdirSync(out)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("on the fixture's FAKE-1, once it is claimed, the body writes the golden ticket.json and brief.md byte for byte, and returns the golden intake output", async () => {
+test("on the fixture's FAKE-1, once it is claimed, the body writes the golden ticket.json and brief.md byte for byte, and returns the golden intake output", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sail-ticket-intake-'));
   dirs.push(dir);
   copyFileSync(join(FIXTURES, 'repo', '.sail', 'fake', 'tickets.json'), join(dir, 'tickets.json'));
