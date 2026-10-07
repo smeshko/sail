@@ -6,16 +6,16 @@ import { untrusted } from './untrusted';
 
 /**
  * A ticket as the `ticket` intake hands it to the workflow: `run.input`. Every string the provider returned is marked
- * untrusted, apart from the URL: `untrusted()` is a plain string schema, so marking it would drop the URL check.
+ * untrusted, the ticket's URL included, which is checked as a URL too. The ticket key is the run's own.
  */
 export const TicketInput = z.object({
   ticketKey: z.string(),
   title: untrusted(),
-  url: z.url(),
+  url: untrusted().check(z.url()),
   acceptanceCriteria: z.array(untrusted()),
   labels: z.array(untrusted()),
   links: z.array(z.object({ url: untrusted(), title: untrusted().optional() })),
-  attachments: z.array(z.object({ name: untrusted(), url: untrusted(), mimeType: z.string().optional() })),
+  attachments: z.array(z.object({ name: untrusted(), url: untrusted(), mimeType: untrusted().optional() })),
 });
 export type TicketInput = z.infer<typeof TicketInput>;
 
