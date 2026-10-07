@@ -221,6 +221,23 @@ test('SAIL_CONFIG names the project.yaml whose ticket source answers, whatever t
   });
 });
 
+test('a SAIL_CONFIG whose path runs through a file, or that names a directory, exits 3 as one that names nothing does', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureWithLinked(repo.dir);
+    const get = ['port', 'ticket-source', 'get', 'FAKE-5'];
+    // Nothing is under `project.yaml`, a file: the stat of a path through it fails with ENOTDIR, where a missing one
+    // fails with ENOENT.
+    for (const config of [join(sail, 'project.yaml', 'project.yaml'), sail]) {
+      const refused = await runCaptured(get, repo.dir, { env: { SAIL_CONFIG: config } });
+      expect(refused).toEqual({
+        code: EXIT_REFUSED,
+        stdout: '',
+        stderr: `sail port: SAIL_CONFIG names ${config}, which is no file\n`,
+      });
+    }
+  });
+});
+
 test('only the ticket source is resolved: a harness entry that names a module which does not exist does not refuse a get', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureWithLinked(repo.dir);
