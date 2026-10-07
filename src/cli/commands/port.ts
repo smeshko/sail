@@ -44,14 +44,21 @@ const PORTS = {
   },
 } as const;
 
+/** Whether `path` is a file. A path whose stat fails is none, whatever the failure: a path through a file is ENOTDIR. */
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /** `.sail/`: the directory of `SAIL_CONFIG` when it is set, found from the working directory otherwise. */
 function findSail(io: Io): { dir: string } | { refused: string } {
   const configured = (io.env ?? process.env).SAIL_CONFIG;
   if (configured === undefined || configured === '') return findSailDir(io.cwd);
   const file = resolve(io.cwd, configured);
-  if (!statSync(file, { throwIfNoEntry: false })?.isFile()) {
-    return { refused: `SAIL_CONFIG names ${configured}, which is no file` };
-  }
+  if (!isFile(file)) return { refused: `SAIL_CONFIG names ${configured}, which is no file` };
   return { dir: dirname(file) };
 }
 
