@@ -31,6 +31,8 @@ const ITEM = /^\s*(?:[-*+]|\d+[.)])\s+(\S.*)$/s;
 const CHECKBOX = /^\[[ xX]\]\s+(?=\S)/;
 /** A code fence's line, whose marker is the capture: three or more backticks with no backtick after, or tildes. */
 const FENCE = /^\s*(`{3,}(?=[^`]*$)|~{3,})/;
+/** A list marker alone on its line: an item whose text starts below it. It is no criterion, having no text. */
+const BARE = /^\s*(?:[-*+]|\d+[.)])\s*$/;
 
 const indentOf = (line: string): number => line.length - line.trimStart().length;
 
@@ -51,6 +53,9 @@ function columnsOf(text: string): number {
  *   past its block.
  * - It ends with the item that holds it, at the first line that falls short of the item's text. Its own marker on that
  *   line still closes it. Any other line starts anew.
+ *
+ * An item here is a marker with its text, or a marker alone on its line, whose text may start on the next line. Only
+ * the plain cases of a marker alone are followed: Markdown's rules for one under a paragraph go further than this.
  */
 function fenced(lines: readonly string[]): boolean[] {
   /** The column each open item's text starts at, innermost last: what a line must reach to be inside the item. */
@@ -59,9 +64,14 @@ function fenced(lines: readonly string[]): boolean[] {
   let fence: { marker: string; base: number } | undefined;
   /** Whether the line above was a paragraph's: plain text right under one goes on with it, however little indented. */
   let paragraph = false;
+  /** Whether the line above was a marker alone: a blank line right under one ends its item, which stays empty. */
+  let bare = false;
 
   return lines.map((line) => {
+    const underBare = bare;
+    bare = false;
     if (line.trim() === '') {
+      if (underBare) items.pop();
       paragraph = false;
       return fence !== undefined;
     }
@@ -86,11 +96,20 @@ function fenced(lines: readonly string[]): boolean[] {
     }
 
     const outer = held.at(-1) ?? 0;
-    const starts = indent - outer < 4 && (ATX.test(line.trimStart()) || ITEM.test(line) || FENCE.test(line));
-    if (paragraph && held.length < items.length && !starts) return false;
+    const block = ATX.test(line.trimStart()) || ITEM.test(line) || FENCE.test(line) || BARE.test(line);
+    const short = held.length < items.length;
+    if (paragraph && short && !(indent - outer < 4 && block)) return false;
     items.length = held.length;
     // Indented code, or more of a paragraph: neither opens a fence or an item.
     if (indent - outer >= 4) return false;
+    if (BARE.test(line)) {
+      // Right under a line of a paragraph in its own block, a marker alone is more of that paragraph.
+      if (paragraph && !short) return false;
+      items.push(columnsOf(line.trimEnd()) + 1);
+      bare = true;
+      paragraph = false;
+      return false;
+    }
 
     let text = ITEM.exec(line)?.[1];
     if (text === undefined) {
