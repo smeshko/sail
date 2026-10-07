@@ -466,10 +466,7 @@ test.each([['--events'], ['--follow']])(
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ("sail show lists a ticket run's intake#1 first, with its kind, its outcome and its duration, and --events prints what the run printed, the intake's lines included", async () => {
+test("sail show lists a ticket run's intake#1 first, with its kind, its outcome and its duration, and --events prints what the run printed, the intake's lines included", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
     const helper = join(import.meta.dir, '..', 'helpers', 'ticket-run.ts');

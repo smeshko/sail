@@ -178,10 +178,7 @@ test('the shim hands sail port render its stdin: text piped in comes out wrapped
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ("sail port ticket-source get piped into sail port render through the shim prints the ticket's JSON inside one wrapper", async () => {
+test("sail port ticket-source get piped into sail port render through the shim prints the ticket's JSON inside one wrapper", async () => {
   await withTempRepo((repo) => {
     copyFixture(repo.dir);
     const options = { cwd: repo.dir, env: repo.env };

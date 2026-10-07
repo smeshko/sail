@@ -491,10 +491,7 @@ test('sail resume runs a run from a ticket to its end with no --input, counting 
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ('a run from a ticket sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched once', async () => {
+test('a run from a ticket sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched once', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true, sleepAt: 'implement#2' });
     const helper = join(import.meta.dir, '..', 'helpers', 'ticket-run.ts');

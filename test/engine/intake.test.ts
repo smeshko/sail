@@ -738,10 +738,7 @@ function spawnTicketRun(repo: TempRepo, ticketKey: string) {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ("a run from FAKE-1 in a process of its own exits 0: its terminal view shows the intake as intake ticket · builtin before the stages, and its intake call holds the validated input and a brief that wraps the ticket's text", async () => {
+test("a run from FAKE-1 in a process of its own exits 0: its terminal view shows the intake as intake ticket · builtin before the stages, and its intake call holds the validated input and a brief that wraps the ticket's text", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
     const { code, stdout, stderr, runId, dir } = spawnTicketRun(repo, 'FAKE-1');
@@ -758,25 +755,32 @@ test
 
     expect(readdirSync(join(dir, '00-intake', 'call-1')).sort()).toEqual(['brief.md', 'result.json', 'ticket.json']);
     const brief = readFileSync(join(dir, '00-intake', 'call-1', 'brief.md'), 'utf8');
-    const block = (what: string, text: string) => `<untrusted-input source="ticket FAKE-1, ${what}">\n${text}\n</untrusted-input>\n`;
+    const block = (what: string, text: string) =>
+      `<untrusted-input source="ticket FAKE-1, ${what}">\n${text}\n</untrusted-input>\n`;
     const item = (index: number, text: string) =>
       `- <untrusted-input source="ticket FAKE-1, acceptance criterion ${index}">${text}</untrusted-input>\n`;
-    expect(brief).toContain(`## Request\n\n${block('title', 'Add a greeting')}\n${block('description', 'Greet the user by name.')}`);
-    expect(brief).toContain(`## Acceptance criteria\n\n${item(1, '`greet Ada` prints `Hello, Ada!`')}${item(2, '`greet` prints the usage')}`);
+    expect(brief).toContain(
+      `## Request\n\n${block('title', 'Add a greeting')}\n${block('description', 'Greet the user by name.')}`,
+    );
+    expect(brief).toContain(
+      `## Acceptance criteria\n\n${item(1, '`greet Ada` prints `Hello, Ada!`')}${item(2, '`greet` prints the usage')}`,
+    );
     expect(brief).toContain(block('comment 1', 'Keep the exclamation mark.'));
 
     const result = resultOf(dir, '00-intake/call-1');
-    expect(result).toMatchObject({ key: 'intake#1', kind: 'builtin', outcome: 'passed', output: { ticketKey: 'FAKE-1' } });
+    expect(result).toMatchObject({
+      key: 'intake#1',
+      kind: 'builtin',
+      outcome: 'passed',
+      output: { ticketKey: 'FAKE-1' },
+    });
     expect<unknown>(TicketInput.parse(result.output)).toEqual(result.output);
     expect(keys(dir)[0]).toBe('intake#1');
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ('a run from a ticket whose text plants closing delimiters completes, and the brief spec#1 consumed holds each one escaped inside its wrapper', async () => {
+test('a run from a ticket whose text plants closing delimiters completes, and the brief spec#1 consumed holds each one escaped inside its wrapper', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
     const { code, stderr, dir } = spawnTicketRun(repo, 'FAKE-2');
@@ -794,10 +798,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ("a run from FAKE-9 in a process of its own exits 1 with stage_error: its terminal view and its intake's result.json name the port's error", async () => {
+test("a run from FAKE-9 in a process of its own exits 1 with stage_error: its terminal view and its intake's result.json name the port's error", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true });
     const { code, stdout, stderr, runId, dir } = spawnTicketRun(repo, 'FAKE-9');
