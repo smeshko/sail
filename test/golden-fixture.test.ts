@@ -50,7 +50,7 @@ test('the golden run directory is valid against every run-directory schema', () 
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
     'sail.journal.v1': 10,
-    'sail.event.v1': 137,
+    'sail.event.v1': 135,
     'sail.summary.v1': 1,
     'sail.result.v1': 10,
   });

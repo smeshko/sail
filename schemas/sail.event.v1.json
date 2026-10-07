@@ -300,7 +300,8 @@
               "exit_code",
               "not_started",
               "budget_exceeded",
-              "harness"
+              "harness",
+              "port"
             ]
           },
           "message": { "type": "string", "minLength": 1 }
@@ -495,7 +496,7 @@
       "$ref": "#/$defs/callEnvelope",
       "properties": {
         "intake": { "type": "string" },
-        "kind": { "enum": ["agent", "script"] },
+        "kind": { "enum": ["agent", "script", "builtin"] },
         "origin": { "$ref": "#/$defs/origin" },
         "consumed": { "$ref": "#/$defs/consumed" }
       },

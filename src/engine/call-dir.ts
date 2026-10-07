@@ -90,20 +90,21 @@ export function nextTry(runDir: string, index: number, stage: string, call: numb
 /**
  * Creates the call directory and `$STAGE_IN`. A call directory is written once, so an existing one throws. A `durable`
  * one has its entries synced before this returns: the tries an agent call has on disk are where a resume reads how far
- * the call got.
+ * the call got. `stageIn: false` leaves `$STAGE_IN` out, for a call with no bindings to materialise: a built-in intake's.
  */
-export function createCallDir(paths: CallPaths, options: { durable?: boolean } = {}): void {
+export function createCallDir(paths: CallPaths, options: { durable?: boolean; stageIn?: boolean } = {}): void {
   const parent = dirname(paths.dir);
   mkdirSync(parent, { recursive: true });
+  const stageIn = options.stageIn ?? true;
   if (!options.durable) {
     mkdirSync(paths.dir);
-    mkdirSync(paths.stageIn);
+    if (stageIn) mkdirSync(paths.stageIn);
     return;
   }
   // The stage's directory may be new too, and its entry is its own parent's.
   syncDir(dirname(parent));
   createDir(paths.dir);
-  createDir(paths.stageIn);
+  if (stageIn) createDir(paths.stageIn);
 }
 
 /**

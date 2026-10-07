@@ -1,6 +1,6 @@
 // A run's directory, `.sail-runs/<ticket key>-<ulid>/` beside `.sail/`, and its STATUS file, which holds the run's
 // status and, for a failed or suspended run, its stop reason. The run id's ticket key comes from the run's source,
-// which until intake exists is the LOCAL stub.
+// which is the LOCAL stub for a run started with no ticket.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createDir, replaceFile } from './durable';
@@ -20,8 +20,16 @@ export interface Source {
   forced: boolean;
 }
 
-/** A run started by hand with no ticket. It stands in until intake exists, so its runs are `LOCAL-<ulid>`. */
+/**
+ * A run started by hand with no ticket, so its runs are `LOCAL-<ulid>`. It takes its input from `--input` and runs no
+ * intake. It stands in until `sail <ticket>` exists.
+ */
 export const LOCAL_SOURCE: Source = { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: false };
+
+/** Whether `source` is the LOCAL stub: a run with no ticket, whose input is given and whose journal has no intake. */
+export function isLocalSource(source: Source): boolean {
+  return source.ticketKey === LOCAL_SOURCE.ticketKey;
+}
 
 /**
  * Creates the directory of run `runId` and returns its absolute path, creating `.sail-runs/` on first use. Both entries

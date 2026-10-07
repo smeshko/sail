@@ -127,7 +127,13 @@ interface Payloads {
     /** Exactly when the outcome is `error`. */
     errors?: ContractError[];
   };
-  'intake:start': { key: string; intake: string; kind: 'agent' | 'script'; origin: string; consumed: Consumed };
+  'intake:start': {
+    key: string;
+    intake: string;
+    kind: 'agent' | 'script' | 'builtin';
+    origin: string;
+    consumed: Consumed;
+  };
   'intake:end': { key: string; outcome: Outcome; resultPath: string };
   'step:start': {
     key: string;

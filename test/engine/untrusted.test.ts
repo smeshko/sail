@@ -25,13 +25,13 @@ const input = {
   acceptanceCriteria: ['one', 'two'],
 };
 
-test('markUntrusted marks a ticket title and each criterion with its path, and nothing else', () => {
+test("markUntrusted marks a ticket's title, its URL and each criterion with its path, and nothing else", () => {
   const copy = structuredClone(input);
   const marked = markUntrusted(TicketInput, input, 'ticket');
   expect(shown(marked)).toEqual({
     ticketKey: 'FAKE-9',
     title: '<ticket.title>A title',
-    url: 'fake://tickets/FAKE-9',
+    url: '<ticket.url>fake://tickets/FAKE-9',
     acceptanceCriteria: ['<ticket.acceptanceCriteria.0>one', '<ticket.acceptanceCriteria.1>two'],
   });
   expect(input).toEqual(copy);

@@ -3,6 +3,9 @@
 // directory exists. This module parses, hands the run's events to the terminal view and maps the run's status to an
 // exit code; the run is the engine's. Everything the command prints during the run comes from its events.
 //
+// `sail run` names no source, so it starts a run with no ticket, whose input is `--input`. The engine decides what an
+// input means for a run: neither command asks whether a run came from a ticket.
+//
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
 // resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
 //
@@ -10,7 +13,7 @@
 import { join, relative } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
 import { type ResolvedAdapters, resolveAdapters } from '../../engine/adapters';
-import { type ProjectConfig, readConfig } from '../../engine/config';
+import { type Port, type ProjectConfig, readConfig } from '../../engine/config';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { runsDir } from '../../engine/run-dir';
 import { type RunEnd, runWorkflow } from '../../engine/runtime';
@@ -59,13 +62,15 @@ export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | 
 
 /**
  * `.sail/`, found from where sail runs, its config and the adapters it names. A config or an adapter with issues prints
- * each and refuses.
+ * each and refuses. `only` narrows it for a command that needs less: a `.sail/` it found its own way, and the ports to
+ * resolve, so no other adapter is loaded or asked for its credentials.
  */
-export async function findProject(
+export async function findProject<P extends Port = Port>(
   io: Io,
   command: string,
-): Promise<{ sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters } | ExitCode> {
-  const found = findSailDir(io.cwd);
+  only: { found?: { dir: string } | { refused: string }; ports?: readonly P[] } = {},
+): Promise<{ sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters<P> } | ExitCode> {
+  const found = only.found ?? findSailDir(io.cwd);
   if ('refused' in found) return refuseAs(io, command)(found.refused);
   const config = readConfig(found.dir);
   const file = at(io, join(found.dir, 'project.yaml'));
@@ -78,6 +83,7 @@ export async function findProject(
     config,
     builtins: BUILTINS,
     env: io.env ?? process.env,
+    ...(only.ports === undefined ? {} : { ports: only.ports }),
   });
   if ('issues' in adapters) {
     for (const issue of adapters.issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);

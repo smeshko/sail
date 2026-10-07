@@ -14,7 +14,8 @@ export type ErrorReason =
   | 'exit_code'
   | 'not_started'
   | 'budget_exceeded'
-  | 'harness';
+  | 'harness'
+  | 'port';
 
 export interface ContractError {
   reason: ErrorReason;

@@ -1,5 +1,5 @@
 // runCaptured(): runs `sail <argv>` in process from `cwd`, capturing what it prints. It runs in plain mode unless the
-// test hands it a `tty`. fakeInterrupts() stands in for Ctrl-C, through the `io.onInterrupt` a command registers its
+// test hands it a `tty`, and with no stdin unless the test supplies its text. fakeInterrupts() stands in for Ctrl-C, through the `io.onInterrupt` a command registers its
 // handler with. normaliseDurations() makes a terminal view's timings comparable.
 import type { ExitCode } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
@@ -18,6 +18,8 @@ export interface CaptureOptions {
   tty?: Tty;
   /** Handed to the command as `io.env`: the environment it runs in, in place of the process's. */
   env?: Io['env'];
+  /** What the command reads as all of stdin. Left out, the command has no stdin. */
+  stdin?: string;
 }
 
 /** `text` with each duration the terminal view prints, such as `850ms`, `2.5s`, `1m 11s` or `2h 2m`, as `<t>`. */
@@ -43,6 +45,7 @@ export async function runCaptured(
     ...(options.onInterrupt === undefined ? {} : { onInterrupt: options.onInterrupt }),
     ...(options.tty === undefined ? {} : { tty: options.tty }),
     ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.stdin === undefined ? {} : { stdin: () => Promise.resolve(options.stdin as string) }),
   };
   const code = await run(argv, io);
   return { code, stdout, stderr };

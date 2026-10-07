@@ -79,7 +79,7 @@ One body inside a stage, run in order with its siblings. Every stage has at leas
 _Avoid_: sub-stage, action, unit
 
 **Kind**:
-What a step is. v1 ships two kinds: `agent` and `script`. Kinds belong to steps; a stage has steps, not a kind. Kinds are an extension point: a new kind implements one interface.
+What a step is. v1 ships two kinds: `agent` and `script`. Kinds belong to steps; a stage has steps, not a kind. Kinds are an extension point: a new kind implements one interface. A built-in intake's call records the kind `builtin`, though no step runs: the engine runs its body in process.
 _Avoid_: type, mode, flavour
 
 **Agent step**:
@@ -131,7 +131,7 @@ The agent outcome for "I cannot complete this", submitted with a reason. It hono
 _Avoid_: failed, stuck, gave up, incomplete
 
 **Error**:
-The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness` or `exit_code`.
+The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `port` or `exit_code`.
 _Avoid_: crash, exception, failed
 
 **Output**:
@@ -201,7 +201,7 @@ A place where a repository or a future version adds its own definition without c
 _Avoid_: hook, plugin slot, customisation
 
 **Built-in**:
-A definition that ships inside sail and is used unless the repository shadows it.
+A definition that ships inside sail and is used unless the repository shadows it. A built-in intake's call is recorded under the kind `builtin`.
 _Avoid_: default (that means "used when none is named"), bundled, stock, core
 
 **Shadowing**:

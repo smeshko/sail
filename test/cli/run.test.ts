@@ -88,3 +88,21 @@ test('a command that throws exits 4 and names the error', async () => {
   expect(stderr).toStartWith('sail: internal error: stdout closed\n');
   expect(stderr).toContain('at ');
 });
+
+test('the usage says what --input is for: a run with no ticket, started or resumed', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toContain(
+    '\nInput of run and resume:\n' +
+      '  --input <json>  Starts, and resumes, a run with no ticket. A run from a ticket gets its input from its intake\n',
+  );
+});
+
+test('the usage lists sail port ticket-source and its three operations', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toContain('\n  sail port ticket-source get|links|attachments <ticket>  ');
+});
+
+test('the usage lists sail port render', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toContain('\n  sail port render --untrusted --source <text> [--inline]  ');
+});

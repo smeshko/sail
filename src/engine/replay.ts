@@ -9,6 +9,9 @@
 // its `catch` and its `finally` never run, and a workflow's `try/catch` can't swallow the halt. `run.fail()` throws
 // only after its end is recorded, so catching it changes nothing.
 //
+// The entries are the stages' alone. A run's journaled `intake#1` is given beside them, never among them, and is where
+// `run.input` and `run.intake.files` come from.
+//
 // Replay goes by position: request n must be journal entry n. That is how a request finds its result, and it catches a
 // workflow whose calls changed between replays, which a lookup by key would silently accept.
 //
@@ -57,8 +60,10 @@ export interface ReplayOptions {
   entries: readonly JournalEntry[];
   /** The absolute run directory, which a journaled file's path is relative to. */
   runDir: string;
-  /** `run.input`. */
-  input: unknown;
+  /** `run.input`, for a run with no intake. Given together with `intake`, it throws. */
+  input?: unknown;
+  /** The journaled `intake#1`: `run.input` is its output, and `run.intake.files` its files. Never among `entries`. */
+  intake?: JournalEntry;
   /** Where the loop and route events of moves past the journal's end go. */
   emit?: Emit;
 }
@@ -111,9 +116,14 @@ function deepFreeze<T>(value: T): T {
  * workflow's own promise may never settle. An exception inside sail's `run` methods rejects instead.
  */
 export function replay(options: ReplayOptions): Promise<ReplayEnd> {
-  const { workflow, stages, entries, runDir } = options;
+  const { workflow, stages, entries, runDir, intake } = options;
+  if (intake !== undefined && options.input !== undefined) {
+    throw new Error('replay() takes the journaled intake or an input, never both: a bug in its caller');
+  }
   const emit = options.emit ?? (() => {});
-  const input = deepFreeze(options.input);
+  const input = deepFreeze(intake === undefined ? options.input : intake.output);
+  /** Where `run.input` came from, as `consumed` records it: the intake's result, or `--input` for a run with none. */
+  const inputFrom = intake === undefined ? '--input' : `${intake.resultPath}#/output`;
   if (!process.listeners('unhandledRejection').includes(dropStrayHalt)) process.on('unhandledRejection', dropStrayHalt);
   return new Promise<ReplayEnd>((resolve, reject) => {
     let ended = false;
@@ -128,6 +138,20 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
     const pointers = new WeakMap<object, string>();
     /** The `break` of each loop left since the last move, innermost first, reported at the workflow's next move. */
     const pendingExits: NewEvent[] = [];
+
+    /** A handle per file a journaled call left, by name: the only thing a `file()` binding takes. */
+    function handles(entry: JournalEntry): Record<string, ProducedFile> {
+      const produced = new Map<string, ProducedFile>();
+      for (const [name, path] of Object.entries(entry.files)) {
+        const handle = Object.freeze({ name }) as ProducedFile;
+        files.set(handle, path);
+        produced.set(name, handle);
+      }
+      return Object.fromEntries(produced);
+    }
+    const intakeFiles = intake === undefined ? {} : handles(intake);
+    // Parsing a loop's feedback makes a new object, which finds its pointer here.
+    if (intake !== undefined && isObject(input)) pointers.set(input, inputFrom);
 
     /** Every journaled call has been handed back, so the workflow's moves from here on are new. */
     const live = () => position === entries.length;
@@ -164,7 +188,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       record({ kind: 'failed', stopReason, message });
 
     /** Where a value came from, as `consumed` records it. `WeakMap#get` gives undefined for a primitive. */
-    const from = (value: unknown) => (value === input ? '--input' : (pointers.get(value as object) ?? 'workflow'));
+    const from = (value: unknown) => (value === input ? inputFrom : (pointers.get(value as object) ?? 'workflow'));
 
     /** A journaled call's result, as the workflow reads it. */
     function rebuild(entry: JournalEntry, key: string, callOptions: CallOptions | undefined): Promise<unknown> {
@@ -177,16 +201,9 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
           }
           failRun('stage_error', `${key} ended in error: ${entry.reason ?? ''}`);
           return never();
-        default: {
-          const produced = new Map<string, ProducedFile>();
-          for (const [name, path] of Object.entries(entry.files)) {
-            const handle = Object.freeze({ name }) as ProducedFile;
-            files.set(handle, path);
-            produced.set(name, handle);
-          }
+        default:
           if (isObject(entry.output)) pointers.set(deepFreeze(entry.output), `${entry.resultPath}#/output`);
-          return Promise.resolve({ outcome: entry.outcome, output: entry.output, files: Object.fromEntries(produced) });
-        }
+          return Promise.resolve({ outcome: entry.outcome, output: entry.output, files: handles(entry) });
       }
     }
 
@@ -333,7 +350,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
 
     const run = {
       input,
-      intake: { files: {} },
+      intake: { files: intakeFiles },
       /** An exception here is a bug in sail: it ends the replay as a crash and never reaches the workflow. */
       stage(definition: StageDefinition, bindings: unknown = {}, callOptions?: CallOptions): Promise<unknown> {
         try {

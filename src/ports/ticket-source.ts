@@ -1,7 +1,15 @@
 // The TicketSource port: the ticket system in sail's words, whatever the provider. A ticket's state is reported by type,
 // and moved by the four moves ADR-0015 names. The claim is the only move that can not happen, and says so as a value.
 import type { ProviderEmit } from '../events/types';
-import type { ClaimResult, Moved, Posted, Ticket, TicketMove, TicketSourceCapabilities } from './types';
+import { PortError } from './errors';
+import {
+  type ClaimResult,
+  type Moved,
+  type Posted,
+  Ticket,
+  type TicketMove,
+  type TicketSourceCapabilities,
+} from './types';
 
 /** What every adapter factory takes beside its own options. */
 export interface ProviderOptions {
@@ -27,4 +35,17 @@ export interface TicketSource {
   /** Emits `ticket:commented`. */
   comment(ticketKey: string, body: string): Promise<Posted>;
   capabilities(): TicketSourceCapabilities;
+}
+
+/**
+ * The ticket `source.get()` answers with, checked against the port's schema: an adapter's answer crosses a trust
+ * boundary. An answer that is no Ticket is a PortError of `get`, code `invalid`, saying where it isn't one.
+ */
+export async function getTicket(source: TicketSource, ticketKey: string): Promise<Ticket> {
+  const answer: unknown = await source.get(ticketKey);
+  const parsed = Ticket.safeParse(answer);
+  if (parsed.success) return parsed.data;
+  const [issue] = parsed.error.issues;
+  const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+  throw new PortError('ticketSource', 'get', 'invalid', `ticket ${ticketKey} is not a Ticket: ${where}`, answer);
 }

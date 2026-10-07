@@ -13,7 +13,7 @@ import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { rebuildSummary } from '../../src/events/consumers/summary';
 import type { Summary } from '../../src/events/summary';
-import type { Consumer, SailEvent } from '../../src/events/types';
+import type { Consumer, ProviderEvent, SailEvent } from '../../src/events/types';
 import { fakeAdapters } from '../helpers/adapters';
 import {
   AGENT_WORKFLOW,
@@ -276,7 +276,15 @@ function interruptedCopy(to: string, options: Partial<RunWorkflowOptions> = {}):
 }
 
 const ALL_KEYS = ['spec#1', 'implement#1', 'tests#1', 'implement#2', 'tests#2', 'self-review#1', 'publish#1'];
-const INPUT = { ticketKey: 'FAKE-5', title: 'Greet', url: 'fake://tickets/FAKE-5', acceptanceCriteria: ['greets'] };
+const INPUT = {
+  ticketKey: 'FAKE-5',
+  title: 'Greet',
+  url: 'fake://tickets/FAKE-5',
+  acceptanceCriteria: ['greets'],
+  labels: ['cli'],
+  links: [],
+  attachments: [],
+};
 
 test('an abort stops the running call, leaves it unjournaled, and suspends the run', async () => {
   await withTempRepo(async (repo) => {
@@ -1259,3 +1267,107 @@ test('a try whose last events were lost is counted once, from its result, howeve
     expect(summaryText(dir)).toBe(written);
   });
 }, 60_000);
+
+// The relay in a run (D8): what an adapter emits while the run is going reaches its stream.
+
+const FETCHED: ProviderEvent = {
+  type: 'ticket:fetched',
+  ticketKey: 'FAKE-1',
+  comments: 0,
+  links: 0,
+  attachments: 0,
+  durationMs: 1,
+};
+const LEASED: ProviderEvent = { type: 'workspace:leased', remote: 'fake://codehost/stub', branch: 'sail/LOCAL' };
+const COMMENTED: ProviderEvent = { type: 'ticket:commented', ticketKey: 'FAKE-1', body: 'between two calls' };
+
+test("what an adapter emits while a call runs is in events.ndjson with that call's key, right after the event it followed: a workspace event has no key, and neither has a ticket event between two calls", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const adapters = await fakeAdapters(repo.dir);
+    const during: Consumer = {
+      name: 'provider',
+      onEvent(event) {
+        if (event.type !== 'script:exec' || event.key !== 'spec#1') return;
+        adapters.relay.emit(FETCHED);
+        adapters.relay.emit(LEASED);
+      },
+    };
+    const end = await ran(repo.dir, {
+      adapters,
+      consumers: [during],
+      onCall: (entry) => {
+        if (entry.key === 'spec#1') adapters.relay.emit(COMMENTED);
+      },
+    });
+
+    const list = events(end.dir);
+    const exec = list.findIndex((event) => event.type === 'script:exec' && event.key === 'spec#1');
+    const envelope = { ts: expect.any(String), runId: end.runId };
+    expect(list.slice(exec + 1, exec + 3)).toEqual([
+      { seq: exec + 2, ...envelope, key: 'spec#1', ...FETCHED },
+      { seq: exec + 3, ...envelope, ...LEASED },
+    ]);
+    expect(list[exec + 2]).not.toHaveProperty('key');
+
+    const commented = list.findIndex((event) => event.type === 'ticket:commented');
+    expect(outline(list.slice(commented - 1, commented + 1))).toEqual(['journal:append spec#1', 'ticket:commented']);
+    expect(list[commented]).toEqual({ seq: commented + 1, ...envelope, ...COMMENTED });
+    expect(list[commented]).not.toHaveProperty('key');
+
+    expect(end.status).toBe('completed');
+    expect(seqs(list)).toEqual(gapless(list));
+    expect(list.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue)).toEqual([]);
+    expect(validateRunDir(end.dir).issues).toEqual([]);
+  });
+});
+
+test('once run:end is out nothing an adapter emits reaches the file, and the run lets go of the relay', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const adapters = await fakeAdapters(repo.dir);
+    const atTheEnd: Consumer = {
+      name: 'provider',
+      onEvent(event) {
+        if (event.type === 'run:end') adapters.relay.emit(FETCHED);
+      },
+    };
+    const end = await ran(repo.dir, { adapters, consumers: [atTheEnd] });
+    const written = eventsText(end.dir);
+    adapters.relay.emit(FETCHED);
+
+    // The relay is free again: a sink attaches, and receives.
+    const seen: ProviderEvent[] = [];
+    adapters.relay.attach((event) => seen.push(event));
+    adapters.relay.emit(LEASED);
+    expect(seen).toEqual([LEASED]);
+    expect(eventsText(end.dir)).toBe(written);
+    const list = events(end.dir);
+    expect(list.at(-1)?.type).toBe('run:end');
+    expect(list.filter((event) => event.type === 'ticket:fetched')).toEqual([]);
+  });
+});
+
+test('a run that crashes lets go of the relay too', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(
+      sail,
+      'workflows/ticket-to-pr/stages/spec/run.sh',
+      "printf '# Spec",
+      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+    );
+    const adapters = await fakeAdapters(repo.dir);
+    const error = await runWorkflow({ cwd: repo.dir, adapters, workflow: 'ticket-to-pr' }).catch(
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(JournalError);
+
+    const seen: ProviderEvent[] = [];
+    adapters.relay.attach((event) => seen.push(event));
+    adapters.relay.emit(LEASED);
+    expect(seen).toEqual([LEASED]);
+    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
+    expect(events(join(repo.dir, '.sail-runs', runId)).at(-1)?.type).toBe('error:crash');
+  });
+});

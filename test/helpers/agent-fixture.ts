@@ -23,6 +23,9 @@ export const TICKET = {
   title: 'Add a --shout flag',
   url: 'fake://tickets/FAKE-1',
   acceptanceCriteria: ['greet --shout prints the greeting in capitals'],
+  labels: ['cli'],
+  links: [],
+  attachments: [],
 };
 
 /** `sail run` of the fixture's workflow on `TICKET`. */

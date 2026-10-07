@@ -4,7 +4,7 @@
   "stage": "intake",
   "call": 1,
   "key": "intake#1",
-  "kind": "script",
+  "kind": "builtin",
   "outcome": "passed",
   "output": {
     "ticketKey": "FAKE-1",
@@ -14,18 +14,23 @@
       "`greet Ada --shout` prints `HELLO, ADA!`",
       "`greet Ada` still prints `Hello, Ada!`",
       "`greet --help` lists `--shout`"
-    ]
+    ],
+    "labels": [
+      "sail"
+    ],
+    "links": [],
+    "attachments": []
   },
   "files": {
     "ticket.json": {
       "path": "00-intake/call-1/ticket.json",
-      "bytes": 622,
-      "sha256": "00dfba83bc3416c489aaaf86a571c03d5b7dace8adb4135e3c7d990e73e977dc"
+      "bytes": 1474,
+      "sha256": "64f2b53a8345a130f9e698010f80c5ff6ece24ea5223df04eab3c7a1aac4601e"
     },
     "brief.md": {
       "path": "00-intake/call-1/brief.md",
-      "bytes": 674,
-      "sha256": "77279acc674ac04758c7f34b343999dc1e1d1708cbdb6c8691215e249c1378e6",
+      "bytes": 1157,
+      "sha256": "9f06b325459f4da6861328c51e9edeb01c4988f7c4bb6b797766f97f66a3ad89",
       "validation": {
         "ok": true,
         "checks": [
@@ -40,18 +45,5 @@
   },
   "startedAt": "2026-09-25T09:00:00.940Z",
   "finishedAt": "2026-09-25T09:00:02.990Z",
-  "durationMs": 2050,
-  "exit": {
-    "code": 0,
-    "mapped": "passed"
-  },
-  "command": "builtin:ticket",
-  "env": {
-    "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
-    "STAGE": "intake",
-    "CALL": "1",
-    "TRY": "1",
-    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/00-intake/call-1",
-    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace"
-  }
+  "durationMs": 2050
 }

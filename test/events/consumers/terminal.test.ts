@@ -873,14 +873,14 @@ test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then o
     },
     runsDir: RUNS,
     shownRunsDir: '.sail-runs',
-    prior: events.filter((event) => event.seq <= 57),
+    prior: events.filter((event) => event.seq <= 55),
   });
   expect(out).toBe('');
 
-  for (const event of events.filter((each) => each.seq > 57)) terminal.onEvent(event);
+  for (const event of events.filter((each) => each.seq > 55)) terminal.onEvent(event);
   const normal = golden('normal').split('\n');
   const resumedAt = normal.findIndex((line) => line.endsWith('↻ iteration 2/3 · feedback from tests#1'));
-  expect(resumedAt).toBe(24);
+  expect(resumedAt).toBe(23);
   expect(out).toBe(
     [
       `sail · ticket-to-pr v1 · ${FAKE_1} · resumed after 4 calls, last tests#1 failed`,

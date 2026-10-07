@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -937,4 +937,112 @@ test('project.yaml: conventions is a list of distinct file paths, and may be emp
   expect(projectIssues(`${text}conventions: [AGENTS.md, AGENTS.md]\n`)).toEqual(['/conventions']);
   expect(projectIssues(`${text}conventions: [AGENTS.md, ""]\n`)).toEqual(['/conventions/1']);
   expect(projectIssues(`${text}conventions: [AGENTS.md, 7]\n`)).toEqual(['/conventions/1']);
+});
+
+// A built-in intake's call (D1): the kind `builtin`, and the error reason `port` (D7).
+
+const builtinResult = {
+  ...call,
+  stage: 'intake',
+  call: 1,
+  key: 'intake#1',
+  kind: 'builtin',
+  outcome: 'passed',
+  consumed: { source: 'run.json#/source' },
+};
+const portError = { reason: 'port', message: 'ticketSource.get: no ticket FAKE-9 (not_found)' };
+
+test("result: a built-in intake's result has exactly its thirteen fields, and errors exactly when it ended in error", () => {
+  expect(validateDocument('sail.result.v1', builtinResult)).toEqual([]);
+  expect(Object.keys(builtinResult).sort()).toEqual([
+    'call',
+    'consumed',
+    'durationMs',
+    'files',
+    'finishedAt',
+    'key',
+    'kind',
+    'outcome',
+    'output',
+    'runId',
+    'schema',
+    'stage',
+    'startedAt',
+  ]);
+  // Without its kind a result is read as an agent's, so every other field is left out in turn.
+  for (const field of Object.keys(builtinResult).filter((name) => name !== 'kind')) {
+    expect(validateDocument('sail.result.v1', omit(builtinResult, field))).toEqual([
+      { schema: 'sail.result.v1', path: `/${field}`, message: 'is required' },
+    ]);
+  }
+  const failing = { ...builtinResult, outcome: 'error', output: null };
+  expect(validateDocument('sail.result.v1', failing)).toEqual([
+    { schema: 'sail.result.v1', path: '/errors', message: 'is required' },
+  ]);
+  expect(validateDocument('sail.result.v1', { ...failing, errors: [portError] })).toEqual([]);
+  expect(validateDocument('sail.result.v1', { ...builtinResult, errors: [portError] })).toEqual([
+    { schema: 'sail.result.v1', path: '/errors', message: 'is not allowed' },
+  ]);
+});
+
+test.each<[string, Record<string, unknown>, string]>([
+  ['an exit', { exit: { code: 0 } }, '/exit'],
+  ['a command', { command: 'builtin:ticket' }, '/command'],
+  ['an env', { env: { RUN_ID } }, '/env'],
+  ['a harness', { harness: agentResult.harness }, '/harness'],
+  ['a usage', { usage: { costUsd: 0 } }, '/usage'],
+  ['a prompt', { prompt: { path: 'prompt.md', untrusted: 0, fragments: [], conventions: [] } }, '/prompt'],
+  ['a step', { step: 'fetch' }, '/step'],
+  ['steps', { steps: [describeStep, openStep] }, '/steps'],
+  ['the outcome failed', { outcome: 'failed' }, '/outcome'],
+  ['the outcome done', { outcome: 'done' }, '/outcome'],
+  ['the outcome blocked', { outcome: 'blocked' }, '/outcome'],
+])("result: a built-in intake's result with %s is refused, naming it", (_, fields, path) => {
+  expect(paths('sail.result.v1', { ...builtinResult, ...fields })).toEqual([path]);
+});
+
+test.each([
+  ['built-in intake', builtinResult],
+  ['script', scriptResult],
+  ['agent', agentResult],
+] as const)('result: a %s result may end in error with the reason port', (_, result) => {
+  expect(validateDocument('sail.result.v1', { ...result, outcome: 'error', errors: [portError] })).toEqual([]);
+});
+
+test('event: intake:start takes the kind builtin, and neither a stage nor a step starts as one', () => {
+  const intakeStart = {
+    ...envelope,
+    type: 'intake:start',
+    key: 'intake#1',
+    intake: 'ticket',
+    kind: 'builtin',
+    origin: 'builtin',
+    consumed: { source: 'run.json#/source' },
+  };
+  expect(validateDocument('sail.event.v1', intakeStart)).toEqual([]);
+  const stageStart = { ...envelope, type: 'stage:start', key: KEY, stage: 'tests', call: 1, try: 1, consumed: {} };
+  expect(paths('sail.event.v1', { ...stageStart, kind: 'script' })).toEqual([]);
+  expect(paths('sail.event.v1', { ...stageStart, kind: 'builtin' })).toEqual(['/kind']);
+  const stepStart = { ...envelope, type: 'step:start', key: OPEN, stage: 'publish', step: 'open', index: 2, of: 2 };
+  expect(paths('sail.event.v1', { ...stepStart, kind: 'script' })).toEqual([]);
+  expect(paths('sail.event.v1', { ...stepStart, kind: 'builtin' })).toEqual(['/kind']);
+});
+
+test('event: stage:end takes the reason port in its errors, and every other reason a result may give', () => {
+  const stageEnd = {
+    ...envelope,
+    type: 'stage:end',
+    key: KEY,
+    stage: 'tests',
+    call: 1,
+    try: 1,
+    outcome: 'error',
+    durationMs: 12,
+    resultPath: '03-tests/call-1/result.json',
+  };
+  expect(validateDocument('sail.event.v1', { ...stageEnd, errors: [portError] })).toEqual([]);
+  // A call's `stage:end` carries its result's errors as they are, so the two schemas list the same reasons.
+  const reasonsOf = (file: string): string[] =>
+    JSON.parse(readFileSync(join(root, 'schemas', file), 'utf8')).$defs.errors.items.properties.reason.enum;
+  expect(reasonsOf('sail.event.v1.json')).toEqual(reasonsOf('sail.result.v1.json'));
 });

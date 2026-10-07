@@ -129,7 +129,7 @@
       "type": "object",
       "properties": {
         "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+$" },
-        "kind": { "enum": ["agent", "script"] },
+        "kind": { "enum": ["agent", "script", "builtin"] },
         "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
         "durationMs": { "type": "number", "minimum": 0 },
         "turns": { "type": "integer", "minimum": 0 },

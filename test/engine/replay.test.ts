@@ -727,3 +727,178 @@ test('a route is reported for the moves the workflow made: its end, run.fail(), 
   expect(await reported(returns, [entry('a#1', 'error', { reason: 'boom' })])).toEqual([]);
   expect(await reported(returns, [entry('a#1', 'passed'), entry('c#1', 'passed')])).toEqual([]);
 });
+
+// The journaled intake (D6): `run.input` and `run.intake.files` come from the `intake#1` entry, given beside the
+// stage entries.
+
+const INTAKE: JournalEntry = {
+  seq: 1,
+  key: 'intake#1',
+  stage: 'intake',
+  call: 1,
+  outcome: 'passed',
+  output: {
+    ticketKey: 'FAKE-1',
+    title: 'a ticket',
+    url: 'fake://tickets/FAKE-1',
+    acceptanceCriteria: ['one'],
+    labels: [],
+    links: [],
+    attachments: [],
+  },
+  reason: null,
+  files: { 'ticket.json': '00-intake/call-1/ticket.json', 'brief.md': '00-intake/call-1/brief.md' },
+  resultPath: '00-intake/call-1/result.json',
+  recordedAt: '2026-10-06T09:00:00.000Z',
+};
+/** The same intake journaled from its second try. */
+const LATER_TRY: JournalEntry = {
+  ...INTAKE,
+  files: { 'ticket.json': '00-intake/call-1/try-2/ticket.json', 'brief.md': '00-intake/call-1/try-2/brief.md' },
+  resultPath: '00-intake/call-1/try-2/result.json',
+};
+
+type TicketBody = (run: Run<typeof ticket.output, typeof ticket.produces>) => Promise<unknown>;
+
+/** Replays a workflow whose body is `body` against the journaled `intake` and the stage `entries`. */
+function replayedFrom(
+  body: TicketBody,
+  intake: JournalEntry = INTAKE,
+  entries: JournalEntry[] = [],
+  emit?: Emit,
+): Promise<ReplayEnd> {
+  const flow = workflow('flow', { intake: ticket }, body);
+  const options = {
+    workflow: flow as never,
+    stages: STAGES,
+    entries,
+    runDir: RUN_DIR,
+    intake: structuredClone(intake),
+  };
+  return replay(emit === undefined ? options : { ...options, emit });
+}
+
+test('given the journaled intake, run.input is its output, frozen all the way down: a workflow that changes it fails the run', async () => {
+  let seen: unknown;
+  const end = await replayedFrom(async (run) => {
+    seen = run.input;
+    (run.input.acceptanceCriteria as string[]).push('two');
+  });
+  expect(seen).toEqual(INTAKE.output);
+  expect(Object.isFrozen(seen)).toBe(true);
+  expect(end).toEqual(failed('workflow_failed', expect.stringMatching(/^workflow threw: /)));
+  expect((seen as { acceptanceCriteria: string[] }).acceptanceCriteria).toEqual(['one']);
+});
+
+test("run.intake.files holds a handle per file the entry names, which binds as the intake's file; the first request is stage 1 and reports no route, and an object that only looks like a handle is refused", async () => {
+  const { events, emit } = collect();
+  let names: string[] = [];
+  const bound = await replayedFrom(
+    async (run) => {
+      names = Object.keys(run.intake.files);
+      await run.stage(b, { report: run.intake.files['brief.md'] });
+    },
+    INTAKE,
+    [],
+    emit,
+  );
+  expect(names).toEqual(['ticket.json', 'brief.md']);
+  expect(bound).toMatchObject({
+    kind: 'call',
+    call: {
+      key: 'b#1',
+      stageIndex: 1,
+      supplied: {
+        report: { kind: 'file', path: join(RUN_DIR, '00-intake/call-1/brief.md'), from: '00-intake/call-1/brief.md' },
+      },
+    },
+  });
+  expect(events).toEqual([]);
+
+  const forged = await replayedFrom(async (run) => {
+    await run.stage(b, { report: { name: 'brief.md' } as ProducedFile });
+  });
+  expect(forged).toEqual(failed('workflow_failed', "b#1 can't run: 'report' needs a file a call produced"));
+});
+
+test("run.input supplied to a value binding records the intake's result, and a value taken out of it records the workflow", async () => {
+  const whole = await replayedFrom(async (run) => {
+    await run.stage(c, { data: run.input });
+  });
+  expect(whole).toMatchObject({
+    call: { supplied: { data: { kind: 'value', value: INTAKE.output, from: '00-intake/call-1/result.json#/output' } } },
+  });
+  const part = await replayedFrom(async (run) => {
+    await run.stage(c, { data: run.input.title, extra: run.input.ticketKey });
+  });
+  expect(part).toMatchObject({
+    call: {
+      supplied: {
+        data: { kind: 'value', value: 'a ticket', from: 'workflow' },
+        extra: { kind: 'value', value: 'FAKE-1', from: 'workflow' },
+      },
+    },
+  });
+});
+
+test("an entry journaled from a later try gives handles and provenance under that try's directory", async () => {
+  const file = await replayedFrom(async (run) => {
+    await run.stage(b, { report: run.intake.files['brief.md'] });
+  }, LATER_TRY);
+  const from = '00-intake/call-1/try-2/brief.md';
+  expect(file).toMatchObject({ call: { supplied: { report: { kind: 'file', path: join(RUN_DIR, from), from } } } });
+  const value = await replayedFrom(async (run) => {
+    await run.stage(c, { data: run.input });
+  }, LATER_TRY);
+  expect(value).toMatchObject({
+    call: { supplied: { data: { from: '00-intake/call-1/try-2/result.json#/output' } } },
+  });
+});
+
+test("an input that is not an object still records the intake's result", async () => {
+  const end = await replayedFrom(
+    async (run) => {
+      await run.stage(c, { data: run.input });
+    },
+    { ...INTAKE, output: 'the whole input' },
+  );
+  expect(end).toMatchObject({
+    call: { supplied: { data: { value: 'the whole input', from: '00-intake/call-1/result.json#/output' } } },
+  });
+});
+
+test('the journaled intake and an input given together make replay() throw: a bug in its caller', async () => {
+  const flow = workflow('flow', { intake: ticket }, async () => 'returned');
+  const both = { workflow: flow as never, stages: STAGES, entries: [], runDir: RUN_DIR, input: INPUT, intake: INTAKE };
+  const outcome = await (async () => replay(both))().then(
+    (end) => end,
+    (error: unknown) => error,
+  );
+  expect(outcome).toBeInstanceOf(Error);
+  expect((outcome as Error).message).toContain('never both');
+});
+
+test("a loop that fails a pass with run.input names the intake's result as where its feedback came from, also once the feedback's schema has parsed it into a new object", async () => {
+  const { events, emit } = collect();
+  const end = await replayedFrom(
+    async (run) => {
+      for (const iteration of run.loop('fix', { max: 2, feedback: z.object({ ticketKey: z.string() }) })) {
+        if (iteration.previous === undefined) {
+          iteration.fail(run.input);
+          continue;
+        }
+        await run.stage(c, { data: iteration.previous });
+      }
+    },
+    INTAKE,
+    [],
+    emit,
+  );
+  const from = '00-intake/call-1/result.json#/output';
+  expect(events).toEqual([
+    { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 2 },
+    { type: 'loop:iteration', loop: 'fix', iteration: 2, max: 2, feedback: { from } },
+  ]);
+  expect(end).toMatchObject({ call: { key: 'c#1', supplied: { data: { value: { ticketKey: 'FAKE-1' }, from } } } });
+  checkStamped(events);
+});

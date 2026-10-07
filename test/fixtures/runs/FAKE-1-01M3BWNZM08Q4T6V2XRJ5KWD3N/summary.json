@@ -25,7 +25,7 @@
   "calls": [
     {
       "key": "intake#1",
-      "kind": "script",
+      "kind": "builtin",
       "outcome": "passed",
       "durationMs": 2050,
       "files": [
