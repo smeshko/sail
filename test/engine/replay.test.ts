@@ -778,10 +778,7 @@ function replayedFrom(
   return replay(emit === undefined ? options : { ...options, emit });
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('given the journaled intake, run.input is its output, frozen all the way down: a workflow that changes it fails the run', async () => {
+test('given the journaled intake, run.input is its output, frozen all the way down: a workflow that changes it fails the run', async () => {
   let seen: unknown;
   const end = await replayedFrom(async (run) => {
     seen = run.input;
@@ -793,10 +790,7 @@ test
   expect((seen as { acceptanceCriteria: string[] }).acceptanceCriteria).toEqual(['one']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("run.intake.files holds a handle per file the entry names, which binds as the intake's file; the first request is stage 1 and reports no route, and an object that only looks like a handle is refused", async () => {
+test("run.intake.files holds a handle per file the entry names, which binds as the intake's file; the first request is stage 1 and reports no route, and an object that only looks like a handle is refused", async () => {
   const { events, emit } = collect();
   let names: string[] = [];
   const bound = await replayedFrom(
@@ -827,10 +821,7 @@ test
   expect(forged).toEqual(failed('workflow_failed', "b#1 can't run: 'report' needs a file a call produced"));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("run.input supplied to a value binding records the intake's result, and a value taken out of it records the workflow", async () => {
+test("run.input supplied to a value binding records the intake's result, and a value taken out of it records the workflow", async () => {
   const whole = await replayedFrom(async (run) => {
     await run.stage(c, { data: run.input });
   });
@@ -850,10 +841,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("an entry journaled from a later try gives handles and provenance under that try's directory", async () => {
+test("an entry journaled from a later try gives handles and provenance under that try's directory", async () => {
   const file = await replayedFrom(async (run) => {
     await run.stage(b, { report: run.intake.files['brief.md'] });
   }, LATER_TRY);
@@ -867,10 +855,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("an input that is not an object still records the intake's result", async () => {
+test("an input that is not an object still records the intake's result", async () => {
   const end = await replayedFrom(
     async (run) => {
       await run.stage(c, { data: run.input });
@@ -882,10 +867,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the journaled intake and an input given together make replay() throw: a bug in its caller', async () => {
+test('the journaled intake and an input given together make replay() throw: a bug in its caller', async () => {
   const flow = workflow('flow', { intake: ticket }, async () => 'returned');
   const both = { workflow: flow as never, stages: STAGES, entries: [], runDir: RUN_DIR, input: INPUT, intake: INTAKE };
   const outcome = await (async () => replay(both))().then(
@@ -896,10 +878,7 @@ test
   expect((outcome as Error).message).toContain('never both');
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a loop that fails a pass with run.input names the intake's result as where its feedback came from, also once the feedback's schema has parsed it into a new object", async () => {
+test("a loop that fails a pass with run.input names the intake's result as where its feedback came from, also once the feedback's schema has parsed it into a new object", async () => {
   const { events, emit } = collect();
   const end = await replayedFrom(
     async (run) => {
