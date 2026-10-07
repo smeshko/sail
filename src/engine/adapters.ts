@@ -50,7 +50,19 @@ export interface ResolvedAdapters<P extends Port = Port> {
 
 /** A relay with no sink attached. */
 export function providerRelay(): ProviderRelay {
-  return { emit: () => {}, attach: () => () => {} };
+  let attached: ((event: ProviderEvent) => void) | undefined;
+  return {
+    emit: (event) => attached?.(event),
+    attach(sink) {
+      if (attached !== undefined) {
+        throw new Error('a run is already attached to these adapters: each run resolves its own, a bug in the caller');
+      }
+      attached = sink;
+      return () => {
+        if (attached === sink) attached = undefined;
+      };
+    },
+  };
 }
 
 /** A definition found for a port, with where it came from. */
@@ -161,6 +173,7 @@ async function build(
   found: Found,
   options: AdapterOptions,
   resolved: ResolveOptions,
+  emit: ProviderEmit,
 ): Promise<{ adapter: unknown } | { issue: string }> {
   const fail = (text: string) => ({ issue: text });
   let adapter: unknown;
@@ -170,7 +183,7 @@ async function build(
       sailDir: resolved.sailDir,
       runsDir: runsDir(resolved.sailDir),
       env: resolved.env,
-      ...(resolved.emit === undefined ? {} : { emit: resolved.emit }),
+      emit,
       ...(resolved.now === undefined ? {} : { now: resolved.now }),
     });
   } catch (error) {
@@ -199,7 +212,8 @@ async function build(
 
 /**
  * Resolves, preflights and creates the four adapters, or gives every issue the first failing pass found. Given `ports`,
- * it does so for those alone: no other port's adapter is loaded, asked for its credentials or created.
+ * it does so for those alone: no other port's adapter is loaded, asked for its credentials or created. Every adapter
+ * emits into one relay, and into `options.emit` when one is given.
  */
 export async function resolveAdapters<P extends Port = Port>(
   options: ResolveOptions<P>,
@@ -208,6 +222,11 @@ export async function resolveAdapters<P extends Port = Port>(
   const issue = (port: Port, text: string) => issues.push({ path: `/adapters/${port}`, message: text });
   const optionsOf = ({ use: _use, ...rest }: ProjectConfig['adapters'][Port]): AdapterOptions => rest;
   const wanted: readonly Port[] = options.ports ?? PORTS;
+  const relay = providerRelay();
+  const emit: ProviderEmit = (event) => {
+    options.emit?.(event);
+    relay.emit(event);
+  };
 
   const found = {} as Record<Port, Found>;
   for (const port of wanted) {
@@ -234,7 +253,7 @@ export async function resolveAdapters<P extends Port = Port>(
       continue;
     }
     const { versions } = read;
-    const built = await build(port, use, found[port], optionsOf(options.config.adapters[port]), options);
+    const built = await build(port, use, found[port], optionsOf(options.config.adapters[port]), options, emit);
     if ('issue' in built) {
       issue(port, built.issue);
       continue;
@@ -247,5 +266,5 @@ export async function resolveAdapters<P extends Port = Port>(
     };
   }
   if (issues.length > 0) return { issues };
-  return { ports: ports as unknown as Pick<PortAdapters, P>, entries, relay: providerRelay() };
+  return { ports: ports as unknown as Pick<PortAdapters, P>, entries, relay };
 }

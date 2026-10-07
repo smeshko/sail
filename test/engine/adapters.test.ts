@@ -606,10 +606,7 @@ async function resolveFixture<P extends Port = Port>(
   return resolved;
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a relay hands each event to the sink attached to it, drops what it is given with none, and takes a new sink once the first is detached', () => {
+test('a relay hands each event to the sink attached to it, drops what it is given with none, and takes a new sink once the first is detached', () => {
   const relay = providerRelay();
   expect(() => relay.emit(FETCHED)).not.toThrow();
   const first: ProviderEvent[] = [];
@@ -629,10 +626,7 @@ test
   expect(first).toHaveLength(2);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a second sink while one is attached throws, and the first keeps receiving', () => {
+test('a second sink while one is attached throws, and the first keeps receiving', () => {
   const relay = providerRelay();
   const first: ProviderEvent[] = [];
   relay.attach((event) => first.push(event));
@@ -641,10 +635,7 @@ test
   expect(first).toEqual([FETCHED]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("resolveAdapters gives a relay its adapters emit into: an attached sink sees a get's ticket:fetched, and an emit given in the options receives every event, sink or not", async () => {
+test("resolveAdapters gives a relay its adapters emit into: an attached sink sees a get's ticket:fetched, and an emit given in the options receives every event, sink or not", async () => {
   const given: ProviderEvent[] = [];
   const resolved = await resolveFixture({ emit: (event) => given.push(event) });
   await resolved.ports.ticketSource.get('FAKE-1');
@@ -661,10 +652,7 @@ test
   expect(given[1]).toBe(seen[0] as ProviderEvent);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('resolving a subset of the ports gives a relay too, which the adapters resolved emit into', async () => {
+test('resolving a subset of the ports gives a relay too, which the adapters resolved emit into', async () => {
   const resolved = await resolveFixture({ ports: ['ticketSource'] });
   expect(Object.keys(resolved.ports)).toEqual(['ticketSource']);
   const seen: ProviderEvent[] = [];

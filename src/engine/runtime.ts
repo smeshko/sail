@@ -3,6 +3,9 @@
 // are this one loop: a resume enters it with an existing run directory. Until runs get a workspace of their own,
 // scripts run in the directory that holds `.sail/`.
 //
+// What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
+// that is running. A workspace event carries none.
+//
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
 // Ctrl-C no longer ends the process once sail listens for it.
@@ -21,7 +24,7 @@ import { dirname, join } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
-import type { Consumer, Emit, SailEvent } from '../events/types';
+import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
@@ -162,18 +165,26 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     ...(options.unreported === undefined ? {} : { unreported: options.unreported }),
   });
   let replays = 0;
-  /** The call being run or journaled, which a crash names. */
+  /** The call being run or journaled, which a crash names and a provider event is stamped with. */
   let running: string | undefined;
-  /** Set by `run:end`. */
+  /** Set as `run:end` goes out: it ends the stream. */
   let ended = false;
   const replayEmit: Emit = (event) => {
     if (!ended) bus.emit(event);
   };
+  /** Emits what an adapter emitted, under the running call's key. A workspace event has none, nor one between calls. */
+  const relayed = (event: ProviderEvent): void => {
+    if (ended) return;
+    const keyed = running !== undefined && !event.type.startsWith('workspace:');
+    bus.emit((keyed ? { ...event, key: running } : event) as NewEvent);
+  };
+  const detach = opened.relay.attach(relayed);
 
   /** Records how the run ended in STATUS, then reports it. */
   const finish = (end: RunEnd): RunEnd => {
     writeStatus(dir, end.status, end.stopReason);
     const { status, stopReason, message } = end;
+    ended = true;
     bus.emit({
       type: 'run:end',
       status,
@@ -182,7 +193,6 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       ...(status === 'completed' ? resultOf(end.result) : {}),
       replays,
     });
-    ended = true;
     return end;
   };
   const failed = (stopReason: StopReason, message: string): RunEnd =>
@@ -248,6 +258,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });
     throw error;
+  } finally {
+    detach();
   }
 }
 

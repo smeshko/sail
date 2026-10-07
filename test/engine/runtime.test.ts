@@ -1281,10 +1281,7 @@ const FETCHED: ProviderEvent = {
 const LEASED: ProviderEvent = { type: 'workspace:leased', remote: 'fake://codehost/stub', branch: 'sail/LOCAL' };
 const COMMENTED: ProviderEvent = { type: 'ticket:commented', ticketKey: 'FAKE-1', body: 'between two calls' };
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("what an adapter emits while a call runs is in events.ndjson with that call's key, right after the event it followed: a workspace event has no key, and neither has a ticket event between two calls", async () => {
+test("what an adapter emits while a call runs is in events.ndjson with that call's key, right after the event it followed: a workspace event has no key, and neither has a ticket event between two calls", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const adapters = await fakeAdapters(repo.dir);
@@ -1325,10 +1322,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('once run:end is out nothing an adapter emits reaches the file, and the run lets go of the relay', async () => {
+test('once run:end is out nothing an adapter emits reaches the file, and the run lets go of the relay', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const adapters = await fakeAdapters(repo.dir);
@@ -1354,10 +1348,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a run that crashes lets go of the relay too', async () => {
+test('a run that crashes lets go of the relay too', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(
