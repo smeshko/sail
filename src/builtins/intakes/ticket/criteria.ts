@@ -34,21 +34,80 @@ const FENCE = /^\s*(`{3,}(?=[^`]*$)|~{3,})/;
 
 const indentOf = (line: string): number => line.length - line.trimStart().length;
 
+/** How wide `text` is in columns, a tab reaching the next multiple of four, as Markdown counts an indent. */
+function columnsOf(text: string): number {
+  let columns = 0;
+  for (const char of text) columns += char === '\t' ? 4 - (columns % 4) : 1;
+  return columns;
+}
+
 /**
- * Which lines are code: those of a fence, its own two included. A fence runs to a line that is its marker alone, at
- * least as long as the one that opened it, or to the end when it has none.
+ * Which lines are code: those inside a fence, with the line that closes it. A fence is read where Bun's Markdown
+ * parser reads one, which takes the list items around it:
+ *
+ * - It opens on a line indented less than four columns past the block that holds it, or right after an item's marker.
+ *   That line is code unless it is the item's own, which stays an item. Indented further, backticks are indented code.
+ * - It closes on its marker alone, at least as long as the one that opened it and indented less than four columns
+ *   past its block.
+ * - It ends with the item that holds it, at the first line that falls short of the item's text. Its own marker on that
+ *   line still closes it. Any other line starts anew.
  */
 function fenced(lines: readonly string[]): boolean[] {
-  let opened: string | undefined;
+  /** The column each open item's text starts at, innermost last: what a line must reach to be inside the item. */
+  const items: number[] = [];
+  /** The open fence: its marker, and the column of the block that holds it. */
+  let fence: { marker: string; base: number } | undefined;
+  /** Whether the line above was a paragraph's: plain text right under one goes on with it, however little indented. */
+  let paragraph = false;
+
   return lines.map((line) => {
-    const marker = FENCE.exec(line)?.[1];
-    if (opened === undefined) {
-      opened = marker;
-      return opened !== undefined;
+    if (line.trim() === '') {
+      paragraph = false;
+      return fence !== undefined;
     }
-    const same = marker !== undefined && marker[0] === opened[0] && marker.length >= opened.length;
-    if (same && line.trim() === marker) opened = undefined;
-    return true;
+    const indent = columnsOf(line.slice(0, indentOf(line)));
+    const held = items.filter((column) => column <= indent);
+    if (fence !== undefined) {
+      const marker = FENCE.exec(line)?.[1];
+      const same = marker !== undefined && marker[0] === fence.marker[0] && marker.length >= fence.marker.length;
+      const closes = same && line.trim() === marker;
+      if (indent >= fence.base) {
+        // Indented four columns or more past its block, the marker is the fence's own code.
+        if (closes && indent - fence.base < 4) fence = undefined;
+        return true;
+      }
+      // A line that falls short of the block that held the fence ends that block, and the fence with it. The fence's
+      // own marker there still closes it, as Bun's Markdown parser reads it, where any other line starts anew.
+      fence = undefined;
+      if (closes) {
+        items.length = held.length;
+        return true;
+      }
+    }
+
+    const outer = held.at(-1) ?? 0;
+    const starts = indent - outer < 4 && (ATX.test(line.trimStart()) || ITEM.test(line) || FENCE.test(line));
+    if (paragraph && held.length < items.length && !starts) return false;
+    items.length = held.length;
+    // Indented code, or more of a paragraph: neither opens a fence or an item.
+    if (indent - outer >= 4) return false;
+
+    let text = ITEM.exec(line)?.[1];
+    if (text === undefined) {
+      const marker = FENCE.exec(line)?.[1];
+      if (marker !== undefined) fence = { marker, base: outer };
+      paragraph = marker === undefined && !ATX.test(line.trimStart());
+      return marker !== undefined;
+    }
+    // An item, and any item that starts on the same line inside it: `- 1. text`.
+    for (let inner: string | undefined = text; inner !== undefined; inner = ITEM.exec(inner)?.[1]) {
+      text = inner;
+      items.push(columnsOf(line.slice(0, line.length - inner.length)));
+    }
+    const marker = FENCE.exec(text)?.[1];
+    if (marker !== undefined) fence = { marker, base: items.at(-1) ?? 0 };
+    paragraph = marker === undefined;
+    return false;
   });
 }
 
