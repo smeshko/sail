@@ -8,10 +8,7 @@ import * as intakes from '../../../src/sdk/intakes';
 const isIntake = (value: unknown): value is Intake =>
   typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'intake';
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('BUILTIN_INTAKES holds a body for every intake sail/intakes exports, and for nothing else', () => {
+test('BUILTIN_INTAKES holds a body for every intake sail/intakes exports, and for nothing else', () => {
   const exported = Object.values<unknown>(intakes).filter(isIntake);
   expect(exported.map((intake) => intake.name)).toEqual(['ticket']);
   expect([...BUILTIN_INTAKES.keys()]).toEqual(exported);

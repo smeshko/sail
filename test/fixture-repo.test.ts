@@ -127,10 +127,7 @@ test('each stage matches its golden roster entry', async () => {
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('every golden output parses with the matching fixture schema', async () => {
+test('every golden output parses with the matching fixture schema', async () => {
   const found = await stages();
   const results = [...new Bun.Glob('**/result.json').scanSync({ cwd: golden })].sort();
   const checked: string[] = [];

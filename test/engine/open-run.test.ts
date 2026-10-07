@@ -231,10 +231,7 @@ test('a .sail/ refused by its project.yaml is not claimed, so a run from it can 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("an input the intake's schema accepts becomes the run's input, parsed", async () => {
+test("an input the intake's schema accepts becomes the run's input, parsed", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const input = {
@@ -357,10 +354,7 @@ test("findRun throws on a STATUS it can't read: sail's own files are broken", as
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('reopenRun reopens a suspended run with the header on disk, its input parsed, and STATUS running again', async () => {
+test('reopenRun reopens a suspended run with the header on disk, its input parsed, and STATUS running again', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
     const reopened = await reopenRun({

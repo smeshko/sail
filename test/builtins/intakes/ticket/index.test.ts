@@ -129,10 +129,7 @@ function section(brief: string, heading: string): string {
   return (to === -1 ? rest : rest.slice(0, to)).trim();
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the body returns the ticket as TicketInput takes it, with the criteria in order, from one get', async () => {
+test('the body returns the ticket as TicketInput takes it, with the criteria in order, from one get', async () => {
   const { output, gets } = await ran();
   expect(output).toEqual({
     ticketKey: 'FAKE-7',
@@ -147,10 +144,7 @@ test
   expect(gets.map((each) => each.ticketKey)).toEqual(['FAKE-7']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("ticket.json is the port's ticket as get returned it, raw included, with the criteria, as indented JSON", async () => {
+test("ticket.json is the port's ticket as get returned it, raw included, with the criteria, as indented JSON", async () => {
   const { out, gets } = await ran();
   expect(readdirSync(out).sort()).toEqual(['brief.md', 'ticket.json']);
   const text = readFileSync(join(out, 'ticket.json'), 'utf8');
@@ -162,10 +156,7 @@ test
   expect([file.state, file.raw.state]).toEqual([SEED.state, SEED.state]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('brief.md opens with the ticket key, then has Request, Acceptance criteria and Context, in that order', async () => {
+test('brief.md opens with the ticket key, then has Request, Acceptance criteria and Context, in that order', async () => {
   const brief = briefIn((await ran()).out);
   expect(brief.split('\n').filter((line) => /^#{1,2} /.test(line))).toEqual([
     '# Brief: FAKE-7',
@@ -180,10 +171,7 @@ test
   expect(brief.endsWith('</untrusted-input>\n')).toBe(true);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("every string the provider returned is wrapped in the brief, each with its own source, and only the ticket key and the state's type are bare", async () => {
+test("every string the provider returned is wrapped in the brief, each with its own source, and only the ticket key and the state's type are bare", async () => {
   const brief = briefIn((await ran()).out);
   expect(wrapped(brief)).toEqual({
     'ticket FAKE-7, title': SEED.title,
@@ -214,10 +202,7 @@ test
   for (const absent of ['STATE-NAME-MARK', '2026-10-01', 'image/png']) expect(brief).not.toContain(absent);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('text that closes the wrapper stays inside it: one pair of delimiters per wrapped value, whatever the value holds', async () => {
+test('text that closes the wrapper stays inside it: one pair of delimiters per wrapped value, whatever the value holds', async () => {
   const CLOSE = '</untrusted-input>';
   const hostile = {
     ...SEED,
@@ -242,10 +227,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a ticket with no criteria section has none: the brief says None stated., and the whole description is the request', async () => {
+test('a ticket with no criteria section has none: the brief says None stated., and the whole description is the request', async () => {
   const description = lines('REQUEST-MARK line one.', '', '- a list that is no criterion');
   const { output, out } = await ran({ ...SEED, description });
   expect(output).toMatchObject({ ticketKey: 'FAKE-7', acceptanceCriteria: [] });
@@ -255,10 +237,7 @@ test
   expect(JSON.parse(readFileSync(join(out, 'ticket.json'), 'utf8')).acceptanceCriteria).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a ticket with no description, labels, links, attachments or comments renders: the title alone under Request, and Context says it has no comments', async () => {
+test('a ticket with no description, labels, links, attachments or comments renders: the title alone under Request, and Context says it has no comments', async () => {
   const bare = { ...SEED, description: '', labels: [], links: [], attachments: [], comments: [] };
   const { output, out } = await ran(bare);
   expect(output).toMatchObject({ acceptanceCriteria: [], labels: [], links: [], attachments: [] });
@@ -270,10 +249,7 @@ test
   expect(section(brief, '## Context').split('\n')).toContain('- Comments: none');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a PortError from get reaches the caller as it is, an answer that is no Ticket becomes one naming the port's get, and neither leaves a file", async () => {
+test("a PortError from get reaches the caller as it is, an answer that is no Ticket becomes one naming the port's get, and neither leaves a file", async () => {
   const { ticketSource, out } = world(SEED);
   const missing = await rejection(ticketIntake({ source: sourceOf('FAKE-9'), ticketSource, out }));
   expect(portFailure(missing)).toEqual({ port: 'ticketSource', op: 'get', code: 'not_found' });

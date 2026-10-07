@@ -26,10 +26,7 @@ test('ticket is the built-in intake for ticket sources', () => {
   expect(ticket).not.toHaveProperty('steps');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('TicketInput accepts the golden intake output, its labels, links and attachments included', () => {
+test('TicketInput accepts the golden intake output, its labels, links and attachments included', () => {
   const { output } = JSON.parse(readFileSync(goldenIntake, 'utf8'));
   expect(Object.keys(output)).toEqual([
     'ticketKey',
@@ -43,10 +40,7 @@ test
   expect(TicketInput.parse(output)).toEqual(output);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('TicketInput refuses a ticket without its acceptance criteria, its labels, its links or its attachments', () => {
+test('TicketInput refuses a ticket without its acceptance criteria, its labels, its links or its attachments', () => {
   const result = TicketInput.safeParse({ ticketKey: 'FAKE-1', title: 'Title', url: 'fake://tickets/FAKE-1' });
   expect(result.success).toBe(false);
   expect(result.error?.issues.map((issue) => issue.path.join('.'))).toEqual([
@@ -72,10 +66,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("TicketInput marks as untrusted its title, each criterion, each label, each link's URL and title and each attachment's name and URL, and nothing else", () => {
+test("TicketInput marks as untrusted its title, each criterion, each label, each link's URL and title and each attachment's name and URL, and nothing else", () => {
   const { shape } = TicketInput;
   expect(Object.keys(shape)).toEqual([
     'ticketKey',

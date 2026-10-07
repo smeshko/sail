@@ -1,6 +1,10 @@
 // Generated from src/sdk by `bun run types`. Do not edit.
 import { z } from 'zod';
-declare const Shape: z.ZodObject<{
+/**
+ * A ticket as the `ticket` intake hands it to the workflow: `run.input`. Every string the provider returned is marked
+ * untrusted, apart from the URL: `untrusted()` is a plain string schema, so marking it would drop the URL check.
+ */
+export declare const TicketInput: z.ZodObject<{
     ticketKey: z.ZodString;
     title: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
     url: z.ZodURL;
@@ -16,10 +20,8 @@ declare const Shape: z.ZodObject<{
         mimeType: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
-/** A ticket as the `ticket` intake hands it to the workflow: `run.input`. */
-export declare const TicketInput: typeof Shape;
 export type TicketInput = z.infer<typeof TicketInput>;
-/** The built-in intake for ticket sources. It leaves `ticket.json` and `brief.md`. Declared here; its body comes later. */
+/** The built-in intake for ticket sources. The engine runs its body, which leaves `ticket.json` and `brief.md`. */
 export declare const ticket: import("./intake").Intake<z.ZodObject<{
     ticketKey: z.ZodString;
     title: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
@@ -39,4 +41,3 @@ export declare const ticket: import("./intake").Intake<z.ZodObject<{
     'ticket.json': "file";
     'brief.md': "file";
 }, import("./steps").StepList>;
-export {};

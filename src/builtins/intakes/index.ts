@@ -3,6 +3,8 @@
 import type { Source } from '../../engine/run-dir';
 import type { TicketSource } from '../../ports/ticket-source';
 import type { Intake } from '../../sdk/intake';
+import { ticket } from '../../sdk/intakes';
+import { ticketIntake } from './ticket/index';
 
 /** What a built-in intake's body is given. */
 export interface IntakeContext {
@@ -18,4 +20,4 @@ export interface IntakeContext {
 export type IntakeBody = (context: IntakeContext) => Promise<unknown>;
 
 /** Each built-in intake, as `sail/intakes` exports it, to its body. */
-export const BUILTIN_INTAKES: ReadonlyMap<Intake, IntakeBody> = new Map<Intake, IntakeBody>();
+export const BUILTIN_INTAKES: ReadonlyMap<Intake, IntakeBody> = new Map<Intake, IntakeBody>([[ticket, ticketIntake]]);

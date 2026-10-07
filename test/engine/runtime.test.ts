@@ -459,10 +459,7 @@ test('resuming from a .sail/ this process already ran from throws before it writ
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the input given again on resume is run.input', async () => {
+test('the input given again on resume is run.input', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir, { input: INPUT });
     edit(
