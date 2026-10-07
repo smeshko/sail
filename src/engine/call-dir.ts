@@ -95,15 +95,16 @@ export function nextTry(runDir: string, index: number, stage: string, call: numb
 export function createCallDir(paths: CallPaths, options: { durable?: boolean; stageIn?: boolean } = {}): void {
   const parent = dirname(paths.dir);
   mkdirSync(parent, { recursive: true });
+  const stageIn = options.stageIn ?? true;
   if (!options.durable) {
     mkdirSync(paths.dir);
-    mkdirSync(paths.stageIn);
+    if (stageIn) mkdirSync(paths.stageIn);
     return;
   }
   // The stage's directory may be new too, and its entry is its own parent's.
   syncDir(dirname(parent));
   createDir(paths.dir);
-  createDir(paths.stageIn);
+  if (stageIn) createDir(paths.stageIn);
 }
 
 /**

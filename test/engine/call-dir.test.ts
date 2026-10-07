@@ -123,10 +123,7 @@ test('runRelative gives a run-relative POSIX path, as result.json records files'
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('createCallDir leaves in/ out when told to, for a first try and a durable later one, and still refuses to reuse the directory', () => {
+test('createCallDir leaves in/ out when told to, for a first try and a durable later one, and still refuses to reuse the directory', () => {
   const dir = tempDir();
   const first = callPaths(dir, 0, 'intake', 1);
   createCallDir(first, { stageIn: false });

@@ -110,12 +110,16 @@ const leaving =
   };
 const BOTH = { 'ticket.json': '{}\n', 'brief.md': '# Brief: FAKE-1\n' };
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a passing try of the ticket intake leaves ticket.json, brief.md and result.json in 00-intake/call-1/, and nothing else: no in/ and no logs', async () => {
+test('a passing try of the ticket intake leaves ticket.json, brief.md and result.json in 00-intake/call-1/, and nothing else: no in/ and no logs', async () => {
   const { runDir, ticketSource } = world();
-  const { result, paths } = await runIntake({ runDir, runId: RUN_ID, intake: LOADED, body: ticketIntake, source: SOURCE, ticketSource });
+  const { result, paths } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: ticketIntake,
+    source: SOURCE,
+    ticketSource,
+  });
   expect(result.outcome).toBe('passed');
   expect(paths.dir).toBe(join(runDir, '00-intake', 'call-1'));
   expect(paths.result).toBe(join(runDir, '00-intake', 'call-1', 'result.json'));
@@ -123,12 +127,16 @@ test
   expect(readdirSync(runDir)).toEqual(['00-intake']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('its result.json is a valid builtin result: the call, the output as TicketInput parsed it, both files by size and hash, where its source came from, and a duration that is its timestamps apart', async () => {
+test('its result.json is a valid builtin result: the call, the output as TicketInput parsed it, both files by size and hash, where its source came from, and a duration that is its timestamps apart', async () => {
   const { runDir, ticketSource } = world();
-  const { result, paths } = await runIntake({ runDir, runId: RUN_ID, intake: LOADED, body: ticketIntake, source: SOURCE, ticketSource });
+  const { result, paths } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: ticketIntake,
+    source: SOURCE,
+    ticketSource,
+  });
   expect(validateDocument('sail.result.v1', result).map(formatIssue)).toEqual([]);
   const { startedAt, finishedAt, durationMs, ...rest } = result;
   expect(rest).toEqual({
@@ -152,10 +160,7 @@ test
   expect([INTAKE_STAGE, INTAKE_KEY]).toEqual(['intake', 'intake#1']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('it emits intake:start before the call directory exists, then output:validated, a file:produced per declared file in the order produces declares them, then intake:end, each keyed intake#1', async () => {
+test('it emits intake:start before the call directory exists, then output:validated, a file:produced per declared file in the order produces declares them, then intake:end, each keyed intake#1', async () => {
   const { runDir, ticketSource } = world();
   const { events, emit } = collect();
   let existedAtStart: boolean | undefined;
@@ -183,13 +188,18 @@ test
   expect(eventIssues(events)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a body that throws a PortError ends the try in error with one error: the reason port, and the error's own message with its code", async () => {
+test("a body that throws a PortError ends the try in error with one error: the reason port, and the error's own message with its code", async () => {
   const { runDir, ticketSource } = world();
   const { events, emit } = collect();
-  const { result, paths } = await runIntake({ runDir, runId: RUN_ID, intake: LOADED, body: ticketIntake, source: sourceOf('FAKE-9'), ticketSource, emit });
+  const { result, paths } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: ticketIntake,
+    source: sourceOf('FAKE-9'),
+    ticketSource,
+    emit,
+  });
   expect(result).toMatchObject({
     key: 'intake#1',
     kind: 'builtin',
@@ -201,18 +211,28 @@ test
   expect(validateDocument('sail.result.v1', result).map(formatIssue)).toEqual([]);
   expect(JSON.parse(readFileSync(paths.result, 'utf8'))).toEqual(result);
   expect(events.map((event) => event.type)).toEqual(['intake:start', 'intake:end']);
-  expect(events.at(-1)).toEqual({ type: 'intake:end', key: 'intake#1', outcome: 'error', resultPath: '00-intake/call-1/result.json' });
+  expect(events.at(-1)).toEqual({
+    type: 'intake:end',
+    key: 'intake#1',
+    outcome: 'error',
+    resultPath: '00-intake/call-1/result.json',
+  });
   expect(eventIssues(events)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("an output the intake's schema refuses is invalid_output with Zod's message, reported as output:invalid, and the files the body left are still recorded", async () => {
+test("an output the intake's schema refuses is invalid_output with Zod's message, reported as output:invalid, and the files the body left are still recorded", async () => {
   const { runDir, ticketSource } = world();
   const { events, emit } = collect();
   const body = leaving(BOTH, { ...VALID, url: 'not a url' });
-  const { result } = await runIntake({ runDir, runId: RUN_ID, intake: LOADED, body, source: SOURCE, ticketSource, emit });
+  const { result } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body,
+    source: SOURCE,
+    ticketSource,
+    emit,
+  });
   expect(result.outcome).toBe('error');
   expect(result).toMatchObject({
     outcome: 'error',
@@ -237,10 +257,7 @@ test
   expect(eventIssues(events)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a declared file the body did not leave is a missing_file, beside any other error, and alone it still ends the try in error', async () => {
+test('a declared file the body did not leave is a missing_file, beside any other error, and alone it still ends the try in error', async () => {
   const both = world();
   const invalid = leaving({ 'ticket.json': '{}\n' }, { ...VALID, title: 7 });
   const { result } = await runIntake({ ...both, runId: RUN_ID, intake: LOADED, body: invalid, source: SOURCE });
@@ -257,17 +274,21 @@ test
   expect((lone.result.errors as { reason: string }[]).map((error) => error.reason)).toEqual(['missing_file']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("an output JSON can't hold is invalid_output, and the result is still written", async () => {
+test("an output JSON can't hold is invalid_output, and the result is still written", async () => {
   const { runDir, ticketSource } = world();
   const counted: LoadedIntake = {
     definition: intake('counted', { accepts: ['ticket'], output: z.object({ count: z.bigint() }) }),
     module: {},
   };
   const body: IntakeBody = async () => ({ count: 1n });
-  const { result, paths } = await runIntake({ runDir, runId: RUN_ID, intake: counted, body, source: SOURCE, ticketSource });
+  const { result, paths } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: counted,
+    body,
+    source: SOURCE,
+    ticketSource,
+  });
   expect(result).toMatchObject({ outcome: 'error', output: null, files: {} });
   const errors = result.errors as { reason: string; message: string }[];
   expect(errors.map((error) => error.reason)).toEqual(['invalid_output']);
@@ -275,10 +296,7 @@ test
   expect(JSON.parse(readFileSync(paths.result, 'utf8'))).toEqual(result);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a later try writes into try-N, its result and events say so, and a try whose directory exists throws', async () => {
+test('a later try writes into try-N, its result and events say so, and a try whose directory exists throws', async () => {
   const { runDir, ticketSource } = world();
   const request = { runDir, runId: RUN_ID, intake: LOADED, body: ticketIntake, source: SOURCE, ticketSource };
   await runIntake(request);
@@ -291,31 +309,32 @@ test
     'brief.md': recorded(runDir, '00-intake/call-1/try-2/brief.md'),
   });
   expect(events.at(-1)).toMatchObject({ type: 'intake:end', resultPath: '00-intake/call-1/try-2/result.json' });
-  expect(readdirSync(join(runDir, '00-intake', 'call-1')).sort()).toEqual(['brief.md', 'result.json', 'ticket.json', 'try-2']);
+  expect(readdirSync(join(runDir, '00-intake', 'call-1')).sort()).toEqual([
+    'brief.md',
+    'result.json',
+    'ticket.json',
+    'try-2',
+  ]);
 
   expect(await rejection(runIntake({ ...request, try: 2 }))).toMatchObject({ code: 'EEXIST' });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a body that throws anything but a PortError rejects with it, after intake:start and with no result.json', async () => {
+test('a body that throws anything but a PortError rejects with it, after intake:start and with no result.json', async () => {
   const { runDir, ticketSource } = world();
   const { events, emit } = collect();
   const bug = new Error('a bug in the body');
   const body: IntakeBody = async () => {
     throw bug;
   };
-  const error = await rejection(runIntake({ runDir, runId: RUN_ID, intake: LOADED, body, source: SOURCE, ticketSource, emit }));
+  const error = await rejection(
+    runIntake({ runDir, runId: RUN_ID, intake: LOADED, body, source: SOURCE, ticketSource, emit }),
+  );
   expect(error).toBe(bug);
   expect(events.map((event) => event.type)).toEqual(['intake:start']);
   expect(existsSync(join(runDir, '00-intake', 'call-1', 'result.json'))).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the body is given the request's source, ticket source and signal, and the absolute call directory to write into", async () => {
+test("the body is given the request's source, ticket source and signal, and the absolute call directory to write into", async () => {
   const { runDir, ticketSource } = world();
   const { signal } = new AbortController();
   let given: IntakeContext | undefined;
@@ -329,10 +348,7 @@ test
   expect(given?.signal).toBe(signal);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('intakeBody gives the body of the built-in a workflow names, and none for an intake the repository exports', () => {
+test('intakeBody gives the body of the built-in a workflow names, and none for an intake the repository exports', () => {
   expect(intakeBody(LOADED)).toBe(ticketIntake);
   const own = intake('own', { accepts: ['ticket'], output: intakes.TicketInput, produces: { 'brief.md': 'file' } });
   expect(intakeBody({ definition: own, path: '/repo/.sail/intakes/own', module: { own } })).toBeUndefined();
