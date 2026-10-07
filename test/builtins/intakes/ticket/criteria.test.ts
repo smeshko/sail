@@ -209,6 +209,36 @@ const CASES: Case[] = [
     request: '',
     criteria: ['A', lines('B', '- C'), 'D'],
   },
+  {
+    rule: 'a no-break space after the heading leaves it the heading, and after a bold line leaves it bold alone',
+    description: lines('Intro.', '**Acceptance criteria:** ', '- one', '**Notes** ', '- no criterion'),
+    request: lines('Intro.', '**Notes** ', '- no criterion'),
+    criteria: ['one'],
+  },
+  {
+    rule: "a no-break space between the heading's words, after a marker or a checkbox, or as an indent, is a space",
+    description: lines('Acceptance criteria:', '- one', '  more', '1. two', '- [x] three'),
+    request: '',
+    criteria: [lines('one', 'more'), 'two', 'three'],
+  },
+  {
+    rule: 'an item whose text holds a line separator is one criterion, whole',
+    description: lines('## Acceptance criteria', '- one more', '- two'),
+    request: '',
+    criteria: ['one more', 'two'],
+  },
+  {
+    rule: 'a line ending with a stray carriage return before its CRLF ends the same',
+    description: 'Intro.\r\r\n## Acceptance criteria\r\r\n- one\r\r\n- two\r\r\n',
+    request: 'Intro.',
+    criteria: ['one', 'two'],
+  },
+  {
+    rule: 'a line of no-break spaces alone is a blank line',
+    description: lines('Intro.', ' ', '## Acceptance criteria', '- one', ' ', 'Outro.'),
+    request: lines('Intro.', '', 'Outro.'),
+    criteria: ['one'],
+  },
 ];
 
 test.each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { description, request, criteria }) => {
@@ -216,7 +246,7 @@ test.each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { descripti
 });
 
 /** The heading in any of its three forms, as a trimmed line. */
-const HEADING = /^(?:#{1,6}\s+)?(?:\*\*|__)?acceptance criteria:?(?:\*\*|__)?:?$/i;
+const HEADING = /^(?:#{1,6}\s+)?(?:\*\*|__)?acceptance\s+criteria:?(?:\*\*|__)?:?$/i;
 /** A list marker, with a task checkbox when one follows it: what an item's first line loses on its way to a criterion. */
 const MARKER = /^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
 
@@ -262,6 +292,8 @@ const BARE_FENCE = /^(?:`{3,}|~{3,})$/;
 
 /** The lines a generated description is made of: every form of the heading, of an item, of a section's end and of a fence. */
 const POOL = [
+  '## Acceptance criteria ',
+  '- no-break item',
   '```',
   '```sh',
   '  ```',
