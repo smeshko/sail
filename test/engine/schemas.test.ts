@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -1026,4 +1026,23 @@ test('event: intake:start takes the kind builtin, and neither a stage nor a step
   const stepStart = { ...envelope, type: 'step:start', key: OPEN, stage: 'publish', step: 'open', index: 2, of: 2 };
   expect(paths('sail.event.v1', { ...stepStart, kind: 'script' })).toEqual([]);
   expect(paths('sail.event.v1', { ...stepStart, kind: 'builtin' })).toEqual(['/kind']);
+});
+
+test('event: stage:end takes the reason port in its errors, and every other reason a result may give', () => {
+  const stageEnd = {
+    ...envelope,
+    type: 'stage:end',
+    key: KEY,
+    stage: 'tests',
+    call: 1,
+    try: 1,
+    outcome: 'error',
+    durationMs: 12,
+    resultPath: '03-tests/call-1/result.json',
+  };
+  expect(validateDocument('sail.event.v1', { ...stageEnd, errors: [portError] })).toEqual([]);
+  // A call's `stage:end` carries its result's errors as they are, so the two schemas list the same reasons.
+  const reasonsOf = (file: string): string[] =>
+    JSON.parse(readFileSync(join(root, 'schemas', file), 'utf8')).$defs.errors.items.properties.reason.enum;
+  expect(reasonsOf('sail.event.v1.json')).toEqual(reasonsOf('sail.result.v1.json'));
 });
