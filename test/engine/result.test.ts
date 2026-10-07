@@ -88,10 +88,7 @@ test('writeResult throws on a result that breaks the schema, and writes nothing'
   expect(existsSync(path)).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("a built-in intake's result has no fields of a kind's own, and writeResult accepts it, passed or failed by its port", () => {
+test("a built-in intake's result has no fields of a kind's own, and writeResult accepts it, passed or failed by its port", () => {
   const consumed = { source: 'run.json#/source' };
   const fields = { runId: RUN_ID, stage: 'intake', call: 1, kind: 'builtin', consumed, startedAt, finishedAt };
   const run: StepRun = { outcome: 'passed', output: { ticketKey: 'FAKE-1' }, files: {}, errors: [], record: {} };

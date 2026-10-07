@@ -138,10 +138,7 @@ test('a run with no calls yet says so', async () => {
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('sail show --rebuild writes summary.json from the events, says where, then shows the run', async () => {
+test('sail show --rebuild writes summary.json from the events, says where, then shows the run', async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     const dir = copyGoldenRun(repo.dir);

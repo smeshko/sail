@@ -454,10 +454,7 @@ test('events with no run:start give no summary', () => {
   expect(summarize(stamp([100, start('spec#1')], [300, end('spec#1', 'passed', 200)]))).toBeUndefined();
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("a built-in intake's call is an entry of kind builtin, which no step of a call may be", () => {
+test("a built-in intake's call is an entry of kind builtin, which no step of a call may be", () => {
   const summary = folded(
     stamp(
       [0, runStart()],

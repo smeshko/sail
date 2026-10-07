@@ -2,15 +2,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.result.v1.json",
   "title": "sail result: what one call or one step left behind",
-  "description": "Engine-written result.json. Three shapes: a script step, an agent step, or a multi-step stage's call (steps[] and no kind, because kinds belong to steps). A single-step stage is written as its one step.",
+  "description": "Engine-written result.json. Four shapes: a script step, an agent step, a built-in intake's call (kind builtin: no step ran, so it has no exit, command or session), or a multi-step stage's call (steps[] and no kind, because kinds belong to steps). A single-step stage is written as its one step.",
   "$comment": "Dispatch is if/then/else rather than oneOf: with allErrors, oneOf reports every branch's failures, while this reports the one branch the document claims to be.",
   "type": "object",
-  "if": { "type": "object", "properties": { "steps": true }, "required": ["steps"] },
-  "then": { "$ref": "#/$defs/multiStepStageResult" },
+  "if": { "type": "object", "properties": { "kind": { "const": "builtin" } }, "required": ["kind"] },
+  "then": { "$ref": "#/$defs/builtinResult" },
   "else": {
-    "if": { "type": "object", "properties": { "kind": { "const": "script" } }, "required": ["kind"] },
-    "then": { "$ref": "#/$defs/scriptResult" },
-    "else": { "$ref": "#/$defs/agentResult" }
+    "if": { "type": "object", "properties": { "steps": true }, "required": ["steps"] },
+    "then": { "$ref": "#/$defs/multiStepStageResult" },
+    "else": {
+      "if": { "type": "object", "properties": { "kind": { "const": "script" } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/scriptResult" },
+      "else": { "$ref": "#/$defs/agentResult" }
+    }
   },
   "$defs": {
     "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+(/[a-z0-9-]+)?$" },
@@ -126,7 +130,8 @@
               "exit_code",
               "not_started",
               "budget_exceeded",
-              "harness"
+              "harness",
+              "port"
             ]
           },
           "message": { "type": "string", "minLength": 1 }
@@ -196,6 +201,45 @@
         "finishedAt",
         "durationMs",
         "command"
+      ],
+      "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+      "then": { "properties": { "errors": true }, "required": ["errors"] },
+      "else": { "properties": { "errors": false } },
+      "additionalProperties": false
+    },
+    "builtinResult": {
+      "description": "A built-in intake's call: the engine ran its body in process. It passed, or it ended in error.",
+      "type": "object",
+      "properties": {
+        "schema": { "const": "sail.result.v1" },
+        "runId": { "type": "string" },
+        "stage": { "type": "string" },
+        "call": { "type": "integer", "minimum": 1 },
+        "key": { "$ref": "#/$defs/key" },
+        "kind": { "const": "builtin" },
+        "outcome": { "enum": ["passed", "error"] },
+        "errors": { "$ref": "#/$defs/errors" },
+        "output": true,
+        "files": { "$ref": "#/$defs/files" },
+        "consumed": { "$ref": "#/$defs/consumed" },
+        "startedAt": { "$ref": "#/$defs/ts" },
+        "finishedAt": { "$ref": "#/$defs/ts" },
+        "durationMs": { "type": "number", "minimum": 0 }
+      },
+      "required": [
+        "schema",
+        "runId",
+        "stage",
+        "call",
+        "key",
+        "kind",
+        "outcome",
+        "output",
+        "files",
+        "consumed",
+        "startedAt",
+        "finishedAt",
+        "durationMs"
       ],
       "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
       "then": { "properties": { "errors": true }, "required": ["errors"] },

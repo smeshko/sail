@@ -952,10 +952,7 @@ const builtinResult = {
 };
 const portError = { reason: 'port', message: 'ticketSource.get: no ticket FAKE-9 (not_found)' };
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("result: a built-in intake's result has exactly its thirteen fields, and errors exactly when it ended in error", () => {
+test("result: a built-in intake's result has exactly its thirteen fields, and errors exactly when it ended in error", () => {
   expect(validateDocument('sail.result.v1', builtinResult)).toEqual([]);
   expect(Object.keys(builtinResult).sort()).toEqual([
     'call',
@@ -988,10 +985,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each<[string, Record<string, unknown>, string]>([
+test.each<[string, Record<string, unknown>, string]>([
   ['an exit', { exit: { code: 0 } }, '/exit'],
   ['a command', { command: 'builtin:ticket' }, '/command'],
   ['an env', { env: { RUN_ID } }, '/env'],
@@ -1007,10 +1001,7 @@ test
   expect(paths('sail.result.v1', { ...builtinResult, ...fields })).toEqual([path]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each([
+test.each([
   ['built-in intake', builtinResult],
   ['script', scriptResult],
   ['agent', agentResult],
@@ -1018,10 +1009,7 @@ test
   expect(validateDocument('sail.result.v1', { ...result, outcome: 'error', errors: [portError] })).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('event: intake:start takes the kind builtin, and neither a stage nor a step starts as one', () => {
+test('event: intake:start takes the kind builtin, and neither a stage nor a step starts as one', () => {
   const intakeStart = {
     ...envelope,
     type: 'intake:start',
