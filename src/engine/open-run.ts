@@ -15,10 +15,20 @@ import type { PortAdapters } from '../ports/adapter';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
+import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
 import { createJournal } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { modelProblems } from './roster';
-import { createRunDir, LOCAL_SOURCE, type RunStatus, readStatus, runsDir, type Source, writeStatus } from './run-dir';
+import {
+  createRunDir,
+  isLocalSource,
+  LOCAL_SOURCE,
+  type RunStatus,
+  readStatus,
+  runsDir,
+  type Source,
+  writeStatus,
+} from './run-dir';
 import {
   type AdapterEntry,
   assertRunHeader,
@@ -50,7 +60,10 @@ export interface OpenedRun {
   config: ProjectConfig;
   /** The workflow, with the stages it reaches: what the run replays. */
   loaded: LoadedWorkflow;
-  /** `run.input`: the input, parsed with the intake's schema, or undefined when none was given. */
+  /**
+   * `run.input` of a run with no ticket: the input, parsed with the intake's schema, or undefined when none was given.
+   * A run from a ticket has none here: its input is its journaled `intake#1`.
+   */
   input: unknown;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
@@ -61,11 +74,11 @@ export interface OpenRunOptions {
   cwd: string;
   /** The workflow's name, its folder under `.sail/workflows/`. */
   workflow: string;
-  /** What the run starts from. The `LOCAL` stub until intake exists. */
+  /** What the run starts from: a ticket, whose intake builds the input, or the `LOCAL` stub when left out. */
   source?: Source;
   /** The run id's time and the header's `startedAt`, from one clock. */
   now?: Date;
-  /** The run's input, checked against the intake's schema. It stands in for what intake builds until intake exists. */
+  /** The input of a run with no ticket, checked against the intake's schema. Given beside a ticket, it is refused. */
   input?: unknown;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
@@ -110,6 +123,9 @@ function findConfigured(cwd: string): { dir: string; config: ProjectConfig } | {
  * builds the run header and checks it, all before writing anything. A header that breaks `sail.run.v1` throws: that is a bug in sail,
  * not a refusal. Only then does it create the run directory and write the header, the journal and STATUS.
  *
+ * A stage named `intake` is refused, whatever the run starts from. A run from a ticket is refused an input, since its
+ * intake builds one, and a workflow whose intake is the repository's own, since only a built-in intake runs.
+ *
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
  */
@@ -123,6 +139,22 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   if ('refused' in loaded) return loaded;
   const models = modelProblems(loaded, config);
   if (models.length > 0) return { refused: models.join('\n') };
+  const at = (path: string) => relative(dirname(found.dir), path);
+  const taken = loaded.stages.find((stage) => stage.definition.name === INTAKE_STAGE);
+  if (taken !== undefined) {
+    const why = `its first call's key would be the intake's, ${INTAKE_KEY}`;
+    return { refused: `${at(join(taken.dir, 'stage.ts'))}: a stage can't be named '${INTAKE_STAGE}': ${why}` };
+  }
+  if (!isLocalSource(source)) {
+    if (options.input !== undefined) {
+      return { refused: `a run from ticket ${source.ticketKey} gets its input from its intake, so it takes none` };
+    }
+    if (intakeBody(loaded.intake) === undefined) {
+      const name = loaded.intake.definition.name;
+      const file = at(join(loaded.dir, 'workflow.ts'));
+      return { refused: `${file}: its intake '${name}' is the repository's own, and only a built-in intake runs` };
+    }
+  }
   const parsed = parseInput(loaded, options.input);
   if ('refused' in parsed) return parsed;
   const { input } = parsed;
@@ -163,7 +195,7 @@ export interface ReopenRunOptions {
   cwd: string;
   /** The run's id, its directory under `.sail-runs/`. */
   runId: string;
-  /** The run's input, checked against the intake's schema as on a fresh start. */
+  /** The input of a run with no ticket, given again and checked as on a fresh start. */
   input?: unknown;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;

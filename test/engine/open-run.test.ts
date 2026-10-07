@@ -544,10 +544,7 @@ function useOwnIntake(sail: string): void {
   edit(sail, WORKFLOW, "import { ticket } from 'sail/intakes';", "import { own as ticket } from './intake';");
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('openRun refuses an input given beside a ticket: the run gets its input from its intake, and no run directory is created', async () => {
+test('openRun refuses an input given beside a ticket: the run gets its input from its intake, and no run directory is created', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const run = await openRun({
@@ -562,10 +559,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('openRun refuses a ticket for a workflow that names an intake of its own, which still starts with no ticket', async () => {
+test('openRun refuses a ticket for a workflow that names an intake of its own, which still starts with no ticket', async () => {
   await withTempRepo(async (repo) => {
     useOwnIntake(copyFixture(repo.dir));
     const run = await openRun({
@@ -588,10 +582,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("openRun refuses a workflow that reaches a stage named intake, whatever the run starts from: its first call's key would be the intake's", async () => {
+test("openRun refuses a workflow that reaches a stage named intake, whatever the run starts from: its first call's key would be the intake's", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     write(

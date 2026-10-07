@@ -418,10 +418,7 @@ function writeOddStub(repoDir: string, get: string): string {
   return sail;
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a run from a ticket journals intake#1 as its first line before the workflow function is entered, and its stage lines follow as on a run with no ticket', async () => {
+test('a run from a ticket journals intake#1 as its first line before the workflow function is entered, and its stage lines follow as on a run with no ticket', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
     const enteredAt: Record<string, number> = {};
@@ -445,7 +442,11 @@ test
       stage: 'intake',
       call: 1,
       reason: null,
-      output: { ticketKey: 'FAKE-1', title: 'Add a greeting', acceptanceCriteria: ['`greet Ada` prints `Hello, Ada!`', '`greet` prints the usage'] },
+      output: {
+        ticketKey: 'FAKE-1',
+        title: 'Add a greeting',
+        acceptanceCriteria: ['`greet Ada` prints `Hello, Ada!`', '`greet` prints the usage'],
+      },
       files: { 'ticket.json': '00-intake/call-1/ticket.json', 'brief.md': '00-intake/call-1/brief.md' },
       resultPath: '00-intake/call-1/result.json',
     });
@@ -459,10 +460,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("its events start with the intake's, each keyed intake#1, the ticket:fetched included; no route leaves intake#1, and the intake adds no replay", async () => {
+test("its events start with the intake's, each keyed intake#1, the ticket:fetched included; no route leaves intake#1, and the intake adds no replay", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
     const end = await ticketRun(repo.dir);
@@ -490,10 +488,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('spec#1 consumes the brief the intake left, byte for byte, and the workflow reads the journaled output as run.input', async () => {
+test('spec#1 consumes the brief the intake left, byte for byte, and the workflow reads the journaled output as run.input', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
     edit(sail, WORKFLOW, "  return run.stage(publish, { spec: s.files['spec.md'] });", '  return run.input;');
@@ -508,10 +503,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('an intake output that breaks TicketInput fails the run with stage_error, naming intake#1 and invalid_output, before the workflow function is entered', async () => {
+test('an intake output that breaks TicketInput fails the run with stage_error, naming intake#1 and invalid_output, before the workflow function is entered', async () => {
   await withTempRepo(async (repo) => {
     writeOddStub(repo.dir, "async (key) => ({ ...(await fake.get(key)), url: 'not a url' })");
     const end = await ticketRun(repo.dir);
@@ -528,10 +520,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a ticket the ticket source does not have fails the run with stage_error, naming the port's error, and the intake's result holds it", async () => {
+test("a ticket the ticket source does not have fails the run with stage_error, naming the port's error, and the intake's result holds it", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true });
     const end = await ticketRun(repo.dir, { source: sourceOf('FAKE-9') });
@@ -544,14 +533,16 @@ test
     });
     expect(keys(end.dir)).toEqual(['intake#1']);
     expect(workflowEntries(repo.dir)).toBe(0);
-    expect(events(end.dir).at(-1)).toMatchObject({ type: 'run:end', status: 'failed', stopReason: 'stage_error', replays: 0 });
+    expect(events(end.dir).at(-1)).toMatchObject({
+      type: 'run:end',
+      status: 'failed',
+      stopReason: 'stage_error',
+      replays: 0,
+    });
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a resume replays intake#1 from the journal: across the start and the resume the ticket is fetched once, and spec's next try still consumes the brief of the intake's one try", async () => {
+test("a resume replays intake#1 from the journal: across the start and the resume the ticket is fetched once, and spec's next try still consumes the brief of the intake's one try", async () => {
   await withTempRepo(async (repo) => {
     const started = await withTempRepo(async (from) => {
       writeStub(from.dir, { ticket: true, testsPassAt: 1, sleepAt: 'spec#1' });
@@ -563,7 +554,11 @@ test
       copyRun(from.dir, repo.dir);
       return { end, gets: gets.count, journal: existsSync(end.dir) ? journalText(end.dir) : '' };
     });
-    expect(started.end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during spec#1' });
+    expect(started.end).toMatchObject({
+      status: 'suspended',
+      stopReason: 'interrupted',
+      message: 'stopped during spec#1',
+    });
     expect(started.journal.trimEnd().split('\n')).toHaveLength(1);
 
     const adapters = await fakeAdapters(repo.dir);
@@ -576,17 +571,17 @@ test
     const fetched = events(dir).filter((event) => event.type === 'ticket:fetched');
     expect(fetched).toMatchObject([{ key: 'intake#1', ticketKey: 'FAKE-1' }]);
     expect(journalText(dir).split('\n')[0]).toBe(started.journal.split('\n')[0] ?? '');
-    expect(readJournal(dir).entries[1]).toMatchObject({ key: 'spec#1', resultPath: '01-spec/call-1/try-2/result.json' });
+    expect(readJournal(dir).entries[1]).toMatchObject({
+      key: 'spec#1',
+      resultPath: '01-spec/call-1/try-2/result.json',
+    });
     expect(resultOf(dir, '01-spec/call-1/try-2').consumed).toEqual({ brief: '00-intake/call-1/brief.md' });
     expect(existsSync(join(dir, '00-intake', 'call-1', 'try-2'))).toBe(false);
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('an abort seen before the intake starts suspends the run with an empty journal, no intake directory and no fetch', async () => {
+test('an abort seen before the intake starts suspends the run with an empty journal, no intake directory and no fetch', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { ticket: true });
     const adapters = await fakeAdapters(repo.dir);
@@ -603,10 +598,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("an abort seen once the intake has returned leaves it unjournaled, and the resume runs it as try 2 and journals that try's result", async () => {
+test("an abort seen once the intake has returned leaves it unjournaled, and the resume runs it as try 2 and journals that try's result", async () => {
   await withTempRepo(async (repo) => {
     const end = await withTempRepo(async (from) => {
       writeStub(from.dir, { ticket: true, testsPassAt: 1 });
@@ -614,7 +606,9 @@ test
       const controller = new AbortController();
       countGets(adapters, () => controller.abort());
       const ended = await ticketRun(from.dir, { adapters, signal: controller.signal });
-      const left = existsSync(join(ended.dir, '00-intake')) ? readdirSync(join(ended.dir, '00-intake', 'call-1')).sort() : [];
+      const left = existsSync(join(ended.dir, '00-intake'))
+        ? readdirSync(join(ended.dir, '00-intake', 'call-1')).sort()
+        : [];
       copyRun(from.dir, repo.dir);
       return { ...ended, left, journal: journalText(ended.dir) };
     });
@@ -638,10 +632,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a run left with intake#1 journaled as error and STATUS running fails with stage_error on resume, without a fetch and without entering the workflow', async () => {
+test('a run left with intake#1 journaled as error and STATUS running fails with stage_error on resume, without a fetch and without entering the workflow', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeStub(from.dir, { ticket: true });
@@ -665,14 +656,16 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a ticket run whose journal starts with another key fails with determinism_violation, naming the key, without a fetch', async () => {
+test('a ticket run whose journal starts with another key fails with determinism_violation, naming the key, without a fetch', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeStub(from.dir, { ticket: true });
-      const run = await openRun({ cwd: from.dir, workflow: 'ticket-to-pr', adapters: await fakeAdapters(from.dir), source: SOURCE });
+      const run = await openRun({
+        cwd: from.dir,
+        workflow: 'ticket-to-pr',
+        adapters: await fakeAdapters(from.dir),
+        source: SOURCE,
+      });
       if ('refused' in run) throw new Error(run.refused);
       appendJournal(run.dir, {
         key: 'spec#1',
@@ -702,10 +695,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a body that throws something other than a PortError crashes the run: error:crash names intake#1, STATUS stays running, and the error propagates', async () => {
+test('a body that throws something other than a PortError crashes the run: error:crash names intake#1, STATUS stays running, and the error propagates', async () => {
   await withTempRepo(async (repo) => {
     writeOddStub(repo.dir, "async () => { throw new TypeError('the ticket source broke'); }");
     const error = await rejection(
