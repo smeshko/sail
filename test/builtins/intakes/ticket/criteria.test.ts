@@ -197,6 +197,18 @@ const CASES: Case[] = [
     request: '```make``` builds it:',
     criteria: ['one', 'two'],
   },
+  {
+    rule: 'after a line that belongs to no item, every item of an indented list is a criterion',
+    description: lines('## Acceptance criteria', '- A', 'Some prose', '  - x', '  - y', '  - z'),
+    request: 'Some prose',
+    criteria: ['A', 'x', 'y', 'z'],
+  },
+  {
+    rule: 'an item indented under the one above it is nested in it, however far the first item was indented',
+    description: lines('## Acceptance criteria', '  - A', '- B', '  - C', '- D'),
+    request: '',
+    criteria: ['A', lines('B', '- C'), 'D'],
+  },
 ];
 
 test.each(CASES.map((each) => [each.rule, each] as const))('%s', (_, { description, request, criteria }) => {
