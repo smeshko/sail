@@ -12,19 +12,27 @@ export function runsDir(sailDir: string): string {
   return join(dirname(sailDir), RUNS_DIR);
 }
 
+/** The checks `--force` can override, in the order a run header lists them. */
+export const FORCED = ['designation', 'state'] as const;
+export type Forced = (typeof FORCED)[number];
+
 /** What a run was started from: the run header's `source`. Intake resolves it into the run's input. */
 export interface Source {
   kind: 'ticket';
   ticketKey: string;
   via: 'cli' | 'watch';
-  forced: boolean;
+  /** The checks `--force` overrode. Empty for a run nobody forced. */
+  forced: Forced[];
 }
+
+/** Stub: what a run records as `forced` until the run header's contract takes the list. */
+export const NOT_FORCED = false as unknown as Forced[];
 
 /**
  * A run started by hand with no ticket, so its runs are `LOCAL-<ulid>`. It takes its input from `--input` and runs no
  * intake. It stands in until `sail <ticket>` exists.
  */
-export const LOCAL_SOURCE: Source = { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: false };
+export const LOCAL_SOURCE: Source = { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: NOT_FORCED };
 
 /** Whether `source` is the LOCAL stub: a run with no ticket, whose input is given and whose journal has no intake. */
 export function isLocalSource(source: Source): boolean {

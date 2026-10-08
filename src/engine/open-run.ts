@@ -11,6 +11,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { z } from 'zod';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
+import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
@@ -23,6 +24,7 @@ import {
   createRunDir,
   isLocalSource,
   LOCAL_SOURCE,
+  NOT_FORCED,
   type RunStatus,
   readStatus,
   runsDir,
@@ -65,6 +67,13 @@ export interface OpenedRun {
    * A run from a ticket has none here: its input is its journaled `intake#1`.
    */
   input: unknown;
+  /**
+   * What the claim did to the ticket, in order, for a fresh run's stream. Empty for a run with no ticket and for a
+   * reopened one. Stub: always empty.
+   */
+  claimed: readonly ProviderEvent[];
+  /** The stage `--until` named, for a fresh run that was given one. Stub: never set. */
+  until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
 }
@@ -74,8 +83,15 @@ export interface OpenRunOptions {
   cwd: string;
   /** The workflow's name, its folder under `.sail/workflows/`. */
   workflow: string;
-  /** What the run starts from: a ticket, whose intake builds the input, or the `LOCAL` stub when left out. */
-  source?: Source;
+  /**
+   * The ticket the run starts from, as typed: a ticket key, or a URL the ticket source owns. Its intake builds the
+   * input. Left out, the run starts on the `LOCAL` stub. Stub: taken as the ticket key, unchecked and unclaimed.
+   */
+  ticket?: string;
+  /** Runs a ticket that is not designated or not unstarted. Stub: ignored. */
+  force?: boolean;
+  /** The stage after whose first call the run stops, suspended. Stub: ignored. */
+  until?: string;
   /** The run id's time and the header's `startedAt`, from one clock. */
   now?: Date;
   /** The input of a run with no ticket, checked against the intake's schema. Given beside a ticket, it is refused. */
@@ -138,7 +154,11 @@ function intakeNameTaken(loaded: LoadedWorkflow, sailDir: string): string | unde
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
  */
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
-  const { cwd, workflow, source = LOCAL_SOURCE, now = new Date() } = options;
+  const { cwd, workflow, ticket, now = new Date() } = options;
+  // Stub: the ticket as typed is the ticket key. One that can't name a run directory is refused, with nothing to say.
+  if (ticket !== undefined && !isPlainName(ticket)) return { refused: '' };
+  const source: Source =
+    ticket === undefined ? LOCAL_SOURCE : { kind: 'ticket', ticketKey: ticket, via: 'cli', forced: NOT_FORCED };
   const found = findConfigured(cwd);
   if ('refused' in found) return found;
   const { config } = found;
@@ -191,6 +211,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     config,
     loaded,
     input,
+    claimed: [],
     firstSeq: 1,
   };
 }
@@ -277,6 +298,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     config: found.config,
     loaded,
     input: parsed.input,
+    claimed: [],
     firstSeq,
   };
 }
