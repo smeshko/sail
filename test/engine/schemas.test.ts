@@ -1100,10 +1100,7 @@ test('run: claim holds whether the claim took and the state the provider reporte
   ).toEqual(['/claim/state/type']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-011
-test
-  .skip // TDD-PENDING TASK-011
-  ('run: a header with no claim is refused, naming claim', () => {
+test('run: a header with no claim is refused, naming claim', () => {
   expect(validateDocument('sail.run.v1', omit(run, 'claim'))).toEqual([
     { schema: 'sail.run.v1', path: '/claim', message: 'is required' },
   ]);

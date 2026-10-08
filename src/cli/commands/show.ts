@@ -4,7 +4,7 @@
 // `summary.json` from the events first. It reads only `.sail-runs/`, never `project.yaml`, and exits 0 whenever it
 // could show the run, a failed one too.
 //
-// `--events` prints the run's events through the terminal view `sail run` printed them with, at the verbosity `-q` and
+// `--events` prints the run's events through the terminal view the run printed them with, at the verbosity `-q` and
 // `-v` ask for, so it prints what the run printed. `--follow` does the same, then prints each event appended until the
 // run ends or Ctrl-C stops it, so `--events --follow` is `--follow`.
 import { resolveRun } from '../../engine/runs';

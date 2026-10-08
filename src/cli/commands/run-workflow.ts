@@ -6,8 +6,6 @@
 // the terminal view and maps the run's status to an exit code; the run is the engine's, and so are the ticket's checks
 // and its claim. Everything the command prints during the run comes from its events.
 //
-// `sail run [--workflow <name>] [--input <json>]` names no ticket: it starts a run on the `LOCAL` stub.
-//
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
 // resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
 //
@@ -39,17 +37,6 @@ export function refuseAs(io: Io, command: string): (message: string) => ExitCode
     io.stderr(`${command}: ${message}\n`);
     return EXIT_REFUSED;
   };
-}
-
-/** `--input` parsed as JSON, with the text as given, or neither when it wasn't given. Text that isn't JSON refuses. */
-export function parseInputOption(args: Parsed, io: Io, command: string): { input?: unknown; raw?: string } | ExitCode {
-  const raw = args.values.input;
-  if (typeof raw !== 'string') return {};
-  try {
-    return { input: JSON.parse(raw), raw };
-  } catch (error) {
-    return refuseAs(io, command)(`--input is not JSON: ${(error as Error).message}`);
-  }
 }
 
 /** The verbosity `-q` and `-v` ask for: `-v` is verbose, and `-vv` or more is trace. `-q` with any `-v` refuses. */
@@ -148,25 +135,18 @@ export function terminalFor(
   });
 }
 
-/**
- * After the terminal view's final block, prints how to resume a suspended run, repeating `--input` quoted for a POSIX
- * shell: no event carries the input as given. Returns the status's exit code.
- */
-export function printEnd(end: RunEnd, io: Io, rawInput: string | undefined): ExitCode {
-  if (end.status === 'suspended') {
-    const input = rawInput === undefined ? '' : ` --input '${rawInput.replaceAll("'", "'\\''")}'`;
-    io.stdout(`resume it with: sail resume ${end.runId}${input}\n`);
-  }
+/** After the terminal view's final block, prints how to resume a suspended run. Returns the status's exit code. */
+export function printEnd(end: RunEnd, io: Io): ExitCode {
+  if (end.status === 'suspended') io.stdout(`resume it with: sail resume ${end.runId}\n`);
   return exitCodeFor(end.status);
 }
 
+/** `sail <ticket>`: the dispatch hands it the ticket as its one positional. */
 export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode> {
-  const [ticket] = args.positionals;
+  const [ticket = ''] = args.positionals;
   // A refusal names the ticket as it was typed: the ticket source may not even parse it.
-  const command = ticket === undefined ? 'sail run' : `sail ${ticket}`;
+  const command = `sail ${ticket}`;
   const refuse = refuseAs(io, command);
-  const given = parseInputOption(args, io, command);
-  if (typeof given === 'number') return given;
   const verbosity = verbosityOf(args, io, command);
   if (typeof verbosity === 'number') return verbosity;
   const project = await findProject(io, command);
@@ -187,14 +167,14 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
     runWorkflow({
       cwd: io.cwd,
       workflow,
-      ...(ticket === undefined ? {} : { ticket, force: args.values.force === true }),
+      ticket,
+      force: args.values.force === true,
       ...(typeof until === 'string' ? { until } : {}),
-      ...(given.input === undefined ? {} : { input: given.input }),
       adapters: project.adapters,
       signal,
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );
   if ('refused' in end) return refuse(end.refused);
-  return printEnd(end, io, given.raw);
+  return printEnd(end, io);
 }

@@ -17,7 +17,6 @@
 // start one run per process.
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { z } from 'zod';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
@@ -28,16 +27,7 @@ import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
 import { createJournal } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { modelProblems } from './roster';
-import {
-  createRunDir,
-  isLocalSource,
-  LOCAL_SOURCE,
-  type RunStatus,
-  readStatus,
-  runsDir,
-  type Source,
-  writeStatus,
-} from './run-dir';
+import { createRunDir, type RunStatus, readStatus, runsDir, type Source, writeStatus } from './run-dir';
 import {
   type AdapterEntry,
   assertRunHeader,
@@ -71,13 +61,8 @@ export interface OpenedRun {
   /** The workflow, with the stages it reaches: what the run replays. */
   loaded: LoadedWorkflow;
   /**
-   * `run.input` of a run with no ticket: the input, parsed with the intake's schema, or undefined when none was given.
-   * A run from a ticket has none here: its input is its journaled `intake#1`.
-   */
-  input: unknown;
-  /**
    * What the claim did to the ticket, in order, for a fresh run's stream: the adapter's own events found no run
-   * attached. Empty for a run with no ticket and for a reopened one.
+   * attached. Empty for a reopened run.
    */
   claimed: readonly ProviderEvent[];
   /** The stage `--until` named, for a fresh run that was given one. A resume takes none. */
@@ -91,19 +76,14 @@ export interface OpenRunOptions {
   cwd: string;
   /** The workflow's name, its folder under `.sail/workflows/`. */
   workflow: string;
-  /**
-   * The ticket the run starts from, as typed: a ticket key, or a URL the ticket source owns. Its intake builds the
-   * input. Left out, the run starts on the `LOCAL` stub.
-   */
-  ticket?: string;
+  /** The ticket the run starts from, as typed: a ticket key, or a URL the ticket source owns. */
+  ticket: string;
   /** Runs a ticket that is not designated or not unstarted, and records which check it overrode. */
   force?: boolean;
   /** The stage after whose first call the run stops, suspended. One the workflow doesn't reach is refused. */
   until?: string;
   /** The run id's time and the header's `startedAt`, from one clock. */
   now?: Date;
-  /** The input of a run with no ticket, checked against the intake's schema. Given beside a ticket, it is refused. */
-  input?: unknown;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
 }
@@ -117,17 +97,6 @@ function claim(sailDir: string): void {
     );
   }
   claimed.add(real);
-}
-
-/** `run.input`: the input parsed with the intake's schema, undefined when none was given, or a refusal. */
-function parseInput(loaded: LoadedWorkflow, input: unknown): { input: unknown } | { refused: string } {
-  if (input === undefined) return { input: undefined };
-  const parsed = loaded.intake.definition.output.safeParse(input);
-  if (!parsed.success) {
-    const name = loaded.intake.definition.name;
-    return { refused: `the input doesn't match intake '${name}':\n${z.prettifyError(parsed.error)}` };
-  }
-  return { input: parsed.data };
 }
 
 /** Finds `.sail/` from `cwd` and reads its config, refusing on either. */
@@ -170,8 +139,6 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
  * too, saying where the ticket stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a
  * refusal. Last, it creates the run directory and writes the header, the journal and STATUS.
  *
- * With no ticket the run starts on the `LOCAL` stub: nothing is checked or claimed, and its input is the one given.
- *
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
  */
@@ -187,10 +154,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   if (models.length > 0) return { refused: models.join('\n') };
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
-  if (ticket !== undefined && options.input !== undefined) {
-    return { refused: `a run from ticket ${ticket} gets its input from its intake, so it takes none` };
-  }
-  const unfit = ticket === undefined ? undefined : intakeProblem(loaded, found.dir, ticket);
+  const unfit = intakeProblem(loaded, found.dir, ticket);
   if (unfit !== undefined) return { refused: unfit };
   const { until } = options;
   const stages = loaded.stages.map((stage) => stage.definition.name);
@@ -200,39 +164,29 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       refused: `--until names '${until}', which is no stage of workflow '${loaded.name}': its stages are ${known}`,
     };
   }
-  const parsed = parseInput(loaded, options.input);
-  if ('refused' in parsed) return parsed;
-  const { input } = parsed;
-  const fields = { sailDir: found.dir, loaded, config, adapters: options.adapters.entries, now };
-
-  let runId: string;
-  let header: RunHeader;
-  let claimed: readonly ProviderEvent[] = [];
-  if (ticket === undefined) {
-    runId = newRunId(LOCAL_SOURCE.ticketKey, now.getTime());
-    header = buildRunHeader({ runId, source: LOCAL_SOURCE, ...fields });
-    assertRunHeader(header);
-  } else {
-    const { ticketSource } = options.adapters.ports;
-    const resolved = await resolveSource({ ref: ticket, ticketSource, label: config.label ?? DEFAULT_LABEL, force });
-    if ('refused' in resolved) return resolved;
-    const { ticketKey } = resolved;
-    runId = newRunId(ticketKey, now.getTime());
-    // Built and checked before the ticket is touched, with the state as fetched standing in for the claim's answer.
-    const source: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: resolved.forced };
-    const unclaimed = buildRunHeader({
-      runId,
-      source,
-      claim: { claimed: false, state: resolved.ticket.state },
-      ...fields,
-    });
-    assertRunHeader(unclaimed);
-    const made = await claimSource({ ticketKey, runId, ticketSource, force });
-    if ('refused' in made) return made;
-    header = { ...unclaimed, source: { ...source, forced: [...resolved.forced, ...made.forced] }, claim: made.claim };
-    assertRunHeader(header);
-    claimed = made.events;
-  }
+  const { ticketSource } = options.adapters.ports;
+  const resolved = await resolveSource({ ref: ticket, ticketSource, label: config.label ?? DEFAULT_LABEL, force });
+  if ('refused' in resolved) return resolved;
+  const { ticketKey } = resolved;
+  const runId = newRunId(ticketKey, now.getTime());
+  // Built and checked before the ticket is touched, with the state as fetched standing in for the claim's answer.
+  const source: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: resolved.forced };
+  const unclaimed = buildRunHeader({
+    runId,
+    source,
+    claim: { claimed: false, state: resolved.ticket.state },
+    sailDir: found.dir,
+    loaded,
+    config,
+    adapters: options.adapters.entries,
+    now,
+  });
+  assertRunHeader(unclaimed);
+  const made = await claimSource({ ticketKey, runId, ticketSource, force });
+  if ('refused' in made) return made;
+  const forced = [...resolved.forced, ...made.forced];
+  const header: RunHeader = { ...unclaimed, source: { ...source, forced }, claim: made.claim };
+  assertRunHeader(header);
 
   const dir = createRunDir(found.dir, runId);
   writeRunHeader(dir, header);
@@ -248,8 +202,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     relay: options.adapters.relay,
     config,
     loaded,
-    input,
-    claimed,
+    claimed: made.events,
     ...(until === undefined ? {} : { until }),
     firstSeq: 1,
   };
@@ -260,8 +213,6 @@ export interface ReopenRunOptions {
   cwd: string;
   /** The run's id, its directory under `.sail-runs/`. */
   runId: string;
-  /** The input of a run with no ticket, given again and checked as on a fresh start. A run from a ticket takes none. */
-  input?: unknown;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
 }
@@ -310,9 +261,6 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in found) return found;
   const run = findRun(found.dir, runId);
   if ('refused' in run) return run;
-  if (options.input !== undefined && !isLocalSource(run.header.source)) {
-    return { refused: `run ${runId} got its input from ${INTAKE_KEY}, so --input doesn't apply` };
-  }
   const changed = changedAdapters(run.header, options.adapters.entries);
   if (changed.length > 0) return { refused: `run ${runId} can't resume on different adapters:\n${changed.join('\n')}` };
   claim(found.dir);
@@ -320,8 +268,6 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in loaded) return loaded;
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
-  const parsed = parseInput(loaded, options.input);
-  if ('refused' in parsed) return parsed;
   // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
   const firstSeq = nextSeq(run.dir);
   if (typeof firstSeq !== 'number') return firstSeq;
@@ -336,7 +282,6 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     relay: options.adapters.relay,
     config: found.config,
     loaded,
-    input: parsed.input,
     claimed: [],
     firstSeq,
   };

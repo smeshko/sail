@@ -494,10 +494,7 @@ test('sail FAKE-1 --until spec stops after spec#1 with exit 2: the final block n
 
 // What is gone: `sail run` and `--input`. A run starts from a ticket and from nothing else.
 
-// biome-ignore format: TDD-PENDING TASK-011
-test
-  .skip // TDD-PENDING TASK-011
-  ('sail run starts nothing: run reads as a ticket the ticket source does not know, and is refused with exit 3', async () => {
+test('sail run starts nothing: run reads as a ticket the ticket source does not know, and is refused with exit 3', async () => {
   const { code, stdout, stderr, touched } = await sailIn(['run']);
   expect({ code, stdout, stderr, touched }).toEqual({
     code: EXIT_REFUSED,
@@ -507,10 +504,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-011
-test
-  .skip // TDD-PENDING TASK-011
-  ('sail FAKE-1 --input is refused as an unknown argument with exit 3, and nothing starts', async () => {
+test('sail FAKE-1 --input is refused as an unknown argument with exit 3, and nothing starts', async () => {
   const { code, stdout, stderr, touched } = await sailIn(['FAKE-1', '--input', '{}']);
   expect({ code, stdout, stderr, touched }).toEqual({
     code: EXIT_REFUSED,

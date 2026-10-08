@@ -264,15 +264,14 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
 }
 
 /**
- * `consumed` says `workflow` for any value no call produced, and `--input` for the run's input. A feedback from either
- * can't be told apart from a call's other inputs, so it is never attributed: a call that took it shows no
- * `feedbackFrom`.
+ * `consumed` says `workflow` for any value no call produced. A feedback from there can't be told apart from a call's
+ * other inputs, so it is never attributed: a call that took it shows no `feedbackFrom`.
  */
-const UNTRACEABLE: ReadonlySet<string> = new Set(['workflow', '--input']);
+const UNTRACEABLE = 'workflow';
 
 /** A loop's iteration holds its feedback pointer until the next iteration or the loop's exit. */
 function holdFeedback(state: SummaryState, loop: string, from: string | undefined): void {
-  if (from === undefined || UNTRACEABLE.has(from)) state.feedback.delete(loop);
+  if (from === undefined || from === UNTRACEABLE) state.feedback.delete(loop);
   else state.feedback.set(loop, from);
 }
 

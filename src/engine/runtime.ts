@@ -3,10 +3,10 @@
 // are this one loop: a resume enters it with an existing run directory. Until runs get a workspace of their own,
 // scripts run in the directory that holds `.sail/`.
 //
-// A run from a ticket runs its intake before the first replay and journals it as `intake#1`, the journal's first line.
+// A run runs its intake before the first replay and journals it as `intake#1`, the journal's first line.
 // Every replay is handed that entry beside the stage entries, so a resume reads the input from the journal and never
 // fetches the ticket again. An intake that didn't pass fails the run with `stage_error`: no workflow code has run, and
-// nothing can route on it. A run with no ticket, the `LOCAL` stub, takes its input as given and runs no intake.
+// nothing can route on it.
 //
 // What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
 // that is running. A workspace event carries none. The claim is made before the run directory exists, so a fresh run
@@ -42,7 +42,7 @@ import { INTAKE_INDEX, INTAKE_KEY, INTAKE_STAGE, intakeBody, runIntake } from '.
 import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
 import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
 import { type ReplayEnd, replay } from './replay';
-import { isLocalSource, type StopReason, writeStatus } from './run-dir';
+import { type StopReason, writeStatus } from './run-dir';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
 interface EventOptions {
@@ -166,11 +166,11 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
  * seen before a call starts, or once it has returned, suspends the run with that call unjournaled, and so does one seen
  * while a replay hangs. A replay that ends the run ends it that way, aborted or not: nothing is left to resume.
  *
- * A run from a ticket has one step before the loop: its intake, run and journaled as a call is unless the journal
- * already starts with it. The run goes on only if that entry passed.
+ * A run has one step before the loop: its intake, run and journaled as a call is unless the journal already starts
+ * with it. The run goes on only if that entry passed.
  */
 async function drive(opened: OpenedRun, options: DriveOptions, { start }: { start: boolean }): Promise<RunEnd> {
-  const { runId, dir, sailDir, loaded, input, header } = opened;
+  const { runId, dir, sailDir, loaded, header } = opened;
   const { signal } = options;
   const bus = createBus({
     runId,
@@ -233,55 +233,51 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       // What the claim did to the ticket, before this stream existed to hear it. No call was running, so no key.
       for (const event of opened.claimed) bus.emit(event);
     }
-    const local = isLocalSource(header.source);
-    if (!local) {
-      // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
-      let [intake] = readJournal(dir).entries;
-      if (intake === undefined) {
-        const body = intakeBody(loaded.intake);
-        if (body === undefined) {
-          const name = loaded.intake.definition.name;
-          return failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
-        }
-        if (signal?.aborted) return interrupted(`stopped before ${INTAKE_KEY}`);
-        running = INTAKE_KEY;
-        const { result, paths } = await runIntake({
-          runDir: dir,
-          runId,
-          intake: loaded.intake,
-          body,
-          source: header.source,
-          ticketSource: opened.adapters.ticketSource,
-          try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
-          ...(signal === undefined ? {} : { signal }),
-          emit: bus.emit,
-        });
-        if (signal?.aborted) return interrupted(`stopped during ${INTAKE_KEY}`);
-        intake = appendJournal(dir, entryFrom(dir, result, paths));
-        bus.emit({ type: 'journal:append', key: intake.key, line: intake.seq, outcome: intake.outcome });
-        running = undefined;
-        options.onCall?.(intake);
-      } else if (intake.key !== INTAKE_KEY) {
-        const { ticketKey } = header.source;
-        const message = `the journal of a run from ticket ${ticketKey} starts with '${intake.key}', not '${INTAKE_KEY}'`;
-        return failed('determinism_violation', message);
+    // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
+    let [intake] = readJournal(dir).entries;
+    if (intake === undefined) {
+      const body = intakeBody(loaded.intake);
+      if (body === undefined) {
+        const name = loaded.intake.definition.name;
+        return failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
       }
-      // Checked on every start, not only when the intake just ran: a crash between the journal line and STATUS must
-      // not replay a workflow that has no input.
-      if (intake.outcome !== 'passed') {
-        return failed('stage_error', `${INTAKE_KEY} ended in ${intake.outcome}: ${intake.reason ?? ''}`);
-      }
+      if (signal?.aborted) return interrupted(`stopped before ${INTAKE_KEY}`);
+      running = INTAKE_KEY;
+      const { result, paths } = await runIntake({
+        runDir: dir,
+        runId,
+        intake: loaded.intake,
+        body,
+        source: header.source,
+        ticketSource: opened.adapters.ticketSource,
+        try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
+        ...(signal === undefined ? {} : { signal }),
+        emit: bus.emit,
+      });
+      if (signal?.aborted) return interrupted(`stopped during ${INTAKE_KEY}`);
+      intake = appendJournal(dir, entryFrom(dir, result, paths));
+      bus.emit({ type: 'journal:append', key: intake.key, line: intake.seq, outcome: intake.outcome });
+      running = undefined;
+      options.onCall?.(intake);
+    } else if (intake.key !== INTAKE_KEY) {
+      const { ticketKey } = header.source;
+      const message = `the journal of a run from ticket ${ticketKey} starts with '${intake.key}', not '${INTAKE_KEY}'`;
+      return failed('determinism_violation', message);
+    }
+    // Checked on every start, not only when the intake just ran: a crash between the journal line and STATUS must
+    // not replay a workflow that has no input.
+    if (intake.outcome !== 'passed') {
+      return failed('stage_error', `${INTAKE_KEY} ended in ${intake.outcome}: ${intake.reason ?? ''}`);
     }
     while (true) {
-      const { entries } = readJournal(dir);
-      const [intake, ...stageEntries] = entries;
       replays++;
       const replaying = replay({
         workflow: loaded.workflow,
         stages: loaded.stages,
         runDir: dir,
-        // A run from a ticket reads its input from the journaled intake, a fresh run and a resume alike.
-        ...(local || intake === undefined ? { entries, input } : { entries: stageEntries, intake }),
+        // The input is read from the journaled intake, by a fresh run and a resume alike.
+        entries: readJournal(dir).entries.slice(1),
+        intake,
         emit: replayEmit,
       });
       const end = await unlessAborted(replaying, signal);

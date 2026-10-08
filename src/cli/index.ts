@@ -31,8 +31,7 @@ Usage:
   sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]
                                                              Start a run from a ticket: its key, or its URL
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
-  sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]  Run a workflow in this repository
-  sail resume <run> [--input <json>] [-q|-v|-vv]             Resume a suspended or crashed run
+  sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
@@ -45,10 +44,7 @@ Starting a run from a ticket:
   --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
 
-Input of run and resume:
-  --input <json>  Starts, and resumes, a run with no ticket. A run from a ticket gets its input from its intake
-
-Output of run and resume:
+Output of a run and a resume:
   -q, --quiet    Only the run's start, its errors and the final block
   -v, --verbose  Adds contract details, routes and every script's output tail; -vv prints every event
 `;
@@ -140,15 +136,7 @@ const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
-  [
-    'run',
-    {
-      options: { workflow: { type: 'string' }, input: { type: 'string' }, ...VERBOSITY_OPTIONS },
-      positionals: 0,
-      command: runWorkflowCommand,
-    },
-  ],
-  ['resume', { options: { input: { type: 'string' }, ...VERBOSITY_OPTIONS }, positionals: 1, command: resume }],
+  ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
   ['runs', bare(runs)],
   [
     'show',

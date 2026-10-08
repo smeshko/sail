@@ -32,7 +32,7 @@ export interface RunHeader {
   schema: 'sail.run.v1';
   runId: string;
   source: Source;
-  claim?: ClaimRecord;
+  claim: ClaimRecord;
   workflow: { name: string; version: number; origin: string; sha256: string };
   sail: { version: string; runtime: string };
   adapters: Record<Port, AdapterEntry>;
@@ -74,7 +74,7 @@ export function workflowHash(sailDir: string, loaded: LoadedWorkflow): string {
 export interface HeaderFields {
   runId: string;
   source: Source;
-  claim?: ClaimRecord;
+  claim: ClaimRecord;
   sailDir: string;
   loaded: LoadedWorkflow;
   config: ProjectConfig;
@@ -92,7 +92,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
     schema: 'sail.run.v1',
     runId,
     source: { ...source, forced: [...source.forced] },
-    ...(claim === undefined ? {} : { claim: { claimed: claim.claimed, state: { ...claim.state } } }),
+    claim: { claimed: claim.claimed, state: { ...claim.state } },
     workflow: {
       name: loaded.name,
       version: loaded.workflow.version ?? 1,

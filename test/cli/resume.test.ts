@@ -470,10 +470,7 @@ test('sail FAKE-1 sent SIGINT during implement#2 exits 2, sail resume in a new p
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-011
-test
-  .skip // TDD-PENDING TASK-011
-  ('sail resume --input is refused as an unknown argument with exit 3, and the run is left as it was', async () => {
+test('sail resume --input is refused as an unknown argument with exit 3, and the run is left as it was', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -490,10 +487,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-011
-test
-  .skip // TDD-PENDING TASK-011
-  ('sail resume with no run id is refused with its usage, which takes a run and nothing else', async () => {
+test('sail resume with no run id is refused with its usage, which takes a run and nothing else', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     expect(await runCaptured(['resume'], repo.dir)).toEqual({
