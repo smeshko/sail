@@ -73,6 +73,12 @@ export async function resolveSource(options: ResolveSourceOptions): Promise<Reso
   return { ticketKey, ticket, forced: designated ? [] : ['designation'] };
 }
 
+/**
+ * A state as the run header records it and the stream reports it: the port's two fields. An adapter may answer with
+ * more, such as the provider's id for the state, and `sail.run.v1` takes none of it.
+ */
+const stateOf = ({ type, name }: TicketState): TicketState => ({ type, name });
+
 /** The comment a run leaves on its ticket as it starts. */
 export function claimComment(runId: string): string {
   return `sail run ${runId} started`;
@@ -109,7 +115,9 @@ export async function claimSource(options: ClaimSourceOptions): Promise<ClaimedS
   let claimed: boolean;
   let state: TicketState;
   try {
-    ({ claimed, state } = await ticketSource.claim(ticketKey));
+    const answer = await ticketSource.claim(ticketKey);
+    claimed = answer.claimed;
+    state = stateOf(answer.state);
   } catch (error) {
     return { refused: refusalOf(error) };
   }
@@ -118,7 +126,7 @@ export async function claimSource(options: ClaimSourceOptions): Promise<ClaimedS
     if (!force) return { refused: lostClaim(state) };
     const change = { state: 'in-progress' } as const;
     try {
-      ({ state } = await ticketSource.update(ticketKey, change));
+      state = stateOf((await ticketSource.update(ticketKey, change)).state);
     } catch (error) {
       return { refused: refusalOf(error) };
     }
