@@ -9,7 +9,9 @@
 // nothing can route on it. A run with no ticket, the `LOCAL` stub, takes its input as given and runs no intake.
 //
 // What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
-// that is running. A workspace event carries none.
+// that is running. A workspace event carries none. The claim is made before the run directory exists, so a fresh run
+// reports it from its result, right after `run:start` and with no key: `ticket:claimed`, or `ticket:updated` for a
+// forced move, then `ticket:commented`. A resume reports none of it again.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
@@ -220,6 +222,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         adapters: header.adapters,
         ...(header.budget === undefined ? {} : { budget: header.budget }),
       });
+      // What the claim did to the ticket, before this stream existed to hear it. No call was running, so no key.
+      for (const event of opened.claimed) bus.emit(event);
     }
     const local = isLocalSource(header.source);
     if (!local) {

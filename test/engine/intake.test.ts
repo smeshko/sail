@@ -470,10 +470,7 @@ test('a run journals intake#1 as its first line before the workflow function is 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("its events start with run:start and what the claim did, with no key, then the intake's, each keyed intake#1, its ticket:fetched the stream's only one; no route leaves intake#1, and the intake adds no replay", async () => {
+test("its events start with run:start and what the claim did, with no key, then the intake's, each keyed intake#1, its ticket:fetched the stream's only one; no route leaves intake#1, and the intake adds no replay", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ticketRun(repo.dir);

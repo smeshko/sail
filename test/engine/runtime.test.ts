@@ -533,10 +533,7 @@ const STUB_OUTLINE = [
 const seqs = (list: readonly SailEvent[]) => list.map((event) => event.seq);
 const gapless = (list: readonly SailEvent[]) => list.map((_, i) => i + 1);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("the stub's run writes its whole event stream to events.ndjson, numbered from 1: its start, what the claim did, the intake, then every call", async () => {
+test("the stub's run writes its whole event stream to events.ndjson, numbered from 1: its start, what the claim did, the intake, then every call", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const end = await ran(repo.dir);
@@ -649,10 +646,7 @@ test("a resume appends to the interrupted run's events, continuing seq with no m
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a forced run of a ticket that is not unstarted reports the move in the claim's place: ticket:updated, then ticket:commented, and run:start lists the state check as overridden", async () => {
+test("a forced run of a ticket that is not unstarted reports the move in the claim's place: ticket:updated, then ticket:commented, and run:start lists the state check as overridden", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ran(repo.dir, { ticket: 'FAKE-4', force: true });
@@ -677,10 +671,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a resume reports nothing of the claim again: across both processes the stream holds it once', async () => {
+test('a resume reports nothing of the claim again: across both processes the stream holds it once', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -731,10 +722,7 @@ test("an events file whose last line can't be read refuses the resume, and leave
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a consumer that throws is reported after each event it failed on, and the run completes', async () => {
+test('a consumer that throws is reported after each event it failed on, and the run completes', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const flaky: Consumer = {
@@ -987,10 +975,7 @@ test("after an interrupt and a resume, summary.json is completed with the retrie
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
+test("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     let blocked = false;
