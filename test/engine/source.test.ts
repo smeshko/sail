@@ -237,6 +237,37 @@ test.each<[string, string]>([
   },
 );
 
+/** A state as an adapter may hand it on: the port's two fields, and one of the provider's own. */
+const withId = (state: TicketState): TicketState => Object.assign({ id: 'state-7' }, state);
+
+test.each<[string, string, boolean]>([
+  ['a claim', 'FAKE-1', true],
+  ['a forced move', 'FAKE-6', false],
+])(
+  "the state %s answers with is recorded and reported by its type and name alone, whatever else the adapter's answer carries",
+  async (_, ticketKey, taken) => {
+    const { source, fake } = world({
+      claim: async (key) => {
+        const answer = await fake.claim(key);
+        return { ...answer, state: withId(answer.state) };
+      },
+      update: async (key, change) => {
+        const answer = await fake.update(key, change);
+        return { ...answer, state: withId(answer.state) };
+      },
+    });
+    const claimed = await claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, force: true });
+    if ('refused' in claimed) throw new Error(claimed.refused);
+    expect([claimed.claim, claimed.events[0]]).toEqual([
+      { claimed: taken, state: IN_PROGRESS },
+      taken
+        ? { type: 'ticket:claimed', ticketKey, state: IN_PROGRESS }
+        : { type: 'ticket:updated', ticketKey, change: { state: 'in-progress' }, state: IN_PROGRESS },
+    ]);
+    expect(eventIssues(stamped(claimed.events))).toEqual([]);
+  },
+);
+
 test('a claim that fails is refused with its message and code, and nothing else is called', async () => {
   const { source, calls } = world({ claim: failing('claim', 'the provider is down') });
   const refused = await claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source, force: true });

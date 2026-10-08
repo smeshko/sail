@@ -735,6 +735,20 @@ test('a comment that fails once the ticket has moved is refused, naming the stat
   });
 });
 
+test("a claim whose answer carries more than the state's type and name opens the run, and run.json holds those two", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await adaptersWith(repo.dir, 'claim', (claim) => async (ticketKey) => {
+      const answer = await claim(ticketKey);
+      return { ...answer, state: Object.assign({ id: 'state-7' }, answer.state) };
+    });
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
+    if ('refused' in run) throw new Error(run.refused);
+    expect(readRunHeader(run.dir).claim).toEqual({ claimed: true, state: IN_PROGRESS });
+    expect(validateRunDir(run.dir).issues).toEqual([]);
+  });
+});
+
 test('a run directory that cannot be written once the ticket has moved throws, naming the state it is in and the run its comment names', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
