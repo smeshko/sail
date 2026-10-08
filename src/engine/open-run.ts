@@ -137,7 +137,8 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
  * order the header comment gives. It then mints the run id, builds the run header and checks it, and only then claims
  * the ticket: the one write before the run directory exists. A claim, a forced move or a comment that fails refuses
  * too, saying where the ticket stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a
- * refusal. Last, it creates the run directory and writes the header, the journal and STATUS.
+ * refusal. Last, it creates the run directory and writes the header, the journal and STATUS. A failure there throws
+ * too, and its message says where the ticket stands: it has moved, and no run is behind it.
  *
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
@@ -186,13 +187,23 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   if ('refused' in made) return made;
   const forced = [...resolved.forced, ...made.forced];
   const header: RunHeader = { ...unclaimed, source: { ...source, forced }, claim: made.claim };
-  assertRunHeader(header);
-
-  const dir = createRunDir(found.dir, runId);
-  writeRunHeader(dir, header);
-  createJournal(dir);
-  createEventsFile(dir);
-  writeStatus(dir, 'running');
+  // The ticket has moved, so whatever fails from here says where it stands. It is still thrown on, not refused: these
+  // are sail's own files.
+  let dir: string;
+  try {
+    assertRunHeader(header);
+    dir = createRunDir(found.dir, runId);
+    writeRunHeader(dir, header);
+    createJournal(dir);
+    createEventsFile(dir);
+    writeStatus(dir, 'running');
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `the ticket is now ${made.claim.state.name} and its comment names run ${runId}, but the run directory was not written: ${why}. --force runs the ticket in a new run`,
+      { cause: error },
+    );
+  }
   return {
     runId,
     dir,
