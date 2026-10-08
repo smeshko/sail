@@ -581,10 +581,7 @@ async function adaptersWith<Op extends 'claim' | 'comment'>(
   return adapters;
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('openRun from a ticket claims it before the run directory exists: run.json holds the source with nothing forced and the claim, and the ticket is In Progress with a comment naming the run', async () => {
+test('openRun from a ticket claims it before the run directory exists: run.json holds the source with nothing forced and the claim, and the ticket is In Progress with a comment naming the run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runsAtComment: string[][] = [];
@@ -613,10 +610,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a URL the ticket source owns opens the run of the ticket it names', async () => {
+test('a URL the ticket source owns opens the run of the ticket it names', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const run = await openStub(repo.dir, { ticket: 'fake://tickets/FAKE-1' });
@@ -630,10 +624,7 @@ test
 
 const PR_ONLY = ".sail/workflows/pr-only/workflow.ts: its intake 'pull-request' accepts pr";
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, StubRun, string]>([
+test.each<[string, StubRun, string]>([
   [
     "an intake of the repository's own that accepts only pull requests, for what it accepts",
     { ticket: 'FAKE-1', workflow: 'pr-only' },
@@ -667,10 +658,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, string, Forced[], boolean, string]>([
+test.each<[string, string, Forced[], boolean, string]>([
   ['an undesignated ticket', 'FAKE-3', ['designation'], true, 'ticket:claimed'],
   ['a started ticket', 'FAKE-4', ['state'], false, 'ticket:updated'],
   ['an undesignated, completed ticket', 'FAKE-5', ['designation', 'state'], false, 'ticket:updated'],
@@ -702,10 +690,7 @@ async function racing(repoDir: string): Promise<ResolvedAdapters> {
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a claim that does not take, for a ticket the fetch showed unstarted, is refused with no run directory', async () => {
+test('a claim that does not take, for a ticket the fetch showed unstarted, is refused with no run directory', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, await racing(repo.dir));
@@ -719,10 +704,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('forced, a claim that does not take opens the run, which records the state check as the one overridden', async () => {
+test('forced, a claim that does not take opens the run, which records the state check as the one overridden', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const run = await openStub(repo.dir, { ticket: 'FAKE-1', force: true }, await racing(repo.dir));
@@ -733,10 +715,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a comment that fails once the ticket has moved is refused, naming the state it is in and the run, with no run directory', async () => {
+test('a comment that fails once the ticket has moved is refused, naming the state it is in and the run, with no run directory', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const adapters = await adaptersWith(repo.dir, 'comment', () => async () => {
@@ -754,10 +733,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the label checked is project.yaml's, and sail's own when it sets none", async () => {
+test("the label checked is project.yaml's, and sail's own when it sets none", async () => {
   const refusedFor = (ticket: string, label: string) =>
     withTempRepo(async (repo) => {
       edit(writeStub(repo.dir), 'project.yaml', 'label: sail\n', label);
@@ -769,10 +745,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a header that breaks sail.run.v1 throws once the ticket is fetched and before it is claimed', async () => {
+test('a header that breaks sail.run.v1 throws once the ticket is fetched and before it is claimed', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const adapters = await fakeAdapters(repo.dir);

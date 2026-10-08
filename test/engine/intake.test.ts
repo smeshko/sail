@@ -747,10 +747,7 @@ test('a body that throws something other than a PortError crashes the run: error
 // What the claim leaves for the intake (D3, D9): the start fetches the ticket to check it, claims it and comments, and
 // only then does the intake fetch it.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a start fetches the ticket twice, to check it and then in its intake, and only the second is in its stream', async () => {
+test('a start fetches the ticket twice, to check it and then in its intake, and only the second is in its stream', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const adapters = await fakeAdapters(repo.dir);
@@ -761,10 +758,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the brief lists the claim's comment after the ticket's own, wrapped under its own source, and names the run", async () => {
+test("the brief lists the claim's comment after the ticket's own, wrapped under its own source, and names the run", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ticketRun(repo.dir);
