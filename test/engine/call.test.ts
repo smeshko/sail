@@ -961,7 +961,10 @@ test('the directory and the result of a try are synced to disk before the next s
   });
 });
 
-test('a result whose stage:end was lost is ended once when the call is recovered, with no session and no usage counted again', async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a result whose stage:end was lost is ended once when the call is recovered, with no session and no usage counted again', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [submits({ summary: 3 }, 0.125), submits({ summary: null }, 0.25)];
@@ -1001,7 +1004,10 @@ test('a result whose stage:end was lost is ended once when the call is recovered
   });
 });
 
-test('a session a killed process left open is ended once when its call is recovered, with the last usage it had reported', async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a session a killed process left open is ended once when its call is recovered, with the last usage it had reported', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const emit = stream(s.runDir);
@@ -1052,7 +1058,10 @@ test('a session a killed process left open is ended once when its call is recove
   });
 });
 
-test('a session whose end the events file lost is ended from its durable result, once, however often the call is recovered', async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a session whose end the events file lost is ended from its durable result, once, however often the call is recovered', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [submits({ summary: 3 }, 0.125), submits({ summary: null }, 0.25)];
@@ -1096,7 +1105,10 @@ test('a session whose end the events file lost is ended from its durable result,
 /** A try said whole from its result: its start, the end of its session, and its own. */
 const WHOLE: SailEvent['type'][] = ['stage:start', 'harness:session_end', 'stage:end'];
 
-test.each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  .each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
   ["the first session's start", (event) => event.type === 'harness:session_start', WHOLE.slice(1)],
   ["the first try's start", (event) => event.type === 'stage:start', WHOLE.slice(1)],
   ["the run's start", (event) => event.type === 'run:start', WHOLE],
@@ -1115,6 +1127,7 @@ test.each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
 
       // A power loss took the events' tail, and with it all of the second try: both results had reached the disk.
       const cut = readEvents(s.runDir).findIndex(last);
+      expect(cut).toBeGreaterThanOrEqual(0);
       cutEventsAfter(s.runDir, (event) => event.seq === cut + 1);
       const kept = readEvents(s.runDir).length;
 
@@ -1146,7 +1159,10 @@ test.each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
   },
 );
 
-test('a try that never reached a session, and whose events were lost, is said from its result with no session to end', async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a try that never reached a session, and whose events were lost, is said from its result with no session to end', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const unrendered = specStep({ prompt: './unknown.md' });

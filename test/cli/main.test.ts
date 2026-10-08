@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { cpSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { readJournal } from '../../src/engine/journal';
@@ -9,6 +9,10 @@ import { interruptWhenAsleep, stubExecutions, writeStub } from '../helpers/stub-
 import { withTempRepo } from '../helpers/temp-repo';
 
 const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
+
+/** The repository's one run: the entry of `.sail-runs/` that isn't `fake/`, where the fake adapters keep their state. */
+const runIdIn = (repoDir: string): string =>
+  readdirSync(join(repoDir, '.sail-runs')).filter((name) => name !== 'fake')[0] ?? '';
 
 test('bun runs the shim from another directory', async () => {
   await withTempRepo((repo) => {
@@ -56,20 +60,42 @@ test('the shim runs check: 0 on a fixture copy, 3 once a binding is wrongly wire
   });
 });
 
-test('the shim runs a workflow through a pipe in plain mode, with no escape byte, and exits 0 when the run completes', async () => {
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('the shim starts a run from a ticket through a pipe in plain mode, with no escape byte, and exits 0 when the run completes', async () => {
   await withTempRepo((repo) => {
     writeStub(repo.dir);
-    const result = Bun.spawnSync([process.execPath, shim, 'run'], { cwd: repo.dir, env: repo.env });
+    const result = Bun.spawnSync([process.execPath, shim, 'FAKE-1'], { cwd: repo.dir, env: repo.env });
+    expect([result.exitCode, result.stderr.toString()]).toEqual([0, '']);
     const stdout = result.stdout.toString();
-    expect(stdout).toMatch(/^sail · ticket-to-pr v1 · LOCAL-[0-9A-Z]{26}\n/);
-    expect(stdout).toMatch(/\ncompleted · [^\n]+\n {2}calls {4}7 · 6 passed, 1 failed\n/);
+    expect(stdout).toMatch(/^sail · ticket-to-pr v1 · FAKE-1-[0-9A-Z]{26}\n/);
+    expect(stdout).toMatch(/\ncompleted · [^\n]+\n {2}calls {4}8 · 7 passed, 1 failed\n/);
     expect(stdout.includes('\x1b')).toBe(false);
-    expect(result.exitCode).toBe(0);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('the shim refuses a ticket that is not designated: one line on stderr, exit 3, and nothing under .sail-runs/', async () => {
+  await withTempRepo((repo) => {
+    writeStub(repo.dir);
+    const result = Bun.spawnSync([process.execPath, shim, 'FAKE-3'], { cwd: repo.dir, env: repo.env });
+    expect([result.exitCode, result.stdout.toString(), result.stderr.toString()]).toEqual([
+      3,
+      '',
+      "sail FAKE-3: the ticket is not designated: it carries no 'sail' label. --force runs it anyway\n",
+    ]);
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
 
 // In a process of its own, because bun test fails a test on any unhandled rejection, whatever the process listens for.
-test("a run.fail() in a chain the workflow doesn't await, after the run has ended, changes neither its end nor its code", async () => {
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("a run.fail() in a chain the workflow doesn't await, after the run has ended, changes neither its end nor its code", async () => {
   await withTempRepo((repo) => {
     const sail = writeStub(repo.dir);
     edit(
@@ -83,42 +109,43 @@ test("a run.fail() in a chain the workflow doesn't await, after the run has ende
   })();
   return run.stage(publish`,
     );
-    const result = Bun.spawnSync([process.execPath, shim, 'run'], { cwd: repo.dir, env: repo.env });
-    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
-    expect(readFileSync(join(repo.dir, '.sail-runs', runId, 'STATUS'), 'utf8')).toBe('completed\n');
-    expect(result.stderr.toString()).toBe('');
-    expect(result.exitCode).toBe(0);
+    const result = Bun.spawnSync([process.execPath, shim, 'FAKE-1'], { cwd: repo.dir, env: repo.env });
+    expect([result.exitCode, result.stderr.toString()]).toEqual([0, '']);
+    expect(readFileSync(join(repo.dir, '.sail-runs', runIdIn(repo.dir), 'STATUS'), 'utf8')).toBe('completed\n');
   });
 });
 
 // A real signal through the shim: the test sends it to the spawned bin, never to its own process.
-test.each(['SIGINT', 'SIGTERM'] as const)(
-  '%s during sail run suspends the run, and sail resume runs it to its end, both in plain mode',
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  .each(['SIGINT', 'SIGTERM'] as const)(
+  '%s during sail FAKE-1 suspends the run, and sail resume runs it to its end, both in plain mode',
   async (signal) => {
     await withTempRepo(async (repo) => {
       writeStub(repo.dir, { sleepAt: 'implement#2' });
-      const sail = Bun.spawn([process.execPath, shim, 'run'], {
+      const sail = Bun.spawn([process.execPath, shim, 'FAKE-1'], {
         cwd: repo.dir,
         env: repo.env,
         stdout: 'pipe',
         stderr: 'pipe',
       });
       const { end: code, alive } = await interruptWhenAsleep(repo.dir, sail.exited, () => sail.kill(signal));
-      const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
+      expect(await new Response(sail.stderr).text()).toBe('');
+      expect(code).toBe(2);
+      const runId = runIdIn(repo.dir);
       const dir = join(repo.dir, '.sail-runs', runId);
       const suspended = await new Response(sail.stdout).text();
       expect(suspended).toContain('\n  stop     interrupted: stopped during implement#2\n');
       expect(suspended).toEndWith(`  run      .sail-runs/${runId}\nresume it with: sail resume ${runId}\n`);
       expect(suspended.includes('\x1b')).toBe(false);
-      expect(await new Response(sail.stderr).text()).toBe('');
-      expect(code).toBe(2);
       expect(alive).toEqual([]);
       expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
 
       const resumed = Bun.spawnSync([process.execPath, shim, 'resume', runId], { cwd: repo.dir, env: repo.env });
       const resumedOut = resumed.stdout.toString();
       expect(resumedOut).toStartWith(
-        `sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed\n`,
+        `sail · ticket-to-pr v1 · ${runId} · resumed after 4 calls, last tests#1 failed\n`,
       );
       expect(resumedOut).toEndWith(`  run      .sail-runs/${runId}\n`);
       expect(resumedOut.includes('\x1b')).toBe(false);
@@ -134,6 +161,7 @@ test.each(['SIGINT', 'SIGTERM'] as const)(
         'publish#1',
       ]);
       expect(readJournal(dir).entries.map((entry) => entry.key)).toEqual([
+        'intake#1',
         'spec#1',
         'implement#1',
         'tests#1',

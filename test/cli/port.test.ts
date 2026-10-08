@@ -387,7 +387,7 @@ test("what render prints for a ticket's description is, byte for byte, what the 
   const out = join(dir, 'out');
   mkdirSync(out);
   const ticketSource = createFakeTicketSource({ seed: join(dir, 'tickets.json'), state: join(dir, 'state.json') });
-  await ticketIntake({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false }, ticketSource, out });
+  await ticketIntake({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] }, ticketSource, out });
 
   const { code, stdout } = await runCaptured(render(), dir, { stdin: description, env: {} });
   expect(code).toBe(EXIT_OK);

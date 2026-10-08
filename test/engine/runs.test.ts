@@ -21,14 +21,14 @@ const FAKE_2 = 'FAKE-2-01M3C0Q5ZJ3K8T1V9XRJ5KWD3P';
 test.each<[string, string, string | undefined]>([
   ['an exact id', GOLDEN_RUN_ID, GOLDEN_RUN_ID],
   ['a prefix only one run starts with', 'FAKE-2', FAKE_2],
-  ['an exact id that also starts another', 'LOCAL-1', 'LOCAL-1'],
+  ['an exact id that also starts another', 'FAKE-7-1', 'FAKE-7-1'],
   ['a prefix of no run', 'NOPE', undefined],
   ['a prefix of a directory without run.json', 'tests', undefined],
   ['the whole name of a directory without run.json', STAGE_RUN, undefined],
 ])('resolveRun given %s finds the run it names, or refuses with no match', (_, name, runId) => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
-    for (const id of [GOLDEN_RUN_ID, FAKE_2, 'LOCAL-1', 'LOCAL-10']) runNamed(repo.dir, id);
+    for (const id of [GOLDEN_RUN_ID, FAKE_2, 'FAKE-7-1', 'FAKE-7-10']) runNamed(repo.dir, id);
     mkdirSync(join(repo.dir, '.sail-runs', STAGE_RUN, '00-tests', 'call-1'), { recursive: true });
     expect(resolveRun(sail, name)).toEqual(
       runId === undefined
@@ -55,7 +55,10 @@ const SAME_START = 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const WORKFLOW = 'ticket-to-pr@1';
 const GOLDEN_START = '2026-09-25T09:00:00.000Z';
 
-test('listRuns gives the runs that hold run.json, oldest first and then by id, with their workflow, start and status', () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('listRuns gives the runs that hold run.json, oldest first and then by id, with their workflow, start and status', () => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
     expect(listRuns(sail)).toEqual([]);
@@ -106,7 +109,10 @@ test('listRuns gives the runs that hold run.json, oldest first and then by id, w
   });
 });
 
-test("a run whose run.json or STATUS can't be read is listed with its problem, and one with no start goes last", () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("a run whose run.json or STATUS can't be read is listed with its problem, and one with no start goes last", () => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
     const noHeader = copyGoldenRun(repo.dir, { runId: 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N', status: 'completed\n' });

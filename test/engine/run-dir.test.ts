@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createRunDir,
-  LOCAL_SOURCE,
   RUNS_DIR,
   type RunStatus,
   readStatus,
@@ -45,16 +44,12 @@ test('runs live in .sail-runs/, beside .sail/', () => {
   expect(runsDir('/r/packages/app/.sail')).toBe('/r/packages/app/.sail-runs');
 });
 
-test('the LOCAL source stands in for a ticket until intake exists', () => {
-  expect(LOCAL_SOURCE).toEqual({ kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: false });
-});
-
 test('createRunDir creates .sail-runs/ on first use, then the run directory, once', () => {
   const root = tempDir();
   const sailDir = join(root, '.sail');
   mkdirSync(sailDir);
-  const runId = newRunId(LOCAL_SOURCE.ticketKey);
-  expect(runId).toMatch(/^LOCAL-[0-9A-Z]{26}$/);
+  const runId = newRunId('FAKE-1');
+  expect(runId).toMatch(/^FAKE-1-[0-9A-Z]{26}$/);
 
   const dir = createRunDir(sailDir, runId);
   expect(dir).toBe(join(root, '.sail-runs', runId));
@@ -62,7 +57,7 @@ test('createRunDir creates .sail-runs/ on first use, then the run directory, onc
   expect(readdirSync(dir)).toEqual([]);
   expect(() => createRunDir(sailDir, runId)).toThrow(expect.objectContaining({ code: 'EEXIST' }));
 
-  const second = createRunDir(sailDir, newRunId(LOCAL_SOURCE.ticketKey));
+  const second = createRunDir(sailDir, newRunId('FAKE-1'));
   expect(readdirSync(join(root, '.sail-runs'))).toHaveLength(2);
   expect(existsSync(second)).toBe(true);
 });
@@ -72,8 +67,8 @@ test('createRunDir syncs the directory holding .sail-runs/, so a crash cannot lo
   const sailDir = join(root, '.sail');
   mkdirSync(sailDir);
   const runs = join(root, '.sail-runs');
-  expect(syncedDirs(() => createRunDir(sailDir, newRunId('LOCAL')))).toEqual([root, runs]);
-  expect(syncedDirs(() => createRunDir(sailDir, newRunId('LOCAL')))).toEqual([root, runs]);
+  expect(syncedDirs(() => createRunDir(sailDir, newRunId('FAKE-1')))).toEqual([root, runs]);
+  expect(syncedDirs(() => createRunDir(sailDir, newRunId('FAKE-1')))).toEqual([root, runs]);
 });
 
 const PAIRINGS: RunStatus[] = [

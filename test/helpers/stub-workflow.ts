@@ -3,13 +3,13 @@
 // harness. Its tests fail until the call a threshold names, and every script logs `<stage>#<call>` to
 // `.stub/executions.log`, which proves what ran.
 //
+// A run of it starts from a ticket: `.sail/fake/tickets.json` seeds the fake TicketSource with `STUB_TICKETS`, `spec`
+// consumes the brief the built-in intake leaves, and the workflow's body counts each time it is entered, so a test can
+// show the intake ran before any workflow code.
+//
 // `sleepAt` names a call that sleeps the first time it runs, until something stops its process group. The sleeping
 // script writes its own pid and its `sleep`'s to `.stub/sleeping`, so a test can interrupt it there and check that
 // neither process survives.
-//
-// With `ticket`, the stub is one a run from a ticket runs: `.sail/fake/tickets.json` seeds the fake TicketSource, `spec`
-// consumes the brief the built-in intake leaves, and the workflow's body counts each time it is entered, so a test can
-// show the intake ran before any workflow code.
 //
 // A helper, not a committed fixture: the fixture repository's agent-based `ticket-to-pr` takes over end to end once
 // agents run on fakes, and what stays here are cheap edge cases a test sets up by editing its own copy.
@@ -22,16 +22,27 @@ export interface StubOptions {
   testsPassAt?: number;
   /** The key of the call that sleeps the first time it runs, such as `implement#2`, for a test to interrupt. */
   sleepAt?: string;
-  /** Makes the stub one a run from a ticket runs: seeds `STUB_TICKETS`, and `spec` consumes the intake's brief. */
-  ticket?: boolean;
 }
 
 /** The closing delimiter a hostile ticket plants in its text. */
 export const FAKE_CLOSE = '</untrusted-input>';
 
+/** A ticket of the stub that nothing reads but its label and its state. */
+const bare = (ticketKey: string, labels: string[], state: { type: string; name: string }) => ({
+  ticketKey,
+  title: `Ticket ${ticketKey}`,
+  description: '',
+  state,
+  labels,
+  comments: [],
+  links: [],
+  attachments: [],
+});
+
 /**
- * The tickets the ticket stub's fake TicketSource holds. `FAKE-1` is designated and unstarted, with a criteria section
- * and a comment. `FAKE-2` is the same ticket written to break out of the brief's wrappers.
+ * The tickets the stub's fake TicketSource holds. `FAKE-1` is designated and unstarted, with a criteria section and a
+ * comment. `FAKE-2` is the same ticket written to break out of the brief's wrappers. The rest are what a run refuses
+ * unless forced: `FAKE-3` carries no label, `FAKE-4` is In Progress, and `FAKE-5` carries no label and is Done.
  */
 export const STUB_TICKETS = {
   tickets: [
@@ -56,6 +67,9 @@ export const STUB_TICKETS = {
       links: [],
       attachments: [],
     },
+    bare('FAKE-3', [], { type: 'unstarted', name: 'Todo' }),
+    bare('FAKE-4', ['sail'], { type: 'started', name: 'In Progress' }),
+    bare('FAKE-5', [], { type: 'completed', name: 'Done' }),
   ],
 };
 
@@ -155,15 +169,20 @@ if [ -n "\${INPUT_FEEDBACK:-}" ]; then saw=true; else saw=false; fi
 echo "{\\"notes\\":\\"a stub change\\",\\"sawFeedback\\":$saw}"
 `,
   ),
-  'workflows/ticket-to-pr/stages/spec/stage.ts': `// spec: the stub's spec. It consumes nothing: intake leaves no files until it exists.
-import { script, z } from 'sail';
+  'workflows/ticket-to-pr/stages/spec/stage.ts': `// spec: the stub's spec. It consumes the brief the built-in intake left.
+import { file, script, z } from 'sail';
 
 export const SpecOutput = z.object({
   summary: z.string().max(400),
   tasks: z.array(z.object({ title: z.string(), files: z.array(z.string()) })).min(1),
 });
 
-export const spec = script('spec', { run: './run.sh', produces: { 'spec.md': 'file' }, output: SpecOutput });
+export const spec = script('spec', {
+  run: './run.sh',
+  consumes: { brief: file('brief.md') },
+  produces: { 'spec.md': 'file' },
+  output: SpecOutput,
+});
 `,
   'workflows/ticket-to-pr/stages/spec/run.sh': shell(
     'The stub spec: a one-task spec.',
@@ -210,7 +229,9 @@ import { selfReview } from './stages/self-review/stage';
 import { spec } from './stages/spec/stage';
 
 export default workflow('ticket-to-pr', { intake: ticket, version: 1 }, async (run) => {
-  const s = await run.stage(spec);
+  const entered = ((globalThis as { stubEntered?: Record<string, number> }).stubEntered ??= {});
+  entered['STUB_ID'] = (entered['STUB_ID'] ?? 0) + 1;
+  const s = await run.stage(spec, { brief: run.intake.files['brief.md'] });
   if (s.outcome === 'failed') return run.fail('spec failed');
 
   // Failing tests, then must-fix findings, go back to implement as the next pass's feedback.
@@ -233,43 +254,23 @@ export default workflow('ticket-to-pr', { intake: ticket, version: 1 }, async (r
 `,
 };
 
-/** The ticket stub's `spec`: it consumes the brief the intake left. */
-const TICKET_SPEC_STAGE = `// spec: the stub's spec. It consumes the brief the built-in intake left.
-import { file, script, z } from 'sail';
+/** The stub workflow's call of `spec`, for a test to `edit()` a line in ahead of it. */
+export const STUB_SPEC_CALL = "  const s = await run.stage(spec, { brief: run.intake.files['brief.md'] });";
 
-export const SpecOutput = z.object({
-  summary: z.string().max(400),
-  tasks: z.array(z.object({ title: z.string(), files: z.array(z.string()) })).min(1),
-});
-
-export const spec = script('spec', {
-  run: './run.sh',
-  consumes: { brief: file('brief.md') },
-  produces: { 'spec.md': 'file' },
-  output: SpecOutput,
-});
-`;
-
-const SPEC_CALL = '  const s = await run.stage(spec);\n';
 /**
- * The ticket stub's first lines: the body counts its entries under `id`, then hands `spec` the intake's brief. The id
- * is written into the file, since a workflow is type-checked with no runtime globals to tell it where it is.
+ * The name the workflow's body counts its entries under, until `writeStub()` gives each repository an id of its own.
+ * The id is written into the file, since a workflow is type-checked with no runtime globals to tell it where it is.
  */
-const ticketSpecCall = (
-  id: string,
-) => `  const entered = ((globalThis as { stubEntered?: Record<string, number> }).stubEntered ??= {});
-  entered['${id}'] = (entered['${id}'] ?? 0) + 1;
-  const s = await run.stage(spec, { brief: run.intake.files['brief.md'] });
-`;
+const STUB_ID = 'STUB_ID';
 
 /**
- * How many times the ticket stub's workflow function has been entered in this process: once per replay, and 0 until
- * the first. A copy made by `copyRun()` counts with the repository it was copied from.
+ * How many times the stub's workflow function has been entered in this process: once per replay, and 0 until the
+ * first. A copy made by `copyRun()` counts with the repository it was copied from.
  */
 export function workflowEntries(repoDir: string): number {
   const workflow = readFileSync(join(repoDir, '.sail', 'workflows', 'ticket-to-pr', 'workflow.ts'), 'utf8');
   const id = /entered\['([^']+)'\]/.exec(workflow)?.[1];
-  if (id === undefined) throw new Error(`${repoDir} holds no ticket stub`);
+  if (id === undefined) throw new Error(`${repoDir} holds no stub`);
   return (globalThis as { stubEntered?: Record<string, number> }).stubEntered?.[id] ?? 0;
 }
 
@@ -290,25 +291,42 @@ export function swapImplementAndTests(sail: string): void {
   edit(sail, 'workflows/ticket-to-pr/workflow.ts', IMPLEMENT_THEN_TESTS, TESTS_THEN_IMPLEMENT);
 }
 
-/** Writes the stub `.sail/` into `repoDir` and returns it. */
+/** Writes the stub `.sail/` into `repoDir`, with its tickets, and returns it. */
 export function writeStub(repoDir: string, options: StubOptions = {}): string {
   const sail = join(repoDir, '.sail');
   write(sail, 'project.yaml', PROJECT);
+  const id = crypto.randomUUID();
   for (const [path, text] of Object.entries(FILES)) {
-    const file = write(sail, path, text);
+    const file = write(sail, path, text.replaceAll(STUB_ID, id));
     if (path.endsWith('.sh')) chmodSync(file, 0o755);
   }
-  if (options.ticket) {
-    write(sail, 'fake/tickets.json', `${JSON.stringify(STUB_TICKETS, null, 2)}\n`);
-    write(sail, 'workflows/ticket-to-pr/stages/spec/stage.ts', TICKET_SPEC_STAGE);
-    edit(sail, 'workflows/ticket-to-pr/workflow.ts', SPEC_CALL, ticketSpecCall(crypto.randomUUID()));
-  }
+  write(sail, 'fake/tickets.json', `${JSON.stringify(STUB_TICKETS, null, 2)}\n`);
   if (options.testsPassAt !== undefined) {
     mkdirSync(join(repoDir, '.stub'), { recursive: true });
     writeFileSync(join(repoDir, '.stub', 'tests-pass-at'), `${options.testsPassAt}\n`);
   }
   if (options.sleepAt !== undefined) setSleepAt(repoDir, options.sleepAt);
   return sail;
+}
+
+const PR_ONLY: Record<string, string> = {
+  'workflows/pr-only/intake.ts': `// pull-request: an intake of the repository's own that builds its input from a pull request, never from a ticket.
+import { intake, z } from 'sail';
+
+export const pullRequest = intake('pull-request', { accepts: ['pr'], output: z.object({ number: z.number().int() }) });
+`,
+  'workflows/pr-only/workflow.ts': `// pr-only: a workflow a ticket can't start, since its intake accepts only pull requests.
+import { workflow } from 'sail';
+import { tests } from '../../stages/tests/stage';
+import { pullRequest } from './intake';
+
+export default workflow('pr-only', { intake: pullRequest, version: 1 }, async (run) => run.stage(tests));
+`,
+};
+
+/** Adds `pr-only` to the stub `.sail/`: a workflow whose intake, the repository's own, accepts only pull requests. */
+export function writePrOnly(sail: string): void {
+  for (const [path, text] of Object.entries(PR_ONLY)) write(sail, path, text);
 }
 
 /** Makes the call `key` sleep the next time it runs, and clears the `.stub/sleeping` an earlier sleep left. */

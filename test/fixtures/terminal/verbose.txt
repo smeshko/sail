@@ -2,8 +2,8 @@ sail · ticket-to-pr v1 · FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
 intake#1            ▶ intake ticket · builtin
 intake#1              output valid
 intake#1              file brief.md valid · hasSections(Request, Acceptance criteria, Context), untrustedInputWrapped
-intake#1              file ticket.json · 1.4 KB
-intake#1              file brief.md · 1.1 KB
+intake#1              file ticket.json · 1.7 KB
+intake#1              file brief.md · 1.3 KB
 intake#1            ✓ passed
 spec#1              ▶ spec · agent · claude-opus-5-5
 spec#1                in brief ← 00-intake/call-1/brief.md

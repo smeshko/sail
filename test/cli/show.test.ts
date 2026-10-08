@@ -52,10 +52,19 @@ function runWith(repoDir: string, events: string): string {
   return dir;
 }
 
-/** A stub run of ticket-to-pr in `repoDir`, to its end. Its run id. */
+/** The repository's one run: the entry of `.sail-runs/` that isn't `fake/`, where the fake adapters keep their state. */
+const runIdIn = (repoDir: string): string =>
+  readdirSync(join(repoDir, '.sail-runs')).filter((name) => name !== 'fake')[0] ?? '';
+
+/** A stub run of ticket-to-pr in `repoDir` from `FAKE-1`, to its end. Its run id. */
 async function stubRun(repoDir: string, testsPassAt: number): Promise<string> {
   writeStub(repoDir, { testsPassAt });
-  const ended = await runWorkflow({ cwd: repoDir, adapters: await fakeAdapters(repoDir), workflow: 'ticket-to-pr' });
+  const ended = await runWorkflow({
+    cwd: repoDir,
+    adapters: await fakeAdapters(repoDir),
+    workflow: 'ticket-to-pr',
+    ticket: 'FAKE-1',
+  });
   if ('refused' in ended) throw new Error(`refused: ${ended.refused}`);
   return ended.runId;
 }
@@ -81,7 +90,7 @@ test('a failed run shows its stop reason in the title and a stop row, and sail s
     expect(lines.slice(-4)).toEqual([
       'stop    workflow_failed: loop "fix" exceeded 3',
       'loops   fix 3/3',
-      'totals  7 calls · 7 steps · 0 tool calls · 0 denials · 8 replays',
+      'totals  8 calls · 8 steps · 0 tool calls · 0 denials · 8 replays',
       'cost    $0.00 of $25.00 (0%)',
     ]);
     expect(code).toBe(EXIT_OK);
@@ -264,16 +273,16 @@ test.each<[string, Refusal]>([
 
 // TASK-008: --events and --follow.
 
-/** FAKE-1's golden view at `verbosity`: what `sail run` printed for it. */
+/** FAKE-1's golden view at `verbosity`: what its run printed. */
 const goldenView = (verbosity: string): string =>
   readFileSync(join(import.meta.dir, '..', 'fixtures', 'terminal', `${verbosity}.txt`), 'utf8');
 
 /** The golden run's events.ndjson, a line each, newlines kept. */
 const goldenLines = (): string[] => readFileSync(join(GOLDEN_RUN, 'events.ndjson'), 'utf8').split(/(?<=\n)/);
 
-/** A copy of the golden run as it was while running: its first 60 events, up to implement#2's start, and STATUS running. */
+/** A copy of the golden run as it was while running: its first 62 events, up to implement#2's start, and STATUS running. */
 function runningRun(repoDir: string): string {
-  const dir = runWith(repoDir, goldenLines().slice(0, 60).join(''));
+  const dir = runWith(repoDir, goldenLines().slice(0, 62).join(''));
   writeFileSync(join(dir, 'STATUS'), 'running\n');
   return dir;
 }
@@ -306,12 +315,15 @@ async function until(condition: () => boolean): Promise<void> {
   }
 }
 
-test('sail show --events prints exactly what sail run printed for a completed stub run', async () => {
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('sail show --events prints exactly what sail FAKE-1 printed for a completed stub run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    const live = await runCaptured(['run'], repo.dir);
+    const live = await runCaptured(['FAKE-1'], repo.dir);
     expect([live.code, live.stdout]).toEqual([EXIT_OK, expect.stringContaining('\ncompleted · ')]);
-    const runId = readdirSync(join(repo.dir, '.sail-runs'))[0] ?? '';
+    const runId = runIdIn(repo.dir);
     expect(await runCaptured(['show', runId, '--events'], repo.dir)).toEqual({
       code: EXIT_OK,
       stdout: live.stdout,
@@ -337,20 +349,24 @@ test.each<[string[], string]>([
   });
 });
 
-test("sail show --events of a resumed run prints both processes' events in order, the suspended final block first", async () => {
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("sail show --events of a resumed run prints both processes' events in order, the suspended final block first", async () => {
   await withTempRepo(async (repo) => {
     // Run in a repository of its own, as resume.test.ts does: one run per .sail/ in a process.
     const interrupted = await withTempRepo(async (from) => {
       writeStub(from.dir, { sleepAt: 'implement#2' });
       const interrupts = fakeInterrupts();
-      const running = runCaptured(['run'], from.dir, interrupts);
+      const running = runCaptured(['FAKE-1'], from.dir, interrupts);
       const { end } = await interruptWhenAsleep(from.dir, running, interrupts.interrupt);
       copyRun(from.dir, repo.dir);
       return end;
     });
-    const runId = readdirSync(join(repo.dir, '.sail-runs'))[0] ?? '';
+    expect(interrupted.code).toBe(EXIT_SUSPENDED);
+    const runId = runIdIn(repo.dir);
     const resumed = await runCaptured(['resume', runId], repo.dir);
-    expect([interrupted.code, resumed.code]).toEqual([EXIT_SUSPENDED, EXIT_OK]);
+    expect(resumed.code).toBe(EXIT_OK);
 
     const shown = await runCaptured(['show', runId, '--events'], repo.dir);
     // Each process's view of the run's events: the run without how to resume it, and the resume without its opening line.
@@ -369,7 +385,7 @@ test('sail show --follow on a running run prints events as they are appended, an
     const following = started(['show', GOLDEN_RUN_ID, '--follow'], repo.dir);
     await until(() => following.printed() !== '');
     const early = following.printed();
-    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(60).join(''));
+    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(62).join(''));
     writeFileSync(join(dir, 'STATUS'), 'completed\n');
     expect(await following.done).toEqual({ code: EXIT_OK, stdout: goldenView('normal'), stderr: '' });
     expect(goldenView('normal').startsWith(early)).toBe(true);
@@ -406,7 +422,7 @@ test('sail show --follow stopped by Ctrl-C exits 0 with what it printed so far, 
     expect(await following.done).toEqual({ code: EXIT_OK, stdout: sofar.stdout, stderr: '' });
     expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);
     // A poll left running would print these within 200 ms.
-    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(60).join(''));
+    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(62).join(''));
     await Bun.sleep(300);
     expect(following.printed()).toBe(sofar.stdout);
   });
@@ -466,12 +482,16 @@ test.each([['--events'], ['--follow']])(
   },
 );
 
-test("sail show lists a ticket run's intake#1 first, with its kind, its outcome and its duration, and --events prints what the run printed, the intake's lines included", async () => {
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("sail show lists a run's intake#1 first, with its kind, its outcome and its duration, and --events prints what the run printed in a process of its own, the intake's lines included", async () => {
   await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { ticket: true, testsPassAt: 1 });
-    const helper = join(import.meta.dir, '..', 'helpers', 'ticket-run.ts');
-    const ran = Bun.spawnSync([process.execPath, helper, 'FAKE-1'], { cwd: repo.dir, env: repo.env });
-    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
+    const ran = Bun.spawnSync([process.execPath, shim, 'FAKE-1'], { cwd: repo.dir, env: repo.env });
+    expect([ran.exitCode, ran.stderr.toString()]).toEqual([0, '']);
+    const runId = runIdIn(repo.dir);
 
     const shown = await runCaptured(['show', runId], repo.dir);
     const rows = normaliseDurations(shown.stdout).split('\n');
@@ -485,6 +505,5 @@ test("sail show lists a ticket run's intake#1 first, with its kind, its outcome 
     const replayed = await runCaptured(['show', runId, '--events'], repo.dir);
     expect(replayed.stdout).toContain(`${'intake#1'.padEnd(13)}  ▶ intake ticket · builtin\n`);
     expect(normaliseDurations(replayed.stdout)).toBe(normaliseDurations(ran.stdout.toString()));
-    expect(ran.exitCode).toBe(0);
   });
 }, 30_000);

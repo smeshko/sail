@@ -11,7 +11,10 @@ import { withTempRepo } from '../helpers/temp-repo';
 const STAGE_RUN = 'tests-01M3D4A2B6C8E0G2J4K6M8P0R2';
 const text = (...lines: string[]) => lines.map((line) => `${line}\n`).join('');
 
-test("sail runs prints a row per run, oldest first, and leaves out what isn't a run", async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("sail runs prints a row per run, oldest first, and leaves out what isn't a run", async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     copyGoldenRun(repo.dir, { status: 'completed\n' });
@@ -58,7 +61,10 @@ test.each<[string, (repoDir: string) => void]>([
   });
 });
 
-test("sail runs shows ? for a STATUS it can't read, says why on stderr, and exits 0", async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("sail runs shows ? for a STATUS it can't read, says why on stderr, and exits 0", async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     copyGoldenRun(repo.dir, { status: 'bogus\n' });
@@ -75,7 +81,10 @@ test("sail runs shows ? for a STATUS it can't read, says why on stderr, and exit
   });
 });
 
-test("sail runs shows ? for a start that isn't a date, lists that run last, says why on stderr, and exits 0", async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("sail runs shows ? for a start that isn't a date, lists that run last, says why on stderr, and exits 0", async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     // sail.run.v1's timestamp pattern lets month 13 through.

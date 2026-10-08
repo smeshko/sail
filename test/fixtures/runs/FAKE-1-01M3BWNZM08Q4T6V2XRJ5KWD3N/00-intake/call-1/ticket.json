@@ -14,6 +14,11 @@
     {
       "author": "fixture-user",
       "body": "Upper-case the whole line, the name included."
+    },
+    {
+      "author": "sail",
+      "body": "sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started",
+      "createdAt": "2026-09-25T08:59:59.900Z"
     }
   ],
   "links": [],
@@ -33,6 +38,11 @@
       {
         "author": "fixture-user",
         "body": "Upper-case the whole line, the name included."
+      },
+      {
+        "author": "sail",
+        "body": "sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started",
+        "createdAt": "2026-09-25T08:59:59.900Z"
       }
     ],
     "links": [],

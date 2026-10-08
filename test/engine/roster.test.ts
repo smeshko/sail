@@ -57,7 +57,10 @@ test('an origin is repo: and the POSIX path below the directory holding .sail/',
   expect(origin('/r/pkg', '/r/pkg/.sail/workflows/w/intake.ts')).toBe('repo:.sail/workflows/w/intake.ts');
 });
 
-test("the fixture's roster is its intake and the five stages ticket-to-pr reaches, with resolved values", async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("the fixture's roster is its intake and the five stages ticket-to-pr reaches, with resolved values", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const loaded = await loadWorkflow(sail, 'ticket-to-pr');
@@ -116,8 +119,9 @@ test("the fixture's roster is its intake and the five stages ticket-to-pr reache
 
     const header = {
       schema: 'sail.run.v1',
-      runId: 'LOCAL-01M3BWNZM08Q4T6V2XRJ5KWD3N',
-      source: { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: false },
+      runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+      claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
       workflow: { name: 'ticket-to-pr', version: 1 },
       sail: { version: '0.0.0', runtime: 'bun' },
       adapters: Object.fromEntries(
