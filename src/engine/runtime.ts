@@ -40,7 +40,14 @@ import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../even
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { INTAKE_INDEX, INTAKE_KEY, INTAKE_STAGE, intakeBody, runIntake } from './intake';
-import { appendJournal, type JournalEntry, type NewJournalEntry, readJournal } from './journal';
+import {
+  appendJournal,
+  JOURNAL_FILE,
+  type JournalEntry,
+  JournalError,
+  type NewJournalEntry,
+  readJournal,
+} from './journal';
 import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
 import { type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
@@ -277,7 +284,12 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       replays++;
       // The input is the journal's first line as read back, for a fresh run and a resume alike: the intake's output in
       // memory may hold what JSON drops, and a resume would then replay on another object than the run that wrote it.
-      const [journaledIntake = intake, ...entries] = readJournal(dir).entries;
+      // Nothing stands in for that line: a journal that has lost it can't be trusted.
+      const [journaledIntake, ...entries] = readJournal(dir).entries;
+      if (journaledIntake?.key !== INTAKE_KEY) {
+        const why = `is no longer ${INTAKE_KEY}: the journal changed under the run`;
+        throw new JournalError(join(dir, JOURNAL_FILE), 1, why);
+      }
       const replaying = replay({
         workflow: loaded.workflow,
         stages: loaded.stages,
