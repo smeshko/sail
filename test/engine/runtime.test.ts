@@ -326,6 +326,32 @@ test('an abort seen before the first stage call suspends the run before any stag
   });
 });
 
+test("run.input is the intake's output as the journal holds it, in the run that journaled it too: a key JSON drops is gone before the first replay", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
+    edit(
+      sail,
+      WORKFLOW,
+      STUB_SPEC_CALL,
+      `  if (run.input.links.some((link) => 'title' in link)) return run.fail('a link holds a title key');\n${STUB_SPEC_CALL}`,
+    );
+    // A link with a title that is undefined: the key is there in memory, and gone from the journal's line.
+    const adapters = await fakeAdapters(repo.dir);
+    const { ticketSource } = adapters.ports;
+    const get = ticketSource.get.bind(ticketSource);
+    ticketSource.get = async (ticketKey) => ({
+      ...(await get(ticketKey)),
+      links: [{ url: 'https://example.com/spec', title: undefined }],
+    });
+    const end = await ran(repo.dir, { adapters });
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(readJournal(end.dir).entries[0]).toMatchObject({
+      key: 'intake#1',
+      output: { links: [{ url: 'https://example.com/spec' }] },
+    });
+  });
+});
+
 test('an abort does not hide a replay that ends the run', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
