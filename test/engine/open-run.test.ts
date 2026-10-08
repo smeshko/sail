@@ -552,6 +552,7 @@ interface StubRun {
   workflow?: string;
   force?: boolean;
   until?: string;
+  signal?: AbortSignal;
 }
 
 /** Opens a run of the stub from `repoDir`, on the adapters given or its own. */
@@ -760,6 +761,58 @@ test('a run directory that cannot be written once the ticket has moved throws, n
       [],
       IN_PROGRESS,
       expect.stringMatching(new RegExp(`^sail run FAKE-1-${ULID} started$`)),
+    ]);
+  });
+});
+
+// An abort: seen before the claim it ends the start with the ticket as it was, and once the ticket is claimed the start
+// goes on to its comment and its run directory, for the run to be suspended there.
+
+test.each<[string, (source: TicketSource, abort: () => void) => void]>([
+  ['before the start', (_, abort) => abort()],
+  [
+    'while the ticket is fetched',
+    (source, abort) => {
+      const get = source.get.bind(source);
+      source.get = async (ticketKey) => {
+        abort();
+        return get(ticketKey);
+      };
+    },
+  ],
+])(
+  'an abort seen %s is refused before the claim, with no run directory and the ticket never written to',
+  async (_, arrange) => {
+    await withTempRepo(async (repo) => {
+      writeStub(repo.dir);
+      const adapters = await fakeAdapters(repo.dir);
+      const controller = new AbortController();
+      arrange(adapters.ports.ticketSource, () => controller.abort());
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', signal: controller.signal }, adapters);
+      expect([run, existsSync(join(repo.dir, '.sail-runs'))]).toEqual([
+        { refused: 'stopped before the ticket was claimed' },
+        false,
+      ]);
+    });
+  },
+);
+
+test('an abort seen once the ticket is claimed still comments and opens the run', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const controller = new AbortController();
+    const adapters = await adaptersWith(repo.dir, 'claim', (claim) => async (ticketKey) => {
+      const result = await claim(ticketKey);
+      controller.abort();
+      return result;
+    });
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1', signal: controller.signal }, adapters);
+    if ('refused' in run) throw new Error(run.refused);
+    const ticket = await ticketIn(repo.dir, 'FAKE-1');
+    expect([runIds(repo.dir), ticket.state, ticket.comments.at(-1)?.body]).toEqual([
+      [run.runId],
+      IN_PROGRESS,
+      `sail run ${run.runId} started`,
     ]);
   });
 });

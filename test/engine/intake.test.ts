@@ -593,12 +593,19 @@ test("a resume replays intake#1 from the journal: it fetches nothing, the stream
   });
 }, 30_000);
 
-test('an abort seen before the intake starts suspends the run with an empty journal, no intake directory and no fetch in its stream', async () => {
+test('an abort seen once the ticket is claimed, before the intake starts, suspends the run with an empty journal, no intake directory and no fetch in its stream', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
     const controller = new AbortController();
-    controller.abort();
-    const end = await ticketRun(repo.dir, { signal: controller.signal });
+    // Aborted as the claim's comment is posted: an abort seen before the claim starts no run at all.
+    const { ticketSource } = adapters.ports;
+    const comment = ticketSource.comment.bind(ticketSource);
+    ticketSource.comment = (ticketKey, body) => {
+      controller.abort();
+      return comment(ticketKey, body);
+    };
+    const end = await ticketRun(repo.dir, { adapters, signal: controller.signal });
     expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped before intake#1' });
     expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
     expect(keys(end.dir)).toEqual([]);

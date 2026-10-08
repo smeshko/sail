@@ -583,6 +583,23 @@ test('Ctrl-C during sail FAKE-1 ends the running call in error, suspends the run
   });
 }, 20_000);
 
+test('Ctrl-C before the ticket is claimed is refused in one line with exit 3, and leaves no run directory and the ticket as it was', async () => {
+  // Interrupted as the handler is registered, while the run is still being opened.
+  const interrupted: CaptureOptions = {
+    onInterrupt: (handler) => {
+      handler();
+      return () => undefined;
+    },
+  };
+  const { code, stdout, stderr, touched } = await sailIn(['FAKE-1'], {}, () => undefined, interrupted);
+  expect({ code, stdout, stderr, touched }).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: 'sail FAKE-1: stopped before the ticket was claimed\n',
+    touched: false,
+  });
+});
+
 test('the interrupt handler is unregistered even when the run throws', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
