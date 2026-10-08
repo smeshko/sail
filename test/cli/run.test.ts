@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
-import { runCaptured } from '../helpers/run-captured';
+import { type Captured, runCaptured } from '../helpers/run-captured';
 
 test('--version prints the package version', async () => {
   expect(await runCaptured(['--version'])).toEqual({ code: EXIT_OK, stdout: `${pkg.version}\n`, stderr: '' });
@@ -13,7 +13,6 @@ test.each([[[]], [['--help']], [['-h']]])('%p prints usage', async (argv) => {
   expect(code).toBe(EXIT_OK);
   expect(stdout).toContain('sail check [--list]');
   expect(stdout).toContain('sail stage run <stage-dir> [--bind name=value]...');
-  expect(stdout).toContain('sail run [--workflow <name>] [--input <json>]');
   expect(stdout).toContain('--version');
   expect(stdout).toContain('--help');
   expect(stderr).toBe('');
@@ -21,14 +20,11 @@ test.each([[[]], [['--help']], [['-h']]])('%p prints usage', async (argv) => {
 
 test('the usage lists sail resume', async () => {
   const { stdout } = await runCaptured(['--help']);
-  expect(stdout).toContain('sail resume <run> [--input <json>]');
+  expect(stdout).toMatch(/^ {2}sail resume <run> .* {2,}Resume a suspended or crashed run$/m);
 });
 
-test('the usage lists -q, -v and -vv on run and resume, and what each prints', async () => {
+test('the usage says what -q, -v and -vv print', async () => {
   const { stdout } = await runCaptured(['--help']);
-  expect(stdout).toContain('sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]');
-  expect(stdout).toContain('sail resume <run> [--input <json>] [-q|-v|-vv]');
-  expect(stdout).toContain('Output of run and resume:');
   expect(stdout).toMatch(/-q, --quiet:? +[Oo]nly the run's start, its errors and the final block\n/);
   expect(stdout).toMatch(
     /-v, --verbose:? +[Aa]dds contract details, routes and every script's output tail; -vv prints every event\n/,
@@ -89,12 +85,35 @@ test('a command that throws exits 4 and names the error', async () => {
   expect(stderr).toContain('at ');
 });
 
-test('the usage says what --input is for: a run with no ticket, started or resumed', async () => {
+// `sail <ticket>` (D1): the first argument that names no command is the ticket a run starts from.
+
+const TICKET_USAGE = 'sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]';
+
+test('the usage lists sail <ticket> first among the commands, and says what --force and --until do, each on a line of its own', async () => {
   const { stdout } = await runCaptured(['--help']);
-  expect(stdout).toContain(
-    '\nInput of run and resume:\n' +
-      '  --input <json>  Starts, and resumes, a run with no ticket. A run from a ticket gets its input from its intake\n',
-  );
+  const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
+  expect(commands[0]).toBe(`  ${TICKET_USAGE}`);
+  expect(stdout).toMatch(/^ {2}--force {2,}\S.*designated.*unstarted/m);
+  expect(stdout).toMatch(/^ {2}--until <stage> {2,}\S.*first call.*sail resume/m);
+});
+
+test('an argument after the ticket that sail <ticket> does not take is refused by name with exit 3, before anything is looked for', async () => {
+  const refused = (bad: string): Captured => ({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: `sail: unknown argument '${bad}'\nRun 'sail --help' for usage.\n`,
+  });
+  expect(await runCaptured(['FAKE-1', 'extra'])).toEqual(refused('extra'));
+  expect(await runCaptured(['FAKE-1', '--bogus'])).toEqual(refused('--bogus'));
+  // The ticket comes first: an option ahead of it is no command.
+  expect(await runCaptured(['--force', 'FAKE-1'])).toEqual(refused('--force'));
+});
+
+test('the usage names neither sail run nor --input: a run starts from a ticket, and a resume takes a run and how much to print', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect([stdout.includes('sail run '), stdout.includes('--input')]).toEqual([false, false]);
+  expect(stdout).toMatch(/^ {2}sail resume <run> \[-q\|-v\|-vv\] {2,}Resume a suspended or crashed run$/m);
+  expect(stdout).toContain('\nOutput of a run and a resume:\n');
 });
 
 test('the usage lists sail port ticket-source and its three operations', async () => {

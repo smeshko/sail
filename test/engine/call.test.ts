@@ -1115,6 +1115,7 @@ test.each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
 
       // A power loss took the events' tail, and with it all of the second try: both results had reached the disk.
       const cut = readEvents(s.runDir).findIndex(last);
+      expect(cut).toBeGreaterThanOrEqual(0);
       cutEventsAfter(s.runDir, (event) => event.seq === cut + 1);
       const kept = readEvents(s.runDir).length;
 

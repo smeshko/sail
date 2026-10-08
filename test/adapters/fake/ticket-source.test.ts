@@ -74,7 +74,7 @@ test('a claim made through one instance is read by a new one on the same state f
   expect(readFileSync(world.seed, 'utf8')).toBe(seed);
 });
 
-test("the fixture seed's FAKE-1 is the golden ticket, read without creating the state file", async () => {
+test("the fixture seed's FAKE-1 is the golden ticket before its run's claim commented on it, read without creating the state file", async () => {
   const state = join(tempDir(), 'tickets.json');
   const source = createFakeTicketSource({ seed: SEED, state });
   const { title, description, url, labels, comments } = await source.get('FAKE-1');
@@ -84,7 +84,11 @@ test("the fixture seed's FAKE-1 is the golden ticket, read without creating the 
     description: golden.description,
     url: golden.url,
     labels: golden.labels,
-    comments: golden.comments,
+    comments: golden.comments.slice(0, -1),
+  });
+  expect(golden.comments.at(-1)).toMatchObject({
+    author: 'sail',
+    body: 'sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started',
   });
   expect(keys(await source.listDesignated('sail'))).toEqual(['FAKE-1']);
   expect(existsSync(state)).toBe(false);

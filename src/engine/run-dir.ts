@@ -1,6 +1,5 @@
 // A run's directory, `.sail-runs/<ticket key>-<ulid>/` beside `.sail/`, and its STATUS file, which holds the run's
-// status and, for a failed or suspended run, its stop reason. The run id's ticket key comes from the run's source,
-// which is the LOCAL stub for a run started with no ticket.
+// status and, for a failed or suspended run, its stop reason. The run id's ticket key comes from the run's source.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createDir, replaceFile } from './durable';
@@ -12,23 +11,21 @@ export function runsDir(sailDir: string): string {
   return join(dirname(sailDir), RUNS_DIR);
 }
 
+/** The checks `--force` can override, in the order a run header lists them. */
+export const FORCED = ['designation', 'state'] as const;
+export type Forced = (typeof FORCED)[number];
+
 /** What a run was started from: the run header's `source`. Intake resolves it into the run's input. */
 export interface Source {
   kind: 'ticket';
   ticketKey: string;
   via: 'cli' | 'watch';
-  forced: boolean;
-}
-
-/**
- * A run started by hand with no ticket, so its runs are `LOCAL-<ulid>`. It takes its input from `--input` and runs no
- * intake. It stands in until `sail <ticket>` exists.
- */
-export const LOCAL_SOURCE: Source = { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: false };
-
-/** Whether `source` is the LOCAL stub: a run with no ticket, whose input is given and whose journal has no intake. */
-export function isLocalSource(source: Source): boolean {
-  return source.ticketKey === LOCAL_SOURCE.ticketKey;
+  /**
+   * The checks `--force` overrode, each at most once: `designation` when the ticket didn't carry the repository's
+   * label, `state` when the claim didn't take because the ticket was not unstarted. Empty for a run nobody forced, and
+   * for one `--force` had nothing to override.
+   */
+  forced: Forced[];
 }
 
 /**

@@ -116,7 +116,7 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   }
   const workspace = dirname(found.dir);
 
-  /** Refuses with each issue of `project.yaml`, as `sail run` prints them. */
+  /** Refuses with each issue of `project.yaml`, as `sail <ticket>` prints them. */
   const refuseConfig = (issues: readonly SchemaIssue[]): ExitCode => {
     const file = at(join(found.dir, 'project.yaml'));
     for (const issue of issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);

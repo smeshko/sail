@@ -1,5 +1,5 @@
 // fakeAdapters(): the four adapters a repository's `.sail/project.yaml` names, resolved with the built-ins, for a test
-// that opens or resumes a run. A run is handed its adapters, so each call site resolves them itself, as `sail run` does.
+// that opens or resumes a run. A run is handed its adapters, so each call site resolves them itself, as the CLI does.
 import { BUILTINS } from '../../src/adapters/index';
 import { type ResolvedAdapters, resolveAdapters } from '../../src/engine/adapters';
 import type { Port } from '../../src/engine/config';

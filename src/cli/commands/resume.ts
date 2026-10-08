@@ -1,12 +1,10 @@
-// `sail resume <run> [--input <json>] [-q|-v|-vv]`: resumes a suspended or crashed run of the repository sail is run from, and runs
-// it to its end from its journal. It takes `sail run`'s steps: the run's workflow is type-checked first, so a wrongly
+// `sail resume <run> [-q|-v|-vv]`: resumes a suspended or crashed run of the repository sail is run from, and runs it to
+// its end from its journal. It takes `sail <ticket>`'s steps: the run's workflow is type-checked first, so a wrongly
 // wired stage never runs, and every refusal comes before the run's STATUS changes. A workflow changed since the run
-// started isn't refused: the determinism guard decides whether the journal still fits it.
+// started isn't refused: the determinism guard decides whether the journal still fits it. It asks nothing of the
+// ticket and claims nothing: the run's input is in its journal.
 //
-// `--input` is passed through as given: the engine takes it again for a run with no ticket, and refuses it for a run
-// that got its input from its intake.
-//
-// Ctrl-C or SIGTERM suspends the run again, as it does during `sail run`, and the command prints how to resume it.
+// Ctrl-C or SIGTERM suspends the run again, as it does during `sail <ticket>`, and the command prints how to resume it.
 //
 // The terminal view shows the whole run: it reads the run's earlier events first, prints nothing for them, and opens
 // with what already ran once the resume's first event arrives. A resume refused before then prints nothing.
@@ -19,7 +17,6 @@ import type { Io, Parsed } from '../index';
 import {
   findProject,
   interruptibly,
-  parseInputOption,
   printEnd,
   refuseAs,
   terminalFor,
@@ -32,9 +29,7 @@ const COMMAND = 'sail resume';
 export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   const refuse = refuseAs(io, COMMAND);
   const [runId] = args.positionals;
-  if (runId === undefined) return refuse('usage: sail resume <run> [--input <json>]');
-  const given = parseInputOption(args, io, COMMAND);
-  if (typeof given === 'number') return given;
+  if (runId === undefined) return refuse('usage: sail resume <run>');
   const verbosity = verbosityOf(args, io, COMMAND);
   if (typeof verbosity === 'number') return verbosity;
   const project = await findProject(io, COMMAND);
@@ -53,12 +48,11 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
     resumeWorkflow({
       cwd: io.cwd,
       runId,
-      ...(given.input === undefined ? {} : { input: given.input }),
       adapters: project.adapters,
       signal,
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );
   if ('refused' in end) return refuse(end.refused);
-  return printEnd(end, io, given.raw);
+  return printEnd(end, io);
 }

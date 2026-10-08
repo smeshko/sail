@@ -189,7 +189,6 @@ test.each<[string, string, string | null, string | undefined]>([
   ],
   // consumed says workflow for every value no call produced, so the feedback can't be told from the call's other inputs.
   ['is left out for a feedback the workflow built', 'workflow', 'workflow', undefined],
-  ['is left out for a feedback that is the run input', '--input', '--input', undefined],
   [
     'is a pointer that matches no result, as given',
     'elsewhere/result.json#/output',

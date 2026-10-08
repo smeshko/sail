@@ -3,14 +3,15 @@ import { parseCommandArgs } from '../../src/cli/index';
 
 const stage = { options: { bind: { type: 'string', multiple: true } }, positionals: 2 } as const;
 const check = { options: { list: { type: 'boolean' } }, positionals: 0 } as const;
-const run = {
+const ticket = {
   options: {
     workflow: { type: 'string' },
-    input: { type: 'string' },
+    until: { type: 'string' },
+    force: { type: 'boolean' },
     quiet: { type: 'boolean', short: 'q' },
     verbose: { type: 'boolean', short: 'v', multiple: true },
   },
-  positionals: 0,
+  positionals: 1,
 } as const;
 
 test('positionals and a repeated option are collected in order, keeping = and JSON intact', () => {
@@ -30,17 +31,23 @@ test('a boolean option is true, and a single string option takes its last value'
   expect(parseCommandArgs(['--at', 'a', '--at=b'], single)).toEqual({ values: { at: 'b' }, positionals: [] });
 });
 
-test('with the run spec, each -v counts, -q is a flag, and -x or a value given to --verbose are still refused', () => {
+test('with the ticket spec, each -v counts, -q is a flag, and -x or a value given to --verbose are still refused', () => {
   const given = [['-vv'], ['-v', '-v'], ['--verbose', '-v'], ['-q'], ['-qv']];
-  expect(given.map((args) => parseCommandArgs(args, run))).toEqual([
+  expect(given.map((args) => parseCommandArgs(args, ticket))).toEqual([
     { values: { verbose: 2 }, positionals: [] },
     { values: { verbose: 2 }, positionals: [] },
     { values: { verbose: 2 }, positionals: [] },
     { values: { quiet: true }, positionals: [] },
     { values: { quiet: true, verbose: 1 }, positionals: [] },
   ]);
-  expect(parseCommandArgs(['-x'], run)).toEqual({ refused: "unknown argument '-x'" });
-  expect(parseCommandArgs(['--verbose=1'], run)).toEqual({ refused: "option '--verbose' takes no value" });
+  expect(parseCommandArgs(['-x'], ticket)).toEqual({ refused: "unknown argument '-x'" });
+  expect(parseCommandArgs(['--verbose=1'], ticket)).toEqual({ refused: "option '--verbose' takes no value" });
+  // The ticket is the one positional, wherever the options around it fall.
+  expect(parseCommandArgs(['FAKE-1', '--force', '--until', 'spec', '--workflow=ticket-to-pr'], ticket)).toEqual({
+    values: { force: true, until: 'spec', workflow: 'ticket-to-pr' },
+    positionals: ['FAKE-1'],
+  });
+  expect(parseCommandArgs(['FAKE-1', 'FAKE-2'], ticket)).toEqual({ refused: "unknown argument 'FAKE-2'" });
 });
 
 test('arguments after -- count as positionals', () => {

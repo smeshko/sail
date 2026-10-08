@@ -406,7 +406,7 @@
             "kind": { "const": "ticket" },
             "ticketKey": { "type": "string" },
             "via": { "enum": ["cli", "watch"] },
-            "forced": { "type": "boolean" }
+            "forced": { "type": "array", "items": { "enum": ["designation", "state"] }, "uniqueItems": true }
           },
           "required": ["kind", "ticketKey", "via", "forced"],
           "additionalProperties": false

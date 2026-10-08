@@ -60,10 +60,8 @@ export interface ReplayOptions {
   entries: readonly JournalEntry[];
   /** The absolute run directory, which a journaled file's path is relative to. */
   runDir: string;
-  /** `run.input`, for a run with no intake. Given together with `intake`, it throws. */
-  input?: unknown;
   /** The journaled `intake#1`: `run.input` is its output, and `run.intake.files` its files. Never among `entries`. */
-  intake?: JournalEntry;
+  intake: JournalEntry;
   /** Where the loop and route events of moves past the journal's end go. */
   emit?: Emit;
 }
@@ -117,13 +115,10 @@ function deepFreeze<T>(value: T): T {
  */
 export function replay(options: ReplayOptions): Promise<ReplayEnd> {
   const { workflow, stages, entries, runDir, intake } = options;
-  if (intake !== undefined && options.input !== undefined) {
-    throw new Error('replay() takes the journaled intake or an input, never both: a bug in its caller');
-  }
   const emit = options.emit ?? (() => {});
-  const input = deepFreeze(intake === undefined ? options.input : intake.output);
-  /** Where `run.input` came from, as `consumed` records it: the intake's result, or `--input` for a run with none. */
-  const inputFrom = intake === undefined ? '--input' : `${intake.resultPath}#/output`;
+  const input = deepFreeze(intake.output);
+  /** Where `run.input` came from, as `consumed` records it: the intake's result. */
+  const inputFrom = `${intake.resultPath}#/output`;
   if (!process.listeners('unhandledRejection').includes(dropStrayHalt)) process.on('unhandledRejection', dropStrayHalt);
   return new Promise<ReplayEnd>((resolve, reject) => {
     let ended = false;
@@ -149,9 +144,9 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       }
       return Object.fromEntries(produced);
     }
-    const intakeFiles = intake === undefined ? {} : handles(intake);
+    const intakeFiles = handles(intake);
     // Parsing a loop's feedback makes a new object, which finds its pointer here.
-    if (intake !== undefined && isObject(input)) pointers.set(input, inputFrom);
+    if (isObject(input)) pointers.set(input, inputFrom);
 
     /** Every journaled call has been handed back, so the workflow's moves from here on are new. */
     const live = () => position === entries.length;

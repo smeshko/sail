@@ -50,7 +50,7 @@ test('the golden run directory is valid against every run-directory schema', () 
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
     'sail.journal.v1': 10,
-    'sail.event.v1': 135,
+    'sail.event.v1': 137,
     'sail.summary.v1': 1,
     'sail.result.v1': 10,
   });
@@ -99,6 +99,49 @@ test('events are numbered without a gap, never go back in time, and all belong t
   expect(times).toEqual([...times].sort((a, b) => a - b));
   expect(new Set(events.map((event) => event.runId))).toEqual(new Set([basename(fixture)]));
   expect(text('STATUS')).toBe('completed\n');
+});
+
+test('the golden run records its claim: run.json holds it, the stream reports it right after run:start with no key, and the ticket the intake fetched carries its comment', () => {
+  const inProgress = { type: 'started', name: 'In Progress' };
+  const comment = `sail run ${RUN_ID} started`;
+  const header = JSON.parse(text('run.json'));
+  expect([header.source.forced, header.claim]).toEqual([[], { claimed: true, state: inProgress }]);
+
+  const events = lines('events.ndjson');
+  expect(events.slice(0, 4).map((event) => event.type)).toEqual([
+    'run:start',
+    'ticket:claimed',
+    'ticket:commented',
+    'workspace:leased',
+  ]);
+  const envelope = (seq: number, ts: string, type: string) => ({ seq, ts, type, runId: RUN_ID, ticketKey: 'FAKE-1' });
+  expect(events.slice(1, 3)).toEqual([
+    { ...envelope(2, '2026-09-25T09:00:00.040Z', 'ticket:claimed'), state: inProgress },
+    { ...envelope(3, '2026-09-25T09:00:00.080Z', 'ticket:commented'), body: comment },
+  ]);
+  expect(events[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] } });
+
+  // The intake fetched the ticket after the claim: its one ticket:fetched counts the claim's comment.
+  const fetched = events.filter((event) => event.type === 'ticket:fetched');
+  expect(fetched.map((event) => [event.key, event.comments])).toEqual([['intake#1', 2]]);
+  const ticket = JSON.parse(text('00-intake/call-1/ticket.json'));
+  expect([ticket.state, ticket.comments.at(-1)]).toEqual([
+    inProgress,
+    { author: 'sail', body: comment, createdAt: '2026-09-25T08:59:59.900Z' },
+  ]);
+  expect(text('00-intake/call-1/brief.md')).toEndWith(
+    `<untrusted-input source="ticket FAKE-1, comment 2">\n${comment}\n</untrusted-input>\n`,
+  );
+  // The input the workflow reads holds no comment, so the journal's first line is what it was.
+  expect(Object.keys(lines('journal.ndjson')[0]?.output as object)).toEqual([
+    'ticketKey',
+    'title',
+    'url',
+    'acceptanceCriteria',
+    'labels',
+    'links',
+    'attachments',
+  ]);
 });
 
 /** The move after each stage call, as `[at, value, took]`: the engine routes once per journaled call, but not the intake. */

@@ -40,8 +40,9 @@ test('with testsPassAt 1, the tests stage passes its first call', async () => {
 
 test('the call sleepAt names sleeps on its first run until it is interrupted, and neither of its processes survives', async () => {
   await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { sleepAt: 'spec#1' });
-    const stage = '.sail/workflows/ticket-to-pr/stages/spec';
+    // The tests stage consumes nothing, so it runs in isolation with no binding. The spec consumes the intake's brief.
+    writeStub(repo.dir, { sleepAt: 'tests#1', testsPassAt: 1 });
+    const stage = '.sail/stages/tests';
     const interrupts = fakeInterrupts();
     const running = runCaptured(['stage', 'run', stage], repo.dir, interrupts);
     const pids = await whenSleeping(repo.dir);
@@ -54,8 +55,8 @@ test('the call sleepAt names sleeps on its first run until it is interrupted, an
     expect(existsSync(join(repo.dir, '.stub', 'sleep-at'))).toBe(false);
 
     const again = await runCaptured(['stage', 'run', stage], repo.dir);
-    expect(again.stdout).toStartWith('spec#1 passed');
+    expect(again.stdout).toStartWith('tests#1 passed');
     expect(again.code).toBe(EXIT_OK);
-    expect(stubExecutions(repo.dir)).toEqual(['spec#1', 'spec#1']);
+    expect(stubExecutions(repo.dir)).toEqual(['tests#1', 'tests#1']);
   });
 });

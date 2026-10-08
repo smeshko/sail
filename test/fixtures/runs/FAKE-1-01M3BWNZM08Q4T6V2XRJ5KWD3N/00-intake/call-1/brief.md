@@ -31,3 +31,9 @@ Add a `--shout` flag to the `greet` command. With the flag, the whole greeting i
 <untrusted-input source="ticket FAKE-1, comment 1">
 Upper-case the whole line, the name included.
 </untrusted-input>
+
+<untrusted-input source="ticket FAKE-1, comment 2 author">sail</untrusted-input> wrote:
+
+<untrusted-input source="ticket FAKE-1, comment 2">
+sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started
+</untrusted-input>

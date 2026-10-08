@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 const lines = (...each: string[]): string => each.join('\n');
-const sourceOf = (ticketKey: string): Source => ({ kind: 'ticket', ticketKey, via: 'cli', forced: false });
+const sourceOf = (ticketKey: string): Source => ({ kind: 'ticket', ticketKey, via: 'cli', forced: [] });
 
 /** A ticket as the fake's seed holds it, with a marker in every string a provider returns. */
 const SEED = {
@@ -262,14 +262,20 @@ test("a PortError from get reaches the caller as it is, an answer that is no Tic
   expect(readdirSync(out)).toEqual([]);
 });
 
-test("on the fixture's FAKE-1, once it is claimed, the body writes the golden ticket.json and brief.md byte for byte, and returns the golden intake output", async () => {
+test("on the fixture's FAKE-1, once it is claimed and commented on as the golden run's start did, the body writes the golden ticket.json and brief.md byte for byte, and returns the golden intake output", async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sail-ticket-intake-'));
   dirs.push(dir);
   copyFileSync(join(FIXTURES, 'repo', '.sail', 'fake', 'tickets.json'), join(dir, 'tickets.json'));
   const out = join(dir, 'out');
   mkdirSync(out);
-  const ticketSource = createFakeTicketSource({ seed: join(dir, 'tickets.json'), state: join(dir, 'state.json') });
+  // The golden run's claim: made, and commented on, just before its run:start at 09:00:00.000Z.
+  const ticketSource = createFakeTicketSource({
+    seed: join(dir, 'tickets.json'),
+    state: join(dir, 'state.json'),
+    now: () => new Date('2026-09-25T08:59:59.900Z'),
+  });
   await ticketSource.claim('FAKE-1');
+  await ticketSource.comment('FAKE-1', 'sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started');
 
   const output = await ticketIntake({ source: sourceOf('FAKE-1'), ticketSource, out });
   const golden = JSON.parse(readFileSync(join(GOLDEN_CALL, 'result.json'), 'utf8'));

@@ -5,7 +5,14 @@
     "kind": "ticket",
     "ticketKey": "FAKE-1",
     "via": "cli",
-    "forced": false
+    "forced": []
+  },
+  "claim": {
+    "claimed": true,
+    "state": {
+      "type": "started",
+      "name": "In Progress"
+    }
   },
   "workflow": {
     "name": "ticket-to-pr",

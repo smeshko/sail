@@ -1,6 +1,7 @@
-// runWorkflow() and resumeWorkflow(): a run from start to end through replay, on the stub ticket-to-pr, and a run
-// interrupted, then resumed. Each case has a temp repository of its own: one run per .sail/ in a process, and Bun
-// caches the workflow's modules by path. So a run resumes in a copy of the repository it was interrupted in.
+// runWorkflow() and resumeWorkflow(): a run from its ticket to its end through replay, on the stub ticket-to-pr, and a
+// run interrupted or stopped by `until`, then resumed. Each case has a temp repository of its own: one run per .sail/
+// in a process, and Bun caches the workflow's modules by path. So a run resumes in a copy of the repository it was
+// interrupted in. Every run starts from the stub's `FAKE-1`, so its journal starts with `intake#1`.
 import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -40,22 +41,25 @@ import { copyFixture, edit, write } from '../helpers/fixture';
 import {
   copyRun,
   interruptWhenAsleep,
+  STUB_SPEC_CALL,
   type StubOptions,
   setSleepAt,
   stubExecutions,
   swapImplementAndTests,
+  workflowEntries,
   writeStub,
 } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 
-/** Runs ticket-to-pr from `cwd`, which must not be refused. */
+/** Runs ticket-to-pr from `cwd` on `FAKE-1`, or as `options` say. It must not be refused. */
 async function ran(cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> {
   const end = await runWorkflow({
     cwd,
     adapters: await fakeAdapters(cwd),
     workflow: 'ticket-to-pr',
+    ticket: 'FAKE-1',
     ...options,
   });
   if ('refused' in end) throw new Error(`refused: ${end.refused}`);
@@ -77,6 +81,14 @@ async function stubRun(
 const keys = (runDir: string) => readJournal(runDir).entries.map((entry) => entry.key);
 const sha256 = (path: string) => new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
 
+/** The runs in `repoDir`'s `.sail-runs/`: every entry but `fake/`, where the fake adapters keep their state. */
+const runIds = (repoDir: string): string[] =>
+  existsSync(join(repoDir, '.sail-runs'))
+    ? readdirSync(join(repoDir, '.sail-runs')).filter((name) => name !== 'fake')
+    : [];
+/** The only run in `repoDir`'s `.sail-runs/`. */
+const onlyRun = (repoDir: string) => join(repoDir, '.sail-runs', runIds(repoDir)[0] ?? '');
+
 test('the stub runs to completion through its fix loop, and every call ran once', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
@@ -85,7 +97,7 @@ test('the stub runs to completion through its fix loop, and every call ran once'
     const end = await ran(repo.dir, {
       onCall: (entry) => {
         journaled.push(entry);
-        header ??= sha256(join(repo.dir, '.sail-runs', readdirSync(join(repo.dir, '.sail-runs'))[0] ?? '', 'run.json'));
+        header ??= sha256(join(onlyRun(repo.dir), 'run.json'));
       },
     });
 
@@ -96,6 +108,7 @@ test('the stub runs to completion through its fix loop, and every call ran once'
     expect(end.stopReason).toBeUndefined();
     const { entries } = readJournal(end.dir);
     expect(entries.map((entry) => entry.key)).toEqual([
+      'intake#1',
       'spec#1',
       'implement#1',
       'tests#1',
@@ -107,6 +120,7 @@ test('the stub runs to completion through its fix loop, and every call ran once'
     expect(entries.map((entry) => entry.outcome)).toEqual([
       'passed',
       'passed',
+      'passed',
       'failed',
       'passed',
       'passed',
@@ -115,7 +129,8 @@ test('the stub runs to completion through its fix loop, and every call ran once'
     ]);
     expect(journaled).toEqual(entries);
     expect(readStatus(end.dir)).toEqual({ status: 'completed' });
-    expect(stubExecutions(repo.dir)).toEqual(keys(end.dir));
+    // Every stage call ran once, as a script. The intake is no script: the engine ran it.
+    expect(stubExecutions(repo.dir)).toEqual(keys(end.dir).slice(1));
     expect(validateRunDir(end.dir).issues).toEqual([]);
     const implement = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
     expect(implement.consumed).toEqual({
@@ -135,6 +150,7 @@ test('tests that never pass fail the run when the fix loop exceeds its max', asy
       expect(end).toMatchObject({ status: 'failed', stopReason: 'workflow_failed', message: 'loop "fix" exceeded 3' });
       expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('failed workflow_failed\n');
       expect(keys(end.dir)).toEqual([
+        'intake#1',
         'spec#1',
         'implement#1',
         'tests#1',
@@ -148,6 +164,8 @@ test('tests that never pass fail the run when the fix loop exceeds its max', asy
 });
 
 const UNMAPPED = 'exit_code: exit code 2 is not mapped to passed or failed';
+/** Why the fixture's own ticket-to-pr stops at its spec: the fake harness has no script to answer that session with. */
+const FIXTURE_SPEC_FAILED = /^spec#1 ended in error: harness: fake harness: .*\/\.sail\/fake\/harness\.json: ENOENT/;
 
 test('a call that ends in error fails the run with stage_error, and the journal keeps its errors', async () => {
   await stubRun(
@@ -184,17 +202,18 @@ test('a call that asks for its error routes on it', async () => {
   );
 });
 
-test("the fixture's ticket-to-pr still can't run: its spec has no brief until intake leaves one, so the run fails before its first call", async () => {
+test("the fixture's ticket-to-pr gets as far as its spec: the intake leaves the brief spec#1 consumes, and the run fails there, where the fake harness has no script for it", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const end = await ran(repo.dir);
     expect(end).toMatchObject({
       status: 'failed',
-      stopReason: 'workflow_failed',
-      message: "spec#1 can't run: 'brief' is required",
+      stopReason: 'stage_error',
+      message: expect.stringMatching(FIXTURE_SPEC_FAILED),
     });
-    expect(readJournal(end.dir).entries).toEqual([]);
-    expect(existsSync(join(end.dir, '01-spec'))).toBe(false);
+    expect(keys(end.dir)).toEqual(['intake#1', 'spec#1']);
+    const spec = JSON.parse(readFileSync(join(end.dir, '01-spec', 'call-1', 'result.json'), 'utf8'));
+    expect(spec.consumed).toEqual({ brief: '00-intake/call-1/brief.md' });
   });
 });
 
@@ -203,12 +222,7 @@ test('a workflow whose calls change between replays fails with determinism_viola
     {},
     (sail) => {
       edit(sail, WORKFLOW, 'export default workflow(', 'let replays = 0;\n\nexport default workflow(');
-      edit(
-        sail,
-        WORKFLOW,
-        '  const s = await run.stage(spec);',
-        '  if (replays++ > 0) await run.stage(tests);\n  const s = await run.stage(spec);',
-      );
+      edit(sail, WORKFLOW, STUB_SPEC_CALL, `  if (replays++ > 0) await run.stage(tests);\n${STUB_SPEC_CALL}`);
     },
     (end) => {
       expect(end).toMatchObject({
@@ -216,7 +230,7 @@ test('a workflow whose calls change between replays fails with determinism_viola
         stopReason: 'determinism_violation',
         message: "the workflow asked for 'tests#1' where the journal has 'spec#1'",
       });
-      expect(keys(end.dir)).toEqual(['spec#1']);
+      expect(keys(end.dir)).toEqual(['intake#1', 'spec#1']);
     },
   );
 });
@@ -230,10 +244,8 @@ test('a journal that breaks mid-run is an exception inside sail, and STATUS stay
       "printf '# Spec",
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
-    const running = runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'ticket-to-pr' });
-    await expect(running).rejects.toThrow(JournalError);
-    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
-    expect(readStatus(join(repo.dir, '.sail-runs', runId))).toEqual({ status: 'running' });
+    await expect(ran(repo.dir)).rejects.toThrow(JournalError);
+    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'running' });
   });
 });
 
@@ -241,17 +253,16 @@ test('a second run from the same .sail/ in a process throws before it writes any
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const first = await ran(repo.dir);
-    await expect(
-      runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'ticket-to-pr' }),
-    ).rejects.toThrow('already started in this process');
-    expect(readdirSync(join(repo.dir, '.sail-runs'))).toEqual([first.runId]);
+    await expect(ran(repo.dir)).rejects.toThrow('already started in this process');
+    expect(runIds(repo.dir)).toEqual([first.runId]);
   });
 });
 
 test('a refused open passes through, and nothing runs', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    expect(await runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'nope' })).toEqual({
+    const adapters = await fakeAdapters(repo.dir);
+    expect(await runWorkflow({ cwd: repo.dir, adapters, workflow: 'nope', ticket: 'FAKE-1' })).toEqual({
       refused: expect.stringContaining('no workflow'),
     });
     expect(stubExecutions(repo.dir)).toEqual([]);
@@ -275,16 +286,8 @@ function interruptedCopy(to: string, options: Partial<RunWorkflowOptions> = {}):
   });
 }
 
-const ALL_KEYS = ['spec#1', 'implement#1', 'tests#1', 'implement#2', 'tests#2', 'self-review#1', 'publish#1'];
-const INPUT = {
-  ticketKey: 'FAKE-5',
-  title: 'Greet',
-  url: 'fake://tickets/FAKE-5',
-  acceptanceCriteria: ['greets'],
-  labels: ['cli'],
-  links: [],
-  attachments: [],
-};
+const STAGE_KEYS = ['spec#1', 'implement#1', 'tests#1', 'implement#2', 'tests#2', 'self-review#1', 'publish#1'];
+const ALL_KEYS = ['intake#1', ...STAGE_KEYS];
 
 test('an abort stops the running call, leaves it unjournaled, and suspends the run', async () => {
   await withTempRepo(async (repo) => {
@@ -297,8 +300,8 @@ test('an abort stops the running call, leaves it unjournaled, and suspends the r
     });
     expect(alive).toEqual([]);
     expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
-    expect(keys(end.dir)).toEqual(['spec#1', 'implement#1', 'tests#1']);
-    expect(journaled).toEqual(['spec#1', 'implement#1', 'tests#1']);
+    expect(keys(end.dir)).toEqual(['intake#1', 'spec#1', 'implement#1', 'tests#1']);
+    expect(journaled).toEqual(['intake#1', 'spec#1', 'implement#1', 'tests#1']);
     const interrupted = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
     expect(interrupted).toMatchObject({
       key: 'implement#2',
@@ -310,17 +313,63 @@ test('an abort stops the running call, leaves it unjournaled, and suspends the r
   });
 }, 20_000);
 
-test('an abort before the first call suspends the run before anything runs', async () => {
+test('an abort seen before the first stage call suspends the run before any stage runs', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const controller = new AbortController();
-    controller.abort();
-    const end = await ran(repo.dir, { signal: controller.signal });
+    // Raised once the intake is journaled: the replay that follows asks for spec#1, which never starts.
+    const end = await ran(repo.dir, { signal: controller.signal, onCall: () => controller.abort() });
     expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped before spec#1' });
     expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
-    expect(keys(end.dir)).toEqual([]);
+    expect(keys(end.dir)).toEqual(['intake#1']);
     expect(existsSync(join(end.dir, '01-spec'))).toBe(false);
     expect(stubExecutions(repo.dir)).toEqual([]);
+  });
+});
+
+test("run.input is the intake's output as the journal holds it, in the run that journaled it too: a key JSON drops is gone before the first replay", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
+    edit(
+      sail,
+      WORKFLOW,
+      STUB_SPEC_CALL,
+      `  if (run.input.links.some((link) => 'title' in link)) return run.fail('a link holds a title key');\n${STUB_SPEC_CALL}`,
+    );
+    // A link with a title that is undefined: the key is there in memory, and gone from the journal's line.
+    const adapters = await fakeAdapters(repo.dir);
+    const { ticketSource } = adapters.ports;
+    const get = ticketSource.get.bind(ticketSource);
+    ticketSource.get = async (ticketKey) => ({
+      ...(await get(ticketKey)),
+      links: [{ url: 'https://example.com/spec', title: undefined }],
+    });
+    const end = await ran(repo.dir, { adapters });
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(readJournal(end.dir).entries[0]).toMatchObject({
+      key: 'intake#1',
+      output: { links: [{ url: 'https://example.com/spec' }] },
+    });
+  });
+});
+
+test('a journal that loses its intake mid-run is an exception inside sail: no replay runs on the intake kept in memory, and STATUS stays running', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    // Emptied as the intake is journaled, before the first replay reads it back.
+    const emptied = ran(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key === 'intake#1') writeFileSync(join(onlyRun(repo.dir), 'journal.ndjson'), '');
+      },
+    });
+    const thrown = await emptied.then(
+      () => 'resolved',
+      (error: unknown) => error,
+    );
+    expect(thrown).toBeInstanceOf(JournalError);
+    expect(String(thrown)).toEndWith('journal.ndjson:1 is no longer intake#1: the journal changed under the run');
+    expect([workflowEntries(repo.dir), stubExecutions(repo.dir)]).toEqual([0, []]);
+    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'running' });
   });
 });
 
@@ -330,18 +379,18 @@ test('an abort does not hide a replay that ends the run', async () => {
     edit(
       sail,
       WORKFLOW,
-      '  const s = await run.stage(spec);',
-      "  if (run.input === undefined) return run.fail('no ticket given');\n  const s = await run.stage(spec);",
+      STUB_SPEC_CALL,
+      `  if (run.input.ticketKey === 'FAKE-1') return run.fail('no run for FAKE-1');\n${STUB_SPEC_CALL}`,
     );
     const controller = new AbortController();
-    controller.abort();
-    const end = await ran(repo.dir, { signal: controller.signal });
+    // Raised once the intake is journaled, so the abort is there before the one replay starts.
+    const end = await ran(repo.dir, { signal: controller.signal, onCall: () => controller.abort() });
     expect(end).toEqual({
       runId: end.runId,
       dir: end.dir,
       status: 'failed',
       stopReason: 'workflow_failed',
-      message: 'no ticket given',
+      message: 'no run for FAKE-1',
     });
     expect(readStatus(end.dir)).toEqual({ status: 'failed', stopReason: 'workflow_failed' });
   });
@@ -350,23 +399,23 @@ test('an abort does not hide a replay that ends the run', async () => {
 test("an abort suspends a run whose replay hangs in the workflow's own code", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
-    edit(
-      sail,
-      WORKFLOW,
-      '  const s = await run.stage(spec);',
-      '  await new Promise<void>(() => {});\n  const s = await run.stage(spec);',
-    );
+    edit(sail, WORKFLOW, STUB_SPEC_CALL, `  await new Promise<void>(() => {});\n${STUB_SPEC_CALL}`);
     const controller = new AbortController();
-    const running = ran(repo.dir, { signal: controller.signal });
-    const runs = join(repo.dir, '.sail-runs');
-    const started = () => existsSync(runs) && readdirSync(runs).some((id) => existsSync(join(runs, id, 'STATUS')));
-    while (!started()) await Bun.sleep(10);
+    let replaying = false;
+    const running = ran(repo.dir, {
+      signal: controller.signal,
+      onCall: () => {
+        replaying = true;
+      },
+    });
+    // The intake is journaled, so the first replay is next: it hangs.
+    while (!replaying) await Bun.sleep(10);
     await Bun.sleep(50);
     controller.abort();
     const end = await running;
     expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during the replay' });
     expect(readStatus(end.dir)).toEqual({ status: 'suspended', stopReason: 'interrupted' });
-    expect(keys(end.dir)).toEqual([]);
+    expect(keys(end.dir)).toEqual(['intake#1']);
     expect(stubExecutions(repo.dir)).toEqual([]);
   });
 });
@@ -389,7 +438,8 @@ test('a resume runs the interrupted call again as its next try, and nothing jour
       'self-review#1',
       'publish#1',
     ]);
-    expect(readJournal(dir).entries[3]?.resultPath).toBe('02-implement/call-2/try-2/result.json');
+    const retried = readJournal(dir).entries.find((entry) => entry.key === 'implement#2');
+    expect(retried?.resultPath).toBe('02-implement/call-2/try-2/result.json');
     const tryTwo = JSON.parse(readFileSync(join(dir, '02-implement', 'call-2', 'try-2', 'result.json'), 'utf8'));
     expect(tryTwo.env.TRY).toBe('2');
     expect(existsSync(join(dir, '02-implement', 'call-2', 'stdout.log'))).toBe(true);
@@ -459,20 +509,6 @@ test('resuming from a .sail/ this process already ran from throws before it writ
   });
 }, 20_000);
 
-test('the input given again on resume is run.input', async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedCopy(repo.dir, { input: INPUT });
-    edit(
-      join(repo.dir, '.sail'),
-      WORKFLOW,
-      "  return run.stage(publish, { spec: s.files['spec.md'] });",
-      '  return run.input;',
-    );
-    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId, input: INPUT });
-    expect(end).toEqual({ runId, dir: join(repo.dir, '.sail-runs', runId), status: 'completed', result: INPUT });
-  });
-}, 30_000);
-
 /** The run's `events.ndjson`, or '' when it has none. */
 const eventsText = (runDir: string): string =>
   existsSync(join(runDir, 'events.ndjson')) ? readFileSync(join(runDir, 'events.ndjson'), 'utf8') : '';
@@ -504,10 +540,24 @@ const callOutline = (key: string, bindings: number, files: number): string[] => 
 ];
 const route = (at: string, took: string) => `workflow:route ${at}→${took}`;
 
-/** The stub's whole stream, tests passing on their second call. */
-const STUB_OUTLINE = [
+/** How every run's stream opens: its start, what the claim did to the ticket, then the intake, to its journal line. */
+const OPENING = [
   'run:start',
-  ...callOutline('spec#1', 0, 1),
+  'ticket:claimed',
+  'ticket:commented',
+  'intake:start intake#1',
+  'ticket:fetched intake#1',
+  'output:validated intake#1',
+  'file:produced intake#1',
+  'file:produced intake#1',
+  'intake:end intake#1',
+  'journal:append intake#1',
+];
+
+/** The stub's whole stream, tests passing on their second call. No route leaves the intake. */
+const STUB_OUTLINE = [
+  ...OPENING,
+  ...callOutline('spec#1', 1, 1),
   'loop:iteration',
   route('spec#1', 'implement#1'),
   ...callOutline('implement#1', 1, 1),
@@ -530,14 +580,11 @@ const STUB_OUTLINE = [
 const seqs = (list: readonly SailEvent[]) => list.map((event) => event.seq);
 const gapless = (list: readonly SailEvent[]) => list.map((_, i) => i + 1);
 
-test("the stub's run writes its whole event stream to events.ndjson, numbered from 1", async () => {
+test("the stub's run writes its whole event stream to events.ndjson, numbered from 1: its start, what the claim did, the intake, then every call", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const end = await ran(repo.dir);
     const list = events(end.dir);
-    console.log(
-      list.map((e) => JSON.stringify([e.seq, e.type, 'key' in e ? e.key : 'at' in e ? e.at : null])).join('\n'),
-    );
 
     expect(outline(list)).toEqual(STUB_OUTLINE);
     expect(seqs(list)).toEqual(gapless(list));
@@ -555,6 +602,13 @@ test("the stub's run writes its whole event stream to events.ndjson, numbered fr
       adapters: header.adapters,
       budget: header.budget,
     });
+    expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
+    // What the claim did, as the engine reports it: neither event belongs to a call, so neither has a key.
+    const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-1' };
+    expect(list.slice(1, 3)).toEqual([
+      { seq: 2, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
+      { seq: 3, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+    ]);
     expect(list.at(-1)).toEqual({
       seq: list.length,
       ts: expect.any(String),
@@ -639,6 +693,44 @@ test("a resume appends to the interrupted run's events, continuing seq with no m
   });
 }, 30_000);
 
+test("a forced run of a ticket that is not unstarted reports the move in the claim's place: ticket:updated, then ticket:commented, and run:start lists the state check as overridden", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const end = await ran(repo.dir, { ticket: 'FAKE-4', force: true });
+    expect([end.status, end.runId.slice(0, 7)]).toEqual(['completed', 'FAKE-4-']);
+    const list = events(end.dir);
+    expect(outline(list.slice(0, 4))).toEqual([
+      'run:start',
+      'ticket:updated',
+      'ticket:commented',
+      'intake:start intake#1',
+    ]);
+    const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-4' };
+    const inProgress = { type: 'started', name: 'In Progress' } as const;
+    expect(list.slice(1, 3)).toEqual([
+      { seq: 2, ...reported, type: 'ticket:updated', change: { state: 'in-progress' }, state: inProgress },
+      { seq: 3, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+    ]);
+    expect(list[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-4', via: 'cli', forced: ['state'] } });
+    expect(outline(list)).not.toContain('ticket:claimed');
+    expect(seqs(list)).toEqual(gapless(list));
+    expect(validateRunDir(end.dir).issues).toEqual([]);
+  });
+});
+
+test('a resume reports nothing of the claim again: across both processes the stream holds it once', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
+    const ticket = outline(events(dir)).filter((line) => line.startsWith('ticket:'));
+    expect(ticket).toEqual(['ticket:claimed', 'ticket:commented', 'ticket:fetched intake#1']);
+    expect(validateRunDir(dir).issues).toEqual([]);
+  });
+}, 30_000);
+
 test('a torn tail is cut before a resume, and seq continues from the last complete line', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
@@ -656,22 +748,6 @@ test('a torn tail is cut before a resume, and seq continues from the last comple
     const list = events(dir);
     expect(seqs(list)).toEqual(gapless(list));
     expect(validateRunDir(dir).issues).toEqual([]);
-  });
-}, 30_000);
-
-test('a resume refused for its input leaves a torn tail as it was', async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedCopy(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    appendFileSync(join(dir, 'events.ndjson'), '{"seq":99,"ts":"2026-09-28T');
-    const before = eventsText(dir);
-
-    expect(
-      await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId, input: { ticketKey: 5 } }),
-    ).toEqual({
-      refused: expect.stringMatching(/^the input doesn't match intake 'ticket'/),
-    });
-    expect(eventsText(dir)).toBe(before);
   });
 }, 30_000);
 
@@ -732,13 +808,9 @@ test('an exception inside sail leaves error:crash as the last event, and still p
       "printf '# Spec",
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
-    const error = await runWorkflow({
-      cwd: repo.dir,
-      adapters: await fakeAdapters(repo.dir),
-      workflow: 'ticket-to-pr',
-    }).catch((thrown: unknown) => thrown);
+    const error = await ran(repo.dir).catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(JournalError);
-    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
+    const [runId = ''] = runIds(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
     // The journal breaks while spec#1 is being journaled, so the crash names that call.
     expect(events(dir).at(-1)).toEqual({
@@ -766,7 +838,12 @@ test('a replay abandoned by an abort reports nothing after run:end, even once it
   (await import('node:fs')).writeFileSync(${JSON.stringify(moved)}, '');`,
     );
     const controller = new AbortController();
-    const end = await ran(repo.dir, { signal: controller.signal, onCall: () => controller.abort() });
+    const end = await ran(repo.dir, {
+      signal: controller.signal,
+      onCall: (entry) => {
+        if (entry.key === 'spec#1') controller.abort();
+      },
+    });
     expect(end).toMatchObject({ status: 'suspended', message: 'stopped during the replay' });
     while (!existsSync(moved)) await Bun.sleep(10);
     expect(outline(events(end.dir)).slice(-2)).toEqual(['journal:append spec#1', 'run:end']);
@@ -844,10 +921,7 @@ const summaryOf = (runDir: string): Summary | undefined => {
   return text === '' ? undefined : JSON.parse(text);
 };
 
-/** The only run in `repoDir`'s `.sail-runs/`. */
-const onlyRun = (repoDir: string) => join(repoDir, '.sail-runs', readdirSync(join(repoDir, '.sail-runs'))[0] ?? '');
-
-/** The stub's routes, one per move after a journaled call, tests passing on their second call. */
+/** The stub's routes, one per move after a journaled stage call, tests passing on their second call. */
 const STUB_ROUTES = [
   { at: 'spec#1', value: 'passed', took: 'implement#1' },
   { at: 'implement#1', value: 'passed', took: 'tests#1' },
@@ -872,6 +946,7 @@ test("the stub's summary.json is rewritten after every call, and ends completed 
     });
 
     expect(readdirSync(end.dir).sort()).toEqual([
+      '00-intake',
       '01-spec',
       '02-implement',
       '03-tests',
@@ -883,7 +958,7 @@ test("the stub's summary.json is rewritten after every call, and ends completed 
       'run.json',
       'summary.json',
     ]);
-    expect([listed, issues]).toEqual([[1, 2, 3, 4, 5, 6, 7], []]);
+    expect([listed, issues]).toEqual([[1, 2, 3, 4, 5, 6, 7, 8], []]);
     const text = summaryText(end.dir);
     const summary = JSON.parse(text);
     expect(text).toBe(`${JSON.stringify(summary, null, 2)}\n`);
@@ -918,7 +993,7 @@ test("after an interrupt and a resume, summary.json is completed with the retrie
     expect([interrupted?.status, interrupted?.stopReason, interrupted?.calls.map((call) => call.key)]).toEqual([
       'suspended',
       'interrupted',
-      ['spec#1', 'implement#1', 'tests#1', 'implement#2'],
+      ['intake#1', 'spec#1', 'implement#1', 'tests#1', 'implement#2'],
     ]);
 
     expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
@@ -932,7 +1007,7 @@ test("after an interrupt and a resume, summary.json is completed with the retrie
       replays,
       ALL_KEYS,
     ]);
-    expect(summary?.calls[3]).toMatchObject({
+    expect(summary?.calls.find((call) => call.key === 'implement#2')).toMatchObject({
       key: 'implement#2',
       outcome: 'passed',
       resultPath: '02-implement/call-2/try-2/result.json',
@@ -965,8 +1040,9 @@ test("a summary.json that can't be written is reported at each write point after
     const failures = list.flatMap((event) =>
       event.type === 'error:consumer' ? [[event.consumer, event.failed.type]] : [],
     );
+    // Blocked as the intake is journaled: every stage call's journal line fails to be summarised, and so does the end.
     expect(failures).toEqual([
-      ...Array<string[]>(6).fill(['summary.json', 'journal:append']),
+      ...Array<string[]>(7).fill(['summary.json', 'journal:append']),
       ['summary.json', 'run:end'],
     ]);
     expect(outline(list.filter((event) => event.type !== 'error:consumer'))).toEqual(STUB_OUTLINE);
@@ -982,19 +1058,152 @@ test('a crash leaves summary.json running, with the calls made before it', async
       "printf '# Spec",
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
-    await expect(
-      runWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), workflow: 'ticket-to-pr' }),
-    ).rejects.toThrow(JournalError);
+    await expect(ran(repo.dir)).rejects.toThrow(JournalError);
     const summary = summaryOf(onlyRun(repo.dir));
-    expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['spec#1']]);
+    expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['intake#1', 'spec#1']]);
+  });
+});
+
+// `until` (D10): the run stops, suspended, once the named stage's first call is journaled and the workflow asks for
+// another call. A replay that ends the run ends it.
+
+const UNTIL_SPEC = {
+  status: 'suspended',
+  stopReason: 'until',
+  message: 'stopped after spec#1, as --until asked',
+} as const;
+
+/** The stub's run from `FAKE-1`, stopped by `until: 'spec'` in a repository of its own, then copied into `to`. Its id. */
+function stoppedCopy(to: string): Promise<string> {
+  return withTempRepo(async (from) => {
+    writeStub(from.dir);
+    const end = await ran(from.dir, { until: 'spec' });
+    copyRun(from.dir, to);
+    return end.runId;
+  });
+}
+
+test("until stops the run after the named stage's first call: suspended with until, that call the last journaled and the only one that ran, and the stream and the summary say so", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await ran(repo.dir, { until: 'spec' });
+    expect(end).toEqual({ runId: end.runId, dir: end.dir, ...UNTIL_SPEC });
+    expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended until\n');
+    expect([keys(end.dir), stubExecutions(repo.dir)]).toEqual([['intake#1', 'spec#1'], ['spec#1']]);
+    const list = events(end.dir);
+    expect(list.at(-1)).toEqual({
+      seq: list.length,
+      ts: expect.any(String),
+      type: 'run:end',
+      runId: end.runId,
+      ...UNTIL_SPEC,
+      replays: 2,
+    });
+    const summary = summaryOf(end.dir);
+    expect([summary?.status, summary?.stopReason, summary?.calls.map((call) => call.key)]).toEqual([
+      'suspended',
+      'until',
+      ['intake#1', 'spec#1'],
+    ]);
+    expect(validateRunDir(end.dir).issues).toEqual([]);
+  });
+});
+
+test('a resume takes a run until stopped to its end: every call ran once, and the summary holds each route once, the one out of the stage it stopped after included', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await stoppedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
+    expect(end).toMatchObject({ runId, status: 'completed' });
+    expect([keys(dir), stubExecutions(repo.dir)]).toEqual([ALL_KEYS, STAGE_KEYS]);
+    const summary = summaryOf(dir);
+    expect([summary?.status, summary?.routes]).toEqual(['completed', STUB_ROUTES]);
+    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    expect(validateRunDir(dir).issues).toEqual([]);
+  });
+});
+
+test("until stops after the named stage's first call whatever its outcome: a failed tests#1 is journaled, and the pass it would send back to implement never starts", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await ran(repo.dir, { until: 'tests' });
+    expect(end).toMatchObject({
+      status: 'suspended',
+      stopReason: 'until',
+      message: 'stopped after tests#1, as --until asked',
+    });
+    expect(readJournal(end.dir).entries.at(-1)).toMatchObject({ key: 'tests#1', outcome: 'failed' });
+    expect(stubExecutions(repo.dir)).toEqual(['spec#1', 'implement#1', 'tests#1']);
+  });
+});
+
+test('until naming the stage of the last call completes the run: a replay that ends the run ends it', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const stopped = await withTempRepo(async (other) => {
+      writeStub(other.dir, { testsPassAt: 1 });
+      return (await ran(other.dir, { until: 'self-review' })).stopReason;
+    });
+    const end = await ran(repo.dir, { until: 'publish' });
+    expect([stopped, end.status, end.stopReason, keys(end.dir).at(-1)]).toEqual([
+      'until',
+      'completed',
+      undefined,
+      'publish#1',
+    ]);
+    expect(readStatus(end.dir)).toEqual({ status: 'completed' });
+  });
+});
+
+test("a named stage whose first call ends in error fails the run with stage_error: until doesn't suspend a run that can only fail", async () => {
+  await withTempRepo(async (repo) => {
+    const failing = await withTempRepo(async (other) => {
+      writeStub(other.dir);
+      return (await ran(other.dir, { until: 'tests' })).stopReason;
+    });
+    edit(writeStub(repo.dir), 'stages/tests/run.sh', 'pass_at=2\n', 'exit 2\n');
+    const end = await ran(repo.dir, { until: 'tests' });
+    expect([failing, end.status, end.stopReason, end.message]).toEqual([
+      'until',
+      'failed',
+      'stage_error',
+      `tests#1 ended in error: ${UNMAPPED}`,
+    ]);
+  });
+});
+
+test('an abort raised while the named stage runs still suspends the run with interrupted, and leaves the call unjournaled', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { sleepAt: 'spec#1' });
+    const controller = new AbortController();
+    const running = ran(repo.dir, { until: 'spec', signal: controller.signal });
+    const { end } = await interruptWhenAsleep(repo.dir, running, () => controller.abort());
+    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during spec#1' });
+    expect(keys(end.dir)).toEqual(['intake#1']);
+  });
+}, 20_000);
+
+test('an abort seen together with the stop loses: once the named call is journaled the run is suspended with until', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const controller = new AbortController();
+    const end = await ran(repo.dir, {
+      until: 'spec',
+      signal: controller.signal,
+      onCall: (entry) => {
+        if (entry.key === 'spec#1') controller.abort();
+      },
+    });
+    expect(end).toEqual({ runId: end.runId, dir: end.dir, ...UNTIL_SPEC });
+    expect(readStatus(end.dir)).toEqual({ status: 'suspended', stopReason: 'until' });
   });
 });
 
 // Agent calls in a run: brief-to-spec on the fake harness, whose script says what each try of spec#1 does.
 
-/** Runs brief-to-spec from `cwd` on TICKET, which must not be refused. */
+/** Runs brief-to-spec from `cwd` on the fixture's `FAKE-1`, which must not be refused. */
 const ranAgent = (cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> =>
-  ran(cwd, { workflow: AGENT_WORKFLOW, input: TICKET, ...options });
+  ran(cwd, { workflow: AGENT_WORKFLOW, ...options });
 
 test('an agent call is journaled once, with the output, the files and the result of its last try, and ran on the model its alias names', async () => {
   await withTempRepo(async (repo) => {
@@ -1006,7 +1215,9 @@ test('an agent call is journaled once, with the output, the files and the result
       status: 'completed',
       result: { outcome: 'passed', output: { published: true, bytes: 17 } },
     });
-    expect(journaled(end.dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    // The input the stages bind is what the intake built from the seeded ticket.
+    expect(entryOf(end.dir, 'intake#1')?.output).toEqual(TICKET);
     expect(entryOf(end.dir, 'spec#1')).toMatchObject({
       stage: 'spec',
       call: 1,
@@ -1063,7 +1274,7 @@ test('a blocked agent call is journaled with its reason, which reaches the workf
     const end = await ranAgent(repo.dir);
 
     expect(end).toMatchObject({ status: 'failed', stopReason: 'workflow_failed', message: `spec blocked: ${reason}` });
-    expect(journaled(end.dir)).toEqual(['brief#1 passed', 'spec#1 blocked']);
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 blocked']);
     expect(entryOf(end.dir, 'spec#1')).toMatchObject({
       output: null,
       reason,
@@ -1109,7 +1320,7 @@ test('an abort during an agent session suspends the run with the call unjournale
       const end = await interruptInSession(from.dir, running, () => controller.abort());
 
       expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during spec#1' });
-      expect(journaled(end.dir)).toEqual(['brief#1 passed']);
+      expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed']);
       // What the session had spent is kept, and nothing it submitted was checked.
       expect(specResult(end.dir)).toMatchObject({
         outcome: 'error',
@@ -1127,10 +1338,10 @@ test('an abort during an agent session suspends the run with the call unjournale
     edit(join(repo.dir, '.sail'), 'project.yaml', 'deep: claude-opus-5-5', 'deep: claude-next');
     const dir = join(repo.dir, '.sail-runs', runId);
     const adapters = await fakeAdapters(repo.dir);
-    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, input: TICKET })).toMatchObject({
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId })).toMatchObject({
       status: 'completed',
     });
-    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(journaled(dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done', 'publish#1 passed']);
     expect(entryOf(dir, 'spec#1')?.resultPath).toBe('02-spec/call-1/try-2/result.json');
     expect(specResult(dir, 2)).toMatchObject({
       outcome: 'done',
@@ -1158,7 +1369,7 @@ test('a resume replays a journaled agent call from the journal, and starts no se
       const running = ranAgent(from.dir, { signal: controller.signal });
       const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort());
       expect(end).toMatchObject({ status: 'suspended', message: 'stopped during publish#1' });
-      expect(journaled(end.dir)).toEqual(['brief#1 passed', 'spec#1 done']);
+      expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done']);
       copyRun(from.dir, repo.dir);
       return end.runId;
     });
@@ -1167,11 +1378,11 @@ test('a resume replays a journaled agent call from the journal, and starts no se
     writeHarnessScript(repo.dir, { spec: [{ outcome: 'error', message: 'a session the journal made needless' }] });
     const dir = join(repo.dir, '.sail-runs', runId);
     const adapters = await fakeAdapters(repo.dir);
-    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, input: TICKET })).toMatchObject({
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId })).toMatchObject({
       status: 'completed',
       result: { outcome: 'passed', output: { published: true, bytes: 17 } },
     });
-    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(journaled(dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done', 'publish#1 passed']);
     expect(sessions(readEvents(dir))).toEqual(['start fake-session-spec-1', 'end fake-session-spec-1 done 0.25']);
     expect(existsSync(specDir(dir, 2))).toBe(false);
     expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1', 'publish#1']);
@@ -1224,7 +1435,6 @@ test('a try whose last events were lost is counted once, from its result, howeve
         cwd: second.dir,
         adapters,
         runId: id,
-        input: TICKET,
         signal: controller.signal,
       });
       expect(await interruptInSession(second.dir, running, () => controller.abort(), 2)).toMatchObject({
@@ -1236,7 +1446,7 @@ test('a try whose last events were lost is counted once, from its result, howeve
 
     const dir = join(repo.dir, '.sail-runs', runId);
     const adapters = await fakeAdapters(repo.dir);
-    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, input: TICKET })).toMatchObject({
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId })).toMatchObject({
       status: 'completed',
     });
     const all = readEvents(dir);
@@ -1258,6 +1468,7 @@ test('a try whose last events were lost is counted once, from its result, howeve
     const summary = summaryOf(dir);
     expect(summary?.totals.usage).toEqual({ inputTokens: 7000, outputTokens: 700, costUsd: 0.875 });
     expect(summary?.calls.map((call) => `${call.key} ${call.outcome}`)).toEqual([
+      'intake#1 passed',
       'brief#1 passed',
       'spec#1 done',
       'publish#1 passed',
@@ -1278,7 +1489,7 @@ const FETCHED: ProviderEvent = {
   attachments: 0,
   durationMs: 1,
 };
-const LEASED: ProviderEvent = { type: 'workspace:leased', remote: 'fake://codehost/stub', branch: 'sail/LOCAL' };
+const LEASED: ProviderEvent = { type: 'workspace:leased', remote: 'fake://codehost/stub', branch: 'sail/FAKE-1' };
 const COMMENTED: ProviderEvent = { type: 'ticket:commented', ticketKey: 'FAKE-1', body: 'between two calls' };
 
 test("what an adapter emits while a call runs is in events.ndjson with that call's key, right after the event it followed: a workspace event has no key, and neither has a ticket event between two calls", async () => {
@@ -1310,7 +1521,8 @@ test("what an adapter emits while a call runs is in events.ndjson with that call
     ]);
     expect(list[exec + 2]).not.toHaveProperty('key');
 
-    const commented = list.findIndex((event) => event.type === 'ticket:commented');
+    // The claim's own comment is ahead of it in the stream, so this one is found by its body.
+    const commented = list.findIndex((event) => event.type === 'ticket:commented' && event.body === COMMENTED.body);
     expect(outline(list.slice(commented - 1, commented + 1))).toEqual(['journal:append spec#1', 'ticket:commented']);
     expect(list[commented]).toEqual({ seq: commented + 1, ...envelope, ...COMMENTED });
     expect(list[commented]).not.toHaveProperty('key');
@@ -1344,7 +1556,8 @@ test('once run:end is out nothing an adapter emits reaches the file, and the run
     expect(eventsText(end.dir)).toBe(written);
     const list = events(end.dir);
     expect(list.at(-1)?.type).toBe('run:end');
-    expect(list.filter((event) => event.type === 'ticket:fetched')).toEqual([]);
+    // The stream's one fetch is the intake's own: neither of the two emitted from the end on is in it.
+    expect(list.flatMap((event) => (event.type === 'ticket:fetched' ? [event.key] : []))).toEqual(['intake#1']);
   });
 });
 
@@ -1358,16 +1571,13 @@ test('a run that crashes lets go of the relay too', async () => {
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
     const adapters = await fakeAdapters(repo.dir);
-    const error = await runWorkflow({ cwd: repo.dir, adapters, workflow: 'ticket-to-pr' }).catch(
-      (thrown: unknown) => thrown,
-    );
+    const error = await ran(repo.dir, { adapters }).catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(JournalError);
 
     const seen: ProviderEvent[] = [];
     adapters.relay.attach((event) => seen.push(event));
     adapters.relay.emit(LEASED);
     expect(seen).toEqual([LEASED]);
-    const [runId = ''] = readdirSync(join(repo.dir, '.sail-runs'));
-    expect(events(join(repo.dir, '.sail-runs', runId)).at(-1)?.type).toBe('error:crash');
+    expect(events(onlyRun(repo.dir)).at(-1)?.type).toBe('error:crash');
   });
 });

@@ -1,13 +1,14 @@
-// `sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]`: runs a workflow of the repository sail is run from, to
-// its end. The workflow is type-checked first, so a wrongly wired stage never runs. Every refusal comes before the run
-// directory exists. This module parses, hands the run's events to the terminal view and maps the run's status to an
-// exit code; the run is the engine's. Everything the command prints during the run comes from its events.
-//
-// `sail run` names no source, so it starts a run with no ticket, whose input is `--input`. The engine decides what an
-// input means for a run: neither command asks whether a run came from a ticket.
+// `sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]`: starts a run from a ticket in the
+// repository sail is run from, and runs its workflow to its end, or to the stage `--until` names. The workflow is
+// type-checked first, so a wrongly wired stage never runs. Every refusal is one `sail <ticket as typed>: <message>` line
+// with exit code 3, and comes before the run directory exists: the config and its adapters, the workflow, its types,
+// and then what the engine refuses of the workflow and of the ticket. This module parses, hands the run's events to
+// the terminal view and maps the run's status to an exit code; the run is the engine's, and so are the ticket's checks
+// and its claim. Everything the command prints during the run comes from its events.
 //
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
-// resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
+// resume it. One that arrives while the run is being opened, before its ticket is claimed, is a refusal: the ticket is
+// as it was, and nothing exists to resume. Earlier still, during the type-check, it ends sail the default way.
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { join, relative } from 'node:path';
@@ -31,23 +32,12 @@ export function at(io: Io, path: string): string {
   return relative(io.cwd, path) || '.';
 }
 
-/** A refusal of `command`, such as `sail run`: prints `<command>: <message>` and returns the refused exit code. */
+/** A refusal of `command`, such as `sail resume`: prints `<command>: <message>` and returns the refused exit code. */
 export function refuseAs(io: Io, command: string): (message: string) => ExitCode {
   return (message) => {
     io.stderr(`${command}: ${message}\n`);
     return EXIT_REFUSED;
   };
-}
-
-/** `--input` parsed as JSON, with the text as given, or neither when it wasn't given. Text that isn't JSON refuses. */
-export function parseInputOption(args: Parsed, io: Io, command: string): { input?: unknown; raw?: string } | ExitCode {
-  const raw = args.values.input;
-  if (typeof raw !== 'string') return {};
-  try {
-    return { input: JSON.parse(raw), raw };
-  } catch (error) {
-    return refuseAs(io, command)(`--input is not JSON: ${(error as Error).message}`);
-  }
 }
 
 /** The verbosity `-q` and `-v` ask for: `-v` is verbose, and `-vv` or more is trace. `-q` with any `-v` refuses. */
@@ -146,27 +136,21 @@ export function terminalFor(
   });
 }
 
-/**
- * After the terminal view's final block, prints how to resume a suspended run, repeating `--input` quoted for a POSIX
- * shell: no event carries the input as given. Returns the status's exit code.
- */
-export function printEnd(end: RunEnd, io: Io, rawInput: string | undefined): ExitCode {
-  if (end.status === 'suspended') {
-    const input = rawInput === undefined ? '' : ` --input '${rawInput.replaceAll("'", "'\\''")}'`;
-    io.stdout(`resume it with: sail resume ${end.runId}${input}\n`);
-  }
+/** After the terminal view's final block, prints how to resume a suspended run. Returns the status's exit code. */
+export function printEnd(end: RunEnd, io: Io): ExitCode {
+  if (end.status === 'suspended') io.stdout(`resume it with: sail resume ${end.runId}\n`);
   return exitCodeFor(end.status);
 }
 
-const COMMAND = 'sail run';
-
+/** `sail <ticket>`: the dispatch hands it the ticket as its one positional. */
 export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode> {
-  const refuse = refuseAs(io, COMMAND);
-  const given = parseInputOption(args, io, COMMAND);
-  if (typeof given === 'number') return given;
-  const verbosity = verbosityOf(args, io, COMMAND);
+  const [ticket = ''] = args.positionals;
+  // A refusal names the ticket as it was typed: the ticket source may not even parse it.
+  const command = `sail ${ticket}`;
+  const refuse = refuseAs(io, command);
+  const verbosity = verbosityOf(args, io, command);
   if (typeof verbosity === 'number') return verbosity;
-  const project = await findProject(io, COMMAND);
+  const project = await findProject(io, command);
   if (typeof project === 'number') return project;
 
   const named = args.values.workflow;
@@ -174,21 +158,24 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   if (workflow === undefined) return refuse('no --workflow given, and .sail/project.yaml sets no defaultWorkflow');
   const workflowFile = findWorkflowFile(project.sailDir, workflow);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
-  const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);
+  const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
 
+  const { until } = args.values;
   const terminal = terminalFor(io, project.sailDir, verbosity);
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     runWorkflow({
       cwd: io.cwd,
       workflow,
-      ...(given.input === undefined ? {} : { input: given.input }),
+      ticket,
+      force: args.values.force === true,
+      ...(typeof until === 'string' ? { until } : {}),
       adapters: project.adapters,
       signal,
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );
   if ('refused' in end) return refuse(end.refused);
-  return printEnd(end, io, given.raw);
+  return printEnd(end, io);
 }

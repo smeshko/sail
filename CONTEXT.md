@@ -17,7 +17,7 @@ _Avoid_: pipeline, bot, the agent (for the whole)
 ### Input
 
 **Source**:
-What a run was started from: a ticket key such as `ADW-23`, or a pull request. It comes from the CLI or from the watcher's queue, and intake resolves it into the input.
+What a run was started from: a ticket key such as `ADW-23`, or a pull request. It comes from the CLI or from the watcher's queue, and intake resolves it into the input. The run header records it, with the checks `--force` overrode.
 _Avoid_: trigger, argument, request
 
 **Input**:
@@ -45,8 +45,12 @@ An open, non-draft pull request carrying the designation label. A workflow that 
 _Avoid_: tagged PR, labelled PR, bot PR
 
 **Claim**:
-Moving a designated ticket to In Progress through TicketSource at dispatch, before its run starts. After a claim the ticket is no longer eligible, so a restart cannot pick it up twice.
+Moving a designated ticket to In Progress through TicketSource before its run starts: at dispatch for a run the watcher starts, and at its start for a run started by hand. sail then comments on the ticket with the run id. After a claim the ticket is no longer unstarted, so a restart cannot pick it up twice. A forced run of a ticket that is not unstarted makes no claim: it moves the ticket to In Progress through `update`.
 _Avoid_: lock, reserve, take
+
+**Forced run**:
+A run started with `--force` on a ticket that is not designated, not unstarted, or both. Its run header lists the checks `--force` overrode, `designation` and `state`.
+_Avoid_: bypass, skip, unsafe run
 
 **Brief**:
 Intake's rendering of a ticket for agents: request, acceptance criteria and context, with every human-written passage wrapped as untrusted input.

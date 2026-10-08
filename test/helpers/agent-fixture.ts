@@ -1,8 +1,9 @@
 // writeAgentFixture(): a copy of the fixture repository's `.sail/` in a test's temp repository, plus `brief-to-spec`: a
-// script, a one-step agent stage and a script, which is what runs end to end on the fakes until intake and multi-step
-// stages exist. `brief` writes the brief, `spec` turns it into a spec on the fake harness, and `publish` reads the spec.
-// The fake harness's script is the test's to write: what each try of `spec#1` submits, spends and takes. The fixture's
-// own `ticket-to-pr` stays as it is.
+// script, a one-step agent stage and a script, which is what runs end to end on the fakes until multi-step stages
+// exist. `brief` writes a brief of its own, `spec` turns it into a spec on the fake harness, and `publish` reads the
+// spec. The fake harness's script is the test's to write: what each try of `spec#1` submits, spends and takes. The
+// fixture's own `ticket-to-pr` stays as it is. A run of it starts from `FAKE-1`, which the fake TicketSource holds here
+// as `SEEDED`.
 //
 // The scripts log `<stage>#<call>` to `.stub/executions.log` and sleep when `.stub/sleep-at` names them, as the stub
 // workflow's do, so `setSleepAt()`, `interruptWhenAsleep()`, `stubExecutions()` and `copyRun()` work here too.
@@ -17,19 +18,35 @@ import { copyFixture, write } from './fixture';
 
 export const AGENT_WORKFLOW = 'brief-to-spec';
 
-/** The ticket every run of the fixture is given as its input. Its title is untrusted, so the prompt wraps it. */
+/** `FAKE-1` as the fake TicketSource holds it here: designated and unstarted, so a run of it starts unforced. */
+const SEEDED = {
+  ticketKey: 'FAKE-1',
+  title: 'Add a --shout flag',
+  description:
+    'Print the greeting in capitals.\n\n## Acceptance criteria\n\n- greet --shout prints the greeting in capitals',
+  state: { type: 'unstarted', name: 'Todo' },
+  labels: ['sail', 'cli'],
+  comments: [],
+  links: [],
+  attachments: [],
+};
+
+/**
+ * The input the intake builds from `SEEDED`: what every run of the fixture reads as `run.input`, and what a stage that
+ * binds the ticket is handed. Its title is untrusted, so the prompt wraps it.
+ */
 export const TICKET = {
   ticketKey: 'FAKE-1',
   title: 'Add a --shout flag',
   url: 'fake://tickets/FAKE-1',
   acceptanceCriteria: ['greet --shout prints the greeting in capitals'],
-  labels: ['cli'],
+  labels: ['sail', 'cli'],
   links: [],
   attachments: [],
 };
 
-/** `sail run` of the fixture's workflow on `TICKET`. */
-export const RUN_ARGV = ['run', '--workflow', AGENT_WORKFLOW, '--input', JSON.stringify(TICKET)];
+/** `sail FAKE-1` on the fixture's workflow. */
+export const RUN_ARGV = ['FAKE-1', '--workflow', AGENT_WORKFLOW];
 
 /** What `spec` submits when it is right, and the two ways the tests get it wrong. */
 export const SPEC = { summary: 'Add a --shout flag to greet.', tasks: ['Add the flag', 'Cover it in tests'] };
@@ -153,11 +170,12 @@ export function writeHarnessScript(repoDir: string, script: HarnessScript): void
 }
 
 /**
- * Copies the fixture's `.sail/` into `repoDir`, adds `brief-to-spec`, and scripts the fake harness with what each try
- * of `spec` does. Returns the `.sail/`.
+ * Copies the fixture's `.sail/` into `repoDir`, adds `brief-to-spec`, seeds the fake TicketSource with `SEEDED` alone,
+ * and scripts the fake harness with what each try of `spec` does. Returns the `.sail/`.
  */
 export function writeAgentFixture(repoDir: string, spec: ScriptedAnswer[]): string {
   const sail = copyFixture(repoDir);
+  write(sail, 'fake/tickets.json', `${JSON.stringify({ tickets: [SEEDED] }, null, 2)}\n`);
   for (const [path, text] of Object.entries(FILES)) {
     const file = write(sail, path, text);
     if (path.endsWith('.sh')) chmodSync(file, 0o755);

@@ -28,9 +28,10 @@ export interface Io {
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.
 
 Usage:
+  sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]
+                                                             Start a run from a ticket: its key, or its URL
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
-  sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]  Run a workflow in this repository
-  sail resume <run> [--input <json>] [-q|-v|-vv]             Resume a suspended or crashed run
+  sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
@@ -39,10 +40,11 @@ Usage:
   sail --version                                             Print the version
   sail --help                                                Print this help
 
-Input of run and resume:
-  --input <json>  Starts, and resumes, a run with no ticket. A run from a ticket gets its input from its intake
+Starting a run from a ticket:
+  --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode
+  --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
 
-Output of run and resume:
+Output of a run and a resume:
   -q, --quiet    Only the run's start, its errors and the final block
   -v, --verbose  Adds contract details, routes and every script's output tail; -vv prints every event
 `;
@@ -125,7 +127,7 @@ const version: Command = (_, io) => {
 
 const bare = (command: Command): CommandSpec => ({ options: {}, positionals: 0, command });
 
-/** How much of a run `sail run`, `sail resume` and `sail show --events` print: `-q`, or `-v` given once or twice. */
+/** How much of a run `sail <ticket>`, `sail resume` and `sail show --events` print: `-q`, or `-v` given once or twice. */
 const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
   quiet: { type: 'boolean', short: 'q' },
   verbose: { type: 'boolean', short: 'v', multiple: true },
@@ -134,15 +136,7 @@ const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
-  [
-    'run',
-    {
-      options: { workflow: { type: 'string' }, input: { type: 'string' }, ...VERBOSITY_OPTIONS },
-      positionals: 0,
-      command: runWorkflowCommand,
-    },
-  ],
-  ['resume', { options: { input: { type: 'string' }, ...VERBOSITY_OPTIONS }, positionals: 1, command: resume }],
+  ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
   ['runs', bare(runs)],
   [
     'show',
@@ -171,16 +165,33 @@ const commands = new Map<string, CommandSpec>([
   ['--version', bare(version)],
 ]);
 
+/** `sail <ticket>`: what starts a run. The ticket is its one positional, so it is parsed with the options after it. */
+const TICKET: CommandSpec = {
+  options: {
+    workflow: { type: 'string' },
+    force: { type: 'boolean' },
+    until: { type: 'string' },
+    ...VERBOSITY_OPTIONS,
+  },
+  positionals: 1,
+  command: runWorkflowCommand,
+};
+
 const refuse = (io: Io, message: string): ExitCode => {
   io.stderr(`sail: ${message}\nRun 'sail --help' for usage.\n`);
   return EXIT_REFUSED;
 };
 
+/**
+ * Runs the command the first argument names. A first argument that names none and doesn't read as an option is the
+ * ticket a run starts from, so a mistyped command is refused as one the ticket source doesn't know.
+ */
 export async function run(argv: readonly string[], io: Io): Promise<ExitCode> {
   const [first, ...rest] = argv;
-  const entry = first === undefined ? bare(help) : commands.get(first);
-  if (entry === undefined) return refuse(io, `unknown argument '${first}'`);
-  const args = parseCommandArgs(rest, entry);
+  const named = first === undefined ? bare(help) : commands.get(first);
+  if (named === undefined && first?.startsWith('-')) return refuse(io, `unknown argument '${first}'`);
+  const entry = named ?? TICKET;
+  const args = parseCommandArgs(named === undefined ? argv : rest, entry);
   if ('refused' in args) return refuse(io, args.refused);
   try {
     return await entry.command(args, io);

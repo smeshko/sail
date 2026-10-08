@@ -18,8 +18,22 @@ import {
 } from '../../src/sdk';
 import { ticket } from '../../src/sdk/intakes';
 
-const RUN_DIR = '/runs/LOCAL-01M3J94G5X7C627GTFB2M111ZT';
+const RUN_DIR = '/runs/FAKE-1-01M3J94G5X7C627GTFB2M111ZT';
 const INPUT = { ticketKey: 'FAKE-1', title: 'a ticket' };
+
+/** A run's journaled `intake#1` whose output, the run's input, is `output`. */
+const intakeOf = (output: unknown): JournalEntry => ({
+  seq: 1,
+  key: 'intake#1',
+  stage: 'intake',
+  call: 1,
+  outcome: 'passed',
+  output,
+  reason: null,
+  files: { 'ticket.json': '00-intake/call-1/ticket.json', 'brief.md': '00-intake/call-1/brief.md' },
+  resultPath: '00-intake/call-1/result.json',
+  recordedAt: '2026-10-06T09:00:00.000Z',
+});
 
 const Report = z.object({ ok: z.boolean() });
 const a = script('a', { run: './run.sh', produces: { 'r.txt': 'file' }, output: Report });
@@ -53,10 +67,13 @@ const STAGES = [a, b, c, planner, implement, tests].map(reached);
 
 type Body = (run: Run<typeof ticket.output>) => Promise<unknown>;
 
-/** Replays a workflow whose body is `body` against `entries`, its events going to `emit` when one is given. */
+/**
+ * Replays a workflow whose body is `body` against `entries`, beside a journaled intake whose output is `INPUT`. Its
+ * events go to `emit` when one is given.
+ */
 function replayed(body: Body, entries: JournalEntry[] = [], emit?: Emit): Promise<ReplayEnd> {
   const flow = workflow('flow', { intake: ticket }, body);
-  const options = { workflow: flow as never, stages: STAGES, entries, runDir: RUN_DIR, input: INPUT };
+  const options = { workflow: flow as never, stages: STAGES, entries, runDir: RUN_DIR, intake: intakeOf(INPUT) };
   return replay(emit === undefined ? options : { ...options, emit });
 }
 
@@ -146,7 +163,7 @@ test("a journaled call returns its recorded result, and its files bind as the ru
   });
 });
 
-test("a value binding records where it came from: a call's output, --input, or the workflow", async () => {
+test("a value binding records where it came from: a call's output, or the workflow", async () => {
   const entries = [entry('a#1', 'passed')];
   const fromOutput = await replayed(async (run) => {
     const r = await run.stage(a);
@@ -157,11 +174,6 @@ test("a value binding records where it came from: a call's output, --input, or t
   });
   if (fromOutput.kind !== 'call') throw new Error('a call');
   expect(Object.keys(fromOutput.call.supplied)).toEqual(['data']);
-
-  const fromInput = await replayed(async (run) => {
-    await run.stage(c, { data: run.input });
-  });
-  expect(fromInput).toMatchObject({ call: { supplied: { data: { kind: 'value', value: INPUT, from: '--input' } } } });
 
   const literal = await replayed(async (run) => {
     await run.stage(c, { data: [1, 2], extra: 'x' });
@@ -209,7 +221,13 @@ test('run.input and a journaled output are frozen, so a workflow that changes ei
   const flow = workflow('flow', { intake: ticket }, async (run) => {
     (run.input.acceptanceCriteria as string[]).push('two');
   });
-  const changesInput = await replay({ workflow: flow as never, stages: STAGES, entries: [], runDir: RUN_DIR, input });
+  const changesInput = await replay({
+    workflow: flow as never,
+    stages: STAGES,
+    entries: [],
+    runDir: RUN_DIR,
+    intake: intakeOf(input),
+  });
   const threw = failed('workflow_failed', expect.stringMatching(/^workflow threw: /));
   expect(changesInput).toEqual(threw);
   expect(input.acceptanceCriteria).toEqual(['one']);
@@ -526,7 +544,7 @@ function checkStamped(events: readonly NewEvent[]): void {
   const stamped = events.map((event, i) => ({
     seq: i + 1,
     ts: '2026-09-28T09:00:00.000Z',
-    runId: 'LOCAL-01M3J94G5X7C627GTFB2M111ZT',
+    runId: 'FAKE-1-01M3J94G5X7C627GTFB2M111ZT',
     ...event,
   }));
   expect(stamped.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue)).toEqual([]);
@@ -731,26 +749,15 @@ test('a route is reported for the moves the workflow made: its end, run.fail(), 
 // The journaled intake (D6): `run.input` and `run.intake.files` come from the `intake#1` entry, given beside the
 // stage entries.
 
-const INTAKE: JournalEntry = {
-  seq: 1,
-  key: 'intake#1',
-  stage: 'intake',
-  call: 1,
-  outcome: 'passed',
-  output: {
-    ticketKey: 'FAKE-1',
-    title: 'a ticket',
-    url: 'fake://tickets/FAKE-1',
-    acceptanceCriteria: ['one'],
-    labels: [],
-    links: [],
-    attachments: [],
-  },
-  reason: null,
-  files: { 'ticket.json': '00-intake/call-1/ticket.json', 'brief.md': '00-intake/call-1/brief.md' },
-  resultPath: '00-intake/call-1/result.json',
-  recordedAt: '2026-10-06T09:00:00.000Z',
-};
+const INTAKE = intakeOf({
+  ticketKey: 'FAKE-1',
+  title: 'a ticket',
+  url: 'fake://tickets/FAKE-1',
+  acceptanceCriteria: ['one'],
+  labels: [],
+  links: [],
+  attachments: [],
+});
 /** The same intake journaled from its second try. */
 const LATER_TRY: JournalEntry = {
   ...INTAKE,
@@ -865,17 +872,6 @@ test("an input that is not an object still records the intake's result", async (
   expect(end).toMatchObject({
     call: { supplied: { data: { value: 'the whole input', from: '00-intake/call-1/result.json#/output' } } },
   });
-});
-
-test('the journaled intake and an input given together make replay() throw: a bug in its caller', async () => {
-  const flow = workflow('flow', { intake: ticket }, async () => 'returned');
-  const both = { workflow: flow as never, stages: STAGES, entries: [], runDir: RUN_DIR, input: INPUT, intake: INTAKE };
-  const outcome = await (async () => replay(both))().then(
-    (end) => end,
-    (error: unknown) => error,
-  );
-  expect(outcome).toBeInstanceOf(Error);
-  expect((outcome as Error).message).toContain('never both');
 });
 
 test("a loop that fails a pass with run.input names the intake's result as where its feedback came from, also once the feedback's schema has parsed it into a new object", async () => {

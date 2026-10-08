@@ -21,14 +21,14 @@ const FAKE_2 = 'FAKE-2-01M3C0Q5ZJ3K8T1V9XRJ5KWD3P';
 test.each<[string, string, string | undefined]>([
   ['an exact id', GOLDEN_RUN_ID, GOLDEN_RUN_ID],
   ['a prefix only one run starts with', 'FAKE-2', FAKE_2],
-  ['an exact id that also starts another', 'LOCAL-1', 'LOCAL-1'],
+  ['an exact id that also starts another', 'FAKE-7-1', 'FAKE-7-1'],
   ['a prefix of no run', 'NOPE', undefined],
   ['a prefix of a directory without run.json', 'tests', undefined],
   ['the whole name of a directory without run.json', STAGE_RUN, undefined],
 ])('resolveRun given %s finds the run it names, or refuses with no match', (_, name, runId) => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
-    for (const id of [GOLDEN_RUN_ID, FAKE_2, 'LOCAL-1', 'LOCAL-10']) runNamed(repo.dir, id);
+    for (const id of [GOLDEN_RUN_ID, FAKE_2, 'FAKE-7-1', 'FAKE-7-10']) runNamed(repo.dir, id);
     mkdirSync(join(repo.dir, '.sail-runs', STAGE_RUN, '00-tests', 'call-1'), { recursive: true });
     expect(resolveRun(sail, name)).toEqual(
       runId === undefined

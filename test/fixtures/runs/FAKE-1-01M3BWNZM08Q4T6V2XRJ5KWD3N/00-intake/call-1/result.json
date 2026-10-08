@@ -24,13 +24,13 @@
   "files": {
     "ticket.json": {
       "path": "00-intake/call-1/ticket.json",
-      "bytes": 1474,
-      "sha256": "64f2b53a8345a130f9e698010f80c5ff6ece24ea5223df04eab3c7a1aac4601e"
+      "bytes": 1786,
+      "sha256": "ab499f9c5b756afdc86d6fd5d31eb9530b4d46208bf9d82181f7cdf1fde1600b"
     },
     "brief.md": {
       "path": "00-intake/call-1/brief.md",
-      "bytes": 1157,
-      "sha256": "9f06b325459f4da6861328c51e9edeb01c4988f7c4bb6b797766f97f66a3ad89",
+      "bytes": 1369,
+      "sha256": "d6c0a5bbf7fa91c2c5d8e662b582692cca824794e9fbf67bcac3e2e78a22a49c",
       "validation": {
         "ok": true,
         "checks": [

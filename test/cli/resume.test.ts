@@ -1,18 +1,16 @@
-// `sail resume`, in process through run(): a run of the stub repository, interrupted or ended in a repository of its
-// own, then copied into the test's repository and resumed there. A process opens one run per .sail/, and Bun caches
-// the workflow's modules by path, so the run and its resume never share a .sail/.
+// `sail resume`, in process through run(): a run of the stub repository, started with `sail FAKE-1` and interrupted or
+// ended in a repository of its own, then copied into the test's repository and resumed there. A process opens one run
+// per .sail/, and Bun caches the workflow's modules by path, so the run and its resume never share a .sail/.
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED, type ExitCode } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
 import { readStatus } from '../../src/engine/run-dir';
-import { runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { rebuildSummary } from '../../src/events/consumers/summary';
 import type { Summary } from '../../src/events/summary';
-import { fakeAdapters } from '../helpers/adapters';
 import {
   interruptInSession,
   journaled,
@@ -25,7 +23,6 @@ import {
   specFile,
   specResult,
   submits,
-  TICKET,
   writeAgentFixture,
 } from '../helpers/agent-fixture';
 import { edit, FIXTURE_SAIL, write } from '../helpers/fixture';
@@ -42,24 +39,32 @@ import { withTempRepo } from '../helpers/temp-repo';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 
-const runIdIn = (repoDir: string) => readdirSync(join(repoDir, '.sail-runs'))[0] ?? '';
+/** The runs in the repository's `.sail-runs/`: every entry but `fake/`, where the fake adapters keep their state. */
+const runIds = (repoDir: string): string[] =>
+  existsSync(join(repoDir, '.sail-runs'))
+    ? readdirSync(join(repoDir, '.sail-runs')).filter((name) => name !== 'fake')
+    : [];
+const runIdIn = (repoDir: string) => runIds(repoDir)[0] ?? '';
 
-/** `sail run` of the stub in a repository of its own, interrupted during `implement#2`, then copied into `to`. */
+/** `sail FAKE-1` on the stub in a repository of its own, interrupted during `implement#2`, then copied into `to`. */
 function interruptedInto(to: string): Promise<string> {
   return withTempRepo(async (from) => {
     writeStub(from.dir, { sleepAt: 'implement#2' });
     const interrupts = fakeInterrupts();
-    await interruptWhenAsleep(from.dir, runCaptured(['run'], from.dir, interrupts), interrupts.interrupt);
+    const running = runCaptured(['FAKE-1'], from.dir, interrupts);
+    const { end } = await interruptWhenAsleep(from.dir, running, interrupts.interrupt);
+    expect({ code: end.code, stderr: end.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
     copyRun(from.dir, to);
     return runIdIn(to);
   });
 }
 
-/** `sail run` of the stub to its end in a repository of its own, then copied into `to`. */
-function endedInto(to: string, options: StubOptions): Promise<string> {
+/** `sail FAKE-1` on the stub to its end, `code`, in a repository of its own, then copied into `to`. */
+function endedInto(to: string, options: StubOptions, code: ExitCode): Promise<string> {
   return withTempRepo(async (from) => {
     writeStub(from.dir, options);
-    await runCaptured(['run'], from.dir);
+    const ended = await runCaptured(['FAKE-1'], from.dir);
+    expect({ code: ended.code, stderr: ended.stderr }).toEqual({ code, stderr: '' });
     copyRun(from.dir, to);
     return runIdIn(to);
   });
@@ -68,9 +73,8 @@ function endedInto(to: string, options: StubOptions): Promise<string> {
 /** Each run's STATUS and journal, by run id: what a refusal must leave as it was. */
 function runFiles(repoDir: string): Record<string, string[]> {
   const runs = join(repoDir, '.sail-runs');
-  if (!existsSync(runs)) return {};
   return Object.fromEntries(
-    readdirSync(runs).map((runId) => [
+    runIds(repoDir).map((runId) => [
       runId,
       ['STATUS', 'journal.ndjson'].map((file) => readFileSync(join(runs, runId, file), 'utf8')),
     ]),
@@ -93,7 +97,7 @@ test('sail resume opens with what already ran, runs the interrupted call as its 
     const { code, stdout, stderr } = await runCaptured(['resume', runId], repo.dir);
     expect(normaliseDurations(stdout)).toBe(
       [
-        `sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed`,
+        `sail · ticket-to-pr v1 · ${runId} · resumed after 4 calls, last tests#1 failed`,
         'fix            ↻ iteration 2/3 · feedback from tests#1',
         'implement#2    ▶ implement · script · try 2',
         'implement#2      exit 0 → passed · <t>',
@@ -114,7 +118,7 @@ test('sail resume opens with what already ran, runs the interrupted call as its 
         'publish#1      ✓ passed · <t>',
         '',
         'completed · <t>',
-        '  calls    7 · 6 passed, 1 failed',
+        '  calls    8 · 7 passed, 1 failed',
         '  loops    fix 2/3',
         `  replays  ${replaysOf(repo.dir, runId)}`,
         `  run      .sail-runs/${runId}`,
@@ -146,43 +150,15 @@ test.each<[string, Refusal]>([
   [
     'a completed run',
     async (repoDir) => {
-      const runId = await endedInto(repoDir, { testsPassAt: 1 });
+      const runId = await endedInto(repoDir, { testsPassAt: 1 }, EXIT_OK);
       return { argv: ['resume', runId], message: `run ${runId} has completed: there is nothing to resume` };
     },
   ],
   [
     'a failed run',
     async (repoDir) => {
-      const runId = await endedInto(repoDir, { testsPassAt: 99 });
+      const runId = await endedInto(repoDir, { testsPassAt: 99 }, EXIT_FAILED);
       return { argv: ['resume', runId], message: `run ${runId} failed (workflow_failed): a failed run is final` };
-    },
-  ],
-  [
-    'an id that names no run',
-    async (repoDir) => {
-      writeStub(repoDir);
-      return { argv: ['resume', 'LOCAL-NOPE'], message: "no run 'LOCAL-NOPE' in .sail-runs" };
-    },
-  ],
-  [
-    'no run id',
-    async (repoDir) => {
-      writeStub(repoDir);
-      return { argv: ['resume'], message: 'usage: sail resume <run> [--input <json>]' };
-    },
-  ],
-  [
-    '--input that is not JSON',
-    async (repoDir) => {
-      const runId = await interruptedInto(repoDir);
-      return { argv: ['resume', runId, '--input', '{'], message: '--input is not JSON: ' };
-    },
-  ],
-  [
-    "--input the intake's schema rejects",
-    async (repoDir) => {
-      const runId = await interruptedInto(repoDir);
-      return { argv: ['resume', runId, '--input', '{"x":1}'], message: "the input doesn't match intake 'ticket':" };
     },
   ],
   [
@@ -217,6 +193,18 @@ test.each<[string, Refusal]>([
   30_000,
 );
 
+test('an id that names no run is refused with exit 3, and nothing is created', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    expect(await runCaptured(['resume', 'FAKE-1-NOPE'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: "sail resume: no run 'FAKE-1-NOPE' in .sail-runs\n",
+    });
+    expect(runFiles(repo.dir)).toEqual({});
+  });
+});
+
 test('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and exits 1', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
@@ -224,11 +212,11 @@ test('a workflow whose keys no longer fit the journal fails the resume with dete
     const { code, stdout } = await runCaptured(['resume', runId], repo.dir);
     expect(normaliseDurations(stdout)).toBe(
       [
-        `sail · ticket-to-pr v1 · ${runId} · resumed after 3 calls, last tests#1 failed`,
+        `sail · ticket-to-pr v1 · ${runId} · resumed after 4 calls, last tests#1 failed`,
         '',
         'failed · <t>',
         "  stop     determinism_violation: the workflow asked for 'tests#1' where the journal has 'implement#1'",
-        '  calls    3 · 2 passed, 1 failed',
+        '  calls    4 · 3 passed, 1 failed',
         '  loops    fix 2/3',
         `  replays  ${replaysOf(repo.dir, runId)}`,
         `  run      .sail-runs/${runId}`,
@@ -255,7 +243,7 @@ test('Ctrl-C during sail resume suspends the run again, and names the resume aga
         '',
         'suspended · <t>',
         '  stop     interrupted: stopped during implement#2',
-        '  calls    3 · 2 passed, 1 failed',
+        '  calls    4 · 3 passed, 1 failed',
         '  loops    fix 2/3',
         `  replays  ${replaysOf(repo.dir, runId)}`,
         `  run      .sail-runs/${runId}`,
@@ -299,7 +287,6 @@ test('sail resume refuses a run whose harness the config now swaps, leaves the r
 // Agent stages across a resume: brief-to-spec on the fake harness, interrupted or killed while a session of spec#1 sits
 // in the delay its answer scripts, then resumed.
 
-const RESUME_INPUT = ['--input', JSON.stringify(TICKET)];
 const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
 
 /** A result's outcome and its place among its call's tries. */
@@ -332,17 +319,17 @@ test('sail resume takes up a correction it was interrupted in: the next try is s
       const { code, stdout } = await interruptInSession(from.dir, running, interrupts.interrupt, 2);
       expect(code).toBe(EXIT_SUSPENDED);
       const id = basename(runDirIn(from.dir));
-      expect(stdout).toContain(`resume it with: sail resume ${id} --input '${JSON.stringify(TICKET)}'\n`);
+      expect(stdout).toEndWith(`\nresume it with: sail resume ${id}\n`);
       copyRun(from.dir, repo.dir);
       return id;
     });
 
     // The alias names another model by now. The run goes on with the one its roster froze.
     edit(join(repo.dir, '.sail'), 'project.yaml', 'deep: claude-opus-5-5', 'deep: claude-next');
-    const { code, stdout, stderr } = await runCaptured(['resume', runId, ...RESUME_INPUT], repo.dir);
+    const { code, stdout, stderr } = await runCaptured(['resume', runId], repo.dir);
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
     const view = normaliseDurations(stdout).split('\n');
-    expect(view[0]).toBe(`sail · brief-to-spec v1 · ${runId} · resumed after 1 call, last brief#1 passed`);
+    expect(view[0]).toBe(`sail · brief-to-spec v1 · ${runId} · resumed after 2 calls, last brief#1 passed`);
     expect(view.filter((line) => line.startsWith('spec#1'))).toEqual([
       'spec#1     ▶ spec · agent · claude-opus-5-5 · try 3',
       'spec#1       output valid',
@@ -350,7 +337,7 @@ test('sail resume takes up a correction it was interrupted in: the next try is s
     ]);
 
     const dir = join(repo.dir, '.sail-runs', runId);
-    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(journaled(dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done', 'publish#1 passed']);
     expect([1, 2, 3].map((n) => placeOf(specResult(dir, n)))).toEqual([
       { outcome: 'error', try: 1, validationTry: 1, validationFailed: true },
       { outcome: 'error', try: 2, validationTry: 2, validationFailed: false },
@@ -398,9 +385,9 @@ test('a run whose process was killed in a session resumes: the session is ended 
     expect(sessions(readEvents(dir))).toEqual(['start fake-session-spec-1']);
     expect(specFile(dir, 'result.json')).toBeNull();
 
-    const { code, stderr } = await runCaptured(['resume', basename(dir), ...RESUME_INPUT], repo.dir);
+    const { code, stderr } = await runCaptured(['resume', basename(dir)], repo.dir);
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
-    expect(journaled(dir)).toEqual(['brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(journaled(dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done', 'publish#1 passed']);
     // The kill used none of the correction: nothing the session submitted was ever checked.
     expect(placeOf(specResult(dir, 2))).toEqual({ outcome: 'done', try: 2, validationTry: 1, validationFailed: false });
     expect(sessions(readEvents(dir))).toEqual([
@@ -415,65 +402,15 @@ test('a run whose process was killed in a session resumes: the session is ended 
   });
 }, 90_000);
 
-// A run from a ticket (D4): it resumes with no --input, and refuses one.
+// What a resume leaves alone: the intake, the ticket and the claim. And what `sail resume` no longer takes.
 
-/**
- * A run of the ticket stub from `FAKE-1`, interrupted during `implement#2` in a repository of its own, then copied into
- * `to`. It starts through the engine: no command starts a run from a ticket yet.
- */
-function interruptedTicketRunInto(to: string): Promise<string> {
-  return withTempRepo(async (from) => {
-    writeStub(from.dir, { ticket: true, sleepAt: 'implement#2' });
-    const controller = new AbortController();
-    const running = runWorkflow({
-      cwd: from.dir,
-      workflow: 'ticket-to-pr',
-      adapters: await fakeAdapters(from.dir),
-      source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false },
-      signal: controller.signal,
-    });
-    await interruptWhenAsleep(from.dir, running, () => controller.abort());
-    copyRun(from.dir, to);
-    return runIdIn(to);
-  });
-}
-
-test('sail resume refuses --input for a run from a ticket with exit 3, and leaves its STATUS and events as they were', async () => {
+test('sail resume replays the intake from the journal: its line is as the start wrote it, and the ticket is neither fetched nor claimed again', async () => {
   await withTempRepo(async (repo) => {
-    const runId = await interruptedTicketRunInto(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    const files = () =>
-      ['STATUS', 'events.ndjson', 'journal.ndjson'].map((name) => readFileSync(join(dir, name), 'utf8'));
-    const before = files();
-    expect(await runCaptured(['resume', runId, '--input', '{}'], repo.dir)).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr: `sail resume: run ${runId} got its input from intake#1, so --input doesn't apply\n`,
-    });
-    expect(files()).toEqual(before);
-    expect(before[0]).toBe('suspended interrupted\n');
-  });
-}, 30_000);
-
-test('sail resume runs a run from a ticket to its end with no --input, counting intake#1 among the calls that already ran', async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedTicketRunInto(repo.dir);
+    const runId = await interruptedInto(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
     const [first] = readFileSync(join(dir, 'journal.ndjson'), 'utf8').split('\n');
-    const { code, stdout, stderr } = await runCaptured(['resume', runId], repo.dir);
-    const lines = normaliseDurations(stdout).split('\n');
-    expect(lines[0]).toBe(`sail · ticket-to-pr v1 · ${runId} · resumed after 4 calls, last tests#1 failed`);
-    expect(lines.slice(-7)).toEqual([
-      '',
-      'completed · <t>',
-      '  calls    8 · 7 passed, 1 failed',
-      '  loops    fix 2/3',
-      `  replays  ${replaysOf(repo.dir, runId)}`,
-      `  run      .sail-runs/${runId}`,
-      '',
-    ]);
-    expect(stderr).toBe('');
-    expect(code).toBe(EXIT_OK);
+    const { code, stderr } = await runCaptured(['resume', runId], repo.dir);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
     const { entries } = readJournal(dir);
     expect(entries.map((entry) => entry.key)).toEqual([
       'intake#1',
@@ -486,29 +423,29 @@ test('sail resume runs a run from a ticket to its end with no --input, counting 
       'publish#1',
     ]);
     expect(readFileSync(join(dir, 'journal.ndjson'), 'utf8').split('\n')[0]).toBe(first ?? '');
-    expect(readEvents(dir).filter((event) => event.type === 'ticket:fetched')).toHaveLength(1);
+    const ticket = readEvents(dir).flatMap((event) => (event.type.startsWith('ticket:') ? [event.type] : []));
+    expect(ticket).toEqual(['ticket:claimed', 'ticket:commented', 'ticket:fetched']);
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 30_000);
 
-test('a run from a ticket sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched once', async () => {
+test('sail FAKE-1 sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched into the stream once', async () => {
   await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { ticket: true, sleepAt: 'implement#2' });
-    const helper = join(import.meta.dir, '..', 'helpers', 'ticket-run.ts');
-    const started = Bun.spawn([process.execPath, helper, 'FAKE-1'], {
+    writeStub(repo.dir, { sleepAt: 'implement#2' });
+    const started = Bun.spawn([process.execPath, shim, 'FAKE-1'], {
       cwd: repo.dir,
       env: repo.env,
       stdout: 'pipe',
       stderr: 'pipe',
     });
     const { end: code, alive } = await interruptWhenAsleep(repo.dir, started.exited, () => started.kill('SIGINT'));
+    expect(await new Response(started.stderr).text()).toBe('');
+    expect({ code, alive }).toEqual({ code: 2, alive: [] });
     const runId = runIdIn(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
     const suspended = await new Response(started.stdout).text();
     expect(suspended).toEndWith(`  run      .sail-runs/${runId}\nresume it with: sail resume ${runId}\n`);
     expect(suspended).toContain('\n  stop     interrupted: stopped during implement#2\n');
-    expect(await new Response(started.stderr).text()).toBe('');
-    expect({ code, alive }).toEqual({ code: 2, alive: [] });
 
     const resumed = Bun.spawnSync([process.execPath, shim, 'resume', runId], { cwd: repo.dir, env: repo.env });
     expect(resumed.stdout.toString()).toStartWith(
@@ -532,3 +469,31 @@ test('a run from a ticket sent SIGINT during implement#2 exits 2, sail resume in
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 60_000);
+
+test('sail resume --input is refused as an unknown argument with exit 3, and the run is left as it was', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedInto(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const files = () =>
+      ['STATUS', 'events.ndjson', 'journal.ndjson'].map((name) => readFileSync(join(dir, name), 'utf8'));
+    const before = files();
+    expect(await runCaptured(['resume', runId, '--input', '{}'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: "sail: unknown argument '--input'\nRun 'sail --help' for usage.\n",
+    });
+    expect(files()).toEqual(before);
+    expect(before[0]).toBe('suspended interrupted\n');
+  });
+}, 30_000);
+
+test('sail resume with no run id is refused with its usage, which takes a run and nothing else', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    expect(await runCaptured(['resume'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: 'sail resume: usage: sail resume <run>\n',
+    });
+  });
+});

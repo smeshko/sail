@@ -26,7 +26,7 @@ const fake = { use: 'fake', origin: 'builtin' };
 /** The run's `run:start`, from a `ticket-to-pr` v1 run of `FAKE-1`, with `budget` when given. */
 export const runStart = (budget?: { maxUsd?: number; maxMinutes?: number }): NewEvent => ({
   type: 'run:start',
-  source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false },
+  source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
   workflow: { name: 'ticket-to-pr', version: 1, origin: 'repo:.sail/workflows/ticket-to-pr', sha256: '0'.repeat(64) },
   roster: { intake: { name: 'ticket', kind: 'script', origin: 'builtin' }, stages: {} },
   adapters: { ticketSource: fake, codeHost: fake, harness: fake, workspace: fake },

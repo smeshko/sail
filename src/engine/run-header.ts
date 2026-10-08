@@ -4,6 +4,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
+import type { TicketState } from '../ports/types';
 import type { Port, ProjectConfig } from './config';
 import { createFileOnce } from './durable';
 import type { LoadedWorkflow } from './load-workflow';
@@ -20,11 +21,18 @@ export interface AdapterEntry {
   versions?: Record<string, string>;
 }
 
+/** What a run's start did to its ticket: whether the claim took, and the state the provider reported after sail's move. */
+export interface ClaimRecord {
+  claimed: boolean;
+  state: TicketState;
+}
+
 /** The `sail.run.v1` fields a run header holds when the run starts. */
 export interface RunHeader {
   schema: 'sail.run.v1';
   runId: string;
   source: Source;
+  claim: ClaimRecord;
   workflow: { name: string; version: number; origin: string; sha256: string };
   sail: { version: string; runtime: string };
   adapters: Record<Port, AdapterEntry>;
@@ -66,6 +74,7 @@ export function workflowHash(sailDir: string, loaded: LoadedWorkflow): string {
 export interface HeaderFields {
   runId: string;
   source: Source;
+  claim: ClaimRecord;
   sailDir: string;
   loaded: LoadedWorkflow;
   config: ProjectConfig;
@@ -74,14 +83,16 @@ export interface HeaderFields {
 }
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
-export function buildRunHeader({ runId, source, sailDir, loaded, config, adapters, now }: HeaderFields): RunHeader {
+export function buildRunHeader(fields: HeaderFields): RunHeader {
+  const { runId, source, claim, sailDir, loaded, config, adapters, now } = fields;
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
   const budget = config.budgets.run;
   return {
     schema: 'sail.run.v1',
     runId,
-    source: { ...source },
+    source: { ...source, forced: [...source.forced] },
+    claim: { claimed: claim.claimed, state: { ...claim.state } },
     workflow: {
       name: loaded.name,
       version: loaded.workflow.version ?? 1,

@@ -21,7 +21,8 @@ const fake = { use: 'fake', origin: 'builtin' };
 const run = {
   schema: 'sail.run.v1',
   runId: RUN_ID,
-  source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false },
+  source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+  claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
   workflow: { name: 'ticket-to-pr', version: 1 },
   sail: { version: '0.0.0', runtime: 'bun 1.3.14' },
   adapters: { ticketSource: fake, codeHost: fake, harness: fake, workspace: fake },
@@ -45,7 +46,7 @@ const journal = {
 type Payload<T extends NewEvent['type']> = Omit<Extract<NewEvent, { type: T }>, 'type'>;
 const envelope = { seq: 1, ts: TS, runId: RUN_ID };
 const runStart: Payload<'run:start'> = {
-  source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: false },
+  source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
   workflow: {
     name: 'ticket-to-pr',
     version: 1,
@@ -176,14 +177,20 @@ test.each([...SCHEMA_NAMES])('%s compiles in strict mode under its own $id', asy
 });
 
 test.each([
-  ['sail.run.v1', run],
   ['sail.journal.v1', journal],
-  ['sail.event.v1', event],
   ['sail.summary.v1', summary],
   ['sail.result.v1', scriptResult],
   ['sail.result.v1', agentResult],
   ['sail.result.v1', multiStepResult],
 ] as const)('a minimal %s document is valid', (schema, data) => {
+  expect(validateDocument(schema, data)).toEqual([]);
+});
+
+// The two that carry the run's source, and with it the checks `--force` overrode.
+test.each([
+  ['sail.run.v1', run],
+  ['sail.event.v1', event],
+] as const)('a minimal %s document is valid, its source included', (schema, data) => {
   expect(validateDocument(schema, data)).toEqual([]);
 });
 
@@ -308,14 +315,26 @@ const CALL_LEVEL = new Set([
 
 const stamped = (sample: NewEvent): Record<string, unknown> => ({ ...envelope, ...sample });
 
-test.each(CLOSED.map((sample) => [sample.type, sample] as const))(
+/** The closed samples whose type `is` says, each with its type as the case's name. */
+const closed = (is: (type: NewEvent['type']) => boolean) =>
+  CLOSED.filter((sample) => is(sample.type)).map((sample) => [sample.type, sample] as const);
+
+function acceptsOnlyItsPayload(_: string, sample: NewEvent): void {
+  expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
+  expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
+    { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+  ]);
+}
+
+test.each(closed((type) => type !== 'run:start'))(
   '%s accepts its payload, and rejects a field it does not declare',
-  (_, sample) => {
-    expect(validateDocument('sail.event.v1', stamped(sample))).toEqual([]);
-    expect(validateDocument('sail.event.v1', { ...stamped(sample), surprise: 1 })).toEqual([
-      { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
-    ]);
-  },
+  acceptsOnlyItsPayload,
+);
+
+// run:start on its own: its payload is the run header's, the source and what `--force` overrode included.
+test.each(closed((type) => type === 'run:start'))(
+  "%s accepts its payload, the run header's own, and rejects a field it does not declare",
+  acceptsOnlyItsPayload,
 );
 
 test.each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) => [sample.type, sample] as const))(
@@ -1045,4 +1064,50 @@ test('event: stage:end takes the reason port in its errors, and every other reas
   const reasonsOf = (file: string): string[] =>
     JSON.parse(readFileSync(join(root, 'schemas', file), 'utf8')).$defs.errors.items.properties.reason.enum;
   expect(reasonsOf('sail.event.v1.json')).toEqual(reasonsOf('sail.result.v1.json'));
+});
+
+// The run header's source and claim (D2, D9): `forced` lists the checks `--force` overrode, and `claim` says what the
+// run's start did to its ticket.
+
+const forcedIssues = (schema: SchemaName, document: { source: object }, forced: unknown): string[] =>
+  paths(schema, { ...document, source: { ...document.source, forced } });
+
+test('run: source.forced takes no check, either check, or both in order', () => {
+  const taken = [[], ['designation'], ['state'], ['designation', 'state']];
+  expect(taken.map((forced) => forcedIssues('sail.run.v1', run, forced))).toEqual([[], [], [], []]);
+});
+
+test('run: source.forced refuses a boolean, a check it does not know and a check listed twice, naming /source/forced', () => {
+  const refused = [false, true, ['label'], ['state', 'state']];
+  expect(refused.map((forced) => forcedIssues('sail.run.v1', run, forced))).toEqual([
+    ['/source/forced'],
+    ['/source/forced'],
+    ['/source/forced/0'],
+    ['/source/forced'],
+  ]);
+});
+
+test('run: claim holds whether the claim took and the state the provider reported, and nothing else', () => {
+  const claimed = (claim: unknown) => validateDocument('sail.run.v1', { ...run, claim });
+  const issue = (path: string, message: string) => [{ schema: 'sail.run.v1' as const, path, message }];
+  const state = { type: 'completed', name: 'Done' };
+  expect(claimed({ claimed: false, state })).toEqual([]);
+  expect(claimed({ claimed: true })).toEqual(issue('/claim/state', 'is required'));
+  expect(claimed({ state })).toEqual(issue('/claim/claimed', 'is required'));
+  expect(claimed({ claimed: true, state, runId: RUN_ID })).toEqual(issue('/claim/runId', 'is not allowed'));
+  expect(
+    paths('sail.run.v1', { ...run, claim: { claimed: true, state: { type: 'in-progress', name: 'Doing' } } }),
+  ).toEqual(['/claim/state/type']);
+});
+
+test('run: a header with no claim is refused, naming claim', () => {
+  expect(validateDocument('sail.run.v1', omit(run, 'claim'))).toEqual([
+    { schema: 'sail.run.v1', path: '/claim', message: 'is required' },
+  ]);
+});
+
+test('event: run:start takes source.forced as the list, and refuses a boolean', () => {
+  expect(forcedIssues('sail.event.v1', event, ['designation', 'state'])).toEqual([]);
+  expect(forcedIssues('sail.event.v1', event, false)).toEqual(['/source/forced']);
+  expect(forcedIssues('sail.event.v1', event, ['label'])).toEqual(['/source/forced/0']);
 });

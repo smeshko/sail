@@ -15,6 +15,7 @@ import { statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { wrapUntrusted } from '../../engine/render';
 import { findSailDir } from '../../engine/sail-dir';
+import { notATicket } from '../../engine/source';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
@@ -102,9 +103,7 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
   if (typeof project === 'number') return project;
   const source = project.adapters.ports[entry.port];
   const ticketKey = source.parseKey(ref);
-  if (ticketKey === undefined) {
-    return refuse(`'${ref}' is not a ticket of the ${source.name} ticket source: a ticket key, or a URL it owns`);
-  }
+  if (ticketKey === undefined) return refuse(notATicket(ref, source.name));
   try {
     io.stdout(`${JSON.stringify(await run(source, ticketKey))}\n`);
     return EXIT_OK;
