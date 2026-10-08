@@ -275,13 +275,15 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     }
     while (true) {
       replays++;
+      // The input is the journal's first line as read back, for a fresh run and a resume alike: the intake's output in
+      // memory may hold what JSON drops, and a resume would then replay on another object than the run that wrote it.
+      const [journaledIntake = intake, ...entries] = readJournal(dir).entries;
       const replaying = replay({
         workflow: loaded.workflow,
         stages: loaded.stages,
         runDir: dir,
-        // The input is read from the journaled intake, by a fresh run and a resume alike.
-        entries: readJournal(dir).entries.slice(1),
-        intake,
+        entries,
+        intake: journaledIntake,
         emit: replayEmit,
       });
       const end = await unlessAborted(replaying, signal);
