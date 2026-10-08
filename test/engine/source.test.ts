@@ -184,10 +184,7 @@ const COMMENTED = { type: 'ticket:commented', ticketKey: 'FAKE-1', body: COMMENT
 const stamped = (events: readonly object[]) =>
   events.map((event, index) => ({ seq: index + 1, ts: NOW.toISOString(), runId: RUN_ID, ...event }));
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('an unstarted ticket is claimed and commented on with the run id, with no update, and the events say both', async () => {
+test('an unstarted ticket is claimed and commented on with the run id, with no update, and the events say both', async () => {
   const { source, calls, fake } = world();
   const claimed = await claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source });
   expect(claimed).toEqual({
@@ -204,10 +201,7 @@ test
   expect(eventIssues(stamped('events' in claimed ? claimed.events : []))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a ticket whose claim did not take is refused unless forced, and is neither moved nor commented on', async () => {
+test('a ticket whose claim did not take is refused unless forced, and is neither moved nor commented on', async () => {
   const { source, calls, fake } = world();
   const refused = await claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source });
   expect([refused, calls]).toEqual([
@@ -219,10 +213,7 @@ test
   expect((await fake.get('FAKE-2')).comments).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, string]>([
+test.each<[string, string]>([
   ['a started ticket', 'FAKE-2'],
   ['a completed ticket', 'FAKE-6'],
   ['a canceled ticket', 'FAKE-4'],
@@ -246,19 +237,13 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a claim that fails is refused with its message and code, and nothing else is called', async () => {
+test('a claim that fails is refused with its message and code, and nothing else is called', async () => {
   const { source, calls } = world({ claim: failing('claim', 'the provider is down') });
   const refused = await claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source, force: true });
   expect([refused, calls]).toEqual([{ refused: 'ticketSource.claim: the provider is down (unavailable)' }, ['claim']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a forced move that fails is refused with its message and code, and no comment is posted', async () => {
+test('a forced move that fails is refused with its message and code, and no comment is posted', async () => {
   const { source, calls, fake } = world({ update: failing('update', 'the provider is down') });
   const refused = await claimSource({ ticketKey: 'FAKE-6', runId: RUN_ID, ticketSource: source, force: true });
   expect([refused, calls]).toEqual([
@@ -268,10 +253,7 @@ test
   expect((await fake.get('FAKE-6')).comments).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, string, boolean]>([
+test.each<[string, string, boolean]>([
   ['the claim took', 'FAKE-1', false],
   ['a forced move of a completed ticket', 'FAKE-6', true],
 ])(
@@ -287,10 +269,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, Partial<Calls>, string]>([
+test.each<[string, Partial<Calls>, string]>([
   ['claim', { claim: broken }, 'FAKE-1'],
   ['update', { update: broken }, 'FAKE-2'],
   ['comment', { comment: broken }, 'FAKE-1'],

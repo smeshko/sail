@@ -22,6 +22,10 @@ const notUnstarted = (state: TicketState) =>
   state.type === 'started'
     ? `the ticket is already claimed: it is ${state.name}. ${FORCE}`
     : `the ticket is not unstarted: it is ${state.name}. ${FORCE}`;
+const lostClaim = (state: TicketState) =>
+  `the ticket is already claimed: it became ${state.name} while sail was starting. ${FORCE}`;
+const commentFailed = (state: TicketState, runId: string, failure: string) =>
+  `the ticket is now ${state.name}, but the comment naming run ${runId} failed: ${failure}. --force runs it`;
 
 /** A port's failure as a refusal: its own message, with its code. Anything else is a bug in sail, and is thrown on. */
 function refusalOf(error: unknown): string {
@@ -69,14 +73,14 @@ export async function resolveSource(options: ResolveSourceOptions): Promise<Reso
   return { ticketKey, ticket, forced: designated ? [] : ['designation'] };
 }
 
-/** The comment a run leaves on its ticket as it starts. Stub: empty. */
-export function claimComment(_runId: string): string {
-  return '';
+/** The comment a run leaves on its ticket as it starts. */
+export function claimComment(runId: string): string {
+  return `sail run ${runId} started`;
 }
 
 export interface ClaimSourceOptions {
   ticketKey: string;
-  /** The run the comment names. */
+  /** The run the comment names, minted before the claim. */
   runId: string;
   ticketSource: TicketSource;
   /** Moves a ticket whose claim didn't take, where a run nobody forced is refused. */
@@ -87,11 +91,45 @@ export interface ClaimedSource {
   claim: ClaimRecord;
   /** `state` when `--force` overrode a claim that didn't take. */
   forced: Forced[];
-  /** What was done to the ticket, in order, for the run's stream. */
+  /**
+   * What was done to the ticket, in order, for the run's stream. Built from the port's answers: the adapter emits its
+   * own as it is called, but no run is attached to hear them yet.
+   */
   events: ProviderEvent[];
 }
 
-/** Claims the ticket, or moves a forced one, then comments with the run id. Stub: refuses, with nothing to say. */
-export async function claimSource(_options: ClaimSourceOptions): Promise<ClaimedSource | { refused: string }> {
-  return { refused: '' };
+/**
+ * Claims the ticket, moves it to In Progress through `update` when the claim didn't take and `force` is set, then
+ * comments with the run id. The claim's own answer decides, not an earlier fetch: two starts can both read a ticket as
+ * unstarted, and one claim takes. Each port call that fails refuses, and nothing is moved back.
+ */
+export async function claimSource(options: ClaimSourceOptions): Promise<ClaimedSource | { refused: string }> {
+  const { ticketKey, runId, ticketSource, force = false } = options;
+  const events: ProviderEvent[] = [];
+  let claimed: boolean;
+  let state: TicketState;
+  try {
+    ({ claimed, state } = await ticketSource.claim(ticketKey));
+  } catch (error) {
+    return { refused: refusalOf(error) };
+  }
+  if (claimed) events.push({ type: 'ticket:claimed', ticketKey, state: { ...state } });
+  else {
+    if (!force) return { refused: lostClaim(state) };
+    const change = { state: 'in-progress' } as const;
+    try {
+      ({ state } = await ticketSource.update(ticketKey, change));
+    } catch (error) {
+      return { refused: refusalOf(error) };
+    }
+    events.push({ type: 'ticket:updated', ticketKey, change, state: { ...state } });
+  }
+  const body = claimComment(runId);
+  try {
+    await ticketSource.comment(ticketKey, body);
+  } catch (error) {
+    return { refused: commentFailed(state, runId, refusalOf(error)) };
+  }
+  events.push({ type: 'ticket:commented', ticketKey, body });
+  return { claim: { claimed, state: { ...state } }, forced: claimed ? [] : ['state'], events };
 }
