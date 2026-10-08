@@ -16,10 +16,14 @@ export interface AdapterConfig {
   readonly [option: string]: unknown;
 }
 
+/** sail's own designation label: what `sail.project.v1`'s `label` falls back to when `project.yaml` sets none. */
+export const DEFAULT_LABEL = 'sail';
+
 export interface ProjectConfig {
   name: string;
   /** The sail versions the repository accepts, as a semver range. */
   sail: string;
+  /** The designation label. `DEFAULT_LABEL` applies when it is left out. */
   label?: string;
   defaultWorkflow?: string;
   adapters: Record<Port, AdapterConfig>;

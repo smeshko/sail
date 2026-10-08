@@ -99,10 +99,7 @@ const broken = async (): Promise<never> => {
 
 // resolveSource(): the key, the fetch, the label and the state (D4, D7, D8).
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, string, boolean, Forced[]]>([
+test.each<[string, string, boolean, Forced[]]>([
   ['a designated, unstarted ticket', 'FAKE-1', false, []],
   ['a designated, unstarted ticket, forced', 'FAKE-1', true, []],
   ['an undesignated ticket, forced', 'FAKE-3', true, ['designation']],
@@ -120,19 +117,13 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a URL the ticket source owns resolves to the ticket key it names, and the ticket is fetched by that key', async () => {
+test('a URL the ticket source owns resolves to the ticket key it names, and the ticket is fetched by that key', async () => {
   const { source, fake } = world();
   const resolved = await resolveSource({ ref: 'fake://tickets/FAKE-1', ticketSource: source, label: 'sail' });
   expect(resolved).toEqual({ ticketKey: 'FAKE-1', ticket: await fake.get('FAKE-1'), forced: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each([['FAKE1'], ['run'], ['']])(
+test.each([['FAKE1'], ['run'], ['']])(
   "'%s', which the ticket source does not parse, is refused in its own sentence before anything is fetched",
   async (ref) => {
     const { source, calls } = world();
@@ -141,20 +132,14 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a ticket the ticket source does not have is refused with the port's message and its code", async () => {
+test("a ticket the ticket source does not have is refused with the port's message and its code", async () => {
   const { source } = world();
   expect(await resolveSource({ ref: 'FAKE-9', ticketSource: source, label: 'sail', force: true })).toEqual({
     refused: 'ticketSource.get: no ticket FAKE-9 (not_found)',
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('an answer of get that is no Ticket is refused as invalid, saying where it is none', async () => {
+test('an answer of get that is no Ticket is refused as invalid, saying where it is none', async () => {
   const { source, fake } = world({ get: async (key) => ({ ...(await fake.get(key)), title: 7 }) as unknown as Ticket });
   expect(await resolveSource({ ref: 'FAKE-1', ticketSource: source, label: 'sail' })).toEqual({
     refused:
@@ -162,10 +147,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, string, string, string]>([
+test.each<[string, string, string, string]>([
   ['an undesignated ticket', 'FAKE-3', 'sail', "the ticket is not designated: it carries no 'sail' label"],
   [
     'a ticket that carries another label',
@@ -188,10 +170,7 @@ test
   expect([refused, existsSync(state)]).toEqual([{ refused: `${why}. --force runs it anyway` }, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('anything get throws that is no PortError is thrown on: a bug, never a refusal', async () => {
+test('anything get throws that is no PortError is thrown on: a bug, never a refusal', async () => {
   const { source } = world({ get: broken });
   const thrown = await rejection(resolveSource({ ref: 'FAKE-1', ticketSource: source, label: 'sail' }));
   expect(thrown).toBeInstanceOf(TypeError);
