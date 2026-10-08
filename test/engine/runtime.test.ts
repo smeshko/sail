@@ -46,6 +46,7 @@ import {
   setSleepAt,
   stubExecutions,
   swapImplementAndTests,
+  workflowEntries,
   writeStub,
 } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -349,6 +350,26 @@ test("run.input is the intake's output as the journal holds it, in the run that 
       key: 'intake#1',
       output: { links: [{ url: 'https://example.com/spec' }] },
     });
+  });
+});
+
+test('a journal that loses its intake mid-run is an exception inside sail: no replay runs on the intake kept in memory, and STATUS stays running', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    // Emptied as the intake is journaled, before the first replay reads it back.
+    const emptied = ran(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key === 'intake#1') writeFileSync(join(onlyRun(repo.dir), 'journal.ndjson'), '');
+      },
+    });
+    const thrown = await emptied.then(
+      () => 'resolved',
+      (error: unknown) => error,
+    );
+    expect(thrown).toBeInstanceOf(JournalError);
+    expect(String(thrown)).toEndWith('journal.ndjson:1 is no longer intake#1: the journal changed under the run');
+    expect([workflowEntries(repo.dir), stubExecutions(repo.dir)]).toEqual([0, []]);
+    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'running' });
   });
 });
 
