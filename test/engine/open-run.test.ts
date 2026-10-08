@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import {
   appendFileSync,
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -730,6 +731,36 @@ test('a comment that fails once the ticket has moved is refused, naming the stat
       ),
     });
     expect([runIds(repo.dir), (await ticketIn(repo.dir, 'FAKE-1')).state]).toEqual([[], IN_PROGRESS]);
+  });
+});
+
+test('a run directory that cannot be written once the ticket has moved throws, naming the state it is in and the run its comment names', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const runs = join(repo.dir, '.sail-runs');
+    // Read-only once the comment is posted: the fake has written its state by then, and only the run is left to make.
+    const adapters = await adaptersWith(repo.dir, 'comment', (comment) => async (ticketKey, body) => {
+      const posted = await comment(ticketKey, body);
+      chmodSync(runs, 0o555);
+      return posted;
+    });
+    const thrown = await rejection(openStub(repo.dir, { ticket: 'FAKE-1' }, adapters)).finally(() =>
+      chmodSync(runs, 0o755),
+    );
+    expect(thrown).toMatchObject({
+      message: expect.stringMatching(
+        new RegExp(
+          `^the ticket is now In Progress and its comment names run FAKE-1-${ULID}, but the run directory was not written: EACCES.+\\. --force runs the ticket in a new run$`,
+        ),
+      ),
+      cause: { code: 'EACCES' },
+    });
+    const ticket = await ticketIn(repo.dir, 'FAKE-1');
+    expect([runIds(repo.dir), ticket.state, ticket.comments.at(-1)?.body]).toEqual([
+      [],
+      IN_PROGRESS,
+      expect.stringMatching(new RegExp(`^sail run FAKE-1-${ULID} started$`)),
+    ]);
   });
 });
 
