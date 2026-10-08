@@ -770,10 +770,7 @@ test('a header that breaks sail.run.v1 throws once the ticket is fetched and bef
 const NO_STAGE =
   "which is no stage of workflow 'ticket-to-pr': its stages are implement, publish, self-review, spec, tests";
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, StubRun, string]>([
+test.each<[string, StubRun, string]>([
   ['a name that is no stage', { ticket: 'FAKE-1', until: 'nope' }, `--until names 'nope', ${NO_STAGE}`],
   ['the intake, which is no stage', { ticket: 'FAKE-1', until: 'intake' }, `--until names 'intake', ${NO_STAGE}`],
   [

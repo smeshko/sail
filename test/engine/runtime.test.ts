@@ -1036,10 +1036,7 @@ function stoppedCopy(to: string): Promise<string> {
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("until stops the run after the named stage's first call: suspended with until, that call the last journaled and the only one that ran, and the stream and the summary say so", async () => {
+test("until stops the run after the named stage's first call: suspended with until, that call the last journaled and the only one that ran, and the stream and the summary say so", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const end = await ran(repo.dir, { until: 'spec' });
@@ -1065,10 +1062,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a resume takes a run until stopped to its end: every call ran once, and the summary holds each route once, the one out of the stage it stopped after included', async () => {
+test('a resume takes a run until stopped to its end: every call ran once, and the summary holds each route once, the one out of the stage it stopped after included', async () => {
   await withTempRepo(async (repo) => {
     const runId = await stoppedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -1082,10 +1076,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("until stops after the named stage's first call whatever its outcome: a failed tests#1 is journaled, and the pass it would send back to implement never starts", async () => {
+test("until stops after the named stage's first call whatever its outcome: a failed tests#1 is journaled, and the pass it would send back to implement never starts", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const end = await ran(repo.dir, { until: 'tests' });
@@ -1099,10 +1090,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('until naming the stage of the last call completes the run: a replay that ends the run ends it', async () => {
+test('until naming the stage of the last call completes the run: a replay that ends the run ends it', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const stopped = await withTempRepo(async (other) => {
@@ -1120,10 +1108,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a named stage whose first call ends in error fails the run with stage_error: until doesn't suspend a run that can only fail", async () => {
+test("a named stage whose first call ends in error fails the run with stage_error: until doesn't suspend a run that can only fail", async () => {
   await withTempRepo(async (repo) => {
     const failing = await withTempRepo(async (other) => {
       writeStub(other.dir);
@@ -1151,10 +1136,7 @@ test('an abort raised while the named stage runs still suspends the run with int
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an abort seen together with the stop loses: once the named call is journaled the run is suspended with until', async () => {
+test('an abort seen together with the stop loses: once the named call is journaled the run is suspended with until', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const controller = new AbortController();

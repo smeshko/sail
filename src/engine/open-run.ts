@@ -6,10 +6,11 @@
 // the process.
 //
 // A fresh run's checks, in order: the config, the workflow and its definitions, the model aliases, a stage named
-// `intake`, an intake that accepts tickets and is a built-in, then the ticket itself, which the ticket source must
-// parse, hold, and show designated and unstarted unless `--force`. The claim comes last, since it is the one thing
-// written before the run directory: the ticket moves to In Progress and gets a comment naming the run. The header is
-// built and checked before it, so nothing but the ticket source can still refuse once the ticket has moved.
+// `intake`, an intake that accepts tickets and is a built-in, the stage `--until` names, then the ticket itself, which
+// the ticket source must parse, hold, and show designated and unstarted unless `--force`. The claim comes last, since
+// it is the one thing written before the run directory: the ticket moves to In Progress and gets a comment naming the
+// run. The header is built and checked before it, so nothing but the ticket source can still refuse once the ticket
+// has moved.
 //
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail <ticket>`, `sail resume` and the watcher's dispatch each
@@ -79,7 +80,7 @@ export interface OpenedRun {
    * attached. Empty for a run with no ticket and for a reopened one.
    */
   claimed: readonly ProviderEvent[];
-  /** The stage `--until` named. Stub: never set. */
+  /** The stage `--until` named, for a fresh run that was given one. A resume takes none. */
   until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
@@ -97,7 +98,7 @@ export interface OpenRunOptions {
   ticket?: string;
   /** Runs a ticket that is not designated or not unstarted, and records which check it overrode. */
   force?: boolean;
-  /** The stage after whose first call the run stops, suspended. Stub: ignored. */
+  /** The stage after whose first call the run stops, suspended. One the workflow doesn't reach is refused. */
   until?: string;
   /** The run id's time and the header's `startedAt`, from one clock. */
   now?: Date;
@@ -191,6 +192,14 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   }
   const unfit = ticket === undefined ? undefined : intakeProblem(loaded, found.dir, ticket);
   if (unfit !== undefined) return { refused: unfit };
+  const { until } = options;
+  const stages = loaded.stages.map((stage) => stage.definition.name);
+  if (until !== undefined && !stages.includes(until)) {
+    const known = stages.join(', ');
+    return {
+      refused: `--until names '${until}', which is no stage of workflow '${loaded.name}': its stages are ${known}`,
+    };
+  }
   const parsed = parseInput(loaded, options.input);
   if ('refused' in parsed) return parsed;
   const { input } = parsed;
@@ -241,6 +250,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     loaded,
     input,
     claimed,
+    ...(until === undefined ? {} : { until }),
     firstSeq: 1,
   };
 }

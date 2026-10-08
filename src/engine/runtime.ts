@@ -17,6 +17,10 @@
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
 // Ctrl-C no longer ends the process once sail listens for it.
 //
+// `until` names a stage to stop after. Once that stage's first call is journaled the next replay still runs: if it
+// ends the run, the run ends that way, and if it asks for another call the run is suspended with `until` instead, where
+// an abort seen before a call suspends it. A resume takes none and runs to the end.
+//
 // An exception inside sail, such as a journal that can't be trusted or a bug in a call, propagates and leaves STATUS
 // `running`: writing it may be what failed, and a `running` run with no process is how a dead one looks.
 //
@@ -208,8 +212,12 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   };
   const failed = (stopReason: StopReason, message: string): RunEnd =>
     finish({ runId, dir, status: 'failed', stopReason, message });
-  const suspended = (message: string): RunEnd =>
-    finish({ runId, dir, status: 'suspended', stopReason: 'interrupted', message });
+  const suspended = (stopReason: 'interrupted' | 'until', message: string): RunEnd =>
+    finish({ runId, dir, status: 'suspended', stopReason, message });
+  const interrupted = (message: string): RunEnd => suspended('interrupted', message);
+  /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
+  const last = opened.until === undefined ? undefined : `${opened.until}#1`;
+  let reached = false;
 
   try {
     if (start) {
@@ -235,7 +243,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
           const name = loaded.intake.definition.name;
           return failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
         }
-        if (signal?.aborted) return suspended(`stopped before ${INTAKE_KEY}`);
+        if (signal?.aborted) return interrupted(`stopped before ${INTAKE_KEY}`);
         running = INTAKE_KEY;
         const { result, paths } = await runIntake({
           runDir: dir,
@@ -248,7 +256,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
           ...(signal === undefined ? {} : { signal }),
           emit: bus.emit,
         });
-        if (signal?.aborted) return suspended(`stopped during ${INTAKE_KEY}`);
+        if (signal?.aborted) return interrupted(`stopped during ${INTAKE_KEY}`);
         intake = appendJournal(dir, entryFrom(dir, result, paths));
         bus.emit({ type: 'journal:append', key: intake.key, line: intake.seq, outcome: intake.outcome });
         running = undefined;
@@ -277,16 +285,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         emit: replayEmit,
       });
       const end = await unlessAborted(replaying, signal);
-      if (end === undefined) return suspended('stopped during the replay');
+      if (end === undefined) return interrupted('stopped during the replay');
       if (end.kind === 'completed') return finish({ runId, dir, status: 'completed', result: end.result });
       if (end.kind === 'failed') return failed(end.stopReason, end.message);
 
       const { call } = end;
+      // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it.
+      if (reached) return suspended('until', `stopped after ${last}, as --until asked`);
       running = call.key;
       const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
       const problems = callProblems(call.definition, call.supplied, agent);
       if (problems.length > 0) return failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
-      if (signal?.aborted) return suspended(`stopped before ${call.key}`);
+      if (signal?.aborted) return interrupted(`stopped before ${call.key}`);
       const { result, paths } = await runCall({
         runDir: dir,
         runId,
@@ -302,10 +312,11 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         ...(agent === undefined ? {} : { agent }),
         emit: bus.emit,
       });
-      if (signal?.aborted) return suspended(`stopped during ${call.key}`);
+      if (signal?.aborted) return interrupted(`stopped during ${call.key}`);
       const journaled = appendJournal(dir, entryFrom(dir, result, paths));
       bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
       running = undefined;
+      reached ||= journaled.key === last;
       options.onCall?.(journaled);
     }
   } catch (error) {
