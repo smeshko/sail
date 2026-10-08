@@ -794,10 +794,7 @@ function spawnTicketRun(repo: TempRepo, ticketKey: string) {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("sail FAKE-1 in a process of its own exits 0: its terminal view shows the intake as intake ticket · builtin before the stages, and its intake call holds the validated input and a brief that wraps the ticket's text", async () => {
+test("sail FAKE-1 in a process of its own exits 0: its terminal view shows the intake as intake ticket · builtin before the stages, and its intake call holds the validated input and a brief that wraps the ticket's text", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const { code, stdout, stderr, runId, dir } = spawnTicketRun(repo, 'FAKE-1');
@@ -840,10 +837,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-2, a ticket whose text plants closing delimiters, completes, and the brief spec#1 consumed holds each one escaped inside its wrapper', async () => {
+test('sail FAKE-2, a ticket whose text plants closing delimiters, completes, and the brief spec#1 consumed holds each one escaped inside its wrapper', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const { code, stderr, dir } = spawnTicketRun(repo, 'FAKE-2');
@@ -862,10 +856,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("sail FAKE-1 on a ticket source that no longer has the ticket when the intake fetches it exits 1 with stage_error: its terminal view and its intake's result.json name the port's error", async () => {
+test("sail FAKE-1 on a ticket source that no longer has the ticket when the intake fetches it exits 1 with stage_error: its terminal view and its intake's result.json name the port's error", async () => {
   await withTempRepo(async (repo) => {
     writeOddStub(repo.dir, GONE_IN_RUN);
     const { code, stdout, stderr, runId, dir } = spawnTicketRun(repo, 'FAKE-1');

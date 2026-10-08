@@ -91,10 +91,7 @@ function replaysOf(repoDir: string, runId: string): number {
     .reduce((sum, event) => sum + (event.replays ?? 0), 0);
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail resume opens with what already ran, runs the interrupted call as its second try, and ends with the whole run', async () => {
+test('sail resume opens with what already ran, runs the interrupted call as its second try, and ends with the whole run', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const { code, stdout, stderr } = await runCaptured(['resume', runId], repo.dir);
@@ -133,10 +130,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('-q with -v is refused with exit 3, and the run is left as it was', async () => {
+test('-q with -v is refused with exit 3, and the run is left as it was', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const before = runFiles(repo.dir);
@@ -152,10 +146,7 @@ test
 
 type Refusal = (repoDir: string) => Promise<{ argv: string[]; message: string }>;
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each<[string, Refusal]>([
+test.each<[string, Refusal]>([
   [
     'a completed run',
     async (repoDir) => {
@@ -214,10 +205,7 @@ test('an id that names no run is refused with exit 3, and nothing is created', a
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and exits 1', async () => {
+test('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and exits 1', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     swapImplementAndTests(join(repo.dir, '.sail'));
@@ -239,10 +227,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('Ctrl-C during sail resume suspends the run again, and names the resume again', async () => {
+test('Ctrl-C during sail resume suspends the run again, and names the resume again', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     setSleepAt(repo.dir, 'implement#2');
@@ -274,10 +259,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail resume refuses a run whose harness the config now swaps, leaves the run as it was, and resumes once the config is swapped back', async () => {
+test('sail resume refuses a run whose harness the config now swaps, leaves the run as it was, and resumes once the config is swapped back', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const sail = join(repo.dir, '.sail');
@@ -324,10 +306,7 @@ function summaries(dir: string): { written: Summary; rebuilt: unknown; same: boo
   return { written: JSON.parse(text), rebuilt, same: readFileSync(path, 'utf8') === text };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail resume takes up a correction it was interrupted in: the next try is still the second validation, told the original problems, on the model the run started with, and every session is counted once', async () => {
+test('sail resume takes up a correction it was interrupted in: the next try is still the second validation, told the original problems, on the model the run started with, and every session is counted once', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeAgentFixture(from.dir, [
@@ -388,10 +367,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a run whose process was killed in a session resumes: the session is ended with the usage it had reported, and its usage and that of the next are each counted once', async () => {
+test('a run whose process was killed in a session resumes: the session is ended with the usage it had reported, and its usage and that of the next are each counted once', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(SPEC, 0.5, { turns: 2, delayMs: 60_000 }), submits(SPEC, 0.25)]);
     const child = Bun.spawn([process.execPath, shim, ...RUN_ARGV], {
@@ -428,10 +404,7 @@ test
 
 // What a resume leaves alone: the intake, the ticket and the claim. And what `sail resume` no longer takes.
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail resume replays the intake from the journal: its line is as the start wrote it, and the ticket is neither fetched nor claimed again', async () => {
+test('sail resume replays the intake from the journal: its line is as the start wrote it, and the ticket is neither fetched nor claimed again', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -456,10 +429,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched into the stream once', async () => {
+test('sail FAKE-1 sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched into the stream once', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { sleepAt: 'implement#2' });
     const started = Bun.spawn([process.execPath, shim, 'FAKE-1'], {

@@ -89,10 +89,7 @@ test('a command that throws exits 4 and names the error', async () => {
 
 const TICKET_USAGE = 'sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]';
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the usage lists sail <ticket> first among the commands, and says what --force and --until do, each on a line of its own', async () => {
+test('the usage lists sail <ticket> first among the commands, and says what --force and --until do, each on a line of its own', async () => {
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect(commands[0]).toBe(`  ${TICKET_USAGE}`);
@@ -100,10 +97,7 @@ test
   expect(stdout).toMatch(/^ {2}--until <stage> {2,}\S.*first call.*sail resume/m);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('an argument after the ticket that sail <ticket> does not take is refused by name with exit 3, before anything is looked for', async () => {
+test('an argument after the ticket that sail <ticket> does not take is refused by name with exit 3, before anything is looked for', async () => {
   const refused = (bad: string): Captured => ({
     code: EXIT_REFUSED,
     stdout: '',

@@ -99,10 +99,7 @@ async function started(repoDir: string, argv: string[], ticketKey = 'FAKE-1') {
 const head = (key: string, text: string) => `${key.padEnd(13)}  ${text}`;
 const detail = (key: string, text: string) => `${key.padEnd(13)}    ${text}`;
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 prints the run as the terminal view: the intake, each call, its exit, its output, the loop, a failure tail and the final block', async () => {
+test('sail FAKE-1 prints the run as the terminal view: the intake, each call, its exit, its output, the loop, a failure tail and the final block', async () => {
   const { code, view, stderr, runs } = await sailIn(['FAKE-1']);
   expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
   expect(runs).toHaveLength(1);
@@ -158,10 +155,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a run whose tests never pass exits 1, its final block naming the stop reason and why', async () => {
+test('a run whose tests never pass exits 1, its final block naming the stop reason and why', async () => {
   const { code, view, runs } = await sailIn(['FAKE-1', '--workflow', 'ticket-to-pr'], { testsPassAt: 99 });
   expect(code).toBe(EXIT_FAILED);
   const [runId] = runs;
@@ -179,10 +173,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 -q prints the header, a call that ends in error with its message, and the final block, and exits 1', async () => {
+test('sail FAKE-1 -q prints the header, a call that ends in error with its message, and the final block, and exits 1', async () => {
   const { code, view, runs } = await sailIn(['FAKE-1', '-q'], {}, (sail) =>
     edit(sail, 'stages/tests/run.sh', 'pass_at=2\n', 'exit 2\n'),
   );
@@ -205,10 +196,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("sail FAKE-1 -v adds each command and the tail of every script, and -vv adds each journal line and the claim's two events", async () => {
+test("sail FAKE-1 -v adds each command and the tail of every script, and -vv adds each journal line and the claim's two events", async () => {
   const verbose = await sailIn(['FAKE-1', '-v']);
   expect(verbose.code).toBe(EXIT_OK);
   const specTail = [
@@ -245,10 +233,7 @@ test('verbosityOf maps no flag, -q, -v, -vv and -vvv to normal, quiet, verbose, 
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 refuses -q with -v, and sail check takes no -v, each with exit 3 before anything runs', async () => {
+test('sail FAKE-1 refuses -q with -v, and sail check takes no -v, each with exit 3 before anything runs', async () => {
   const { code, stdout, stderr, touched } = await sailIn(['FAKE-1', '-q', '-v']);
   expect({ code, stdout, stderr, touched }).toEqual({
     code: EXIT_REFUSED,
@@ -263,10 +248,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('in a terminal, sail FAKE-1 colours its lines and draws the live line, then ends with the final block', async () => {
+test('in a terminal, sail FAKE-1 colours its lines and draws the live line, then ends with the final block', async () => {
   const { code, stdout, runs } = await sailIn(['FAKE-1'], {}, () => undefined, { tty: { columns: () => 120 } });
   expect(code).toBe(EXIT_OK);
   const [runId] = runs;
@@ -280,10 +262,7 @@ test
 
 const TYPE_ERROR = "{ spec: s.files['spec.md'], feedback: iteration.previous }";
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each<[string, string[], (sail: string) => void, string]>([
+test.each<[string, string[], (sail: string) => void, string]>([
   [
     'an unknown workflow',
     ['FAKE-1', '--workflow', 'nope'],
@@ -357,10 +336,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a type error in the workflow is printed where it is, then refused with exit 3 and no run directory: the ticket is not looked at, so one that is not designated changes nothing', async () => {
+test('a type error in the workflow is printed where it is, then refused with exit 3 and no run directory: the ticket is not looked at, so one that is not designated changes nothing', async () => {
   const breakIt = (sail: string) => edit(sail, WORKFLOW, TYPE_ERROR, '{}');
   for (const ticket of ['FAKE-1', 'FAKE-3']) {
     const { code, stdout, stderr, touched } = await sailIn([ticket], {}, breakIt);
@@ -378,10 +354,7 @@ test
 
 // The ticket: claimed as the run starts, forced past its checks, and stopped by --until.
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 claims the ticket for its one run: run.json records nothing forced and the claim, the stream reports it, and the ticket is In Progress with a comment naming the run', async () => {
+test('sail FAKE-1 claims the ticket for its one run: run.json records nothing forced and the claim, the stream reports it, and the ticket is In Progress with a comment naming the run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const { code, stderr, runs, runId, header, events, ticket } = await started(repo.dir, ['FAKE-1']);
@@ -400,10 +373,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail given a URL the ticket source owns starts the run of the ticket it names, and a refusal would name the URL as typed', async () => {
+test('sail given a URL the ticket source owns starts the run of the ticket it names, and a refusal would name the URL as typed', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const { code, stderr, runId, header } = await started(repo.dir, ['fake://tickets/FAKE-1']);
@@ -414,10 +384,7 @@ test
   expect(refused.stderr).toStartWith('sail fake://tickets/FAKE-3: the ticket is not designated: ');
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each<[string, string, Forced[]]>([
+test.each<[string, string, Forced[]]>([
   ['FAKE-3, which carries no label', 'FAKE-3', ['designation']],
   ['FAKE-5, which carries no label and is Done', 'FAKE-5', ['designation', 'state']],
 ])('sail --force runs %s, and run.json lists what it overrode', async (_, ticketKey, forced) => {
@@ -441,10 +408,7 @@ function afterFirstRun(to: string): Promise<string> {
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a second sail FAKE-1 is refused with exit 3 as already claimed, and adds no run directory', async () => {
+test('a second sail FAKE-1 is refused with exit 3 as already claimed, and adds no run directory', async () => {
   await withTempRepo(async (repo) => {
     const first = await afterFirstRun(repo.dir);
     const second = await started(repo.dir, ['FAKE-1']);
@@ -458,10 +422,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a second sail FAKE-1 --force runs: it moves the ticket through update, records the state check as overridden and the claim as not taken, and comments again', async () => {
+test('a second sail FAKE-1 --force runs: it moves the ticket through update, records the state check as overridden and the claim as not taken, and comments again', async () => {
   await withTempRepo(async (repo) => {
     const first = await afterFirstRun(repo.dir);
     const second = await started(repo.dir, ['FAKE-1', '--force']);
@@ -482,10 +443,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 --until spec stops after spec#1 with exit 2: the final block names until, the last line says how to resume, and sail resume then runs the rest and exits 0', async () => {
+test('sail FAKE-1 --until spec stops after spec#1 with exit 2: the final block names until, the last line says how to resume, and sail resume then runs the rest and exits 0', async () => {
   await withTempRepo(async (repo) => {
     const stopped = await withTempRepo(async (from) => {
       writeStub(from.dir, { testsPassAt: 1 });
@@ -562,10 +520,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a project.yaml that breaks its schema is refused with its issues', async () => {
+test('a project.yaml that breaks its schema is refused with its issues', async () => {
   const { code, stderr, touched } = await sailIn(['FAKE-1'], {}, (sail) =>
     edit(sail, 'project.yaml', 'adapters:\n', 'no-adapters:\n'),
   );
@@ -573,10 +528,7 @@ test
   expect({ code, touched }).toEqual({ code: EXIT_REFUSED, touched: false });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('outside a git repository, sail FAKE-1 is refused', async () => {
+test('outside a git repository, sail FAKE-1 is refused', async () => {
   await withTempRepo(async (repo) => {
     const { code, stderr } = await runCaptured(['FAKE-1'], repo.home);
     expect(stderr).toBe(`sail FAKE-1: not inside a git repository: ${repo.home}\n`);
@@ -584,10 +536,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a journal corrupted mid-run is an internal error, exit 4', async () => {
+test('a journal corrupted mid-run is an internal error, exit 4', async () => {
   const { code, stderr } = await sailIn(['FAKE-1'], {}, (sail) =>
     edit(
       sail,
@@ -614,10 +563,7 @@ async function interruptedRun(repoDir: string, argv: string[]) {
   return { ...end, lines: end.stdout.trimEnd().split('\n'), runId, alive, interrupts };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('Ctrl-C during sail FAKE-1 ends the running call in error, suspends the run, prints how to resume it, and exits 2', async () => {
+test('Ctrl-C during sail FAKE-1 ends the running call in error, suspends the run, prints how to resume it, and exits 2', async () => {
   await withTempRepo(async (repo) => {
     const { code, stdout, stderr, runId, alive, interrupts } = await interruptedRun(repo.dir, ['FAKE-1']);
     expect({ code, stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
@@ -643,10 +589,7 @@ test
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the interrupt handler is unregistered even when the run throws', async () => {
+test('the interrupt handler is unregistered even when the run throws', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(
@@ -691,10 +634,7 @@ async function runWith(change: (sail: string) => void, env?: Record<string, stri
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("run.json and run:start record each adapter: four builtin fakes, then the repository's own harness with its origin and versions, and the token stays off disk", async () => {
+test("run.json and run:start record each adapter: four builtin fakes, then the repository's own harness with its origin and versions, and the token stays off disk", async () => {
   const fake = { use: 'fake', origin: 'builtin' };
   const plain = await runWith(() => undefined);
   expect(plain.code).toBe(EXIT_OK);
@@ -709,10 +649,7 @@ test
   expect(swapped.everything).not.toContain(TOKEN);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each<[string, Record<string, string>]>([
+test.each<[string, Record<string, string>]>([
   ['unset', {}],
   ['empty', { ECHO_HARNESS_TOKEN: '' }],
 ])(
@@ -728,10 +665,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('an adapter the built-ins do not have is refused with exit 3, naming the port, and no run directory', async () => {
+test('an adapter the built-ins do not have is refused with exit 3, naming the port, and no run directory', async () => {
   const { code, stderr, ranFrom } = await runWith((sail) =>
     edit(sail, 'project.yaml', 'codeHost: { use: fake }', 'codeHost: { use: githb }'),
   );
@@ -743,10 +677,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the adapters are resolved before the type-check: a missing token and a type error print the token refusal alone', async () => {
+test('the adapters are resolved before the type-check: a missing token and a type error print the token refusal alone', async () => {
   const { code, stderr } = await runWith((sail) => {
     useEcho(sail);
     edit(
@@ -761,10 +692,7 @@ test
   expect(code).toBe(EXIT_REFUSED);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a model alias the config does not define refuses the run with exit 3, naming the stages and the alias', async () => {
+test('a model alias the config does not define refuses the run with exit 3, naming the stages and the alias', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     edit(
@@ -798,10 +726,7 @@ const marked = (view: string): string[] => view.split('\n').filter((line) => /^\
 const summaryIn = (dir: string): Summary => JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
 const callIn = (summary: Summary, key: string) => summary.calls.find((call) => call.key === key);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 takes a script-to-agent workflow to its end on the fake harness, correcting an invalid output once: both tries in the view, exit 0, a run directory that validates and each session counted once', async () => {
+test('sail FAKE-1 takes a script-to-agent workflow to its end on the fake harness, correcting an invalid output once: both tries in the view, exit 0, a run directory that validates and each session counted once', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125, { turns: 2 }), submits(SPEC, 0.25)]);
     const { code, stderr, view, dir, runId } = await agentRun(repo.dir);
@@ -888,10 +813,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 fails with stage_error once the output is invalid twice, naming the problems of both tries in order', async () => {
+test('sail FAKE-1 fails with stage_error once the output is invalid twice, naming the problems of both tries in order', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(NO_TASKS, 0.125), submits(NO_SUMMARY, 0.25), submits(SPEC, 0.5)]);
     const { code, view, dir } = await agentRun(repo.dir);
@@ -932,10 +854,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 fails the workflow with the reason of a blocked agent stage', async () => {
+test('sail FAKE-1 fails the workflow with the reason of a blocked agent stage', async () => {
   await withTempRepo(async (repo) => {
     const reason = 'The brief has no acceptance criteria.';
     writeAgentFixture(repo.dir, [{ outcome: 'blocked', reason, usage: usageOf(0.125) }]);
@@ -954,10 +873,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 fails with stage_error when the harness fails, keeping its message and reporting error:harness once', async () => {
+test('sail FAKE-1 fails with stage_error when the harness fails, keeping its message and reporting error:harness once', async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [{ outcome: 'error', message: 'model overloaded' }, submits(SPEC, 0.25)]);
     const { code, view, dir } = await agentRun(repo.dir);
@@ -973,10 +889,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 stops an agent stage at its maxTurns: budget_exceeded, the usage of the turns it ran, and no second try', async () => {
+test('sail FAKE-1 stops an agent stage at its maxTurns: budget_exceeded, the usage of the turns it ran, and no second try', async () => {
   await withTempRepo(async (repo) => {
     // The step allows 4 turns, and the session needs 8.
     writeAgentFixture(repo.dir, [submits(SPEC, 0.5, { turns: 8 }), submits(SPEC, 0.25)]);

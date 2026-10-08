@@ -315,10 +315,7 @@ async function until(condition: () => boolean): Promise<void> {
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail show --events prints exactly what sail FAKE-1 printed for a completed stub run', async () => {
+test('sail show --events prints exactly what sail FAKE-1 printed for a completed stub run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const live = await runCaptured(['FAKE-1'], repo.dir);
@@ -349,10 +346,7 @@ test.each<[string[], string]>([
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("sail show --events of a resumed run prints both processes' events in order, the suspended final block first", async () => {
+test("sail show --events of a resumed run prints both processes' events in order, the suspended final block first", async () => {
   await withTempRepo(async (repo) => {
     // Run in a repository of its own, as resume.test.ts does: one run per .sail/ in a process.
     const interrupted = await withTempRepo(async (from) => {
@@ -482,10 +476,7 @@ test.each([['--events'], ['--follow']])(
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("sail show lists a run's intake#1 first, with its kind, its outcome and its duration, and --events prints what the run printed in a process of its own, the intake's lines included", async () => {
+test("sail show lists a run's intake#1 first, with its kind, its outcome and its duration, and --events prints what the run printed in a process of its own, the intake's lines included", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');

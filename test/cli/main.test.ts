@@ -60,10 +60,7 @@ test('the shim runs check: 0 on a fixture copy, 3 once a binding is wrongly wire
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the shim starts a run from a ticket through a pipe in plain mode, with no escape byte, and exits 0 when the run completes', async () => {
+test('the shim starts a run from a ticket through a pipe in plain mode, with no escape byte, and exits 0 when the run completes', async () => {
   await withTempRepo((repo) => {
     writeStub(repo.dir);
     const result = Bun.spawnSync([process.execPath, shim, 'FAKE-1'], { cwd: repo.dir, env: repo.env });
@@ -75,10 +72,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the shim refuses a ticket that is not designated: one line on stderr, exit 3, and nothing under .sail-runs/', async () => {
+test('the shim refuses a ticket that is not designated: one line on stderr, exit 3, and nothing under .sail-runs/', async () => {
   await withTempRepo((repo) => {
     writeStub(repo.dir);
     const result = Bun.spawnSync([process.execPath, shim, 'FAKE-3'], { cwd: repo.dir, env: repo.env });
@@ -92,10 +86,7 @@ test
 });
 
 // In a process of its own, because bun test fails a test on any unhandled rejection, whatever the process listens for.
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a run.fail() in a chain the workflow doesn't await, after the run has ended, changes neither its end nor its code", async () => {
+test("a run.fail() in a chain the workflow doesn't await, after the run has ended, changes neither its end nor its code", async () => {
   await withTempRepo((repo) => {
     const sail = writeStub(repo.dir);
     edit(
@@ -116,10 +107,7 @@ test
 });
 
 // A real signal through the shim: the test sends it to the spawned bin, never to its own process.
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each(['SIGINT', 'SIGTERM'] as const)(
+test.each(['SIGINT', 'SIGTERM'] as const)(
   '%s during sail FAKE-1 suspends the run, and sail resume runs it to its end, both in plain mode',
   async (signal) => {
     await withTempRepo(async (repo) => {

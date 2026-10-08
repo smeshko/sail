@@ -1,10 +1,12 @@
-// `sail run [--workflow <name>] [--input <json>] [-q|-v|-vv]`: runs a workflow of the repository sail is run from, to
-// its end. The workflow is type-checked first, so a wrongly wired stage never runs. Every refusal comes before the run
-// directory exists. This module parses, hands the run's events to the terminal view and maps the run's status to an
-// exit code; the run is the engine's. Everything the command prints during the run comes from its events.
+// `sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]`: starts a run from a ticket in the
+// repository sail is run from, and runs its workflow to its end, or to the stage `--until` names. The workflow is
+// type-checked first, so a wrongly wired stage never runs. Every refusal is one `sail <ticket as typed>: <message>` line
+// with exit code 3, and comes before the run directory exists: the config and its adapters, the workflow, its types,
+// and then what the engine refuses of the workflow and of the ticket. This module parses, hands the run's events to
+// the terminal view and maps the run's status to an exit code; the run is the engine's, and so are the ticket's checks
+// and its claim. Everything the command prints during the run comes from its events.
 //
-// `sail run` names no source, so it starts a run with no ticket, whose input is `--input`. The engine decides what an
-// input means for a run: neither command asks whether a run came from a ticket.
+// `sail run [--workflow <name>] [--input <json>]` names no ticket: it starts a run on the `LOCAL` stub.
 //
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
 // resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
@@ -31,7 +33,7 @@ export function at(io: Io, path: string): string {
   return relative(io.cwd, path) || '.';
 }
 
-/** A refusal of `command`, such as `sail run`: prints `<command>: <message>` and returns the refused exit code. */
+/** A refusal of `command`, such as `sail resume`: prints `<command>: <message>` and returns the refused exit code. */
 export function refuseAs(io: Io, command: string): (message: string) => ExitCode {
   return (message) => {
     io.stderr(`${command}: ${message}\n`);
@@ -158,15 +160,16 @@ export function printEnd(end: RunEnd, io: Io, rawInput: string | undefined): Exi
   return exitCodeFor(end.status);
 }
 
-const COMMAND = 'sail run';
-
 export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode> {
-  const refuse = refuseAs(io, COMMAND);
-  const given = parseInputOption(args, io, COMMAND);
+  const [ticket] = args.positionals;
+  // A refusal names the ticket as it was typed: the ticket source may not even parse it.
+  const command = ticket === undefined ? 'sail run' : `sail ${ticket}`;
+  const refuse = refuseAs(io, command);
+  const given = parseInputOption(args, io, command);
   if (typeof given === 'number') return given;
-  const verbosity = verbosityOf(args, io, COMMAND);
+  const verbosity = verbosityOf(args, io, command);
   if (typeof verbosity === 'number') return verbosity;
-  const project = await findProject(io, COMMAND);
+  const project = await findProject(io, command);
   if (typeof project === 'number') return project;
 
   const named = args.values.workflow;
@@ -174,15 +177,18 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   if (workflow === undefined) return refuse('no --workflow given, and .sail/project.yaml sets no defaultWorkflow');
   const workflowFile = findWorkflowFile(project.sailDir, workflow);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
-  const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);
+  const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
 
+  const { until } = args.values;
   const terminal = terminalFor(io, project.sailDir, verbosity);
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     runWorkflow({
       cwd: io.cwd,
       workflow,
+      ...(ticket === undefined ? {} : { ticket, force: args.values.force === true }),
+      ...(typeof until === 'string' ? { until } : {}),
       ...(given.input === undefined ? {} : { input: given.input }),
       adapters: project.adapters,
       signal,
