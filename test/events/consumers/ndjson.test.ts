@@ -136,10 +136,7 @@ test.each<[string, string]>([
   expect(contents(dir)).toBe(before);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('readEvents gives every event of a run in file order, and none for a missing file', () => {
+test('readEvents gives every event of a run in file order, and none for a missing file', () => {
   const fake1 = join(import.meta.dir, '..', '..', 'fixtures', 'runs', RUN_ID);
   const events = readEvents(fake1);
   expect(events.map((each) => each.seq)).toEqual(Array.from({ length: 137 }, (_, index) => index + 1));

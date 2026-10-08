@@ -21,18 +21,19 @@ export interface Source {
   kind: 'ticket';
   ticketKey: string;
   via: 'cli' | 'watch';
-  /** The checks `--force` overrode. Empty for a run nobody forced. */
+  /**
+   * The checks `--force` overrode, each at most once: `designation` when the ticket didn't carry the repository's
+   * label, `state` when the claim didn't take because the ticket was not unstarted. Empty for a run nobody forced, and
+   * for one `--force` had nothing to override.
+   */
   forced: Forced[];
 }
-
-/** Stub: what a run records as `forced` until the run header's contract takes the list. */
-export const NOT_FORCED = false as unknown as Forced[];
 
 /**
  * A run started by hand with no ticket, so its runs are `LOCAL-<ulid>`. It takes its input from `--input` and runs no
  * intake. It stands in until `sail <ticket>` exists.
  */
-export const LOCAL_SOURCE: Source = { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: NOT_FORCED };
+export const LOCAL_SOURCE: Source = { kind: 'ticket', ticketKey: 'LOCAL', via: 'cli', forced: [] };
 
 /** Whether `source` is the LOCAL stub: a run with no ticket, whose input is given and whose journal has no intake. */
 export function isLocalSource(source: Source): boolean {

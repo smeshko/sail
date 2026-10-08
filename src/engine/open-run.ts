@@ -24,7 +24,6 @@ import {
   createRunDir,
   isLocalSource,
   LOCAL_SOURCE,
-  NOT_FORCED,
   type RunStatus,
   readStatus,
   runsDir,
@@ -158,7 +157,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   // Stub: the ticket as typed is the ticket key. One that can't name a run directory is refused, with nothing to say.
   if (ticket !== undefined && !isPlainName(ticket)) return { refused: '' };
   const source: Source =
-    ticket === undefined ? LOCAL_SOURCE : { kind: 'ticket', ticketKey: ticket, via: 'cli', forced: NOT_FORCED };
+    ticket === undefined ? LOCAL_SOURCE : { kind: 'ticket', ticketKey: ticket, via: 'cli', forced: [] };
   const found = findConfigured(cwd);
   if ('refused' in found) return found;
   const { config } = found;

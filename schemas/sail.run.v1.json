@@ -14,9 +14,24 @@
         "kind": { "const": "ticket" },
         "ticketKey": { "type": "string" },
         "via": { "enum": ["cli", "watch"] },
-        "forced": { "type": "boolean" }
+        "forced": {
+          "description": "the checks --force overrode: empty for a run nobody forced",
+          "type": "array",
+          "items": { "enum": ["designation", "state"] },
+          "uniqueItems": true
+        }
       },
       "required": ["kind", "ticketKey", "via", "forced"],
+      "additionalProperties": false
+    },
+    "claim": {
+      "description": "what the run's start did to its ticket: whether the claim took, and the state the provider reported after sail's move",
+      "type": "object",
+      "properties": {
+        "claimed": { "type": "boolean" },
+        "state": { "$ref": "#/$defs/ticketState" }
+      },
+      "required": ["claimed", "state"],
       "additionalProperties": false
     },
     "workflow": {
@@ -81,6 +96,16 @@
   "$defs": {
     "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
     "origin": { "type": "string", "pattern": "^(builtin|repo:.+)$" },
+    "ticketState": {
+      "description": "a ticket's state by type, with the provider's own name for it",
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["unstarted", "started", "completed", "canceled"] },
+        "name": { "type": "string" }
+      },
+      "required": ["type", "name"],
+      "additionalProperties": false
+    },
     "adapterEntry": {
       "type": "object",
       "properties": {

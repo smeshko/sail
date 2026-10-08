@@ -74,7 +74,6 @@ export function workflowHash(sailDir: string, loaded: LoadedWorkflow): string {
 export interface HeaderFields {
   runId: string;
   source: Source;
-  /** Stub: taken and left out of the header. */
   claim?: ClaimRecord;
   sailDir: string;
   loaded: LoadedWorkflow;
@@ -84,14 +83,16 @@ export interface HeaderFields {
 }
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
-export function buildRunHeader({ runId, source, sailDir, loaded, config, adapters, now }: HeaderFields): RunHeader {
+export function buildRunHeader(fields: HeaderFields): RunHeader {
+  const { runId, source, claim, sailDir, loaded, config, adapters, now } = fields;
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
   const budget = config.budgets.run;
   return {
     schema: 'sail.run.v1',
     runId,
-    source: { ...source },
+    source: { ...source, forced: [...source.forced] },
+    ...(claim === undefined ? {} : { claim: { claimed: claim.claimed, state: { ...claim.state } } }),
     workflow: {
       name: loaded.name,
       version: loaded.workflow.version ?? 1,

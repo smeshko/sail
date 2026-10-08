@@ -187,20 +187,14 @@ test.each([
 });
 
 // The two that carry the run's source, and with it the checks `--force` overrode.
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each([
+test.each([
   ['sail.run.v1', run],
   ['sail.event.v1', event],
 ] as const)('a minimal %s document is valid, its source included', (schema, data) => {
   expect(validateDocument(schema, data)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('run: an unknown key is not allowed and a missing source is required', () => {
+test('run: an unknown key is not allowed and a missing source is required', () => {
   expect(validateDocument('sail.run.v1', { ...run, colour: 'blue' })).toEqual([
     { schema: 'sail.run.v1', path: '/colour', message: 'is not allowed' },
   ]);
@@ -338,10 +332,7 @@ test.each(closed((type) => type !== 'run:start'))(
 );
 
 // run:start on its own: its payload is the run header's, the source and what `--force` overrode included.
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each(closed((type) => type === 'run:start'))(
+test.each(closed((type) => type === 'run:start'))(
   "%s accepts its payload, the run header's own, and rejects a field it does not declare",
   acceptsOnlyItsPayload,
 );
@@ -712,27 +703,18 @@ test('journal: an unknown outcome names the field', () => {
   expect(paths('sail.journal.v1', { ...journal, outcome: 'maybe' })).toEqual(['/outcome']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('property names in a path are escaped as JSON pointer segments', () => {
+test('property names in a path are escaped as JSON pointer segments', () => {
   expect(paths('sail.run.v1', { ...run, 'a/b~c': 1 })).toEqual(['/a~1b~0c']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir counts every document and finds nothing wrong in a valid run directory', () => {
+test('validateRunDir counts every document and finds nothing wrong in a valid run directory', () => {
   expect(validateRunDir(tempDir(validRunDir()))).toEqual({
     counts: { 'sail.run.v1': 1, 'sail.journal.v1': 1, 'sail.event.v1': 2, 'sail.summary.v1': 1, 'sail.result.v1': 1 },
     issues: [],
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir skips blank lines and absent optional files, and walks only call directories', () => {
+test('validateRunDir skips blank lines and absent optional files, and walks only call directories', () => {
   const dir = tempDir({
     'run.json': json(run),
     'events.ndjson': `\n${ndjson(event)}\n`,
@@ -741,20 +723,14 @@ test
   expect(validateRunDir(dir)).toEqual({ counts: { 'sail.run.v1': 1, 'sail.event.v1': 1 }, issues: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir reports an events file whose seq skips a number', () => {
+test('validateRunDir reports an events file whose seq skips a number', () => {
   const gap = { ...validRunDir(), 'events.ndjson': ndjson(event, { ...runEnd, seq: 3 }) };
   expect(validateRunDir(tempDir(gap)).issues.map(formatIssue)).toEqual([
     'events.ndjson:2  [sail.event.v1]  /seq must be 2, its place in the events file',
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir reports a missing run.json', () => {
+test('validateRunDir reports a missing run.json', () => {
   const files = validRunDir();
   delete files['run.json'];
   expect(validateRunDir(tempDir(files)).issues).toEqual([
@@ -762,10 +738,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir reports an unparseable line or file by file and line', () => {
+test('validateRunDir reports an unparseable line or file by file and line', () => {
   const dir = tempDir({
     ...validRunDir(),
     'events.ndjson': `${JSON.stringify(event)}\n{ not json\n`,
@@ -777,10 +750,7 @@ test
   expect(issues[1]).toStartWith('summary.json  [sail.summary.v1]  / is not valid JSON: ');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir reports a nested result.json by its path in the run directory', () => {
+test('validateRunDir reports a nested result.json by its path in the run directory', () => {
   const dir = tempDir({
     ...validRunDir(),
     '01-spec/call-1/result.json': json({ ...scriptResult, stage: 'spec', key: 'spec#1', outcome: 'approved' }),
@@ -810,10 +780,7 @@ const publishFiles = (): Record<string, string> => ({
   }),
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir checks that a multi-step call points at results for its own steps', () => {
+test('validateRunDir checks that a multi-step call points at results for its own steps', () => {
   expect(validateRunDir(tempDir({ ...validRunDir(), ...publishFiles() })).issues).toEqual([]);
   const wrongLink = {
     ...multiStepResult,
@@ -826,10 +793,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir checks that every journal line points at a result that agrees with it', () => {
+test('validateRunDir checks that every journal line points at a result that agrees with it', () => {
   const missing = tempDir({
     ...validRunDir(),
     'journal.ndjson': ndjson({ ...journal, resultPath: '01-spec/call-1/result.json' }),
@@ -847,10 +811,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir checks that a journal line replays the output and files its result recorded', () => {
+test('validateRunDir checks that a journal line replays the output and files its result recorded', () => {
   const brief = { path: '00-intake/call-1/brief.md', bytes: 1, sha256: 'a'.repeat(64) };
   const dir = tempDir({
     ...validRunDir(),
@@ -874,10 +835,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir requires a completed run to journal every result, in order', () => {
+test('validateRunDir requires a completed run to journal every result, in order', () => {
   const unjournaled = { ...validRunDir(), '01-spec/call-1/result.json': json(agentResult) };
   expect(validateRunDir(tempDir(unjournaled)).issues).toEqual([]);
   const completed = { ...unjournaled, 'summary.json': json({ ...summary, status: 'completed' }) };
@@ -895,10 +853,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("validateRunDir takes a completed run's unjournaled try as superseded by its call's journaled later try", () => {
+test("validateRunDir takes a completed run's unjournaled try as superseded by its call's journaled later try", () => {
   const spec = (n: number) => json({ ...agentResult, call: n, key: `spec#${n}` });
   const retried = {
     ...validRunDir(),
@@ -921,10 +876,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('validateRunDir reports an invalid linked result once, by its own issues', () => {
+test('validateRunDir reports an invalid linked result once, by its own issues', () => {
   const dir = tempDir({ ...validRunDir(), '00-intake/call-1/result.json': json({ ...scriptResult, extra: true }) });
   expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
     '00-intake/call-1/result.json  [sail.result.v1]  /extra is not allowed',
@@ -1120,18 +1072,12 @@ test('event: stage:end takes the reason port in its errors, and every other reas
 const forcedIssues = (schema: SchemaName, document: { source: object }, forced: unknown): string[] =>
   paths(schema, { ...document, source: { ...document.source, forced } });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('run: source.forced takes no check, either check, or both in order', () => {
+test('run: source.forced takes no check, either check, or both in order', () => {
   const taken = [[], ['designation'], ['state'], ['designation', 'state']];
   expect(taken.map((forced) => forcedIssues('sail.run.v1', run, forced))).toEqual([[], [], [], []]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('run: source.forced refuses a boolean, a check it does not know and a check listed twice, naming /source/forced', () => {
+test('run: source.forced refuses a boolean, a check it does not know and a check listed twice, naming /source/forced', () => {
   const refused = [false, true, ['label'], ['state', 'state']];
   expect(refused.map((forced) => forcedIssues('sail.run.v1', run, forced))).toEqual([
     ['/source/forced'],
@@ -1141,10 +1087,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('run: claim holds whether the claim took and the state the provider reported, and nothing else', () => {
+test('run: claim holds whether the claim took and the state the provider reported, and nothing else', () => {
   const claimed = (claim: unknown) => validateDocument('sail.run.v1', { ...run, claim });
   const issue = (path: string, message: string) => [{ schema: 'sail.run.v1' as const, path, message }];
   const state = { type: 'completed', name: 'Done' };
@@ -1166,10 +1109,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('event: run:start takes source.forced as the list, and refuses a boolean', () => {
+test('event: run:start takes source.forced as the list, and refuses a boolean', () => {
   expect(forcedIssues('sail.event.v1', event, ['designation', 'state'])).toEqual([]);
   expect(forcedIssues('sail.event.v1', event, false)).toEqual(['/source/forced']);
   expect(forcedIssues('sail.event.v1', event, ['label'])).toEqual(['/source/forced/0']);

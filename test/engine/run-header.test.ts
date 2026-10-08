@@ -147,10 +147,7 @@ test("a repository's intake is hashed: a private one as its file, a shared one a
   expect(await hashAfter(privately(intake))).not.toBe(await hashAfter(privately(`// changed\n${intake}`)));
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("the fixture's header validates, with the workflow's folder, the adapters asked for and the run budget", async () => {
+test("the fixture's header validates, with the workflow's folder, the adapters asked for and the run budget", async () => {
   const header = await fixtureHeader();
   expect(validateRunHeader(header)).toEqual([]);
   expect(header).toMatchObject({
@@ -169,10 +166,7 @@ test
   expect(header.intake.name).toBe('ticket');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a workflow without a version is version 1, and a config without a run budget leaves budget out', async () => {
+test('a workflow without a version is version 1, and a config without a run budget leaves budget out', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     edit(sail, WORKFLOW, ' version: 1,', '');
@@ -194,10 +188,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a header records the adapters it is handed, with the versions a repository adapter declares', async () => {
+test('a header records the adapters it is handed, with the versions a repository adapter declares', async () => {
   const echo: AdapterEntry = {
     use: './adapters/echo-harness.ts',
     origin: 'repo:.sail/adapters/echo-harness.ts',
@@ -209,10 +200,7 @@ test
   expect(validateRunHeader(header)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('run.json is written once, read-only, and reads back equal', async () => {
+test('run.json is written once, read-only, and reads back equal', async () => {
   const header = await fixtureHeader();
   expect(validateRunHeader(header)).toEqual([]);
   const dir = tempDir();
@@ -233,10 +221,7 @@ test('an invalid header is a bug in sail: it throws, and nothing is written', as
   expect(existsSync(join(dir, RUN_HEADER_FILE))).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("the golden run's run.json reads, and one missing runId or not JSON throws naming the problem", () => {
+test("the golden run's run.json reads, and one missing runId or not JSON throws naming the problem", () => {
   expect(validateRunHeader(JSON.parse(readFileSync(join(GOLDEN, RUN_HEADER_FILE), 'utf8')))).toEqual([]);
   expect(readRunHeader(GOLDEN).runId).toBe(RUN_ID);
 
@@ -250,10 +235,7 @@ test
   expect(() => readRunHeader(tempDir())).toThrow(expect.objectContaining({ code: 'ENOENT' }));
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a header holds the claim it is given and the checks its source lists, as copies, and run.json holds both', async () => {
+test('a header holds the claim it is given and the checks its source lists, as copies, and run.json holds both', async () => {
   const forced: Source = { ...FAKE_1, forced: ['designation', 'state'] };
   const moved: ClaimRecord = { claimed: false, state: { type: 'started', name: 'In Review' } };
   const header = await withTempRepo(async (repo) => {

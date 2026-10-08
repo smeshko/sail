@@ -57,10 +57,7 @@ test('an origin is repo: and the POSIX path below the directory holding .sail/',
   expect(origin('/r/pkg', '/r/pkg/.sail/workflows/w/intake.ts')).toBe('repo:.sail/workflows/w/intake.ts');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("the fixture's roster is its intake and the five stages ticket-to-pr reaches, with resolved values", async () => {
+test("the fixture's roster is its intake and the five stages ticket-to-pr reaches, with resolved values", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const loaded = await loadWorkflow(sail, 'ticket-to-pr');

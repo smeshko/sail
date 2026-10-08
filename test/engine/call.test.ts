@@ -961,10 +961,7 @@ test('the directory and the result of a try are synced to disk before the next s
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a result whose stage:end was lost is ended once when the call is recovered, with no session and no usage counted again', async () => {
+test('a result whose stage:end was lost is ended once when the call is recovered, with no session and no usage counted again', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [submits({ summary: 3 }, 0.125), submits({ summary: null }, 0.25)];
@@ -1004,10 +1001,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a session a killed process left open is ended once when its call is recovered, with the last usage it had reported', async () => {
+test('a session a killed process left open is ended once when its call is recovered, with the last usage it had reported', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const emit = stream(s.runDir);
@@ -1058,10 +1052,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a session whose end the events file lost is ended from its durable result, once, however often the call is recovered', async () => {
+test('a session whose end the events file lost is ended from its durable result, once, however often the call is recovered', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const answers = [submits({ summary: 3 }, 0.125), submits({ summary: null }, 0.25)];
@@ -1105,10 +1096,7 @@ test
 /** A try said whole from its result: its start, the end of its session, and its own. */
 const WHOLE: SailEvent['type'][] = ['stage:start', 'harness:session_end', 'stage:end'];
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
+test.each<[string, (event: SailEvent) => boolean, SailEvent['type'][]]>([
   ["the first session's start", (event) => event.type === 'harness:session_start', WHOLE.slice(1)],
   ["the first try's start", (event) => event.type === 'stage:start', WHOLE.slice(1)],
   ["the run's start", (event) => event.type === 'run:start', WHOLE],
@@ -1159,10 +1147,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a try that never reached a session, and whose events were lost, is said from its result with no session to end', async () => {
+test('a try that never reached a session, and whose events were lost, is said from its result with no session to end', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const unrendered = specStep({ prompt: './unknown.md' });
