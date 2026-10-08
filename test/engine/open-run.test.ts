@@ -515,9 +515,13 @@ test("openRun refuses a workflow that reaches a stage named intake: its first ca
   });
 });
 
-test('reopenRun refuses a workflow that has come to reach a stage named intake, and leaves STATUS as it was', async () => {
+test('reopenRun refuses a workflow that has come to reach a stage named intake, and leaves STATUS and a torn events tail as they were', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    // A torn tail, and a refusal that comes once the workflow is loaded: only a resume that goes ahead may cut it.
+    appendFileSync(join(dir, 'events.ndjson'), '{"seq":1,"ts":"2026-09-2');
+    const before = ['STATUS', 'events.ndjson'].map((file) => readFileSync(join(dir, file), 'utf8'));
     const sail = join(repo.dir, '.sail');
     write(
       sail,
@@ -535,7 +539,8 @@ test('reopenRun refuses a workflow that has come to reach a stage named intake, 
       refused:
         ".sail/stages/intake/stage.ts: a stage can't be named 'intake': its first call's key would be the intake's, intake#1",
     });
-    expect(readFileSync(join(repo.dir, '.sail-runs', run.runId, 'STATUS'), 'utf8')).toBe('suspended budget_exceeded\n');
+    expect(before[0]).toBe('suspended budget_exceeded\n');
+    expect(['STATUS', 'events.ndjson'].map((file) => readFileSync(join(dir, file), 'utf8'))).toEqual(before);
   });
 });
 
