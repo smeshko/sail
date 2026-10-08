@@ -15,7 +15,8 @@
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
-// Ctrl-C no longer ends the process once sail listens for it.
+// Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
+// ticket is claimed, refuses the start instead: nothing was written, so there is no run to suspend.
 //
 // `until` names a stage to stop after. Once that stage's first call is journaled the next replay still runs: if it
 // ends the run, the run ends that way, and if it asks for another call the run is suspended with `until` instead, where
@@ -65,7 +66,10 @@ export interface RunEnd {
 }
 
 export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
-  /** Stops the running call when it aborts, and suspends the run. */
+  /**
+   * Stops the running call when it aborts, and suspends the run. Aborted before the ticket is claimed, it refuses the
+   * start.
+   */
   signal?: AbortSignal;
   /** Called after each call is journaled. */
   onCall?(entry: JournalEntry): void;

@@ -7,7 +7,8 @@
 // and its claim. Everything the command prints during the run comes from its events.
 //
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
-// resume it. Before the run starts, a Ctrl-C ends sail the default way: nothing exists yet to resume.
+// resume it. One that arrives while the run is being opened, before its ticket is claimed, is a refusal: the ticket is
+// as it was, and nothing exists to resume. Earlier still, during the type-check, it ends sail the default way.
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { join, relative } from 'node:path';

@@ -10,7 +10,7 @@
 // the ticket source must parse, hold, and show designated and unstarted unless `--force`. The claim comes last, since
 // it is the one thing written before the run directory: the ticket moves to In Progress and gets a comment naming the
 // run. The header is built and checked before it, so nothing but the ticket source can still refuse once the ticket
-// has moved.
+// has moved. A start aborted by then is refused too, with the ticket as it was: nothing exists to resume.
 //
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail <ticket>`, `sail resume` and the watcher's dispatch each
@@ -84,6 +84,11 @@ export interface OpenRunOptions {
   until?: string;
   /** The run id's time and the header's `startedAt`, from one clock. */
   now?: Date;
+  /**
+   * Refuses the start when it has aborted by the time the ticket would be claimed. Once the ticket is claimed the run
+   * is opened whatever the signal says, and stopping it is its caller's.
+   */
+  signal?: AbortSignal;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
 }
@@ -135,10 +140,11 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
 /**
  * Finds `.sail/`, reads its config, loads the workflow and checks the ticket, refusing at the first that fails, in the
  * order the header comment gives. It then mints the run id, builds the run header and checks it, and only then claims
- * the ticket: the one write before the run directory exists. A claim, a forced move or a comment that fails refuses
- * too, saying where the ticket stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a
- * refusal. Last, it creates the run directory and writes the header, the journal and STATUS. A failure there throws
- * too, and its message says where the ticket stands: it has moved, and no run is behind it.
+ * the ticket: the one write before the run directory exists. A start whose `signal` has aborted by then is refused
+ * with the ticket untouched. A claim, a forced move or a comment that fails refuses too, saying where the ticket
+ * stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a refusal. Last, it creates the run
+ * directory and writes the header, the journal and STATUS. A failure there throws too, and its message says where the
+ * ticket stands: it has moved, and no run is behind it.
  *
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
@@ -183,6 +189,8 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     now,
   });
   assertRunHeader(unclaimed);
+  // The last moment the ticket is as it was. Everything up to here only read, so one check covers an abort at any of it.
+  if (options.signal?.aborted) return { refused: 'stopped before the ticket was claimed' };
   const made = await claimSource({ ticketKey, runId, ticketSource, force });
   if ('refused' in made) return made;
   const forced = [...resolved.forced, ...made.forced];
