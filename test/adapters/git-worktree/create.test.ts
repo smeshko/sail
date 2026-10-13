@@ -137,6 +137,14 @@ test("create leaves the clone's HEAD and working tree as they were, with an edit
   expect(readFileSync(join(p.clone, 'README.md'), 'utf8')).toBe('an edit in the clone\n');
 });
 
+test("create keeps a clone's exclude pattern whose line has no newline, and adds .sail-runs/ on its own line", async () => {
+  const p = pair();
+  const exclude = join(p.clone, '.git', 'info', 'exclude');
+  writeFileSync(exclude, '*.local');
+  await createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(runIn(p, 'r1'), CREATE);
+  expect(readFileSync(exclude, 'utf8').split('\n')).toEqual(['*.local', '.sail-runs/', '']);
+});
+
 test('git never prompts for credentials: an origin that asks for them fails as unavailable, and promptly', async () => {
   const p = pair();
   const server = Bun.serve({
