@@ -117,63 +117,54 @@ async function runIn(repo: TempRepo): Promise<RunEnd> {
 
 // STICKER: the resolved gitDiff binding is TASK-010's. Each sticker names that task.
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('a gitDiff binding the engine resolved is written as <name>.patch in $STAGE_IN, and INPUT_ names it', () => {
-    const dir = tempDir();
-    const stageIn = join(dir, 'call-1', 'in');
-    mkdirSync(stageIn, { recursive: true });
-    const consumes: Consumes = { diff: gitDiff('origin/HEAD...HEAD') };
-    const supplied: Record<string, Supplied> = {
-      diff: { kind: 'gitDiff', patch: 'diff --git a/x b/x\n', from: RANGE },
-    };
-    expect(bindingProblems(consumes, supplied)).toEqual([]);
-    const { inputs, consumed } = materialise(consumes, supplied, stageIn);
+test('a gitDiff binding the engine resolved is written as <name>.patch in $STAGE_IN, and INPUT_ names it', () => {
+  const dir = tempDir();
+  const stageIn = join(dir, 'call-1', 'in');
+  mkdirSync(stageIn, { recursive: true });
+  const consumes: Consumes = { diff: gitDiff('origin/HEAD...HEAD') };
+  const supplied: Record<string, Supplied> = {
+    diff: { kind: 'gitDiff', patch: 'diff --git a/x b/x\n', from: RANGE },
+  };
+  expect(bindingProblems(consumes, supplied)).toEqual([]);
+  const { inputs, consumed } = materialise(consumes, supplied, stageIn);
+  expect({
+    inputs,
+    consumed,
+    patch: readFileSync(join(stageIn, 'diff.patch'), 'utf8'),
+  }).toEqual({
+    inputs: { INPUT_DIFF: join(stageIn, 'diff.patch') },
+    consumed: { diff: RANGE },
+    patch: 'diff --git a/x b/x\n',
+  });
+});
+
+test('a stage consuming gitDiff(origin/HEAD...HEAD) finds the edit the run made, in its $STAGE_IN, and the journal holds the range', async () => {
+  await withDiffWorkflow(async (repo) => {
+    const end = await runIn(repo);
+    const seeDir = readdirSync(end.dir).find((name) => name.endsWith('-see-diff')) ?? '';
+    const result = JSON.parse(readFileSync(join(end.dir, seeDir, 'call-1', 'result.json'), 'utf8'));
+    const entry = readJournal(end.dir).entries.find((line) => line.key === 'see-diff#1');
     expect({
-      inputs,
-      consumed,
-      patch: readFileSync(join(stageIn, 'diff.patch'), 'utf8'),
-    }).toEqual({
-      inputs: { INPUT_DIFF: join(stageIn, 'diff.patch') },
-      consumed: { diff: RANGE },
-      patch: 'diff --git a/x b/x\n',
-    });
+      status: end.status,
+      names: (entry?.output as { names?: number } | undefined)?.names,
+      consumed: result.consumed?.diff,
+    }).toEqual({ status: 'completed', names: 1, consumed: RANGE });
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('a stage consuming gitDiff(origin/HEAD...HEAD) finds the edit the run made, in its $STAGE_IN, and the journal holds the range', async () => {
-    await withDiffWorkflow(async (repo) => {
-      const end = await runIn(repo);
-      const seeDir = readdirSync(end.dir).find((name) => name.endsWith('-see-diff')) ?? '';
-      const result = JSON.parse(readFileSync(join(end.dir, seeDir, 'call-1', 'result.json'), 'utf8'));
-      const entry = readJournal(end.dir).entries.find((line) => line.key === 'see-diff#1');
-      expect({
-        status: end.status,
-        names: (entry?.output as { names?: number } | undefined)?.names,
-        consumed: result.consumed?.diff,
-      }).toEqual({ status: 'completed', names: 1, consumed: RANGE });
-    });
+test('a gitDiff whose right side is not HEAD fails the run with workflow_failed, naming the binding', async () => {
+  await withDiffWorkflow(async (repo) => {
+    edit(
+      join(repo.dir, '.sail'),
+      'workflows/ticket-to-pr/stages/see-diff/stage.ts',
+      "gitDiff('origin/HEAD...HEAD')",
+      "gitDiff('origin/HEAD...main')",
+    );
+    const end = await runIn(repo);
+    expect({
+      status: end.status,
+      stopReason: end.stopReason,
+      namesBinding: (end.message ?? '').includes('diff'),
+    }).toEqual({ status: 'failed', stopReason: 'workflow_failed', namesBinding: true });
   });
-
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('a gitDiff whose right side is not HEAD fails the run with workflow_failed, naming the binding', async () => {
-    await withDiffWorkflow(async (repo) => {
-      edit(
-        join(repo.dir, '.sail'),
-        'workflows/ticket-to-pr/stages/see-diff/stage.ts',
-        "gitDiff('origin/HEAD...HEAD')",
-        "gitDiff('origin/HEAD...main')",
-      );
-      const end = await runIn(repo);
-      expect({
-        status: end.status,
-        stopReason: end.stopReason,
-        namesBinding: (end.message ?? '').includes('diff'),
-      }).toEqual({ status: 'failed', stopReason: 'workflow_failed', namesBinding: true });
-    });
-  });
+});

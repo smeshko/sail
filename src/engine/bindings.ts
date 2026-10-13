@@ -48,7 +48,8 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
   }
   for (const [key, binding] of Object.entries(consumes)) {
     const given = Object.hasOwn(supplied, key) ? supplied[key] : undefined;
-    if (binding.kind === 'gitDiff' || binding.kind === 'fromStep') {
+    // A gitDiff is resolved by the engine from the run's worktree, so it is supplied like any other binding.
+    if (binding.kind === 'fromStep') {
       problems.push(`'${key}' is a ${binding.kind} binding, which can't be supplied here`);
       continue;
     }
@@ -65,6 +66,8 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
       if (stat === undefined) problems.push(`'${key}': no file at ${given.path}`);
       else if (!stat.isFile()) problems.push(`'${key}': ${given.path} is not a regular file`);
       else planned.push({ key, name: binding.name, write: { copy: given.path } });
+    } else if (binding.kind === 'gitDiff' && given.kind === 'gitDiff') {
+      planned.push({ key, name: `${key}.patch`, write: { text: given.patch } });
     } else if (binding.kind === 'value' && given.kind === 'value') {
       const checked = checkValue(binding, given.value);
       if (!checked.ok) {

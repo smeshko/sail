@@ -37,7 +37,9 @@ import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
-import type { RunRef } from '../ports/workspace';
+import type { RunRef, WorkspacePort } from '../ports/workspace';
+import type { Consumes } from '../sdk/bindings';
+import type { Supplied } from './bindings';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
@@ -167,6 +169,34 @@ function resultOf(result: unknown): { result?: unknown } | { message: string } {
   } catch (error) {
     return { message: `the workflow's result can't be written as JSON: ${messageOf(error)}` };
   }
+}
+
+/**
+ * Resolves the call's `gitDiff` bindings from its workspace, since the workflow never supplies one. `<base>...HEAD` is the
+ * patch of the workspace's edits since `base`: a range whose right side is not HEAD, or that doesn't resolve, is a problem.
+ */
+async function resolveGitDiffs(
+  consumes: Consumes,
+  supplied: Readonly<Record<string, Supplied>>,
+  workspace: WorkspacePort,
+  path: string,
+): Promise<{ supplied: Record<string, Supplied> } | { problem: string }> {
+  const bound: Record<string, Supplied> = { ...supplied };
+  for (const [key, binding] of Object.entries(consumes)) {
+    if (binding.kind !== 'gitDiff') continue;
+    const range = /^(.+)\.\.\.HEAD$/.exec(binding.range);
+    if (range === null) return { problem: `'${key}': gitDiff('${binding.range}') must name a range ending in ...HEAD` };
+    try {
+      bound[key] = {
+        kind: 'gitDiff',
+        patch: (await workspace.diff(path, range[1] ?? '')).patch,
+        from: `gitDiff('${binding.range}')`,
+      };
+    } catch (error) {
+      return { problem: `'${key}': gitDiff('${binding.range}') can't be resolved: ${messageOf(error)}` };
+    }
+  }
+  return { supplied: bound };
 }
 
 /** Opens a run of the workflow and runs it to its end. A refusal to open passes through, and nothing is written. */
@@ -323,7 +353,14 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       if (reached) return await suspended('until', `stopped after ${last}, as --until asked`);
       running = call.key;
       const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
-      const problems = callProblems(call.definition, call.supplied, agent);
+      const bound = await resolveGitDiffs(
+        call.definition.consumes,
+        call.supplied,
+        opened.adapters.workspace,
+        opened.workspace,
+      );
+      if ('problem' in bound) return await failed('workflow_failed', `${call.key} can't run: ${bound.problem}`);
+      const problems = callProblems(call.definition, bound.supplied, agent);
       if (problems.length > 0) return await failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
       if (signal?.aborted) return await interrupted(`stopped before ${call.key}`);
       const { result, paths } = await runCall({
@@ -336,7 +373,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         stageFile: call.stageFile,
         workspace: opened.workspace,
         config: join(sailDir, 'project.yaml'),
-        supplied: call.supplied,
+        supplied: bound.supplied,
         ...(signal === undefined ? {} : { signal }),
         ...(agent === undefined ? {} : { agent }),
         emit: bus.emit,
