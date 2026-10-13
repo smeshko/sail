@@ -1,8 +1,10 @@
 // The Linear TicketSource: the adapter over Linear's GraphQL API, and its adapter definition, which the built-in
 // registration hands the registry (DECISIONS §1 to §6).
 // Stub: the definition is written in TASK-006.
+
+import { z } from 'zod';
 import type { ProviderEvent } from '../../../events/types';
-import type { AdapterDefinition } from '../../../ports/adapter';
+import type { AdapterDefinition, AdapterOptions } from '../../../ports/adapter';
 import { PortError } from '../../../ports/errors';
 import type { ProviderOptions, TicketSource } from '../../../ports/ticket-source';
 import { type Moved, type Ticket, TicketMove, type TicketState } from '../../../ports/types';
@@ -194,9 +196,35 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   };
 }
 
+const LinearOptions = z.strictObject({
+  team: z.string().regex(/^[A-Z][A-Z0-9]*$/, 'team must be an upper-case team key, such as ADW'),
+  inReviewState: z.string().min(1).optional(),
+});
+
+/** Parses the adapter's options with the strict object, or throws naming the offending option. */
+function parseOptions(options: AdapterOptions): z.infer<typeof LinearOptions> {
+  const parsed = LinearOptions.safeParse(options);
+  if (parsed.success) return parsed.data;
+  const issue = parsed.error.issues[0];
+  const option = issue?.code === 'unrecognized_keys' ? issue.keys.join(', ') : issue?.path.join('.');
+  throw new Error(`linear ticketSource: option ${option}: ${issue?.message}`);
+}
+
 /** The built-in `linear` ticket source: its options, its credential and its creation. */
 export const linearAdapters: { ticketSource: AdapterDefinition<TicketSource> } = {
   ticketSource: {
-    create: () => createLinearTicketSource({ apiKey: '', team: '' }),
+    requires: () => ['LINEAR_API_KEY'],
+    create(options, context) {
+      const { team, inReviewState } = parseOptions(options);
+      const apiKey = context.env.LINEAR_API_KEY;
+      if (apiKey === undefined) throw new Error('LINEAR_API_KEY is not set');
+      return createLinearTicketSource({
+        apiKey,
+        team,
+        ...(inReviewState === undefined ? {} : { inReviewState }),
+        ...(context.emit === undefined ? {} : { emit: context.emit }),
+        ...(context.now === undefined ? {} : { now: context.now }),
+      });
+    },
   },
 };

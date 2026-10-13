@@ -43,58 +43,43 @@ async function resolveSource(options: object, env: Env) {
 
 const LINEAR = { use: 'linear', team: 'ADW' };
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('with no LINEAR_API_KEY, linear is one issue at its port, and nothing is created or requested', async () => {
-    const result = await resolveSource(LINEAR, {});
-    expect(result).toEqual({
-      issues: [{ path: '/adapters/ticketSource', message: 'needs LINEAR_API_KEY, which is not set' }],
-    });
-    expect(world.requests).toEqual([]);
+test('with no LINEAR_API_KEY, linear is one issue at its port, and nothing is created or requested', async () => {
+  const result = await resolveSource(LINEAR, {});
+  expect(result).toEqual({
+    issues: [{ path: '/adapters/ticketSource', message: 'needs LINEAR_API_KEY, which is not set' }],
   });
+  expect(world.requests).toEqual([]);
+});
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('with the key set, linear resolves as a built-in ticket source, and its entry names no options', async () => {
-    const resolved = await resolveSource(LINEAR, { LINEAR_API_KEY: KEY });
-    expect(resolved).toMatchObject({
-      ports: { ticketSource: { name: 'linear' } },
-      entries: { ticketSource: { use: 'linear', origin: 'builtin' } },
-    });
+test('with the key set, linear resolves as a built-in ticket source, and its entry names no options', async () => {
+  const resolved = await resolveSource(LINEAR, { LINEAR_API_KEY: KEY });
+  expect(resolved).toMatchObject({
+    ports: { ticketSource: { name: 'linear' } },
+    entries: { ticketSource: { use: 'linear', origin: 'builtin' } },
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an option linear does not take is refused, and the issue names it', async () => {
-    const result = await resolveSource({ ...LINEAR, foo: 1 }, { LINEAR_API_KEY: KEY });
-    expect('issues' in result ? result.issues.map((issue) => [issue.path, issue.message]) : []).toEqual([
-      ['/adapters/ticketSource', expect.stringContaining('foo')],
-    ]);
-  });
+test('an option linear does not take is refused, and the issue names it', async () => {
+  const result = await resolveSource({ ...LINEAR, foo: 1 }, { LINEAR_API_KEY: KEY });
+  expect('issues' in result ? result.issues.map((issue) => [issue.path, issue.message]) : []).toEqual([
+    ['/adapters/ticketSource', expect.stringContaining('foo')],
+  ]);
+});
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each([
-    ['a missing team', { use: 'linear' }],
-    ['a lower-case team', { use: 'linear', team: 'adw' }],
-  ])('%s is one issue at the ticket source, naming the team', async (_, options) => {
-    const result = await resolveSource(options, { LINEAR_API_KEY: KEY });
-    expect('issues' in result ? result.issues.map((issue) => issue.path) : []).toEqual(['/adapters/ticketSource']);
-    expect('issues' in result ? result.issues[0]?.message : '').toContain('team');
-  });
+test.each([
+  ['a missing team', { use: 'linear' }],
+  ['a lower-case team', { use: 'linear', team: 'adw' }],
+])('%s is one issue at the ticket source, naming the team', async (_, options) => {
+  const result = await resolveSource(options, { LINEAR_API_KEY: KEY });
+  expect('issues' in result ? result.issues.map((issue) => issue.path) : []).toEqual(['/adapters/ticketSource']);
+  expect('issues' in result ? result.issues[0]?.message : '').toContain('team');
+});
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('creating the linear ticket source sends no request', async () => {
-    const resolved = await resolveSource(LINEAR, { LINEAR_API_KEY: KEY });
-    expect(resolved).toMatchObject({ ports: { ticketSource: { name: 'linear' } } });
-    expect(world.requests).toEqual([]);
-  });
+test('creating the linear ticket source sends no request', async () => {
+  const resolved = await resolveSource(LINEAR, { LINEAR_API_KEY: KEY });
+  expect(resolved).toMatchObject({ ports: { ticketSource: { name: 'linear' } } });
+  expect(world.requests).toEqual([]);
+});
 
 // A guard, not a red test: a project.yaml that names linear is a valid config, so `sail check` accepts it. The check
 // does not resolve adapters (the registry's checks are the tests above and the end-to-end run's), so this proves the
