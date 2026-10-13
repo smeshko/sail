@@ -149,33 +149,30 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     }).toEqual({ empty: false, stable: true, absolute: false });
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: a workspace is a detached checkout of the base, in the run directory, and emits workspace:created`, async () => {
-      const { adapter, world, capture } = await start();
-      const r1 = await world.run('r1');
-      const workspace = await adapter.create(r1, { base: world.base, branch: BRANCH });
-      expect(parseIssues(Workspace, workspace)).toEqual([]);
-      const { path, branch, baseSha } = workspace;
-      expect({ path, branch, baseSha }).toEqual({
-        path: join(r1.runDir, 'workspace'),
+  test(`${label}: a workspace is a detached checkout of the base, in the run directory, and emits workspace:created`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = await world.run('r1');
+    const workspace = await adapter.create(r1, { base: world.base, branch: BRANCH });
+    expect(parseIssues(Workspace, workspace)).toEqual([]);
+    const { path, branch, baseSha } = workspace;
+    expect({ path, branch, baseSha }).toEqual({
+      path: join(r1.runDir, 'workspace'),
+      branch: BRANCH,
+      baseSha: world.baseSha,
+    });
+    expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
+    expect(world.git(path, 'symbolic-ref', '-q', 'HEAD')).toEqual({ code: 1, stdout: '' });
+    expect(timed(capture.events)).toEqual([
+      {
+        type: 'workspace:created',
+        path: relative(world.clone, path),
         branch: BRANCH,
         baseSha: world.baseSha,
-      });
-      expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
-      expect(world.git(path, 'symbolic-ref', '-q', 'HEAD')).toEqual({ code: 1, stdout: '' });
-      expect(timed(capture.events)).toEqual([
-        {
-          type: 'workspace:created',
-          path: relative(world.clone, path),
-          branch: BRANCH,
-          baseSha: world.baseSha,
-          durationMs: 'ms',
-        },
-      ]);
-      expectValidEvents(capture);
-    });
+        durationMs: 'ms',
+      },
+    ]);
+    expectValidEvents(capture);
+  });
 
   test(`${label}: two runs hold workspaces for the same branch name, since neither checks it out`, async () => {
     const { adapter, world } = await start();
@@ -189,109 +186,91 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     ]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: diff gives the working tree's edits against the base`, async () => {
-      const { adapter, world } = await start();
-      const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
-      writeFileSync(join(workspace.path, world.tracked), 'an edit in the workspace\n', { flag: 'a' });
-      const diff = await adapter.diff(workspace.path, workspace.baseSha);
-      expect(parseIssues(Diff, diff)).toEqual([]);
-      expect(diff.patch).toContain(`+++ b/${world.tracked}`);
-      expect(diff.patch).toContain('+an edit in the workspace');
-    });
+  test(`${label}: diff gives the working tree's edits against the base`, async () => {
+    const { adapter, world } = await start();
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    writeFileSync(join(workspace.path, world.tracked), 'an edit in the workspace\n', { flag: 'a' });
+    const diff = await adapter.diff(workspace.path, workspace.baseSha);
+    expect(parseIssues(Diff, diff)).toEqual([]);
+    expect(diff.patch).toContain(`+++ b/${world.tracked}`);
+    expect(diff.patch).toContain('+an edit in the workspace');
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: diff's patch is whole, so it applies to a fresh checkout of the base`, async () => {
-      const { adapter, world } = await start();
-      const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
-      writeFileSync(join(workspace.path, world.tracked), 'an edit, then a blank line\n\n', { flag: 'a' });
-      const { patch } = await adapter.diff(workspace.path, workspace.baseSha);
-      const fresh = await adapter.create(await world.run('r2'), { base: world.base, branch: BRANCH });
-      const file = join(world.runsDir, 'r2', 'edit.patch');
-      writeFileSync(file, patch);
-      expect(world.git(fresh.path, 'apply', '--check', file)).toEqual({ code: 0, stdout: '' });
-    });
+  test(`${label}: diff's patch is whole, so it applies to a fresh checkout of the base`, async () => {
+    const { adapter, world } = await start();
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    writeFileSync(join(workspace.path, world.tracked), 'an edit, then a blank line\n\n', { flag: 'a' });
+    const { patch } = await adapter.diff(workspace.path, workspace.baseSha);
+    const fresh = await adapter.create(await world.run('r2'), { base: world.base, branch: BRANCH });
+    const file = join(world.runsDir, 'r2', 'edit.patch');
+    writeFileSync(file, patch);
+    expect(world.git(fresh.path, 'apply', '--check', file)).toEqual({ code: 0, stdout: '' });
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: diff includes the files the run created, so its patch creates them, but not the ignored ones`, async () => {
-      const { adapter, world } = await start();
-      const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
-      mkdirSync(join(workspace.path, 'src', 'new dir'), { recursive: true });
-      writeFileSync(join(workspace.path, 'src', 'new dir', 'created.ts'), 'export const created = true;\n');
-      writeFileSync(join(workspace.path, '.gitignore'), '\n*.log\n', { flag: 'a' });
-      writeFileSync(join(workspace.path, 'run.log'), 'noise\n');
-      const { patch } = await adapter.diff(workspace.path, workspace.baseSha);
-      expect(patch).toContain('+++ b/src/new dir/created.ts');
-      expect(patch).not.toContain('run.log');
-      const fresh = await adapter.create(await world.run('r2'), { base: world.base, branch: BRANCH });
-      const file = join(world.runsDir, 'r2', 'created.patch');
-      writeFileSync(file, patch);
-      expect(world.git(fresh.path, 'apply', file)).toEqual({ code: 0, stdout: '' });
-    });
+  test(`${label}: diff includes the files the run created, so its patch creates them, but not the ignored ones`, async () => {
+    const { adapter, world } = await start();
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    mkdirSync(join(workspace.path, 'src', 'new dir'), { recursive: true });
+    writeFileSync(join(workspace.path, 'src', 'new dir', 'created.ts'), 'export const created = true;\n');
+    writeFileSync(join(workspace.path, '.gitignore'), '\n*.log\n', { flag: 'a' });
+    writeFileSync(join(workspace.path, 'run.log'), 'noise\n');
+    const { patch } = await adapter.diff(workspace.path, workspace.baseSha);
+    expect(patch).toContain('+++ b/src/new dir/created.ts');
+    expect(patch).not.toContain('run.log');
+    const fresh = await adapter.create(await world.run('r2'), { base: world.base, branch: BRANCH });
+    const file = join(world.runsDir, 'r2', 'created.patch');
+    writeFileSync(file, patch);
+    expect(world.git(fresh.path, 'apply', file)).toEqual({ code: 0, stdout: '' });
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: diff is three-dot: from's commits that HEAD lacks are not reverted, only the workspace's own edits show`, async () => {
-      const { adapter, world } = await start();
-      const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
-      const landed = commitOn(world, world.baseSha, 'landed on the base\n');
-      writeFileSync(join(workspace.path, 'run.txt'), 'the run\n');
-      const { patch } = await adapter.diff(workspace.path, landed);
-      expect([patch.includes('+++ b/run.txt'), patch.includes(world.tracked)]).toEqual([true, false]);
-    });
+  test(`${label}: diff is three-dot: from's commits that HEAD lacks are not reverted, only the workspace's own edits show`, async () => {
+    const { adapter, world } = await start();
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    const landed = commitOn(world, world.baseSha, 'landed on the base\n');
+    writeFileSync(join(workspace.path, 'run.txt'), 'the run\n');
+    const { patch } = await adapter.diff(workspace.path, landed);
+    expect([patch.includes('+++ b/run.txt'), patch.includes(world.tracked)]).toEqual([true, false]);
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {
-      const { adapter, world, capture } = await start();
-      const r1 = await world.run('r1');
-      const r2 = await world.run('r2');
-      const removed = await adapter.create(r1, { base: world.base, branch: BRANCH });
-      const kept = await adapter.create(r2, { base: world.base, branch: BRANCH });
-      const results = [await adapter.release(r1, false), await adapter.release(r2, true)];
-      expect(results.flatMap((result) => parseIssues(WorkspaceReleased, result))).toEqual([]);
-      expect(results.map(bare)).toEqual([
-        { path: removed.path, kept: false },
-        { path: kept.path, kept: true },
-      ]);
-      expect([existsSync(removed.path), existsSync(kept.path)]).toEqual([false, true]);
-      // The removed worktree is gone from the repository's list too, not only from the disk.
-      const listed = world.git(kept.path, 'worktree', 'list', '--porcelain').stdout.split('\n');
-      expect([listed.includes(`worktree ${removed.path}`), listed.includes(`worktree ${kept.path}`)]).toEqual([
-        false,
-        true,
-      ]);
-      expect(capture.events.filter((event) => event.type === 'workspace:released')).toEqual([
-        { type: 'workspace:released', path: relative(world.clone, removed.path), kept: false },
-        { type: 'workspace:released', path: relative(world.clone, kept.path), kept: true },
-      ]);
-      expectValidEvents(capture);
-    });
+  test(`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = await world.run('r1');
+    const r2 = await world.run('r2');
+    const removed = await adapter.create(r1, { base: world.base, branch: BRANCH });
+    const kept = await adapter.create(r2, { base: world.base, branch: BRANCH });
+    const results = [await adapter.release(r1, false), await adapter.release(r2, true)];
+    expect(results.flatMap((result) => parseIssues(WorkspaceReleased, result))).toEqual([]);
+    expect(results.map(bare)).toEqual([
+      { path: removed.path, kept: false },
+      { path: kept.path, kept: true },
+    ]);
+    expect([existsSync(removed.path), existsSync(kept.path)]).toEqual([false, true]);
+    // The removed worktree is gone from the repository's list too, not only from the disk.
+    const listed = world.git(kept.path, 'worktree', 'list', '--porcelain').stdout.split('\n');
+    expect([listed.includes(`worktree ${removed.path}`), listed.includes(`worktree ${kept.path}`)]).toEqual([
+      false,
+      true,
+    ]);
+    expect(capture.events.filter((event) => event.type === 'workspace:released')).toEqual([
+      { type: 'workspace:released', path: relative(world.clone, removed.path), kept: false },
+      { type: 'workspace:released', path: relative(world.clone, kept.path), kept: true },
+    ]);
+    expectValidEvents(capture);
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-004
-  test
-    .skip // TDD-PENDING TASK-004
-    (`${label}: sweep removes the workspaces of completed and failed runs, and keeps the rest`, async () => {
-      const { adapter, world } = await start();
-      const statuses: (Status | 'none')[] = ['completed', 'failed', 'running', 'suspended', 'none'];
-      const paths: string[] = [];
-      for (const status of statuses) {
-        const run = await world.run(`r-${status}`, status);
-        paths.push((await adapter.create(run, { base: world.base, branch: BRANCH })).path);
-      }
-      const swept = await adapter.sweep(world.runsDir);
-      expect(parseIssues(Swept, swept)).toEqual([]);
-      expect(swept.paths).toEqual(paths.slice(0, 2).sort());
-      expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
-    });
+  test(`${label}: sweep removes the workspaces of completed and failed runs, and keeps the rest`, async () => {
+    const { adapter, world } = await start();
+    const statuses: (Status | 'none')[] = ['completed', 'failed', 'running', 'suspended', 'none'];
+    const paths: string[] = [];
+    for (const status of statuses) {
+      const run = await world.run(`r-${status}`, status);
+      paths.push((await adapter.create(run, { base: world.base, branch: BRANCH })).path);
+    }
+    const swept = await adapter.sweep(world.runsDir);
+    expect(parseIssues(Swept, swept)).toEqual([]);
+    expect(swept.paths).toEqual(paths.slice(0, 2).sort());
+    expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
+  });
 
   // biome-ignore format: TDD-PENDING TASK-009
   test

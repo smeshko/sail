@@ -1,13 +1,14 @@
 // The git-worktree Workspace adapter: one detached worktree per run, built from `origin/HEAD` of the clone, with branch
 // leases kept machine-wide on origin's remote key (ADR-0018).
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
-import type { Swept, Workspace, WorkspaceCapabilities } from '../../ports/types';
+import type { Workspace, WorkspaceCapabilities } from '../../ports/types';
 import type { RunRef, WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
+import { clonePath, diffFrom, removeWorktree, sweepRuns } from '../worktree-git';
 import { git } from './git';
 import { remoteKeyOf } from './remote';
 
@@ -39,6 +40,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
   const now = () => options.now?.() ?? new Date();
   const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
   const { repo, env } = options;
+  const runGit = (cwd: string, args: readonly string[]) => git(cwd, [...args], env);
   return {
     name: 'git-worktree',
     async lease(remote, branch, holder) {
@@ -76,21 +78,22 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       await excludeRunsDir(repo, env);
       emit({
         type: 'workspace:created',
-        path: relative(resolve(repo), resolve(path)),
+        path: clonePath(repo, path),
         branch: from.branch,
         baseSha,
         durationMs: Math.max(0, Date.now() - started),
       });
       return { path, branch: from.branch, baseSha, raw: { fetched, resolved, added } };
     },
-    async diff() {
-      return { patch: '', raw: null };
+    diff: (path, from) => diffFrom(runGit, path, from),
+    async release(run, keep) {
+      const path = join(run.runDir, 'workspace');
+      const raw = keep ? null : await removeWorktree(runGit, repo, 'release', path);
+      emit({ type: 'workspace:released', path: clonePath(repo, path), kept: keep });
+      return { path, kept: keep, raw };
     },
-    async release() {
-      return { path: '', kept: false, raw: null };
-    },
-    async sweep(): Promise<Swept> {
-      return { paths: [], raw: null };
+    async sweep(runsDir) {
+      return { paths: await sweepRuns(runGit, repo, runsDir), raw: null };
     },
     remoteKey: (clone) => remoteKeyOf(clone, env),
     async isBasedOn() {
