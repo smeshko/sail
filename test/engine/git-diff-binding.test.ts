@@ -63,7 +63,7 @@ echo '{}'
       write(
         sail,
         'workflows/ticket-to-pr/stages/see-diff/stage.ts',
-        `// see-diff: counts the lines of the run's diff that name the edit.
+        `// see-diff: counts the files of the run's diff that are the edit, one diff --git header each.
 import { gitDiff, script, z } from 'sail';
 
 export const seeDiff = script('see-diff', {
@@ -78,7 +78,7 @@ export const seeDiff = script('see-diff', {
         'workflows/ticket-to-pr/stages/see-diff/run.sh',
         `#!/usr/bin/env bash
 set -euo pipefail
-names=$(grep -c 'edit.txt' "$INPUT_DIFF" || true)
+names=$(grep -c '^diff --git .*edit.txt' "$INPUT_DIFF" || true)
 echo "{\\"names\\":$names}"
 `,
       );
