@@ -556,6 +556,7 @@ const OPENING = [
   'workspace:leased',
   'ticket:claimed',
   'ticket:commented',
+  'workspace:created',
   'intake:start intake#1',
   'ticket:fetched intake#1',
   'output:validated intake#1',
@@ -719,11 +720,12 @@ test("a forced run of a ticket that is not unstarted reports the move in the cla
     const end = await ran(repo.dir, { ticket: 'FAKE-4', force: true });
     expect([end.status, end.runId.slice(0, 7)]).toEqual(['completed', 'FAKE-4-']);
     const list = events(end.dir);
-    expect(outline(list.slice(0, 5))).toEqual([
+    expect(outline(list.slice(0, 6))).toEqual([
       'run:start',
       'workspace:leased',
       'ticket:updated',
       'ticket:commented',
+      'workspace:created',
       'intake:start intake#1',
     ]);
     const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-4' };

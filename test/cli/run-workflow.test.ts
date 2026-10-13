@@ -203,7 +203,7 @@ test("sail FAKE-1 -v adds each command and the tail of every script, and -vv add
     detail('spec#1', 'stdout.log'),
     detail('spec#1', '│ {"summary":"Add a greeting.","tasks":[{"title":"Add greet()","files":["src/greet.ts"]}]}'),
   ].join('\n');
-  expect(verbose.view).toContain(`\n${detail('tests#1', '$ .sail/stages/tests/run.sh')}\n`);
+  expect(verbose.view).toContain(`\n${detail('tests#1', '$ ../../../.sail/stages/tests/run.sh')}\n`);
   expect(verbose.view).toContain(`\n${specTail}\n`);
   expect(verbose.view).not.toContain('journal line');
   expect(verbose.view).not.toContain('ticket:claimed');
@@ -214,12 +214,19 @@ test("sail FAKE-1 -v adds each command and the tail of every script, and -vv add
   expect(trace.view).toContain(`\n${detail('spec#1', 'journal line 2')}\n`);
   // The lease and the claim belong to no call: their events print as generic lines with no key, right under the header.
   const [traced] = trace.runs;
-  expect(trace.view.split('\n').slice(1, 5)).toEqual([
+  const lines = trace.view.split('\n');
+  expect(lines.slice(1, 4)).toEqual([
     `${' '.repeat(15)}· workspace:leased {"remote":"fake","branch":"sail/FAKE-1"}`,
     `${' '.repeat(15)}· ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}`,
     `${' '.repeat(15)}· ticket:commented {"ticketKey":"FAKE-1","body":"sail run ${traced} started"}`,
-    head('intake#1', '▶ intake ticket · builtin'),
   ]);
+  // The worktree the run made: its base commit and duration differ from run to run, so only their shape is checked.
+  expect(lines[4]).toMatch(
+    new RegExp(
+      `^ {15}· workspace:created \\{"path":".sail-runs/${traced}/workspace","branch":"sail/FAKE-1","baseSha":"[0-9a-f]{40}","durationMs":\\d+\\}$`,
+    ),
+  );
+  expect(lines[5]).toBe(head('intake#1', '▶ intake ticket · builtin'));
 });
 
 test('verbosityOf maps no flag, -q, -v, -vv and -vvv to normal, quiet, verbose, trace and trace', () => {
@@ -364,11 +371,12 @@ test('sail FAKE-1 claims the ticket for its one run: run.json records nothing fo
       { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
       { claimed: true, state: IN_PROGRESS },
     ]);
-    expect(events.slice(0, 5).map((event) => event.type)).toEqual([
+    expect(events.slice(0, 6).map((event) => event.type)).toEqual([
       'run:start',
       'workspace:leased',
       'ticket:claimed',
       'ticket:commented',
+      'workspace:created',
       'intake:start',
     ]);
     expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${runId} started`]);

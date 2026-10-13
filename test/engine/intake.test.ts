@@ -494,11 +494,12 @@ test("its events start with run:start and what the claim did, with no key, then 
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ticketRun(repo.dir);
     const list = events(end.dir);
-    expect(outline(list.slice(0, 12))).toEqual([
+    expect(outline(list.slice(0, 13))).toEqual([
       'run:start',
       'workspace:leased',
       'ticket:claimed',
       'ticket:commented',
+      'workspace:created',
       'intake:start intake#1',
       'ticket:fetched intake#1',
       'output:validated intake#1',
@@ -508,11 +509,11 @@ test("its events start with run:start and what the claim did, with no key, then 
       'journal:append intake#1',
       'stage:start spec#1',
     ]);
-    expect(list[4]).toMatchObject({ intake: 'ticket', kind: 'builtin', origin: 'builtin' });
+    expect(list[5]).toMatchObject({ intake: 'ticket', kind: 'builtin', origin: 'builtin' });
     // The intake fetched the ticket after the claim, so it counts the claim's comment beside the ticket's own.
-    expect(list[5]).toMatchObject({ ticketKey: 'FAKE-1', comments: 2, links: 0, attachments: 0 });
+    expect(list[6]).toMatchObject({ ticketKey: 'FAKE-1', comments: 2, links: 0, attachments: 0 });
     expect(list.filter((event) => event.type === 'ticket:fetched')).toHaveLength(1);
-    expect(list[10]).toMatchObject({ line: 1, outcome: 'passed' });
+    expect(list[11]).toMatchObject({ line: 1, outcome: 'passed' });
     const routes = list.flatMap((event) => (event.type === 'workflow:route' ? [event.at] : []));
     expect(routes).toEqual(['spec#1', 'implement#1', 'tests#1', 'self-review#1', 'publish#1']);
     // Five stage calls and the replay that ends the run: neither the claim nor the intake is a replay.

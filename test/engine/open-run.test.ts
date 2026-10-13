@@ -323,7 +323,7 @@ test('openRun creates an empty events.ndjson beside the journal, and its events 
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const run = await opened(repo.dir);
-    expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'events.ndjson', 'journal.ndjson', 'run.json']);
+    expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'events.ndjson', 'journal.ndjson', 'run.json', 'workspace']);
     expect(readFileSync(join(run.dir, 'events.ndjson'), 'utf8')).toBe('');
     expect(run.firstSeq).toBe(1);
   });
@@ -612,6 +612,7 @@ test('openRun from a ticket claims it before the run directory exists: run.json 
       { type: 'workspace:leased', remote: 'fake', branch: 'sail/FAKE-1' },
       { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: IN_PROGRESS },
       { type: 'ticket:commented', ticketKey: 'FAKE-1', body },
+      expect.objectContaining({ type: 'workspace:created', branch: 'sail/FAKE-1' }),
     ]);
     const ticket = await ticketIn(repo.dir, 'FAKE-1');
     expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, body]);
@@ -681,7 +682,7 @@ test.each<[string, string, Forced[], boolean, string]>([
       expect([run.header.source, run.header.claim, run.claimed.map((event): string => event.type)]).toEqual([
         { kind: 'ticket', ticketKey: ticket, via: 'cli', forced },
         { claimed, state: IN_PROGRESS },
-        ['workspace:leased', moved, 'ticket:commented'],
+        ['workspace:leased', moved, 'ticket:commented', 'workspace:created'],
       ]);
       expect(readRunHeader(run.dir)).toEqual(run.header);
       const now = await ticketIn(repo.dir, ticket);
@@ -719,7 +720,12 @@ test('forced, a claim that does not take opens the run, which records the state 
     const run = await openStub(repo.dir, { ticket: 'FAKE-1', force: true }, await racing(repo.dir));
     expect(run).toMatchObject({
       header: { source: { forced: ['state'] }, claim: { claimed: false, state: IN_PROGRESS } },
-      claimed: [{ type: 'workspace:leased' }, { type: 'ticket:updated' }, { type: 'ticket:commented' }],
+      claimed: [
+        { type: 'workspace:leased' },
+        { type: 'ticket:updated' },
+        { type: 'ticket:commented' },
+        { type: 'workspace:created' },
+      ],
     });
   });
 });
