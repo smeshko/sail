@@ -5,7 +5,7 @@
 // fixture's own `ticket-to-pr` stays as it is. A run of it starts from `FAKE-1`, which the fake TicketSource holds here
 // as `SEEDED`.
 //
-// The scripts log `<stage>#<call>` to `.stub/executions.log` and sleep when the clone's `.stub/sleep-at` names them, as the stub
+// The scripts log `<stage>#<call>` to `.stub-log/<run>.log` and sleep when the clone's `.stub/sleep-at` names them, as the stub
 // workflow's do, so `setSleepAt()`, `interruptWhenAsleep()`, `stubExecutions()` and `copyRun()` work here too.
 import { chmodSync, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -77,10 +77,8 @@ const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 set -euo pipefail
 CLONE="$(dirname "$(dirname "$SAIL_CONFIG")")"
 CONTROL="$CLONE/.stub"
-mkdir -p "$WORKSPACE/.stub"
-echo "$STAGE#$CALL" >>"$WORKSPACE/.stub/executions.log"
 mkdir -p "$CLONE/.stub-log"
-echo "$STAGE#$CALL" >>"$CLONE/.stub-log/$RUN_ID.log"
+echo "$STAGE#$CALL $WORKSPACE" >>"$CLONE/.stub-log/$RUN_ID.log"
 if [ -f "$CONTROL/sleep-at" ] && [ "$(cat "$CONTROL/sleep-at")" = "$STAGE#$CALL" ]; then
   rm "$CONTROL/sleep-at"
   sleep 30 &

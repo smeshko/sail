@@ -1,7 +1,7 @@
 // writeStub(): a script-only `ticket-to-pr` written into a test's temp repository. It has the fixture workflow's shape,
 // spec, a fix loop of implement and tests, self-review and publish, with every stage a script, so a whole run needs no
 // harness. Its tests fail until the call a threshold names, and every script logs `<stage>#<call>` to
-// `.stub/executions.log`, which proves what ran.
+// `.stub-log/<run>.log`, which proves what ran.
 //
 // A run of it starts from a ticket: `.sail/fake/tickets.json` seeds the fake TicketSource with `STUB_TICKETS`, `spec`
 // consumes the brief the built-in intake leaves, and the workflow's body counts each time it is entered, so a test can
@@ -97,10 +97,8 @@ const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 set -euo pipefail
 CLONE="$(dirname "$(dirname "$SAIL_CONFIG")")"
 CONTROL="$CLONE/.stub"
-mkdir -p "$WORKSPACE/.stub"
-echo "$STAGE#$CALL" >>"$WORKSPACE/.stub/executions.log"
 mkdir -p "$CLONE/.stub-log"
-echo "$STAGE#$CALL" >>"$CLONE/.stub-log/$RUN_ID.log"
+echo "$STAGE#$CALL $WORKSPACE" >>"$CLONE/.stub-log/$RUN_ID.log"
 if [ -f "$CONTROL/sleep-at" ] && [ "$(cat "$CONTROL/sleep-at")" = "$STAGE#$CALL" ]; then
   rm "$CONTROL/sleep-at"
   sleep 30 &
@@ -433,8 +431,8 @@ export function copyRun(from: string, to: string): void {
 
 /**
  * What the stub's scripts actually ran, one `<stage>#<call>` per line, every run of the repository in id order. Each
- * script appends its line to `<repo>/.stub-log/<run>.log` as well as to the run's worktree: the log outlives the worktree,
- * which a completed run removes (TASK-008).
+ * script appends `<stage>#<call> <WORKSPACE>` to `<repo>/.stub-log/<run>.log`: the log is in the clone, so it outlives the
+ * worktree a completed run removes (TASK-008), and stays out of the worktree's own diff.
  */
 export function stubExecutions(repoDir: string): string[] {
   const logs = join(repoDir, '.stub-log');
@@ -442,5 +440,6 @@ export function stubExecutions(repoDir: string): string[] {
   return readdirSync(logs)
     .sort()
     .flatMap((file) => readFileSync(join(logs, file), 'utf8').split('\n'))
-    .filter((line) => line !== '');
+    .filter((line) => line !== '')
+    .map((line) => line.split(' ')[0] ?? '');
 }
