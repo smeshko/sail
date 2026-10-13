@@ -14,6 +14,8 @@ const REMOTE = 'fake://codehost/fixture';
 const BRANCH = 'sail/FAKE-1';
 const NOW = new Date('2026-09-29T09:00:00.000Z');
 const LATER = new Date('2026-09-29T10:00:00.000Z');
+/** A pid no process has (macOS and Linux both stop well below it). */
+const DEAD_PID = 999999;
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -83,7 +85,8 @@ test('a second run is refused while the first is running, and told who holds the
 
 test('the same run leasing again renews its lease with its new pid and time', () => {
   const dir = tempDir();
-  const r1 = run('r1', process.pid, 'suspended', 'interrupted');
+  // A suspended run's process has exited, so its lease names a pid that is no longer alive.
+  const r1 = run('r1', DEAD_PID, 'suspended', 'interrupted');
   takeLease(dir, REMOTE, BRANCH, r1, NOW);
   const resumed = { ...r1, pid: process.ppid };
   expect(bare(takeLease(dir, REMOTE, BRANCH, resumed, LATER))).toEqual({
@@ -91,6 +94,16 @@ test('the same run leasing again renews its lease with its new pid and time', ()
     lease: leaseOf(resumed, LATER),
   });
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(resumed, LATER));
+});
+
+test("a second resume is refused while the first one's lease is written but its STATUS is not yet running", () => {
+  const dir = tempDir();
+  const first = run('r1', process.pid, 'suspended', 'interrupted');
+  takeLease(dir, REMOTE, BRANCH, first, NOW);
+  const second = { ...first, pid: process.ppid };
+  const refused = takeLease(dir, REMOTE, BRANCH, second, LATER);
+  expect([refused.leased, refused.leased ? undefined : refused.holder.pid]).toEqual([false, process.pid]);
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(first, NOW));
 });
 
 test('the same run leasing again from another process is refused while the first one still runs, and keeps its lease', () => {

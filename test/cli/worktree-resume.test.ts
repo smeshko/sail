@@ -56,6 +56,10 @@ async function suspendedInWorktree(check: (repo: TempRepo, runId: string) => Pro
       edit(sail, 'project.yaml', 'workspace: { use: fake }', 'workspace: { use: git-worktree }');
       const stopped = await runCaptured(['FAKE-1', '--until', 'tests'], repo.dir, { env: repo.env });
       expect(stopped.code).toBe(EXIT_SUSPENDED);
+      // `runCaptured` runs the suspending sail in this process, which then stays alive. A real suspended run's process has
+      // exited, so its lease names a pid no process has: the lease is rewritten to one, as the exit would have left it.
+      const file = leaseFileUnder(repo.env.HOME ?? '');
+      writeFileSync(file, readFileSync(file, 'utf8').replace(/"pid": ?\d+/, '"pid": 999999'));
       const [runId] = runIds(repo.dir);
       await check(repo, runId ?? '');
     });
