@@ -73,6 +73,35 @@ test('a step schema with its own $id keeps its references, and literal data that
   }).toEqual({ nested: true, badChild: false, literal: true });
 });
 
+test('an empty $id or a fragment-only $id is no new resource, and a named fragment still resolves inside the envelope', () => {
+  // review #3.2: only a non-empty $id that is not a bare fragment opens a scope; a named fragment is not a JSON pointer.
+  const EMPTY_ID = {
+    $id: '',
+    type: 'object',
+    properties: { summary: { type: 'string' }, children: { type: 'array', items: { $ref: '#' } } },
+    required: ['summary'],
+    additionalProperties: false,
+  };
+  const FRAGMENT_ID = { ...EMPTY_ID, $id: '#tree' };
+  const NAMED = {
+    type: 'object',
+    properties: { value: { $ref: '#value' } },
+    required: ['value'],
+    additionalProperties: false,
+    definitions: { Value: { $id: '#value', type: 'string' } },
+  };
+  const nested = { outcome: 'done', output: { summary: 'a', children: [{ summary: 'b', children: [] }] } };
+  const empty = new Ajv({ strict: true }).compile(submissionSchema(EMPTY_ID));
+  const fragment = new Ajv({ strict: true }).compile(submissionSchema(FRAGMENT_ID));
+  const named = new Ajv({ strict: true }).compile(submissionSchema(NAMED));
+  expect({
+    empty: empty(nested),
+    fragment: fragment(nested),
+    named: named({ outcome: 'done', output: { value: 'x' } }),
+    namedBad: named({ outcome: 'done', output: { value: 3 } }),
+  }).toEqual({ empty: true, fragment: true, named: true, namedBad: false });
+});
+
 test('the envelope is a draft-07 oneOf with exactly two branches, one per outcome', () => {
   const schema = submissionSchema(STEP_SCHEMA) as { oneOf?: { properties?: { outcome?: { const?: string } } }[] };
   expect(schema.oneOf?.map((branch) => branch.properties?.outcome?.const)).toEqual(['done', 'blocked']);
