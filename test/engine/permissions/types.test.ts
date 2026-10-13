@@ -13,10 +13,7 @@ function incompleteCalls(): ToolCall[] {
 }
 void incompleteCalls;
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('RULES holds the eleven rules and the nine deny rules, in D15 order', () => {
+test('RULES holds the eleven rules and the nine deny rules, in D15 order', () => {
   expect(RULES).toEqual([
     'tool:not-listed',
     'mcp:not-listed',
@@ -41,10 +38,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('isDenial is true for a denial and false for an allow', () => {
+test('isDenial is true for a denial and false for an allow', () => {
   const denial: Decision = { deny: true, rule: 'tool:not-listed', reason: 'Read is not in the step tools' };
   const allow: Decision = { allow: true };
   expect(isDenial(denial)).toBe(true);

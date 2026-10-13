@@ -24,29 +24,30 @@ export interface Roots {
 }
 
 /** The rule names a denial can carry. Each `deny:<name>` is a rule of the default deny set. */
-export const RULES: readonly Rule[] = [];
+export const RULES = [
+  'tool:not-listed',
+  'mcp:not-listed',
+  'read:outside-roots',
+  'write:outside-roots',
+  'write:not-allowed',
+  'read:not-allowed',
+  'redirect:not-allowed',
+  'path:outside-roots',
+  'command:unparseable',
+  'command:not-listed',
+  'git:outside-roots',
+  'deny:rm-rf',
+  'deny:git-push-force',
+  'deny:git-reset-hard',
+  'deny:git-clean-f',
+  'deny:git-branch-D',
+  'deny:git-checkout',
+  'deny:git-switch',
+  'deny:sudo',
+  'deny:curl-pipe-shell',
+] as const;
 
-export type Rule =
-  | 'tool:not-listed'
-  | 'mcp:not-listed'
-  | 'read:outside-roots'
-  | 'write:outside-roots'
-  | 'write:not-allowed'
-  | 'read:not-allowed'
-  | 'redirect:not-allowed'
-  | 'path:outside-roots'
-  | 'command:unparseable'
-  | 'command:not-listed'
-  | 'git:outside-roots'
-  | 'deny:rm-rf'
-  | 'deny:git-push-force'
-  | 'deny:git-reset-hard'
-  | 'deny:git-clean-f'
-  | 'deny:git-branch-D'
-  | 'deny:git-checkout'
-  | 'deny:git-switch'
-  | 'deny:sudo'
-  | 'deny:curl-pipe-shell';
+export type Rule = (typeof RULES)[number];
 
 /** A refused call: its rule from `RULES` and a readable reason. */
 export interface Denial {
@@ -60,7 +61,7 @@ export type Decision = { readonly allow: true } | Denial;
 
 /** Whether a decision is a denial, narrowing it to `Denial`. */
 export function isDenial(decision: Decision): decision is Denial {
-  return false;
+  return 'deny' in decision;
 }
 
 /**
