@@ -181,6 +181,10 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
   }
   if (commandWord.unsafe) throw new Unparseable('a command name the engine cannot read');
   if (SHELL_STATE.has(argv[0] ?? '')) throw new Unparseable(`${argv[0]} changes the shell's state or runs a file`);
+  // Bash expands `{a,b}` and `{1..3}` into several words, so the argv the deny set reads would not be the one that runs.
+  if (argvWords.some((word) => braceExpands(word.raw))) {
+    throw new Unparseable('a brace expansion the engine does not expand');
+  }
   if (name === 'cd') {
     const next = changeDirectory(walk.roots, args, ctx.cwd);
     if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx, env, writes, reads);
@@ -272,6 +276,12 @@ function insideRoots(roots: Roots, value: string, cwd: string): boolean {
   if (/[$`]/.test(value)) return false;
   const resolved = resolveReal(value, cwd);
   return resolved !== null && rootOf(resolved, roots) !== null;
+}
+
+/** Whether a word has an unquoted brace pair with a comma or a `..` range inside, which bash expands into words. */
+function braceExpands(raw: string): boolean {
+  const unquoted = raw.replace(/'[^']*'|"(?:\\.|[^"\\])*"|\\./g, '');
+  return /\{[^{}\s]*(,|\.\.)[^{}\s]*\}/.test(unquoted);
 }
 
 /** The indexes of a git command's arguments that are the value of a path option, such as `-C ..`. */
