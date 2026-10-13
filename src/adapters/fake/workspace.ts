@@ -126,9 +126,9 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       }
       return { paths: paths.sort(), raw: null };
     },
-    // STUB (tdd-plan): wrong values until TASK-001 and TASK-009 make them real.
+    // The fake's remote is a path, which no event or run file may hold, so every clone reports the same name.
     async remoteKey() {
-      return '';
+      return 'fake';
     },
     async isBasedOn() {
       return false;

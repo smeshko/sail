@@ -115,13 +115,10 @@ test('the fake declares keep and sweep', () => {
 });
 
 // STICKER: the fake's lease remote is the fixed name `fake` for any clone, so its events and run files hold no path.
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("the fake keys its leases on the remote named fake, whatever the clone's path", async () => {
-    const workspace = createFakeWorkspace({ repo: repo().dir });
-    expect([await workspace.remoteKey(repo().dir), await workspace.remoteKey(tempDir())]).toEqual(['fake', 'fake']);
-  });
+test("the fake keys its leases on the remote named fake, whatever the clone's path", async () => {
+  const workspace = createFakeWorkspace({ repo: repo().dir });
+  expect([await workspace.remoteKey(repo().dir), await workspace.remoteKey(tempDir())]).toEqual(['fake', 'fake']);
+});
 
 // STICKER: the engine asks for `origin/HEAD` as the base of every run, and the fake has no origin: it bases on HEAD.
 // biome-ignore format: TDD-PENDING TASK-007
