@@ -25,32 +25,29 @@ const SCRIPTS = {
   'over-turns': { messages: [init(), failure('error_max_turns')] },
 };
 
-// biome-ignore format: TDD-PENDING TASK-007
-describe
-  .skip // TDD-PENDING TASK-007
-  ('claude-code (scripted)', () => {
-    let probe = new Probe();
-    const make = async () => {
-      probe = new Probe();
-      return {
-        adapter: createClaudeCodeHarness({ query: scriptedQuery(SCRIPTS, probe), env: {}, now: () => 0 }),
-        world: {
-          done: requestOf({ key: 'spec#1', prompt: 'done' }),
-          blocked: requestOf({ key: 'review#1', prompt: 'blocked' }),
-          error: requestOf({ key: 'implement#1', prompt: 'error' }),
-          overTurns: requestOf({ key: 'tests#1', prompt: 'over-turns' }),
-        },
-      };
+describe('claude-code (scripted)', () => {
+  let probe = new Probe();
+  const make = async () => {
+    probe = new Probe();
+    return {
+      adapter: createClaudeCodeHarness({ query: scriptedQuery(SCRIPTS, probe), env: {}, now: () => 0 }),
+      world: {
+        done: requestOf({ key: 'spec#1', prompt: 'done' }),
+        blocked: requestOf({ key: 'review#1', prompt: 'blocked' }),
+        error: requestOf({ key: 'implement#1', prompt: 'error' }),
+        overTurns: requestOf({ key: 'tests#1', prompt: 'over-turns' }),
+      },
     };
+  };
 
-    harnessSuite('claude-code (scripted)', make);
+  harnessSuite('claude-code (scripted)', make);
 
-    test('claude-code (scripted): an already-aborted request answers aborted without calling the SDK', async () => {
-      const { adapter, world } = await make();
-      const result = await adapter.run({ ...world.done, signal: AbortSignal.abort() });
-      expect({ message: result.outcome === 'error' ? result.message : undefined, calls: probe.calls.length }).toEqual({
-        message: 'aborted',
-        calls: 0,
-      });
+  test('claude-code (scripted): an already-aborted request answers aborted without calling the SDK', async () => {
+    const { adapter, world } = await make();
+    const result = await adapter.run({ ...world.done, signal: AbortSignal.abort() });
+    expect({ message: result.outcome === 'error' ? result.message : undefined, calls: probe.calls.length }).toEqual({
+      message: 'aborted',
+      calls: 0,
     });
   });
+});
