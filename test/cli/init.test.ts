@@ -372,3 +372,43 @@ test.each([['extra'], ['--force']])(
     });
   },
 );
+
+test('a .gitignore whose write fails half way keeps what it held: the lines are written beside it and renamed over it, and nothing is left beside it', async () => {
+  await withTempRepo(async (repo) => {
+    const gitignore = join(repo.dir, '.gitignore');
+    writeFileSync(gitignore, 'node_modules/\n');
+    chmodSync(gitignore, 0o640);
+    const real = fs.writeFileSync;
+    // A full disk: the file being written is cut to nothing, and the write throws.
+    const full = spyOn(fs, 'writeFileSync').mockImplementation((path, data, options) => {
+      if (!String(path).includes('.gitignore')) return real(path, data, options);
+      real(path, '');
+      throw new Error('ENOSPC: no space left on device, write');
+    });
+    try {
+      const { code, stdout, stderr } = await init(repo);
+      expect(stderr).toBe(
+        'sail init: .sail/ is written, but .gitignore could not be: ENOSPC: no space left on device, write\n',
+      );
+      expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: WROTE });
+    } finally {
+      full.mockRestore();
+    }
+    expect(textOf(gitignore)).toBe('node_modules/\n');
+    expect(listing(repo.dir)).toEqual(['.git', '.gitignore', '.sail', 'README.md']);
+  });
+});
+
+test('an existing .gitignore keeps its mode when it gains the lines, and one that is a link stays a link to the file that gained them', async () => {
+  await withTempRepo(async (repo) => {
+    const shared = join(repo.dir, 'shared.gitignore');
+    writeFileSync(shared, 'node_modules/\n');
+    chmodSync(shared, 0o640);
+    symlinkSync('shared.gitignore', join(repo.dir, '.gitignore'));
+    expect((await init(repo)).code).toBe(EXIT_OK);
+    expect(fs.lstatSync(join(repo.dir, '.gitignore')).isSymbolicLink()).toBe(true);
+    expect(textOf(shared)).toBe(`node_modules/\n${IGNORED}`);
+    expect(fs.statSync(shared).mode & 0o777).toBe(0o640);
+    expect(listing(repo.dir)).toEqual(['.git', '.gitignore', '.sail', 'README.md', 'shared.gitignore']);
+  });
+});
