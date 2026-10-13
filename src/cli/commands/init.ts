@@ -134,6 +134,8 @@ export function init(_args: unknown, io: Io): ExitCode {
   let building: string | undefined;
   try {
     building = mkdtempSync(join(here, '.sail.init-'));
+    // A temporary directory is its owner's alone. `.sail/` is a directory like any other in the repository.
+    chmodSync(building, 0o777 & ~process.umask());
     for (const file of files) writeFileSync(join(building, file.name), file.text);
     renameSync(building, sail);
   } catch (error) {
