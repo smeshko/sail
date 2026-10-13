@@ -93,6 +93,16 @@ test('the same run leasing again renews its lease with its new pid and time', ()
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(resumed, LATER));
 });
 
+test('the same run leasing again from another process is refused while the first one still runs, and keeps its lease', () => {
+  const dir = tempDir();
+  const live = run('r1', process.pid, 'running');
+  takeLease(dir, REMOTE, BRANCH, live, NOW);
+  const second = { ...live, pid: process.ppid };
+  const refused = takeLease(dir, REMOTE, BRANCH, second, LATER);
+  expect([refused.leased, refused.leased ? undefined : refused.holder.pid]).toEqual([false, process.pid]);
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(live, NOW));
+});
+
 test.each([
   ['completed', 'completed', undefined, 'live'],
   ['failed', 'failed', 'workflow_failed', 'live'],
