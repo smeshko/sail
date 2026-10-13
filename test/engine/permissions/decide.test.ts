@@ -125,6 +125,21 @@ test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev
     });
   }));
 
+test('a BASH_ENV assignment is refused: bash would run that file before the allowed command', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['true', 'bash *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('BASH_ENV=./bootstrap bash -c true'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('BASH_ENV=./bootstrap true'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('true'), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('git called by its path is checked as git is: its options, environment and -C chain', () =>
   inRoots((p) => {
     mkdirSync(join(p.roots.worktree, 'src'));
