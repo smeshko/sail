@@ -313,7 +313,8 @@ test('reopenRun reopens a suspended run with the header on disk, nothing a claim
       header: run.header,
       sailDir: join(repo.dir, '.sail'),
       loaded: { workflow: { name: 'ticket-to-pr' } },
-      claimed: [],
+      // The resume renews the run's lease, which is the one event it reports.
+      claimed: [expect.objectContaining({ type: 'workspace:leased' })],
     });
     expect(readStatus(dir)).toEqual({ status: 'running' });
   });
