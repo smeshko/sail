@@ -192,6 +192,16 @@ test('commands nested through eval past the walker limit are denied command:unpa
     });
   }));
 
+test('a login or interactive shell is refused: it would source startup files the engine does not read', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['true', 'bash *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    for (const command of ['bash -lc true', 'bash -ic true', 'bash --login -c true', 'bash -c -i true']) {
+      expect(decide(bash(command), policy, p.roots)).toMatchObject({ deny: true, rule: 'command:unparseable' });
+    }
+    expect(decide(bash('bash -c true'), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('a BASH_ENV assignment is refused: bash would run that file before the allowed command', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['true', 'bash *'], tools: ['Bash'] };

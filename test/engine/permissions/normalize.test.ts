@@ -52,7 +52,7 @@ test('env with options is refused as unparseable', () =>
 
 test.each([
   ['bash -c "rm -rf ."', ['rm', '-rf', '.']],
-  ['sh -lc "rm x"', ['rm', 'x']],
+  ['sh -c "rm x"', ['rm', 'x']],
   ['eval "rm -rf ."', ['rm', '-rf', '.']],
 ])('%s yields its inner command as the one normalized command', (command, argv) =>
   inRoots((p) => {
