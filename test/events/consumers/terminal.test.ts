@@ -205,10 +205,7 @@ function visibleLive(out: string): string | undefined {
 
 // TASK-003: quiet and normal.
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  .each(['quiet', 'normal', 'verbose', 'trace'] as const)(
+test.each(['quiet', 'normal', 'verbose', 'trace'] as const)(
   'FAKE-1 at %s equals its golden view, byte for byte',
   (verbosity) => {
     expect(renderView(fake1(), verbosity)).toBe(golden(verbosity));

@@ -58,18 +58,12 @@ function changedCopy(name: string, change: (dir: string) => void): string {
   return dir;
 }
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
+test('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
   expect(stale(fresh, committed)).toEqual([]);
   expect(filesIn(committed)).toHaveLength(50);
 });
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
+test("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
   const runtimeOf = (dir: string): unknown =>
     existsSync(join(dir, 'run.json')) ? JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).sail.runtime : null;
   expect(runtimeOf(fresh)).toBe(`bun ${Bun.version}`);
@@ -82,10 +76,7 @@ test
   expect(stale(fresh, bumped)).toEqual([`run.json is stale: ${REGENERATE}`]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  .each<[string, (dir: string) => void, string]>([
+test.each<[string, (dir: string) => void, string]>([
   [
     'one byte changed',
     (dir) => {
@@ -116,10 +107,7 @@ test
   expect(stale(fresh, changedCopy(how.replaceAll(' ', '-'), change))).toEqual([`${problem}: ${REGENERATE}`]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  .each(VERBOSITIES.map((verbosity) => [verbosity] as const))(
+test.each(VERBOSITIES.map((verbosity) => [verbosity] as const))(
   "the committed %s view is the golden run's events rendered afresh, byte for byte",
   (verbosity) => {
     const view = readFileSync(join(fixtures, 'terminal', `${verbosity}.txt`), 'utf8');
@@ -128,10 +116,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ('a view rendered from a changed stream differs from the committed one: a stale view fails this test', () => {
+test('a view rendered from a changed stream differs from the committed one: a stale view fails this test', () => {
   const events = readEvents(committed).filter((event) => event.type !== 'loop:exit');
   const committedView = readFileSync(join(fixtures, 'terminal', 'normal.txt'), 'utf8');
   const rendered = renderView(events, 'normal');
@@ -139,10 +124,7 @@ test
   expect(committedView.replace('fix            ↻ break after 2/3\n', '')).toBe(rendered);
 });
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ('no file of a fresh run holds the path of the temporary repository it ran in, or of this checkout', () => {
+test('no file of a fresh run holds the path of the temporary repository it ran in, or of this checkout', () => {
   const files = filesIn(fresh);
   expect(files).toHaveLength(50);
   const machine = [tmpdir(), 'sail-golden-', join(import.meta.dir, '..', '..')];
@@ -152,10 +134,7 @@ test
   expect(holding).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-012
-test
-  .skip // TDD-PENDING TASK-012
-  ('every file of a fresh run is an ordinary, writable file: run.json too, which the run itself leaves read-only', () => {
+test('every file of a fresh run is an ordinary, writable file: run.json too, which the run itself leaves read-only', () => {
   const files = filesIn(fresh);
   expect(files).toHaveLength(50);
   expect(files.filter((file) => (statSync(join(fresh, file)).mode & 0o200) === 0)).toEqual([]);
