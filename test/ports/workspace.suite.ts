@@ -3,7 +3,7 @@
 // case starts from a fresh make(), and every event it captures must validate against sail.event.v1 with no key.
 // Events carry paths relative to the clone (D7), so a suite run never writes a machine path into a run.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import type { Status } from '../../src/engine/run-dir';
@@ -221,6 +221,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     const file = join(world.runsDir, 'r2', 'created.patch');
     writeFileSync(file, patch);
     expect(world.git(fresh.path, 'apply', file)).toEqual({ code: 0, stdout: '' });
+    expect(readFileSync(join(fresh.path, 'src', 'new dir', 'created.ts'), 'utf8')).toBe('export const created = true;\n');
   });
 
   test(`${label}: diff is three-dot: from's commits that HEAD lacks are not reverted, only the workspace's own edits show`, async () => {
