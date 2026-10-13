@@ -77,7 +77,7 @@ test('sail FAKE-1 --force while a suspended run leases its branch is refused wit
   });
 });
 
-test('a run takes over the lease a completed run left, and its stream says which run it took it from', async () => {
+test('a run takes the lease a completed run released, with no takeover in its stream', async () => {
   await withTempRepo(async (first) => {
     writeStub(first.dir);
     const done = await runCaptured(['FAKE-1'], first.dir, { env: first.env });
@@ -90,7 +90,7 @@ test('a run takes over the lease a completed run left, and its stream says which
       const leased = readEvents(join(second.dir, '.sail-runs', secondRun)).find(
         (event) => event.type === 'workspace:leased',
       ) as { took?: string } | undefined;
-      expect([again.code, leased?.took]).toEqual([EXIT_OK, firstRun]);
+      expect([again.code, leased?.took]).toEqual([EXIT_OK, undefined]);
     });
   });
 });
