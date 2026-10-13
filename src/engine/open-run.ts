@@ -15,7 +15,7 @@
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail <ticket>`, `sail resume` and the watcher's dispatch each
 // start one run per process.
-import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
@@ -391,6 +391,15 @@ export function changedAdapters(header: RunHeader, entries: Record<Port, Adapter
  * Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. The
  * workflow is loaded as it reads now, so a stage it has come to name `intake` is refused here as at a start.
  */
+/** Whether `path` is a worktree of its own: a real directory whose `.git` is a file, the way git makes a worktree's. */
+function isWorktreeOfItsOwn(path: string): boolean {
+  try {
+    return !lstatSync(path).isSymbolicLink() && lstatSync(join(path, '.git')).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, runId } = options;
   const found = findConfigured(cwd);
@@ -407,10 +416,19 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   const workspace = options.adapters.ports.workspace;
   const keyed = await remoteKeyFor(workspace, dirname(found.dir));
   if ('refused' in keyed) return keyed;
-  // A run resumes in its own worktree, which must still be there and still on the base the run started from.
-  const worktree = run.header.workspace === undefined ? undefined : join(dirname(found.dir), run.header.workspace);
+  // A run resumes in its own worktree, which must still be there and still on the base the run started from. The header
+  // names it, and a header that names another path (the clone, another run's worktree) is not trusted to say where it is.
+  const recorded = run.header.workspace;
+  // The header names the worktree relative to the clone, which is `dirname` of the sail directory.
+  if (recorded !== undefined && resolve(dirname(found.dir), recorded) !== resolve(run.dir, 'workspace')) {
+    return { refused: `run ${runId}'s workspace ${recorded} is not the run's own worktree: the run stays suspended` };
+  }
+  const worktree = recorded === undefined ? undefined : join(dirname(found.dir), recorded);
   if (worktree !== undefined && !existsSync(worktree)) {
-    return { refused: `run ${runId}'s worktree ${run.header.workspace} is gone: the run stays suspended` };
+    return { refused: `run ${runId}'s worktree ${recorded} is gone: the run stays suspended` };
+  }
+  if (worktree !== undefined && !isWorktreeOfItsOwn(worktree)) {
+    return { refused: `run ${runId}'s workspace ${recorded} is a plain directory, not a worktree: the run stays suspended` };
   }
   const base = run.header.repository?.baseSha;
   if (worktree !== undefined && base !== undefined && !(await workspace.isBasedOn(worktree, base))) {
