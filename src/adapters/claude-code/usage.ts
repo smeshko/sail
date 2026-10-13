@@ -28,10 +28,12 @@ const isCount = (value: unknown): value is number => Number.isInteger(value) && 
 function tokensOf(usage: unknown): Tokens | undefined {
   if (typeof usage !== 'object' || usage === null) return undefined;
   const fields = usage as Readonly<Record<string, unknown>>;
+  // A cache count the API sends as null is none, not a missing count (review #1.7).
+  const cache = (value: unknown) => (value === null ? 0 : value);
   const counts = {
     input: fields.input_tokens,
-    cacheRead: fields.cache_read_input_tokens,
-    cacheWrite: fields.cache_creation_input_tokens,
+    cacheRead: cache(fields.cache_read_input_tokens),
+    cacheWrite: cache(fields.cache_creation_input_tokens),
     output: fields.output_tokens,
   };
   return Object.values(counts).every(isCount) ? (counts as Tokens) : undefined;
