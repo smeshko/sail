@@ -1,7 +1,7 @@
 // Normalizes a parsed script into simple commands: wrappers, env and cd are resolved, git's global options and nested
 // shells are unwrapped, and every path is resolved. A refusal is recorded with its rule; `normalize` throws the first.
 import { statSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { resolveReal, rootOf } from './paths';
 import { classifyRedirect, type RedirectTarget, substitutionScripts } from './substitute';
 import { type Joiner, type Script, type Segment, tokenize, Unparseable, type Word } from './tokenize';
@@ -377,13 +377,16 @@ function changeDirectory(roots: Roots, args: readonly string[], cwd: string): st
   if (args.length !== 1 || target === undefined || target.startsWith('-')) {
     throw new Unparseable('cd without one plain directory');
   }
-  const resolved = resolveReal(target, cwd);
-  if (resolved === null || rootOf(resolved, roots) === null) {
+  // bash's cd is logical: it removes `..` from the path lexically, then enters the path it names. The shell's directory
+  // is that path, so later relative paths resolve from it; the directory it reaches must still be inside the roots.
+  const logical = resolve(cwd, target);
+  const reached = resolveReal(logical, '/');
+  if (reached === null || rootOf(reached, roots) === null) {
     throw new Refusal('path:outside-roots', `cd to ${target} is outside the run's roots`);
   }
   // A cd that fails leaves the shell where it was, so the later commands would run somewhere the engine did not track.
-  if (!statSync(resolved, { throwIfNoEntry: false })?.isDirectory()) {
+  if (!statSync(logical, { throwIfNoEntry: false })?.isDirectory()) {
     throw new Unparseable(`cd to ${target}, which is not an existing directory`);
   }
-  return resolved;
+  return logical;
 }
