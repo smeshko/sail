@@ -63,7 +63,8 @@ function forcesPush(arg: string): boolean {
   if (arg.startsWith('+')) return true;
   if (arg.startsWith('--')) {
     const name = arg.split('=')[0] ?? arg;
-    return name.startsWith('--force') || ('--force'.startsWith(name) && name.length > 2);
+    // --mirror force-updates every remote ref, and removes the ones the local repository lacks.
+    return ['--force', '--mirror'].some((long) => name.startsWith(long) || (long.startsWith(name) && name.length > 2));
   }
   return arg.startsWith('-') && arg.includes('f');
 }
