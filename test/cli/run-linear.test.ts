@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { copyFixture, edit } from '../helpers/fixture';
 import { createLinearWorld, type LinearWorld, type WorldIssue } from '../helpers/linear-world';
 import { type Captured, runCaptured } from '../helpers/run-captured';
@@ -80,7 +80,7 @@ test('sail ADW-1 --until spec exits 0, and its intake writes the ticket with its
     linear(repo);
     const { code } = await sail(repo, START);
     const [run] = runIds(repo);
-    expect({ code, runs: runIds(repo).length }).toEqual({ code: EXIT_OK, runs: 1 });
+    expect({ code, runs: runIds(repo).length }).toEqual({ code: EXIT_SUSPENDED, runs: 1 });
     const intake = join(runDirOf(repo, run ?? ''), '00-intake', 'call-1');
     const ticket = JSON.parse(readFileSync(join(intake, 'ticket.json'), 'utf8'));
     expect([ticket.ticketKey, ticket.raw?.identifier]).toEqual(['ADW-1', 'ADW-1']);
@@ -102,7 +102,7 @@ test('the brief wraps the description and every comment as untrusted input, and 
   await withTempRepo(async (repo) => {
     linear(repo);
     const ran = await sail(repo, START);
-    expect(ran.code).toBe(EXIT_OK);
+    expect(ran.code).toBe(EXIT_SUSPENDED);
     const [run] = runIds(repo);
     const brief = readFileSync(join(runDirOf(repo, run ?? ''), '00-intake', 'call-1', 'brief.md'), 'utf8');
     expect(brief).toMatch(
@@ -123,7 +123,7 @@ test('the brief wraps the description and every comment as untrusted input, and 
 test('a second run of a ticket already claimed is refused with exit 3 and creates no run directory', async () => {
   await withTempRepo(async (first) => {
     linear(first);
-    expect((await sail(first, START)).code).toBe(EXIT_OK);
+    expect((await sail(first, START)).code).toBe(EXIT_SUSPENDED);
     await withTempRepo(async (second) => {
       linear(second);
       const refused: Captured = await sail(second, START);
@@ -157,11 +157,11 @@ test('--force runs the undesignated ticket, and run.json lists the designation a
   await withTempRepo(async (repo) => {
     linear(repo);
     const forced = await sail(repo, ['ADW-3', '--force', '--until', 'spec']);
-    expect(forced.code).toBe(EXIT_OK);
+    expect(forced.code).toBe(EXIT_SUSPENDED);
     const [run] = runIds(repo);
     const header = JSON.parse(readFileSync(join(runDirOf(repo, run ?? ''), 'run.json'), 'utf8'));
     expect({ code: forced.code, forced: header.source?.forced }).toEqual({
-      code: EXIT_OK,
+      code: EXIT_SUSPENDED,
       forced: ['designation'],
     });
   });
@@ -208,7 +208,7 @@ test('the key appears in no file of the run directory, and in no output of the r
   await withTempRepo(async (repo) => {
     linear(repo);
     const ran = await sail(repo, START);
-    expect(ran.code).toBe(EXIT_OK);
+    expect(ran.code).toBe(EXIT_SUSPENDED);
     const root = join(repo.dir, '.sail-runs');
     const files = [...new Bun.Glob('**/*').scanSync({ cwd: root, dot: true, onlyFiles: true })];
     const leaked = files.filter((file) => readFileSync(join(root, file), 'utf8').includes(KEY));
