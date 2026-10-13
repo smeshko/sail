@@ -55,7 +55,10 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     },
     async create(run, { base, branch }) {
       const started = now().getTime();
-      const resolved = git(options.repo, 'rev-parse', '--verify', '--quiet', `${base}^{commit}`);
+      const names = (ref: string) => git(options.repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`);
+      // The engine bases every run on origin/HEAD. A repository with no origin has none, so its HEAD is the base.
+      let resolved = names(base);
+      if (resolved.code !== 0 && base === 'origin/HEAD') resolved = names('HEAD');
       if (resolved.code !== 0) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
       const baseSha = resolved.stdout.trim();
       const path = join(run.runDir, 'workspace');

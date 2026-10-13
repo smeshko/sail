@@ -58,20 +58,17 @@ test('a fresh run reports its lease right after run:start, before what the claim
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("every call of a run runs in the run's worktree: the stub's log is written there, and the clone holds none", async () => {
-    await withStub({}, async (repo) => {
-      const end = await runIn(repo, { until: 'tests' });
-      const logFile = join(end.dir, 'workspace', '.stub', 'executions.log');
-      const log = existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n') : [];
-      expect({ calls: log, cloneHasStub: existsSync(join(repo.dir, '.stub')) }).toEqual({
-        calls: ['spec#1', 'implement#1', 'tests#1'],
-        cloneHasStub: false,
-      });
+test("every call of a run runs in the run's worktree: the stub's log is written there, and the clone holds none", async () => {
+  await withStub({}, async (repo) => {
+    const end = await runIn(repo, { until: 'tests' });
+    const logFile = join(end.dir, 'workspace', '.stub', 'executions.log');
+    const log = existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n') : [];
+    expect({ calls: log, cloneHasStub: existsSync(join(repo.dir, '.stub')) }).toEqual({
+      calls: ['spec#1', 'implement#1', 'tests#1'],
+      cloneHasStub: false,
     });
   });
+});
 
 // biome-ignore format: TDD-PENDING TASK-008
 test

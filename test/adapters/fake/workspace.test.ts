@@ -123,16 +123,13 @@ test("the fake keys its leases on the remote named fake, whatever the clone's pa
 });
 
 // STICKER: the engine asks for `origin/HEAD` as the base of every run, and the fake has no origin: it bases on HEAD.
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a base of origin/HEAD in a repository with no origin is the repository's HEAD, so the fake's runs are based on it", async () => {
-    const w = world();
-    const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
-    const run = await w.run('r1');
-    const made = await workspace.create(run, { base: 'origin/HEAD', branch: 'sail/FAKE-1' }).then(
-      (workspace) => workspace,
-      (error: unknown) => String(error),
-    );
-    expect(made).toMatchObject({ baseSha: w.baseSha, path: join(run.runDir, 'workspace') });
-  });
+test("a base of origin/HEAD in a repository with no origin is the repository's HEAD, so the fake's runs are based on it", async () => {
+  const w = world();
+  const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
+  const run = await w.run('r1');
+  const made = await workspace.create(run, { base: 'origin/HEAD', branch: 'sail/FAKE-1' }).then(
+    (workspace) => workspace,
+    (error: unknown) => String(error),
+  );
+  expect(made).toMatchObject({ baseSha: w.baseSha, path: join(run.runDir, 'workspace') });
+});

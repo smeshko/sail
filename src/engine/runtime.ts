@@ -1,7 +1,7 @@
 // Runs a workflow to its end: open the run, then loop. Each turn replays the workflow against the journal, runs the call
 // the replay stopped at, and journals it, until a replay ends the run and STATUS records how. Start, continue and resume
-// are this one loop: a resume enters it with an existing run directory. Until runs get a workspace of their own,
-// scripts run in the directory that holds `.sail/`.
+// are this one loop: a resume enters it with an existing run directory. A run's calls run in its workspace, its own
+// worktree, and never in the clone.
 //
 // A run runs its intake before the first replay and journals it as `intake#1`, the journal's first line.
 // Every replay is handed that entry beside the stage entries, so a resume reads the input from the journal and never
@@ -32,7 +32,7 @@
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
 // `run:end` ends the stream: a replay an abort abandoned may move on once its workflow stops waiting, since the CLI
 // only sets an exit code, but nothing it reports after that is emitted.
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
@@ -324,7 +324,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         try: nextTry(dir, call.stageIndex, call.stage, call.call),
         definition: call.definition,
         stageFile: call.stageFile,
-        workspace: dirname(sailDir),
+        workspace: opened.workspace,
         config: join(sailDir, 'project.yaml'),
         supplied: call.supplied,
         ...(signal === undefined ? {} : { signal }),

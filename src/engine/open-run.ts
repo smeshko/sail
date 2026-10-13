@@ -15,12 +15,13 @@
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail <ticket>`, `sail resume` and the watcher's dispatch each
 // start one run per process.
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import { PortError } from '../ports/errors';
+import type { Workspace } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
@@ -55,6 +56,8 @@ export interface OpenedRun {
   header: RunHeader;
   /** The absolute `.sail/` the run started from. */
   sailDir: string;
+  /** The absolute workspace the run's calls run in: its worktree, or the clone for a run that has none. */
+  workspace: string;
   /** The adapters the run was opened with, one per port. */
   adapters: PortAdapters;
   /** Where those adapters emit: the runtime attaches the run's stream to it. */
@@ -257,33 +260,64 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const forced = [...resolved.forced, ...made.forced];
   const header: RunHeader = { ...unclaimed, source: { ...source, forced }, claim: made.claim };
   // The ticket has moved, so whatever fails from here says where it stands. It is still thrown on, not refused: these
-  // are sail's own files.
+  // are sail's own files, or the workspace the ticket's branch was based on.
+  const moved = (what: string, error: unknown): Error => {
+    const why = error instanceof Error ? error.message : String(error);
+    return new Error(
+      `the ticket is now ${made.claim.state.name} and its comment names run ${runId}, but ${what}: ${why}. --force runs the ticket in a new run`,
+      { cause: error },
+    );
+  };
   let dir: string;
   try {
     assertRunHeader(header);
     dir = createRunDir(found.dir, runId);
-    writeRunHeader(dir, header);
+  } catch (error) {
+    await releaseLease();
+    throw moved('the run directory was not written', error);
+  }
+  // The run's worktree, made once its directory exists. Its events are captured here, since no run is attached yet, and
+  // they go out after the claim's. A worktree that can't be made leaves no run directory and no lease behind.
+  const captured: ProviderEvent[] = [];
+  const detach = options.adapters.relay.attach((event) => {
+    captured.push(event);
+  });
+  let worktree: Workspace;
+  try {
+    worktree = await workspace.create({ runId, runDir: dir }, { base: 'origin/HEAD', branch });
+  } catch (error) {
+    await releaseLease();
+    rmSync(dir, { recursive: true, force: true });
+    throw moved('its workspace was not made', error);
+  } finally {
+    detach();
+  }
+  // The header names the worktree relative to the clone, and the repository it came from when the workspace has one.
+  const repository =
+    worktree.defaultBranch === undefined
+      ? {}
+      : { repository: { url: keyed.remote, defaultBranch: worktree.defaultBranch, baseSha: worktree.baseSha } };
+  const recorded: RunHeader = { ...header, workspace: relative(dirname(found.dir), worktree.path), ...repository };
+  try {
+    writeRunHeader(dir, recorded);
     createJournal(dir);
     createEventsFile(dir);
     writeStatus(dir, 'running');
   } catch (error) {
     await releaseLease();
-    const why = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `the ticket is now ${made.claim.state.name} and its comment names run ${runId}, but the run directory was not written: ${why}. --force runs the ticket in a new run`,
-      { cause: error },
-    );
+    throw moved('the run directory was not written', error);
   }
   return {
     runId,
     dir,
-    header,
+    header: recorded,
     sailDir: found.dir,
+    workspace: worktree.path,
     adapters: options.adapters.ports,
     relay: options.adapters.relay,
     config,
     loaded,
-    claimed: [...leasing.events, ...made.events],
+    claimed: [...leasing.events, ...made.events, ...captured],
     ...(until === undefined ? {} : { until }),
     firstSeq: 1,
   };
@@ -361,6 +395,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     dir: run.dir,
     header: run.header,
     sailDir: found.dir,
+    workspace: run.header.workspace === undefined ? dirname(found.dir) : join(dirname(found.dir), run.header.workspace),
     adapters: options.adapters.ports,
     relay: options.adapters.relay,
     config: found.config,

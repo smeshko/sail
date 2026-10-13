@@ -39,6 +39,10 @@ export interface RunHeader {
   intake: IntakeEntry;
   stages: Record<string, RosterEntry>;
   budget?: { maxUsd?: number; maxMinutes?: number };
+  /** The run's workspace, relative to the clone: its worktree under `.sail-runs/`. */
+  workspace?: string;
+  /** The repository the workspace was based on, for a workspace that has an origin: git-worktree writes it. */
+  repository?: { url: string; defaultBranch: string; baseSha: string };
   startedAt: string;
 }
 

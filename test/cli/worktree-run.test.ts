@@ -95,65 +95,56 @@ test('a run takes over the lease a completed run left, and its stream says which
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail FAKE-1 --until tests in a clone with an origin works in a worktree under .sail-runs, recorded in run.json with the base commit origin has', async () => {
-    await withOriginRepo(async (repo, origin) => {
-      const head = repo.git('rev-parse', 'HEAD');
-      const stopped = await runCaptured(['FAKE-1', '--until', 'tests'], repo.dir, { env: repo.env });
-      expect(stopped.code).toBe(EXIT_SUSPENDED);
-      const [runId] = runIds(repo.dir);
-      const header = JSON.parse(readFileSync(join(repo.dir, '.sail-runs', runId ?? '', 'run.json'), 'utf8'));
-      expect({
-        code: stopped.code,
-        workspace: header.workspace,
-        baseSha: header.repository?.baseSha,
-        head: repo.git('rev-parse', 'HEAD'),
-        listed: repo
-          .git('worktree', 'list', '--porcelain')
-          .includes(`worktree ${join(repo.dir, '.sail-runs', runId ?? '', 'workspace')}`),
-      }).toEqual({
-        code: EXIT_SUSPENDED,
-        workspace: `.sail-runs/${runId}/workspace`,
-        baseSha: origin.git('rev-parse', 'HEAD'),
-        head,
-        listed: true,
-      });
-    });
-  }, 60_000);
-
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('with an uncommitted edit and another branch checked out in the clone, sail FAKE-1 still runs to completion, and the clone is as it was left', async () => {
-    await withOriginRepo(async (repo) => {
-      repo.git('checkout', '-b', 'feature/other');
-      writeFileSync(join(repo.dir, 'README.md'), 'an edit in the clone\n');
-      const head = repo.git('rev-parse', 'HEAD');
-      const status = trackedStatus(repo);
-      const done = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
-      expect([
-        done.code,
-        repo.git('rev-parse', 'HEAD'),
-        trackedStatus(repo),
-        readFileSync(join(repo.dir, 'README.md'), 'utf8'),
-      ]).toEqual([EXIT_OK, head, status, 'an edit in the clone\n']);
-    });
-  }, 60_000);
-
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a worktree that cannot be made after the claim leaves no run directory and no lease, and says where the ticket stands', async () => {
-    await withOriginRepo(async (repo) => {
-      repo.git('remote', 'set-head', 'origin', '-d');
-      const failed = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
-      expect([
-        failed.code !== EXIT_OK,
-        failed.stderr.includes('In Progress'),
-        runIds(repo.dir),
-        leasesUnder(repo.home),
-      ]).toEqual([true, true, [], []]);
+test('sail FAKE-1 --until tests in a clone with an origin works in a worktree under .sail-runs, recorded in run.json with the base commit origin has', async () => {
+  await withOriginRepo(async (repo, origin) => {
+    const head = repo.git('rev-parse', 'HEAD');
+    const stopped = await runCaptured(['FAKE-1', '--until', 'tests'], repo.dir, { env: repo.env });
+    expect(stopped.code).toBe(EXIT_SUSPENDED);
+    const [runId] = runIds(repo.dir);
+    const header = JSON.parse(readFileSync(join(repo.dir, '.sail-runs', runId ?? '', 'run.json'), 'utf8'));
+    expect({
+      code: stopped.code,
+      workspace: header.workspace,
+      baseSha: header.repository?.baseSha,
+      head: repo.git('rev-parse', 'HEAD'),
+      listed: repo
+        .git('worktree', 'list', '--porcelain')
+        .includes(`worktree ${join(repo.dir, '.sail-runs', runId ?? '', 'workspace')}`),
+    }).toEqual({
+      code: EXIT_SUSPENDED,
+      workspace: `.sail-runs/${runId}/workspace`,
+      baseSha: origin.git('rev-parse', 'HEAD'),
+      head,
+      listed: true,
     });
   });
+}, 60_000);
+
+test('with an uncommitted edit and another branch checked out in the clone, sail FAKE-1 still runs to completion, and the clone is as it was left', async () => {
+  await withOriginRepo(async (repo) => {
+    repo.git('checkout', '-b', 'feature/other');
+    writeFileSync(join(repo.dir, 'README.md'), 'an edit in the clone\n');
+    const head = repo.git('rev-parse', 'HEAD');
+    const status = trackedStatus(repo);
+    const done = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect([
+      done.code,
+      repo.git('rev-parse', 'HEAD'),
+      trackedStatus(repo),
+      readFileSync(join(repo.dir, 'README.md'), 'utf8'),
+    ]).toEqual([EXIT_OK, head, status, 'an edit in the clone\n']);
+  });
+}, 60_000);
+
+test('a worktree that cannot be made after the claim leaves no run directory and no lease, and says where the ticket stands', async () => {
+  await withOriginRepo(async (repo) => {
+    repo.git('remote', 'set-head', 'origin', '-d');
+    const failed = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect([
+      failed.code !== EXIT_OK,
+      failed.stderr.includes('In Progress'),
+      runIds(repo.dir),
+      leasesUnder(repo.home),
+    ]).toEqual([true, true, [], []]);
+  });
+});

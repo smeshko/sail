@@ -76,6 +76,8 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       const added = await git(repo, ['worktree', 'add', '--detach', resolve(path), baseSha], env);
       if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr, added);
       await excludeRunsDir(repo, env);
+      const head = await git(repo, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], env);
+      const defaultBranch = head.code === 0 ? head.stdout.trim().replace(/^origin\//, '') : undefined;
       emit({
         type: 'workspace:created',
         path: clonePath(repo, path),
@@ -83,7 +85,13 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
         baseSha,
         durationMs: Math.max(0, Date.now() - started),
       });
-      return { path, branch: from.branch, baseSha, raw: { fetched, resolved, added } };
+      return {
+        path,
+        branch: from.branch,
+        baseSha,
+        ...(defaultBranch === undefined ? {} : { defaultBranch }),
+        raw: { fetched, resolved, added },
+      };
     },
     diff: (path, from) => diffFrom(runGit, path, from),
     async release(run, keep) {

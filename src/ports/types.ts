@@ -124,7 +124,14 @@ export type Released = z.infer<typeof Released>;
 
 // Workspaces
 
-export const Workspace = z.object({ path: z.string(), branch: z.string(), baseSha: z.string(), raw: Raw });
+// `defaultBranch` is the branch origin's HEAD names, when the workspace has an origin to name one: git-worktree does.
+export const Workspace = z.object({
+  path: z.string(),
+  branch: z.string(),
+  baseSha: z.string(),
+  defaultBranch: z.string().optional(),
+  raw: Raw,
+});
 export type Workspace = z.infer<typeof Workspace>;
 
 export const Diff = z.object({ patch: z.string(), raw: Raw });
