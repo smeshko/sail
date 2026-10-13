@@ -12,16 +12,17 @@ const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
 
 /** `text` without escape sequences, and with every other control character as a space. */
-function clean(text: string): string {
+export function clean(text: string): string {
   return text.replace(ESCAPES, '').replace(CONTROLS, ' ');
 }
 
 /** Linear's `extensions.code` values that map to a code other than `invalid`. Any other code is `invalid`. */
-const GRAPHQL_CODES: Readonly<Record<string, PortErrorCode>> = {
-  AUTHENTICATION_ERROR: 'unauthorized',
-  FORBIDDEN: 'forbidden',
-  RATELIMITED: 'unavailable',
-};
+// A Map, so a code that names a property of Object (`constructor`) is not a recognised code.
+const GRAPHQL_CODES: ReadonlyMap<string, PortErrorCode> = new Map<string, PortErrorCode>([
+  ['AUTHENTICATION_ERROR', 'unauthorized'],
+  ['FORBIDDEN', 'forbidden'],
+  ['RATELIMITED', 'unavailable'],
+]);
 
 export interface LinearClientOptions {
   readonly apiKey: string;
@@ -49,13 +50,15 @@ function providerMessage(body: unknown): string | undefined {
   return messages.length === 0 ? undefined : messages.join('; ');
 }
 
-/** The first GraphQL error's `extensions.code`, when the body carries one. */
+/** The first GraphQL error whose `extensions.code` the client knows, or undefined when none does. */
 function graphqlCode(body: unknown): string | undefined {
-  const first = (body as { errors?: unknown[] } | undefined)?.errors?.[0] as
-    | { extensions?: { code?: unknown } }
-    | undefined;
-  const code = first?.extensions?.code;
-  return typeof code === 'string' ? code : undefined;
+  const errors = (body as { errors?: unknown } | undefined)?.errors;
+  if (!Array.isArray(errors)) return undefined;
+  for (const error of errors) {
+    const code = (error as { extensions?: { code?: unknown } } | null)?.extensions?.code;
+    if (typeof code === 'string' && GRAPHQL_CODES.has(code)) return code;
+  }
+  return undefined;
 }
 
 /** The PortError code for an HTTP status that is not a success, or undefined for a success. */
@@ -76,8 +79,10 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
       // Every failure goes through here. Nothing it is given may carry the key or a control character, and the answer's
       // body is never attached: it may echo the key, and no caller needs it.
       const fail = (code: PortErrorCode, message: string): PortError => {
-        const redacted = options.apiKey === '' ? message : message.split(options.apiKey).join('[redacted]');
-        return new PortError('ticketSource', operation, code, clean(redacted));
+        // Cleaned first, so a key split by an escape sequence is whole again before it is redacted.
+        const cleaned = clean(message);
+        const redacted = options.apiKey === '' ? cleaned : cleaned.split(options.apiKey).join('[redacted]');
+        return new PortError('ticketSource', operation, code, redacted);
       };
 
       let response: Response;
@@ -106,14 +111,14 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
       }
       const detail = providerMessage(body) ?? `HTTP ${response.status}`;
 
-      // A recognised GraphQL code names the cause even on a 4xx, where Linear reports rate limits and failed auth.
+      // The status decides 401, 403, 429 and 5xx. A recognised GraphQL code refines any other status (Linear reports rate
+      // limits and failed auth as a 400), and a 200 with errors.
       const recognised = graphqlCode(body);
-      const coded = recognised === undefined ? undefined : GRAPHQL_CODES[recognised];
-      // The status decides 401, 403, 429 and 5xx. A GraphQL code refines any other status, and a 200 with errors.
+      const coded = recognised === undefined ? undefined : GRAPHQL_CODES.get(recognised);
       const fromStatus = statusCode(response.status);
       const code = fromStatus === undefined || fromStatus === 'invalid' ? (coded ?? fromStatus) : fromStatus;
       if (code !== undefined) {
-        const rateLimited = response.status === 429 || recognised === 'RATELIMITED';
+        const rateLimited = code === 'unavailable' && (response.status === 429 || recognised === 'RATELIMITED');
         throw fail(code, `${rateLimited ? 'Linear rate limit reached: ' : ''}${detail}`);
       }
 
