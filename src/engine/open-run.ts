@@ -306,7 +306,11 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     createEventsFile(dir);
     writeStatus(dir, 'running');
   } catch (error) {
+    // The worktree and the run directory go with the lease: a run that never got its STATUS would never be swept. A
+    // failure to remove the worktree is not the cause of this one, so the original error is the one thrown.
+    await workspace.release({ runId, runDir: dir }, false).catch(() => undefined);
     await releaseLease();
+    rmSync(dir, { recursive: true, force: true });
     throw moved('the run directory was not written', error);
   }
   return {
