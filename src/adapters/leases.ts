@@ -5,6 +5,7 @@
 // directory. So a lease is stale once its run has ended, or once its pid is dead while the run is running or has no
 // STATUS yet. A suspended run holds its lease whatever its pid. Two accepted risks: a reused pid makes a dead run read as
 // alive, and three processes interleaving on one stale lease within microseconds could drop the lease just taken.
+import { randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -89,9 +90,12 @@ export function isStale(lease: Lease): boolean {
 
 const text = (lease: Lease): string => `${JSON.stringify(lease)}\n`;
 
+/** A name no other attempt uses: two processes taking one run's lease must never write or move the same file. */
+const attempt = (): string => `${process.pid}.${randomUUID()}`;
+
 /** Creates `file` holding `lease` all at once, by linking a written temp file to it. False when `file` exists. */
 function create(file: string, lease: Lease): boolean {
-  const tmp = `${file}.${lease.runId}.tmp`;
+  const tmp = `${file}.${lease.runId}.${attempt()}.tmp`;
   writeFileSync(tmp, text(lease));
   try {
     linkSync(tmp, file);
@@ -110,7 +114,7 @@ function create(file: string, lease: Lease): boolean {
  * which is put back unless a third taker has created the file meanwhile, or when there was no file.
  */
 function dropIfStill(file: string, read: Lease, runId: string): boolean {
-  const aside = `${file}.${runId}.aside`;
+  const aside = `${file}.${runId}.${attempt()}.aside`;
   try {
     renameSync(file, aside);
   } catch (error) {
