@@ -12,7 +12,7 @@ const ISSUE_FIELDS = `id identifier title description url priority
 
 /** Reads one ticket by team key and number, with its first page of comments. */
 export const FETCH_ISSUE = `query FetchIssue($team: String!, $number: Float!) {
-  issues(filter: { team: { key: { eq: $team } }, number: { eq: $number } }) {
+  issues(filter: { team: { key: { eq: $team } }, number: { eq: $number } }, first: 1) {
     nodes {
       ${ISSUE_FIELDS}
     }

@@ -1,6 +1,5 @@
 // The Linear TicketSource: the adapter over Linear's GraphQL API, and its adapter definition, which the built-in
 // registration hands the registry (DECISIONS §1 to §6).
-// Stub: the definition is written in TASK-006.
 
 import { z } from 'zod';
 import type { ProviderEvent } from '../../../events/types';
@@ -21,6 +20,7 @@ import {
   type IssueNode,
   LIST_ISSUES,
   type ListIssuesData,
+  type PageInfo,
   UPDATE_ISSUE,
   type UpdateIssueData,
 } from './queries';
@@ -37,9 +37,32 @@ export interface LinearTicketSourceOptions extends ProviderOptions {
   readonly fetch?: typeof fetch;
 }
 
-/** A ticket key: a team key and a number. A bare key, or a key inside an issue URL the provider owns. */
-const KEY = /^[A-Z][A-Z0-9]*-\d+$/;
-const URL_KEY = /^https:\/\/linear\.app\/[^/]+\/issue\/([A-Z][A-Z0-9]*-\d+)(?:\/|$)/;
+/** A ticket key: a team key and a number, spelt as Linear numbers it. A bare key, or a key inside an issue URL. */
+const KEY = /^[A-Z][A-Z0-9]*-[1-9]\d*$/;
+const URL_KEY = /^https:\/\/linear\.app\/[^/]+\/issue\/([A-Z][A-Z0-9]*-[1-9]\d*)(?:\/|$)/;
+
+/** Tickets per listing page: small, so each page's nested comment requests stay under Linear's complexity cap. */
+const LISTING_PAGE = 10;
+
+/**
+ * The cursor of the next page, or undefined when there is none. A page that says there is more must bring tickets and
+ * name a cursor not seen before, or the paging is refused as invalid: a repeated, missing or empty page would never end.
+ */
+function continuation(
+  op: string,
+  page: PageInfo,
+  nodes: readonly unknown[],
+  seen: Set<string>,
+  what: string,
+): string | undefined {
+  if (!page.hasNextPage) return undefined;
+  const cursor = page.endCursor;
+  if (nodes.length === 0 || typeof cursor !== 'string' || cursor === '' || seen.has(cursor)) {
+    throw new PortError('ticketSource', op, 'invalid', `Linear's ${what} paging does not advance`);
+  }
+  seen.add(cursor);
+  return cursor;
+}
 
 export function createLinearTicketSource(options: LinearTicketSourceOptions): TicketSource {
   const client = createLinearClient({ apiKey: options.apiKey, fetch: options.fetch });
@@ -71,18 +94,19 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   /** The comments of one issue, every page of them, in order. */
   const allComments = async (node: IssueNode): Promise<CommentNode[]> => {
     const comments = [...node.comments.nodes];
-    let page = node.comments.pageInfo;
-    while (page.hasNextPage && page.endCursor !== null) {
+    const seen = new Set<string>();
+    let after = continuation('FetchMoreComments', node.comments.pageInfo, node.comments.nodes, seen, 'comment');
+    while (after !== undefined) {
       const data = (await client.request('FetchMoreComments', FETCH_MORE_COMMENTS, {
         id: node.id,
-        after: page.endCursor,
+        after,
       })) as FetchMoreCommentsData;
       const next = data.issue?.comments;
       if (next === undefined || next === null) {
         throw new PortError('ticketSource', 'get', 'invalid', `Linear answered no comments for ${node.identifier}`);
       }
       comments.push(...next.nodes);
-      page = next.pageInfo;
+      after = continuation('FetchMoreComments', next.pageInfo, next.nodes, seen, 'comment');
     }
     return comments;
   };
@@ -90,13 +114,14 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   /** Every designated ticket in a backlog or unstarted state, every page of the listing, with its comments. */
   const listDesignated = async (label: string): Promise<Ticket[]> => {
     const tickets: Ticket[] = [];
+    const seen = new Set<string>();
     let after: string | undefined;
     let more = true;
     while (more) {
       const { issues } = (await client.request('ListIssues', LIST_ISSUES, {
         team: options.team,
         label,
-        first: 100,
+        first: LISTING_PAGE,
         after,
       })) as ListIssuesData;
       for (const node of issues.nodes) {
@@ -104,8 +129,8 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
         // The server filters by type already; the state is checked again, so a broad filter cannot list a started ticket.
         if (ticket.state.type === 'unstarted' && ticket.labels.includes(label)) tickets.push(ticket);
       }
-      more = issues.pageInfo.hasNextPage && issues.pageInfo.endCursor !== null;
-      after = issues.pageInfo.endCursor ?? undefined;
+      after = continuation('ListIssues', issues.pageInfo, issues.nodes, seen, 'listing');
+      more = after !== undefined;
     }
     return tickets;
   };
@@ -151,7 +176,11 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const current = { type: stateTypeOf(node.state.type, 'claim'), name: node.state.name };
       // A ticket that is not unstarted is not taken: no write, and nothing emitted.
       if (current.type !== 'unstarted') return { claimed: false, state: current, raw: node };
-      const moved = await writeMove(node, 'claim', await states.targetFor('claim', 'in-progress'));
+      const moved = await writeMove(
+        node,
+        'claim',
+        await states.targetFor('claim', 'in-progress', options.inReviewState),
+      );
       emit({ type: 'ticket:claimed', ticketKey: node.identifier, state: moved.state });
       return { claimed: true, state: moved.state, raw: moved.raw };
     },
