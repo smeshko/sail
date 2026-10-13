@@ -259,6 +259,16 @@ test('a 401 with a rate-limit code is unauthorized, without the rate-limit prefi
   expect(messageOf(error)).not.toMatch(/rate limit/i);
 });
 
+// Review fix (review #3.1): a key that itself carries a control character is still redacted where the transport echoes it.
+test('a key with a newline is redacted from the message', async () => {
+  const multiline = 'lin_api_SENT\nINEL-key';
+  const transport = (async () => {
+    throw new TypeError(`Header 'Authorization' has invalid value: '${multiline}'`);
+  }) as unknown as typeof fetch;
+  const client = createLinearClient({ apiKey: multiline, fetch: transport });
+  expect(messageOf(await rejection(request(client)))).not.toContain('lin_api_SENT');
+});
+
 test('a 400 whose second error carries a rate-limit code is unavailable', async () => {
   const { client } = failing({
     status: 400,
