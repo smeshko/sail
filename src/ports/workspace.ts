@@ -31,5 +31,9 @@ export interface WorkspacePort {
   release(run: RunRef, keep: boolean): Promise<WorkspaceReleased>;
   /** Removes the workspaces of the ended runs under `runsDir`. */
   sweep(runsDir: string): Promise<Swept>;
+  /** The name leases are keyed by for the clone at `clone`: the same for every clone of one repository (ADR-0018). */
+  remoteKey(clone: string): Promise<string>;
+  /** Whether `baseSha` is an ancestor of the HEAD of the workspace at `path`, so a resumed run is still on its base. */
+  isBasedOn(path: string, baseSha: string): Promise<boolean>;
   capabilities(): WorkspaceCapabilities;
 }

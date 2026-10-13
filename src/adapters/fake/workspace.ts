@@ -126,6 +126,13 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       }
       return { paths: paths.sort(), raw: null };
     },
+    // STUB (tdd-plan): wrong values until TASK-001 and TASK-009 make them real.
+    async remoteKey() {
+      return '';
+    },
+    async isBasedOn() {
+      return false;
+    },
     capabilities: () => ({ keep: true, sweep: true }),
   };
 }

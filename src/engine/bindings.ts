@@ -11,7 +11,11 @@ import { isPlainName } from './call-dir';
  * What a caller supplies for one binding. `path` is absolute. `from` is where it came from, as `result.json`'s
  * `consumed` records it.
  */
-export type Supplied = { kind: 'file'; path: string; from: string } | { kind: 'value'; value: unknown; from: string };
+export type Supplied =
+  | { kind: 'file'; path: string; from: string }
+  | { kind: 'value'; value: unknown; from: string }
+  /** A `gitDiff` binding the engine resolved from the run's worktree: `from` names the range it was resolved for. */
+  | { kind: 'gitDiff'; patch: string; from: string };
 
 /** `INPUT_` and the binding's name, upper-cased, with anything outside `[A-Z0-9]` turned into `_`. */
 export function inputVar(name: string): string {

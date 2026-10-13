@@ -87,6 +87,8 @@ export const PORT_OPERATIONS = {
     'diff',
     'release',
     'sweep',
+    'remoteKey',
+    'isBasedOn',
     'capabilities',
   ]),
 } as const;
