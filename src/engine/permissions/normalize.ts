@@ -56,6 +56,9 @@ const GIT_VALUE_OPTIONS = new Set([
   '--config-env',
 ]);
 const GIT_PATH_OPTIONS = new Set(['-C', '--git-dir', '--work-tree']);
+const INJECTING_OPTIONS = new Set(['-c', '--config-env', '--exec-path']);
+// Builtins that change the shell's variables or run a file. The engine does not follow them into later segments.
+const SHELL_STATE = new Set(['export', 'declare', 'typeset', 'local', 'readonly', 'unset', 'alias', 'source', '.']);
 
 /** Normalizes every simple command of a script, unwrapping nested shells. Throws `Refusal` for the first refusal. */
 export function normalize(script: Script, roots: Roots): NormalizedCommand[] {
@@ -168,6 +171,7 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
     return ctx.cwd;
   }
   if (commandWord.unsafe) throw new Unparseable('a command name the engine cannot read');
+  if (SHELL_STATE.has(argv[0] ?? '')) throw new Unparseable(`${argv[0]} changes the shell's state or runs a file`);
   if (name === 'cd') {
     const next = changeDirectory(walk.roots, args, ctx.cwd);
     if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx, env, writes, reads);
@@ -283,6 +287,10 @@ function checkGitOptions(
     const eq = arg.indexOf('=');
     const longForm = arg.startsWith('--') && eq >= 0;
     const flag = longForm ? arg.slice(0, eq) : arg;
+    if (INJECTING_OPTIONS.has(flag)) {
+      // Configuration and helper paths change what git runs (a core.fsmonitor or an alias is code), with no list complete.
+      walk.refusals.push(new Refusal('command:unparseable', `${flag} changes git's configuration or helpers`));
+    }
     if (GIT_PATH_OPTIONS.has(flag)) {
       const value = longForm ? arg.slice(eq + 1) : args[i + 1];
       if (value === undefined) throw new Unparseable('a git option with no value');
@@ -299,6 +307,11 @@ function checkGitOptions(
     const value = env[name];
     if (value !== undefined && !insideRoots(walk.roots, value, effective)) {
       walk.refusals.push(new Refusal('git:outside-roots', `${name} points outside the run's roots`));
+    }
+  }
+  for (const name of Object.keys(env)) {
+    if (name.startsWith('GIT_CONFIG_') || name === 'GIT_EXEC_PATH') {
+      walk.refusals.push(new Refusal('command:unparseable', `${name} changes git's configuration or helpers`));
     }
   }
 }
