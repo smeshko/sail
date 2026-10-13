@@ -35,10 +35,7 @@ test.each([[''], ['a/b'], ['a b'], ['ä']])('a key of %p is refused', (key) => {
   expect(() => newRunId(key)).toThrow('run id key');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a run id on a fixed time and fixed random bytes is known, and without the bytes its 16 random characters differ', () => {
+test('a run id on a fixed time and fixed random bytes is known, and without the bytes its 16 random characters differ', () => {
   const now = Date.parse(GOLDEN_START);
   expect(newRunId('FAKE-1', now, goldenRandom)).toBe('FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N');
   const [one, two] = [newRunId('FAKE-1', now), newRunId('FAKE-1', now)];

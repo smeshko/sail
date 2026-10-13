@@ -161,10 +161,7 @@ test('its result.json is a valid builtin result: the call, the output as TicketI
   expect([INTAKE_STAGE, INTAKE_KEY]).toEqual(['intake', 'intake#1']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a try's startedAt and finishedAt are readings of the clock it is given, the first and the last", async () => {
+test("a try's startedAt and finishedAt are readings of the clock it is given, the first and the last", async () => {
   const { runDir, ticketSource } = world();
   const clock = steppingClock('2026-09-25T09:00:00.000Z', 100);
   const { result } = await runIntake({

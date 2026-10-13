@@ -889,10 +889,7 @@ test.each<[string, StubRun, string]>([
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("openRun reads its clock before anything else does: the run id's time and startedAt are its first reading, and the id's random part is the bytes it is given", async () => {
+test("openRun reads its clock before anything else does: the run id's time and startedAt are its first reading, and the id's random part is the bytes it is given", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     // The fakes read the same clock, twice for the fetch that comes before the id is minted.
@@ -912,10 +909,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('without random bytes, two runs opened at the same reading get different ids on that reading', async () => {
+test('without random bytes, two runs opened at the same reading get different ids on that reading', async () => {
   await withTempRepo(async (repo) => {
     const [first, second] = ['first', 'second'].map((name) => {
       const dir = join(repo.dir, name);

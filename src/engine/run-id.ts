@@ -18,8 +18,11 @@ export function ulid(
   return time + randomPart;
 }
 
-/** `<key>-<ulid>`. The key is a ticket key such as `FAKE-1`, or a stage name for an isolated stage run. */
-export function newRunId(key: string, now?: number, _random?: (bytes: Uint8Array) => Uint8Array): string {
+/**
+ * `<key>-<ulid>`. The key is a ticket key such as `FAKE-1`, or a stage name for an isolated stage run. `random` fills
+ * the ULID's random part, for a run that must be reproduced.
+ */
+export function newRunId(key: string, now?: number, random?: (bytes: Uint8Array) => Uint8Array): string {
   if (!/^[A-Za-z0-9-]+$/.test(key)) throw new Error(`a run id key is letters, digits and dashes: '${key}'`);
-  return `${key}-${ulid(now)}`;
+  return `${key}-${ulid(now, random)}`;
 }

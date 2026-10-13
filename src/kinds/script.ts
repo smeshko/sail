@@ -4,6 +4,7 @@
 // how the process ran and ended, whether the output was read and held its schema, and which files it recorded.
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
+import { systemClock } from '../engine/clock';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
@@ -149,7 +150,8 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     cwd: at(context.workspace),
     envKeys: variables.map(({ name }) => name),
   });
-  const startedAt = Date.now();
+  const clock = context.clock ?? systemClock;
+  const startedAt = clock().getTime();
   const end = await runProcess({
     command: [command],
     cwd: context.workspace,
@@ -160,7 +162,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     ...(context.graceMs === undefined ? {} : { graceMs: context.graceMs }),
     ...(context.signal === undefined ? {} : { signal: context.signal }),
   });
-  const durationMs = Date.now() - startedAt;
+  const durationMs = clock().getTime() - startedAt;
   const ended = (error: ContractError, record: Record<string, unknown>): StepRun => ({
     outcome: 'error',
     output: null,

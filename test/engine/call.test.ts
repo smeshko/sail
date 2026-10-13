@@ -1323,10 +1323,7 @@ const CLOCK_START = '2026-09-25T09:00:00.000Z';
 const iso = (readings: readonly Date[]) => readings.map((reading) => reading.toISOString());
 const PASSING_REPORT = '{"ok":true,"total":1,"failed":0,"durationMs":5,"failures":[]}';
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a script call's startedAt and finishedAt are the first and last readings of its clock, and its script:exit's duration two readings between them", async () => {
+test("a script call's startedAt and finishedAt are the first and last readings of its clock, and its script:exit's duration two readings between them", async () => {
   await withTempRepo(async (repo) => {
     const s = tests(repo);
     s.run(`echo "<testsuites/>" > "$STAGE_OUT/junit.xml"\necho '${PASSING_REPORT}'`);
@@ -1343,10 +1340,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("an agent call reads each try's startedAt and finishedAt from its clock: a corrected try's times come before the correction's", async () => {
+test("an agent call reads each try's startedAt and finishedAt from its clock: a corrected try's times come before the correction's", async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const clock = steppingClock(CLOCK_START, 100);

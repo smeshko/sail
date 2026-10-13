@@ -16,7 +16,7 @@ import type { Usage } from '../ports/types';
 import type { AgentStep, StageDefinition } from '../sdk/steps';
 import { bindingProblems, materialise, materialisePrepared, prepareBindings, type Supplied } from './bindings';
 import { type CallPaths, callPaths, createCallDir, existingTries, nextTry, runRelative } from './call-dir';
-import type { Clock } from './clock';
+import { type Clock, systemClock } from './clock';
 import type { ContractError } from './contract';
 import type { JournalEntry } from './journal';
 import { buildResult, writeResult } from './result';
@@ -128,7 +128,8 @@ export async function runCall(request: CallRequest): Promise<Ran> {
   for (const [binding, from] of Object.entries(consumed)) {
     if (from !== null) emit({ type: 'input:materialised', binding, from });
   }
-  const startedAt = new Date();
+  const clock = request.clock ?? systemClock;
+  const startedAt = clock();
   const run = await KINDS.script.run(definition, {
     runId,
     runDir,
@@ -143,8 +144,9 @@ export async function runCall(request: CallRequest): Promise<Ran> {
     ...(request.signal === undefined ? {} : { signal: request.signal }),
     ...(request.graceMs === undefined ? {} : { graceMs: request.graceMs }),
     emit,
+    clock,
   });
-  const finishedAt = new Date();
+  const finishedAt = clock();
   const result = buildResult({
     runId,
     stage: definition.name,
@@ -310,6 +312,7 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
   const { runDir, runId, call } = request;
   const key = `${definition.name}#${call}`;
   const emit: CallEmit = (event) => request.emit?.({ ...event, key } as NewEvent);
+  const clock = request.clock ?? systemClock;
   const corrects = (definition.onInvalidOutput ?? 'retry-once') === 'retry-once';
   /** A try's `stage:start`: what it runs on, and what it consumes. */
   const start = (tryNumber: number): CallEvent => ({
@@ -349,7 +352,7 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
     for (const [binding, from] of Object.entries(consumed)) {
       if (from !== null) emit({ type: 'input:materialised', binding, from });
     }
-    const startedAt = new Date();
+    const startedAt = clock();
     const ran = await KINDS.agent.run(definition, {
       runId,
       runDir,
@@ -363,6 +366,7 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
       inputs,
       ...(request.signal === undefined ? {} : { signal: request.signal }),
       emit,
+      clock,
       agent: {
         harness: agent.harness,
         model: agent.model,
@@ -372,7 +376,7 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
         ...(found === undefined ? {} : { feedback: found.map((error) => error.message) }),
       },
     });
-    const finishedAt = new Date();
+    const finishedAt = clock();
     // No corrective try starts once the call is aborted: the try keeps its place, and a resume corrects it.
     const corrected =
       corrects && found === undefined && ran.record.validationFailed === true && request.signal?.aborted !== true;

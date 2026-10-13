@@ -1613,10 +1613,7 @@ const journalText = (runDir: string): string => readFileSync(join(runDir, 'journ
 /** `times`, each as its distance in ms from `start`. */
 const since = (start: string, times: readonly string[]) => times.map((time) => Date.parse(time) - Date.parse(start));
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a run on a stepping clock and fixed id bytes takes its id from them, and every time and duration it records from the clock', async () => {
+test('a run on a stepping clock and fixed id bytes takes its id from them, and every time and duration it records from the clock', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const clock = steppingClock(GOLDEN_START, GOLDEN_STEP_MS);
@@ -1646,10 +1643,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('two runs on the same clock and id bytes, in two repositories, write the same run directory, byte for byte', async () => {
+test('two runs on the same clock and id bytes, in two repositories, write the same run directory, byte for byte', async () => {
   await withTempRepo(async (repo) => {
     const [first, second] = [join(repo.dir, 'first'), join(repo.dir, 'second-and-longer')];
     mkdirSync(first);
@@ -1668,10 +1662,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a resume on a clock of its own stamps what it adds with that clock's readings, and leaves what the first process wrote as it was", async () => {
+test("a resume on a clock of its own stamps what it adds with that clock's readings, and leaves what the first process wrote as it was", async () => {
   await withTempRepo(async (repo) => {
     const before = new Date().toISOString();
     const runId = await stoppedCopy(repo.dir);

@@ -462,10 +462,7 @@ const HOUR_MS = 3_600_000;
 /** A run's clock that jumps an hour at every reading: nothing that waits may read it. */
 const jumping = () => steppingClock('2026-09-25T09:00:00.000Z', HOUR_MS);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("script:exit's duration is two readings of the run's clock apart, and a clock that jumps an hour times no script out", async () => {
+test("script:exit's duration is two readings of the run's clock apart, and a clock that jumps an hour times no script out", async () => {
   const s = setup();
   s.run(`${JUNIT}\necho '${PASSING}'`);
   const { context, events } = collecting(s);
@@ -484,10 +481,7 @@ test
   expect([run.outcome, run.errors]).toEqual(['passed', []]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a clock that jumps an hour at every reading stretches no grace period', async () => {
+test('a clock that jumps an hour at every reading stretches no grace period', async () => {
   const s = setup();
   s.run('trap "" TERM\ntouch "$STAGE_OUT/ready"\nwhile :; do sleep 0.05; done');
   const { context, events } = collecting(s);

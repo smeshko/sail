@@ -22,7 +22,7 @@ import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
-import type { Clock } from './clock';
+import { type Clock, systemClock } from './clock';
 import { DEFAULT_LABEL, PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
 import { createJournal } from './journal';
@@ -157,7 +157,8 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
  */
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, workflow, ticket, force = false } = options;
-  const now = new Date();
+  // Read before anything can refuse, so the run id's time is the clock's first reading whatever else reads it later.
+  const now = (options.clock ?? systemClock)();
   const found = findConfigured(cwd);
   if ('refused' in found) return found;
   const { config } = found;
@@ -182,7 +183,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const resolved = await resolveSource({ ref: ticket, ticketSource, label: config.label ?? DEFAULT_LABEL, force });
   if ('refused' in resolved) return resolved;
   const { ticketKey } = resolved;
-  const runId = newRunId(ticketKey, now.getTime());
+  const runId = newRunId(ticketKey, now.getTime(), options.random);
   // Built and checked before the ticket is touched, with the state as fetched standing in for the claim's answer.
   const source: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: resolved.forced };
   const unclaimed = buildRunHeader({
