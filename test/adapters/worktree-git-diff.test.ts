@@ -15,3 +15,15 @@ test('an untracked entry that git exits 1 on, with a message on stderr, fails th
   const error = await rejection(diffFrom(git, '/unused', 'abc'));
   expect(portFailure(error)).toEqual({ port: 'workspace', op: 'diff', code: 'unavailable' });
 });
+
+test('a warning git prints with a valid patch, such as a line-ending notice, does not fail the diff', async () => {
+  const patch = 'diff --git a/a.ts b/a.ts\n';
+  const git: GitRunner = async (_cwd, args) => {
+    if (args[0] === 'ls-files') return { code: 0, stdout: 'a.ts\0', stderr: '' };
+    if (args.includes('--no-index')) {
+      return { code: 1, stdout: patch, stderr: "warning: in the working copy of 'a.ts', LF will be replaced by CRLF" };
+    }
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  expect((await diffFrom(git, '/unused', 'abc')).patch).toContain(patch);
+});
