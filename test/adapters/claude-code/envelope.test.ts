@@ -102,6 +102,28 @@ test('an empty $id or a fragment-only $id is no new resource, and a named fragme
   }).toEqual({ empty: true, fragment: true, named: true, namedBad: false });
 });
 
+test('a step schema with tuple items and dependencies keeps its references, so both shapes still validate', () => {
+  // review #3.2 coverage: the tuple form of items and the schema and array forms of dependencies are rebased too.
+  const SHAPES = {
+    type: 'object',
+    properties: {
+      a: { type: 'string' },
+      b: { type: 'string' },
+      pair: { type: 'array', items: [{ $ref: '#/definitions/Word' }, { type: 'number' }], minItems: 2, maxItems: 2 },
+    },
+    dependencies: { a: ['b'], b: { properties: { c: { $ref: '#/definitions/Word' } } } },
+    definitions: { Word: { type: 'string' } },
+  };
+  const validate = new Ajv({ strict: true }).compile(submissionSchema(SHAPES));
+  const done = (output: unknown) => ({ outcome: 'done', output });
+  expect({
+    valid: validate(done({ a: 'x', b: 'y', pair: ['w', 3], c: 'z' })),
+    missingDependency: validate(done({ a: 'x', pair: ['w', 3] })),
+    badTuple: validate(done({ b: 'y', pair: ['w', 'not-a-number'] })),
+    badSchemaDependency: validate(done({ b: 'y', c: 3 })),
+  }).toEqual({ valid: true, missingDependency: false, badTuple: false, badSchemaDependency: false });
+});
+
 test('the envelope is a draft-07 oneOf with exactly two branches, one per outcome', () => {
   const schema = submissionSchema(STEP_SCHEMA) as { oneOf?: { properties?: { outcome?: { const?: string } } }[] };
   expect(schema.oneOf?.map((branch) => branch.properties?.outcome?.const)).toEqual(['done', 'blocked']);
