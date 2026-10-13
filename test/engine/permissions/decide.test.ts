@@ -111,6 +111,25 @@ test('an argument built by a substitution is refused, since its output can suppl
     expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
   }));
 
+test('git accepts an abbreviated long option and a combined short flag, so those spellings are denied too', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['git *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    const denied: [string, string][] = [
+      ['git branch -df topic', 'deny:git-branch-D'],
+      ['git branch -d -f topic', 'deny:git-branch-D'],
+      ['git branch --del --for topic', 'deny:git-branch-D'],
+      ['git reset --har HEAD', 'deny:git-reset-hard'],
+      ['git clean --for -d', 'deny:git-clean-f'],
+      ['git push --for origin main', 'deny:git-push-force'],
+    ];
+    for (const [command, rule] of denied) {
+      expect(decide(bash(command), policy, p.roots)).toMatchObject({ deny: true, rule });
+    }
+    expect(decide(bash('git branch -d topic'), policy, p.roots)).toEqual({ allow: true });
+    expect(decide(bash('git branch -f topic'), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('repeated git -C options are applied in turn, so a later one is relative to where the earlier one led', () =>
   inRoots((p) => {
     mkdirSync(join(p.roots.worktree, 'src'));
