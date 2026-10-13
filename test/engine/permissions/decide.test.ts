@@ -111,6 +111,33 @@ test('an argument built by a substitution is refused, since its output can suppl
     expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
   }));
 
+test('git configuration, helper paths and shell state the engine cannot check are refused as command:unparseable', () =>
+  inRoots((p) => {
+    const policy: Permissions = {
+      read: [],
+      write: [],
+      commands: ['git *', 'export *', '. *', 'echo *'],
+      tools: ['Bash'],
+    };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    const refused = [
+      'git -c core.fsmonitor=/evil status',
+      'git -c alias.x=!sh status',
+      'git --config-env=core.pager=EVIL status',
+      'git --exec-path=hooks status',
+      'GIT_CONFIG_GLOBAL=/evil git commit -m x',
+      'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=/evil git status',
+      'GIT_EXEC_PATH=hooks git status',
+      'export GIT_DIR=/elsewhere; git status',
+      '. ./setup.sh',
+    ];
+    for (const command of refused) {
+      expect(decide(bash(command), policy, p.roots)).toMatchObject({ deny: true, rule: 'command:unparseable' });
+    }
+    expect(decide(bash('git status'), policy, p.roots)).toEqual({ allow: true });
+    expect(decide(bash('git --no-pager log -1'), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('a substitution nested past the tokenizer limit is denied command:unparseable, not thrown', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['echo *'], tools: ['Bash'] };
