@@ -24,6 +24,31 @@ test('the envelope accepts a done submission whose output fits the step schema a
   expect(submissions.map((submission) => validate(submission))).toEqual([true, true, false, false, false, false]);
 });
 
+test('a step schema whose $ref points at its own root, or at its own definitions, still validates its done output', () => {
+  // review #1.4: wrapped under the envelope, "#" and "#/definitions/…" must still reach the step schema, not the envelope.
+  const RECURSIVE = {
+    type: 'object',
+    properties: { summary: { type: 'string' }, children: { type: 'array', items: { $ref: '#' } } },
+    required: ['summary'],
+    additionalProperties: false,
+  };
+  const SHARED = {
+    type: 'object',
+    properties: { value: { $ref: '#/definitions/Value' } },
+    required: ['value'],
+    additionalProperties: false,
+    definitions: { Value: { type: 'string' } },
+  };
+  const recursive = new Ajv({ strict: true }).compile(submissionSchema(RECURSIVE));
+  const shared = new Ajv({ strict: true }).compile(submissionSchema(SHARED));
+  expect({
+    nested: recursive({ outcome: 'done', output: { summary: 'a', children: [{ summary: 'b', children: [] }] } }),
+    badChild: recursive({ outcome: 'done', output: { summary: 'a', children: [{ summary: 3 }] } }),
+    shared: shared({ outcome: 'done', output: { value: 'x' } }),
+    badShared: shared({ outcome: 'done', output: { value: 3 } }),
+  }).toEqual({ nested: true, badChild: false, shared: true, badShared: false });
+});
+
 test('the envelope is a draft-07 oneOf with exactly two branches, one per outcome', () => {
   const schema = submissionSchema(STEP_SCHEMA) as { oneOf?: { properties?: { outcome?: { const?: string } } }[] };
   expect(schema.oneOf?.map((branch) => branch.properties?.outcome?.const)).toEqual(['done', 'blocked']);
