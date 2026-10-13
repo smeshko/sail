@@ -34,7 +34,12 @@ interface Context {
   readonly env: Readonly<Record<string, string>>;
   /** The script the segment belongs to, so a command knows what it is piped from and into, even when nested. */
   readonly pipeline: Script;
+  /** How many scripts (eval, a nested shell, a substitution) the segment is inside. Bounded, so the walk cannot overflow. */
+  readonly depth: number;
 }
+
+/** How deeply scripts may nest through eval, nested shells and substitutions before the walk refuses. */
+const MAX_DEPTH = 32;
 
 interface Walk {
   readonly roots: Roots;
@@ -72,7 +77,7 @@ export function normalize(script: Script, roots: Roots): NormalizedCommand[] {
 /** Normalizes a script and returns its commands and every refusal, without throwing. */
 export function analyse(script: Script, roots: Roots): Analysis {
   const walk: Walk = { roots, commands: [], refusals: [] };
-  walkScript(walk, script, { cwd: roots.worktree, env: {}, pipeline: script });
+  walkScript(walk, script, { cwd: roots.worktree, env: {}, pipeline: script, depth: 0 });
   return { commands: walk.commands, refusals: walk.refusals };
 }
 
@@ -114,7 +119,7 @@ function walkScript(walk: Walk, script: Script, start: Context): string {
     const after = walkSegment(
       walk,
       segment,
-      { cwd: subshell ? sequenceCwd : cwd, env: start.env, pipeline: script },
+      { cwd: subshell ? sequenceCwd : cwd, env: start.env, pipeline: script, depth: start.depth },
       fedByCurl,
     );
     if (!subshell) cwd = after;
@@ -136,6 +141,7 @@ function walkSegment(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
 }
 
 function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: boolean): string {
+  if (ctx.depth >= MAX_DEPTH) throw new Unparseable('commands nested too deeply to check');
   const { words, redirects } = segment;
   const own: Record<string, string> = {};
   let index = 0;
@@ -155,7 +161,7 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
   const env = { ...ctx.env, ...own };
   // bash runs the file BASH_ENV names before any command, so the commands it would check are not all the code it runs.
   if (env.BASH_ENV !== undefined) throw new Unparseable('BASH_ENV names a startup file the engine does not read');
-  const scoped: Context = { cwd: ctx.cwd, env, pipeline: ctx.pipeline };
+  const scoped: Context = { cwd: ctx.cwd, env, pipeline: ctx.pipeline, depth: ctx.depth + 1 };
   for (const word of [...words, ...redirects.map((redirect) => redirect.target)]) {
     for (const body of substitutionScripts(word)) walkScript(walk, body, scoped);
   }
