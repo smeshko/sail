@@ -94,3 +94,37 @@ test('a credential in the origin URL reaches no lease file and no event, and the
     }).toEqual({ inLeases: false, inEvents: false, remote: ORIGIN });
   });
 });
+
+test("an scp-style origin with no user names one remote in every clone, so the second clone is refused", async () => {
+  await withTempRepo(async (first) => {
+    await withTempRepo(async (second) => {
+      const origin = 'example.com:org/sail.git';
+      first.git('remote', 'add', 'origin', origin);
+      second.git('remote', 'add', 'origin', origin);
+      const leases = tempDir();
+      const a = createGitWorktreeWorkspace({ repo: first.dir, env: first.env, leasesDir: leases });
+      const b = createGitWorktreeWorkspace({ repo: second.dir, env: second.env, leasesDir: leases });
+      const keys = [await a.remoteKey(first.dir), await b.remoteKey(second.dir)];
+      const taken = await a.lease(keys[0] as string, BRANCH, holderIn(tempDir(), 'r1'));
+      const refused = await b.lease(keys[1] as string, BRANCH, holderIn(tempDir(), 'r2'));
+      expect([keys, taken.leased, refused.leased ? 'leased' : refused.holder.runId]).toEqual([
+        [origin, origin],
+        true,
+        'r1',
+      ]);
+    });
+  });
+});
+
+test('a password with a raw @ is stripped whole: the remote key and the lease name no part of it', async () => {
+  await withTempRepo(async (repo) => {
+    repo.git('remote', 'add', 'origin', 'https://user:tok@SECRET_7f3@example.com/org/sail.git');
+    const leases = tempDir();
+    const adapter = createGitWorktreeWorkspace({ repo: repo.dir, env: repo.env, leasesDir: leases });
+    await adapter.lease(await adapter.remoteKey(repo.dir), BRANCH, holderIn(tempDir(), 'r1'));
+    expect({
+      key: await adapter.remoteKey(repo.dir),
+      inLeases: leaseTexts(leases).some((text) => text.includes('SECRET') || text.includes('tok')),
+    }).toEqual({ key: ORIGIN, inLeases: false });
+  });
+});
