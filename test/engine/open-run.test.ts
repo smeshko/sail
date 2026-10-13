@@ -807,7 +807,10 @@ test('a STATUS that cannot be written after the workspace is made releases the w
     };
     const thrown = await rejection(openStub(repo.dir, { ticket: 'FAKE-1' }, adapters));
     expect(thrown).toMatchObject({ message: expect.stringMatching(/the run directory was not written/) });
-    const worktrees = repo.git('worktree', 'list', '--porcelain').split('\n').filter((line) => line.startsWith('worktree '));
+    const worktrees = repo
+      .git('worktree', 'list', '--porcelain')
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '));
     expect([runIds(repo.dir), worktrees.length]).toEqual([[], 1]);
   });
 });
