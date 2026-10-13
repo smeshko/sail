@@ -27,23 +27,23 @@
     }
   },
   "consumed": {},
-  "startedAt": "2026-09-25T09:00:05.800Z",
-  "finishedAt": "2026-09-25T09:00:06.500Z",
+  "startedAt": "2026-09-25T09:00:06.300Z",
+  "finishedAt": "2026-09-25T09:00:07.000Z",
   "durationMs": 700,
   "exit": {
     "code": 1,
     "mapped": "failed"
   },
-  "command": ".sail/stages/tests/run.sh",
+  "command": "../../../.sail/stages/tests/run.sh",
   "env": {
     "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
     "STAGE": "tests",
     "CALL": "1",
     "TRY": "1",
-    "STAGE_IN": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-1/in",
-    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-1",
+    "STAGE_IN": "../03-tests/call-1/in",
+    "STAGE_OUT": "../03-tests/call-1",
     "WORKSPACE": ".",
-    "SAIL_CONFIG": ".sail/project.yaml",
-    "SAIL_EVENTS": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-1/port-events.ndjson"
+    "SAIL_CONFIG": "../../../.sail/project.yaml",
+    "SAIL_EVENTS": "../03-tests/call-1/port-events.ndjson"
   }
 }

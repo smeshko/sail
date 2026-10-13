@@ -192,5 +192,6 @@
     "maxUsd": 25,
     "maxMinutes": 90
   },
-  "startedAt": "2026-09-25T09:00:00.000Z"
+  "startedAt": "2026-09-25T09:00:00.000Z",
+  "workspace": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace"
 }

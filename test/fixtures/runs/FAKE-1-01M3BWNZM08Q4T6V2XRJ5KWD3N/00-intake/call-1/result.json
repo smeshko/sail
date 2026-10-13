@@ -25,7 +25,7 @@
     "ticket.json": {
       "path": "00-intake/call-1/ticket.json",
       "bytes": 1786,
-      "sha256": "c15564d252350007791152b78bcb8aed91bc51b468cde4121264eb6542df0355"
+      "sha256": "df6945fe4b9595dfa3d8934af273b55b79b1bac5dc34def885d4fb1c2d9f7be3"
     },
     "brief.md": {
       "path": "00-intake/call-1/brief.md",
@@ -36,7 +36,7 @@
   "consumed": {
     "source": "run.json#/source"
   },
-  "startedAt": "2026-09-25T09:00:00.800Z",
-  "finishedAt": "2026-09-25T09:00:01.500Z",
+  "startedAt": "2026-09-25T09:00:01.300Z",
+  "finishedAt": "2026-09-25T09:00:02.000Z",
   "durationMs": 700
 }
