@@ -274,6 +274,8 @@ test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that 
 
     await withTempRepo(async (other) => {
       copyRun(repo.dir, other.dir);
+      // The copied clone commits on its own, so its HEAD is not the source's whatever the two repositories' timestamps are.
+      other.git('commit', '--allow-empty', '-m', 'a copied clone of its own');
       const resumed = await runCaptured(['resume', runId], other.dir, { env: other.env });
       const copy = join(other.dir, '.sail-runs', runId);
       expect([resumed.code, resumed.stderr, journalOf(copy)]).toEqual([EXIT_OK, '', JOURNAL]);
