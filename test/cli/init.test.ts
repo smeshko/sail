@@ -412,3 +412,12 @@ test('an existing .gitignore keeps its mode when it gains the lines, and one tha
     expect(listing(repo.dir)).toEqual(['.git', '.gitignore', '.sail', 'README.md', 'shared.gitignore']);
   });
 });
+
+test('.sail/ gets the mode a new directory has under the umask, not the private one of the temporary directory it was built as', async () => {
+  await withTempRepo(async (repo) => {
+    expect((await init(repo)).code).toBe(EXIT_OK);
+    mkdirSync(join(repo.dir, 'plain'));
+    const mode = (path: string) => (fs.statSync(path).mode & 0o777).toString(8);
+    expect(mode(join(repo.dir, '.sail'))).toBe(mode(join(repo.dir, 'plain')));
+  });
+});
