@@ -70,10 +70,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expect(adapter.parseKey('not a key')).toBeUndefined();
   });
 
-  // biome-ignore format: TDD-PENDING TASK-007
-  test
-    .skip // TDD-PENDING TASK-007
-    (`${label}: get gives the ticket with raw, and emits one ticket:fetched that names it by its title and URL and counts what it holds`, async () => {
+  test(`${label}: get gives the ticket with raw, and emits one ticket:fetched that names it by its title and URL and counts what it holds`, async () => {
     const { adapter, world, capture } = await start();
     const ticket = await adapter.get(world.designated);
     expect(parseIssues(Ticket, ticket)).toEqual([]);

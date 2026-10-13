@@ -69,11 +69,13 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       emit({
         type: 'ticket:fetched',
         ticketKey,
+        title: ticket.title,
+        url: ticket.url,
         comments: ticket.comments.length,
         links: ticket.links.length,
         attachments: ticket.attachments.length,
         durationMs: Math.max(0, now().getTime() - started),
-      } as ProviderEvent);
+      });
       return ticket;
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),

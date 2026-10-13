@@ -531,10 +531,7 @@ test.each(PROVIDER.map((sample) => [sample.type, sample] as const))(
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('ticket:fetched accepts its provider payload, with its title and URL, and rejects a field it does not declare', () => {
+test('ticket:fetched accepts its provider payload, with its title and URL, and rejects a field it does not declare', () => {
   expect(validateDocument('sail.event.v1', stamped(FETCHED))).toEqual([]);
   expect(validateDocument('sail.event.v1', { ...stamped(FETCHED), surprise: 1 })).toEqual([
     { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
@@ -1128,10 +1125,7 @@ test('event: run:start takes source.forced as the list, and refuses a boolean', 
   expect(forcedIssues('sail.event.v1', event, ['label'])).toEqual(['/source/forced/0']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('event: a ticket:fetched names its ticket: one without title, or without url, breaks sail.event.v1, with a key and without one', () => {
+test('event: a ticket:fetched names its ticket: one without title, or without url, breaks sail.event.v1, with a key and without one', () => {
   const fetched = {
     seq: 1,
     ts: '2026-09-25T09:00:00.000Z',

@@ -1748,10 +1748,7 @@ test("a script step's sail port leaves its provider event in the run's stream un
 
 const STUB_TICKET = { ticketKey: 'FAKE-1', title: 'Add a greeting', url: 'fake://tickets/FAKE-1' };
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a run's summary.json names its ticket by its key, title and URL, from the intake's fetch, and a resumed run's summary still holds it", async () => {
+test("a run's summary.json names its ticket by its key, title and URL, from the intake's fetch, and a resumed run's summary still holds it", async () => {
   await withTempRepo(async (repo) => {
     const runId = await stoppedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);

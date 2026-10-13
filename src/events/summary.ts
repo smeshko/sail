@@ -4,6 +4,10 @@
 //
 // A resume writes no marker, so the fold infers the run's status from its last `run:end`, keeps each call's latest
 // try, takes each loop's highest iteration, and drops a route the resume reported again.
+//
+// The run's ticket is the one its intake fetched: the first `ticket:fetched` under the intake's key. A script step's
+// `sail port ticket-source get` emits one too, under its own key, and names another fetch, not the run's ticket.
+import { INTAKE_KEY } from '../engine/intake';
 import type { JournalEntry } from '../engine/journal';
 import type { StopReason } from '../engine/run-dir';
 import type { SailEvent } from './types';
@@ -123,6 +127,8 @@ interface CallState {
 /** The fold so far. Opaque: start it with emptyState(), feed it with foldEvent() and read it with toSummary(). */
 export interface SummaryState {
   run?: { runId: string; workflow: string; source: Summary['source']; startedAt: string; maxUsd?: number | undefined };
+  /** The ticket the intake fetched. */
+  ticket?: NonNullable<Summary['ticket']>;
   ending?:
     | { status: 'completed' | 'failed' | 'suspended'; stopReason?: StopReason; endedAt: string; result?: unknown }
     | undefined;
@@ -210,6 +216,9 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
       break;
     case 'harness:session_end':
       foldSession(state, event);
+      break;
+    case 'ticket:fetched':
+      if (event.key === INTAKE_KEY) state.ticket ??= { ticketKey: event.ticketKey, title: event.title, url: event.url };
       break;
     case 'loop:iteration':
       holdFeedback(state, event.loop, event.feedback?.from);
@@ -352,6 +361,7 @@ export function toSummary(state: SummaryState): Summary | undefined {
     runId: run.runId,
     workflow: run.workflow,
     source: { ...run.source },
+    ticket: state.ticket === undefined ? undefined : { ...state.ticket },
     status: ending?.status ?? 'running',
     stopReason: ending?.stopReason,
     startedAt: run.startedAt,

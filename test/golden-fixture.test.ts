@@ -40,10 +40,7 @@ function mutatedCopy(path: string, mutate: (content: string) => string): string 
   return dir;
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the golden run directory is valid against every run-directory schema', () => {
+test('the golden run directory is valid against every run-directory schema', () => {
   const { counts, issues } = validateRunDir(fixture);
   expect(issues.map(formatIssue)).toEqual([]);
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
@@ -65,10 +62,7 @@ test('the fixture repository config is valid', () => {
   expect(validateProjectFile(join(import.meta.dir, 'fixtures', 'repo', '.sail', 'project.yaml'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('an unknown outcome in a mutated copy names the file, line and field', () => {
+test('an unknown outcome in a mutated copy names the file, line and field', () => {
   const result = mutatedCopy('04-self-review/call-1/result.json', (content) =>
     content.replace('"outcome": "done"', '"outcome": "approved"'),
   );
@@ -247,10 +241,7 @@ function holds(value: unknown, path: readonly string[]): boolean {
   return rest.length === 0 ? Object.hasOwn(object, head) : holds(object[head], rest);
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the golden run's summary is its events folded, byte for byte, with nothing left out: it names the ticket, and holds no field that no event carries yet", () => {
+test("the golden run's summary is its events folded, byte for byte, with nothing left out: it names the ticket, and holds no field that no event carries yet", () => {
   const folded = summarize(lines('events.ndjson') as unknown as SailEvent[]);
   expect(`${JSON.stringify(folded, null, 2)}\n`).toBe(text('summary.json'));
   expect(folded?.ticket).toEqual({

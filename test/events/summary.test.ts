@@ -508,10 +508,7 @@ const INTAKE_START: NewEvent = {
 };
 const TICKET = { ticketKey: 'FAKE-1', title: 'Add a --shout flag', url: 'fake://tickets/FAKE-1' };
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the summary names the run's ticket by its key, title and URL, from the intake's ticket:fetched, and a stream that ended before the fetch has no ticket", () => {
+test("the summary names the run's ticket by its key, title and URL, from the intake's ticket:fetched, and a stream that ended before the fetch has no ticket", () => {
   const before = stamp([0, runStart()], [100, INTAKE_START]);
   expect(folded(before)).not.toHaveProperty('ticket');
   const summary = folded(stamp([0, runStart()], [100, INTAKE_START], [300, fetched('intake#1', TICKET.title)]));
@@ -520,10 +517,7 @@ test
   expect(Object.keys(summary ?? {}).slice(0, 6)).toEqual(['schema', 'runId', 'workflow', 'source', 'ticket', 'status']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a later ticket:fetched under another key, with another title, leaves the summary's ticket as the intake's, and so does a second one of the intake's own", () => {
+test("a later ticket:fetched under another key, with another title, leaves the summary's ticket as the intake's, and so does a second one of the intake's own", () => {
   const stream = stamp(
     [0, runStart()],
     [100, INTAKE_START],
@@ -536,10 +530,7 @@ test
   expect(folded(stream)?.ticket).toEqual(TICKET);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a ticket:fetched with no key, or under a step's key alone, sets no ticket: only the intake's names the run's", () => {
+test("a ticket:fetched with no key, or under a step's key alone, sets no ticket: only the intake's names the run's", () => {
   const keyless = stamp([0, runStart()], [100, fetched(undefined, 'Fetched at dispatch')]);
   expect(folded(keyless)).not.toHaveProperty('ticket');
   const script = stamp([0, runStart()], [100, start('open#1')], [200, fetched('open#1', "A script's fetch")]);
