@@ -1,6 +1,6 @@
 // Paths and globs: where a path really is, and whether it falls inside a run's roots or matches a glob.
-import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { lstatSync, readlinkSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import type { Roots } from './types';
 
 /** The roots a path can resolve into. */
@@ -43,42 +43,56 @@ export function matchesAny(path: string, globs: readonly string[]): boolean {
 }
 
 /**
- * The absolute, lexically normal path a name resolves to, with symlinks followed through the longest existing
- * ancestor. Null when the name cannot be resolved (a leading `~`).
+ * The physical path a name resolves to: each symlink is followed where it occurs, so a `..` after one climbs from its
+ * target, as the filesystem does. Null when the name cannot be resolved (a leading `~`, or too many links).
  */
 export function resolveReal(path: string, cwd: string): string | null {
   if (path.startsWith('~')) return null;
-  return realise(resolve(cwd, path), 0);
+  return physical(path.startsWith('/') ? path : `${cwd}/${path}`);
 }
 
-/** Which root contains a resolved path, or null when none does. Roots are compared by their real paths. */
+/**
+ * Which root contains a resolved path, or null when none does. Roots are compared by their real paths, and the deepest
+ * containing root wins, so a binding nested inside the output directory is not the output.
+ */
 export function rootOf(resolved: string, roots: Roots): RootName | null {
+  let best: RootName | null = null;
+  let bestLength = -1;
   for (const name of ROOT_NAMES) {
-    const root = realise(roots[name], 0) ?? roots[name];
-    if (resolved === root || resolved.startsWith(root + sep)) return name;
+    const root = physical(roots[name]) ?? roots[name];
+    const inside = resolved === root || resolved.startsWith(root + sep);
+    if (inside && root.length > bestLength) {
+      best = name;
+      bestLength = root.length;
+    }
   }
-  return null;
+  return best;
 }
 
-/** An absolute path with its longest existing ancestor realpath'd, and a dangling symlink followed to its target. */
-function realise(absolute: string, links: number): string | null {
-  let existing = absolute;
-  const rest: string[] = [];
-  for (;;) {
-    try {
-      return join(realpathSync(existing), ...rest);
-    } catch {
-      const target = symlinkTarget(existing);
-      if (target !== null) {
-        if (links >= MAX_LINKS) return null;
-        return realise(resolve(dirname(existing), target, ...rest), links + 1);
-      }
+/** An absolute path walked one component at a time, following each symbolic link where it sits. */
+function physical(absolute: string): string | null {
+  let queue = absolute.split('/').filter((part) => part !== '' && part !== '.');
+  let current = '/';
+  let links = 0;
+  while (queue.length > 0) {
+    const [part = '', ...rest] = queue;
+    queue = rest;
+    if (part === '..') {
+      current = dirname(current);
+      continue;
     }
-    const parent = dirname(existing);
-    if (parent === existing) return join(existing, ...rest);
-    rest.unshift(basename(existing));
-    existing = parent;
+    const candidate = join(current, part);
+    const target = symlinkTarget(candidate);
+    if (target === null) {
+      current = candidate;
+      continue;
+    }
+    links += 1;
+    if (links > MAX_LINKS) return null;
+    if (target.startsWith('/')) current = '/';
+    queue = [...target.split('/').filter((piece) => piece !== '' && piece !== '.'), ...queue];
   }
+  return current;
 }
 
 /** The target a path names when it is a symbolic link, dangling or not, and null for anything else. */
