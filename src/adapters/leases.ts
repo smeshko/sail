@@ -74,15 +74,6 @@ export function isAlive(pid: number): boolean {
 }
 
 /** Whether `lease`'s run no longer holds it: its run has ended, or it isn't suspended and its pid is dead. */
-/** Whether the lease's run is still going: its STATUS is `running`, and its pid is alive. */
-function runsLive(lease: Lease): boolean {
-  try {
-    return readStatus(lease.runDir).status === 'running' && isAlive(lease.pid);
-  } catch {
-    return false;
-  }
-}
-
 export function isStale(lease: Lease): boolean {
   let status: string | undefined;
   try {
@@ -168,9 +159,10 @@ export function takeLease(
       if (create(file, lease)) return { leased: true, lease, raw: lease };
       continue;
     }
-    // The same run renews its lease, unless another live process is still running it: a second resume of a run that
-    // is going on elsewhere must not share its branch and worktree.
-    const renewal = held.runId === runId && (held.pid === pid || !runsLive(held));
+    // The same run renews its lease from its own pid, or once the pid that held it is gone. A live holder of another pid
+    // is refused whatever its STATUS says: a second resume must not share the branch and worktree of a run going on
+    // elsewhere, even in the moment between that resume's lease and its `running` STATUS.
+    const renewal = held.runId === runId && (held.pid === pid || !isAlive(held.pid));
     if (!renewal && !isStale(held)) return { leased: false, holder: held, raw: held };
     if (dropIfStill(file, held, runId) && create(file, lease)) {
       return renewal ? { leased: true, lease, raw: lease } : { leased: true, lease, took: held.runId, raw: lease };
