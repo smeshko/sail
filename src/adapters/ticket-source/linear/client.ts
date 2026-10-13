@@ -109,7 +109,9 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
       // A recognised GraphQL code names the cause even on a 4xx, where Linear reports rate limits and failed auth.
       const recognised = graphqlCode(body);
       const coded = recognised === undefined ? undefined : GRAPHQL_CODES[recognised];
-      const code = coded ?? statusCode(response.status);
+      // The status decides 401, 403, 429 and 5xx. A GraphQL code refines any other status, and a 200 with errors.
+      const fromStatus = statusCode(response.status);
+      const code = fromStatus === undefined || fromStatus === 'invalid' ? (coded ?? fromStatus) : fromStatus;
       if (code !== undefined) {
         const rateLimited = response.status === 429 || recognised === 'RATELIMITED';
         throw fail(code, `${rateLimited ? 'Linear rate limit reached: ' : ''}${detail}`);
