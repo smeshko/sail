@@ -1,7 +1,7 @@
 // The port events file: what a `sail port` under a script step appends, and what the engine takes from it when the
 // step ends. Only a whole line that is a `ticket:*` or `codehost:*` event, with no envelope, is a provider event.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendPortEvent, PORT_EVENTS_FILE, readPortEvents } from '../../src/engine/port-events';
@@ -122,4 +122,14 @@ test("a file that can't be read is one problem, naming why", () => {
     events: [],
     problems: ["port-events.ndjson can't be read (EISDIR)"],
   });
+});
+
+test('a file that is no regular file is one problem and is never read: a FIFO would block the read for good, and a link to a device would never end it', () => {
+  const path = eventsFile();
+  expect(Bun.spawnSync(['mkfifo', path]).exitCode).toBe(0);
+  const notRegular = { events: [], problems: ['port-events.ndjson is not a regular file'] };
+  expect(readPortEvents(path, ENVELOPE)).toEqual(notRegular);
+  rmSync(path);
+  symlinkSync('/dev/zero', path);
+  expect(readPortEvents(path, ENVELOPE)).toEqual(notRegular);
 });
