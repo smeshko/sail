@@ -143,7 +143,8 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   ): Promise<{ state: TicketState; raw: object }> => {
     const data = (await client.request('UpdateIssue', UPDATE_ISSUE, { id: node.id, stateId })) as UpdateIssueData;
     const issue = data.issueUpdate.issue;
-    if (!data.issueUpdate.success || issue === null) {
+    // A success with no issue is refused too: Linear's answer is then not one the adapter can read (review #2.9).
+    if (!data.issueUpdate.success || issue === null || issue === undefined) {
       throw new PortError('ticketSource', op, 'conflict', `Linear did not move ${node.identifier}`);
     }
     const state = { type: stateTypeOf(issue.state.type, op), name: issue.state.name };
@@ -202,7 +203,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
         body,
       })) as CreateCommentData;
       const created = data.commentCreate.comment;
-      if (!data.commentCreate.success || created === null) {
+      if (!data.commentCreate.success || created === null || created === undefined) {
         throw new PortError(
           'ticketSource',
           'comment',
