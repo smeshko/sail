@@ -4,7 +4,7 @@ import { statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { resolveReal, rootOf } from './paths';
 import { classifyRedirect, type RedirectTarget, substitutionScripts } from './substitute';
-import { type Script, type Segment, tokenize, Unparseable, type Word } from './tokenize';
+import { type Joiner, type Script, type Segment, tokenize, Unparseable, type Word } from './tokenize';
 import { Refusal, type Roots } from './types';
 
 /** One simple command, as the deny set and the patterns see it. */
@@ -103,29 +103,50 @@ export function leadingCommand(words: readonly Word[]): string {
 }
 
 /** Walks a script and returns the directory it leaves the shell in. */
+/** Walks a script and returns the directory it leaves the shell in. */
 function walkScript(walk: Walk, script: Script, start: Context): string {
   let cwd = start.cwd;
-  let sequenceCwd = cwd;
+  let jobCwd = cwd;
+  let pipeCwd = cwd;
   let previous: Segment | undefined;
   script.forEach((segment, index) => {
     // A shell that `curl` pipes into is the deny set's case (deny:curl-pipe-shell), so it is not refused here.
     const fedByCurl =
       segment.before === '|' && previous !== undefined && basename(leadingCommand(previous.words)) === 'curl';
-    // Each member of a pipeline, and a backgrounded command, runs in a subshell: its cd ends with it, and the next
-    // member starts from the directory the pipeline started in.
-    if (segment.before !== '|') sequenceCwd = cwd;
-    const next = script[index + 1];
-    const subshell = segment.before === '|' || next?.before === '|' || next?.before === '&';
+    // A job is a run of segments joined by && or || or |. A job before `&` runs in the background, in a subshell, and
+    // so does each member of a pipeline. Neither moves the shell, so each starts from the directory it began in.
+    if (!isJoined(segment.before)) jobCwd = cwd;
+    if (segment.before !== '|') pipeCwd = cwd;
+    const backgrounded = jobIsBackgrounded(script, index);
+    const pipelined = segment.before === '|' || script[index + 1]?.before === '|';
+    const base = backgrounded ? jobCwd : pipelined ? pipeCwd : cwd;
     const after = walkSegment(
       walk,
       segment,
-      { cwd: subshell ? sequenceCwd : cwd, env: start.env, pipeline: script, depth: start.depth },
+      { cwd: base, env: start.env, pipeline: script, depth: start.depth },
       fedByCurl,
     );
-    if (!subshell) cwd = after;
     previous = segment;
+    if (backgrounded || pipelined) return;
+    // A cd after && or || runs only if the one before it succeeds, so the directory after it is not known.
+    if ((segment.before === '&&' || segment.before === '||') && after !== cwd) {
+      walk.refusals.push(new Refusal('command:unparseable', 'a directory change inside && or ||'));
+    }
+    cwd = after;
   });
   return cwd;
+}
+
+/** Whether a segment joins to the one before it in the same job: a conditional or a pipe. */
+function isJoined(joiner: Joiner): boolean {
+  return joiner === '&&' || joiner === '||' || joiner === '|';
+}
+
+/** Whether the job a segment belongs to is followed by `&`, so that the whole job runs in the background. */
+function jobIsBackgrounded(script: Script, index: number): boolean {
+  let last = index;
+  while (script[last + 1] !== undefined && isJoined(script[last + 1]?.before ?? null)) last++;
+  return script[last + 1]?.before === '&';
 }
 
 /** Walks one segment. A refusal that stops it is recorded, and the segment yields no command. */
