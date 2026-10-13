@@ -18,15 +18,27 @@ interface DenyEntry {
 const SHELLS = new Set(['sh', 'bash', 'zsh']);
 const RM_LONG_FLAGS = { '--recursive': 'r', '--force': 'f' } as const;
 const CLEAN_LONG_FLAGS = { '--force': 'f' } as const;
-const BRANCH_LONG_FLAGS = { '--force': 'f' } as const;
+const BRANCH_LONG_FLAGS = { '--force': 'f', '--delete': 'd' } as const;
+const RESET_LONG_FLAGS = { '--hard': 'H' } as const;
 
-/** The letters of a command's flags, with each long form (`--force`) mapped to its letter. Stops at `--`. */
+/**
+ * The letter a `--name` argument stands for. Git takes any unambiguous prefix of a long option, so `--for` is `--force`;
+ * a name is at least one letter after the dashes, and an ambiguous one matches the first form, which only denies more.
+ */
+function longLetter(arg: string, longForms: Readonly<Record<string, string>>): string | undefined {
+  const name = arg.split('=')[0] ?? arg;
+  if (name.length <= 2) return undefined;
+  const key = Object.keys(longForms).find((candidate) => candidate.startsWith(name));
+  return key === undefined ? undefined : longForms[key];
+}
+
+/** The letters of a command's flags, with each long form (`--force`, or an abbreviation of it) mapped to its letter. */
 function flagLetters(args: readonly string[], longForms: Readonly<Record<string, string>>): Set<string> {
   const letters = new Set<string>();
   for (const arg of args) {
     if (arg === '--') break;
     if (arg.startsWith('--')) {
-      const letter = longForms[arg];
+      const letter = longLetter(arg, longForms);
       if (letter !== undefined) letters.add(letter);
     } else if (arg.startsWith('-')) {
       for (const letter of arg.slice(1)) letters.add(letter);
@@ -48,8 +60,12 @@ function gitIs(argv: readonly string[], subcommand: string, accepts: (args: read
 
 /** Whether a git push argument forces the update: `-f`, a `--force…` form, a `+` refspec, or a short cluster with `f`. */
 function forcesPush(arg: string): boolean {
-  if (arg.startsWith('+') || arg.startsWith('--force')) return true;
-  return arg.startsWith('-') && !arg.startsWith('--') && arg.includes('f');
+  if (arg.startsWith('+')) return true;
+  if (arg.startsWith('--')) {
+    const name = arg.split('=')[0] ?? arg;
+    return name.startsWith('--force') || ('--force'.startsWith(name) && name.length > 2);
+  }
+  return arg.startsWith('-') && arg.includes('f');
 }
 
 /** Whether a sh, bash or zsh runs as the second command of a pipeline whose first segment is a `curl` call. */
@@ -82,7 +98,7 @@ const DENY_SET: readonly DenyEntry[] = [
   },
   {
     rule: 'deny:git-reset-hard',
-    matches: (argv) => gitIs(argv, 'reset', (args) => args.includes('--hard')),
+    matches: (argv) => gitIs(argv, 'reset', (args) => flagLetters(args, RESET_LONG_FLAGS).has('H')),
   },
   {
     rule: 'deny:git-clean-f',
@@ -93,7 +109,8 @@ const DENY_SET: readonly DenyEntry[] = [
     matches: (argv) =>
       gitIs(argv, 'branch', (args) => {
         const letters = flagLetters(args, BRANCH_LONG_FLAGS);
-        return letters.has('D') || (args.includes('--delete') && letters.has('f'));
+        // `-D` is `-d -f`: a deletion that is also forced, in any spelling.
+        return letters.has('D') || (letters.has('d') && letters.has('f'));
       }),
   },
   {
