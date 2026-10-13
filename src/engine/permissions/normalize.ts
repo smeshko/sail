@@ -368,6 +368,10 @@ function shellScript(args: readonly string[]): string {
   if (script === undefined || !flags.some((flag) => /^-[A-Za-z]*c/.test(flag))) {
     throw new Refusal('command:unparseable', 'a shell runs only a -c script the engine can read');
   }
+  // A login or interactive shell sources startup files (~/.bash_profile, ~/.bashrc) that the engine does not read.
+  if (flags.some((flag) => /^-[A-Za-z]*[li]/.test(flag) || /^--(login|interactive|rcfile|init-file)/.test(flag))) {
+    throw new Refusal('command:unparseable', 'a login or interactive shell reads startup files the engine does not');
+  }
   return script;
 }
 
