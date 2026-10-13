@@ -173,8 +173,12 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
     if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx, env, writes, reads);
     return next;
   }
-  if (name === 'git') checkGitOptions(walk, args, ctx.cwd);
-  for (const arg of argvWords.slice(1)) checkArgument(walk, arg, ctx.cwd);
+  if (name === 'git') checkGitOptions(walk, args, ctx.cwd, env);
+  // A git path option's value is checked by checkGitOptions, against the directory git has reached by then.
+  const checked = name === 'git' ? gitPathValueIndexes(args) : new Set<number>();
+  argvWords.slice(1).forEach((arg, index) => {
+    if (!checked.has(index)) checkArgument(walk, arg, ctx.cwd);
+  });
   if (name === 'eval' || SHELLS.has(basename(name))) {
     const piped = fedByCurl && name !== 'eval';
     if (writes.length > 0 || reads.length > 0 || piped) emit(walk, argv, ctx, env, writes, reads);
@@ -253,22 +257,48 @@ function insideRoots(roots: Roots, value: string, cwd: string): boolean {
   return resolved !== null && rootOf(resolved, roots) !== null;
 }
 
-function checkGitOptions(walk: Walk, args: readonly string[], cwd: string): void {
+/** The indexes of a git command's arguments that are the value of a path option, such as `-C ..`. */
+function gitPathValueIndexes(args: readonly string[]): Set<number> {
+  const found = new Set<number>();
   for (let i = 0; i < args.length; i++) {
     const arg = args[i] ?? '';
-    if (!arg.startsWith('-')) return;
+    if (!arg.startsWith('-')) break;
+    if (GIT_PATH_OPTIONS.has(arg)) found.add(i + 1);
+    if (GIT_VALUE_OPTIONS.has(arg) || GIT_PATH_OPTIONS.has(arg)) i += 1;
+  }
+  return found;
+}
+
+function checkGitOptions(
+  walk: Walk,
+  args: readonly string[],
+  cwd: string,
+  env: Readonly<Record<string, string>>,
+): void {
+  // Git applies each -C in turn, and reads a relative path after them, so each is relative to where the earlier -C led.
+  let effective = cwd;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? '';
+    if (!arg.startsWith('-')) break;
     const eq = arg.indexOf('=');
     const longForm = arg.startsWith('--') && eq >= 0;
     const flag = longForm ? arg.slice(0, eq) : arg;
     if (GIT_PATH_OPTIONS.has(flag)) {
       const value = longForm ? arg.slice(eq + 1) : args[i + 1];
       if (value === undefined) throw new Unparseable('a git option with no value');
-      if (!insideRoots(walk.roots, value, cwd)) {
+      if (!insideRoots(walk.roots, value, effective)) {
         walk.refusals.push(new Refusal('git:outside-roots', `git ${flag} ${value} is outside the run's roots`));
       }
+      if (flag === '-C') effective = resolveReal(value, effective) ?? effective;
       if (!longForm) i += 1;
     } else if (GIT_VALUE_OPTIONS.has(flag) && !longForm) {
       i += 1;
+    }
+  }
+  for (const name of GIT_PATH_VARS) {
+    const value = env[name];
+    if (value !== undefined && !insideRoots(walk.roots, value, effective)) {
+      walk.refusals.push(new Refusal('git:outside-roots', `${name} points outside the run's roots`));
     }
   }
 }
