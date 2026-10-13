@@ -1,6 +1,6 @@
 // A scripted Linear world: an in-memory stand-in for the GraphQL API the Linear ticket source talks to, so the adapter's
 // tests run with no network and no key. It answers the six operations the adapter sends, routed by the operation name
-// in each document, in the wire shape ADW's Linear client reads. That proves the adapter against that shape, not against
+// in each document, in the wire shape Linear's GraphQL API answers. That proves the adapter against that shape, not against
 // Linear itself: TASK-009's opt-in live run is the only proof against the service.
 //
 // The contract the adapter follows (variables in, `data` out):
