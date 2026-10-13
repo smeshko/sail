@@ -1,7 +1,7 @@
 // The git plumbing the fake and the git-worktree workspaces share, so the two cannot drift apart: a run's diff against
 // its base, the worktree removal with its fallbacks, and whether a run has ended (ADR-0018, D6, D8).
-import { existsSync, readdirSync, rmSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { readStatus } from '../engine/run-dir';
 import { PortError } from '../ports/errors';
 import type { Diff } from '../ports/types';
@@ -65,13 +65,28 @@ export async function diffFrom(git: GitRunner, path: string, from: string): Prom
   return { patch: tracked.stdout + created.map((result) => result.stdout).join(''), raw: { tracked, created } };
 }
 
-/** Removes the worktree at `path` from the repository, and fails only when it is still there. */
+/** Whether `path` is a symbolic link, so that git or `rm` would act on what it points to. A missing path is not one. */
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /** Whether `baseSha` is an ancestor of the HEAD of the worktree at `path`, so a resumed run is still on its base. */
 export async function basedOn(git: GitRunner, path: string, baseSha: string): Promise<boolean> {
   return (await git(path, ['merge-base', '--is-ancestor', baseSha, 'HEAD'])).code === 0;
 }
 
+/**
+ * Removes the worktree at `path` from the repository, and fails only when it is still there. A path reached through a
+ * symbolic link, at the workspace or at its run directory, is refused before git or `rm` can follow it.
+ */
 export async function removeWorktree(git: GitRunner, repo: string, op: string, path: string): Promise<GitResult> {
+  if (isLink(path) || isLink(dirname(path))) {
+    throw new PortError('workspace', op, 'invalid', `${path} is reached through a symbolic link: it is not removed`);
+  }
   const removed = await git(repo, ['worktree', 'remove', '--force', resolve(path)]);
   await git(repo, ['worktree', 'prune']);
   if (removed.code === 0 || !existsSync(path)) return removed;
@@ -89,7 +104,8 @@ export async function sweepRuns(git: GitRunner, repo: string, runsDir: string): 
   for (const entry of existsSync(runsDir) ? readdirSync(runsDir) : []) {
     const runDir = join(runsDir, entry);
     const path = join(runDir, 'workspace');
-    if (!existsSync(path) || !endedRun(runDir)) continue;
+    // A link where a run directory or its workspace should be is not the run's: it is skipped, not followed.
+    if (isLink(runDir) || isLink(path) || !existsSync(path) || !endedRun(runDir)) continue;
     await removeWorktree(git, repo, 'sweep', path);
     paths.push(path);
   }
