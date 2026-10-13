@@ -204,10 +204,7 @@ test('run: an unknown key is not allowed and a missing source is required', () =
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('run: a stage permissions block may list tools and mcp servers, and an unknown key in it is still refused', () => {
+test('run: a stage permissions block may list tools and mcp servers, and an unknown key in it is still refused', () => {
   const permissions = {
     read: ['**'],
     write: ['$STAGE_OUT/**'],
@@ -215,9 +212,15 @@ test
     tools: ['Read'],
     mcp: ['linear:get_issue'],
   };
-  const withPermissions = { ...run, stages: { spec: { kind: 'agent', origin: 'repo:.sail/stages/spec', permissions } } };
+  const withPermissions = {
+    ...run,
+    stages: { spec: { kind: 'agent', origin: 'repo:.sail/stages/spec', permissions } },
+  };
   expect(validateDocument('sail.run.v1', withPermissions)).toEqual([]);
-  const misspelt = { ...run, stages: { spec: { kind: 'agent', origin: 'repo:x', permissions: { ...permissions, toolz: [] } } } };
+  const misspelt = {
+    ...run,
+    stages: { spec: { kind: 'agent', origin: 'repo:x', permissions: { ...permissions, toolz: [] } } },
+  };
   expect(validateDocument('sail.run.v1', misspelt)).toEqual([
     { schema: 'sail.run.v1', path: '/stages/spec/permissions/toolz', message: 'is not allowed' },
   ]);

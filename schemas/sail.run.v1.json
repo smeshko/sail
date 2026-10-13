@@ -147,7 +147,9 @@
         "commands": { "type": "array", "items": { "type": "string" } },
         "network": {
           "oneOf": [{ "const": "none" }, { "type": "array", "items": { "type": "string" } }]
-        }
+        },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "mcp": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
     },
