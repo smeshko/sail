@@ -94,6 +94,21 @@ test('echo $(rm -rf /) with commands echo is denied deny:rm-rf, and the reason n
     expect((denial as Denial).reason).toContain('rm -rf /');
   }));
 
+test('an argument built by a substitution is refused, since its output can supply flags the deny set would not see', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['rm *', 'printf *', 'echo *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('rm $(printf %s -rf) x'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('echo "$(printf hi)"'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('bash -c "rm -rf ." is denied deny:rm-rf even though the outer bash is not listed', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['ls *'], tools: ['Bash'] };
