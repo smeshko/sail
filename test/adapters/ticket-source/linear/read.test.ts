@@ -199,3 +199,45 @@ test('the read documents are named for their operations, and neither asks for an
 test('the ticket read asks for one issue', () => {
   expect(/\bfirst: 1\b/.test(FETCH_ISSUE)).toBe(true);
 });
+
+// Review fixes (review #2.2 and #2.7): a state type that carries terminal control characters is refused without them,
+// and a comment cursor that brings no new comments is refused as invalid.
+test('a state type with terminal control characters is refused without them', async () => {
+  const world = createLinearWorld({
+    issues: [issue('ADW-1', 'Todo')],
+    states: [{ id: 'state-todo', name: 'Todo', type: 'tri\x1b[2J\x1b[Hage\r', position: 1 }],
+  });
+  const message = messageOf(await rejection(adapterOver(world).adapter.get('ADW-1')));
+  expect([message.includes('\x1b'), message.includes('\r')]).toEqual([false, false]);
+});
+
+test('a comment cursor that repeats, or brings no comments, is refused as invalid', async () => {
+  const comment = { id: 'c0', body: 'first', createdAt: '2026-10-02T09:00:00.000Z', user: { name: 'a' } };
+  const node = {
+    id: 'issue-1',
+    identifier: 'ADW-1',
+    title: 'Ticket ADW-1',
+    description: null,
+    url: 'https://linear.app/sail-fixture/issue/ADW-1',
+    priority: 0,
+    state: { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 1 },
+    labels: { nodes: [{ name: 'sail' }] },
+    assignee: null,
+    comments: { nodes: [comment], pageInfo: { hasNextPage: true, endCursor: 'c1' } },
+    relations: { nodes: [] },
+    attachments: { nodes: [] },
+  };
+  const answers = [
+    { nodes: [comment], pageInfo: { hasNextPage: true, endCursor: 'c1' } },
+    { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'c2' } },
+  ];
+  for (const page of answers) {
+    const transport = (async (_input: string, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body)) as { operationName?: string };
+      const data = sent.operationName === 'FetchIssue' ? { issues: { nodes: [node] } } : { issue: { comments: page } };
+      return new Response(JSON.stringify({ data }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const adapter = createLinearTicketSource({ apiKey: KEY, team: 'ADW', fetch: transport });
+    expect(portFailure(await rejection(adapter.get('ADW-1')))).toMatchObject({ code: 'invalid' });
+  }
+});
