@@ -23,7 +23,12 @@ export function stateTypeOf(linearType: string, op = 'get'): TicketStateType {
   const mapped = STATE_TYPES.get(linearType);
   if (mapped === undefined) {
     // The type is Linear's text, so it is cleaned before a person reads it (review #2.2).
-    throw new PortError('ticketSource', op, 'invalid', `Linear state type ${clean(linearType)} is not one sail maps`);
+    throw new PortError(
+      'ticketSource',
+      op,
+      'invalid',
+      `Linear state type ${clean(String(linearType))} is not one sail maps`,
+    );
   }
   return mapped;
 }
