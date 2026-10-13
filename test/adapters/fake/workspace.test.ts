@@ -39,6 +39,7 @@ function world(): WorkspaceWorld & { leasesDir: string } {
   const runsDir = tempDir();
   return {
     remote: REMOTE,
+    clone: repo().dir,
     base: 'main',
     baseSha: git('rev-parse', 'main'),
     tracked: 'README.md',
@@ -112,3 +113,27 @@ test("a relative run directory is the caller's, not the stand-in repository's: t
 test('the fake declares keep and sweep', () => {
   expect(createFakeWorkspace({ repo: repo().dir }).capabilities()).toEqual({ keep: true, sweep: true });
 });
+
+// STICKER: the fake's lease remote is the fixed name `fake` for any clone, so its events and run files hold no path.
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("the fake keys its leases on the remote named fake, whatever the clone's path", async () => {
+    const workspace = createFakeWorkspace({ repo: repo().dir });
+    expect([await workspace.remoteKey(repo().dir), await workspace.remoteKey(tempDir())]).toEqual(['fake', 'fake']);
+  });
+
+// STICKER: the engine asks for `origin/HEAD` as the base of every run, and the fake has no origin: it bases on HEAD.
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("a base of origin/HEAD in a repository with no origin is the repository's HEAD, so the fake's runs are based on it", async () => {
+    const w = world();
+    const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
+    const run = await w.run('r1');
+    const made = await workspace.create(run, { base: 'origin/HEAD', branch: 'sail/FAKE-1' }).then(
+      (workspace) => workspace,
+      (error: unknown) => String(error),
+    );
+    expect(made).toMatchObject({ baseSha: w.baseSha, path: join(run.runDir, 'workspace') });
+  });
