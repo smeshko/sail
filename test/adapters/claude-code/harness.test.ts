@@ -4,7 +4,7 @@
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { claudeCodeAdapters, createClaudeCodeHarness } from '../../../src/adapters/claude-code/harness';
+import { claudeCodeAdapters, createClaudeCodeHarness, type QueryFn } from '../../../src/adapters/claude-code/harness';
 import { renderTranscript } from '../../../src/adapters/claude-code/transcript';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import { HarnessResult } from '../../../src/ports/types';
@@ -164,13 +164,13 @@ test('an abort mid-stream ends the session as aborted, stops pulling messages, c
 test('an abort the SDK surfaces as a thrown error ends the session as aborted, not as a harness failure', async () => {
   // review #1.6: the SDK throws when its process is aborted, so the catch must read the request's signal.
   const controller = new AbortController();
-  const query = (params: { options: { abortController: AbortController } }) =>
+  const query: QueryFn = ({ options }) =>
     (async function* () {
       yield init();
       // The abort lands while the adapter awaits the next message, which the SDK then rejects with.
       setTimeout(() => controller.abort(), 0);
       await new Promise((_, reject) =>
-        params.options.abortController.signal.addEventListener('abort', () =>
+        options.abortController?.signal.addEventListener('abort', () =>
           reject(new Error('Claude Code process aborted by user')),
         ),
       );
@@ -326,7 +326,7 @@ test('the definition declares the pinned SDK version, which package.json pins ex
 test('only sdk.ts imports the Agent SDK in all of src, and no module in src imports the engine permissions', () => {
   // review #1.10: the boundary is the whole of src, not the claude-code folder alone.
   const src = join(import.meta.dir, '../../../src');
-  const modules = readdirSync(src, { recursive: true }).filter((name) => name.endsWith('.ts'));
+  const modules = readdirSync(src, { recursive: true, encoding: 'utf8' }).filter((name) => name.endsWith('.ts'));
   // Any mention of the module by its specifier counts: a static, type-only, side-effect or dynamic import alike.
   const sourceOf = (name: string) => readFileSync(join(src, name), 'utf8');
   const importers = modules.filter((name) => /['"]@anthropic-ai\/claude-agent-sdk['"]/.test(sourceOf(name)));
