@@ -793,6 +793,25 @@ test('a run directory that cannot be written once the ticket has moved throws, n
   });
 });
 
+test('a STATUS that cannot be written after the workspace is made releases the worktree and the run directory, and throws', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const create = workspace.create.bind(workspace);
+    // The worktree is made, then the last write of the run (its STATUS) fails: a directory stands where it goes.
+    workspace.create = async (run, from) => {
+      const made = await create(run, from);
+      mkdirSync(join(run.runDir, 'STATUS'));
+      return made;
+    };
+    const thrown = await rejection(openStub(repo.dir, { ticket: 'FAKE-1' }, adapters));
+    expect(thrown).toMatchObject({ message: expect.stringMatching(/the run directory was not written/) });
+    const worktrees = repo.git('worktree', 'list', '--porcelain').split('\n').filter((line) => line.startsWith('worktree '));
+    expect([runIds(repo.dir), worktrees.length]).toEqual([[], 1]);
+  });
+});
+
 // An abort: seen before the claim it ends the start with the ticket as it was, and once the ticket is claimed the start
 // goes on to its comment and its run directory, for the run to be suspended there.
 
