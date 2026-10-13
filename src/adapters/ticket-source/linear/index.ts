@@ -1,15 +1,17 @@
 // The Linear TicketSource: the adapter over Linear's GraphQL API, and its adapter definition, which the built-in
 // registration hands the registry (DECISIONS §1 to §6).
-// Stub: listDesignated, claim, update, comment and the definition are written in TASK-004 to TASK-006.
+// Stub: the definition is written in TASK-006.
 import type { ProviderEvent } from '../../../events/types';
 import type { AdapterDefinition } from '../../../ports/adapter';
 import { PortError } from '../../../ports/errors';
 import type { ProviderOptions, TicketSource } from '../../../ports/ticket-source';
-import type { Ticket } from '../../../ports/types';
+import { type Moved, type Ticket, TicketMove, type TicketState } from '../../../ports/types';
 import { createLinearClient } from './client';
-import { toTicket } from './normalise';
+import { stateTypeOf, toTicket } from './normalise';
 import {
   type CommentNode,
+  CREATE_COMMENT,
+  type CreateCommentData,
   FETCH_ISSUE,
   FETCH_MORE_COMMENTS,
   type FetchIssueData,
@@ -17,7 +19,10 @@ import {
   type IssueNode,
   LIST_ISSUES,
   type ListIssuesData,
+  UPDATE_ISSUE,
+  type UpdateIssueData,
 } from './queries';
+import { createTeamStates } from './states';
 
 export interface LinearTicketSourceOptions extends ProviderOptions {
   /** The key from `LINEAR_API_KEY`. It is sent as the Authorization header and nowhere else. */
@@ -34,10 +39,9 @@ export interface LinearTicketSourceOptions extends ProviderOptions {
 const KEY = /^[A-Z][A-Z0-9]*-\d+$/;
 const URL_KEY = /^https:\/\/linear\.app\/[^/]+\/issue\/([A-Z][A-Z0-9]*-\d+)(?:\/|$)/;
 
-const notYetWritten = (op: string) => new PortError('ticketSource', op, 'invalid', 'not implemented yet');
-
 export function createLinearTicketSource(options: LinearTicketSourceOptions): TicketSource {
   const client = createLinearClient({ apiKey: options.apiKey, fetch: options.fetch });
+  const states = createTeamStates(client, options.team);
   const now = options.now ?? (() => new Date());
   const emit = (event: ProviderEvent) => options.emit?.(event);
 
@@ -45,6 +49,21 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   const parseKey = (ref: string): string | undefined => {
     const key = KEY.test(ref) ? ref : URL_KEY.exec(ref)?.[1];
     return key?.startsWith(`${options.team}-`) ? key : undefined;
+  };
+
+  /** The issue a ticket key names, or a PortError `not_found` naming the operation that asked. */
+  const fetchNode = async (ticketKey: string, op: string): Promise<IssueNode> => {
+    const key = parseKey(ticketKey);
+    const data =
+      key === undefined
+        ? undefined
+        : ((await client.request('FetchIssue', FETCH_ISSUE, {
+            team: options.team,
+            number: Number(key.slice(options.team.length + 1)),
+          })) as FetchIssueData);
+    const node = data?.issues.nodes[0];
+    if (node === undefined) throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey}`);
+    return node;
   };
 
   /** The comments of one issue, every page of them, in order. */
@@ -89,22 +108,27 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     return tickets;
   };
 
+  /** Moves `node` to `stateId`. A move Linear reports as not successful is a PortError `conflict`, and nothing is emitted. */
+  const writeMove = async (
+    node: IssueNode,
+    op: string,
+    stateId: string,
+  ): Promise<{ state: TicketState; raw: object }> => {
+    const data = (await client.request('UpdateIssue', UPDATE_ISSUE, { id: node.id, stateId })) as UpdateIssueData;
+    const issue = data.issueUpdate.issue;
+    if (!data.issueUpdate.success || issue === null) {
+      throw new PortError('ticketSource', op, 'conflict', `Linear did not move ${node.identifier}`);
+    }
+    const state = { type: stateTypeOf(issue.state.type, op), name: issue.state.name };
+    return { state, raw: { ...node, state: issue.state } };
+  };
+
   return {
     name: 'linear',
     parseKey,
     async get(ticketKey) {
       const started = now().getTime();
-      const key = parseKey(ticketKey);
-      const data =
-        key === undefined
-          ? undefined
-          : ((await client.request('FetchIssue', FETCH_ISSUE, {
-              team: options.team,
-              number: Number(key.slice(options.team.length + 1)),
-            })) as FetchIssueData);
-      const node = data?.issues.nodes[0];
-      if (node === undefined) throw new PortError('ticketSource', 'get', 'not_found', `no ticket ${ticketKey}`);
-
+      const node = await fetchNode(ticketKey, 'get');
       const ticket: Ticket = toTicket(node, await allComments(node));
       emit({
         type: 'ticket:fetched',
@@ -120,14 +144,43 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
     listDesignated,
-    claim: async () => {
-      throw notYetWritten('claim');
+    async claim(ticketKey) {
+      const node = await fetchNode(ticketKey, 'claim');
+      const current = { type: stateTypeOf(node.state.type, 'claim'), name: node.state.name };
+      // A ticket that is not unstarted is not taken: no write, and nothing emitted.
+      if (current.type !== 'unstarted') return { claimed: false, state: current, raw: node };
+      const moved = await writeMove(node, 'claim', await states.targetFor('claim', 'in-progress'));
+      emit({ type: 'ticket:claimed', ticketKey: node.identifier, state: moved.state });
+      return { claimed: true, state: moved.state, raw: moved.raw };
     },
-    update: async () => {
-      throw notYetWritten('update');
+    async update(ticketKey, change) {
+      // A move from outside TypeScript, such as `sail port`, is checked before any request is sent.
+      if (!TicketMove.safeParse(change.state).success) {
+        throw new PortError('ticketSource', 'update', 'invalid', `${String(change.state)} is not a move`);
+      }
+      const node = await fetchNode(ticketKey, 'update');
+      const target = await states.targetFor('update', change.state, options.inReviewState);
+      const moved: Moved = await writeMove(node, 'update', target);
+      emit({ type: 'ticket:updated', ticketKey: node.identifier, change: { state: change.state }, state: moved.state });
+      return moved;
     },
-    comment: async () => {
-      throw notYetWritten('comment');
+    async comment(ticketKey, body) {
+      const node = await fetchNode(ticketKey, 'comment');
+      const data = (await client.request('CreateComment', CREATE_COMMENT, {
+        issueId: node.id,
+        body,
+      })) as CreateCommentData;
+      const created = data.commentCreate.comment;
+      if (!data.commentCreate.success || created === null) {
+        throw new PortError(
+          'ticketSource',
+          'comment',
+          'conflict',
+          `Linear did not post the comment on ${node.identifier}`,
+        );
+      }
+      emit({ type: 'ticket:commented', ticketKey: node.identifier, body });
+      return { id: created.id, url: created.url, raw: created };
     },
     capabilities: () => ({
       comments: true,

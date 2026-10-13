@@ -109,6 +109,20 @@ export interface ListIssuesData {
   readonly issues: { readonly nodes: readonly IssueNode[]; readonly pageInfo: PageInfo };
 }
 
+export interface UpdateIssueData {
+  readonly issueUpdate: {
+    readonly success: boolean;
+    readonly issue: { readonly state: { readonly id: string; readonly name: string; readonly type: string } } | null;
+  };
+}
+
+export interface CreateCommentData {
+  readonly commentCreate: {
+    readonly success: boolean;
+    readonly comment: { readonly id: string; readonly url: string } | null;
+  };
+}
+
 export interface FetchMoreCommentsData {
   readonly issue: { readonly comments: { readonly nodes: readonly CommentNode[]; readonly pageInfo: PageInfo } } | null;
 }
