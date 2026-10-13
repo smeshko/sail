@@ -181,8 +181,9 @@ async function runSession(request: HarnessRequest, deps: Deps): Promise<HarnessR
     return conclude(session, await drive(session, plan.options), true);
   } catch (error) {
     // The SDK rejects with its own text when its process is aborted, so an abort is read from the signal (review #1.6).
-    const message =
-      request.signal?.aborted === true ? 'aborted' : error instanceof Error ? error.message : String(error);
+    // The helper keeps TypeScript from narrowing the signal to not-aborted by the check above.
+    const aborted = (): boolean => request.signal?.aborted === true;
+    const message = aborted() ? 'aborted' : error instanceof Error ? error.message : String(error);
     return conclude(session, failure(session, message), true);
   } finally {
     request.signal?.removeEventListener('abort', stop);
