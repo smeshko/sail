@@ -109,6 +109,17 @@ test('a success whose structured output is not a well-formed envelope ends in er
   });
 });
 
+test('a success that is_error ends in error with reason harness and the provider message, not the zero-token text', () => {
+  // review #1.2: the SDK reports an API failure as subtype success with is_error true and the diagnostic in result.
+  const message = { ...success({ structured: done({ summary: 'x' }) }), is_error: true, result: 'Invalid API key' };
+  const result = resultOf(message, { ...CONTEXT, usage: NO_TOKENS });
+  expect({
+    outcome: result.outcome,
+    reason: result.outcome === 'error' ? result.reason : undefined,
+    message: result.outcome === 'error' ? result.message : undefined,
+  }).toEqual({ outcome: 'error', reason: 'harness', message: 'Invalid API key' });
+});
+
 test('a success with zero tokens ends in error with reason harness, never in done', () => {
   expect(summary(success({ structured: done({ summary: 'ok' }) }), { ...CONTEXT, usage: NO_TOKENS })).toEqual({
     outcome: 'error',
