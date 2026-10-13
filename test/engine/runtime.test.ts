@@ -710,12 +710,14 @@ test("a resume appends to the interrupted run's events, continuing seq with no m
     const list = events(dir);
     expect(seqs(list)).toEqual(gapless(list));
     const resumed = list.slice(interrupted.length);
-    expect(outline(resumed.slice(0, 3))).toEqual([
+    // The resume renews the lease first, so its stream opens with that renewal, then the loop picks up.
+    expect(outline(resumed.slice(0, 4))).toEqual([
+      'workspace:leased',
       'loop:iteration',
       'workflow:route tests#1→implement#2',
       'stage:start implement#2',
     ]);
-    expect(resumed[2]).toMatchObject({ try: 2 });
+    expect(resumed[3]).toMatchObject({ try: 2 });
     expect(outline(resumed).filter((line) => line.startsWith('run:start'))).toEqual([]);
     expect(resumed.at(-1)).toMatchObject({ type: 'run:end', status: 'completed', replays: 5 });
     expect(validateRunDir(dir).issues).toEqual([]);
