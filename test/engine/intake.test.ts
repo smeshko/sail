@@ -684,8 +684,10 @@ test('a run left with intake#1 journaled as error and STATUS running fails with 
       return end.runId;
     });
     const dir = join(repo.dir, '.sail-runs', runId);
-    // The failed run released its worktree: a crashed one would still hold it, and a resume needs it in place.
+    // A crashed run still holds its worktree, and a resume needs it in place: an empty directory with the `.git` file a
+    // worktree has, which the resume checks for.
     mkdirSync(join(dir, 'workspace'), { recursive: true });
+    writeFileSync(join(dir, 'workspace', '.git'), `gitdir: ${join(repo.dir, '.git')}\n`);
     const journal = journalText(dir);
     writeFileSync(join(dir, 'STATUS'), 'running\n');
     const adapters = await fakeAdapters(repo.dir);
