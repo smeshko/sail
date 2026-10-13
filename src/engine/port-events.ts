@@ -5,7 +5,7 @@
 // What a line must be is decided here alone: a JSON object whose type is a `ticket:*` or `codehost:*` event, with none
 // of the fields the run stamps, that validates against `sail.event.v1` once enveloped. A script can write the file
 // itself, so nothing else is taken from it. A `workspace:*` event carries no key, and no port command emits one.
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import type { ProviderEvent } from '../events/types';
 import { validateDocument } from './schemas';
 
@@ -43,7 +43,8 @@ function parseLine(line: string, envelope: { runId: string; key: string }): Prov
 /**
  * The provider events the file at `path` holds, in order, and a problem for each whole line that is none:
  * `port-events.ndjson line <n> is not a provider event: <why>`. The valid lines around a bad one are still given. A
- * last line with no newline is left out: a child was killed while writing it. A file that isn't there holds nothing.
+ * last line with no newline is left out: a child was killed while writing it. A file that isn't there holds nothing,
+ * and one that is no regular file is a problem, unread.
  */
 export function readPortEvents(
   path: string,
@@ -51,7 +52,18 @@ export function readPortEvents(
 ): { events: ProviderEvent[]; problems: string[] } {
   let text: string;
   try {
-    text = readFileSync(path, 'utf8');
+    // Opened without blocking and looked at before it is read: a script can leave a FIFO here, whose read would never
+    // return, or a link to a device, whose read would never end. A directory is refused by the read itself.
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      const stat = fstatSync(fd);
+      if (!stat.isFile() && !stat.isDirectory()) {
+        return { events: [], problems: [`${PORT_EVENTS_FILE} is not a regular file`] };
+      }
+      text = readFileSync(fd, 'utf8');
+    } finally {
+      closeSync(fd);
+    }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? (error as Error).message;
     return { events: [], problems: code === 'ENOENT' ? [] : [`${PORT_EVENTS_FILE} can't be read (${code})`] };
