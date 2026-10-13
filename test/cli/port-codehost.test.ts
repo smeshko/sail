@@ -636,3 +636,63 @@ test('a usage error of sail port prints every operation of ticket-source and cod
     }
   });
 });
+
+test.each<[string, string[], { stdin: string }, string]>([
+  ['comment with an empty stdin, as a script step has', ['comment', '1'], { stdin: '' }, 'stdin'],
+  ['comment with a stdin of blank lines', ['comment', '1'], { stdin: ' \n\n' }, 'stdin'],
+  [
+    'comment with an empty --body-file',
+    ['comment', '1', '--body-file', 'empty.md'],
+    { stdin: 'unused' },
+    '--body-file empty.md',
+  ],
+  ['open-pull-request with an empty stdin', opening('sail/FAKE-9'), { stdin: '' }, 'stdin'],
+  [
+    'open-pull-request with an empty --body-file',
+    opening('sail/FAKE-9', '--body-file', 'empty.md'),
+    { stdin: 'unused' },
+    '--body-file empty.md',
+  ],
+])('%s exits 3 before the port is called: an empty body is no body', async (_, args, options, where) => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeFileSync(join(repo.dir, 'empty.md'), '\n');
+    await codehost(repo, ['push', 'sail/FAKE-9']);
+    const before = world(repo.dir);
+    expect(await codehost(repo, args, options)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `sail port: codehost ${args[0]} needs a body, and ${where} is empty\n`,
+    });
+    expect(world(repo.dir)).toEqual(before);
+  });
+});
+
+test('through the real bin, whose stdin is always there, a comment with nothing on stdin is refused and nothing is posted', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts'),
+        'port',
+        'codehost',
+        'comment',
+        '1',
+      ],
+      {
+        cwd: repo.dir,
+        env: repo.env,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
+    expect({ code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() }).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: 'sail port: codehost comment needs a body, and stdin is empty\n',
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'prs.json'))).toBe(false);
+  });
+});
