@@ -323,12 +323,13 @@ test('the definition declares the pinned SDK version, which package.json pins ex
   }).toEqual({ versions: { 'claude-agent-sdk': '0.3.282' }, pin: '0.3.282' });
 });
 
-test('only sdk.ts imports the Agent SDK among the claude-code modules, and no module there imports the engine permissions', () => {
-  const dir = join(import.meta.dir, '../../../src/adapters/claude-code');
-  const modules = readdirSync(dir).filter((name) => name.endsWith('.ts'));
+test('only sdk.ts imports the Agent SDK in all of src, and no module in src imports the engine permissions', () => {
+  // review #1.10: the boundary is the whole of src, not the claude-code folder alone.
+  const src = join(import.meta.dir, '../../../src');
+  const modules = readdirSync(src, { recursive: true }).filter((name) => name.endsWith('.ts'));
   // Any mention of the module by its specifier counts: a static, type-only, side-effect or dynamic import alike.
-  const sourceOf = (name: string) => readFileSync(join(dir, name), 'utf8');
+  const sourceOf = (name: string) => readFileSync(join(src, name), 'utf8');
   const importers = modules.filter((name) => /['"]@anthropic-ai\/claude-agent-sdk['"]/.test(sourceOf(name)));
   const gated = modules.filter((name) => /['"][^'"]*engine\/permissions['"]/.test(sourceOf(name)));
-  expect({ importers, gated }).toEqual({ importers: ['sdk.ts'], gated: [] });
+  expect({ importers, gated }).toEqual({ importers: [join('adapters', 'claude-code', 'sdk.ts')], gated: [] });
 });
