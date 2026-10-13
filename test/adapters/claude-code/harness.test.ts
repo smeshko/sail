@@ -161,6 +161,30 @@ test('an abort mid-stream ends the session as aborted, stops pulling messages, c
   }).toEqual({ outcome: 'error', message: 'aborted', pulled: 2, closed: 1, ends: 1 });
 });
 
+test('an abort the SDK surfaces as a thrown error ends the session as aborted, not as a harness failure', async () => {
+  // review #1.6: the SDK throws when its process is aborted, so the catch must read the request's signal.
+  const controller = new AbortController();
+  const query = (params: { options: { abortController: AbortController } }) =>
+    (async function* () {
+      yield init();
+      // The abort lands while the adapter awaits the next message, which the SDK then rejects with.
+      setTimeout(() => controller.abort(), 0);
+      await new Promise((_, reject) =>
+        params.options.abortController.signal.addEventListener('abort', () =>
+          reject(new Error('Claude Code process aborted by user')),
+        ),
+      );
+    })();
+  const result = await createClaudeCodeHarness({ query, env: { ANTHROPIC_API_KEY: 'sk-test' } }).run({
+    ...requestOf(),
+    signal: controller.signal,
+  });
+  expect({ outcome: result.outcome, message: result.outcome === 'error' ? result.message : undefined }).toEqual({
+    outcome: 'error',
+    message: 'aborted',
+  });
+});
+
 test('a request whose signal is already aborted gives error aborted, and query is never called', async () => {
   const probe = new Probe();
   const result = await harnessOver({ 'Write the spec.': { messages: COMPLETE } }, probe).run({
