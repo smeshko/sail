@@ -139,7 +139,8 @@ test('an emit in the context receives ticket:fetched from the ticket source', as
 });
 
 test('BUILTINS holds the fake for every port, each a definition with create alone: no requires, no versions', () => {
-  expect(Object.keys(BUILTINS)).toEqual(['fake']);
+  // amend TASK-006: BUILTINS also holds claude-code, the one harness built in beside the fake (plan TASK-006 Files).
+  expect(Object.keys(BUILTINS)).toEqual(['fake', 'claude-code']);
   const definitions = Object.entries(BUILTINS.fake ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(definitions)).toEqual({
     ticketSource: ['create'],
@@ -147,4 +148,5 @@ test('BUILTINS holds the fake for every port, each a definition with create alon
     harness: ['create'],
     workspace: ['create'],
   });
+  expect(Object.keys(BUILTINS['claude-code'] ?? {})).toEqual(['harness']);
 });
