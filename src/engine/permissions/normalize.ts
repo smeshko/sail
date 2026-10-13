@@ -178,9 +178,11 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
     if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx, env, writes, reads);
     return next;
   }
-  if (name === 'git') checkGitOptions(walk, args, ctx.cwd, env);
+  // Git is checked by its name, so a path to it (`/usr/bin/git`) gets the same checks as `git`.
+  const isGit = basename(name) === 'git';
+  if (isGit) checkGitOptions(walk, args, ctx.cwd, env);
   // A git path option's value is checked by checkGitOptions, against the directory git has reached by then.
-  const checked = name === 'git' ? gitPathValueIndexes(args) : new Set<number>();
+  const checked = isGit ? gitPathValueIndexes(args) : new Set<number>();
   argvWords.slice(1).forEach((arg, index) => {
     if (!checked.has(index)) checkArgument(walk, arg, ctx.cwd);
   });
