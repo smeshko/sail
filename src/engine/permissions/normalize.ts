@@ -1,5 +1,6 @@
 // Normalizes a parsed script into simple commands: wrappers, env and cd are resolved, git's global options and nested
 // shells are unwrapped, and every path is resolved. A refusal is recorded with its rule; `normalize` throws the first.
+import { statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { resolveReal, rootOf } from './paths';
 import { classifyRedirect, type RedirectTarget, substitutionScripts } from './substitute';
@@ -92,16 +93,30 @@ export function leadingCommand(words: readonly Word[]): string {
   return '';
 }
 
-function walkScript(walk: Walk, script: Script, start: Context): void {
+/** Walks a script and returns the directory it leaves the shell in. */
+function walkScript(walk: Walk, script: Script, start: Context): string {
   let cwd = start.cwd;
+  let sequenceCwd = cwd;
   let previous: Segment | undefined;
-  for (const segment of script) {
+  script.forEach((segment, index) => {
     // A shell that `curl` pipes into is the deny set's case (deny:curl-pipe-shell), so it is not refused here.
     const fedByCurl =
       segment.before === '|' && previous !== undefined && basename(leadingCommand(previous.words)) === 'curl';
-    cwd = walkSegment(walk, segment, { cwd, env: start.env, pipeline: script }, fedByCurl);
+    // Each member of a pipeline, and a backgrounded command, runs in a subshell: its cd ends with it, and the next
+    // member starts from the directory the pipeline started in.
+    if (segment.before !== '|') sequenceCwd = cwd;
+    const next = script[index + 1];
+    const subshell = segment.before === '|' || next?.before === '|' || next?.before === '&';
+    const after = walkSegment(
+      walk,
+      segment,
+      { cwd: subshell ? sequenceCwd : cwd, env: start.env, pipeline: script },
+      fedByCurl,
+    );
+    if (!subshell) cwd = after;
     previous = segment;
-  }
+  });
+  return cwd;
 }
 
 /** Walks one segment. A refusal that stops it is recorded, and the segment yields no command. */
@@ -165,8 +180,9 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
     if (writes.length > 0 || reads.length > 0 || piped) emit(walk, argv, ctx, env, writes, reads);
     if (piped) return ctx.cwd;
     const inner = name === 'eval' ? args.join(' ') : shellScript(args);
-    walkScript(walk, tokenize(inner), scoped);
-    return ctx.cwd;
+    const after = walkScript(walk, tokenize(inner), scoped);
+    // eval runs in this shell, so its cd stays; a shell started with -c runs in a child process, so its cd does not.
+    return name === 'eval' ? after : ctx.cwd;
   }
   emit(walk, argv, ctx, env, writes, reads);
   return ctx.cwd;
@@ -277,6 +293,10 @@ function changeDirectory(roots: Roots, args: readonly string[], cwd: string): st
   const resolved = resolveReal(target, cwd);
   if (resolved === null || rootOf(resolved, roots) === null) {
     throw new Refusal('path:outside-roots', `cd to ${target} is outside the run's roots`);
+  }
+  // A cd that fails leaves the shell where it was, so the later commands would run somewhere the engine did not track.
+  if (!statSync(resolved, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Unparseable(`cd to ${target}, which is not an existing directory`);
   }
   return resolved;
 }
