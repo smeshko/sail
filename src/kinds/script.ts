@@ -23,6 +23,9 @@ import type { StepContext, StepKind, StepRun } from './index';
 /** This package's `bin/`, which holds the `sail` a script step runs. */
 export const BIN_DIR = join(import.meta.dir, '..', '..', 'bin');
 
+/** What a process with no `PATH` is run with: `bin/` goes ahead of it, where it would otherwise be all there is. */
+const SYSTEM_PATH = '/usr/bin:/bin';
+
 /** How long a script may run when it sets no `timeoutSeconds`. */
 export const DEFAULT_TIMEOUT_SECONDS = 600;
 
@@ -167,7 +170,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     cwd: context.workspace,
     env: {
       ...inherited,
-      PATH: inherited.PATH === undefined ? BIN_DIR : `${BIN_DIR}${delimiter}${inherited.PATH}`,
+      PATH: `${BIN_DIR}${delimiter}${inherited.PATH ?? SYSTEM_PATH}`,
       SAIL_BUN: process.execPath,
       ...Object.fromEntries(variables.map(({ name, value }) => [name, value])),
     },
