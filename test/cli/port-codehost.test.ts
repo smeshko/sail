@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { run } from '../../src/cli/index';
 import { PullRequest, Pushed } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { type CaptureOptions, runCaptured } from '../helpers/run-captured';
@@ -694,5 +695,30 @@ test('through the real bin, whose stdin is always there, a comment with nothing 
       stderr: 'sail port: codehost comment needs a body, and stdin is empty\n',
     });
     expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'prs.json'))).toBe(false);
+  });
+});
+
+test('comment on a reference that is no pull request is refused before stdin is read: a stdin that never ends is never waited for', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    let reads = 0;
+    let stderr = '';
+    const code = await run(['port', 'codehost', 'comment', 'abc'], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdout: () => {},
+      stderr: (text) => {
+        stderr += text;
+      },
+      stdin: () => {
+        reads++;
+        return new Promise<string>(() => {});
+      },
+    });
+    expect({ code, stderr, reads }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: "sail port: 'abc' is not a pull request of the fake code host: a number, or a URL it owns\n",
+      reads: 0,
+    });
   });
 });
