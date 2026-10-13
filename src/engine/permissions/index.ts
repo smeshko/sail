@@ -88,7 +88,7 @@ function checkCommand(command: string, policy: Permissions, roots: Roots): Denia
   }
   const { commands, refusals } = analyse(script, roots);
   for (const simple of commands) {
-    const match = denyRule(simple, script);
+    const match = denyRule(simple, simple.pipeline);
     if (match !== null) return denial(match.rule, match.reason);
   }
   const [refusal] = refusals;

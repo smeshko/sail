@@ -18,6 +18,8 @@ export interface NormalizedCommand {
   readonly writes: readonly string[];
   /** Resolved paths the command reads through its redirect sources. */
   readonly reads: readonly string[];
+  /** The script the command was parsed from, whose pipeline the deny set reads (a nested `bash -c` has its own). */
+  readonly pipeline: Script;
 }
 
 /** The commands of a script and every refusal found in it. A refused part does not hide the commands around it. */
@@ -29,6 +31,8 @@ export interface Analysis {
 interface Context {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
+  /** The script the segment belongs to, so a command knows what it is piped from and into, even when nested. */
+  readonly pipeline: Script;
 }
 
 interface Walk {
@@ -63,7 +67,7 @@ export function normalize(script: Script, roots: Roots): NormalizedCommand[] {
 /** Normalizes a script and returns its commands and every refusal, without throwing. */
 export function analyse(script: Script, roots: Roots): Analysis {
   const walk: Walk = { roots, commands: [], refusals: [] };
-  walkScript(walk, script, { cwd: roots.worktree, env: {} });
+  walkScript(walk, script, { cwd: roots.worktree, env: {}, pipeline: script });
   return { commands: walk.commands, refusals: walk.refusals };
 }
 
@@ -95,7 +99,7 @@ function walkScript(walk: Walk, script: Script, start: Context): void {
     // A shell that `curl` pipes into is the deny set's case (deny:curl-pipe-shell), so it is not refused here.
     const fedByCurl =
       segment.before === '|' && previous !== undefined && basename(leadingCommand(previous.words)) === 'curl';
-    cwd = walkSegment(walk, segment, { cwd, env: start.env }, fedByCurl);
+    cwd = walkSegment(walk, segment, { cwd, env: start.env, pipeline: script }, fedByCurl);
     previous = segment;
   }
 }
@@ -130,7 +134,7 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
     index += 1;
   }
   const env = { ...ctx.env, ...own };
-  const scoped: Context = { cwd: ctx.cwd, env };
+  const scoped: Context = { cwd: ctx.cwd, env, pipeline: ctx.pipeline };
   for (const word of [...words, ...redirects.map((redirect) => redirect.target)]) {
     for (const body of substitutionScripts(word)) walkScript(walk, body, scoped);
   }
@@ -145,38 +149,38 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
   const [name = '', ...args] = argv;
   const commandWord = argvWords[0];
   if (commandWord === undefined) {
-    emit(walk, argv, ctx.cwd, env, writes, reads);
+    emit(walk, argv, ctx, env, writes, reads);
     return ctx.cwd;
   }
   if (commandWord.unsafe) throw new Unparseable('a command name the engine cannot read');
   if (name === 'cd') {
     const next = changeDirectory(walk.roots, args, ctx.cwd);
-    if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx.cwd, env, writes, reads);
+    if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx, env, writes, reads);
     return next;
   }
   if (name === 'git') checkGitOptions(walk, args, ctx.cwd);
   for (const arg of argvWords.slice(1)) checkArgument(walk, arg, ctx.cwd);
   if (name === 'eval' || SHELLS.has(basename(name))) {
     const piped = fedByCurl && name !== 'eval';
-    if (writes.length > 0 || reads.length > 0 || piped) emit(walk, argv, ctx.cwd, env, writes, reads);
+    if (writes.length > 0 || reads.length > 0 || piped) emit(walk, argv, ctx, env, writes, reads);
     if (piped) return ctx.cwd;
     const inner = name === 'eval' ? args.join(' ') : shellScript(args);
     walkScript(walk, tokenize(inner), scoped);
     return ctx.cwd;
   }
-  emit(walk, argv, ctx.cwd, env, writes, reads);
+  emit(walk, argv, ctx, env, writes, reads);
   return ctx.cwd;
 }
 
 function emit(
   walk: Walk,
   argv: readonly string[],
-  cwd: string,
+  ctx: Context,
   env: Readonly<Record<string, string>>,
   writes: readonly string[],
   reads: readonly string[],
 ): void {
-  walk.commands.push({ argv, cwd, env, writes: [...writes], reads: [...reads] });
+  walk.commands.push({ argv, cwd: ctx.cwd, env, writes: [...writes], reads: [...reads], pipeline: ctx.pipeline });
 }
 
 function assignment(walk: Walk, word: Word, own: Record<string, string>, cwd: string): void {
