@@ -34,15 +34,19 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 /**
  * The step schema with each local `$ref` pointed where the schema now sits, so `#` and `#/…` still reach it (review #1.4).
  * A subschema with its own `$id` opens a new scope, so its references are left as they are, and data is never rewritten.
+ * An empty `$id` or a bare fragment (`#name`) opens no scope (review #3.2). A named fragment is not a JSON pointer, so
+ * only `#` and `#/…` are rebased.
  */
 function rebase(schema: unknown): unknown {
-  if (!isObject(schema) || typeof schema.$id === 'string') return schema;
+  const opensScope =
+    isObject(schema) && typeof schema.$id === 'string' && schema.$id !== '' && !schema.$id.startsWith('#');
+  if (!isObject(schema) || opensScope) return schema;
   const rebaseList = (list: unknown) => (Array.isArray(list) ? list.map(rebase) : list);
   const rebaseMap = (map: unknown) =>
     isObject(map) ? Object.fromEntries(Object.entries(map).map(([name, sub]) => [name, rebase(sub)])) : map;
   return Object.fromEntries(
     Object.entries(schema).map(([key, value]) => {
-      if (key === '$ref' && typeof value === 'string' && value.startsWith('#')) {
+      if (key === '$ref' && typeof value === 'string' && (value === '#' || value.startsWith('#/'))) {
         return [key, OUTPUT_POINTER + value.slice(1)];
       }
       if (SCHEMA_MAPS.includes(key)) return [key, rebaseMap(value)];
