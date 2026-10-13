@@ -365,10 +365,7 @@ const USAGE = `${TICKET_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehos
        sail port render --untrusted --source <text> [--inline]
 `;
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("get-pull-request prints the pull request as the port's PullRequest, named by its number, by #number or by its URL", async () => {
+test("get-pull-request prints the pull request as the port's PullRequest, named by its number, by #number or by its URL", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const byNumber = await codehost(repo, ['get-pull-request', '1']);
@@ -390,10 +387,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a ref the adapter's parseRef does not take exits 3, naming it, and a pull request the host does not have exits 1 with the port's message", async () => {
+test("a ref the adapter's parseRef does not take exits 3, naming it, and a pull request the host does not have exits 1 with the port's message", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     for (const ref of ['abc', 'https://example.com/pull/1', '0']) {
@@ -411,10 +405,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('list-designated prints the open, non-draft pull requests that carry the label as a JSON array in number order, and [] for a label none carries', async () => {
+test('list-designated prints the open, non-draft pull requests that carry the label as a JSON array in number order, and [] for a label none carries', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const { code, stdout, stderr } = await codehost(repo, ['list-designated', 'sail']);
@@ -434,10 +425,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("checks prints the port's Checks, and the fake's script carries on between two commands: pending, then failed", async () => {
+test("checks prints the port's Checks, and the fake's script carries on between two commands: pending, then failed", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const first = oneLine((await codehost(repo, ['checks', '4'])).stdout);
@@ -451,10 +439,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a merge the host answers pending or refused is a printed result with exit code 0, and one that lands prints merged with its sha', async () => {
+test('a merge the host answers pending or refused is a printed result with exit code 0, and one that lands prints merged with its sha', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const merge = async (...args: string[]) => {
@@ -481,10 +466,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('merge with no --method exits 3 with the usage, and a method the port does not know exits 1 with its message: nothing merges', async () => {
+test('merge with no --method exits 3 with the usage, and a method the port does not know exits 1 with its message: nothing merges', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const none = await codehost(repo, ['merge', '1']);
@@ -502,10 +484,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("add-label prints the pull request's labels with the new one, and remove-label prints them without it", async () => {
+test("add-label prints the pull request's labels with the new one, and remove-label prints them without it", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const labels = async (operation: string) => {
@@ -522,10 +501,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("comment posts the body from --body-file, or from stdin without it, and prints the port's Posted with an id and a URL each time", async () => {
+test("comment posts the body from --body-file, or from stdin without it, and prints the port's Posted with an id and a URL each time", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     writeFileSync(join(repo.dir, 'note.md'), 'From the file.\n');
@@ -552,10 +528,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('with SAIL_EVENTS set, each operation appends what its adapter emitted: checks, a merge that landed, a label that changed and a comment each one event, and a read, a merge that did not land and a label already there none', async () => {
+test('with SAIL_EVENTS set, each operation appends what its adapter emitted: checks, a merge that landed, a label that changed and a comment each one event, and a read, a merge that did not land and a label already there none', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const file = join(repo.dir, 'port-events.ndjson');
@@ -592,10 +565,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string[], string]>([
+test.each<[string[], string]>([
   [['get-pull-request'], 'codehost get-pull-request needs a pull request'],
   [['get-pull-request', '1', 'extra'], "unknown argument 'extra'"],
   [['list-designated'], 'codehost list-designated needs a label'],
@@ -622,10 +592,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, string[], string]>([
+test.each<[string, string[], string]>([
   [
     '--method given to checks',
     ['checks', '4', '--method', 'squash'],
@@ -653,10 +620,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a usage error of sail port prints every operation of ticket-source and codehost, and render', async () => {
+test('a usage error of sail port prints every operation of ticket-source and codehost, and render', async () => {
   await withTempRepo(async (repo) => {
     for (const [argv, problem] of [
       [['port'], 'no port given'],
