@@ -59,13 +59,10 @@ function makeOver(states: readonly WorldState[], issues: WorldIssue[], inReviewS
 }
 
 // The describe block carries the sticker: the suite file is shared, so its cases can't each carry one.
-// biome-ignore format: TDD-PENDING TASK-007
-describe
-  .skip // TDD-PENDING TASK-007
-  ('linear, through the shared suite', () => {
-    ticketSourceSuite('linear', makeOver(ADW_STATES, ISSUES, 'In Review'));
-    ticketSourceSuite('linear (renamed states)', makeOver(RENAMED, ISSUES.map(renamedIssue), 'Review'));
-  });
+describe('linear, through the shared suite', () => {
+  ticketSourceSuite('linear', makeOver(ADW_STATES, ISSUES, 'In Review'));
+  ticketSourceSuite('linear (renamed states)', makeOver(RENAMED, ISSUES.map(renamedIssue), 'Review'));
+});
 
 /** The same tickets, moved onto the renamed states: the same types, under other names. */
 function renamedIssue(issue: WorldIssue): WorldIssue {
