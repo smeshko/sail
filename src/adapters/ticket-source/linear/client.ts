@@ -11,6 +11,11 @@ const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
 const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
 
+/** `text` with every occurrence of `key` replaced by [redacted]. An empty key redacts nothing. */
+function scrub(text: string, key: string): string {
+  return key === '' ? text : text.split(key).join('[redacted]');
+}
+
 /** `text` without escape sequences, and with every other control character as a space. */
 export function clean(text: string): string {
   return text.replace(ESCAPES, '').replace(CONTROLS, ' ');
@@ -79,10 +84,10 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
       // Every failure goes through here. Nothing it is given may carry the key or a control character, and the answer's
       // body is never attached: it may echo the key, and no caller needs it.
       const fail = (code: PortErrorCode, message: string): PortError => {
-        // Cleaned first, so a key split by an escape sequence is whole again before it is redacted.
-        const cleaned = clean(message);
-        const redacted = options.apiKey === '' ? cleaned : cleaned.split(options.apiKey).join('[redacted]');
-        return new PortError('ticketSource', operation, code, redacted);
+        // Redacted as sent, then cleaned, then redacted as cleaned: a key split by an escape sequence is whole after the
+        // cleaning, and a key with a control character (a newline) is found in the form the transport echoed it.
+        const redacted = clean(scrub(message, options.apiKey));
+        return new PortError('ticketSource', operation, code, scrub(redacted, clean(options.apiKey)));
       };
 
       let response: Response;
