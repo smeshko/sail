@@ -418,22 +418,26 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in keyed) return keyed;
   // A run resumes in its own worktree, which must still be there and still on the base the run started from. The header
   // names it, and a header that names another path (the clone, another run's worktree) is not trusted to say where it is.
+  // Every run records its workspace, so a header without one is refused rather than resumed in the clone.
   const recorded = run.header.workspace;
+  if (recorded === undefined) {
+    return { refused: `run ${runId}'s run.json names no workspace: the run stays suspended` };
+  }
   // The header names the worktree relative to the clone, which is `dirname` of the sail directory.
-  if (recorded !== undefined && resolve(dirname(found.dir), recorded) !== resolve(run.dir, 'workspace')) {
+  if (resolve(dirname(found.dir), recorded) !== resolve(run.dir, 'workspace')) {
     return { refused: `run ${runId}'s workspace ${recorded} is not the run's own worktree: the run stays suspended` };
   }
-  const worktree = recorded === undefined ? undefined : join(dirname(found.dir), recorded);
-  if (worktree !== undefined && !existsSync(worktree)) {
+  const worktree = join(dirname(found.dir), recorded);
+  if (!existsSync(worktree)) {
     return { refused: `run ${runId}'s worktree ${recorded} is gone: the run stays suspended` };
   }
-  if (worktree !== undefined && !isWorktreeOfItsOwn(worktree)) {
+  if (!isWorktreeOfItsOwn(worktree)) {
     return {
       refused: `run ${runId}'s workspace ${recorded} is a plain directory, not a worktree: the run stays suspended`,
     };
   }
   const base = run.header.repository?.baseSha;
-  if (worktree !== undefined && base !== undefined && !(await workspace.isBasedOn(worktree, base))) {
+  if (base !== undefined && !(await workspace.isBasedOn(worktree, base))) {
     const head = headOfWorktree(worktree) ?? 'a commit sail could not read';
     return {
       refused: `run ${runId}'s base ${base} is no ancestor of the HEAD of its worktree, ${head}: the run stays suspended`,
@@ -453,7 +457,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     dir: run.dir,
     header: run.header,
     sailDir: found.dir,
-    workspace: run.header.workspace === undefined ? dirname(found.dir) : join(dirname(found.dir), run.header.workspace),
+    workspace: worktree,
     lease: { remote: keyed.remote, branch },
     adapters: options.adapters.ports,
     relay: options.adapters.relay,
