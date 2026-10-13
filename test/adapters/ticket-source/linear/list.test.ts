@@ -17,6 +17,59 @@ const issue = (identifier: string, state: string, labels: string[] = ['sail']): 
 
 const keysOf = (tickets: readonly { ticketKey: string }[]) => tickets.map((ticket) => ticket.ticketKey);
 
+// Review fixes (review #1.3, #1.1): a listing that makes no progress is refused rather than looped over, and a listing
+// asks for pages of ten tickets, so each page's comment requests stay under Linear's complexity cap.
+/** A complete ticket node, as ListIssues answers one, with no comments. */
+const ticketNode = {
+  id: 'issue-1',
+  identifier: 'ADW-1',
+  title: 'Ticket ADW-1',
+  description: null,
+  url: 'https://linear.app/sail-fixture/issue/ADW-1',
+  priority: 0,
+  state: { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 1 },
+  labels: { nodes: [{ name: 'sail' }] },
+  assignee: null,
+  comments: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+  relations: { nodes: [] },
+  attachments: { nodes: [] },
+};
+
+/**
+ * A transport that answers every ListIssues with `page`. It stops after five calls, so a listing that loops fails the
+ * test rather than hanging the run.
+ */
+function listingOf(page: unknown) {
+  let calls = 0;
+  return (async () => {
+    calls += 1;
+    if (calls > 5) throw new TypeError('the listing did not stop');
+    return new Response(JSON.stringify({ data: { issues: page } }), { status: 200 });
+  }) as unknown as typeof fetch;
+}
+
+test.each([
+  ['an empty page that says there is more', { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'fresh' } }],
+  ['a repeated cursor', { nodes: [ticketNode], pageInfo: { hasNextPage: true, endCursor: 'same' } }],
+  ['a missing cursor', { nodes: [ticketNode], pageInfo: { hasNextPage: true } }],
+])('a listing with %s is refused as invalid', async (_, page) => {
+  const adapter = createLinearTicketSource({ apiKey: KEY, team: 'ADW', fetch: listingOf(page) });
+  const error = await adapter.listDesignated('sail').then(
+    () => undefined,
+    (reason: unknown) => reason,
+  );
+  expect(error).toBeDefined();
+  expect(error).toMatchObject({ code: 'invalid' });
+});
+
+test('listDesignated asks for pages of ten tickets', async () => {
+  const world = createLinearWorld({ issues: [issue('ADW-1', 'Todo')] });
+  await createLinearTicketSource({ apiKey: KEY, team: 'ADW', fetch: world.transport }).listDesignated('sail');
+  expect(world.requests.filter((sent) => sent.operation === 'ListIssues').map((sent) => sent.variables.first)).toEqual([
+    10,
+  ]);
+});
+
 test('listDesignated lists the designated tickets in backlog or unstarted, and no others, each as a parsed Ticket', async () => {
   const world = createLinearWorld({
     issues: [

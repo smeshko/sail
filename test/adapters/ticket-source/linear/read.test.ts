@@ -31,8 +31,17 @@ const issue = (identifier: string, state: string, extra: Partial<WorldIssue> = {
 
 test('parseKey gives the key of this team, from a bare key or its issue URL, and nothing for another team or a bad key', () => {
   const { adapter } = adapterOver(createLinearWorld());
-  const refs = ['ADW-95', `${URL_BASE}/ADW-95/add-a-shout-flag`, 'OPS-1', 'not a key', 'adw-95'];
-  expect(refs.map((ref) => adapter.parseKey(ref))).toEqual(['ADW-95', 'ADW-95', undefined, undefined, undefined]);
+  const refs = ['ADW-95', `${URL_BASE}/ADW-95/add-a-shout-flag`, 'OPS-1', 'not a key', 'adw-95', 'ADW-007', 'ADW-0'];
+  expect(refs.map((ref) => adapter.parseKey(ref))).toEqual([
+    'ADW-95',
+    'ADW-95',
+    undefined,
+    undefined,
+    undefined,
+    // Review fix (review #1.11): a key is spelt as Linear numbers it, so ADW-007 is not this team's key.
+    undefined,
+    undefined,
+  ]);
 });
 
 test('get gives the ticket with the GraphQL node as raw, and emits one ticket:fetched that names it', async () => {
@@ -183,4 +192,10 @@ test('the read documents are named for their operations, and neither asks for an
   expect(FETCH_ISSUE).toContain('query FetchIssue');
   expect(FETCH_MORE_COMMENTS).toContain('query FetchMoreComments');
   expect(/email/i.test(`${FETCH_ISSUE}\n${FETCH_MORE_COMMENTS}`)).toBe(false);
+});
+
+// Review fix (review #1.1): the ticket read asks for one issue, not the default page of fifty, so its comment requests
+// stay under Linear's complexity cap.
+test('the ticket read asks for one issue', () => {
+  expect(/\bfirst: 1\b/.test(FETCH_ISSUE)).toBe(true);
 });

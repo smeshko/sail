@@ -3,7 +3,7 @@
 import { expect, test } from 'bun:test';
 import { createLinearTicketSource } from '../../../../src/adapters/ticket-source/linear/index';
 import type { TicketMove, TicketStateType } from '../../../../src/ports/types';
-import { createLinearWorld, type WorldIssue } from '../../../helpers/linear-world';
+import { createLinearWorld, type WorldIssue, type WorldState } from '../../../helpers/linear-world';
 import { captureEvents, messageOf, portFailure, rejection } from '../../../helpers/ports';
 
 const KEY = 'lin_api_SENTINEL-write-key';
@@ -29,6 +29,20 @@ function adapterOver(world: ReturnType<typeof createLinearWorld>, inReviewState?
 
 const writesOf = (world: ReturnType<typeof createLinearWorld>) =>
   world.requests.filter((sent) => sent.operation === 'UpdateIssue');
+
+// Review fix (review #1.4): the claim passes the configured review state, so a review state ordered before the progress
+// state is not where a run starts.
+test('a claim lands on In Progress when the review state is ordered before it', async () => {
+  const states: WorldState[] = [
+    { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 0 },
+    { id: 'state-in-review', name: 'In Review', type: 'started', position: 1 },
+    { id: 'state-in-progress', name: 'In Progress', type: 'started', position: 2 },
+    { id: 'state-done', name: 'Done', type: 'completed', position: 3 },
+  ];
+  const world = createLinearWorld({ issues: [ISSUE('ADW-1', 'Todo')], states });
+  const { adapter } = adapterOver(world, 'In Review');
+  expect((await adapter.claim('ADW-1')).state).toEqual({ type: 'started', name: 'In Progress' });
+});
 
 test.each(['Todo', 'Backlog'])(
   'a claim of a %s ticket writes once, and returns and emits the In Progress state',
