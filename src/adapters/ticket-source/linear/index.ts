@@ -7,7 +7,7 @@ import type { AdapterDefinition, AdapterOptions } from '../../../ports/adapter';
 import { PortError } from '../../../ports/errors';
 import type { ProviderOptions, TicketSource } from '../../../ports/ticket-source';
 import { type Moved, type Ticket, TicketMove, type TicketState } from '../../../ports/types';
-import { createLinearClient } from './client';
+import { clean, createLinearClient } from './client';
 import { stateTypeOf, toTicket } from './normalise';
 import {
   type CommentNode,
@@ -103,7 +103,12 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       })) as FetchMoreCommentsData;
       const next = data.issue?.comments;
       if (next === undefined || next === null) {
-        throw new PortError('ticketSource', 'get', 'invalid', `Linear answered no comments for ${node.identifier}`);
+        throw new PortError(
+          'ticketSource',
+          'get',
+          'invalid',
+          `Linear answered no comments for ${clean(node.identifier)}`,
+        );
       }
       comments.push(...next.nodes);
       after = continuation('FetchMoreComments', next.pageInfo, next.nodes, seen, 'comment');
@@ -145,7 +150,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     const issue = data.issueUpdate.issue;
     // A success with no issue is refused too: Linear's answer is then not one the adapter can read (review #2.9).
     if (!data.issueUpdate.success || issue === null || issue === undefined) {
-      throw new PortError('ticketSource', op, 'conflict', `Linear did not move ${node.identifier}`);
+      throw new PortError('ticketSource', op, 'conflict', `Linear did not move ${clean(node.identifier)}`);
     }
     const state = { type: stateTypeOf(issue.state.type, op), name: issue.state.name };
     return { state, raw: { ...node, state: issue.state } };
@@ -208,7 +213,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
           'ticketSource',
           'comment',
           'conflict',
-          `Linear did not post the comment on ${node.identifier}`,
+          `Linear did not post the comment on ${clean(node.identifier)}`,
         );
       }
       emit({ type: 'ticket:commented', ticketKey: node.identifier, body });
