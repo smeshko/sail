@@ -9,7 +9,7 @@
 // Arguments go in as positionals and flags, and a result comes out as one line of JSON on stdout, so a bash script
 // builds no JSON. A failed port call exits 1 with the port's message, and anything refused before a call is made exits
 // 3: every refusal comes before the port is called, and before stdin is read, but for one. A body that is empty, from
-// the file or from stdin, is refused once it has been read.
+// the file or from stdin, is refused once it has been read, which is the last thing before the port is called.
 //
 // Each port is a table of operations of one shape: an operation names its positionals and its options, and returns the
 // value to print. This module dispatches over the tables, checks a command line against the operation's row, reads a
@@ -63,8 +63,20 @@ export interface PortCall {
   positionals: readonly string[];
   /** Its options, as parsed. */
   values: Parsed['values'];
-  /** Its body, from `--body-file` or stdin: never empty for an operation that takes one. */
+  /**
+   * Its body, from `--body-file` or stdin, read when called: an operation calls it last before its port. An empty one
+   * is refused there, and never returned.
+   */
   body(): Promise<string>;
+}
+
+/** A body that was read and held nothing: the operation is refused before its port is called. */
+class EmptyBody extends Error {
+  // Written out, not implicit: Bun reads an implicit subclass constructor as uncovered.
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmptyBody';
+  }
 }
 
 /** One operation of a port, as this command runs it: the one shape every port's table has. */
@@ -282,20 +294,27 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
   const project = await findProject(io, COMMAND, { found: findSail(io), ports: [table.port], ...events });
   if (typeof project === 'number') return project;
   const adapter = project.adapters.ports[table.port];
-  // The body is read now, with nothing else left to refuse. An empty one is no body: a script step's stdin is there
-  // and holds nothing, so a script that left --body-file out would otherwise post a blank.
-  const text = row.body && body !== undefined ? await body() : '';
-  if (row.body && text.trim() === '') {
-    const where = typeof bodyFile === 'string' ? `--body-file ${bodyFile}` : 'stdin';
-    return refuse(`${name} ${operation} needs a body, and ${where} is empty`);
-  }
-  const call: PortCall = { cwd: io.cwd, positionals: given, values: args.values, body: () => Promise.resolve(text) };
+  // The body is read when the operation asks for it, once it has refused what only its adapter can read. An empty one
+  // is no body: a script step's stdin is there and holds nothing, so a script that left --body-file out would
+  // otherwise post a blank.
+  const call: PortCall = {
+    cwd: io.cwd,
+    positionals: given,
+    values: args.values,
+    async body() {
+      const text = (await body?.()) ?? '';
+      if (text.trim() !== '') return text;
+      const where = typeof bodyFile === 'string' ? `--body-file ${bodyFile}` : 'stdin';
+      throw new EmptyBody(`${name} ${operation} needs a body, and ${where} is empty`);
+    },
+  };
   try {
     const ran = await row.run(adapter as never, call);
     if ('refused' in ran) return refuse(ran.refused);
     io.stdout(`${JSON.stringify(ran.value)}\n`);
     return EXIT_OK;
   } catch (error) {
+    if (error instanceof EmptyBody) return refuse(error.message);
     // A port that failed is this command's failure. Anything else is a bug in sail, and run() reports it.
     if (!(error instanceof PortError)) throw error;
     io.stderr(`${COMMAND}: ${error.message} (${error.code})\n`);
