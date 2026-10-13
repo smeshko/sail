@@ -125,6 +125,20 @@ test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev
     });
   }));
 
+test('commands nested through eval past the walker limit are denied command:unparseable, not thrown', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['*'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash(`${'eval '.repeat(10000)}true`), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash(`${'bash -c "'.repeat(200)}true${'"'.repeat(200)}`), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+  }));
+
 test('a BASH_ENV assignment is refused: bash would run that file before the allowed command', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['true', 'bash *'], tools: ['Bash'] };
