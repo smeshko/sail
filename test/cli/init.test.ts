@@ -421,3 +421,31 @@ test('.sail/ gets the mode a new directory has under the umask, not the private 
     expect(mode(join(repo.dir, '.sail'))).toBe(mode(join(repo.dir, 'plain')));
   });
 });
+
+test.each<[string, string, string, string]>([
+  [
+    'holds all three is left byte for byte',
+    'node_modules/\r\n.sail-runs/\r\n.sail/sail.d.ts\r\n.sail/sail-intakes.d.ts\r\n',
+    'node_modules/\r\n.sail-runs/\r\n.sail/sail.d.ts\r\n.sail/sail-intakes.d.ts\r\n',
+    '',
+  ],
+  [
+    'lacks two gains them with its own line endings',
+    'node_modules/\r\n.sail-runs/\r\n',
+    'node_modules/\r\n.sail-runs/\r\n.sail/sail.d.ts\r\n.sail/sail-intakes.d.ts\r\n',
+    'updated .gitignore\n',
+  ],
+  [
+    'ends without a newline gets its own first',
+    'node_modules/\r\n.sail-runs/',
+    'node_modules/\r\n.sail-runs/\r\n.sail/sail.d.ts\r\n.sail/sail-intakes.d.ts\r\n',
+    'updated .gitignore\n',
+  ],
+])('.gitignore: one with CRLF line endings that %s', async (_, before, after, said) => {
+  await withTempRepo(async (repo) => {
+    writeFileSync(join(repo.dir, '.gitignore'), before);
+    const { code, stdout } = await init(repo);
+    expect(textOf(join(repo.dir, '.gitignore'))).toBe(after);
+    expect([code, stdout]).toEqual([EXIT_OK, `${WROTE}${said}${NEXT}`]);
+  });
+});
