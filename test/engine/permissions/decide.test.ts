@@ -192,6 +192,18 @@ test('commands nested through eval past the walker limit are denied command:unpa
     });
   }));
 
+test('a cd under CDPATH is refused: bash may enter a directory the engine did not track', () =>
+  inRoots((p) => {
+    mkdirSync(join(p.roots.worktree, 'realdir'));
+    const policy: Permissions = { read: [], write: ['realdir/**'], commands: ['echo *', 'cd *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('CDPATH=.. cd realdir; echo x > out.txt'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('cd realdir && echo x > a.txt'), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('a login or interactive shell is refused: it would source startup files the engine does not read', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['true', 'bash *'], tools: ['Bash'] };
