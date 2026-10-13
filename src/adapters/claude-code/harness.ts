@@ -115,7 +115,11 @@ async function drive(session: Session, options: Options): Promise<HarnessResult>
     if (result !== undefined) return result;
     if (session.request.signal?.aborted === true) return failure(session, 'aborted');
   }
-  return failure(session, 'the session ended without a result message');
+  // A stream that closes after an abort is the abort, not a session that ended without a result (review #2.3).
+  return failure(
+    session,
+    session.request.signal?.aborted === true ? 'aborted' : 'the session ended without a result message',
+  );
 }
 
 /** Why a session ended, in the harness's own words. */
