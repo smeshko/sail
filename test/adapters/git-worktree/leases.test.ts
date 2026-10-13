@@ -95,7 +95,7 @@ test('a credential in the origin URL reaches no lease file and no event, and the
   });
 });
 
-test("an scp-style origin with no user names one remote in every clone, so the second clone is refused", async () => {
+test('an scp-style origin with no user names one remote in every clone, so the second clone is refused', async () => {
   await withTempRepo(async (first) => {
     await withTempRepo(async (second) => {
       const origin = 'example.com:org/sail.git';

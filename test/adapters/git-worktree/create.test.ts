@@ -1,11 +1,20 @@
 // The git-worktree Workspace adapter's `create`, and what it reports: a real origin and a clone of it, in temporary
 // directories, so no test needs the network (ADR-0018). Each case says what the clone and origin hold before it runs.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createGitWorktreeWorkspace } from '../../../src/adapters/git-worktree/index';
 import { git as runGitCmd } from '../../../src/adapters/git-worktree/git';
+import { createGitWorktreeWorkspace } from '../../../src/adapters/git-worktree/index';
 import { removeWorktree, sweepRuns } from '../../../src/adapters/worktree-git';
 import { writeStatus } from '../../../src/engine/run-dir';
 import type { RunRef } from '../../../src/ports/workspace';

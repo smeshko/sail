@@ -428,7 +428,9 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     return { refused: `run ${runId}'s worktree ${recorded} is gone: the run stays suspended` };
   }
   if (worktree !== undefined && !isWorktreeOfItsOwn(worktree)) {
-    return { refused: `run ${runId}'s workspace ${recorded} is a plain directory, not a worktree: the run stays suspended` };
+    return {
+      refused: `run ${runId}'s workspace ${recorded} is a plain directory, not a worktree: the run stays suspended`,
+    };
   }
   const base = run.header.repository?.baseSha;
   if (worktree !== undefined && base !== undefined && !(await workspace.isBasedOn(worktree, base))) {

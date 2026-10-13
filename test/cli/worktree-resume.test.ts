@@ -99,17 +99,23 @@ test("a resume whose run.json names the clone as the run's workspace is refused 
     chmodSync(file, 0o644);
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), workspace: '.' }));
     const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
-    expect({ code: resumed.code, status: readStatus(runDir).status }).toEqual({ code: EXIT_REFUSED, status: 'suspended' });
+    expect({ code: resumed.code, status: readStatus(runDir).status }).toEqual({
+      code: EXIT_REFUSED,
+      status: 'suspended',
+    });
   });
 });
 
-test("a resume whose worktree is replaced by a plain directory is refused with exit 3, and the run stays suspended", async () => {
+test('a resume whose worktree is replaced by a plain directory is refused with exit 3, and the run stays suspended', async () => {
   await suspendedInWorktree(async (repo, runId) => {
     const runDir = join(repo.dir, '.sail-runs', runId);
     rmSync(join(runDir, 'workspace'), { recursive: true, force: true });
     mkdirSync(join(runDir, 'workspace'));
     const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
-    expect({ code: resumed.code, status: readStatus(runDir).status }).toEqual({ code: EXIT_REFUSED, status: 'suspended' });
+    expect({ code: resumed.code, status: readStatus(runDir).status }).toEqual({
+      code: EXIT_REFUSED,
+      status: 'suspended',
+    });
   });
 });
 

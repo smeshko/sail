@@ -221,7 +221,9 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     const file = join(world.runsDir, 'r2', 'created.patch');
     writeFileSync(file, patch);
     expect(world.git(fresh.path, 'apply', file)).toEqual({ code: 0, stdout: '' });
-    expect(readFileSync(join(fresh.path, 'src', 'new dir', 'created.ts'), 'utf8')).toBe('export const created = true;\n');
+    expect(readFileSync(join(fresh.path, 'src', 'new dir', 'created.ts'), 'utf8')).toBe(
+      'export const created = true;\n',
+    );
   });
 
   test(`${label}: diff is three-dot: from's commits that HEAD lacks are not reverted, only the workspace's own edits show`, async () => {
