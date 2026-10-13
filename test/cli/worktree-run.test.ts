@@ -126,7 +126,7 @@ test
 // biome-ignore format: TDD-PENDING TASK-007
 test
   .skip // TDD-PENDING TASK-007
-  ("with an uncommitted edit and another branch checked out in the clone, sail FAKE-1 still runs to completion, and the clone is as it was left", async () => {
+  ('with an uncommitted edit and another branch checked out in the clone, sail FAKE-1 still runs to completion, and the clone is as it was left', async () => {
     await withOriginRepo(async (repo) => {
       repo.git('checkout', '-b', 'feature/other');
       writeFileSync(join(repo.dir, 'README.md'), 'an edit in the clone\n');
