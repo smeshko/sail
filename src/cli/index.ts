@@ -31,6 +31,7 @@ const USAGE = `sail: a software factory. A ticket goes in and a pull request com
 Usage:
   sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]
                                                              Start a run from a ticket: its key, or its URL
+  sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail runs                                                  List the runs in .sail-runs/
@@ -138,7 +139,7 @@ const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
-  ['init', { options: { force: { type: 'boolean' } }, positionals: 1, command: init }],
+  ['init', bare(init)],
   ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
   ['runs', bare(runs)],
   [

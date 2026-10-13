@@ -109,10 +109,7 @@ test('projectIssues reports invalid YAML as one issue at /', async () => {
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('findGitRoot gives the first directory upwards that holds a .git entry, a .git file included, and none outside a repository', async () => {
+test('findGitRoot gives the first directory upwards that holds a .git entry, a .git file included, and none outside a repository', async () => {
   await withTempRepo((repo) => {
     const deep = join(repo.dir, 'a', 'b');
     mkdirSync(deep, { recursive: true });

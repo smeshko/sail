@@ -52,10 +52,7 @@ const NEXT =
 const IGNORED = '.sail-runs/\n.sail/sail.d.ts\n.sail/sail-intakes.d.ts\n';
 const FAKE = { use: 'fake' };
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('in a git repository, sail init exits 0, writes exactly the config, the tsconfig.json and the two editor declarations into .sail/, and prints each file it wrote and the next steps', async () => {
+test('in a git repository, sail init exits 0, writes exactly the config, the tsconfig.json and the two editor declarations into .sail/, and prints each file it wrote and the next steps', async () => {
   await withTempRepo(async (repo) => {
     const { code, stdout, stderr } = await init(repo);
     expect(listing(join(repo.dir, '.sail'))).toEqual(FILES);
@@ -69,10 +66,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("project.yaml validates against sail.project.v1: the directory's name, the label sail-<name>, this version's range and all four ports on fake, with no defaultWorkflow and the real adapters named in comments", async () => {
+test("project.yaml validates against sail.project.v1: the directory's name, the label sail-<name>, this version's range and all four ports on fake, with no defaultWorkflow and the real adapters named in comments", async () => {
   await withTempRepo(async (repo) => {
     await init(repo);
     const text = textOf(join(repo.dir, '.sail', 'project.yaml')) ?? '';
@@ -95,10 +89,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('sail check on what sail init wrote passes with 0 workflows and 0 stages, and sail FAKE-1 there is refused for want of a workflow, with no .sail-runs/', async () => {
+test('sail check on what sail init wrote passes with 0 workflows and 0 stages, and sail FAKE-1 there is refused for want of a workflow, with no .sail-runs/', async () => {
   await withTempRepo(async (repo) => {
     await init(repo);
     expect(await runCaptured(['check'], repo.dir, { env: repo.env })).toEqual({
@@ -116,10 +107,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("tsconfig.json holds sail's house rules, CHECK_OPTIONS, with paths from sail and sail/intakes to the two editor declarations, and includes every .ts under .sail/", async () => {
+test("tsconfig.json holds sail's house rules, CHECK_OPTIONS, with paths from sail and sail/intakes to the two editor declarations, and includes every .ts under .sail/", async () => {
   await withTempRepo(async (repo) => {
     await init(repo);
     const config = JSON.parse(textOf(join(repo.dir, '.sail', 'tsconfig.json')) ?? '{}');
@@ -160,10 +148,7 @@ function editorTsc(repo: TempRepo) {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("an editor's tsc on what sail init wrote resolves sail and sail/intakes: a workflow with one planted type error gets that error and no other, and one with none passes", async () => {
+test("an editor's tsc on what sail init wrote resolves sail and sail/intakes: a workflow with one planted type error gets that error and no other, and one with none passes", async () => {
   await withTempRepo(async (repo) => {
     await init(repo);
     const sail = join(repo.dir, '.sail');
@@ -179,10 +164,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each<[string, string | null, string, string]>([
+test.each<[string, string | null, string, string]>([
   ['a missing .gitignore is created with the three lines', null, IGNORED, 'wrote .gitignore\n'],
   [
     'an existing one gains the lines it lacks, after a newline when its last line has none',
@@ -206,10 +188,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('after sail init, git ignores the two editor declarations and the runs, and lists neither declaration as untracked', async () => {
+test('after sail init, git ignores the two editor declarations and the runs, and lists neither declaration as untracked', async () => {
   await withTempRepo(async (repo) => {
     await init(repo);
     expect(listing(join(repo.dir, '.sail'))).toEqual(FILES);
@@ -223,10 +202,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each([
+test.each([
   ['My App', 'my-app'],
   ['API_v2', 'api-v2'],
   ['--x--', 'x'],
@@ -239,10 +215,7 @@ test
   expect([slugOf(directory), labelOf(slugOf(directory))]).toEqual([name, `sail-${name}`]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("the range is this version up to its next major: '>=0.0.0 <1' today", () => {
+test("the range is this version up to its next major: '>=0.0.0 <1' today", () => {
   expect([rangeOf('0.0.0'), rangeOf('0.4.2'), rangeOf('1.4.2'), rangeOf('12.0.0')]).toEqual([
     '>=0.0.0 <1',
     '>=0.4.2 <1',
@@ -252,10 +225,7 @@ test
   expect(rangeOf(pkg.version)).toBe('>=0.0.0 <1');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each([
+test.each([
   ['My App', 'my-app'],
   ['123', '123'],
 ])(
@@ -280,10 +250,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('outside a git repository it exits 3, naming the directory, and writes nothing', async () => {
+test('outside a git repository it exits 3, naming the directory, and writes nothing', async () => {
   await withTempRepo(async (repo) => {
     const outside = realpathSync(mkdtempSync(join(tmpdir(), 'sail-init-')));
     dirs.push(outside);
@@ -296,10 +263,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("in the home directory, as HOME names it or links to it, it exits 3: that .sail/ is sail's own", async () => {
+test("in the home directory, as HOME names it or links to it, it exits 3: that .sail/ is sail's own", async () => {
   await withTempRepo(async (repo) => {
     const linked = join(repo.home, 'link-to-repo');
     symlinkSync(repo.dir, linked);
@@ -314,10 +278,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each<[string, (path: string) => void]>([
+test.each<[string, (path: string) => void]>([
   ['a directory', (path) => mkdirSync(path)],
   ['a file', (path) => writeFileSync(path, '')],
   ['a link to nothing', (path) => symlinkSync(join(path, '..', 'nowhere'), path)],
@@ -335,10 +296,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .skipIf(process.getuid?.() === 0)(
+test.skipIf(process.getuid?.() === 0)(
   "in a directory it can't write to it exits 3 with why, and leaves the directory as it was",
   async () => {
     await withTempRepo(async (repo) => {
@@ -357,10 +315,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('when the last write fails, the rename into place, no .sail/ is left, and nothing of the one being built', async () => {
+test('when the last write fails, the rename into place, no .sail/ is left, and nothing of the one being built', async () => {
   await withTempRepo(async (repo) => {
     const rename = spyOn(fs, 'renameSync').mockImplementation(() => {
       throw new Error('EIO: i/o error, rename');
@@ -379,10 +334,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a .gitignore that can't be read is refused before anything is written", async () => {
+test("a .gitignore that can't be read is refused before anything is written", async () => {
   await withTempRepo(async (repo) => {
     mkdirSync(join(repo.dir, '.gitignore'));
     const { code, stdout, stderr } = await init(repo);
@@ -392,10 +344,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .skipIf(process.getuid?.() === 0)(
+test.skipIf(process.getuid?.() === 0)(
   "a .gitignore that can't be written fails after .sail/ is in place, and the message says so",
   async () => {
     await withTempRepo(async (repo) => {
@@ -410,10 +359,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each([['extra'], ['--force']])(
+test.each([['extra'], ['--force']])(
   'sail init %s exits 3 as an unknown argument, and writes nothing',
   async (argument) => {
     await withTempRepo(async (repo) => {

@@ -116,10 +116,7 @@ test('the usage names neither sail run nor --input: a run starts from a ticket, 
   expect(stdout).toContain('\nOutput of a run and a resume:\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('the usage lists sail init', async () => {
+test('the usage lists sail init', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(/^ {2}sail init {2,}Write \.sail\/ here: /m);
 });

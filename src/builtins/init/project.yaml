@@ -1,0 +1,18 @@
+# This repository's sail config, as sail init wrote it. Set `name` and `label`, write a workflow under
+# .sail/workflows/<workflow>/workflow.ts, then run `sail check`.
+
+# The repository's name, unique among this machine's watchers.
+name: "{{name}}"
+# The sail versions this .sail/ runs on.
+sail: "{{sail}}"
+# The label that designates a ticket for sail.
+label: "{{label}}"
+# The workflow `sail <ticket>` runs when --workflow is left out.
+# defaultWorkflow: <workflow>
+
+# Which adapter fills each port. Every port starts on its fake, which reads a seed file under .sail/fake/.
+adapters:
+  ticketSource: { use: fake } # or: linear
+  codeHost: { use: fake } # or: github
+  harness: { use: fake } # or: claude-code
+  workspace: { use: fake } # or: git-worktree
