@@ -8,7 +8,8 @@
 //
 // Arguments go in as positionals and flags, and a result comes out as one line of JSON on stdout, so a bash script
 // builds no JSON. A failed port call exits 1 with the port's message, and anything refused before a call is made exits
-// 3: every refusal comes before the port is called, and before stdin is read.
+// 3: every refusal comes before the port is called, and before stdin is read, but for one. A body that is empty, from
+// the file or from stdin, is refused once it has been read.
 //
 // Each port is a table of operations of one shape: an operation names its positionals and its options, and returns the
 // value to print. This module dispatches over the tables, checks a command line against the operation's row, reads a
@@ -62,7 +63,7 @@ export interface PortCall {
   positionals: readonly string[];
   /** Its options, as parsed. */
   values: Parsed['values'];
-  /** Its body, from `--body-file` or stdin. Read when called, so a refusal comes before stdin is read. */
+  /** Its body, from `--body-file` or stdin: never empty for an operation that takes one. */
   body(): Promise<string>;
 }
 
@@ -281,13 +282,14 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
   const project = await findProject(io, COMMAND, { found: findSail(io), ports: [table.port], ...events });
   if (typeof project === 'number') return project;
   const adapter = project.adapters.ports[table.port];
-  const call: PortCall = {
-    cwd: io.cwd,
-    positionals: given,
-    values: args.values,
-    // An operation that takes a body was refused above when there is none.
-    body: () => body?.() ?? Promise.resolve(''),
-  };
+  // The body is read now, with nothing else left to refuse. An empty one is no body: a script step's stdin is there
+  // and holds nothing, so a script that left --body-file out would otherwise post a blank.
+  const text = row.body && body !== undefined ? await body() : '';
+  if (row.body && text.trim() === '') {
+    const where = typeof bodyFile === 'string' ? `--body-file ${bodyFile}` : 'stdin';
+    return refuse(`${name} ${operation} needs a body, and ${where} is empty`);
+  }
+  const call: PortCall = { cwd: io.cwd, positionals: given, values: args.values, body: () => Promise.resolve(text) };
   try {
     const ran = await row.run(adapter as never, call);
     if ('refused' in ran) return refuse(ran.refused);
