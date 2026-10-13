@@ -75,7 +75,7 @@ const runDirOf = (repo: TempRepo, run: string): string => join(repo.dir, '.sail-
 
 const START = ['ADW-1', '--until', 'spec'];
 
-test('sail ADW-1 --until spec exits 0, and its intake writes the ticket with its raw answer and the brief', async () => {
+test('sail ADW-1 --until spec suspends with exit 2, and its intake writes the ticket with its raw answer and the brief', async () => {
   await withTempRepo(async (repo) => {
     linear(repo);
     const { code } = await sail(repo, START);
