@@ -30,10 +30,7 @@ const EVENTS: HarnessEvent[] = [
   },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the transcript has one line per message in event order, a usage line per turn, and the final usage line last', () => {
+test('the transcript has one line per message in event order, a usage line per turn, and the final usage line last', () => {
   const lines = renderTranscript(EVENTS).split('\n');
   expect(lines.map((line) => line.split(',')[0])).toEqual([
     'assistant: Reading.',
@@ -47,17 +44,14 @@ test
   expect(lines.at(-1)).toContain('0.0421');
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an empty session gives an empty transcript, and one message gives its one line', () => {
-  expect([renderTranscript([]), renderTranscript([{ type: 'agent:message', text: 'Hi.' }])]).toEqual(['', 'assistant: Hi.']);
+test('an empty session gives an empty transcript, and one message gives its one line', () => {
+  expect([renderTranscript([]), renderTranscript([{ type: 'agent:message', text: 'Hi.' }])]).toEqual([
+    '',
+    'assistant: Hi.',
+  ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a provider whose cost is an estimate adds one header line saying so, and the rest is unchanged', () => {
+test('a provider whose cost is an estimate adds one header line saying so, and the rest is unchanged', () => {
   const plain = renderTranscript(EVENTS);
   const estimated = renderTranscript(EVENTS, { provider: 'bedrock' });
   const [header, ...rest] = estimated.split('\n');

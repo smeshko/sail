@@ -22,10 +22,7 @@ function summary(message: SDKResultMessage, context = CONTEXT) {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a success whose structured output unwraps to done gives the output, the session id, the usage, the transcript and the raw result', () => {
+test('a success whose structured output unwraps to done gives the output, the session id, the usage, the transcript and the raw result', () => {
   const message = success({ structured: done({ summary: 'Add a --shout flag.' }), cost: 0.0421, usage: {} });
   const result = resultOf(message, CONTEXT);
   expect({
@@ -47,10 +44,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a success whose structured output unwraps to blocked gives the blocked outcome with its reason', () => {
+test('a success whose structured output unwraps to blocked gives the blocked outcome with its reason', () => {
   expect(summary(success({ structured: blocked('The brief has no acceptance criteria.') }))).toEqual({
     outcome: 'blocked',
     reason: undefined,
@@ -61,10 +55,7 @@ test
   expect(result.outcome === 'blocked' ? result.reason : undefined).toBe('The brief has no acceptance criteria.');
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('error_max_turns ends in error with reason budget_exceeded, and a message that names maxTurns', () => {
+test('error_max_turns ends in error with reason budget_exceeded, and a message that names maxTurns', () => {
   expect(summary(failure('error_max_turns'))).toEqual({
     outcome: 'error',
     reason: 'budget_exceeded',
@@ -73,10 +64,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('error_max_budget_usd ends in error with reason budget_exceeded, and a message that names maxUsd', () => {
+test('error_max_budget_usd ends in error with reason budget_exceeded, and a message that names maxUsd', () => {
   expect(summary(failure('error_max_budget_usd'))).toEqual({
     outcome: 'error',
     reason: 'budget_exceeded',
@@ -85,10 +73,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('error_during_execution ends in error with reason harness, and its message carries each error the SDK gave', () => {
+test('error_during_execution ends in error with reason harness, and its message carries each error the SDK gave', () => {
   expect(summary(failure('error_during_execution', ['Tool crashed', 'Retry later']))).toEqual({
     outcome: 'error',
     reason: 'harness',
@@ -97,10 +82,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('error_max_structured_output_retries ends in error with reason harness, carrying the SDK error', () => {
+test('error_max_structured_output_retries ends in error with reason harness, carrying the SDK error', () => {
   expect(summary(failure('error_max_structured_output_retries', ['Output never matched the schema']))).toEqual({
     outcome: 'error',
     reason: 'harness',
@@ -109,10 +91,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a success with no structured output ends in error with reason harness, never in done', () => {
+test('a success with no structured output ends in error with reason harness, never in done', () => {
   expect(summary(success({ result: 'I wrote it.' }))).toEqual({
     outcome: 'error',
     reason: 'harness',
@@ -121,10 +100,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a success whose structured output is not a well-formed envelope ends in error with reason harness', () => {
+test('a success whose structured output is not a well-formed envelope ends in error with reason harness', () => {
   expect(summary(success({ structured: { outcome: 'retry', output: {} } }))).toEqual({
     outcome: 'error',
     reason: 'harness',
@@ -133,10 +109,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a success with zero tokens ends in error with reason harness, never in done', () => {
+test('a success with zero tokens ends in error with reason harness, never in done', () => {
   expect(summary(success({ structured: done({ summary: 'ok' }) }), { ...CONTEXT, usage: NO_TOKENS })).toEqual({
     outcome: 'error',
     reason: 'harness',
@@ -145,10 +118,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an error result with no error text still gives a message that names its subtype', () => {
+test('an error result with no error text still gives a message that names its subtype', () => {
   expect(summary(failure('error_during_execution', []))).toEqual({
     outcome: 'error',
     reason: 'harness',
