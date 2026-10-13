@@ -135,7 +135,7 @@ The agent outcome for "I cannot complete this", submitted with a reason. It hono
 _Avoid_: failed, stuck, gave up, incomplete
 
 **Error**:
-The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `port` or `exit_code`.
+The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event.
 _Avoid_: crash, exception, failed
 
 **Output**:
@@ -221,8 +221,12 @@ The intake and stages a run resolved at start: the intake its workflow names and
 _Avoid_: stage list, manifest, plan, registry
 
 **Config**:
-The repository's `.sail/project.yaml`: its `name`, which adapter fills each port, model aliases, budgets, the conventions, the designation label and the default workflow. It is validated against a JSON Schema before anything runs, and sail commands run only in a clone that has it (ADR-0020).
+The repository's `.sail/project.yaml`: its `name`, which adapter fills each port, model aliases, budgets, the conventions, the designation label and the default workflow. It is validated against a JSON Schema before anything runs, and every sail command but `sail init` runs only in a clone that has it (ADR-0020).
 _Avoid_: settings, project file, manifest, config.ts
+
+**Editor declarations**:
+The two generated files in `.sail/`, `sail.d.ts` and `sail-intakes.d.ts`, through which an editor resolves `sail` and `sail/intakes` to this machine's sail. `sail init` writes them, `sail check` rewrites them when they are missing or stale, and git ignores them. `sail check` itself type-checks against sail's own declarations and never reads a repository's `tsconfig.json`.
+_Avoid_: stubs, typings, shims
 
 ### Runs
 
@@ -291,6 +295,10 @@ _Avoid_: log line, trace, telemetry, message
 **Event stream**:
 The ordered events of one run, written to `events.ndjson` and handed to every consumer at the same time. Nothing observable happens outside it.
 _Avoid_: log, feed, bus (the bus is the mechanism)
+
+**Provider event**:
+An event an adapter emits about a call to its provider, in the families `ticket:*`, `codehost:*` and `workspace:*`.
+_Avoid_: adapter event, port event (the file's name is the one exception), side effect
 
 **Consumer**:
 Something that receives the event stream and does one thing with it: write the events file, render the terminal view, keep the summary. A consumer that throws is reported as an `error:consumer` event and keeps receiving events. The dashboard reads the files consumers write; it isn't one.
@@ -380,6 +388,10 @@ _Avoid_: worktree manager, checkout service
 **Adapter**:
 One implementation of a port for one provider, selected in the config: by name for a built-in, by module path for the repository's own.
 _Avoid_: plugin, driver, connector, integration, backend
+
+**Port command**:
+`sail port <port> <operation>`: how a script step reaches the configured adapter of a port, with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key.
+_Avoid_: port helper, port CLI, bridge
 
 **Adapter registry**:
 Resolves the adapter that fills each port from the config, a built-in by name or the repository's own by module path.
