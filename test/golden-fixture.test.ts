@@ -191,7 +191,7 @@ test('the golden run records its claim: run.json holds it, the stream reports it
   const ticket = JSON.parse(text('00-intake/call-1/ticket.json'));
   expect([ticket.state, ticket.comments.at(-1)]).toEqual([
     inProgress,
-    { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:00.300Z' },
+    { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:00.400Z' },
   ]);
   expect(text('00-intake/call-1/brief.md')).toEndWith(
     `<untrusted-input source="ticket FAKE-1, comment 2">\n${comment}\n</untrusted-input>\n`,
