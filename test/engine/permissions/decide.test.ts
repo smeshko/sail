@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { type Denial, decide, RULES, type ToolCall } from '../../../src/engine/permissions';
 import type { Permissions } from '../../../src/sdk/steps';
 import { type PermissionRoots, permissionRoots } from '../../helpers/permission-roots';
@@ -107,6 +109,29 @@ test('an argument built by a substitution is refused, since its output can suppl
       rule: 'command:unparseable',
     });
     expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
+  }));
+
+test('a cd is tracked only where the shell keeps it: not in a pipeline, not after a failed cd, and through eval', () =>
+  inRoots((p) => {
+    mkdirSync(join(p.roots.worktree, 'src'));
+    const policy: Permissions = { read: [], write: ['src/**'], commands: ['echo *', 'cd *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    // A sequential cd is kept: the redirect lands in src and the glob allows it.
+    expect(decide(bash('cd src && echo x > a.txt'), policy, p.roots)).toEqual({ allow: true });
+    // A cd in a pipeline runs in a subshell, so the redirect lands in the worktree, outside src/**.
+    expect(decide(bash('cd src | echo x > blocked'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'redirect:not-allowed',
+    });
+    // A failed cd leaves the directory where it was, so the redirect lands in the worktree, not in missing/.
+    expect(decide(bash('cd missing; echo x > blocked'), { ...policy, write: ['missing/**'] }, p.roots)).toMatchObject({
+      deny: true,
+    });
+    // eval runs its cd in this shell, so the redirect lands in src and no longer matches 'blocked'.
+    expect(decide(bash('eval "cd src"; echo x > blocked'), { ...policy, write: ['blocked'] }, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'redirect:not-allowed',
+    });
   }));
 
 test('a curl piped into a shell is denied deny:curl-pipe-shell even inside bash -c or a substitution', () =>

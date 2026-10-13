@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { type NormalizedCommand, normalize } from '../../../src/engine/permissions/normalize';
 import { tokenize } from '../../../src/engine/permissions/tokenize';
@@ -86,6 +87,7 @@ test('a GIT_DIR inside the worktree is accepted, and the assignment is kept in e
 
 test('cd into a directory tracks it, and a redirect in that directory resolves beneath it', () =>
   inRoots((p) => {
+    mkdirSync(join(p.roots.worktree, 'lib'));
     const echo = normalized('cd lib && echo x > a', p).find((command) => command.argv[0] === 'echo');
     expect(echo).toBeDefined();
     expect(echo?.cwd).toBe(join(p.roots.worktree, 'lib'));
