@@ -154,3 +154,16 @@ test('without an injected fetch, the client calls globalThis.fetch as it is at e
   }
   expect(world.requests.map((sent) => sent.operation)).toEqual(['FetchIssue']);
 });
+
+test('a request that outlives its timeout is unavailable, and the request carries an abort signal', async () => {
+  let signalled = false;
+  const hangs = ((_input: string, init?: RequestInit) =>
+    new Promise((_, reject) => {
+      signalled = init?.signal instanceof AbortSignal;
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+    })) as unknown as typeof fetch;
+  const client = createLinearClient({ apiKey: KEY, fetch: hangs, timeoutMs: 5 });
+  const error = await rejection(request(client));
+  expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'unavailable' });
+  expect(signalled).toBe(true);
+});
