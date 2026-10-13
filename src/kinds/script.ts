@@ -196,7 +196,8 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   // What the script's port commands reported, now that no child can still be writing. The call's emit adds the key.
   const ported = readPortEvents(portEvents, { runId: context.runId, key: `${context.stage}#${context.call}` });
   for (const event of ported.events) emit(event);
-  unported.push(...ported.problems.map((message) => ({ reason: 'port' as const, message })));
+  // One at a time: a file of a million bad lines is a million problems, more than a call takes as arguments.
+  for (const message of ported.problems) unported.push({ reason: 'port', message });
 
   const map = exitCodeMap(step);
   const mapped: ScriptOutcome | undefined =
@@ -250,12 +251,12 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   for (const [name, { path, bytes, sha256 }] of Object.entries(produced.files)) {
     emit({ type: 'file:produced', name, path, bytes, sha256 });
   }
-  errors.push(...produced.errors, ...unported);
+  const all = [...errors, ...produced.errors, ...unported];
   return {
-    outcome: errors.length > 0 ? 'error' : mapped,
-    output: errors.length > 0 || !output.ok ? null : output.data,
+    outcome: all.length > 0 ? 'error' : mapped,
+    output: all.length > 0 || !output.ok ? null : output.data,
     files: produced.files,
-    errors,
+    errors: all,
     record,
   };
 }
