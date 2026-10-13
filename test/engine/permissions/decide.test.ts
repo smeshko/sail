@@ -125,6 +125,26 @@ test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev
     });
   }));
 
+test('git called by its path is checked as git is: its options, environment and -C chain', () =>
+  inRoots((p) => {
+    mkdirSync(join(p.roots.worktree, 'src'));
+    const policy: Permissions = { read: [], write: [], commands: ['/usr/bin/git *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('/usr/bin/git -c core.fsmonitor=./evil status'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('GIT_CONFIG_COUNT=0 /usr/bin/git status'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('cd src && /usr/bin/git -C .. -C ../clone status'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'git:outside-roots',
+    });
+    expect(decide(bash('/usr/bin/git status'), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('git push --mirror is a force update of every remote ref, so it is denied deny:git-push-force', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['git push *'], tools: ['Bash'] };
