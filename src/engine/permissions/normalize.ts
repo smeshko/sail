@@ -79,15 +79,31 @@ export function gitSubcommand(
   return null;
 }
 
+/** The command a segment's words run after the assignments and wrappers in front of it, or '' when there is none. */
+export function leadingCommand(words: readonly Word[]): string {
+  for (const word of words) {
+    if (ASSIGNMENT.test(word.raw) || WRAPPERS.has(word.text) || word.text === 'env') continue;
+    return word.text;
+  }
+  return '';
+}
+
 function walkScript(walk: Walk, script: Script, start: Context): void {
   let cwd = start.cwd;
-  for (const segment of script) cwd = walkSegment(walk, segment, { cwd, env: start.env });
+  let previous: Segment | undefined;
+  for (const segment of script) {
+    // A shell that `curl` pipes into is the deny set's case (deny:curl-pipe-shell), so it is not refused here.
+    const fedByCurl =
+      segment.before === '|' && previous !== undefined && basename(leadingCommand(previous.words)) === 'curl';
+    cwd = walkSegment(walk, segment, { cwd, env: start.env }, fedByCurl);
+    previous = segment;
+  }
 }
 
 /** Walks one segment. A refusal that stops it is recorded, and the segment yields no command. */
-function walkSegment(walk: Walk, segment: Segment, ctx: Context): string {
+function walkSegment(walk: Walk, segment: Segment, ctx: Context, fedByCurl: boolean): string {
   try {
-    return segmentBody(walk, segment, ctx);
+    return segmentBody(walk, segment, ctx, fedByCurl);
   } catch (error) {
     if (error instanceof Refusal) walk.refusals.push(error);
     else if (error instanceof Unparseable) walk.refusals.push(new Refusal('command:unparseable', error.reason));
@@ -96,7 +112,7 @@ function walkSegment(walk: Walk, segment: Segment, ctx: Context): string {
   }
 }
 
-function segmentBody(walk: Walk, segment: Segment, ctx: Context): string {
+function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: boolean): string {
   const { words, redirects } = segment;
   const own: Record<string, string> = {};
   let index = 0;
@@ -141,7 +157,9 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context): string {
   if (name === 'git') checkGitOptions(walk, args, ctx.cwd);
   for (const arg of argvWords.slice(1)) checkArgument(walk, arg, ctx.cwd);
   if (name === 'eval' || SHELLS.has(basename(name))) {
-    if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx.cwd, env, writes, reads);
+    const piped = fedByCurl && name !== 'eval';
+    if (writes.length > 0 || reads.length > 0 || piped) emit(walk, argv, ctx.cwd, env, writes, reads);
+    if (piped) return ctx.cwd;
     const inner = name === 'eval' ? args.join(' ') : shellScript(args);
     walkScript(walk, tokenize(inner), scoped);
     return ctx.cwd;

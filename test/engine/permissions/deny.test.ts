@@ -17,10 +17,7 @@ function denialOf(command: string): string | undefined {
   return undefined;
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each([
+test.each([
   ['rm -rf x', 'deny:rm-rf'],
   ['rm -fr x', 'deny:rm-rf'],
   ['rm -r -f x', 'deny:rm-rf'],
@@ -50,10 +47,7 @@ test
   expect(denialOf(command)).toBe(rule);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('the near misses pass the deny set, and only the patterns decide them later', () => {
+test('the near misses pass the deny set, and only the patterns decide them later', () => {
   expect(denialOf('rm -rf x')).toBe('deny:rm-rf');
   for (const command of [
     'rm file',
@@ -68,10 +62,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a denied phrase inside an argument is not a command', () => {
+test('a denied phrase inside an argument is not a command', () => {
   expect(denialOf('git checkout main')).toBe('deny:git-checkout');
   expect(denialOf('echo "git checkout main"')).toBeUndefined();
 });
