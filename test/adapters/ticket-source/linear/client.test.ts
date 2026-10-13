@@ -228,3 +228,41 @@ test.each([
     code: expected,
   });
 });
+
+// Review fixes (review #2.3 to #2.6): redaction after cleaning, only codes the client knows, the rate-limit prefix only
+// for a rate limit, and any recognised code in `errors`.
+test('a key split by an escape sequence is still redacted', async () => {
+  const split = `${KEY.slice(0, 9)}\x1b[0m${KEY.slice(9)}`;
+  const { client } = failing({ status: 401, body: { errors: [{ message: `Bad key ${split}` }] } });
+  expect(messageOf(await rejection(request(client)))).not.toContain(KEY);
+});
+
+test.each([
+  ['a code that names a property of Object', 'constructor'],
+  ['a code of the prototype chain', '__proto__'],
+])('%s is not a recognised code, so a 400 with it is invalid', async (_, code) => {
+  const { client } = failing({ status: 400, body: { errors: [{ message: 'x', extensions: { code } }] } });
+  expect(portFailure(await rejection(request(client)))).toEqual({
+    port: 'ticketSource',
+    op: 'FetchIssue',
+    code: 'invalid',
+  });
+});
+
+test('a 401 with a rate-limit code is unauthorized, without the rate-limit prefix', async () => {
+  const { client } = failing({
+    status: 401,
+    body: { errors: [{ message: 'nope', extensions: { code: 'RATELIMITED' } }] },
+  });
+  const error = await rejection(request(client));
+  expect(portFailure(error)).toMatchObject({ code: 'unauthorized' });
+  expect(messageOf(error)).not.toMatch(/rate limit/i);
+});
+
+test('a 400 whose second error carries a rate-limit code is unavailable', async () => {
+  const { client } = failing({
+    status: 400,
+    body: { errors: [{ message: 'a' }, { message: 'b', extensions: { code: 'RATELIMITED' } }] },
+  });
+  expect(portFailure(await rejection(request(client)))).toMatchObject({ code: 'unavailable' });
+});
