@@ -13,7 +13,7 @@
 //
 // A helper, not a committed fixture: the fixture repository's agent-based `ticket-to-pr` takes over end to end once
 // agents run on fakes, and what stays here are cheap edge cases a test sets up by editing its own copy.
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { edit, write } from './fixture';
 
@@ -95,13 +95,17 @@ budgets: { run: { maxUsd: 25, maxMinutes: 90 } }
 const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 # ${purpose}
 set -euo pipefail
+CLONE="$(dirname "$(dirname "$SAIL_CONFIG")")"
+CONTROL="$CLONE/.stub"
 mkdir -p "$WORKSPACE/.stub"
 echo "$STAGE#$CALL" >>"$WORKSPACE/.stub/executions.log"
-if [ -f "$WORKSPACE/.stub/sleep-at" ] && [ "$(cat "$WORKSPACE/.stub/sleep-at")" = "$STAGE#$CALL" ]; then
-  rm "$WORKSPACE/.stub/sleep-at"
+mkdir -p "$CLONE/.stub-log"
+echo "$STAGE#$CALL" >>"$CLONE/.stub-log/$RUN_ID.log"
+if [ -f "$CONTROL/sleep-at" ] && [ "$(cat "$CONTROL/sleep-at")" = "$STAGE#$CALL" ]; then
+  rm "$CONTROL/sleep-at"
   sleep 30 &
-  echo "$$ $!" >"$WORKSPACE/.stub/sleeping.tmp"
-  mv "$WORKSPACE/.stub/sleeping.tmp" "$WORKSPACE/.stub/sleeping"
+  echo "$$ $!" >"$CONTROL/sleeping.tmp"
+  mv "$CONTROL/sleeping.tmp" "$CONTROL/sleeping"
   wait
 fi
 ${body}`;
@@ -128,7 +132,7 @@ export const tests = script('tests', {
   'stages/tests/run.sh': shell(
     'The stub tests: a failing report while $CALL is below the threshold, then a passing one.',
     `pass_at=2
-if [ -f "$WORKSPACE/.stub/tests-pass-at" ]; then pass_at=$(cat "$WORKSPACE/.stub/tests-pass-at"); fi
+if [ -f "$CONTROL/tests-pass-at" ]; then pass_at=$(cat "$CONTROL/tests-pass-at"); fi
 if [ "$CALL" -lt "$pass_at" ]; then
   echo '<testsuites tests="1" failures="1"/>' >"$STAGE_OUT/junit.xml"
   echo '{"ok":false,"total":1,"failed":1,"durationMs":0,"failures":[{"test":"greets","file":"test/greet.test.ts","message":"expected a greeting"}]}'
@@ -417,21 +421,26 @@ export async function interruptWhenAsleep<T>(
 }
 
 /**
- * Copies a repository's `.sail/`, `.sail-runs/` and, when it exists, `.stub/` into `to`, so a run can resume there: a
+ * Copies a repository's `.sail/`, `.sail-runs/` and, when they exist, `.stub/` and `.stub-log/` into `to`, so a run can resume there: a
  * fresh `.sail/` path gets a claim and modules of its own. Paths in a run directory are relative, so the copy resumes
  * as the original would.
  */
 export function copyRun(from: string, to: string): void {
-  for (const name of ['.sail', '.sail-runs', '.stub']) {
+  for (const name of ['.sail', '.sail-runs', '.stub', '.stub-log']) {
     if (existsSync(join(from, name))) cpSync(join(from, name), join(to, name), { recursive: true });
   }
 }
 
-/** What the stub's scripts actually ran, one `<stage>#<call>` per line: `<repo>/.stub/executions.log`. */
+/**
+ * What the stub's scripts actually ran, one `<stage>#<call>` per line, every run of the repository in id order. Each
+ * script appends its line to `<repo>/.stub-log/<run>.log` as well as to the run's worktree: the log outlives the worktree,
+ * which a completed run removes (TASK-008).
+ */
 export function stubExecutions(repoDir: string): string[] {
-  const path = join(repoDir, '.stub', 'executions.log');
-  if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8')
-    .split('\n')
+  const logs = join(repoDir, '.stub-log');
+  if (!existsSync(logs)) return [];
+  return readdirSync(logs)
+    .sort()
+    .flatMap((file) => readFileSync(join(logs, file), 'utf8').split('\n'))
     .filter((line) => line !== '');
 }
