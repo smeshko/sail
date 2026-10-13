@@ -11,10 +11,7 @@ const STEP_SCHEMA = {
   additionalProperties: false,
 };
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the envelope accepts a done submission whose output fits the step schema and a blocked one with a reason, and rejects the rest', () => {
+test('the envelope accepts a done submission whose output fits the step schema and a blocked one with a reason, and rejects the rest', () => {
   const validate = new Ajv({ strict: true }).compile(submissionSchema(STEP_SCHEMA));
   const submissions = [
     { outcome: 'done', output: { summary: 'Add a --shout flag.' } },
@@ -27,18 +24,12 @@ test
   expect(submissions.map((submission) => validate(submission))).toEqual([true, true, false, false, false, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the envelope is a draft-07 oneOf with exactly two branches, one per outcome', () => {
+test('the envelope is a draft-07 oneOf with exactly two branches, one per outcome', () => {
   const schema = submissionSchema(STEP_SCHEMA) as { oneOf?: { properties?: { outcome?: { const?: string } } }[] };
   expect(schema.oneOf?.map((branch) => branch.properties?.outcome?.const)).toEqual(['done', 'blocked']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('unwrap gives the done output or the blocked reason of a valid envelope, and nothing for a malformed one', () => {
+test('unwrap gives the done output or the blocked reason of a valid envelope, and nothing for a malformed one', () => {
   expect([
     unwrap({ outcome: 'done', output: { summary: 'Add a --shout flag.' } }),
     unwrap({ outcome: 'blocked', reason: 'Needs a spec first.' }),

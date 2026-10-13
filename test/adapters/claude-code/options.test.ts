@@ -14,10 +14,7 @@ function optionsOf(plan: SessionPlan): Options {
 
 const STEP_SCHEMA = { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] };
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the session options take the workspace, model and budgets from the request, with no setting sources and no partial messages', () => {
+test('the session options take the workspace, model and budgets from the request, with no setting sources and no partial messages', () => {
   const controller = new AbortController();
   const options = optionsOf(
     sessionOptions(requestOf({ budget: { maxTurns: 7, maxUsd: 0.5, maxMinutes: 5 } }), {
@@ -43,11 +40,10 @@ test
   expect(options.abortController).toBe(controller);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the structured output is a json_schema envelope that holds the step schema, and the system prompt appends the submit contract', () => {
-  const options = optionsOf(sessionOptions(requestOf({ outputSchema: STEP_SCHEMA }), { env: {}, abortController: new AbortController() }));
+test('the structured output is a json_schema envelope that holds the step schema, and the system prompt appends the submit contract', () => {
+  const options = optionsOf(
+    sessionOptions(requestOf({ outputSchema: STEP_SCHEMA }), { env: {}, abortController: new AbortController() }),
+  );
   const schema = options.outputFormat?.schema as { oneOf?: { properties?: Record<string, unknown> }[] } | undefined;
   expect({
     type: options.outputFormat?.type,
@@ -60,10 +56,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the session runs in default permission mode with six tools allowed and no hook or permission callback, and bypassPermissions appears nowhere in the module', () => {
+test('the session runs in default permission mode with six tools allowed and no hook or permission callback, and bypassPermissions appears nowhere in the module', () => {
   const options = optionsOf(sessionOptions(requestOf(), { env: {}, abortController: new AbortController() }));
   const source = readFileSync(join(import.meta.dir, '../../../src/adapters/claude-code/options.ts'), 'utf8');
   expect({
@@ -80,10 +73,7 @@ test
   expect(source).not.toContain('bypassPermissions');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the session environment is the allowlist of the process environment plus the request preamble, and nothing else', () => {
+test('the session environment is the allowlist of the process environment plus the request preamble, and nothing else', () => {
   const options = optionsOf(
     sessionOptions(requestOf({ env: { STAGE_IN: '/work/in', STAGE_OUT: '/work/out' } }), {
       env: {
@@ -105,10 +95,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a zero dollar budget is refused before any session starts, naming maxUsd, and gives no options', () => {
+test('a zero dollar budget is refused before any session starts, naming maxUsd, and gives no options', () => {
   const plan = sessionOptions(requestOf({ budget: { maxTurns: 5, maxUsd: 0, maxMinutes: 5 } }), {
     env: {},
     abortController: new AbortController(),
@@ -121,13 +108,10 @@ test
   }).toEqual({ refused: true, reason: 'budget_exceeded', names: true, options: false });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the submit contract names the done and blocked branches and says the session ends with one submission', () => {
-  expect([/\bdone\b/.test(SUBMIT_CONTRACT), /\bblocked\b/.test(SUBMIT_CONTRACT), /one submission/i.test(SUBMIT_CONTRACT)]).toEqual([
-    true,
-    true,
-    true,
-  ]);
+test('the submit contract names the done and blocked branches and says the session ends with one submission', () => {
+  expect([
+    /\bdone\b/.test(SUBMIT_CONTRACT),
+    /\bblocked\b/.test(SUBMIT_CONTRACT),
+    /one submission/i.test(SUBMIT_CONTRACT),
+  ]).toEqual([true, true, true]);
 });
