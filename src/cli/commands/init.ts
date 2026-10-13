@@ -73,12 +73,16 @@ function isHome(directory: string, io: Io): boolean {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** `.gitignore` as it should read: `text` with each line of `IGNORED` it lacks, after a newline if its last line has none. */
+/**
+ * `.gitignore` as it should read: `text` with each line of `IGNORED` it lacks, after a newline if its last line has
+ * none. A file with CRLF line endings holds a line whatever ends it, and gains lines that end as its own do.
+ */
 function ignoring(text: string): string {
-  const lines = text.split('\n');
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const lines = text.split('\n').map((line) => line.replace(/\r$/, ''));
   const missing = IGNORED.filter((line) => !lines.includes(line));
   if (missing.length === 0) return text;
-  return `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${missing.join('\n')}\n`;
+  return `${text}${text === '' || text.endsWith('\n') ? '' : eol}${missing.map((line) => `${line}${eol}`).join('')}`;
 }
 
 /**
