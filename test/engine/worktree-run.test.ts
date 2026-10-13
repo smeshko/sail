@@ -2,7 +2,7 @@
 // with the worktree as WORKSPACE (TASK-007), and its worktree and lease released when it ends, or kept when it is
 // suspended (TASK-008). Each case has a temp repository and HOME, so its leases are its own.
 import { expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { readLease } from '../../src/adapters/leases';
 import { type RunEnd, type RunWorkflowOptions, runWorkflow } from '../../src/engine/runtime';
@@ -58,13 +58,22 @@ test('a fresh run reports its lease right after run:start, before what the claim
   });
 });
 
-test("every call of a run runs in the run's worktree: the stub's log is written there, and the clone holds none", async () => {
+test("every call of a run runs in the run's worktree: each call's log line names it as WORKSPACE, and the clone holds no .stub", async () => {
   await withStub({}, async (repo) => {
     const end = await runIn(repo, { until: 'tests' });
-    const logFile = join(end.dir, 'workspace', '.stub', 'executions.log');
-    const log = existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n') : [];
-    expect({ calls: log, cloneHasStub: existsSync(join(repo.dir, '.stub')) }).toEqual({
+    const worktree = realpathSync(join(end.dir, 'workspace'));
+    const logs = join(repo.dir, '.stub-log');
+    const lines = readdirSync(logs)
+      .sort()
+      .flatMap((file) => readFileSync(join(logs, file), 'utf8').trim().split('\n'))
+      .map((line) => line.split(' '));
+    expect({
+      calls: lines.map(([call]) => call),
+      inWorktree: lines.map(([, dir]) => realpathSync(dir ?? '') === worktree),
+      cloneHasStub: existsSync(join(repo.dir, '.stub')),
+    }).toEqual({
       calls: ['spec#1', 'implement#1', 'tests#1'],
+      inWorktree: [true, true, true],
       cloneHasStub: false,
     });
   });
