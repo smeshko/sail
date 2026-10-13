@@ -281,7 +281,7 @@ const ROWS: Row[] = [
   },
   {
     name: 'curl written to a file is not a pipe into a shell',
-    build: () => ({ call: bash('curl https://x > f'), policy: P({ commands: ['curl *'] }) }),
+    build: () => ({ call: bash('curl https://x > f'), policy: P({ commands: ['curl *'], write: ['f'] }) }),
     expect: 'allow',
   },
   {
