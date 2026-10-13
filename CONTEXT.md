@@ -355,6 +355,14 @@ _Avoid_: policy, allowlist, sandbox, scope
 A tool call refused for falling outside the step's permissions, recorded with the permissions that refused it. The agent carries on.
 _Avoid_: block, violation, rejection
 
+**Tool call**:
+The harness-neutral model of one of the tools and servers a step reaches, as one call: `{ tool, kind, paths, command?, server? }`, where `kind` is one of `read`, `write`, `edit`, `execute`, `mcp` or `other`. A harness maps its own tool names into it, and the permission engine decides it.
+_Avoid_: tool use, tool invocation, action, request
+
+**Deny rule**:
+A rule of the default deny set: a command form refused whatever the step's `commands` list says, checked first on every normalized command, including those inside substitutions and nested shells. Named `deny:<name>`, such as `deny:rm-rf`.
+_Avoid_: blocklist, forbidden command, override, exception
+
 **Budget**:
 The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended.
 _Avoid_: limit, quota, cap, allowance
