@@ -29,10 +29,11 @@ async function excludeRunsDir(clone: string, env?: Readonly<Record<string, strin
   const found = await git(clone, ['rev-parse', '--git-path', 'info/exclude'], env);
   if (found.code !== 0) return;
   const file = resolve(clone, found.stdout.trim());
-  const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : [];
-  if (lines.includes('.sail-runs/')) return;
+  const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+  if (text.split('\n').includes('.sail-runs/')) return;
   mkdirSync(join(file, '..'), { recursive: true });
-  appendFileSync(file, '.sail-runs/\n');
+  // A last line with no newline is the user's own pattern: the entry starts on a line of its own.
+  appendFileSync(file, `${text === '' || text.endsWith('\n') ? '' : '\n'}.sail-runs/\n`);
 }
 
 export function createGitWorktreeWorkspace(options: GitWorktreeOptions): WorkspacePort {
