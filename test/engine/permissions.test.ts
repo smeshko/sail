@@ -291,25 +291,20 @@ const ROWS: Row[] = [
   },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  .each(ROWS)('$name', (row) =>
+test.each(ROWS)('$name', (row) =>
   withTempRepo(async (repo) => {
-  const p = permissionRoots(repo);
-  const { call, policy } = row.build(p);
-  const decision = decide(call, policy, p.roots);
-  if (row.expect === 'allow') {
-    expect(decision).toEqual({ allow: true });
-  } else {
-    expect(decision).toMatchObject({ deny: true, rule: row.expect });
-  }
-}));
+    const p = permissionRoots(repo);
+    const { call, policy } = row.build(p);
+    const decision = decide(call, policy, p.roots);
+    if (row.expect === 'allow') {
+      expect(decision).toEqual({ allow: true });
+    } else {
+      expect(decision).toMatchObject({ deny: true, rule: row.expect });
+    }
+  }),
+);
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('the table has at least forty rows, and its denials produce every rule name exactly as D15 lists them', async () => {
+test('the table has at least forty rows, and its denials produce every rule name exactly as D15 lists them', async () => {
   expect(RULES).toHaveLength(20);
   expect(ROWS.length).toBeGreaterThanOrEqual(40);
   const produced = new Set<string>();
