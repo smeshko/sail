@@ -1,7 +1,10 @@
 // Normalizes a parsed script into simple commands: wrappers, env and cd are resolved, git's global options and nested
-// shells are unwrapped, and every path is resolved. A refusal throws `Refusal` with its rule.
-import type { Script } from './tokenize';
-import type { Roots } from './types';
+// shells are unwrapped, and every path is resolved. A refusal is recorded with its rule; `normalize` throws the first.
+import { basename } from 'node:path';
+import { resolveReal, rootOf } from './paths';
+import { classifyRedirect, type RedirectTarget, substitutionScripts } from './substitute';
+import { type Script, type Segment, tokenize, Unparseable, type Word } from './tokenize';
+import { Refusal, type Roots } from './types';
 
 /** One simple command, as the deny set and the patterns see it. */
 export interface NormalizedCommand {
@@ -11,13 +14,244 @@ export interface NormalizedCommand {
   readonly cwd: string;
   /** The environment assignments the command runs with. */
   readonly env: Readonly<Record<string, string>>;
-  /** Resolved paths the command writes: redirect targets and path-like arguments. */
+  /** Resolved paths the command writes through its redirect targets. Path-like arguments are checked, not classified. */
   readonly writes: readonly string[];
-  /** Resolved paths the command reads: redirect sources. */
+  /** Resolved paths the command reads through its redirect sources. */
   readonly reads: readonly string[];
 }
 
-/** Normalizes every simple command of a script, unwrapping nested shells. Throws `Refusal` for a refusal. */
-export function normalize(_script: Script, _roots: Roots): NormalizedCommand[] {
-  return [];
+/** The commands of a script and every refusal found in it. A refused part does not hide the commands around it. */
+export interface Analysis {
+  readonly commands: readonly NormalizedCommand[];
+  readonly refusals: readonly Refusal[];
+}
+
+interface Context {
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+interface Walk {
+  readonly roots: Roots;
+  readonly commands: NormalizedCommand[];
+  readonly refusals: Refusal[];
+}
+
+const WRAPPERS = new Set(['command', 'exec', 'nohup', 'time']);
+const SHELLS = new Set(['sh', 'bash', 'zsh']);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const GIT_PATH_VARS = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR']);
+const GIT_VALUE_OPTIONS = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--super-prefix',
+  '--config-env',
+]);
+const GIT_PATH_OPTIONS = new Set(['-C', '--git-dir', '--work-tree']);
+
+/** Normalizes every simple command of a script, unwrapping nested shells. Throws `Refusal` for the first refusal. */
+export function normalize(script: Script, roots: Roots): NormalizedCommand[] {
+  const { commands, refusals } = analyse(script, roots);
+  const [first] = refusals;
+  if (first !== undefined) throw first;
+  return [...commands];
+}
+
+/** Normalizes a script and returns its commands and every refusal, without throwing. */
+export function analyse(script: Script, roots: Roots): Analysis {
+  const walk: Walk = { roots, commands: [], refusals: [] };
+  walkScript(walk, script, { cwd: roots.worktree, env: {} });
+  return { commands: walk.commands, refusals: walk.refusals };
+}
+
+/** A git command's subcommand and its arguments, past git's global options. Null when no subcommand is named. */
+export function gitSubcommand(
+  argv: readonly string[],
+): { readonly name: string; readonly args: readonly string[] } | null {
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i] ?? '';
+    if (!arg.startsWith('-')) return { name: arg, args: argv.slice(i + 1) };
+    if (GIT_VALUE_OPTIONS.has(arg)) i += 1;
+  }
+  return null;
+}
+
+function walkScript(walk: Walk, script: Script, start: Context): void {
+  let cwd = start.cwd;
+  for (const segment of script) cwd = walkSegment(walk, segment, { cwd, env: start.env });
+}
+
+/** Walks one segment. A refusal that stops it is recorded, and the segment yields no command. */
+function walkSegment(walk: Walk, segment: Segment, ctx: Context): string {
+  try {
+    return segmentBody(walk, segment, ctx);
+  } catch (error) {
+    if (error instanceof Refusal) walk.refusals.push(error);
+    else if (error instanceof Unparseable) walk.refusals.push(new Refusal('command:unparseable', error.reason));
+    else throw error;
+    return ctx.cwd;
+  }
+}
+
+function segmentBody(walk: Walk, segment: Segment, ctx: Context): string {
+  const { words, redirects } = segment;
+  const own: Record<string, string> = {};
+  let index = 0;
+  for (;;) {
+    const word = words[index];
+    if (word === undefined) break;
+    if (ASSIGNMENT.test(word.raw)) {
+      assignment(walk, word, own, ctx.cwd);
+    } else if (word.text === 'env' && !word.unsafe) {
+      // `env` takes assignments only: an option such as `-i` could change what runs, so it is refused.
+      if (words[index + 1]?.text.startsWith('-')) throw new Unparseable('env with options');
+    } else if (!(WRAPPERS.has(word.text) && !word.unsafe)) {
+      break;
+    }
+    index += 1;
+  }
+  const env = { ...ctx.env, ...own };
+  const scoped: Context = { cwd: ctx.cwd, env };
+  for (const word of [...words, ...redirects.map((redirect) => redirect.target)]) {
+    for (const body of substitutionScripts(word)) walkScript(walk, body, scoped);
+  }
+  const writes: string[] = [];
+  const reads: string[] = [];
+  for (const redirect of redirects) {
+    const target = classifyRedirect(redirect);
+    if (target !== null) redirectPath(walk, target, ctx.cwd, writes, reads);
+  }
+  const argvWords = words.slice(index);
+  const argv = argvWords.map((word) => word.text);
+  const [name = '', ...args] = argv;
+  const commandWord = argvWords[0];
+  if (commandWord === undefined) {
+    emit(walk, argv, ctx.cwd, env, writes, reads);
+    return ctx.cwd;
+  }
+  if (commandWord.unsafe) throw new Unparseable('a command name the engine cannot read');
+  if (name === 'cd') {
+    const next = changeDirectory(walk.roots, args, ctx.cwd);
+    if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx.cwd, env, writes, reads);
+    return next;
+  }
+  if (name === 'git') checkGitOptions(walk, args, ctx.cwd);
+  for (const arg of argvWords.slice(1)) checkArgument(walk, arg, ctx.cwd);
+  if (name === 'eval' || SHELLS.has(basename(name))) {
+    if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx.cwd, env, writes, reads);
+    const inner = name === 'eval' ? args.join(' ') : shellScript(args);
+    walkScript(walk, tokenize(inner), scoped);
+    return ctx.cwd;
+  }
+  emit(walk, argv, ctx.cwd, env, writes, reads);
+  return ctx.cwd;
+}
+
+function emit(
+  walk: Walk,
+  argv: readonly string[],
+  cwd: string,
+  env: Readonly<Record<string, string>>,
+  writes: readonly string[],
+  reads: readonly string[],
+): void {
+  walk.commands.push({ argv, cwd, env, writes: [...writes], reads: [...reads] });
+}
+
+function assignment(walk: Walk, word: Word, own: Record<string, string>, cwd: string): void {
+  const eq = word.text.indexOf('=');
+  const name = word.text.slice(0, eq);
+  const value = word.text.slice(eq + 1);
+  if (GIT_PATH_VARS.has(name) && !insideRoots(walk.roots, value, cwd)) {
+    walk.refusals.push(new Refusal('git:outside-roots', `${name} points outside the run's roots`));
+  }
+  own[name] = value;
+}
+
+function redirectPath(walk: Walk, target: RedirectTarget, cwd: string, writes: string[], reads: string[]): void {
+  const resolved = resolveReal(target.path, cwd);
+  const root = resolved === null ? null : rootOf(resolved, walk.roots);
+  if (target.kind === 'write') {
+    if (resolved !== null && (root === 'worktree' || root === 'stageOut')) writes.push(resolved);
+    else walk.refusals.push(new Refusal('write:outside-roots', `${target.path} is not a path the step may write`));
+  } else if (resolved !== null && root !== null) {
+    reads.push(resolved);
+  } else {
+    walk.refusals.push(new Refusal('read:outside-roots', `${target.path} is outside the run's roots`));
+  }
+}
+
+/** Checks one argument: an expansion the engine cannot read is refused, and a path-like value must stay in the roots. */
+function checkArgument(walk: Walk, word: Word, cwd: string): void {
+  if (word.unsafe && word.substitutions.length === 0 && /[$`]/.test(word.text)) {
+    throw new Unparseable('an argument with an expansion');
+  }
+  const value = pathValue(word.text);
+  if (isPathLike(value) && !insideRoots(walk.roots, value, cwd)) {
+    walk.refusals.push(new Refusal('path:outside-roots', `${value} is outside the run's roots`));
+  }
+}
+
+/** The value of a `--flag=value` argument, or the argument itself. */
+function pathValue(text: string): string {
+  const eq = text.indexOf('=');
+  return text.startsWith('-') && eq >= 0 ? text.slice(eq + 1) : text;
+}
+
+function isPathLike(value: string): boolean {
+  return value.startsWith('/') || value.startsWith('~') || value.split('/').includes('..');
+}
+
+/** Whether a value names a place inside a root. A value with an expansion is never known to be, so it is outside. */
+function insideRoots(roots: Roots, value: string, cwd: string): boolean {
+  if (/[$`]/.test(value)) return false;
+  const resolved = resolveReal(value, cwd);
+  return resolved !== null && rootOf(resolved, roots) !== null;
+}
+
+function checkGitOptions(walk: Walk, args: readonly string[], cwd: string): void {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? '';
+    if (!arg.startsWith('-')) return;
+    const eq = arg.indexOf('=');
+    const longForm = arg.startsWith('--') && eq >= 0;
+    const flag = longForm ? arg.slice(0, eq) : arg;
+    if (GIT_PATH_OPTIONS.has(flag)) {
+      const value = longForm ? arg.slice(eq + 1) : args[i + 1];
+      if (value === undefined) throw new Unparseable('a git option with no value');
+      if (!insideRoots(walk.roots, value, cwd)) {
+        walk.refusals.push(new Refusal('git:outside-roots', `git ${flag} ${value} is outside the run's roots`));
+      }
+      if (!longForm) i += 1;
+    } else if (GIT_VALUE_OPTIONS.has(flag) && !longForm) {
+      i += 1;
+    }
+  }
+}
+
+/** The script a shell runs with `-c`. A shell with no `-c` runs an opaque file or stdin, which is refused. */
+function shellScript(args: readonly string[]): string {
+  const dash = args.findIndex((arg) => !arg.startsWith('-'));
+  const flags = dash < 0 ? args : args.slice(0, dash);
+  const script = dash < 0 ? undefined : args[dash];
+  if (script === undefined || !flags.some((flag) => /^-[A-Za-z]*c/.test(flag))) {
+    throw new Refusal('command:unparseable', 'a shell runs only a -c script the engine can read');
+  }
+  return script;
+}
+
+/** The directory a `cd` names, when it is one plain directory inside a root. */
+function changeDirectory(roots: Roots, args: readonly string[], cwd: string): string {
+  const [target] = args;
+  if (args.length !== 1 || target === undefined || target.startsWith('-')) {
+    throw new Unparseable('cd without one plain directory');
+  }
+  const resolved = resolveReal(target, cwd);
+  if (resolved === null || rootOf(resolved, roots) === null) {
+    throw new Refusal('path:outside-roots', `cd to ${target} is outside the run's roots`);
+  }
+  return resolved;
 }
