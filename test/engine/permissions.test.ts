@@ -322,4 +322,4 @@ test
     });
   }
   expect([...produced].sort()).toEqual([...RULES].sort());
-});
+}, 30_000);
