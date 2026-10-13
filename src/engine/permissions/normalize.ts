@@ -202,9 +202,12 @@ function redirectPath(walk: Walk, target: RedirectTarget, cwd: string, writes: s
   }
 }
 
-/** Checks one argument: an expansion the engine cannot read is refused, and a path-like value must stay in the roots. */
+/**
+ * Checks one argument: an expansion is refused, since its value can change the argv that the deny set reads (a
+ * substitution's output included), and a path-like value must stay in the roots.
+ */
 function checkArgument(walk: Walk, word: Word, cwd: string): void {
-  if (word.unsafe && word.substitutions.length === 0 && /[$`]/.test(word.text)) {
+  if (word.unsafe && /[$`]/.test(word.text)) {
     throw new Unparseable('an argument with an expansion');
   }
   const value = pathValue(word.text);
