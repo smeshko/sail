@@ -111,6 +111,16 @@ test('an argument built by a substitution is refused, since its output can suppl
     expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
   }));
 
+test('a substitution nested past the tokenizer limit is denied command:unparseable, not thrown', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['echo *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    const nested = `echo ${'$('.repeat(100000)}true${')'.repeat(100000)}`;
+    expect(decide(bash(nested), policy, p.roots)).toMatchObject({ deny: true, rule: 'command:unparseable' });
+    const inQuotes = `echo "${'$('.repeat(100000)}true${')'.repeat(100000)}"`;
+    expect(decide(bash(inQuotes), policy, p.roots)).toMatchObject({ deny: true, rule: 'command:unparseable' });
+  }));
+
 test('git accepts an abbreviated long option and a combined short flag, so those spellings are denied too', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['git *'], tools: ['Bash'] };
