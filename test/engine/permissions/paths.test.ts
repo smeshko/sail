@@ -78,3 +78,26 @@ test('a path starting with ~ is unresolvable', async () => {
     expect(resolveReal('~/x', roots.worktree)).toBeNull();
   });
 });
+
+test('a binding nested inside the output directory is its own root, not writable output', async () => {
+  await withTempRepo(async (repo) => {
+    const base = dirname(repo.dir);
+    const stageOut = join(base, 'call');
+    const stageIn = join(stageOut, 'in');
+    const roots = { worktree: repo.dir, stageOut, stageIn };
+    const resolved = resolveReal(join(stageIn, 'brief.md'), repo.dir);
+    expect(rootOf(resolved ?? '', roots)).toBe('stageIn');
+    expect(rootOf(join(stageOut, 'out.md'), roots)).toBe('stageOut');
+  });
+});
+
+test('a .. after a symlink climbs from the symlink target, as the filesystem does', async () => {
+  await withTempRepo(async (repo) => {
+    const { roots, elsewhere } = permissionRoots(repo);
+    mkdirSync(join(elsewhere, 'lib', 'real'), { recursive: true });
+    symlinkSync(join(elsewhere, 'lib', 'real'), join(roots.worktree, 'xcb'));
+    const resolved = resolveReal('xcb/../new.h', roots.worktree);
+    expect(resolved).toBe(join(elsewhere, 'lib', 'new.h'));
+    expect(rootOf(resolved ?? '', roots)).toBeNull();
+  });
+});
