@@ -36,7 +36,7 @@ test
 // biome-ignore format: TDD-PENDING TASK-005
 test
   .skip // TDD-PENDING TASK-005
-  ("a workspace name nothing fills refuses, listing git-worktree among the built-ins that fill the workspace port", async () => {
+  ('a workspace name nothing fills refuses, listing git-worktree among the built-ins that fill the workspace port', async () => {
     await withTempRepo(async (repo) => {
       const resolved = await resolvedWith(repo.dir, repo.env, 'no-such-workspace');
       expect('issues' in resolved).toBe(true);
