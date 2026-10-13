@@ -10,17 +10,50 @@ export type Submission =
 /** Where the step schema sits in the envelope: the `done` branch's `output`. Local references are relative to the root. */
 const OUTPUT_POINTER = '#/oneOf/0/properties/output';
 
-/** The step schema with each local `$ref` pointed where the schema now sits, so `#` and `#/…` still reach it (review #1.4). */
-function rebase(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(rebase);
-  if (typeof node !== 'object' || node === null) return node;
+// The keywords whose values are schemas, by shape: a map of schemas, one schema, or a list of schemas. Any other keyword
+// holds data (const, enum, default, examples, required, ...) and is copied as it is (review #2.2).
+const SCHEMA_MAPS = ['properties', 'patternProperties', 'definitions', '$defs', 'dependentSchemas'];
+const SCHEMA_ONES = [
+  'additionalItems',
+  'additionalProperties',
+  'contains',
+  'contentSchema',
+  'else',
+  'if',
+  'not',
+  'propertyNames',
+  'then',
+  'unevaluatedItems',
+  'unevaluatedProperties',
+];
+const SCHEMA_LISTS = ['allOf', 'anyOf', 'oneOf', 'prefixItems'];
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * The step schema with each local `$ref` pointed where the schema now sits, so `#` and `#/…` still reach it (review #1.4).
+ * A subschema with its own `$id` opens a new scope, so its references are left as they are, and data is never rewritten.
+ */
+function rebase(schema: unknown): unknown {
+  if (!isObject(schema) || typeof schema.$id === 'string') return schema;
+  const rebaseList = (list: unknown) => (Array.isArray(list) ? list.map(rebase) : list);
+  const rebaseMap = (map: unknown) =>
+    isObject(map) ? Object.fromEntries(Object.entries(map).map(([name, sub]) => [name, rebase(sub)])) : map;
   return Object.fromEntries(
-    Object.entries(node).map(([key, value]) => [
-      key,
-      key === '$ref' && typeof value === 'string' && value.startsWith('#')
-        ? OUTPUT_POINTER + value.slice(1)
-        : rebase(value),
-    ]),
+    Object.entries(schema).map(([key, value]) => {
+      if (key === '$ref' && typeof value === 'string' && value.startsWith('#')) {
+        return [key, OUTPUT_POINTER + value.slice(1)];
+      }
+      if (SCHEMA_MAPS.includes(key)) return [key, rebaseMap(value)];
+      if (SCHEMA_LISTS.includes(key)) return [key, rebaseList(value)];
+      if (key === 'items') return [key, Array.isArray(value) ? rebaseList(value) : rebase(value)];
+      if (key === 'dependencies' && isObject(value)) {
+        return [key, rebaseMap(value)];
+      }
+      if (SCHEMA_ONES.includes(key)) return [key, rebase(value)];
+      return [key, value];
+    }),
   );
 }
 
