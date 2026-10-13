@@ -211,6 +211,15 @@ test('a state type with terminal control characters is refused without them', as
   expect([message.includes('\x1b'), message.includes('\r')]).toEqual([false, false]);
 });
 
+// Review fix (review #3.2): a state type that is not a string is refused as a PortError, not a TypeError.
+test('a state type that is not a string is refused as invalid', async () => {
+  const world = createLinearWorld({
+    issues: [issue('ADW-1', 'Todo')],
+    states: [{ id: 'state-todo', name: 'Todo', type: null as unknown as string, position: 1 }],
+  });
+  expect(portFailure(await rejection(adapterOver(world).adapter.get('ADW-1')))).toMatchObject({ code: 'invalid' });
+});
+
 test('a comment cursor that repeats, or brings no comments, is refused as invalid', async () => {
   const comment = { id: 'c0', body: 'first', createdAt: '2026-10-02T09:00:00.000Z', user: { name: 'a' } };
   const node = {
