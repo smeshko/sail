@@ -2,7 +2,7 @@
 // is gone, a base commit that is no ancestor of the worktree's HEAD, or a lease a live run has taken over. The resume runs
 // as a child process, as it would in a terminal: a process opens one run per `.sail/`, and the suspended run is in this one.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
@@ -89,6 +89,27 @@ test('a resume whose worktree was deleted is refused with exit 3, and the run st
       code: resumed.code,
       status: readStatus(join(repo.dir, '.sail-runs', runId)).status,
     }).toEqual({ code: EXIT_REFUSED, status: 'suspended' });
+  });
+});
+
+test("a resume whose run.json names the clone as the run's workspace is refused with exit 3, and the run stays suspended", async () => {
+  await suspendedInWorktree(async (repo, runId) => {
+    const runDir = join(repo.dir, '.sail-runs', runId);
+    const file = join(runDir, 'run.json');
+    chmodSync(file, 0o644);
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), workspace: '.' }));
+    const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
+    expect({ code: resumed.code, status: readStatus(runDir).status }).toEqual({ code: EXIT_REFUSED, status: 'suspended' });
+  });
+});
+
+test("a resume whose worktree is replaced by a plain directory is refused with exit 3, and the run stays suspended", async () => {
+  await suspendedInWorktree(async (repo, runId) => {
+    const runDir = join(repo.dir, '.sail-runs', runId);
+    rmSync(join(runDir, 'workspace'), { recursive: true, force: true });
+    mkdirSync(join(runDir, 'workspace'));
+    const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
+    expect({ code: resumed.code, status: readStatus(runDir).status }).toEqual({ code: EXIT_REFUSED, status: 'suspended' });
   });
 });
 
