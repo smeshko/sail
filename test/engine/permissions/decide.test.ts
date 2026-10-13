@@ -125,6 +125,26 @@ test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev
     });
   }));
 
+test('a cd inside && or || is refused, and a backgrounded and-or list does not move the shell', () =>
+  inRoots((p) => {
+    mkdirSync(join(p.roots.worktree, 'src'));
+    const policy: Permissions = { read: [], write: ['src/**'], commands: ['false', 'true', 'echo *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('false && cd src; echo x > blocked'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('true || cd src; echo x > blocked'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    // The whole `cd src && true` runs in the background, so the echo is still in the worktree, outside src/**.
+    expect(decide(bash('cd src && true & echo x > blocked'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'redirect:not-allowed',
+    });
+  }));
+
 test('a brace expansion is refused, since bash builds the argv from it; quoted braces are literal', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['rm *', 'git *', 'echo *'], tools: ['Bash'] };
