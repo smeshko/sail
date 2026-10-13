@@ -357,10 +357,7 @@ const declared = (sail: string): (string | null)[] =>
 const current = (): string[] => editorDeclarations().map((declaration) => declaration.text);
 const checked = (repo: TempRepo, ...args: string[]) => runCaptured(['check', ...args], repo.dir, { env: repo.env });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('in a .sail/ with a tsconfig.json and no editor declarations, sail check writes both, says so, then prints its checked line and exits 0; with both current it writes nothing and says nothing', async () => {
+test('in a .sail/ with a tsconfig.json and no editor declarations, sail check writes both, says so, then prints its checked line and exits 0; with both current it writes nothing and says nothing', async () => {
   await withTempRepo(async (repo) => {
     const sail = clone(repo);
     expect(await checked(repo)).toEqual({ code: EXIT_OK, stdout: `${WROTE_BOTH}${CHECKED_NONE}`, stderr: '' });
@@ -374,10 +371,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('with one declaration naming another path, it rewrites that one alone and names it alone', async () => {
+test('with one declaration naming another path, it rewrites that one alone and names it alone', async () => {
   await withTempRepo(async (repo) => {
     const sail = clone(repo);
     await checked(repo);
@@ -394,10 +388,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("a stale declaration never reaches the type-check: with one that names a path that doesn't exist, the check passes and the file is current afterwards", async () => {
+test("a stale declaration never reaches the type-check: with one that names a path that doesn't exist, the check passes and the file is current afterwards", async () => {
   await withTempRepo(async (repo) => {
     const sail = clone(repo);
     writeFileSync(join(sail, 'sail.d.ts'), 'export * from "/no/such/sail/types/index";\n');
@@ -407,10 +398,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('in a .sail/ with no tsconfig.json it writes nothing, and once the repository has one the same check writes both', async () => {
+test('in a .sail/ with no tsconfig.json it writes nothing, and once the repository has one the same check writes both', async () => {
   await withTempRepo(async (repo) => {
     const sail = clone(repo);
     rmSync(join(sail, 'tsconfig.json'));
@@ -422,10 +410,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('the declarations are written once the config validates, whatever the type-check says after: with type errors it writes them and still exits 3, and with an invalid project.yaml it refuses as before and writes nothing', async () => {
+test('the declarations are written once the config validates, whatever the type-check says after: with type errors it writes them and still exits 3, and with an invalid project.yaml it refuses as before and writes nothing', async () => {
   await withTempRepo(async (repo) => {
     const sail = clone(repo);
     writeFileSync(join(sail, 'broken.ts'), "export const n: number = 'not a number';\n");
@@ -443,10 +428,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  .skipIf(process.getuid?.() === 0)(
+test.skipIf(process.getuid?.() === 0)(
   "where the declarations can't be written, it says which on stderr and goes on: its exit code is the check's own",
   async () => {
     await withTempRepo(async (repo) => {
@@ -465,10 +447,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('with --list, the line that says what it wrote comes first, then the checked line, then the listing', async () => {
+test('with --list, the line that says what it wrote comes first, then the checked line, then the listing', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     writeFileSync(join(sail, 'tsconfig.json'), '{}\n');
@@ -480,10 +459,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('only sail check writes them: a run and a resume in a clone that lacks them leave .sail/ without them, and the check that follows writes both', async () => {
+test('only sail check writes them: a run and a resume in a clone that lacks them leave .sail/ without them, and the check that follows writes both', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     writeFileSync(join(sail, 'tsconfig.json'), '{}\n');
