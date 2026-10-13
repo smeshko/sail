@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createFakeWorkspace } from '../../../src/adapters/fake/workspace';
-import { defaultLeasesDir, readLease } from '../../../src/adapters/leases';
+import { readLease } from '../../../src/adapters/leases';
 import { writeStatus } from '../../../src/engine/run-dir';
 import { holdTempRepo } from '../../helpers/held-repo';
 import { portFailure, rejection } from '../../helpers/ports';
@@ -77,13 +77,15 @@ test("create from a base that doesn't resolve is invalid, and makes no workspace
   expect(existsSync(join(run.runDir, 'workspace'))).toBe(false);
 });
 
-test('with no leases directory named, a lease lands in ~/.sail/leases', async () => {
-  const workspace = createFakeWorkspace({ repo: repo().dir, env: repo().env });
+test("with no leases directory named, a lease lands under the environment's HOME, in its .sail/leases", async () => {
+  const { env } = repo();
+  const leases = join(env.HOME ?? '', '.sail', 'leases');
+  const workspace = createFakeWorkspace({ repo: repo().dir, env });
   const run = await world().run('r1');
   await workspace.lease(REMOTE, 'sail/default-dir', run);
-  const held = readLease(defaultLeasesDir(), REMOTE, 'sail/default-dir')?.runId;
+  const held = readLease(leases, REMOTE, 'sail/default-dir')?.runId;
   await workspace.releaseLease(REMOTE, 'sail/default-dir', 'r1');
-  expect([held, readLease(defaultLeasesDir(), REMOTE, 'sail/default-dir')]).toEqual(['r1', undefined]);
+  expect([held, readLease(leases, REMOTE, 'sail/default-dir')]).toEqual(['r1', undefined]);
 });
 
 test('a released workspace is gone from git worktree list too', async () => {

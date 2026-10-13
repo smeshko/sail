@@ -553,6 +553,7 @@ const route = (at: string, took: string) => `workflow:route ${at}→${took}`;
 /** How every run's stream opens: its start, what the claim did to the ticket, then the intake, to its journal line. */
 const OPENING = [
   'run:start',
+  'workspace:leased',
   'ticket:claimed',
   'ticket:commented',
   'intake:start intake#1',
@@ -615,9 +616,18 @@ test("the stub's run writes its whole event stream to events.ndjson, numbered fr
     expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
     // What the claim did, as the engine reports it: neither event belongs to a call, so neither has a key.
     const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-1' };
-    expect(list.slice(1, 3)).toEqual([
-      { seq: 2, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
-      { seq: 3, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+    // The lease comes first: the run takes its branch before it claims the ticket (D2).
+    expect(list.slice(1, 4)).toEqual([
+      {
+        seq: 2,
+        ts: expect.any(String),
+        runId: end.runId,
+        type: 'workspace:leased',
+        remote: 'fake',
+        branch: 'sail/FAKE-1',
+      },
+      { seq: 3, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
+      { seq: 4, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
     ]);
     expect(list.at(-1)).toEqual({
       seq: list.length,
@@ -709,17 +719,18 @@ test("a forced run of a ticket that is not unstarted reports the move in the cla
     const end = await ran(repo.dir, { ticket: 'FAKE-4', force: true });
     expect([end.status, end.runId.slice(0, 7)]).toEqual(['completed', 'FAKE-4-']);
     const list = events(end.dir);
-    expect(outline(list.slice(0, 4))).toEqual([
+    expect(outline(list.slice(0, 5))).toEqual([
       'run:start',
+      'workspace:leased',
       'ticket:updated',
       'ticket:commented',
       'intake:start intake#1',
     ]);
     const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-4' };
     const inProgress = { type: 'started', name: 'In Progress' } as const;
-    expect(list.slice(1, 3)).toEqual([
-      { seq: 2, ...reported, type: 'ticket:updated', change: { state: 'in-progress' }, state: inProgress },
-      { seq: 3, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+    expect(list.slice(2, 4)).toEqual([
+      { seq: 3, ...reported, type: 'ticket:updated', change: { state: 'in-progress' }, state: inProgress },
+      { seq: 4, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
     ]);
     expect(list[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-4', via: 'cli', forced: ['state'] } });
     expect(outline(list)).not.toContain('ticket:claimed');

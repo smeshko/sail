@@ -609,6 +609,7 @@ test('openRun from a ticket claims it before the run directory exists: run.json 
     ]);
     expect(run.header).toEqual(header);
     expect(run.claimed).toEqual([
+      { type: 'workspace:leased', remote: 'fake', branch: 'sail/FAKE-1' },
       { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: IN_PROGRESS },
       { type: 'ticket:commented', ticketKey: 'FAKE-1', body },
     ]);
@@ -680,7 +681,7 @@ test.each<[string, string, Forced[], boolean, string]>([
       expect([run.header.source, run.header.claim, run.claimed.map((event): string => event.type)]).toEqual([
         { kind: 'ticket', ticketKey: ticket, via: 'cli', forced },
         { claimed, state: IN_PROGRESS },
-        [moved, 'ticket:commented'],
+        ['workspace:leased', moved, 'ticket:commented'],
       ]);
       expect(readRunHeader(run.dir)).toEqual(run.header);
       const now = await ticketIn(repo.dir, ticket);
@@ -718,7 +719,7 @@ test('forced, a claim that does not take opens the run, which records the state 
     const run = await openStub(repo.dir, { ticket: 'FAKE-1', force: true }, await racing(repo.dir));
     expect(run).toMatchObject({
       header: { source: { forced: ['state'] }, claim: { claimed: false, state: IN_PROGRESS } },
-      claimed: [{ type: 'ticket:updated' }, { type: 'ticket:commented' }],
+      claimed: [{ type: 'workspace:leased' }, { type: 'ticket:updated' }, { type: 'ticket:commented' }],
     });
   });
 });

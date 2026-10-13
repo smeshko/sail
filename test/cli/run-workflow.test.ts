@@ -212,9 +212,10 @@ test("sail FAKE-1 -v adds each command and the tail of every script, and -vv add
   expect(trace.view).toContain(`\n${specTail}\n`);
   expect(trace.view).toContain(`\n${detail('intake#1', 'journal line 1')}\n${head('spec#1', '▶ spec · script')}\n`);
   expect(trace.view).toContain(`\n${detail('spec#1', 'journal line 2')}\n`);
-  // The claim belongs to no call: its two events print as generic lines with no key, right under the header.
+  // The lease and the claim belong to no call: their events print as generic lines with no key, right under the header.
   const [traced] = trace.runs;
-  expect(trace.view.split('\n').slice(1, 4)).toEqual([
+  expect(trace.view.split('\n').slice(1, 5)).toEqual([
+    `${' '.repeat(15)}· workspace:leased {"remote":"fake","branch":"sail/FAKE-1"}`,
     `${' '.repeat(15)}· ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}`,
     `${' '.repeat(15)}· ticket:commented {"ticketKey":"FAKE-1","body":"sail run ${traced} started"}`,
     head('intake#1', '▶ intake ticket · builtin'),
@@ -363,8 +364,9 @@ test('sail FAKE-1 claims the ticket for its one run: run.json records nothing fo
       { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
       { claimed: true, state: IN_PROGRESS },
     ]);
-    expect(events.slice(0, 4).map((event) => event.type)).toEqual([
+    expect(events.slice(0, 5).map((event) => event.type)).toEqual([
       'run:start',
+      'workspace:leased',
       'ticket:claimed',
       'ticket:commented',
       'intake:start',
@@ -435,7 +437,7 @@ test('a second sail FAKE-1 --force runs: it moves the ticket through update, rec
       ['state'],
       { claimed: false, state: IN_PROGRESS },
     ]);
-    expect(second.events.slice(1, 3).map((event) => event.type)).toEqual(['ticket:updated', 'ticket:commented']);
+    expect(second.events.slice(2, 4).map((event) => event.type)).toEqual(['ticket:updated', 'ticket:commented']);
     expect(second.ticket.comments.map((comment) => comment.body).slice(1)).toEqual([
       `sail run ${first} started`,
       `sail run ${second.runId} started`,

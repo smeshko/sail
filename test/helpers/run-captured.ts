@@ -1,6 +1,9 @@
 // runCaptured(): runs `sail <argv>` in process from `cwd`, capturing what it prints. It runs in plain mode unless the
 // test hands it a `tty`, and with no stdin unless the test supplies its text. fakeInterrupts() stands in for Ctrl-C, through the `io.onInterrupt` a command registers its
 // handler with. normaliseDurations() makes a terminal view's timings comparable.
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import type { ExitCode } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
 import type { Tty } from '../../src/events/consumers/screen';
@@ -20,6 +23,18 @@ export interface CaptureOptions {
   env?: Io['env'];
   /** What the command reads as all of stdin. Left out, the command has no stdin. */
   stdin?: string;
+}
+
+/**
+ * The environment an in-process run gets when a test names none: the process's, with a HOME of its own for `cwd`. Runs
+ * in one test process would otherwise share one `~/.sail/leases`, and a run one test leaves suspended would refuse
+ * the next test's run of the same ticket.
+ */
+function isolatedEnv(cwd: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
+  const key = createHash('sha256').update(resolve(cwd)).digest('hex').slice(0, 16);
+  return { ...env, HOME: join(tmpdir(), 'sail-cli-home', key) };
 }
 
 /** `text` with each duration the terminal view prints, such as `850ms`, `2.5s`, `1m 11s` or `2h 2m`, as `<t>`. */
@@ -44,7 +59,7 @@ export async function runCaptured(
     },
     ...(options.onInterrupt === undefined ? {} : { onInterrupt: options.onInterrupt }),
     ...(options.tty === undefined ? {} : { tty: options.tty }),
-    ...(options.env === undefined ? {} : { env: options.env }),
+    env: options.env ?? isolatedEnv(cwd),
     ...(options.stdin === undefined ? {} : { stdin: () => Promise.resolve(options.stdin as string) }),
   };
   const code = await run(argv, io);
