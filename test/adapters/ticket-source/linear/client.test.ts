@@ -167,3 +167,50 @@ test('a request that outlives its timeout is unavailable, and the request carrie
   expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'unavailable' });
   expect(signalled).toBe(true);
 });
+
+// Review fixes (review #1.2, #1.5, #1.6, #1.7): the GraphQL code wins over a generic 400, an echoed key stays out of the
+// error's raw body, provider text is free of terminal control characters, and a body read that fails is unavailable.
+test('a 400 carrying the rate-limit code is unavailable, with the rate-limit message', async () => {
+  const { client } = failing({
+    status: 400,
+    body: { data: null, errors: [{ message: 'Too many requests', extensions: { code: 'RATELIMITED' } }] },
+  });
+  const error = await rejection(request(client));
+  expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'unavailable' });
+  expect(messageOf(error)).toMatch(/rate limit/i);
+});
+
+test('a 400 carrying the authentication code is unauthorized', async () => {
+  const { client } = failing({
+    status: 400,
+    body: { data: null, errors: [{ message: 'Bad key', extensions: { code: 'AUTHENTICATION_ERROR' } }] },
+  });
+  expect(portFailure(await rejection(request(client)))).toEqual({
+    port: 'ticketSource',
+    op: 'FetchIssue',
+    code: 'unauthorized',
+  });
+});
+
+test('an echoed key is redacted from the message, and absent from the error raw body', async () => {
+  const { client } = failing({ status: 401, body: { errors: [{ message: `Bad key ${KEY}` }], echo: KEY } });
+  const error = await rejection(request(client));
+  expect(messageOf(error)).not.toContain(KEY);
+  expect(JSON.stringify((error as { raw?: unknown }).raw ?? null)).not.toContain(KEY);
+});
+
+test('provider text reaches the PortError without terminal control characters', async () => {
+  const { client } = failing({ status: 401, body: { errors: [{ message: 'bad\x1b[2K\rlogin\x1b]0;t\x07 now' }] } });
+  const message = messageOf(await rejection(request(client)));
+  expect([message.includes('\x1b'), message.includes('\r')]).toEqual([false, false]);
+  expect(message).toContain('login');
+});
+
+test.each([
+  ['a body read that times out', new DOMException('The operation timed out.', 'TimeoutError'), 'unavailable'],
+  ['a body that is not JSON', new SyntaxError('Unexpected token'), 'invalid'],
+])('%s maps to the expected PortError code', async (_, reason, code) => {
+  const response = { status: 200, json: () => Promise.reject(reason) } as unknown as Response;
+  const client = createLinearClient({ apiKey: KEY, fetch: (async () => response) as unknown as typeof fetch });
+  expect(portFailure(await rejection(request(client)))).toEqual({ port: 'ticketSource', op: 'FetchIssue', code });
+});
