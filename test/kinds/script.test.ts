@@ -732,3 +732,15 @@ test('a script that removes the file after reporting emits nothing for it, and h
   expect(run).toMatchObject({ outcome: 'passed', output: { had: true }, errors: [] });
   expect(typesOf(events)).toEqual(['script:exec', 'script:exit', 'output:validated']);
 });
+
+test('a port events file of a million lines that are no events ends the step in error with a problem for each, where it once threw out of the step', async () => {
+  const s = setup();
+  s.run(`head -c 1000000 /dev/zero | tr '\\0' '\\n' > "$SAIL_EVENTS"\necho '${PASSING}'`);
+  const run = await scriptKind.run(script('tests', { run: './run.sh', output: TestReport }), s.context);
+  expect(run.outcome).toBe('error');
+  expect(run.errors).toHaveLength(1_000_000);
+  expect([run.errors[0], run.errors.at(-1)]).toEqual([
+    { reason: 'port', message: 'port-events.ndjson line 1 is not a provider event: it is not JSON' },
+    { reason: 'port', message: 'port-events.ndjson line 1000000 is not a provider event: it is not JSON' },
+  ]);
+}, 30_000);
