@@ -20,19 +20,13 @@ function mapAll(messages: readonly SDKMessage[], state: MapState): HarnessEvent[
   return messages.flatMap((message) => mapMessage(message, state));
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the init message starts the session: harness:session_start with the claude-code adapter, the init session id and the request model', () => {
+test('the init message starts the session: harness:session_start with the claude-code adapter, the init session id and the request model', () => {
   expect(mapMessage(init(), clockAt())).toEqual([
     { type: 'harness:session_start', adapter: 'claude-code', sessionId: SESSION_ID, model: MODEL },
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a repeated init gives no second session start, and the messages after it still map', () => {
+test('a repeated init gives no second session start, and the messages after it still map', () => {
   const state = clockAt();
   const events = mapAll([init(), init(), assistant('msg_1', [text('Reading the brief.')])], state);
   expect(events).toEqual([
@@ -41,10 +35,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('an assistant message gives its thinking, text and tool calls in the message order, with the tool input', () => {
+test('an assistant message gives its thinking, text and tool calls in the message order, with the tool input', () => {
   const events = mapMessage(
     assistant('msg_1', [
       thinking('Plan the spec.'),
@@ -62,15 +53,15 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a tool_result gives tool:end with its call id, completed or failed, and the time from its start to its end', () => {
+test('a tool_result gives tool:end with its call id, completed or failed, and the time from its start to its end', () => {
   // The clock is read at each start (1000, then 1100) and each end (1250, then 1500).
   const state = clockAt(1000, 1100, 1250, 1500);
   const events = mapAll(
     [
-      assistant('msg_1', [toolUse('toolu_1', 'Read', { file_path: 'a.md' }), toolUse('toolu_2', 'Bash', { command: 'x' })]),
+      assistant('msg_1', [
+        toolUse('toolu_1', 'Read', { file_path: 'a.md' }),
+        toolUse('toolu_2', 'Bash', { command: 'x' }),
+      ]),
       toolResult('toolu_1'),
       toolResult('toolu_2', true, 'exit 1'),
     ],
@@ -82,13 +73,14 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a tool_result with no open tool:start gives nothing and does not throw, and a matched one after it still ends', () => {
+test('a tool_result with no open tool:start gives nothing and does not throw, and a matched one after it still ends', () => {
   const state = clockAt(100, 180);
   const events = mapAll(
-    [toolResult('toolu_orphan'), assistant('msg_1', [toolUse('toolu_1', 'Read', { file_path: 'a.md' })]), toolResult('toolu_1')],
+    [
+      toolResult('toolu_orphan'),
+      assistant('msg_1', [toolUse('toolu_1', 'Read', { file_path: 'a.md' })]),
+      toolResult('toolu_1'),
+    ],
     state,
   );
   expect(events).toEqual([
@@ -97,10 +89,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a stream_event and a message of an unknown type give nothing and do not throw, and the messages around them still map', () => {
+test('a stream_event and a message of an unknown type give nothing and do not throw, and the messages around them still map', () => {
   const streamEvent = { type: 'stream_event', event: { type: 'content_block_delta' }, session_id: SESSION_ID };
   const unknown = { type: 'a_type_the_sdk_adds_later', session_id: SESSION_ID };
   const events = mapAll(
@@ -110,10 +99,7 @@ test
   expect(typesOf(events)).toEqual(['harness:session_start', 'agent:message']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the events of a session pass sail.event.v1 once stamped, and a result message gives no event here', () => {
+test('the events of a session pass sail.event.v1 once stamped, and a result message gives no event here', () => {
   const events = mapAll(
     [
       init(),
