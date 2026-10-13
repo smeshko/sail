@@ -3,7 +3,7 @@
 // case starts from a fresh make(), and every event it captures must validate against sail.event.v1 with no key.
 // Events carry paths relative to the clone (D7), so a suite run never writes a machine path into a run.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative } from 'node:path';
 import type { Status } from '../../src/engine/run-dir';
