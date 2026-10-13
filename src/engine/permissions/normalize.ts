@@ -153,6 +153,8 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
     index += 1;
   }
   const env = { ...ctx.env, ...own };
+  // bash runs the file BASH_ENV names before any command, so the commands it would check are not all the code it runs.
+  if (env.BASH_ENV !== undefined) throw new Unparseable('BASH_ENV names a startup file the engine does not read');
   const scoped: Context = { cwd: ctx.cwd, env, pipeline: ctx.pipeline };
   for (const word of [...words, ...redirects.map((redirect) => redirect.target)]) {
     for (const body of substitutionScripts(word)) walkScript(walk, body, scoped);
