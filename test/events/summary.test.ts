@@ -7,6 +7,7 @@ import type { NewEvent, SailEvent } from '../../src/events/types';
 import {
   at,
   end,
+  fetched,
   journal,
   produced,
   RUN_ID,
@@ -493,4 +494,47 @@ test("a built-in intake's call is an entry of kind builtin, which no step of a c
     '/calls/0/steps/0/kind',
     '/calls/0/steps/1/kind',
   ]);
+});
+
+// The run's ticket (D16): the one the intake fetched.
+
+const INTAKE_START: NewEvent = {
+  type: 'intake:start',
+  key: 'intake#1',
+  intake: 'ticket',
+  kind: 'builtin',
+  origin: 'builtin',
+  consumed: { source: 'run.json#/source' },
+};
+const TICKET = { ticketKey: 'FAKE-1', title: 'Add a --shout flag', url: 'fake://tickets/FAKE-1' };
+
+test("the summary names the run's ticket by its key, title and URL, from the intake's ticket:fetched, and a stream that ended before the fetch has no ticket", () => {
+  const before = stamp([0, runStart()], [100, INTAKE_START]);
+  expect(folded(before)).not.toHaveProperty('ticket');
+  const summary = folded(stamp([0, runStart()], [100, INTAKE_START], [300, fetched('intake#1', TICKET.title)]));
+  expect(summary?.ticket).toEqual(TICKET);
+  // After the source, as sail.summary.v1 lists them.
+  expect(Object.keys(summary ?? {}).slice(0, 6)).toEqual(['schema', 'runId', 'workflow', 'source', 'ticket', 'status']);
+});
+
+test("a later ticket:fetched under another key, with another title, leaves the summary's ticket as the intake's, and so does a second one of the intake's own", () => {
+  const stream = stamp(
+    [0, runStart()],
+    [100, INTAKE_START],
+    [300, fetched('intake#1', TICKET.title)],
+    [900, start('spec#1')],
+    [950, fetched('spec#1', 'A title a script fetched', 'fake://tickets/FAKE-7')],
+    [990, fetched('intake#1', 'The title, edited since')],
+    [1200, end('spec#1', 'passed', 300)],
+  );
+  expect(folded(stream)?.ticket).toEqual(TICKET);
+});
+
+test("a ticket:fetched with no key, or under a step's key alone, sets no ticket: only the intake's names the run's", () => {
+  const keyless = stamp([0, runStart()], [100, fetched(undefined, 'Fetched at dispatch')]);
+  expect(folded(keyless)).not.toHaveProperty('ticket');
+  const script = stamp([0, runStart()], [100, start('open#1')], [200, fetched('open#1', "A script's fetch")]);
+  expect(folded(script)).not.toHaveProperty('ticket');
+  // The fold is the one under test: the same stream with the intake's key names the ticket.
+  expect(folded(stamp([0, runStart()], [100, fetched('intake#1', 'Named')]))?.ticket?.title).toBe('Named');
 });

@@ -70,7 +70,7 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expect(adapter.parseKey('not a key')).toBeUndefined();
   });
 
-  test(`${label}: get gives the ticket with raw, and emits one ticket:fetched that counts what it holds`, async () => {
+  test(`${label}: get gives the ticket with raw, and emits one ticket:fetched that names it by its title and URL and counts what it holds`, async () => {
     const { adapter, world, capture } = await start();
     const ticket = await adapter.get(world.designated);
     expect(parseIssues(Ticket, ticket)).toEqual([]);
@@ -79,6 +79,8 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       {
         type: 'ticket:fetched',
         ticketKey: world.designated,
+        title: ticket.title,
+        url: ticket.url,
         comments: ticket.comments.length,
         links: ticket.links.length,
         attachments: ticket.attachments.length,

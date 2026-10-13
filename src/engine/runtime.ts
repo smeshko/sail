@@ -39,6 +39,7 @@ import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
+import { type Clock, systemClock } from './clock';
 import { INTAKE_INDEX, INTAKE_KEY, INTAKE_STAGE, intakeBody, runIntake } from './intake';
 import {
   appendJournal,
@@ -91,6 +92,8 @@ export interface ResumeWorkflowOptions extends ReopenRunOptions, EventOptions {
 
 /** What drives an opened run, whether it started or resumed. */
 interface DriveOptions extends EventOptions {
+  /** The run's clock: each event's `ts`, each try's times and each journal line's `recordedAt` is a reading of it. */
+  clock?: Clock;
   signal?: AbortSignal;
   onCall?(entry: JournalEntry): void;
 }
@@ -182,10 +185,11 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
  */
 async function drive(opened: OpenedRun, options: DriveOptions, { start }: { start: boolean }): Promise<RunEnd> {
   const { runId, dir, sailDir, loaded, header } = opened;
-  const { signal } = options;
+  const { signal, clock = systemClock } = options;
   const bus = createBus({
     runId,
     firstSeq: opened.firstSeq,
+    now: clock,
     // The events file first: the summary seeds itself from it on a resume, and it must already hold the event in hand.
     consumers: [ndjsonConsumer(dir), summaryConsumer(dir), ...(options.consumers ?? [])],
     ...(options.unreported === undefined ? {} : { unreported: options.unreported }),
@@ -264,9 +268,10 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
         ...(signal === undefined ? {} : { signal }),
         emit: bus.emit,
+        clock,
       });
       if (signal?.aborted) return interrupted(`stopped during ${INTAKE_KEY}`);
-      intake = appendJournal(dir, entryFrom(dir, result, paths));
+      intake = appendJournal(dir, entryFrom(dir, result, paths), clock());
       bus.emit({ type: 'journal:append', key: intake.key, line: intake.seq, outcome: intake.outcome });
       running = undefined;
       options.onCall?.(intake);
@@ -325,9 +330,10 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         ...(signal === undefined ? {} : { signal }),
         ...(agent === undefined ? {} : { agent }),
         emit: bus.emit,
+        clock,
       });
       if (signal?.aborted) return interrupted(`stopped during ${call.key}`);
-      const journaled = appendJournal(dir, entryFrom(dir, result, paths));
+      const journaled = appendJournal(dir, entryFrom(dir, result, paths), clock());
       bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
       running = undefined;
       reached ||= journaled.key === last;

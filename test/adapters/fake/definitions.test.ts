@@ -2,7 +2,7 @@
 // gives it, reads its seed from `.sail/` and keeps its state under `.sail-runs/fake/` (DECISIONS D2, D7, D11). Every
 // case runs in a temp repository holding a copy of the fixture's `.sail/`.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fakeAdapters } from '../../../src/adapters/fake/definitions';
 import { BUILTINS } from '../../../src/adapters/index';
@@ -73,6 +73,8 @@ test('the pull-request fake merges #3 as pending, then merged, with its state in
 test('the harness fake is created with no script, resolves as an error naming the file, and answers once one is written', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
+    // The fixture scripts its harness: this repository is one that doesn't yet.
+    rmSync(join(ctx.sailDir, 'fake', 'harness.json'));
     const harness = await fakeAdapters.harness.create({}, ctx);
     const request = {
       key: 'spec#1',

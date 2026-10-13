@@ -1,12 +1,27 @@
 // `sail check`, in process through run(): the lookup, project.yaml, the type-check and the definitions, in order.
 import { expect, test } from 'bun:test';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { editorDeclarations } from '../../src/engine/editor';
+import { writePublish } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
-import { withTempRepo } from '../helpers/temp-repo';
+import { copyRun, writeStub } from '../helpers/stub-workflow';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const inRepoFixture = join(import.meta.dir, '..', 'fixtures', 'repo');
 const BROKEN = "s.files['spec.md'], feedback";
@@ -45,12 +60,13 @@ test('check --list in the in-repo fixture groups its stages under its workflow, 
   expect(await runCaptured(['check', '--list'], inRepoFixture)).toEqual({
     code: EXIT_OK,
     stdout: [
-      '.sail/ checked: 1 workflow, 5 stages',
+      '.sail/ checked: 1 workflow, 6 stages',
       '',
       'workflows',
       '  ticket-to-pr  intake ticket  .sail/workflows/ticket-to-pr/workflow.ts',
       '    private',
-      '      publish      stage   describe (agent), open (script)',
+      '      describe     agent',
+      '      open         script',
       '      self-review  agent',
       '      spec         agent',
       '    shared',
@@ -66,9 +82,10 @@ test('check --list in the in-repo fixture groups its stages under its workflow, 
   });
 });
 
-test('check --list orders private stages by folder, intake first, and marks a shared stage no one uses', async () => {
+test('check --list orders private stages by folder, intake first, lists a multi-step stage with its steps, and marks a shared stage no one uses', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
+    writePublish(sail);
     const write = (path: string, text: string) => {
       mkdirSync(dirname(join(sail, path)), { recursive: true });
       writeFileSync(join(sail, path), text);
@@ -132,7 +149,7 @@ test('check --list orders private stages by folder, intake first, and marks a sh
 test('check without --list prints only the summary', async () => {
   expect(await runCaptured(['check'], inRepoFixture)).toEqual({
     code: EXIT_OK,
-    stdout: '.sail/ checked: 1 workflow, 5 stages\n',
+    stdout: '.sail/ checked: 1 workflow, 6 stages\n',
     stderr: '',
   });
 });
@@ -143,7 +160,7 @@ test('a copy of the fixture checks from a subdirectory with no node_modules in r
     const { code, stdout, stderr } = await runCaptured(['check', '--list'], subdirectory(repo.dir));
     expect(stderr).toBe('');
     expect(code).toBe(EXIT_OK);
-    expect(stdout).toStartWith('../../.sail/ checked: 1 workflow, 5 stages\n');
+    expect(stdout).toStartWith('../../.sail/ checked: 1 workflow, 6 stages\n');
     expect(stdout).toContain('  ../../.sail/workflows/ticket-to-pr/workflow.ts\n');
     expect(stdout).toContain('used by ticket-to-pr  ../../.sail/stages/tests/stage.ts\n');
     expect(stdout).not.toContain(repo.dir);
@@ -305,3 +322,159 @@ test('run.stage() given an intake is a type error sail check reports with exit 3
     expect(stderr).toEndWith('sail check: 1 type error in .sail/\n');
   });
 });
+
+// The editor declarations (D15): `sail check` rewrites the ones that are missing or stale, where a `tsconfig.json` shows
+// the repository uses them.
+
+const CONFIG = `name: clone
+sail: ">=0.0.0 <1"
+adapters:
+  ticketSource: { use: fake }
+  codeHost: { use: fake }
+  harness: { use: fake }
+  workspace: { use: fake }
+`;
+const DECLARATIONS = ['sail.d.ts', 'sail-intakes.d.ts'];
+const WROTE_BOTH = 'sail check: wrote .sail/sail.d.ts and .sail/sail-intakes.d.ts for the editor\n';
+const CHECKED_NONE = '.sail/ checked: 0 workflows, 0 stages\n';
+
+/**
+ * A fresh clone of a repository that uses the editor declarations: a `.sail/` with a config and a `tsconfig.json`, and
+ * neither declaration, since git ignores them. The check never reads `tsconfig.json`, so it holds nothing here.
+ */
+function clone(repo: TempRepo): string {
+  const sail = join(repo.dir, '.sail');
+  mkdirSync(sail);
+  writeFileSync(join(sail, 'project.yaml'), CONFIG);
+  writeFileSync(join(sail, 'tsconfig.json'), '{}\n');
+  return sail;
+}
+
+/** Each editor declaration in `sail`: what it holds, or null when it isn't there. */
+const declared = (sail: string): (string | null)[] =>
+  DECLARATIONS.map((name) => (existsSync(join(sail, name)) ? readFileSync(join(sail, name), 'utf8') : null));
+/** What each editor declaration should hold on this machine. */
+const current = (): string[] => editorDeclarations().map((declaration) => declaration.text);
+const checked = (repo: TempRepo, ...args: string[]) => runCaptured(['check', ...args], repo.dir, { env: repo.env });
+
+test('in a .sail/ with a tsconfig.json and no editor declarations, sail check writes both, says so, then prints its checked line and exits 0; with both current it writes nothing and says nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = clone(repo);
+    expect(await checked(repo)).toEqual({ code: EXIT_OK, stdout: `${WROTE_BOTH}${CHECKED_NONE}`, stderr: '' });
+    expect(declared(sail)).toEqual(current());
+    expect(readdirSync(sail).sort()).toEqual(['project.yaml', 'sail-intakes.d.ts', 'sail.d.ts', 'tsconfig.json']);
+
+    const stamps = DECLARATIONS.map((name) => statSync(join(sail, name)).mtimeMs);
+    await Bun.sleep(20);
+    expect(await checked(repo)).toEqual({ code: EXIT_OK, stdout: CHECKED_NONE, stderr: '' });
+    expect(DECLARATIONS.map((name) => statSync(join(sail, name)).mtimeMs)).toEqual(stamps);
+  });
+});
+
+test('with one declaration naming another path, it rewrites that one alone and names it alone', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = clone(repo);
+    await checked(repo);
+    const kept = existsSync(join(sail, 'sail.d.ts')) ? statSync(join(sail, 'sail.d.ts')).mtimeMs : 0;
+    writeFileSync(join(sail, 'sail-intakes.d.ts'), 'export * from "/another/machine/sail/types/intakes";\n');
+    await Bun.sleep(20);
+    expect(await checked(repo)).toEqual({
+      code: EXIT_OK,
+      stdout: `sail check: wrote .sail/sail-intakes.d.ts for the editor\n${CHECKED_NONE}`,
+      stderr: '',
+    });
+    expect(declared(sail)).toEqual(current());
+    expect(statSync(join(sail, 'sail.d.ts')).mtimeMs).toBe(kept);
+  });
+});
+
+test("a stale declaration never reaches the type-check: with one that names a path that doesn't exist, the check passes and the file is current afterwards", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = clone(repo);
+    writeFileSync(join(sail, 'sail.d.ts'), 'export * from "/no/such/sail/types/index";\n');
+    const { code, stdout } = await checked(repo);
+    expect(declared(sail)).toEqual(current());
+    expect([code, stdout]).toEqual([EXIT_OK, `${WROTE_BOTH}${CHECKED_NONE}`]);
+  });
+});
+
+test('in a .sail/ with no tsconfig.json it writes nothing, and once the repository has one the same check writes both', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = clone(repo);
+    rmSync(join(sail, 'tsconfig.json'));
+    expect(await checked(repo)).toEqual({ code: EXIT_OK, stdout: CHECKED_NONE, stderr: '' });
+    expect(declared(sail)).toEqual([null, null]);
+    writeFileSync(join(sail, 'tsconfig.json'), '{}\n');
+    expect((await checked(repo)).stdout).toBe(`${WROTE_BOTH}${CHECKED_NONE}`);
+    expect(declared(sail)).toEqual(current());
+  });
+});
+
+test('the declarations are written once the config validates, whatever the type-check says after: with type errors it writes them and still exits 3, and with an invalid project.yaml it refuses as before and writes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = clone(repo);
+    writeFileSync(join(sail, 'broken.ts'), "export const n: number = 'not a number';\n");
+    const typed = await checked(repo);
+    expect(declared(sail)).toEqual(current());
+    expect([typed.code, typed.stdout]).toEqual([EXIT_REFUSED, WROTE_BOTH]);
+    expect(typed.stderr).toEndWith('sail check: 1 type error in .sail/\n');
+
+    for (const name of DECLARATIONS) rmSync(join(sail, name));
+    writeFileSync(join(sail, 'project.yaml'), CONFIG.replace('name: clone', 'name: Not A Slug'));
+    const invalid = await checked(repo);
+    expect([invalid.code, invalid.stdout]).toEqual([EXIT_REFUSED, '']);
+    expect(invalid.stderr).toStartWith('.sail/project.yaml  ');
+    expect(declared(sail)).toEqual([null, null]);
+  });
+});
+
+test.skipIf(process.getuid?.() === 0)(
+  "where the declarations can't be written, it says which on stderr and goes on: its exit code is the check's own",
+  async () => {
+    await withTempRepo(async (repo) => {
+      const sail = clone(repo);
+      chmodSync(sail, 0o555);
+      try {
+        const { code, stdout, stderr } = await checked(repo);
+        expect(stderr).toStartWith('sail check: could not write .sail/sail.d.ts: EACCES');
+        expect(stderr.split('\n')).toHaveLength(2);
+        expect([code, stdout]).toEqual([EXIT_OK, CHECKED_NONE]);
+        expect(readdirSync(sail).sort()).toEqual(['project.yaml', 'tsconfig.json']);
+      } finally {
+        chmodSync(sail, 0o755);
+      }
+    });
+  },
+);
+
+test('with --list, the line that says what it wrote comes first, then the checked line, then the listing', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    writeFileSync(join(sail, 'tsconfig.json'), '{}\n');
+    const { code, stdout } = await checked(repo, '--list');
+    const lines = stdout.split('\n');
+    expect(lines.slice(0, 4)).toEqual([WROTE_BOTH.trimEnd(), '.sail/ checked: 1 workflow, 6 stages', '', 'workflows']);
+    expect(code).toBe(EXIT_OK);
+    expect(declared(sail)).toEqual(current());
+  });
+}, 60_000);
+
+test('only sail check writes them: a run and a resume in a clone that lacks them leave .sail/ without them, and the check that follows writes both', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writeFileSync(join(sail, 'tsconfig.json'), '{}\n');
+    const ran = await runCaptured(['FAKE-1', '--until', 'spec', '-q'], repo.dir, { env: repo.env });
+    expect(ran.code).toBe(2);
+    expect(declared(sail)).toEqual([null, null]);
+    const runId = readdirSync(join(repo.dir, '.sail-runs')).find((name) => name !== 'fake') ?? '';
+    await withTempRepo(async (other) => {
+      copyRun(repo.dir, other.dir);
+      const resumed = await runCaptured(['resume', runId, '-q'], other.dir, { env: other.env });
+      expect(resumed.code).toBe(EXIT_OK);
+      expect(declared(join(other.dir, '.sail'))).toEqual([null, null]);
+      const { stdout } = await runCaptured(['check'], other.dir, { env: other.env });
+      expect(stdout).toBe(`${WROTE_BOTH}.sail/ checked: 1 workflow, 5 stages\n`);
+      expect(declared(join(other.dir, '.sail'))).toEqual(current());
+    });
+  });
+}, 60_000);

@@ -18,17 +18,11 @@
     "name": "ticket-to-pr",
     "version": 1,
     "origin": "repo:.sail/workflows/ticket-to-pr",
-    "sha256": "e0b3cf9118c5580b04a63a226324576776169295075084965c306c90e250a710"
+    "sha256": "bc23bb2038ea8c95a1d21e5546edc1d62e98be29dadc00a530c50891319c446e"
   },
-  "repository": {
-    "url": "fake://codehost/fixture",
-    "defaultBranch": "main",
-    "baseSha": "f569e7f50659194ebd39f2f141e95091f40791da"
-  },
-  "workspace": "workspace",
   "sail": {
     "version": "0.0.0",
-    "runtime": "bun 1.3.14"
+    "runtime": "bun 1.4.2"
   },
   "adapters": {
     "ticketSource": {
@@ -58,6 +52,32 @@
     ]
   },
   "stages": {
+    "describe": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/describe",
+      "model": "claude-sonnet-5",
+      "output": "PrDescription",
+      "produces": [
+        "pr-body.md"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "git log *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 20,
+        "maxUsd": 1,
+        "maxMinutes": 5
+      }
+    },
     "implement": {
       "kind": "agent",
       "origin": "repo:.sail/stages/implement",
@@ -88,42 +108,16 @@
         "maxMinutes": 20
       }
     },
-    "publish": {
-      "origin": "repo:.sail/workflows/ticket-to-pr/stages/publish",
+    "open": {
+      "kind": "script",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/open",
       "output": "PrInfo",
-      "steps": [
-        {
-          "step": "describe",
-          "kind": "agent",
-          "model": "claude-sonnet-5",
-          "output": "PrDescription",
-          "produces": [
-            "pr-body.md"
-          ],
-          "permissions": {
-            "read": [
-              "**"
-            ],
-            "write": [
-              "$STAGE_OUT/**"
-            ],
-            "commands": [
-              "git log *",
-              "git diff *"
-            ]
-          },
-          "budget": {
-            "maxTurns": 20,
-            "maxUsd": 1,
-            "maxMinutes": 5
-          }
-        },
-        {
-          "step": "open",
-          "kind": "script",
-          "output": "PrInfo"
-        }
-      ]
+      "exitCodes": {
+        "passed": [
+          0
+        ],
+        "failed": []
+      }
     },
     "self-review": {
       "kind": "agent",

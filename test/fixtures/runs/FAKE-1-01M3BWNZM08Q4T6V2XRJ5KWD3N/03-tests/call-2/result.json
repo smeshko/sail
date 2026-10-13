@@ -21,9 +21,9 @@
     }
   },
   "consumed": {},
-  "startedAt": "2026-09-25T09:00:42.470Z",
-  "finishedAt": "2026-09-25T09:00:45.160Z",
-  "durationMs": 2690,
+  "startedAt": "2026-09-25T09:00:09.100Z",
+  "finishedAt": "2026-09-25T09:00:09.800Z",
+  "durationMs": 700,
   "exit": {
     "code": 0,
     "mapped": "passed"
@@ -36,7 +36,8 @@
     "TRY": "1",
     "STAGE_IN": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/in",
     "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2",
-    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace",
-    "SAIL_CONFIG": ".sail/project.yaml"
+    "WORKSPACE": ".",
+    "SAIL_CONFIG": ".sail/project.yaml",
+    "SAIL_EVENTS": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/port-events.ndjson"
   }
 }

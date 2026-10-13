@@ -1,9 +1,15 @@
-// `sail check [--list]`: finds `.sail/`, validates its config, type-checks it, then loads its definitions and applies
-// the layout's rules, in that order. The first step with a problem refuses, with every problem it found located
-// relative to where the user ran it.
+// `sail check [--list]`: finds `.sail/`, validates its config, refreshes the editor declarations, type-checks it, then
+// loads its definitions and applies the layout's rules, in that order. The first step with a problem refuses, with
+// every problem it found located relative to where the user ran it.
+//
+// The editor declarations are the one thing it writes: where `.sail/tsconfig.json` shows the repository uses them, the
+// ones that are missing or name another sail are rewritten, so one `sail check` sets a fresh clone or a new worktree up
+// for the editor. A write that fails is a line on stderr and nothing more: the check's answer is the check's own.
+import { existsSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { readConfig } from '../../engine/config';
 import { byFile, type Definitions, loadDefinitions, type StageEntry } from '../../engine/definitions';
+import { EditorWriteError, writeEditorDeclarations } from '../../engine/editor';
 import { type ImportGraph, importGraph } from '../../engine/imports';
 import { layoutProblems, reach } from '../../engine/layout';
 import { findSailDir } from '../../engine/sail-dir';
@@ -74,6 +80,22 @@ function listing(definitions: Definitions, graph: ImportGraph, at: (path: string
   return lines.map((line) => `${line}\n`).join('');
 }
 
+/**
+ * Rewrites the editor declarations of `sailDir` that are missing or stale, and says which, when a `tsconfig.json` there
+ * shows the repository wants them. The check never reads that file: its presence is all it says. One that can't be
+ * written is reported on stderr, and the check goes on.
+ */
+function refreshEditorDeclarations(sailDir: string, io: Io, at: (path: string) => string): void {
+  if (!existsSync(join(sailDir, 'tsconfig.json'))) return;
+  try {
+    const written = writeEditorDeclarations(sailDir).map(at);
+    if (written.length > 0) io.stdout(`sail check: wrote ${written.join(' and ')} for the editor\n`);
+  } catch (error) {
+    if (!(error instanceof EditorWriteError)) throw error;
+    io.stderr(`sail check: could not write ${at(error.path)}: ${error.message}\n`);
+  }
+}
+
 export async function check(args: Parsed, io: Io): Promise<ExitCode> {
   /** Every path the command prints goes through here, relative to where the user ran it. */
   const at = (path: string) => relative(io.cwd, path) || '.';
@@ -93,6 +115,8 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
     return EXIT_REFUSED;
   }
 
+  // Before the type-check, so a stale declaration never reaches it.
+  refreshEditorDeclarations(found.dir, io, at);
   const types = await typecheck(found.dir);
   if ('internal' in types) {
     io.stderr(`sail check: could not run tsc\n${types.internal}\n`);

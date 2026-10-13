@@ -33,6 +33,7 @@ import { intake, z } from '../../src/sdk';
 import * as intakes from '../../src/sdk/intakes';
 import { TicketInput } from '../../src/sdk/intakes';
 import { fakeAdapters } from '../helpers/adapters';
+import { steppingClock } from '../helpers/clock';
 import { edit, write } from '../helpers/fixture';
 import { rejection } from '../helpers/ports';
 import { normaliseDurations } from '../helpers/run-captured';
@@ -158,6 +159,24 @@ test('its result.json is a valid builtin result: the call, the output as TicketI
   expect(durationMs).toBe(Date.parse(String(finishedAt)) - Date.parse(String(startedAt)));
   expect(JSON.parse(readFileSync(paths.result, 'utf8'))).toEqual(result);
   expect([INTAKE_STAGE, INTAKE_KEY]).toEqual(['intake', 'intake#1']);
+});
+
+test("a try's startedAt and finishedAt are readings of the clock it is given, the first and the last", async () => {
+  const { runDir, ticketSource } = world();
+  const clock = steppingClock('2026-09-25T09:00:00.000Z', 100);
+  const { result } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: ticketIntake,
+    source: SOURCE,
+    ticketSource,
+    clock,
+  });
+  const readings = clock.readings.map((reading) => reading.toISOString());
+  expect([result.startedAt, result.finishedAt]).toEqual([readings[0], readings.at(-1)]);
+  expect(readings).toEqual(['2026-09-25T09:00:00.000Z', '2026-09-25T09:00:00.100Z']);
+  expect(result.durationMs).toBe(100);
 });
 
 test('it emits intake:start before the call directory exists, then output:validated, a file:produced per declared file in the order produces declares them, then intake:end, each keyed intake#1', async () => {

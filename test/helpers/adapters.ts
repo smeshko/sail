@@ -8,14 +8,21 @@ import { findSailDir } from '../../src/engine/sail-dir';
 import { formatIssue } from '../../src/engine/schemas';
 import type { Env } from '../../src/ports/adapter';
 
-/** The adapters of the `.sail/` found from `cwd`, whose `project.yaml` must be valid and name only built-ins. It throws on an issue. */
-export async function fakeAdapters(cwd: string, env: Env = {}): Promise<ResolvedAdapters> {
+/**
+ * The adapters of the `.sail/` found from `cwd`, whose `project.yaml` must be valid and name only built-ins. It throws
+ * on an issue. `options.now` is the clock the adapters read: a run that must be reproduced hands them its own.
+ */
+export async function fakeAdapters(
+  cwd: string,
+  env: Env = {},
+  options: { now?: () => Date } = {},
+): Promise<ResolvedAdapters> {
   const found = findSailDir(cwd);
   if ('refused' in found) throw new Error(found.refused);
   const sailDir = found.dir;
   const config = readConfig(sailDir);
   if ('issues' in config) throw new Error(`${sailDir}/project.yaml: ${config.issues.map(formatIssue).join('; ')}`);
-  const resolved = await resolveAdapters({ sailDir, config, builtins: BUILTINS, env });
+  const resolved = await resolveAdapters({ sailDir, config, builtins: BUILTINS, env, ...options });
   if ('issues' in resolved) throw new Error(`adapters: ${resolved.issues.map(formatIssue).join('; ')}`);
   return resolved;
 }

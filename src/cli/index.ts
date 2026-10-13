@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
+import { init } from './commands/init';
 import { port } from './commands/port';
 import { resume } from './commands/resume';
 import { runWorkflowCommand } from './commands/run-workflow';
@@ -30,12 +31,14 @@ const USAGE = `sail: a software factory. A ticket goes in and a pull request com
 Usage:
   sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]
                                                              Start a run from a ticket: its key, or its URL
+  sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
+  sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version
   sail --help                                                Print this help
@@ -136,6 +139,7 @@ const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
+  ['init', bare(init)],
   ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
   ['runs', bare(runs)],
   [
@@ -155,8 +159,20 @@ const commands = new Map<string, CommandSpec>([
   [
     'port',
     {
-      options: { untrusted: { type: 'boolean' }, source: { type: 'string' }, inline: { type: 'boolean' } },
-      positionals: 3,
+      options: {
+        untrusted: { type: 'boolean' },
+        source: { type: 'string' },
+        inline: { type: 'boolean' },
+        base: { type: 'string' },
+        head: { type: 'string' },
+        title: { type: 'string' },
+        'body-file': { type: 'string' },
+        draft: { type: 'boolean' },
+        ticket: { type: 'string' },
+        label: { type: 'string', multiple: true },
+        method: { type: 'string' },
+      },
+      positionals: 4,
       command: port,
     },
   ],

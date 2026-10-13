@@ -587,6 +587,8 @@ test("a version named 'issue' is recorded like any other", async () => {
 const FETCHED: ProviderEvent = {
   type: 'ticket:fetched',
   ticketKey: 'FAKE-1',
+  title: 'Add a --shout flag to the greet command',
+  url: 'fake://tickets/FAKE-1',
   comments: 1,
   links: 0,
   attachments: 0,
@@ -645,7 +647,8 @@ test("resolveAdapters gives a relay its adapters emit into: an attached sink see
   detach();
   await resolved.ports.ticketSource.get('FAKE-1');
 
-  expect(timed(seen)).toEqual([
+  // What the event names of its ticket is the fake's to say: test/ports/ticket-source.suite.ts holds it.
+  expect(timed(seen)).toMatchObject([
     { type: 'ticket:fetched', ticketKey: 'FAKE-1', comments: 1, links: 0, attachments: 0, durationMs: 'ms' },
   ]);
   expect(given.map((event) => event.type)).toEqual(['ticket:fetched', 'ticket:fetched', 'ticket:fetched']);

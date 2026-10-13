@@ -1,5 +1,6 @@
 // The fixture repository's .sail/: the stages and ticket-to-pr workflow a repository would write. It must load in Bun
-// and match the golden run: the same roster, and schemas that accept every output the golden run recorded.
+// and match the golden run, which is generated from a run of it: the same roster, and schemas that accept every output
+// the golden run recorded.
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -76,7 +77,7 @@ test('the typecheck includes every fixture .ts file, though tsc skips dot-direct
   );
   expect(tsc.exitCode).toBe(0);
   const listed = new Set(tsc.stdout.toString().split('\n'));
-  expect(sources.length).toBe(7);
+  expect(sources.length).toBe(8);
   expect(sources.filter((path) => !listed.has(join(sail, path)))).toEqual([]);
 });
 
@@ -149,7 +150,7 @@ test('every golden output parses with the matching fixture schema', async () => 
   }
   console.log(`${checked.length} golden outputs parse: ${checked.join(', ')}`);
   expect(checked.length).toBe(results.length);
-  expect(checked).toContain('publish#1/describe');
+  expect(checked.slice(-2)).toEqual(['describe#1', 'open#1']);
 });
 
 /** `publish#1/describe` → `['publish', 'describe']`, and `spec#1` → `['spec', undefined]`. */

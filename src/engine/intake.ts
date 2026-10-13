@@ -11,6 +11,7 @@ import type { StepRun } from '../kinds/index';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import { type CallPaths, callPaths, createCallDir, runRelative } from './call-dir';
+import { type Clock, systemClock } from './clock';
 import { type ContractError, recordFiles, validateOutput } from './contract';
 import type { LoadedIntake } from './load-workflow';
 import { buildResult, writeResult } from './result';
@@ -38,6 +39,8 @@ export interface IntakeRequest {
   try?: number;
   signal?: AbortSignal;
   emit?: Emit;
+  /** The clock the try's `startedAt` and `finishedAt` are read from. The system's by default. */
+  clock?: Clock;
 }
 
 export interface RanIntake {
@@ -111,7 +114,8 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
   const paths = callPaths(runDir, INTAKE_INDEX, INTAKE_STAGE, 1, request.try ?? 1);
   createCallDir(paths, { stageIn: false });
 
-  const startedAt = new Date();
+  const clock = request.clock ?? systemClock;
+  const startedAt = clock();
   let returned: unknown;
   let failure: ContractError | undefined;
   try {
@@ -130,7 +134,7 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
     failure === undefined
       ? recordTry(intake, returned, paths.dir, runDir, emit)
       : { outcome: 'error', output: null, files: {}, errors: [failure], record: {} };
-  const finishedAt = new Date();
+  const finishedAt = clock();
 
   const result = buildResult({
     runId,

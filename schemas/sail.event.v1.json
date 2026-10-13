@@ -640,7 +640,11 @@
       "properties": {
         "command": { "description": "relative to the workspace", "type": "string" },
         "cwd": { "type": "string" },
-        "envKeys": { "description": "the preamble's names, in order", "type": "array", "items": { "type": "string" } }
+        "envKeys": {
+          "description": "the preamble's names, in order, then SAIL_EVENTS",
+          "type": "array",
+          "items": { "type": "string" }
+        }
       },
       "required": ["command", "cwd", "envKeys"],
       "unevaluatedProperties": false
@@ -769,18 +773,20 @@
     },
     "ticketMove": { "enum": ["unstarted", "in-progress", "in-review", "done"] },
     "ticketFetched": {
-      "description": "how many comments, links and attachments the ticket came with",
+      "description": "the ticket that was fetched, by its title and URL, and how many comments, links and attachments it came with",
       "type": "object",
       "$ref": "#/$defs/envelope",
       "properties": {
         "key": true,
         "ticketKey": { "type": "string" },
+        "title": { "type": "string" },
+        "url": { "type": "string" },
         "comments": { "type": "integer", "minimum": 0 },
         "links": { "type": "integer", "minimum": 0 },
         "attachments": { "type": "integer", "minimum": 0 },
         "durationMs": { "type": "number", "minimum": 0 }
       },
-      "required": ["ticketKey", "comments", "links", "attachments", "durationMs"],
+      "required": ["ticketKey", "title", "url", "comments", "links", "attachments", "durationMs"],
       "unevaluatedProperties": false
     },
     "ticketClaimed": {

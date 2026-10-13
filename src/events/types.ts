@@ -163,7 +163,7 @@ interface Payloads {
     /** Relative to the workspace. */
     command: string;
     cwd: string;
-    /** The preamble's names, in order. */
+    /** The preamble's names, in order, then `SAIL_EVENTS`. */
     envKeys: string[];
   };
   'script:exit': {
@@ -237,6 +237,9 @@ interface Payloads {
   'ticket:fetched': {
     key?: string;
     ticketKey: string;
+    /** The ticket's title, as the provider gave it: untrusted text. */
+    title: string;
+    url: string;
     comments: number;
     links: number;
     attachments: number;

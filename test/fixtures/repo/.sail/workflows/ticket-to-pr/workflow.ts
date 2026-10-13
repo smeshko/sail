@@ -3,7 +3,8 @@ import { workflow } from 'sail';
 import { ticket } from 'sail/intakes';
 import { Feedback, implement } from '../../stages/implement/stage';
 import { tests } from '../../stages/tests/stage';
-import { publish } from './stages/publish/stage';
+import { describe } from './stages/describe/stage';
+import { open } from './stages/open/stage';
 import { selfReview } from './stages/self-review/stage';
 import { spec } from './stages/spec/stage';
 
@@ -30,6 +31,13 @@ export default workflow(
       iteration.fail({ findings });
     }
 
-    return run.stage(publish, { ticket: run.input, spec: s.files['spec.md'] });
+    const d = await run.stage(describe, { ticket: run.input, spec: s.files['spec.md'] });
+    if (d.outcome === 'blocked') return run.fail(`describe blocked: ${d.reason}`);
+    const pr = await run.stage(open, {
+      title: d.output.title,
+      body: d.files['pr-body.md'],
+      ticketKey: run.input.ticketKey,
+    });
+    return { pr: pr.output };
   },
 );

@@ -1,7 +1,7 @@
 // `sail show`, in process through run(): the golden run copied into a temp repository beside a `.sail/` with nothing in
-// it, since the command never reads project.yaml, runs written by hand, and stub runs. The golden table is D12's, written
-// by hand. `--events` and `--follow` print 4.2's terminal view, so FAKE-1's golden views in test/fixtures/terminal/ are
-// theirs too.
+// it, since the command never reads project.yaml, runs written by hand, and stub runs. The golden table is what the
+// command prints for the generated golden run. `--events` and `--follow` print the terminal view, so FAKE-1's golden
+// views in test/fixtures/terminal/ are theirs too.
 import { expect, test } from 'bun:test';
 import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,9 +11,10 @@ import { runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import type { Tty } from '../../src/events/consumers/screen';
 import { fakeAdapters } from '../helpers/adapters';
-import { end, journal, ndjson, runEnd, runStart, stamp, start } from '../helpers/events';
+import { end, journal, ndjson, runEnd, runStart, session, stamp, start } from '../helpers/events';
 import { copyGoldenRun, emptySailDir, GOLDEN_RUN, GOLDEN_RUN_ID } from '../helpers/golden-run';
 import { type Captured, fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
+import { TWO_STEP_RUN_ID, writeTwoStepRun } from '../helpers/run-dir';
 import { copyRun, interruptWhenAsleep, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -21,22 +22,21 @@ const text = (...lines: string[]) => lines.map((line) => `${line}\n`).join('');
 
 /** What `sail show` prints for the golden run. */
 const GOLDEN = text(
-  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 1m 11s`,
+  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 15.5s`,
   '',
-  'key                   kind     outcome  duration  cost   next',
-  'intake#1              builtin  passed   2.1s',
-  'spec#1                agent    done     10.4s     $0.31  implement#1',
-  'implement#1           agent    done     12.6s     $0.48  tests#1',
-  'tests#1               script   failed   2.5s             implement#2',
-  'implement#2           agent    done     12.5s     $0.24  tests#2',
-  'tests#2               script   passed   2.7s             self-review#1',
-  'self-review#1         agent    done     10.5s     $0.22  publish#1',
-  'publish#1                      passed   14.5s     $0.10  end',
-  '  publish#1/describe  agent    done     10.4s     $0.10',
-  '  publish#1/open      script   passed   3.8s',
+  'key            kind     outcome  duration  cost   next',
+  'intake#1       builtin  passed   900ms',
+  'spec#1         agent    done     1.1s      $0.31  implement#1',
+  'implement#1    agent    done     1.2s      $0.48  tests#1',
+  'tests#1        script   failed   700ms            implement#2',
+  'implement#2    agent    done     1.1s      $0.24  tests#2',
+  'tests#2        script   passed   700ms            self-review#1',
+  'self-review#1  agent    done     1.1s      $0.22  describe#1',
+  'describe#1     agent    done     1.1s      $0.10  open#1',
+  'open#1         script   passed   900ms            end',
   '',
   'loops   fix 2/3',
-  'totals  8 calls · 9 steps · 11 tool calls · 1 denial · 8 replays',
+  'totals  9 calls · 9 steps · 0 tool calls · 0 denials · 9 replays',
   'cost    $1.35 of $25.00 (5.4%)',
 );
 
@@ -125,6 +125,53 @@ test('a run with no budget shows its cost alone, and no loops row when no loop r
       ),
       stderr: '',
     });
+  });
+});
+
+test("a multi-step call's own row has no kind, its steps print indented under it, each with its kind, outcome, duration and cost, and the totals count its steps, every session's tool calls and its denials", async () => {
+  await withTempRepo(async (repo) => {
+    emptySailDir(repo.dir);
+    writeTwoStepRun(join(repo.dir, '.sail-runs', TWO_STEP_RUN_ID));
+    expect(await runCaptured(['show', TWO_STEP_RUN_ID], repo.dir)).toEqual({
+      code: EXIT_OK,
+      stdout: text(
+        `${TWO_STEP_RUN_ID} · ticket-to-pr@1 · completed · 3.5s`,
+        '',
+        'key                   kind    outcome  duration  cost   next',
+        'publish#1                     passed   3.3s      $0.10  end',
+        '  publish#1/describe  agent   done     1.0s      $0.10',
+        '  publish#1/open      script  passed   2.0s',
+        '',
+        'totals  1 call · 2 steps · 5 tool calls · 1 denial · 2 replays',
+        'cost    $0.15 of $25.00 (0.6%)',
+      ),
+      stderr: '',
+    });
+  });
+});
+
+test('the totals name one of each in the singular: 1 call, 1 step, 1 tool call, 1 denial and 1 replay', async () => {
+  await withTempRepo(async (repo) => {
+    emptySailDir(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', TWO_STEP_RUN_ID);
+    writeTwoStepRun(dir);
+    const single = stamp(
+      [0, runStart()],
+      [100, start('spec#1', { kind: 'agent' })],
+      [400, session('spec#1', { turns: 1, toolCalls: 1, denials: 1, usage: { costUsd: 0.05 } })],
+      [500, end('spec#1', 'done', 400)],
+      [510, journal('spec#1', 1, 'done')],
+      [600, runEnd('completed', 1)],
+    );
+    writeFileSync(join(dir, 'events.ndjson'), ndjson(single));
+    rmSync(join(dir, 'summary.json'));
+    const { code, stdout } = await runCaptured(['show', TWO_STEP_RUN_ID], repo.dir);
+    expect(stdout.split('\n').slice(-3)).toEqual([
+      'totals  1 call · 1 step · 1 tool call · 1 denial · 1 replay',
+      'cost    $0.05',
+      '',
+    ]);
+    expect(code).toBe(EXIT_OK);
   });
 });
 
@@ -280,9 +327,12 @@ const goldenView = (verbosity: string): string =>
 /** The golden run's events.ndjson, a line each, newlines kept. */
 const goldenLines = (): string[] => readFileSync(join(GOLDEN_RUN, 'events.ndjson'), 'utf8').split(/(?<=\n)/);
 
-/** A copy of the golden run as it was while running: its first 62 events, up to implement#2's start, and STATUS running. */
+/** How many of the golden run's events come before implement#2's session: up to its `stage:start`. */
+const RUNNING = 52;
+
+/** A copy of the golden run as it was while running: its events up to implement#2's start, and STATUS running. */
 function runningRun(repoDir: string): string {
-  const dir = runWith(repoDir, goldenLines().slice(0, 62).join(''));
+  const dir = runWith(repoDir, goldenLines().slice(0, RUNNING).join(''));
   writeFileSync(join(dir, 'STATUS'), 'running\n');
   return dir;
 }
@@ -379,7 +429,7 @@ test('sail show --follow on a running run prints events as they are appended, an
     const following = started(['show', GOLDEN_RUN_ID, '--follow'], repo.dir);
     await until(() => following.printed() !== '');
     const early = following.printed();
-    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(62).join(''));
+    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(RUNNING).join(''));
     writeFileSync(join(dir, 'STATUS'), 'completed\n');
     expect(await following.done).toEqual({ code: EXIT_OK, stdout: goldenView('normal'), stderr: '' });
     expect(goldenView('normal').startsWith(early)).toBe(true);
@@ -408,7 +458,7 @@ test('sail show --follow stopped by Ctrl-C exits 0 with what it printed so far, 
     emptySailDir(repo.dir);
     const dir = runningRun(repo.dir);
     const sofar = await runCaptured(['show', GOLDEN_RUN_ID, '--events'], repo.dir);
-    expect(sofar.stdout).toContain('implement#2         ▶ implement');
+    expect(sofar.stdout).toContain('implement#2    ▶ implement');
     const interrupts = fakeInterrupts();
     const following = started(['show', GOLDEN_RUN_ID, '--follow'], repo.dir, interrupts);
     await until(() => following.printed() !== '');
@@ -416,7 +466,7 @@ test('sail show --follow stopped by Ctrl-C exits 0 with what it printed so far, 
     expect(await following.done).toEqual({ code: EXIT_OK, stdout: sofar.stdout, stderr: '' });
     expect([interrupts.registered, interrupts.unregistered]).toEqual([1, 1]);
     // A poll left running would print these within 200 ms.
-    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(62).join(''));
+    appendFileSync(join(dir, 'events.ndjson'), goldenLines().slice(RUNNING).join(''));
     await Bun.sleep(300);
     expect(following.printed()).toBe(sofar.stdout);
   });

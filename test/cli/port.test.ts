@@ -92,6 +92,55 @@ test("sail port ticket-source get prints the ticket as one line of JSON, the por
   });
 });
 
+test('with SAIL_EVENTS set, a get prints the ticket as before and appends its ticket:fetched to the file, one line per call with no envelope, and without it no file is written', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const file = join(repo.dir, 'out', 'port-events.ndjson');
+    mkdirSync(join(repo.dir, 'out'));
+    const get = ['port', 'ticket-source', 'get', 'FAKE-5'];
+    const first = await runCaptured(get, repo.dir, { env: { SAIL_EVENTS: file } });
+    expect({ code: first.code, stderr: first.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(oneLine(first.stdout)).toEqual(LINKED_TICKET);
+    // A relative name is the working directory's, and `links` reads the ticket through the same get.
+    await runCaptured(['port', 'ticket-source', 'links', 'FAKE-5'], join(repo.dir, 'out'), {
+      env: { SAIL_EVENTS: 'port-events.ndjson', SAIL_CONFIG: join(repo.dir, '.sail', 'project.yaml') },
+    });
+    // Unset, or empty, nothing is emitted.
+    await runCaptured(get, repo.dir, { env: {} });
+    await runCaptured(get, repo.dir, { env: { SAIL_EVENTS: '' } });
+
+    const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    expect(text.endsWith('\n')).toBe(true);
+    const lines = text.split('\n').slice(0, -1);
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line).toStartWith('{"type":"ticket:fetched","ticketKey":"FAKE-5",');
+      const event = JSON.parse(line);
+      expect(event).toMatchObject({ comments: 1, links: 2, attachments: 1 });
+      expect(Object.keys(event).filter((field) => ['seq', 'ts', 'runId', 'key'].includes(field))).toEqual([]);
+    }
+    expect(readdirSync(join(repo.dir, 'out'))).toEqual(['port-events.ndjson']);
+    expect(readdirSync(repo.dir).sort()).toEqual(['.git', '.sail', 'README.md', 'out']);
+  });
+});
+
+test("a SAIL_EVENTS whose directory doesn't exist exits 3, naming it, before the port is called", async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const missing = join(repo.dir, 'gone', 'port-events.ndjson');
+    // FAKE-404 is no ticket: had the port been called first, this would be its not_found, with exit code 1.
+    const refused = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-404'], repo.dir, {
+      env: { SAIL_EVENTS: missing },
+    });
+    expect(refused).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `sail port: SAIL_EVENTS names ${missing}, whose directory doesn't exist\n`,
+    });
+    expect(existsSync(join(repo.dir, 'gone'))).toBe(false);
+  });
+});
+
 test("the ticket argument goes through the adapter's parseKey: a URL the provider owns names the same ticket, from any directory of the repository", async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);

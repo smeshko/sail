@@ -22,7 +22,7 @@ import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
 import { type TerminalConsumer, terminalConsumer, type Verbosity } from '../../events/consumers/terminal';
-import type { SailEvent } from '../../events/types';
+import type { ProviderEmit, SailEvent } from '../../events/types';
 import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
@@ -53,12 +53,12 @@ export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | 
 /**
  * `.sail/`, found from where sail runs, its config and the adapters it names. A config or an adapter with issues prints
  * each and refuses. `only` narrows it for a command that needs less: a `.sail/` it found its own way, and the ports to
- * resolve, so no other adapter is loaded or asked for its credentials.
+ * resolve, so no other adapter is loaded or asked for its credentials. Its `emit` receives what the adapters emit.
  */
 export async function findProject<P extends Port = Port>(
   io: Io,
   command: string,
-  only: { found?: { dir: string } | { refused: string }; ports?: readonly P[] } = {},
+  only: { found?: { dir: string } | { refused: string }; ports?: readonly P[]; emit?: ProviderEmit } = {},
 ): Promise<{ sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters<P> } | ExitCode> {
   const found = only.found ?? findSailDir(io.cwd);
   if ('refused' in found) return refuseAs(io, command)(found.refused);
@@ -74,6 +74,7 @@ export async function findProject<P extends Port = Port>(
     builtins: BUILTINS,
     env: io.env ?? process.env,
     ...(only.ports === undefined ? {} : { ports: only.ports }),
+    ...(only.emit === undefined ? {} : { emit: only.emit }),
   });
   if ('issues' in adapters) {
     for (const issue of adapters.issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);

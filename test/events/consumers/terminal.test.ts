@@ -1,9 +1,12 @@
-// The terminal consumer: FAKE-1 rendered at each verbosity against its golden view in test/fixtures/terminal/, then
-// synthetic events for what FAKE-1 lacks: errors, tails, the final block's rows, the live line, colours and a resume.
+// The terminal consumer: FAKE-1 rendered at each verbosity against its golden view in test/fixtures/terminal/, which
+// `bun run golden` generates with the same `renderView()`, then synthetic events for what FAKE-1 lacks: errors, tails,
+// the final block's rows, the live line, colours, a resume, and what no run writes yet: a multi-step call, a validated
+// file, and a session's tool calls and denials.
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { renderView } from '../../../scripts/golden';
 import type { JournalEntry } from '../../../src/engine/journal';
 import {
   formatDuration,
@@ -35,10 +38,59 @@ function golden(verbosity: Verbosity): string {
   return readFileSync(join(FIXTURES, 'terminal', `${verbosity}.txt`), 'utf8');
 }
 
-/** FAKE-1's `run:start` without its envelope: roster keys up to `publish#1/describe`, so an 18-wide key column. */
-function fake1Start(): NewEvent {
-  const { seq: _seq, ts: _ts, runId: _runId, ...start } = fake1()[0] as SailEvent;
-  return start as NewEvent;
+const REVIEW = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git log *', 'git diff *'] };
+const FAKE = { use: 'fake', origin: 'builtin' };
+
+/**
+ * A `run:start` written by hand: a `ticket-to-pr` whose last stage, `publish`, has two steps. Its roster's keys go up
+ * to `publish#1/describe`, so the key column is 18 wide.
+ */
+function rosterStart(): NewEvent {
+  const agent = (origin: string, model: string, output: string, produces: string) => ({
+    kind: 'agent',
+    origin: `repo:.sail/${origin}`,
+    model,
+    output,
+    produces: [produces],
+    permissions: REVIEW,
+    budget: { maxTurns: 20, maxUsd: 1, maxMinutes: 5 },
+  });
+  const { origin: _origin, ...describe } = agent('', 'claude-sonnet-5', 'PrDescription', 'pr-body.md');
+  return {
+    type: 'run:start',
+    source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+    workflow: { name: 'ticket-to-pr', version: 1, origin: 'repo:.sail/workflows/ticket-to-pr', sha256: '0'.repeat(64) },
+    roster: {
+      intake: { name: 'ticket', origin: 'builtin', output: 'TicketInput', produces: ['ticket.json', 'brief.md'] },
+      stages: {
+        implement: agent('stages/implement', 'claude-sonnet-5', 'ChangeSet', 'diff.patch'),
+        publish: {
+          origin: 'repo:.sail/workflows/ticket-to-pr/stages/publish',
+          output: 'PrInfo',
+          steps: [
+            { step: 'describe', ...describe },
+            { step: 'open', kind: 'script', output: 'PrInfo' },
+          ],
+        },
+        'self-review': agent(
+          'workflows/ticket-to-pr/stages/self-review',
+          'claude-opus-5-5',
+          'ReviewOutput',
+          'review.md',
+        ),
+        spec: agent('workflows/ticket-to-pr/stages/spec', 'claude-opus-5-5', 'SpecOutput', 'spec.md'),
+        tests: {
+          kind: 'script',
+          origin: 'repo:.sail/stages/tests',
+          output: 'TestReport',
+          produces: ['junit.xml'],
+          exitCodes: { passed: [0], failed: [1] },
+        },
+      },
+    },
+    adapters: { ticketSource: FAKE, codeHost: FAKE, harness: FAKE, workspace: FAKE },
+    budget: { maxUsd: 25, maxMinutes: 90 },
+  } as NewEvent;
 }
 
 /** Stamps `events` as a bus would: `seq` from 1, and `ts` 100 ms apart from START. */
@@ -153,9 +205,12 @@ function visibleLive(out: string): string | undefined {
 
 // TASK-003: quiet and normal.
 
-test.each(['quiet', 'normal'] as const)('FAKE-1 at %s equals its golden view, byte for byte', (verbosity) => {
-  expect(render(fake1(), verbosity)).toBe(golden(verbosity));
-});
+test.each(['quiet', 'normal', 'verbose', 'trace'] as const)(
+  'FAKE-1 at %s equals its golden view, byte for byte',
+  (verbosity) => {
+    expect(renderView(fake1(), verbosity)).toBe(golden(verbosity));
+  },
+);
 
 test('quiet prints an error end with its duration and each message, a later line indented two more, and no tail', () => {
   const runs = runsWith({ '03-tests/call-1/stdout.log': 'a tail quiet leaves out\n' });
@@ -348,7 +403,7 @@ test.each<[string, NewEvent[], string]>([
   [
     'a failed run names its stop, counts outcomes in order and keeps each loop at its highest',
     [
-      fake1Start(),
+      rosterStart(),
       { type: 'journal:append', key: 'tests#1', line: 1, outcome: 'failed' },
       { type: 'journal:append', key: 'review#1', line: 2, outcome: 'blocked' },
       { type: 'journal:append', key: 'publish#1/open', line: 3, outcome: 'passed' },
@@ -382,7 +437,7 @@ test.each<[string, NewEvent[], string]>([
   [
     'a suspended run with no call and no loop has calls 0 and no loops row',
     [
-      fake1Start(),
+      rosterStart(),
       {
         type: 'run:end',
         status: 'suspended',
@@ -407,7 +462,7 @@ test.each<[string, NewEvent[], string]>([
 
 test("the final block's stop row puts a message's later lines under its value, indented two more", () => {
   const events = stream([
-    fake1Start(),
+    rosterStart(),
     {
       type: 'run:end',
       status: 'failed',
@@ -537,14 +592,10 @@ test('in a terminal, a pass is green, a failure yellow and an error red', () => 
 
 // TASK-004: verbose and trace.
 
-test.each(['verbose', 'trace'] as const)('FAKE-1 at %s equals its golden view, byte for byte', (verbosity) => {
-  expect(render(fake1(), verbosity)).toBe(golden(verbosity));
-});
-
 test('at trace, an event of every type prints a line of its own', () => {
   const w = 18;
   const cases: [NewEvent, string][] = [
-    [fake1Start(), 'sail · ticket-to-pr v1 · RUN-1'],
+    [rosterStart(), 'sail · ticket-to-pr v1 · RUN-1'],
     [{ type: 'run:adopted', by: 'watch' }, head('', '· run:adopted {"by":"watch"}', w)],
     [{ type: 'run:resumed' }, head('', '· run:resumed {}', w)],
     [
@@ -694,8 +745,21 @@ test('at trace, an event of every type prints a line of its own', () => {
     ],
     // The provider families are closed, so each sample carries its whole payload.
     [
-      { type: 'ticket:fetched', ticketKey: 'FAKE-1', comments: 1, links: 0, attachments: 0, durationMs: 310 },
-      head('', '· ticket:fetched {"ticketKey":"FAKE-1","comments":1,"links":0,"attachments":0,"durationMs":310}', w),
+      {
+        type: 'ticket:fetched',
+        ticketKey: 'FAKE-1',
+        title: 'Add a flag',
+        url: 'fake://tickets/FAKE-1',
+        comments: 1,
+        links: 0,
+        attachments: 0,
+        durationMs: 310,
+      },
+      head(
+        '',
+        '· ticket:fetched {"ticketKey":"FAKE-1","title":"Add a flag","url":"fake://tickets/FAKE-1","comments":1,"links":0,"attachments":0,"durationMs":310}',
+        w,
+      ),
     ],
     [
       { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: { type: 'started', name: 'In Progress' } },
@@ -863,6 +927,9 @@ test('verbose shows the tail of a script that passed, and none for an agent call
 
 // TASK-005: the whole run on resume.
 
+/** The `seq` of the golden run's `journal:append` for tests#1: the last event of the process a resume takes over from. */
+const RESUMED_AFTER = 49;
+
 test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then opens with the resume line and ends with the whole run', () => {
   const events = fake1();
   let out = '';
@@ -873,14 +940,14 @@ test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then o
     },
     runsDir: RUNS,
     shownRunsDir: '.sail-runs',
-    prior: events.filter((event) => event.seq <= 57),
+    prior: events.filter((event) => event.seq <= RESUMED_AFTER),
   });
   expect(out).toBe('');
 
-  for (const event of events.filter((each) => each.seq > 57)) terminal.onEvent(event);
+  for (const event of events.filter((each) => each.seq > RESUMED_AFTER)) terminal.onEvent(event);
   const normal = golden('normal').split('\n');
   const resumedAt = normal.findIndex((line) => line.endsWith('↻ iteration 2/3 · feedback from tests#1'));
-  expect(resumedAt).toBe(23);
+  expect(resumedAt).toBe(21);
   expect(out).toBe(
     [
       `sail · ticket-to-pr v1 · ${FAKE_1} · resumed after 4 calls, last tests#1 failed`,
@@ -891,7 +958,7 @@ test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then o
 
 test('the final block adds up the replays of every run:end, earlier ones included', () => {
   const events = stream([
-    fake1Start(),
+    rosterStart(),
     { type: 'journal:append', key: 'spec#1', line: 1, outcome: 'passed' },
     { type: 'journal:append', key: 'implement#1', line: 2, outcome: 'passed' },
     { type: 'run:end', status: 'suspended', stopReason: 'interrupted', message: 'stopped during tests#1', replays: 3 },
@@ -926,4 +993,146 @@ test('with no earlier events, the resume line names the run from the first live 
   expect(render(events, 'normal', { prior: [] })).toBe(
     view('sail · RUN-9 · resumed before its first call', head('spec#1', '▶ spec · script')),
   );
+});
+
+test('at trace, a ticket:fetched prints its title as JSON does: an escape character in it is printed escaped, never raw', () => {
+  const title = 'Add \u001b[31mred\u001b[0m\r\nand a "quote"';
+  const event: NewEvent = {
+    type: 'ticket:fetched',
+    key: 'intake#1',
+    ticketKey: 'FAKE-1',
+    title,
+    url: 'fake://tickets/FAKE-1',
+    comments: 0,
+    links: 0,
+    attachments: 0,
+    durationMs: 5,
+  };
+  const printed = render(stream([event]), 'trace');
+  expect(printed).toContain(
+    '· ticket:fetched {"ticketKey":"FAKE-1","title":"Add \\u001b[31mred\\u001b[0m\\r\\nand a \\"quote\\"","url":"fake://tickets/FAKE-1","comments":0,"links":0,"attachments":0,"durationMs":5}',
+  );
+  expect([printed.includes('\u001b'), printed.includes('\r')]).toEqual([false, false]);
+  for (const verbosity of ['quiet', 'normal', 'verbose'] as const) {
+    expect(render(stream([event]), verbosity)).not.toContain('ticket:fetched');
+  }
+});
+
+// What the golden run no longer shows (D9): the engine can't run a multi-step stage or a real harness yet, so these
+// lines are held here, on events written by hand. Each expected line is the one the hand-written golden views had.
+
+const DESCRIBE = 'publish#1/describe';
+const OPEN = 'publish#1/open';
+const DENIED = "'git push origin HEAD' matches none of the step's commands";
+
+/** A two-step call: an agent step whose session calls three tools, one denied and one failed, then a script step. */
+const TWO_STEP_CALL: NewEvent[] = [
+  rosterStart(),
+  stageStart('publish#1', 'stage', { steps: ['describe', 'open'] }),
+  {
+    type: 'step:start',
+    key: DESCRIBE,
+    stage: 'publish',
+    step: 'describe',
+    index: 1,
+    of: 2,
+    kind: 'agent',
+    model: 'claude-sonnet-5',
+  },
+  { type: 'agent:thinking', key: DESCRIBE, text: 'Summarise the change for a reviewer.' },
+  { type: 'tool:start', key: DESCRIBE, callId: 'tool-1', tool: 'Read', input: { path: '01-spec/call-1/spec.md' } },
+  { type: 'tool:end', key: DESCRIBE, callId: 'tool-1', status: 'completed', durationMs: 40 },
+  { type: 'tool:start', key: DESCRIBE, callId: 'tool-2', tool: 'Bash', input: { command: 'git push origin HEAD' } },
+  {
+    type: 'permission:denied',
+    key: DESCRIBE,
+    callId: 'tool-2',
+    tool: 'Bash',
+    rule: 'commands',
+    permissions: { commands: ['git log *', 'git diff *'] },
+    reason: DENIED,
+  },
+  { type: 'tool:end', key: DESCRIBE, callId: 'tool-2', status: 'denied', durationMs: 0 },
+  { type: 'tool:start', key: DESCRIBE, callId: 'tool-3', tool: 'Bash', input: { command: 'git log main..' } },
+  { type: 'tool:end', key: DESCRIBE, callId: 'tool-3', status: 'failed', durationMs: 12 },
+  { type: 'output:validated', key: DESCRIBE },
+  {
+    type: 'file:validated',
+    key: DESCRIBE,
+    name: 'pr-body.md',
+    ok: true,
+    checks: ['hasSections(Summary, Changes, Testing)', 'noPlaceholders'],
+  },
+  {
+    type: 'step:end',
+    key: DESCRIBE,
+    step: 'describe',
+    outcome: 'done',
+    resultPath: '05-publish/call-1/steps/1-describe/result.json',
+  },
+  { type: 'step:start', key: OPEN, stage: 'publish', step: 'open', index: 2, of: 2, kind: 'script' },
+  { type: 'script:exit', key: OPEN, code: 0, outcome: 'passed', durationMs: 1900, stdoutBytes: 66 },
+  { type: 'output:validated', key: OPEN },
+  {
+    type: 'step:end',
+    key: OPEN,
+    step: 'open',
+    outcome: 'passed',
+    resultPath: '05-publish/call-1/steps/2-open/result.json',
+  },
+  stageEnd('publish#1', 'passed', 14_500, '05-publish/call-1/result.json'),
+];
+
+/** What the two-step call prints at `verbosity`, from a runs directory that holds no file of it. */
+const twoStep = (verbosity: Verbosity): string[] =>
+  render(stream(TWO_STEP_CALL), verbosity, { runsDir: runsWith({}) })
+    .trimEnd()
+    .split('\n');
+
+const TITLE = 'sail · ticket-to-pr v1 · RUN-1';
+const w18 = 18;
+
+test('at normal, a multi-step call prints its start with its step count, each step with its place, kind and model, a validated file by its verdict, and each end; at quiet it prints none of it', () => {
+  expect(twoStep('normal')).toEqual([
+    TITLE,
+    head('publish#1', '▶ publish · 2 steps', w18),
+    head(DESCRIBE, '▶ describe · step 1/2 · agent · claude-sonnet-5', w18),
+    detail(DESCRIBE, 'output valid', w18),
+    detail(DESCRIBE, 'file pr-body.md valid', w18),
+    head(DESCRIBE, '✓ done', w18),
+    head(OPEN, '▶ open · step 2/2 · script', w18),
+    detail(OPEN, 'exit 0 → passed · 1.9s', w18),
+    detail(OPEN, 'output valid', w18),
+    head(OPEN, '✓ passed', w18),
+    head('publish#1', '✓ passed · 14.5s', w18),
+  ]);
+  expect(twoStep('quiet')).toEqual([TITLE]);
+});
+
+test("at verbose, a validated file's verdict is followed by its checks, and a session's thinking, tool calls and denials still print nothing: they are trace's", () => {
+  const verbose = twoStep('verbose');
+  expect(verbose).toContain(
+    detail(DESCRIBE, 'file pr-body.md valid · hasSections(Summary, Changes, Testing), noPlaceholders', w18),
+  );
+  expect(verbose.filter((line) => /tool:|agent:thinking|permission:denied/.test(line))).toEqual([]);
+  // What verbose adds to normal here is that one line's checks.
+  expect(verbose.length).toBe(twoStep('normal').length);
+});
+
+test('at trace, a session prints its thinking, each tool call from its start to its end, completed, denied or failed, and a denial with the rule and the reason', () => {
+  const session = twoStep('trace').filter((line) => /tool:|agent:thinking|permission:denied/.test(line));
+  expect(session).toEqual([
+    head(DESCRIBE, '· agent:thinking {"text":"Summarise the change for a reviewer."}', w18),
+    head(DESCRIBE, '· tool:start {"callId":"tool-1","tool":"Read","input":{"path":"01-spec/call-1/spec.md"}}', w18),
+    head(DESCRIBE, '· tool:end {"callId":"tool-1","status":"completed","durationMs":40}', w18),
+    head(DESCRIBE, '· tool:start {"callId":"tool-2","tool":"Bash","input":{"command":"git push origin HEAD"}}', w18),
+    head(
+      DESCRIBE,
+      `· permission:denied {"callId":"tool-2","tool":"Bash","rule":"commands","permissions":{"commands":["git log *","git diff *"]},"reason":${JSON.stringify(DENIED)}}`,
+      w18,
+    ),
+    head(DESCRIBE, '· tool:end {"callId":"tool-2","status":"denied","durationMs":0}', w18),
+    head(DESCRIBE, '· tool:start {"callId":"tool-3","tool":"Bash","input":{"command":"git log main.."}}', w18),
+    head(DESCRIBE, '· tool:end {"callId":"tool-3","status":"failed","durationMs":12}', w18),
+  ]);
 });

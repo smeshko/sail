@@ -2,13 +2,29 @@
 // `passed` or `failed` through `exitCodes`, its last stdout line is its JSON output, and it must leave every declared
 // file in `$STAGE_OUT`. Every broken promise is collected as an error. It reports the facts only it knows as events:
 // how the process ran and ended, whether the output was read and held its schema, and which files it recorded.
+//
+// `sail` inside a script is the sail that runs it: `PATH` starts with this package's `bin/`, and `SAIL_BUN` names the
+// running Bun, which `bin/sail` executes. Both name this machine, so neither is recorded.
+//
+// `SAIL_EVENTS` names the step's port events file, `port-events.ndjson` in its call directory, where a `sail port` the
+// script runs leaves its provider events. Once the process has ended, however it ended, the file is read and each event
+// emitted, after `script:exec` and before `script:exit`. A line that is no provider event ends the step in `error`,
+// with the reason `port`. The variable is this kind's, not the preamble's: an agent step gets none.
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { delimiter, join, relative, resolve } from 'node:path';
+import { systemClock } from '../engine/clock';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
+import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
 import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
+
+/** This package's `bin/`, which holds the `sail` a script step runs. */
+export const BIN_DIR = join(import.meta.dir, '..', '..', 'bin');
+
+/** What a process with no `PATH` is run with: `bin/` goes ahead of it, where it would otherwise be all there is. */
+const SYSTEM_PATH = '/usr/bin:/bin';
 
 /** How long a script may run when it sets no `timeoutSeconds`. */
 export const DEFAULT_TIMEOUT_SECONDS = 600;
@@ -130,12 +146,13 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   const emit = context.emit ?? (() => {});
   const command = resolve(context.stageDir, step.run);
   const timeoutSeconds = step.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
-  const variables = preamble(context);
+  const portEvents = join(context.paths.dir, PORT_EVENTS_FILE);
+  const variables = [...preamble(context), { name: 'SAIL_EVENTS', value: portEvents, path: true }];
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
 
-  // Recorded relative to the workspace, and only the preamble: the inherited environment may hold secrets.
+  // Recorded relative to the workspace, and only these variables: the inherited environment may hold secrets.
   const at = (path: string) => relative(context.workspace, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
   const recorded = { command: at(command), env };
@@ -146,27 +163,41 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     cwd: at(context.workspace),
     envKeys: variables.map(({ name }) => name),
   });
-  const startedAt = Date.now();
+  const clock = context.clock ?? systemClock;
+  const startedAt = clock().getTime();
   const end = await runProcess({
     command: [command],
     cwd: context.workspace,
-    env: { ...inherited, ...Object.fromEntries(variables.map(({ name, value }) => [name, value])) },
+    env: {
+      ...inherited,
+      PATH: `${BIN_DIR}${delimiter}${inherited.PATH ?? SYSTEM_PATH}`,
+      SAIL_BUN: process.execPath,
+      ...Object.fromEntries(variables.map(({ name, value }) => [name, value])),
+    },
     stdout: context.paths.stdout,
     stderr: context.paths.stderr,
     timeoutMs: timeoutSeconds * 1000,
     ...(context.graceMs === undefined ? {} : { graceMs: context.graceMs }),
     ...(context.signal === undefined ? {} : { signal: context.signal }),
   });
-  const durationMs = Date.now() - startedAt;
+  const durationMs = clock().getTime() - startedAt;
+  /** What the port events file holds that is no provider event: each ends the step in `error`, whatever else does. */
+  const unported: ContractError[] = [];
   const ended = (error: ContractError, record: Record<string, unknown>): StepRun => ({
     outcome: 'error',
     output: null,
     files: {},
-    errors: [error],
+    errors: [error, ...unported],
     record,
   });
 
   if (!end.started) return ended({ reason: 'not_started', message: end.message }, recorded);
+
+  // What the script's port commands reported, now that no child can still be writing. The call's emit adds the key.
+  const ported = readPortEvents(portEvents, { runId: context.runId, key: `${context.stage}#${context.call}` });
+  for (const event of ported.events) emit(event);
+  // One at a time: a file of a million bad lines is a million problems, more than a call takes as arguments.
+  for (const message of ported.problems) unported.push({ reason: 'port', message });
 
   const map = exitCodeMap(step);
   const mapped: ScriptOutcome | undefined =
@@ -220,12 +251,12 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   for (const [name, { path, bytes, sha256 }] of Object.entries(produced.files)) {
     emit({ type: 'file:produced', name, path, bytes, sha256 });
   }
-  errors.push(...produced.errors);
+  const all = [...errors, ...produced.errors, ...unported];
   return {
-    outcome: errors.length > 0 ? 'error' : mapped,
-    output: errors.length > 0 || !output.ok ? null : output.data,
+    outcome: all.length > 0 ? 'error' : mapped,
+    output: all.length > 0 || !output.ok ? null : output.data,
     files: produced.files,
-    errors,
+    errors: all,
     record,
   };
 }

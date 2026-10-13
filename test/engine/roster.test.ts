@@ -5,7 +5,7 @@ import { buildRoster, modelProblems, origin } from '../../src/engine/roster';
 import { validateDocument } from '../../src/engine/schemas';
 import { agent, intake, type StageDefinition, script, stage, type Workflow, z } from '../../src/sdk/index';
 import * as intakes from '../../src/sdk/intakes';
-import { copyFixture } from '../helpers/fixture';
+import { copyFixture, writePublish } from '../helpers/fixture';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git diff *'] };
@@ -57,9 +57,10 @@ test('an origin is repo: and the POSIX path below the directory holding .sail/',
   expect(origin('/r/pkg', '/r/pkg/.sail/workflows/w/intake.ts')).toBe('repo:.sail/workflows/w/intake.ts');
 });
 
-test("the fixture's roster is its intake and the five stages ticket-to-pr reaches, with resolved values", async () => {
+test('the roster of the fixture, with its last two stages as one multi-step stage, is its intake and the five stages ticket-to-pr reaches, with resolved values', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
+    writePublish(sail);
     const loaded = await loadWorkflow(sail, 'ticket-to-pr');
     const config = readConfig(sail);
     if ('refused' in loaded || 'issues' in config) throw new Error('the fixture should load');

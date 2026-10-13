@@ -2,6 +2,7 @@
 // `script` and `agent` are its implementations.
 import type { PreparedBindings } from '../engine/bindings';
 import type { CallPaths } from '../engine/call-dir';
+import type { Clock } from '../engine/clock';
 import type { ContractError, FileEntry } from '../engine/contract';
 import type { CallEmit } from '../events/types';
 import type { Harness } from '../ports/harness';
@@ -47,6 +48,8 @@ export interface StepContext {
   emit?: CallEmit;
   /** What an agent step runs on. A script step takes none. */
   agent?: AgentTry;
+  /** The run's clock, for a time the step records. Never for a wait: a timeout measures real time. */
+  clock?: Clock;
 }
 
 /** How a step ended. `record` holds the kind's own `result.json` fields, such as a script's `exit`, `command` and `env`. */

@@ -4,13 +4,19 @@ import { dirname, join } from 'node:path';
 import { loadDefinitions } from '../../src/engine/definitions';
 import { importGraph } from '../../src/engine/imports';
 import { layoutProblems, reach } from '../../src/engine/layout';
+import { writePublish } from '../helpers/fixture';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const fixture = join(import.meta.dir, '..', 'fixtures', 'repo', '.sail');
 
+/**
+ * A copy of the fixture's `.sail/` whose `describe` and `open` are the two steps of one stage, `publish`: these cases
+ * hold a multi-step stage beside the one-step ones, which the fixture has none of until the engine can run one.
+ */
 function copyFixture(repoDir: string): string {
   const sail = join(repoDir, '.sail');
   cpSync(fixture, sail, { recursive: true });
+  writePublish(sail);
   return sail;
 }
 

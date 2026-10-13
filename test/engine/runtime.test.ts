@@ -3,7 +3,16 @@
 // in a process, and Bun caches the workflow's modules by path. So a run resumes in a copy of the repository it was
 // interrupted in. Every run starts from the stub's `FAKE-1`, so its journal starts with `intake#1`.
 import { expect, test } from 'bun:test';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { readConfig } from '../../src/engine/config';
 import { type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
@@ -37,6 +46,7 @@ import {
   writeAgentFixture,
   writeHarnessScript,
 } from '../helpers/agent-fixture';
+import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, type SteppingClock, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import {
   copyRun,
@@ -202,9 +212,9 @@ test('a call that asks for its error routes on it', async () => {
   );
 });
 
-test("the fixture's ticket-to-pr gets as far as its spec: the intake leaves the brief spec#1 consumes, and the run fails there, where the fake harness has no script for it", async () => {
+test("the fixture's ticket-to-pr, with its harness script gone, gets as far as its spec: the intake leaves the brief spec#1 consumes, and the run fails there, where the fake harness has no script for it", async () => {
   await withTempRepo(async (repo) => {
-    copyFixture(repo.dir);
+    rmSync(join(copyFixture(repo.dir), 'fake', 'harness.json'));
     const end = await ran(repo.dir);
     expect(end).toMatchObject({
       status: 'failed',
@@ -1481,14 +1491,7 @@ test('a try whose last events were lost is counted once, from its result, howeve
 
 // The relay in a run (D8): what an adapter emits while the run is going reaches its stream.
 
-const FETCHED: ProviderEvent = {
-  type: 'ticket:fetched',
-  ticketKey: 'FAKE-1',
-  comments: 0,
-  links: 0,
-  attachments: 0,
-  durationMs: 1,
-};
+const PUSHED: ProviderEvent = { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'a'.repeat(40) };
 const LEASED: ProviderEvent = { type: 'workspace:leased', remote: 'fake://codehost/stub', branch: 'sail/FAKE-1' };
 const COMMENTED: ProviderEvent = { type: 'ticket:commented', ticketKey: 'FAKE-1', body: 'between two calls' };
 
@@ -1500,7 +1503,7 @@ test("what an adapter emits while a call runs is in events.ndjson with that call
       name: 'provider',
       onEvent(event) {
         if (event.type !== 'script:exec' || event.key !== 'spec#1') return;
-        adapters.relay.emit(FETCHED);
+        adapters.relay.emit(PUSHED);
         adapters.relay.emit(LEASED);
       },
     };
@@ -1516,7 +1519,7 @@ test("what an adapter emits while a call runs is in events.ndjson with that call
     const exec = list.findIndex((event) => event.type === 'script:exec' && event.key === 'spec#1');
     const envelope = { ts: expect.any(String), runId: end.runId };
     expect(list.slice(exec + 1, exec + 3)).toEqual([
-      { seq: exec + 2, ...envelope, key: 'spec#1', ...FETCHED },
+      { seq: exec + 2, ...envelope, key: 'spec#1', ...PUSHED },
       { seq: exec + 3, ...envelope, ...LEASED },
     ]);
     expect(list[exec + 2]).not.toHaveProperty('key');
@@ -1541,12 +1544,12 @@ test('once run:end is out nothing an adapter emits reaches the file, and the run
     const atTheEnd: Consumer = {
       name: 'provider',
       onEvent(event) {
-        if (event.type === 'run:end') adapters.relay.emit(FETCHED);
+        if (event.type === 'run:end') adapters.relay.emit(PUSHED);
       },
     };
     const end = await ran(repo.dir, { adapters, consumers: [atTheEnd] });
     const written = eventsText(end.dir);
-    adapters.relay.emit(FETCHED);
+    adapters.relay.emit(PUSHED);
 
     // The relay is free again: a sink attaches, and receives.
     const seen: ProviderEvent[] = [];
@@ -1556,8 +1559,8 @@ test('once run:end is out nothing an adapter emits reaches the file, and the run
     expect(eventsText(end.dir)).toBe(written);
     const list = events(end.dir);
     expect(list.at(-1)?.type).toBe('run:end');
-    // The stream's one fetch is the intake's own: neither of the two emitted from the end on is in it.
-    expect(list.flatMap((event) => (event.type === 'ticket:fetched' ? [event.key] : []))).toEqual(['intake#1']);
+    // Neither of the two emitted from the end on is in the stream, which holds no push of its own.
+    expect(list.filter((event) => event.type === 'codehost:pushed')).toEqual([]);
   });
 });
 
@@ -1579,5 +1582,182 @@ test('a run that crashes lets go of the relay too', async () => {
     adapters.relay.emit(LEASED);
     expect(seen).toEqual([LEASED]);
     expect(events(onlyRun(repo.dir)).at(-1)?.type).toBe('error:crash');
+  });
+});
+
+// The run's clock (D8): every time a run records is a reading of the clock it is given, and its id's random part is the
+// bytes it is given, so the same run writes the same run directory.
+
+const GOLDEN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+
+/** Runs the stub's `FAKE-1` from `cwd` on `clock` and the golden id bytes, with the fakes reading the same clock. */
+async function ranOnClock(cwd: string, clock: SteppingClock): Promise<RunEnd> {
+  return ran(cwd, { adapters: await fakeAdapters(cwd, {}, { now: clock }), clock, random: goldenRandom });
+}
+
+/** Every `result.json` in a run directory, parsed, by its path relative to the run directory. */
+function resultsIn(runDir: string): Record<string, { startedAt: string; finishedAt: string; durationMs: number }> {
+  const paths = (readdirSync(runDir, { recursive: true }) as string[]).filter((path) => path.endsWith('result.json'));
+  return Object.fromEntries(paths.sort().map((path) => [path, JSON.parse(readFileSync(join(runDir, path), 'utf8'))]));
+}
+
+/** Every file under `dir`, by its path relative to it, with the sha256 of its bytes. */
+function hashed(dir: string): Record<string, string> {
+  const entries = readdirSync(dir, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+  const paths = entries.map((entry) => join(entry.parentPath, entry.name)).sort();
+  return Object.fromEntries(paths.map((path) => [path.slice(dir.length + 1), sha256(path)]));
+}
+
+const journalText = (runDir: string): string => readFileSync(join(runDir, 'journal.ndjson'), 'utf8');
+
+/** `times`, each as its distance in ms from `start`. */
+const since = (start: string, times: readonly string[]) => times.map((time) => Date.parse(time) - Date.parse(start));
+
+test('a run on a stepping clock and fixed id bytes takes its id from them, and every time and duration it records from the clock', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const clock = steppingClock(GOLDEN_START, GOLDEN_STEP_MS);
+    const end = await ranOnClock(repo.dir, clock);
+    expect([end.runId, end.status]).toEqual([GOLDEN_ID, 'completed']);
+    expect(JSON.parse(readFileSync(join(end.dir, 'run.json'), 'utf8')).startedAt).toBe(GOLDEN_START);
+
+    const list = events(end.dir);
+    const results = Object.values(resultsIn(end.dir));
+    const journal = readJournal(end.dir).entries;
+    expect([results.length, journal.length]).toEqual([8, 8]);
+    const stamps = list.map((event) => event.ts);
+    const recorded = journal.map((entry) => entry.recordedAt);
+    const times = [...stamps, ...recorded, ...results.flatMap((result) => [result.startedAt, result.finishedAt])];
+    // Each is a reading: the start plus a whole number of steps.
+    expect(since(GOLDEN_START, times).filter((ms) => ms < 0 || ms % GOLDEN_STEP_MS !== 0)).toEqual([]);
+    // None goes back in time: the stream and the journal in order, and each try ends after it starts.
+    expect([stamps, recorded]).toEqual([[...stamps].sort(), [...recorded].sort()]);
+    expect(results.filter((result) => result.finishedAt <= result.startedAt)).toEqual([]);
+
+    const exits = list.flatMap((event) => (event.type === 'script:exit' ? [event.durationMs] : []));
+    expect(exits).toEqual([100, 100, 100, 100, 100, 100, 100]);
+    const durations = results.map((result) => result.durationMs);
+    expect(durations.filter((ms) => ms <= 0 || ms % GOLDEN_STEP_MS !== 0)).toEqual([]);
+    const last = clock.readings.at(-1)?.toISOString() ?? '';
+    expect(times.filter((time) => time > last)).toEqual([]);
+  });
+});
+
+test('two runs on the same clock and id bytes, in two repositories, write the same run directory, byte for byte', async () => {
+  await withTempRepo(async (repo) => {
+    const [first, second] = [join(repo.dir, 'first'), join(repo.dir, 'second-and-longer')];
+    mkdirSync(first);
+    mkdirSync(second);
+    // One `.sail/`, copied: the stub writes an id of its own into each workflow it writes.
+    cpSync(writeStub(first), join(second, '.sail'), { recursive: true });
+    const one = await ranOnClock(first, steppingClock(GOLDEN_START, GOLDEN_STEP_MS));
+    const two = await ranOnClock(second, steppingClock(GOLDEN_START, GOLDEN_STEP_MS));
+    expect([one.runId, two.runId]).toEqual([GOLDEN_ID, GOLDEN_ID]);
+
+    const files = hashed(one.dir);
+    expect(Object.keys(files)).toContain('events.ndjson');
+    expect(Object.keys(files)).toContain('03-tests/call-2/result.json');
+    expect(Object.keys(files).length).toBeGreaterThan(30);
+    expect(hashed(two.dir)).toEqual(files);
+  });
+});
+
+test("a resume on a clock of its own stamps what it adds with that clock's readings, and leaves what the first process wrote as it was", async () => {
+  await withTempRepo(async (repo) => {
+    const before = new Date().toISOString();
+    const runId = await stoppedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const [firstEvents, firstJournal, firstResults] = [eventsText(dir), journalText(dir), resultsIn(dir)];
+    // With no clock given, the first process read the system's: every time it recorded lies inside this test.
+    const first = [
+      ...events(dir).map((event) => event.ts),
+      ...readJournal(dir).entries.map((entry) => entry.recordedAt),
+      ...Object.values(firstResults).flatMap((result) => [result.startedAt, result.finishedAt]),
+    ];
+    expect(first.filter((time) => time < before || time > new Date().toISOString())).toEqual([]);
+
+    const clock = steppingClock('2031-01-01T00:00:00.000Z', GOLDEN_STEP_MS);
+    const end = await resumeWorkflow({
+      cwd: repo.dir,
+      runId,
+      adapters: await fakeAdapters(repo.dir, {}, { now: clock }),
+      clock,
+    });
+    expect(end).toMatchObject({ status: 'completed' });
+    const readings = new Set(clock.readings.map((reading) => reading.toISOString()));
+
+    expect(eventsText(dir).startsWith(firstEvents)).toBe(true);
+    const added = eventsText(dir)
+      .slice(firstEvents.length)
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line).ts as string);
+    expect(added.length).toBeGreaterThan(30);
+    expect(added.filter((ts) => !readings.has(ts))).toEqual([]);
+
+    expect(journalText(dir).startsWith(firstJournal)).toBe(true);
+    const lines = readJournal(dir).entries.slice(2);
+    expect(lines.map((entry) => entry.key)).toEqual([
+      'implement#1',
+      'tests#1',
+      'implement#2',
+      'tests#2',
+      'self-review#1',
+      'publish#1',
+    ]);
+    expect(lines.filter((entry) => !readings.has(entry.recordedAt))).toEqual([]);
+
+    const results = resultsIn(dir);
+    const ran = Object.keys(results).filter((path) => !Object.hasOwn(firstResults, path));
+    expect(ran).toHaveLength(6);
+    expect(
+      ran.filter(
+        (path) => !readings.has(results[path]?.startedAt ?? '') || !readings.has(results[path]?.finishedAt ?? ''),
+      ),
+    ).toEqual([]);
+    expect(Object.keys(firstResults).map((path) => results[path])).toEqual(Object.values(firstResults));
+  });
+});
+
+// A script's port events (D12).
+
+const SPEC_SCRIPT = 'workflows/ticket-to-pr/stages/spec/run.sh';
+
+test("a script step's sail port leaves its provider event in the run's stream under the step's key, between the step's script:exec and script:exit, and in the call directory's port events file", async () => {
+  const fetches = (sail: string) =>
+    edit(sail, SPEC_SCRIPT, "printf '# Spec", "sail port ticket-source get FAKE-1 >/dev/null\nprintf '# Spec");
+  await stubRun({}, fetches, (end) => {
+    const own = events(end.dir).filter((event) => 'key' in event && event.key === 'spec#1');
+    const from = own.findIndex((event) => event.type === 'script:exec');
+    const first = own[from]?.seq ?? 0;
+    expect(own.slice(from, from + 3).map((event) => [event.type, event.seq - first])).toEqual([
+      ['script:exec', 0],
+      ['ticket:fetched', 1],
+      ['script:exit', 2],
+    ]);
+    expect(own[from + 1]).toMatchObject({ runId: end.runId, key: 'spec#1', ticketKey: 'FAKE-1', comments: 2 });
+    const file = readFileSync(join(end.dir, '01-spec', 'call-1', 'port-events.ndjson'), 'utf8');
+    expect(file).toStartWith('{"type":"ticket:fetched","ticketKey":"FAKE-1",');
+    expect(file.split('\n')).toHaveLength(2);
+    expect(end.status).toBe('completed');
+    expect(validateRunDir(end.dir).issues).toEqual([]);
+  });
+});
+
+// The run's ticket in its summary (D16).
+
+const STUB_TICKET = { ticketKey: 'FAKE-1', title: 'Add a greeting', url: 'fake://tickets/FAKE-1' };
+
+test("a run's summary.json names its ticket by its key, title and URL, from the intake's fetch, and a resumed run's summary still holds it", async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await stoppedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    expect(summaryOf(dir)?.ticket).toEqual(STUB_TICKET);
+    expect(validateDocument('sail.summary.v1', summaryOf(dir)).map(formatIssue)).toEqual([]);
+    // The summary seeds itself from the events file: the fetch is in the first process's lines.
+    await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
+    const summary = summaryOf(dir);
+    expect([summary?.status, summary?.ticket]).toEqual(['completed', STUB_TICKET]);
+    expect(validateRunDir(dir).issues).toEqual([]);
   });
 });

@@ -1,7 +1,9 @@
-// The golden run directory: a complete sail run, validated against every sail.*.v1 schema. Later engine output is
-// compared against it, so a schema change updates the fixture in the same change.
+// The golden run directory: a complete sail run, validated against every sail.*.v1 schema. It is generated: the run the
+// engine makes of the fixture repository's ticket-to-pr on FAKE-1, written by `bun run golden`, which
+// test/scripts/golden.test.ts holds it equal to. So it shows what a run writes today, and nothing a run can't write
+// yet: no workspace, no tool call, no validated file and no multi-step call.
 import { afterEach, expect, test } from 'bun:test';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { formatIssue, validateProjectFile, validateRunDir } from '../src/engine/schemas';
@@ -49,10 +51,10 @@ test('the golden run directory is valid against every run-directory schema', () 
   console.log(`${basename(fixture)}: ${total} documents valid (${perSchema})`);
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
-    'sail.journal.v1': 10,
-    'sail.event.v1': 137,
+    'sail.journal.v1': 9,
+    'sail.event.v1': 121,
     'sail.summary.v1': 1,
-    'sail.result.v1': 10,
+    'sail.result.v1': 9,
   });
 });
 
@@ -77,19 +79,72 @@ test('an unknown outcome in a mutated copy names the file, line and field', () =
   ]);
 });
 
-test('the journal holds the ticket-to-pr key sequence', () => {
-  expect(lines('journal.ndjson').map((line) => line.key)).toEqual([
-    'intake#1',
-    'spec#1',
-    'implement#1',
-    'tests#1',
-    'implement#2',
-    'tests#2',
-    'self-review#1',
-    'publish#1/describe',
-    'publish#1/open',
-    'publish#1',
+test("the golden run is the fixture's: its id, its startedAt the clock's first reading, and its journal the nine calls of ticket-to-pr with their outcomes", () => {
+  const header = JSON.parse(text('run.json'));
+  expect([header.runId, header.startedAt]).toEqual([RUN_ID, '2026-09-25T09:00:00.000Z']);
+  expect(lines('journal.ndjson').map((line) => `${line.key} ${line.outcome}`)).toEqual([
+    'intake#1 passed',
+    'spec#1 done',
+    'implement#1 done',
+    'tests#1 failed',
+    'implement#2 done',
+    'tests#2 passed',
+    'self-review#1 done',
+    'describe#1 done',
+    'open#1 passed',
   ]);
+});
+
+test('it holds nothing a run cannot write yet: no workspace, tool, thinking, validated-file, denial or step event, no ticket:updated, no repository or workspace in run.json, and no publish in its roster', () => {
+  const types = new Set(lines('events.ndjson').map((event) => String(event.type)));
+  const absent = [...types].filter(
+    (type) =>
+      /^(workspace|tool|step):/.test(type) ||
+      ['agent:thinking', 'file:validated', 'permission:denied', 'ticket:updated'].includes(type),
+  );
+  expect(absent).toEqual([]);
+  expect(types.size).toBe(26);
+  const header = JSON.parse(text('run.json'));
+  expect(Object.keys(header)).toEqual([
+    'schema',
+    'runId',
+    'source',
+    'claim',
+    'workflow',
+    'sail',
+    'adapters',
+    'intake',
+    'stages',
+    'budget',
+    'startedAt',
+  ]);
+  expect(Object.keys(header.stages)).toEqual(['describe', 'implement', 'open', 'self-review', 'spec', 'tests']);
+});
+
+test("open#1's provider events are codehost:pushed, codehost:pr_opened and codehost:labelled, between its script:exec and script:exit, and its port events file holds the same three without an envelope", () => {
+  const own = lines('events.ndjson').filter((event) => event.key === 'open#1');
+  const from = own.findIndex((event) => event.type === 'script:exec');
+  const provider = own.slice(from + 1, from + 4);
+  expect(own.slice(from, from + 5).map((event) => event.type)).toEqual([
+    'script:exec',
+    'codehost:pushed',
+    'codehost:pr_opened',
+    'codehost:labelled',
+    'script:exit',
+  ]);
+  expect(lines('06-open/call-1/port-events.ndjson')).toEqual(
+    provider.map(({ seq: _seq, ts: _ts, runId: _runId, key: _key, ...event }) => event),
+  );
+  expect(provider[1]).toMatchObject({ number: 5, url: 'fake://codehost/fixture/pull/5', head: 'sail/FAKE-1' });
+  expect(lines('events.ndjson').filter((event) => String(event.type).startsWith('codehost:'))).toHaveLength(3);
+});
+
+test('no file of the golden run holds a path of the machine that generated it, and every file in it is writable', () => {
+  const files = [...new Bun.Glob('**/*').scanSync({ cwd: fixture })].sort();
+  expect(files).toHaveLength(50);
+  const machine = /\/(Users|home|private|var|tmp|runner|root)\//;
+  expect(files.filter((file) => machine.test(text(file)))).toEqual([]);
+  for (const file of files) expect(() => accessSync(join(fixture, file), constants.W_OK)).not.toThrow();
 });
 
 test('events are numbered without a gap, never go back in time, and all belong to the run', () => {
@@ -112,22 +167,24 @@ test('the golden run records its claim: run.json holds it, the stream reports it
     'run:start',
     'ticket:claimed',
     'ticket:commented',
-    'workspace:leased',
+    'intake:start',
   ]);
   const envelope = (seq: number, ts: string, type: string) => ({ seq, ts, type, runId: RUN_ID, ticketKey: 'FAKE-1' });
   expect(events.slice(1, 3)).toEqual([
-    { ...envelope(2, '2026-09-25T09:00:00.040Z', 'ticket:claimed'), state: inProgress },
-    { ...envelope(3, '2026-09-25T09:00:00.080Z', 'ticket:commented'), body: comment },
+    { ...envelope(2, '2026-09-25T09:00:00.500Z', 'ticket:claimed'), state: inProgress },
+    { ...envelope(3, '2026-09-25T09:00:00.600Z', 'ticket:commented'), body: comment },
   ]);
   expect(events[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] } });
 
-  // The intake fetched the ticket after the claim: its one ticket:fetched counts the claim's comment.
+  // The intake fetched the ticket after the claim: its one ticket:fetched counts the claim's comment, and names it.
   const fetched = events.filter((event) => event.type === 'ticket:fetched');
-  expect(fetched.map((event) => [event.key, event.comments])).toEqual([['intake#1', 2]]);
+  expect(fetched.map((event) => [event.key, event.comments, event.title, event.url])).toEqual([
+    ['intake#1', 2, 'Add a --shout flag to the greet command', 'fake://tickets/FAKE-1'],
+  ]);
   const ticket = JSON.parse(text('00-intake/call-1/ticket.json'));
   expect([ticket.state, ticket.comments.at(-1)]).toEqual([
     inProgress,
-    { author: 'sail', body: comment, createdAt: '2026-09-25T08:59:59.900Z' },
+    { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:00.300Z' },
   ]);
   expect(text('00-intake/call-1/brief.md')).toEndWith(
     `<untrusted-input source="ticket FAKE-1, comment 2">\n${comment}\n</untrusted-input>\n`,
@@ -151,8 +208,9 @@ const MOVES = [
   ['tests#1', 'failed', 'implement#2'],
   ['implement#2', 'done', 'tests#2'],
   ['tests#2', 'passed', 'self-review#1'],
-  ['self-review#1', 'done', 'publish#1'],
-  ['publish#1', 'passed', 'end'],
+  ['self-review#1', 'done', 'describe#1'],
+  ['describe#1', 'done', 'open#1'],
+  ['open#1', 'passed', 'end'],
 ];
 
 test("the golden run's routes are the moves after each stage call", () => {
@@ -161,10 +219,8 @@ test("the golden run's routes are the moves after each stage call", () => {
   expect(JSON.parse(text('summary.json')).routes).toEqual(MOVES.map(([at, value, took]) => ({ at, value, took })));
 });
 
-/** The summary fields no event carries yet, each with what would bring it. The golden fold leaves them out. */
+/** The summary fields no event carries yet, each with what would bring it. A generated summary holds none of them. */
 const NOT_DERIVED_YET = [
-  // The fetched ticket's key and title: ticket:fetched, once intake runs (Epic 06).
-  'ticket',
   // A call's one-line result: an event of each step kind that reports one.
   'calls[].summary',
   // The commits an agent call made: its harness reports them (Epic 07).
@@ -173,28 +229,34 @@ const NOT_DERIVED_YET = [
   'calls[].steps[].summary',
 ];
 
-/** Deletes the field `path` names, where `name[]` walks every item of the list `name`. Key order is kept. */
-function strip(value: unknown, path: readonly string[]): void {
+/** Whether `value` holds the field `path` names anywhere, where `name[]` walks every item of the list `name`. */
+function holds(value: unknown, path: readonly string[]): boolean {
   const [head, ...rest] = path;
-  if (head === undefined || typeof value !== 'object' || value === null) return;
+  if (head === undefined || typeof value !== 'object' || value === null) return false;
   const object = value as Record<string, unknown>;
   if (head.endsWith('[]')) {
     const items = object[head.slice(0, -2)];
-    for (const item of Array.isArray(items) ? items : []) strip(item, rest);
-  } else if (rest.length === 0) delete object[head];
-  else strip(object[head], rest);
+    return (Array.isArray(items) ? items : []).some((item) => holds(item, rest));
+  }
+  return rest.length === 0 ? Object.hasOwn(object, head) : holds(object[head], rest);
 }
 
-test("the golden run's summary is its events, folded", () => {
-  const expected = JSON.parse(text('summary.json'));
-  for (const path of NOT_DERIVED_YET) strip(expected, path.split('.'));
+test("the golden run's summary is its events folded, byte for byte, with nothing left out: it names the ticket, and holds no field that no event carries yet", () => {
   const folded = summarize(lines('events.ndjson') as unknown as SailEvent[]);
-  expect(JSON.stringify(folded, null, 2)).toBe(JSON.stringify(expected, null, 2));
+  expect(`${JSON.stringify(folded, null, 2)}\n`).toBe(text('summary.json'));
+  expect(folded?.ticket).toEqual({
+    ticketKey: 'FAKE-1',
+    title: 'Add a --shout flag to the greet command',
+    url: 'fake://tickets/FAKE-1',
+  });
+  expect(NOT_DERIVED_YET.filter((path) => holds(folded, path.split('.')))).toEqual([]);
+  // The check above can tell: a ticket is a field the summary does hold.
+  expect(holds(folded, ['calls[]', 'resultPath'])).toBe(true);
 });
 
 test('every result records its files by size and hash, and its duration by its timestamps', () => {
   const results = resultFiles();
-  expect(results).toHaveLength(10);
+  expect(results).toHaveLength(9);
   for (const path of results) {
     const result = JSON.parse(text(path));
     expect(Date.parse(result.finishedAt) - Date.parse(result.startedAt)).toBe(result.durationMs);
@@ -236,32 +298,4 @@ test('every journal line agrees with the result it points at', () => {
       files: line.files,
     });
   }
-});
-
-test("a multi-step call's outcome is its last step's, as that step's result records it", () => {
-  const multiStep = resultFiles()
-    .map((path) => JSON.parse(text(path)))
-    .filter((result) => Array.isArray(result.steps));
-  expect(multiStep.map((result) => result.key)).toEqual(['publish#1']);
-  for (const result of multiStep) {
-    const last = result.steps.at(-1);
-    expect(result.outcome).toBe(last.outcome);
-    expect(JSON.parse(text(last.resultPath)).outcome).toBe(last.outcome);
-  }
-});
-
-test("a multi-step call linked to another call's result names the link", () => {
-  const dir = mutatedCopy('05-publish/call-1/result.json', (content) =>
-    content.replace(
-      '"resultPath": "05-publish/call-1/steps/2-open/result.json"',
-      '"resultPath": "03-tests/call-2/result.json"',
-    ),
-  );
-  const found = validateRunDir(dir).issues.map(formatIssue);
-  for (const issue of found) console.log(issue);
-  expect(found).toEqual([
-    '05-publish/call-1/result.json  [sail.result.v1]  /steps/1/resultPath points at 03-tests/call-2/result.json, ' +
-      'which differs in key ("tests#2", not "publish#1/open"), stage ("tests", not "publish"), call (2, not 1), ' +
-      'step (undefined, not "open")',
-  ]);
 });
