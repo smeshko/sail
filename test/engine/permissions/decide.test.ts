@@ -125,6 +125,23 @@ test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev
     });
   }));
 
+test('a brace expansion is refused, since bash builds the argv from it; quoted braces are literal', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['rm *', 'git *', 'echo *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('rm {-r,-f} build'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('git {reset,--hard} HEAD'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'command:unparseable',
+    });
+    expect(decide(bash('echo {1..3}'), policy, p.roots)).toMatchObject({ deny: true, rule: 'command:unparseable' });
+    expect(decide(bash("echo '{a,b}'"), policy, p.roots)).toEqual({ allow: true });
+    expect(decide(bash('echo \\{a,b\\}'), policy, p.roots)).toEqual({ allow: true });
+  }));
+
 test('commands nested through eval past the walker limit are denied command:unparseable, not thrown', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['*'], tools: ['Bash'] };
