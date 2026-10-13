@@ -15,6 +15,8 @@ import {
   type FetchIssueData,
   type FetchMoreCommentsData,
   type IssueNode,
+  LIST_ISSUES,
+  type ListIssuesData,
 } from './queries';
 
 export interface LinearTicketSourceOptions extends ProviderOptions {
@@ -64,6 +66,29 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     return comments;
   };
 
+  /** Every designated ticket in a backlog or unstarted state, every page of the listing, with its comments. */
+  const listDesignated = async (label: string): Promise<Ticket[]> => {
+    const tickets: Ticket[] = [];
+    let after: string | undefined;
+    let more = true;
+    while (more) {
+      const { issues } = (await client.request('ListIssues', LIST_ISSUES, {
+        team: options.team,
+        label,
+        first: 100,
+        after,
+      })) as ListIssuesData;
+      for (const node of issues.nodes) {
+        const ticket = toTicket(node, await allComments(node));
+        // The server filters by type already; the state is checked again, so a broad filter cannot list a started ticket.
+        if (ticket.state.type === 'unstarted' && ticket.labels.includes(label)) tickets.push(ticket);
+      }
+      more = issues.pageInfo.hasNextPage && issues.pageInfo.endCursor !== null;
+      after = issues.pageInfo.endCursor ?? undefined;
+    }
+    return tickets;
+  };
+
   return {
     name: 'linear',
     parseKey,
@@ -94,9 +119,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       return ticket;
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
-    listDesignated: async () => {
-      throw notYetWritten('listDesignated');
-    },
+    listDesignated,
     claim: async () => {
       throw notYetWritten('claim');
     },
@@ -106,7 +129,15 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     comment: async () => {
       throw notYetWritten('comment');
     },
-    capabilities: () => ({ comments: false, links: false, attachments: false, moves: [] }),
+    capabilities: () => ({
+      comments: true,
+      links: true,
+      attachments: true,
+      moves:
+        options.inReviewState === undefined
+          ? ['unstarted', 'in-progress', 'done']
+          : ['unstarted', 'in-progress', 'in-review', 'done'],
+    }),
   };
 }
 
