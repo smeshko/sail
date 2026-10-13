@@ -6,17 +6,21 @@ import { pathToFileURL } from 'node:url';
 import { PortError } from '../../ports/errors';
 import { git } from './git';
 
-/** The URL with `scheme://user:password@` reduced to `scheme://`. Other forms (such as `git@host:path`) pass as they are. */
+/**
+ * The URL with `scheme://user:password@` reduced to `scheme://`. The user and password run up to the last `@` before the
+ * first `/`, so a password with a raw `@` in it goes too. Other forms (such as `git@host:path`) pass as they are.
+ */
 export function stripCredentials(url: string): string {
-  return url.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/@]*@/, '$1');
+  return url.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/]*@/, '$1');
 }
 
 /**
  * A local origin (a path, which git also accepts as a remote) is keyed by its `file://` URL, so the key is never a bare
- * path, the way every other key is a URL. Schemed URLs and `user@host:path` forms pass as they are.
+ * path, the way every other key is a URL. Schemed URLs and scp-style `[user@]host:path` forms pass as they are: git reads
+ * any string with a colon before its first slash as scp-style, with or without a user, so every clone names it alike.
  */
 function keyOf(url: string, clone: string): string {
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url) || /^[^/]+@[^/]+:/.test(url)) return url;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url) || /^[^/]*:/.test(url)) return url;
   return pathToFileURL(resolve(clone, url)).href;
 }
 
