@@ -111,6 +111,20 @@ test('an argument built by a substitution is refused, since its output can suppl
     expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
   }));
 
+test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev/stdout still needs a glob', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['ls *', 'echo *', 'wc *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('ls 2>/dev/null'), policy, p.roots)).toEqual({ allow: true });
+    expect(decide(bash('echo x >/dev/null'), policy, p.roots)).toEqual({ allow: true });
+    expect(decide(bash('echo x &>/dev/null'), policy, p.roots)).toEqual({ allow: true });
+    expect(decide(bash('wc -l </dev/null'), policy, p.roots)).toEqual({ allow: true });
+    expect(decide(bash('echo x >/dev/stdout'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'write:outside-roots',
+    });
+  }));
+
 test('doas is denied as sudo is: it is the same privilege escalation under another name', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['doas *', 'sudo *'], tools: ['Bash'] };
