@@ -135,6 +135,23 @@ test('a result with no total cost counts no cost, and its usage update says zero
   ]);
 });
 
+test('a message whose cache counts are null, which the API may send, still counts its input and output, with the cache at zero', () => {
+  // review #1.7: the cache counts are optional on the wire, so null must not drop the whole message.
+  const tally = createTally(KEY);
+  const message = assistant('msg_null', [text('x')], { input_tokens: 40, output_tokens: 3 }) as unknown as {
+    message: { usage: Record<string, unknown> };
+  };
+  message.message.usage.cache_read_input_tokens = null;
+  message.message.usage.cache_creation_input_tokens = null;
+  expect(tally.onAssistant(message as unknown as SDKAssistantMessage)).toEqual({
+    type: 'usage:update',
+    turn: 1,
+    tokens: { input: 40, cacheRead: 0, cacheWrite: 0, output: 3 },
+    costUsdSoFar: 0,
+  });
+  expect(tally.usage().inputTokens).toBe(40);
+});
+
 test('a message whose usage count is missing or not a whole number gives nothing and adds nothing, and a valid one after it still counts', () => {
   const tally = createTally(KEY);
   const fractional = tally.onAssistant(brokenUsage('msg_bad', 'input_tokens', 1.5));
