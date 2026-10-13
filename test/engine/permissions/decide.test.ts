@@ -111,6 +111,24 @@ test('an argument built by a substitution is refused, since its output can suppl
     expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
   }));
 
+test('repeated git -C options are applied in turn, so a later one is relative to where the earlier one led', () =>
+  inRoots((p) => {
+    mkdirSync(join(p.roots.worktree, 'src'));
+    const policy: Permissions = { read: [], write: [], commands: ['git *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('git -C src -C .. status'), policy, p.roots)).toEqual({ allow: true });
+    // From src, `../clone` is worktree/clone; git's second -C starts at the worktree, so it reaches the clone outside.
+    expect(decide(bash('cd src && git -C .. -C ../clone status'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'git:outside-roots',
+    });
+    // git reads GIT_DIR after its -C, so from the worktree ../clone/.git is outside, though it is inside from src.
+    expect(decide(bash('cd src && GIT_DIR=../clone/.git git -C .. status'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'git:outside-roots',
+    });
+  }));
+
 test('a cd is tracked only where the shell keeps it: not in a pipeline, not after a failed cd, and through eval', () =>
   inRoots((p) => {
     mkdirSync(join(p.roots.worktree, 'src'));
