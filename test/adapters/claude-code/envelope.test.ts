@@ -49,6 +49,30 @@ test('a step schema whose $ref points at its own root, or at its own definitions
   }).toEqual({ nested: true, badChild: false, shared: true, badShared: false });
 });
 
+test('a step schema with its own $id keeps its references, and literal data that looks like a $ref stays literal', () => {
+  // review #2.2: a $id starts a new scope, so its references are left alone; and const, enum and default are data.
+  const IDENTIFIED = {
+    $id: 'https://example.invalid/tree',
+    type: 'object',
+    properties: { summary: { type: 'string' }, children: { type: 'array', items: { $ref: '#' } } },
+    required: ['summary'],
+    additionalProperties: false,
+  };
+  const LITERAL = {
+    type: 'object',
+    properties: { value: { const: { $ref: '#value' } } },
+    required: ['value'],
+    additionalProperties: false,
+  };
+  const identified = new Ajv({ strict: true }).compile(submissionSchema(IDENTIFIED));
+  const literal = new Ajv({ strict: true }).compile(submissionSchema(LITERAL));
+  expect({
+    nested: identified({ outcome: 'done', output: { summary: 'a', children: [{ summary: 'b', children: [] }] } }),
+    badChild: identified({ outcome: 'done', output: { summary: 'a', children: [{ summary: 3 }] } }),
+    literal: literal({ outcome: 'done', output: { value: { $ref: '#value' } } }),
+  }).toEqual({ nested: true, badChild: false, literal: true });
+});
+
 test('the envelope is a draft-07 oneOf with exactly two branches, one per outcome', () => {
   const schema = submissionSchema(STEP_SCHEMA) as { oneOf?: { properties?: { outcome?: { const?: string } } }[] };
   expect(schema.oneOf?.map((branch) => branch.properties?.outcome?.const)).toEqual(['done', 'blocked']);
