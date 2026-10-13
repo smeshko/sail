@@ -1,7 +1,7 @@
 // Branch leases (D9, ADR-0018): one run holds a remote's branch at a time, machine-wide. A second live run is refused
 // and told who holds the lease, the same run renews it on a resume, and a stale lease is taken over.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultLeasesDir, readLease, releaseLease, takeLease } from '../../src/adapters/leases';
@@ -104,6 +104,17 @@ test("a second resume is refused while the first one's lease is written but its 
   const refused = takeLease(dir, REMOTE, BRANCH, second, LATER);
   expect([refused.leased, refused.leased ? undefined : refused.holder.pid]).toEqual([false, process.pid]);
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(first, NOW));
+});
+
+test("a renewal writes its temp file under a name no other taker of the run shares, leaving another taker's file alone", () => {
+  const dir = tempDir();
+  const first = run('r1', DEAD_PID, 'suspended', 'interrupted');
+  takeLease(dir, REMOTE, BRANCH, first, NOW);
+  const [file] = readdirSync(dir).filter((name) => name.endsWith('.json'));
+  const otherTaker = join(dir, `${file}.r1.tmp`);
+  writeFileSync(otherTaker, 'another taker\n');
+  takeLease(dir, REMOTE, BRANCH, { ...first, pid: process.ppid }, LATER);
+  expect(readFileSync(otherTaker, 'utf8')).toBe('another taker\n');
 });
 
 test('the same run leasing again from another process is refused while the first one still runs, and keeps its lease', () => {
