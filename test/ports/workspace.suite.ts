@@ -192,20 +192,17 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
       expectValidEvents(capture);
     });
 
-  // biome-ignore format: TDD-PENDING TASK-002
-  test
-    .skip // TDD-PENDING TASK-002
-    (`${label}: two runs hold workspaces for the same branch name, since neither checks it out`, async () => {
-      const { adapter, world } = await start();
-      const r1 = await world.run('r1');
-      const r2 = await world.run('r2');
-      const first = await adapter.create(r1, { base: world.base, branch: BRANCH });
-      const second = await adapter.create(r2, { base: world.base, branch: BRANCH });
-      expect([first.path, second.path].map((path) => [path, existsSync(path)])).toEqual([
-        [join(r1.runDir, 'workspace'), true],
-        [join(r2.runDir, 'workspace'), true],
-      ]);
-    });
+  test(`${label}: two runs hold workspaces for the same branch name, since neither checks it out`, async () => {
+    const { adapter, world } = await start();
+    const r1 = await world.run('r1');
+    const r2 = await world.run('r2');
+    const first = await adapter.create(r1, { base: world.base, branch: BRANCH });
+    const second = await adapter.create(r2, { base: world.base, branch: BRANCH });
+    expect([first.path, second.path].map((path) => [path, existsSync(path)])).toEqual([
+      [join(r1.runDir, 'workspace'), true],
+      [join(r2.runDir, 'workspace'), true],
+    ]);
+  });
 
   // biome-ignore format: TDD-PENDING TASK-004
   test

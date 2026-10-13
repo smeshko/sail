@@ -71,118 +71,97 @@ const CREATE = { base: 'origin/HEAD', branch: 'sail/FAKE-1' };
 
 // STICKER: every case below is git-worktree's `create`, which lands in TASK-002. Each sticker names that task.
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("create fetches origin, then detaches a worktree at origin's default branch, at the commit origin has now", async () => {
-    const p = pair();
-    const ahead = advance(p);
-    const run = runIn(p, 'r1');
-    const made = await createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE);
-    expect([made.path, made.baseSha]).toEqual([join(run.runDir, 'workspace'), ahead]);
-    expect([p.git(made.path, 'rev-parse', 'HEAD'), p.exitCode(made.path, 'symbolic-ref', '-q', 'HEAD')]).toEqual([
-      ahead,
-      1,
-    ]);
-  });
+test("create fetches origin, then detaches a worktree at origin's default branch, at the commit origin has now", async () => {
+  const p = pair();
+  const ahead = advance(p);
+  const run = runIn(p, 'r1');
+  const made = await createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE);
+  expect([made.path, made.baseSha]).toEqual([join(run.runDir, 'workspace'), ahead]);
+  expect([p.git(made.path, 'rev-parse', 'HEAD'), p.exitCode(made.path, 'symbolic-ref', '-q', 'HEAD')]).toEqual([
+    ahead,
+    1,
+  ]);
+});
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('workspace:created names the branch, the base commit and the path relative to the clone, and validates', async () => {
-    const p = pair();
-    const ahead = advance(p);
-    const capture = captureEvents();
-    await createGitWorktreeWorkspace({ repo: p.clone, env: p.env, emit: capture.emit }).create(runIn(p, 'r1'), CREATE);
-    expect(timed(capture.events)).toEqual([
-      {
-        type: 'workspace:created',
-        path: '.sail-runs/r1/workspace',
-        branch: 'sail/FAKE-1',
-        baseSha: ahead,
-        durationMs: 'ms',
-      },
-    ]);
-    expect(eventIssues(capture.stamped())).toEqual([]);
-  });
+test('workspace:created names the branch, the base commit and the path relative to the clone, and validates', async () => {
+  const p = pair();
+  const ahead = advance(p);
+  const capture = captureEvents();
+  await createGitWorktreeWorkspace({ repo: p.clone, env: p.env, emit: capture.emit }).create(runIn(p, 'r1'), CREATE);
+  expect(timed(capture.events)).toEqual([
+    {
+      type: 'workspace:created',
+      path: '.sail-runs/r1/workspace',
+      branch: 'sail/FAKE-1',
+      baseSha: ahead,
+      durationMs: 'ms',
+    },
+  ]);
+  expect(eventIssues(capture.stamped())).toEqual([]);
+});
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('create refuses a clone whose origin/HEAD is unset as invalid, and the message names git remote set-head origin --auto', async () => {
-    const p = pair();
-    p.git(p.clone, 'remote', 'set-head', 'origin', '-d');
+test('create refuses a clone whose origin/HEAD is unset as invalid, and the message names git remote set-head origin --auto', async () => {
+  const p = pair();
+  p.git(p.clone, 'remote', 'set-head', 'origin', '-d');
+  const run = runIn(p, 'r1');
+  const error = await rejection(createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE));
+  expect([portFailure(error), messageOf(error).includes('git remote set-head origin --auto')]).toEqual([
+    { port: 'workspace', op: 'create', code: 'invalid' },
+    true,
+  ]);
+  expect(existsSync(join(run.runDir, 'workspace'))).toBe(false);
+});
+
+test("a fetch that fails is unavailable with git's message, and leaves no worktree behind", async () => {
+  const p = pair();
+  p.git(p.clone, 'remote', 'set-url', 'origin', join(p.root, 'gone'));
+  const run = runIn(p, 'r1');
+  const error = await rejection(createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE));
+  expect([portFailure(error), existsSync(join(run.runDir, 'workspace'))]).toEqual([
+    { port: 'workspace', op: 'create', code: 'unavailable' },
+    false,
+  ]);
+  expect(messageOf(error)).toContain('gone');
+});
+
+test("create leaves the clone's HEAD and working tree as they were, with an edit and another branch checked out there", async () => {
+  const p = pair();
+  const ahead = advance(p);
+  p.git(p.clone, 'checkout', '-b', 'other');
+  writeFileSync(join(p.clone, 'README.md'), 'an edit in the clone\n');
+  const run = runIn(p, 'r1');
+  const clone = () => [p.git(p.clone, 'rev-parse', 'HEAD'), p.git(p.clone, 'status', '--porcelain')];
+  const before = clone();
+  const made = await createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE);
+  expect([clone(), made.baseSha]).toEqual([before, ahead]);
+  expect(readFileSync(join(p.clone, 'README.md'), 'utf8')).toBe('an edit in the clone\n');
+});
+
+test('git never prompts for credentials: an origin that asks for them fails as unavailable, and promptly', async () => {
+  const p = pair();
+  const server = Bun.serve({
+    port: 0,
+    fetch: () => new Response('denied', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="sail"' } }),
+  });
+  try {
+    p.git(p.clone, 'remote', 'set-url', 'origin', `http://127.0.0.1:${server.port}/repo.git`);
     const run = runIn(p, 'r1');
+    const started = performance.now();
     const error = await rejection(createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE));
-    expect([portFailure(error), messageOf(error).includes('git remote set-head origin --auto')]).toEqual([
-      { port: 'workspace', op: 'create', code: 'invalid' },
+    const elapsed = performance.now() - started;
+    expect([portFailure(error), elapsed < 10_000]).toEqual([
+      { port: 'workspace', op: 'create', code: 'unavailable' },
       true,
     ]);
-    expect(existsSync(join(run.runDir, 'workspace'))).toBe(false);
-  });
+  } finally {
+    server.stop(true);
+  }
+}, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a fetch that fails is unavailable with git's message, and leaves no worktree behind", async () => {
-    const p = pair();
-    p.git(p.clone, 'remote', 'set-url', 'origin', join(p.root, 'gone'));
-    const run = runIn(p, 'r1');
-    const error = await rejection(createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE));
-    expect([portFailure(error), existsSync(join(run.runDir, 'workspace'))]).toEqual([
-      { port: 'workspace', op: 'create', code: 'unavailable' },
-      false,
-    ]);
-    expect(messageOf(error)).toContain('gone');
+test('the git-worktree workspace declares keep and sweep, as the fake does', () => {
+  const p = pair();
+  expect(createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).capabilities()).toEqual({
+    keep: true,
+    sweep: true,
   });
-
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("create leaves the clone's HEAD and working tree as they were, with an edit and another branch checked out there", async () => {
-    const p = pair();
-    const ahead = advance(p);
-    p.git(p.clone, 'checkout', '-b', 'other');
-    writeFileSync(join(p.clone, 'README.md'), 'an edit in the clone\n');
-    const run = runIn(p, 'r1');
-    const clone = () => [p.git(p.clone, 'rev-parse', 'HEAD'), p.git(p.clone, 'status', '--porcelain')];
-    const before = clone();
-    const made = await createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE);
-    expect([clone(), made.baseSha]).toEqual([before, ahead]);
-    expect(readFileSync(join(p.clone, 'README.md'), 'utf8')).toBe('an edit in the clone\n');
-  });
-
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('git never prompts for credentials: an origin that asks for them fails as unavailable, and promptly', async () => {
-    const p = pair();
-    const server = Bun.serve({
-      port: 0,
-      fetch: () => new Response('denied', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="sail"' } }),
-    });
-    try {
-      p.git(p.clone, 'remote', 'set-url', 'origin', `http://127.0.0.1:${server.port}/repo.git`);
-      const run = runIn(p, 'r1');
-      const started = performance.now();
-      const error = await rejection(createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).create(run, CREATE));
-      const elapsed = performance.now() - started;
-      expect([portFailure(error), elapsed < 10_000]).toEqual([
-        { port: 'workspace', op: 'create', code: 'unavailable' },
-        true,
-      ]);
-    } finally {
-      server.stop(true);
-    }
-  }, 30_000);
-
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the git-worktree workspace declares keep and sweep, as the fake does', () => {
-    const p = pair();
-    expect(createGitWorktreeWorkspace({ repo: p.clone, env: p.env }).capabilities()).toEqual({
-      keep: true,
-      sweep: true,
-    });
-  });
+});
