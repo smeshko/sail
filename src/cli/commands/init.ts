@@ -5,8 +5,21 @@
 //
 // It refuses, with exit code 3 and nothing written, outside a git repository, in the home directory, whose `.sail/` is
 // sail's own, and where a `.sail` exists as anything: it never touches one. `.sail/` is built beside its place and
-// renamed into it, so a failure leaves none. `.gitignore` is read before anything is written, and written after.
-import { lstatSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+// renamed into it, so a failure leaves none. `.gitignore` is read before anything is written, and written after, by a
+// rename too: a write that fails leaves the lines it held.
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import pkg from '../../../package.json' with { type: 'json' };
@@ -68,6 +81,26 @@ function ignoring(text: string): string {
   return `${text}${text === '' || text.endsWith('\n') ? '' : '\n'}${missing.join('\n')}\n`;
 }
 
+/**
+ * Makes the file at `path` hold `text`, by a rename: it is written beside its place first, so a write that fails half
+ * way leaves what was there. An existing file keeps its mode, a link stays a link to the file that changed, and one
+ * that can't be written is refused before anything is.
+ */
+function replaceFile(path: string, text: string): void {
+  const existing = exists(path);
+  const target = existing ? realpathSync(path) : path;
+  if (existing) accessSync(target, constants.W_OK);
+  const temporary = `${target}.${process.pid}.tmp`;
+  try {
+    writeFileSync(temporary, text);
+    if (existing) chmodSync(temporary, statSync(target).mode & 0o777);
+    renameSync(temporary, target);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+}
+
 export function init(_args: unknown, io: Io): ExitCode {
   const refuse = refuseAs(io, COMMAND);
   const here = io.cwd;
@@ -112,7 +145,7 @@ export function init(_args: unknown, io: Io): ExitCode {
   const wanted = ignoring(ignored ?? '');
   if (wanted !== ignored) {
     try {
-      writeFileSync(gitignore, wanted);
+      replaceFile(gitignore, wanted);
     } catch (error) {
       // `.sail/` is in place by now, and the next `sail init` would refuse: say so.
       return refuse(`.sail/ is written, but .gitignore could not be: ${messageOf(error)}`);
