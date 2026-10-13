@@ -16,6 +16,7 @@ import type { Usage } from '../ports/types';
 import type { AgentStep, StageDefinition } from '../sdk/steps';
 import { bindingProblems, materialise, materialisePrepared, prepareBindings, type Supplied } from './bindings';
 import { type CallPaths, callPaths, createCallDir, existingTries, nextTry, runRelative } from './call-dir';
+import type { Clock } from './clock';
 import type { ContractError } from './contract';
 import type { JournalEntry } from './journal';
 import { buildResult, writeResult } from './result';
@@ -54,6 +55,8 @@ export interface CallRequest {
   emit?: Emit;
   /** What an agent call runs on. A script call takes none. */
   agent?: AgentExecution;
+  /** The clock each try's `startedAt` and `finishedAt` are read from, and its step's. The system's by default. */
+  clock?: Clock;
 }
 
 /** Why an agent call with no `AgentExecution` can't run: its caller resolved no harness and no model for it. */

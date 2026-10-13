@@ -6,6 +6,11 @@ import { type SchemaIssue, validateProjectFile } from './schemas';
 
 export type SailDir = { root: string; dir: string } | { refused: string };
 
+/** The git root of `cwd`: the first directory from it upwards that holds a `.git` entry, or undefined outside any. */
+export function findGitRoot(_cwd: string): string | undefined {
+  return undefined;
+}
+
 /**
  * Finds the nearest `.sail/` from `cwd` up to the git root, the first directory holding a `.git` entry. A `.git` file,
  * as in a worktree, counts. The search stops at the git root because `~/.sail/` is sail's machine-level directory

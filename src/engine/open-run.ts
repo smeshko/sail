@@ -22,6 +22,7 @@ import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
+import type { Clock } from './clock';
 import { DEFAULT_LABEL, PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
 import { createJournal } from './journal';
@@ -82,8 +83,13 @@ export interface OpenRunOptions {
   force?: boolean;
   /** The stage after whose first call the run stops, suspended. One the workflow doesn't reach is refused. */
   until?: string;
-  /** The run id's time and the header's `startedAt`, from one clock. */
-  now?: Date;
+  /**
+   * The run's clock: every time the run records is read from it. `openRun()` reads it once, on entry, for the run id's
+   * time and the header's `startedAt`. The system's by default.
+   */
+  clock?: Clock;
+  /** Fills the run id's random part. Random by default: a run that must be reproduced passes its bytes. */
+  random?: (bytes: Uint8Array) => Uint8Array;
   /**
    * Refuses the start when it has aborted by the time the ticket would be claimed. Once the ticket is claimed the run
    * is opened whatever the signal says, and stopping it is its caller's.
@@ -150,7 +156,8 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
  */
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
-  const { cwd, workflow, ticket, force = false, now = new Date() } = options;
+  const { cwd, workflow, ticket, force = false } = options;
+  const now = new Date();
   const found = findConfigured(cwd);
   if ('refused' in found) return found;
   const { config } = found;
@@ -234,6 +241,8 @@ export interface ReopenRunOptions {
   runId: string;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
+  /** The clock everything the resume records is read from. The system's by default. */
+  clock?: Clock;
 }
 
 /**

@@ -11,6 +11,7 @@ import type { StepRun } from '../kinds/index';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import { type CallPaths, callPaths, createCallDir, runRelative } from './call-dir';
+import type { Clock } from './clock';
 import { type ContractError, recordFiles, validateOutput } from './contract';
 import type { LoadedIntake } from './load-workflow';
 import { buildResult, writeResult } from './result';
@@ -38,6 +39,8 @@ export interface IntakeRequest {
   try?: number;
   signal?: AbortSignal;
   emit?: Emit;
+  /** The clock the try's `startedAt` and `finishedAt` are read from. The system's by default. */
+  clock?: Clock;
 }
 
 export interface RanIntake {

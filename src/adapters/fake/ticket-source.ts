@@ -73,7 +73,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
         links: ticket.links.length,
         attachments: ticket.attachments.length,
         durationMs: Math.max(0, now().getTime() - started),
-      });
+      } as ProviderEvent);
       return ticket;
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),

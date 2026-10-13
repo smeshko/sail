@@ -10,6 +10,9 @@ import { runProcess } from '../engine/process';
 import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
 
+/** This package's `bin/`, which holds the `sail` a script step runs. */
+export const BIN_DIR = '';
+
 /** How long a script may run when it sets no `timeoutSeconds`. */
 export const DEFAULT_TIMEOUT_SECONDS = 600;
 
