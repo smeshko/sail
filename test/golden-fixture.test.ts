@@ -52,7 +52,7 @@ test('the golden run directory is valid against every run-directory schema', () 
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
     'sail.journal.v1': 9,
-    'sail.event.v1': 121,
+    'sail.event.v1': 125,
     'sail.summary.v1': 1,
     'sail.result.v1': 9,
   });
@@ -99,15 +99,15 @@ test("the golden run is the fixture's: its id, its startedAt the clock's first r
 // biome-ignore format: TDD-PENDING TASK-011
 test
   .skip // TDD-PENDING TASK-011
-  ('it holds nothing a run cannot write yet: no workspace, tool, thinking, validated-file, denial or step event, no ticket:updated, no repository or workspace in run.json, and no publish in its roster', () => {
+  ('it holds nothing a run cannot write yet: no tool, thinking, validated-file, denial or step event, no ticket:updated, no repository in run.json, and no publish in its roster', () => {
   const types = new Set(lines('events.ndjson').map((event) => String(event.type)));
   const absent = [...types].filter(
     (type) =>
-      /^(workspace|tool|step):/.test(type) ||
+      /^(tool|step):/.test(type) ||
       ['agent:thinking', 'file:validated', 'permission:denied', 'ticket:updated'].includes(type),
   );
   expect(absent).toEqual([]);
-  expect(types.size).toBe(26);
+  expect(types.size).toBe(30);
   const header = JSON.parse(text('run.json'));
   expect(Object.keys(header)).toEqual([
     'schema',
@@ -121,6 +121,7 @@ test
     'stages',
     'budget',
     'startedAt',
+    'workspace',
   ]);
   expect(Object.keys(header.stages)).toEqual(['describe', 'implement', 'open', 'self-review', 'spec', 'tests']);
 });
@@ -167,16 +168,18 @@ test('the golden run records its claim: run.json holds it, the stream reports it
   expect([header.source.forced, header.claim]).toEqual([[], { claimed: true, state: inProgress }]);
 
   const events = lines('events.ndjson');
-  expect(events.slice(0, 4).map((event) => event.type)).toEqual([
+  expect(events.slice(0, 6).map((event) => event.type)).toEqual([
     'run:start',
+    'workspace:leased',
     'ticket:claimed',
     'ticket:commented',
+    'workspace:created',
     'intake:start',
   ]);
   const envelope = (seq: number, ts: string, type: string) => ({ seq, ts, type, runId: RUN_ID, ticketKey: 'FAKE-1' });
-  expect(events.slice(1, 3)).toEqual([
-    { ...envelope(2, '2026-09-25T09:00:00.500Z', 'ticket:claimed'), state: inProgress },
-    { ...envelope(3, '2026-09-25T09:00:00.600Z', 'ticket:commented'), body: comment },
+  expect(events.slice(2, 4)).toEqual([
+    { ...envelope(3, '2026-09-25T09:00:00.900Z', 'ticket:claimed'), state: inProgress },
+    { ...envelope(4, '2026-09-25T09:00:01.000Z', 'ticket:commented'), body: comment },
   ]);
   expect(events[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] } });
 
