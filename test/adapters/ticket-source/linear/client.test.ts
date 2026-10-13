@@ -1,0 +1,182 @@
+// The Linear GraphQL client (TASK-002): every failure maps to a PortError that keeps the provider's message and never
+// carries the key or the request body, and the key goes out as the raw Authorization header.
+import { expect, test } from 'bun:test';
+import { createLinearClient } from '../../../../src/adapters/ticket-source/linear/client';
+import { createLinearWorld, type Injected } from '../../../helpers/linear-world';
+import { messageOf, portFailure, rejection } from '../../../helpers/ports';
+
+const KEY = 'lin_api_SENTINEL-key-7f3a9c';
+const MARKER = 'REQUEST-BODY-MARKER';
+const DOCUMENT = `query FetchIssue($team: String!, $number: Float!, $marker: String) {
+  issues(filter: { team: { key: { eq: $team } }, number: { eq: $number } }) { nodes { id identifier } }
+}`;
+const VARIABLES = { team: 'ADW', number: 95, marker: MARKER };
+
+/** A client over a fresh world, with `injected` answering the next FetchIssue. */
+function failing(injected: Injected) {
+  const world = createLinearWorld();
+  world.injectFailure(injected, 'FetchIssue');
+  const client = createLinearClient({ apiKey: KEY, fetch: world.transport });
+  return { world, client };
+}
+
+const request = (client: ReturnType<typeof createLinearClient>) => client.request('FetchIssue', DOCUMENT, VARIABLES);
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('a 401 is unauthorized, and keeps the provider message', async () => {
+    const { client } = failing({ status: 401, body: { errors: [{ message: 'Authentication required, not logged in' }] } });
+    const error = await rejection(request(client));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'unauthorized' });
+    expect(messageOf(error)).toContain('Authentication required, not logged in');
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('a 403 is forbidden, and keeps the provider message', async () => {
+    const { client } = failing({ status: 403, body: { errors: [{ message: 'Forbidden for team ADW' }] } });
+    const error = await rejection(request(client));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'forbidden' });
+    expect(messageOf(error)).toContain('Forbidden for team ADW');
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('a 429 is unavailable, with a rate-limit message', async () => {
+    const { client } = failing({ status: 429, body: { errors: [{ message: 'Rate limit exceeded' }] } });
+    const error = await rejection(request(client));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'unavailable' });
+    expect(messageOf(error)).toMatch(/rate limit/i);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  .each([500, 502, 503])('any other 5xx is unavailable: HTTP %i', async (status) => {
+    const { client } = failing({ status, body: { errors: [{ message: 'Service is down' }] } });
+    const error = await rejection(request(client));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'unavailable' });
+    expect(messageOf(error)).toContain('Service is down');
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  .each([
+    ['a network failure', new TypeError('fetch failed')],
+    ['a timeout', new DOMException('The operation timed out.', 'TimeoutError')],
+  ])('%s is unavailable', async (_, reason) => {
+    const { client } = failing({ reject: reason });
+    const error = await rejection(request(client));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'unavailable' });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  .each([
+    ['AUTHENTICATION_ERROR', 'unauthorized'],
+    ['FORBIDDEN', 'forbidden'],
+    ['RATELIMITED', 'unavailable'],
+    ['SOMETHING_NEW', 'invalid'],
+  ])('a GraphQL error coded %s is %s, and keeps its message', async (code, expected) => {
+    const { client } = failing({ errors: [{ message: `Linear says ${code}`, code }] });
+    const error = await rejection(request(client));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: expected });
+    expect(messageOf(error)).toContain(`Linear says ${code}`);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('an HTTP 200 with no data is invalid', async () => {
+    const { client } = failing({ status: 200, body: {} });
+    expect(portFailure(await rejection(request(client)))).toEqual({
+      port: 'ticketSource',
+      op: 'FetchIssue',
+      code: 'invalid',
+    });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('every PortError names the port and the operation, and carries no request body', async () => {
+    const { client } = failing({ errors: [{ message: 'Nope', code: 'SOMETHING_NEW' }] });
+    const error = await rejection(request(client));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'FetchIssue', code: 'invalid' });
+    const carried = JSON.stringify({ message: messageOf(error), raw: (error as { raw?: unknown }).raw ?? null });
+    expect([carried.includes(MARKER), carried.includes('issues(filter')]).toEqual([false, false]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('the API key appears in no error message and in no error payload, whichever way the call failed', async () => {
+    const answers: Injected[] = [
+      { status: 401, body: { errors: [{ message: 'Authentication required' }] } },
+      { status: 403 },
+      { status: 429 },
+      { status: 500 },
+      { reject: new TypeError('fetch failed') },
+      { errors: [{ message: 'Bad credentials', code: 'AUTHENTICATION_ERROR' }] },
+      { status: 200, body: {} },
+    ];
+    const seen: string[] = [];
+    const codes: string[] = [];
+    for (const answer of answers) {
+      const { client } = failing(answer);
+      const error = await rejection(request(client));
+      const code = portFailure(error);
+      codes.push(typeof code === 'string' ? code : code.code);
+      seen.push(messageOf(error), JSON.stringify((error as { raw?: unknown }).raw ?? null), String(error));
+    }
+    expect(codes).toEqual(['unauthorized', 'forbidden', 'unavailable', 'unavailable', 'unavailable', 'unauthorized', 'invalid']);
+    expect(seen.filter((text) => text.includes(KEY))).toEqual([]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('the Authorization header is the key exactly, with no Bearer prefix, and the body is JSON', async () => {
+    const world = createLinearWorld({ issues: [{ identifier: 'ADW-95', title: 'Ticket', state: 'Todo' }] });
+    await createLinearClient({ apiKey: KEY, fetch: world.transport }).request('FetchIssue', DOCUMENT, VARIABLES);
+    const [sent] = world.requests;
+    expect([sent?.headers.authorization, sent?.headers['content-type']]).toEqual([KEY, 'application/json']);
+    expect(sent?.url).toBe('https://api.linear.app/graphql');
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('a successful answer resolves with its data, and the request carries the operation and its variables', async () => {
+    const world = createLinearWorld({ issues: [{ identifier: 'ADW-95', title: 'Ticket', state: 'Todo' }] });
+    const data = (await createLinearClient({ apiKey: KEY, fetch: world.transport }).request(
+      'FetchIssue',
+      DOCUMENT,
+      { team: 'ADW', number: 95 },
+    )) as { issues: { nodes: { identifier: string }[] } };
+    expect(data).toMatchObject({ issues: { nodes: [{ identifier: 'ADW-95' }] } });
+    expect(world.requests.map((sent) => [sent.operation, sent.variables])).toEqual([
+      ['FetchIssue', { team: 'ADW', number: 95 }],
+    ]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('without an injected fetch, the client calls globalThis.fetch as it is at each call', async () => {
+    const world = createLinearWorld({ issues: [{ identifier: 'ADW-95', title: 'Ticket', state: 'Todo' }] });
+    const client = createLinearClient({ apiKey: KEY });
+    const original = globalThis.fetch;
+    globalThis.fetch = world.transport;
+    try {
+      await client.request('FetchIssue', DOCUMENT, { team: 'ADW', number: 95 });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(world.requests.map((sent) => sent.operation)).toEqual(['FetchIssue']);
+  });

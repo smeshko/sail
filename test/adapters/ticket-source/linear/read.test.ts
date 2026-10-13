@@ -1,0 +1,216 @@
+// Reading one Linear ticket (TASK-003): parseKey, get and isDesignated, with the state mapping and the team check.
+import { expect, test } from 'bun:test';
+import { createLinearTicketSource } from '../../../../src/adapters/ticket-source/linear/index';
+import { FETCH_ISSUE, FETCH_MORE_COMMENTS } from '../../../../src/adapters/ticket-source/linear/queries';
+import { Ticket } from '../../../../src/ports/types';
+import { ADW_STATES, createLinearWorld, type WorldIssue, type WorldState } from '../../../helpers/linear-world';
+import { captureEvents, messageOf, parseIssues, portFailure, rejection, timed } from '../../../helpers/ports';
+
+const KEY = 'lin_api_SENTINEL-read-key';
+const URL_BASE = 'https://linear.app/sail-fixture/issue';
+
+/** The adapter for the ADW team over `world`, and what it emits. */
+function adapterOver(world: ReturnType<typeof createLinearWorld>) {
+  const capture = captureEvents();
+  const adapter = createLinearTicketSource({
+    apiKey: KEY,
+    team: 'ADW',
+    fetch: world.transport,
+    emit: capture.emit,
+  });
+  return { adapter, capture };
+}
+
+const issue = (identifier: string, state: string, extra: Partial<WorldIssue> = {}): WorldIssue => ({
+  identifier,
+  title: `Ticket ${identifier}`,
+  state,
+  labels: ['sail'],
+  ...extra,
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('parseKey gives the key of this team, from a bare key or its issue URL, and nothing for another team or a bad key', () => {
+    const { adapter } = adapterOver(createLinearWorld());
+    const refs = [
+      'ADW-95',
+      `${URL_BASE}/ADW-95/add-a-shout-flag`,
+      'OPS-1',
+      'not a key',
+      'adw-95',
+    ];
+    expect(refs.map((ref) => adapter.parseKey(ref))).toEqual(['ADW-95', 'ADW-95', undefined, undefined, undefined]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('get gives the ticket with the GraphQL node as raw, and emits one ticket:fetched that names it', async () => {
+    const world = createLinearWorld({
+      issues: [issue('ADW-1', 'Todo', { title: 'Add a --shout flag', description: 'Add it.', comments: [{ body: 'Upper-case it.' }] })],
+    });
+    const { adapter, capture } = adapterOver(world);
+    const ticket = await adapter.get('ADW-1');
+    expect(parseIssues(Ticket, ticket)).toEqual([]);
+    expect({
+      ticketKey: ticket.ticketKey,
+      title: ticket.title,
+      url: ticket.url,
+      description: ticket.description,
+      state: ticket.state,
+      labels: ticket.labels,
+      comments: ticket.comments,
+    }).toEqual({
+      ticketKey: 'ADW-1',
+      title: 'Add a --shout flag',
+      url: `${URL_BASE}/ADW-1`,
+      description: 'Add it.',
+      state: { type: 'unstarted', name: 'Todo' },
+      labels: ['sail'],
+      comments: [{ author: 'fixture-user', body: 'Upper-case it.', createdAt: '2026-10-02T09:00:00.000Z' }],
+    });
+    expect(ticket.raw).toMatchObject({ identifier: 'ADW-1', title: 'Add a --shout flag', state: { name: 'Todo' } });
+    expect(timed(capture.events)).toEqual([
+      {
+        type: 'ticket:fetched',
+        ticketKey: 'ADW-1',
+        title: 'Add a --shout flag',
+        url: `${URL_BASE}/ADW-1`,
+        comments: 1,
+        links: 0,
+        attachments: 0,
+        durationMs: 'ms',
+      },
+    ]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a null description reads as empty, and a comment with no user reads as by unknown', async () => {
+    const world = createLinearWorld({
+      issues: [issue('ADW-2', 'Todo', { description: null, comments: [{ body: 'Anonymous.', author: null }] })],
+    });
+    const { adapter } = adapterOver(world);
+    const ticket = await adapter.get('ADW-2');
+    expect({ description: ticket.description, comments: ticket.comments.map((c) => [c.author, c.body]) }).toEqual({
+      description: '',
+      comments: [['unknown', 'Anonymous.']],
+    });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('relations read as links titled by identifier and title, and attachments as their name and URL', async () => {
+    const world = createLinearWorld({
+      issues: [
+        issue('ADW-3', 'Todo', {
+          relations: [{ type: 'related', identifier: 'ADW-7', title: 'Shout the output' }],
+          attachments: [{ title: 'spec.pdf', url: 'https://files.example/spec.pdf' }],
+        }),
+      ],
+    });
+    const { adapter } = adapterOver(world);
+    const ticket = await adapter.get('ADW-3');
+    expect({ links: ticket.links, attachments: ticket.attachments }).toEqual({
+      links: [{ url: `${URL_BASE}/ADW-7`, title: 'ADW-7 Shout the output' }],
+      attachments: [{ name: 'spec.pdf', url: 'https://files.example/spec.pdf' }],
+    });
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a ticket with more comments than one page is read in full, through FetchMoreComments', async () => {
+    const bodies = ['one', 'two', 'three', 'four', 'five'];
+    const world = createLinearWorld({
+      pageSize: 2,
+      issues: [issue('ADW-4', 'Todo', { comments: bodies.map((body) => ({ body })) })],
+    });
+    const { adapter } = adapterOver(world);
+    const ticket = await adapter.get('ADW-4');
+    expect(ticket.comments.map((comment) => comment.body)).toEqual(bodies);
+    expect(world.requests.map((sent) => sent.operation)).toContain('FetchMoreComments');
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('an unknown key is not_found, naming the key, and emits nothing', async () => {
+    const { adapter, capture } = adapterOver(createLinearWorld());
+    const error = await rejection(adapter.get('ADW-99'));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'get', code: 'not_found' });
+    expect(messageOf(error)).toContain('no ticket ADW-99');
+    expect(capture.events).toEqual([]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a ticket in triage is refused by get as invalid, naming the triage type, and emits nothing', async () => {
+    const states: WorldState[] = [...ADW_STATES, { id: 'state-triage', name: 'Triage', type: 'triage', position: 7 }];
+    const world = createLinearWorld({ states, issues: [issue('ADW-5', 'Triage')] });
+    const { adapter, capture } = adapterOver(world);
+    const error = await rejection(adapter.get('ADW-5'));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'get', code: 'invalid' });
+    expect(messageOf(error)).toContain('triage');
+    expect(capture.events).toEqual([]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('Linear state types fold onto sail states: backlog and unstarted are unstarted, duplicate is canceled, and the name stays', async () => {
+    const world = createLinearWorld({
+      issues: [
+        issue('ADW-1', 'Backlog'),
+        issue('ADW-2', 'Todo'),
+        issue('ADW-3', 'In Progress'),
+        issue('ADW-4', 'Done'),
+        issue('ADW-5', 'Canceled'),
+        issue('ADW-6', 'Duplicate'),
+      ],
+    });
+    const { adapter } = adapterOver(world);
+    const states = [];
+    for (const key of ['ADW-1', 'ADW-2', 'ADW-3', 'ADW-4', 'ADW-5', 'ADW-6']) {
+      states.push((await adapter.get(key)).state);
+    }
+    expect(states).toEqual([
+      { type: 'unstarted', name: 'Backlog' },
+      { type: 'unstarted', name: 'Todo' },
+      { type: 'started', name: 'In Progress' },
+      { type: 'completed', name: 'Done' },
+      { type: 'canceled', name: 'Canceled' },
+      { type: 'canceled', name: 'Duplicate' },
+    ]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('isDesignated holds for the label it is given, and only for it', async () => {
+    const world = createLinearWorld({
+      issues: [issue('ADW-1', 'Todo', { labels: ['sail'] }), issue('ADW-3', 'Todo', { labels: [] })],
+    });
+    const { adapter } = adapterOver(world);
+    const designated = await adapter.get('ADW-1');
+    const undesignated = await adapter.get('ADW-3');
+    expect([
+      adapter.isDesignated(designated, 'sail'),
+      adapter.isDesignated(undesignated, 'sail'),
+      adapter.isDesignated(designated, 'other'),
+    ]).toEqual([true, false, false]);
+  });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('the read documents are named for their operations, and neither asks for an e-mail address', () => {
+    expect(FETCH_ISSUE).toContain('query FetchIssue');
+    expect(FETCH_MORE_COMMENTS).toContain('query FetchMoreComments');
+    expect(/email/i.test(`${FETCH_ISSUE}\n${FETCH_MORE_COMMENTS}`)).toBe(false);
+  });
