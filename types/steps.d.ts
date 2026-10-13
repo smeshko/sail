@@ -15,6 +15,10 @@ export interface Permissions {
     readonly commands: readonly string[];
     /** The hosts the step may reach, or `'none'`. */
     readonly network?: 'none' | readonly string[];
+    /** Native tools the step may use, by name, such as `Read`. Absent means none. Matched exactly. */
+    readonly tools?: readonly string[];
+    /** MCP calls the step may make, each as `server:tool`, such as `linear:get_issue`. Absent means none. Matched exactly. */
+    readonly mcp?: readonly string[];
 }
 /** The most one step may spend. Going over ends the step in `error`. */
 export interface Budget {
