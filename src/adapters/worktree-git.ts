@@ -58,8 +58,9 @@ export async function diffFrom(git: GitRunner, path: string, from: string): Prom
   for (const file of listed.stdout.split('\0')) {
     if (file !== '') created.push(await git(path, ['diff', '--no-index', '--binary', '--', '/dev/null', file]));
   }
-  // Exit 1 is git's answer that the two files differ, and it says so on no stderr: any stderr is an entry it could not read.
-  const failed = created.find((result) => result.code !== 1 || result.stderr !== '');
+  // Exit 1 is git's answer that the two files differ. An `error:` or `fatal:` line on stderr says an entry could not be
+  // read; a warning (a line-ending notice, say) comes with a valid patch and does not fail the diff.
+  const failed = created.find((result) => result.code !== 1 || /^(error|fatal):/m.test(result.stderr));
   if (listed.code !== 0 || failed !== undefined) {
     throw new PortError('workspace', 'diff', 'unavailable', `${path}: ${(failed ?? listed).stderr}`);
   }
