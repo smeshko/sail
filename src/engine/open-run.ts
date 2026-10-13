@@ -58,6 +58,8 @@ export interface OpenedRun {
   sailDir: string;
   /** The absolute workspace the run's calls run in: its worktree, or the clone for a run that has none. */
   workspace: string;
+  /** The branch lease the run holds, by the remote key it is kept under: released when the run ends unless it suspends. */
+  lease: { remote: string; branch: string };
   /** The adapters the run was opened with, one per port. */
   adapters: PortAdapters;
   /** Where those adapters emit: the runtime attaches the run's stream to it. */
@@ -313,6 +315,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     header: recorded,
     sailDir: found.dir,
     workspace: worktree.path,
+    lease: { remote: keyed.remote, branch },
     adapters: options.adapters.ports,
     relay: options.adapters.relay,
     config,
@@ -385,6 +388,8 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in loaded) return loaded;
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
+  const keyed = await remoteKeyFor(options.adapters.ports.workspace, dirname(found.dir));
+  if ('refused' in keyed) return keyed;
   // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
   const firstSeq = nextSeq(run.dir);
   if (typeof firstSeq !== 'number') return firstSeq;
@@ -396,6 +401,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     header: run.header,
     sailDir: found.dir,
     workspace: run.header.workspace === undefined ? dirname(found.dir) : join(dirname(found.dir), run.header.workspace),
+    lease: { remote: keyed.remote, branch: `sail/${run.header.source.ticketKey}` },
     adapters: options.adapters.ports,
     relay: options.adapters.relay,
     config: found.config,

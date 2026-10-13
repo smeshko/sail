@@ -37,6 +37,7 @@ import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
+import type { RunRef } from '../ports/workspace';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
@@ -210,8 +211,16 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   };
   const detach = opened.relay.attach(relayed);
 
-  /** Records how the run ended in STATUS, then reports it. */
-  const finish = (end: RunEnd): RunEnd => {
+  const run: RunRef = { runId, runDir: dir };
+  const workspace = opened.adapters.workspace;
+  /**
+   * Releases the run's worktree and lease, then records how the run ended in STATUS and reports it. A suspended run keeps
+   * both, so a resume finds them. A release that throws reaches the crash path, with STATUS left as it was.
+   */
+  const finish = async (end: RunEnd): Promise<RunEnd> => {
+    const keep = end.status === 'suspended';
+    await workspace.release(run, keep);
+    if (!keep) await workspace.releaseLease(opened.lease.remote, opened.lease.branch, runId);
     writeStatus(dir, end.status, end.stopReason);
     const { status, stopReason, message } = end;
     ended = true;
@@ -225,11 +234,11 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     });
     return end;
   };
-  const failed = (stopReason: StopReason, message: string): RunEnd =>
+  const failed = (stopReason: StopReason, message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'failed', stopReason, message });
-  const suspended = (stopReason: 'interrupted' | 'until', message: string): RunEnd =>
+  const suspended = (stopReason: 'interrupted' | 'until', message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'suspended', stopReason, message });
-  const interrupted = (message: string): RunEnd => suspended('interrupted', message);
+  const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
   let reached = false;
@@ -254,9 +263,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const body = intakeBody(loaded.intake);
       if (body === undefined) {
         const name = loaded.intake.definition.name;
-        return failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
+        return await failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
       }
-      if (signal?.aborted) return interrupted(`stopped before ${INTAKE_KEY}`);
+      if (signal?.aborted) return await interrupted(`stopped before ${INTAKE_KEY}`);
       running = INTAKE_KEY;
       const { result, paths } = await runIntake({
         runDir: dir,
@@ -270,7 +279,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         emit: bus.emit,
         clock,
       });
-      if (signal?.aborted) return interrupted(`stopped during ${INTAKE_KEY}`);
+      if (signal?.aborted) return await interrupted(`stopped during ${INTAKE_KEY}`);
       intake = appendJournal(dir, entryFrom(dir, result, paths), clock());
       bus.emit({ type: 'journal:append', key: intake.key, line: intake.seq, outcome: intake.outcome });
       running = undefined;
@@ -278,12 +287,12 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     } else if (intake.key !== INTAKE_KEY) {
       const { ticketKey } = header.source;
       const message = `the journal of a run from ticket ${ticketKey} starts with '${intake.key}', not '${INTAKE_KEY}'`;
-      return failed('determinism_violation', message);
+      return await failed('determinism_violation', message);
     }
     // Checked on every start, not only when the intake just ran: a crash between the journal line and STATUS must
     // not replay a workflow that has no input.
     if (intake.outcome !== 'passed') {
-      return failed('stage_error', `${INTAKE_KEY} ended in ${intake.outcome}: ${intake.reason ?? ''}`);
+      return await failed('stage_error', `${INTAKE_KEY} ended in ${intake.outcome}: ${intake.reason ?? ''}`);
     }
     while (true) {
       replays++;
@@ -304,18 +313,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         emit: replayEmit,
       });
       const end = await unlessAborted(replaying, signal);
-      if (end === undefined) return interrupted('stopped during the replay');
-      if (end.kind === 'completed') return finish({ runId, dir, status: 'completed', result: end.result });
-      if (end.kind === 'failed') return failed(end.stopReason, end.message);
+      if (end === undefined) return await interrupted('stopped during the replay');
+      if (end.kind === 'completed') return await finish({ runId, dir, status: 'completed', result: end.result });
+      if (end.kind === 'failed') return await failed(end.stopReason, end.message);
 
       const { call } = end;
       // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it.
-      if (reached) return suspended('until', `stopped after ${last}, as --until asked`);
+      if (reached) return await suspended('until', `stopped after ${last}, as --until asked`);
       running = call.key;
       const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
       const problems = callProblems(call.definition, call.supplied, agent);
-      if (problems.length > 0) return failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
-      if (signal?.aborted) return interrupted(`stopped before ${call.key}`);
+      if (problems.length > 0) return await failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
+      if (signal?.aborted) return await interrupted(`stopped before ${call.key}`);
       const { result, paths } = await runCall({
         runDir: dir,
         runId,
@@ -332,7 +341,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         emit: bus.emit,
         clock,
       });
-      if (signal?.aborted) return interrupted(`stopped during ${call.key}`);
+      if (signal?.aborted) return await interrupted(`stopped during ${call.key}`);
       const journaled = appendJournal(dir, entryFrom(dir, result, paths), clock());
       bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
       running = undefined;

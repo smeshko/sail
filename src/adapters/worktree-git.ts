@@ -1,6 +1,6 @@
 // The git plumbing the fake and the git-worktree workspaces share, so the two cannot drift apart: a run's diff against
 // its base, the worktree removal with its fallbacks, and whether a run has ended (ADR-0018, D6, D8).
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { readStatus } from '../engine/run-dir';
 import { PortError } from '../ports/errors';
@@ -69,7 +69,12 @@ export async function diffFrom(git: GitRunner, path: string, from: string): Prom
 export async function removeWorktree(git: GitRunner, repo: string, op: string, path: string): Promise<GitResult> {
   const removed = await git(repo, ['worktree', 'remove', '--force', resolve(path)]);
   await git(repo, ['worktree', 'prune']);
-  if (removed.code !== 0 && existsSync(path)) throw new PortError('workspace', op, 'unavailable', removed.stderr);
+  if (removed.code === 0 || !existsSync(path)) return removed;
+  // A run copied from another clone keeps a worktree this repository has no record of: the directory is still the run's.
+  if (!removed.stderr.includes('is not a working tree')) {
+    throw new PortError('workspace', op, 'unavailable', removed.stderr);
+  }
+  rmSync(path, { recursive: true, force: true });
   return removed;
 }
 

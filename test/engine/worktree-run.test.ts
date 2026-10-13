@@ -70,58 +70,49 @@ test("every call of a run runs in the run's worktree: the stub's log is written 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a completed run removes its worktree and releases its lease, both before run:end', async () => {
-    await withStub({}, async (repo) => {
-      const end = await runIn(repo);
-      expect({
-        status: end.status,
-        worktreeGone: !existsSync(join(end.dir, 'workspace')),
-        ...endOf(end.dir),
-      }).toEqual({
-        status: 'completed',
-        worktreeGone: true,
-        kept: false,
-        releasedBeforeEnd: true,
-        leaseReleasedBeforeEnd: true,
-      });
+test('a completed run removes its worktree and releases its lease, both before run:end', async () => {
+  await withStub({}, async (repo) => {
+    const end = await runIn(repo);
+    expect({
+      status: end.status,
+      worktreeGone: !existsSync(join(end.dir, 'workspace')),
+      ...endOf(end.dir),
+    }).toEqual({
+      status: 'completed',
+      worktreeGone: true,
+      kept: false,
+      releasedBeforeEnd: true,
+      leaseReleasedBeforeEnd: true,
     });
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a failed run removes its worktree and releases its lease, both before run:end', async () => {
-    await withStub({ testsPassAt: 99 }, async (repo) => {
-      const end = await runIn(repo);
-      expect({
-        status: end.status,
-        worktreeGone: !existsSync(join(end.dir, 'workspace')),
-        ...endOf(end.dir),
-      }).toEqual({
-        status: 'failed',
-        worktreeGone: true,
-        kept: false,
-        releasedBeforeEnd: true,
-        leaseReleasedBeforeEnd: true,
-      });
+test('a failed run removes its worktree and releases its lease, both before run:end', async () => {
+  await withStub({ testsPassAt: 99 }, async (repo) => {
+    const end = await runIn(repo);
+    expect({
+      status: end.status,
+      worktreeGone: !existsSync(join(end.dir, 'workspace')),
+      ...endOf(end.dir),
+    }).toEqual({
+      status: 'failed',
+      worktreeGone: true,
+      kept: false,
+      releasedBeforeEnd: true,
+      leaseReleasedBeforeEnd: true,
     });
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a suspended run keeps its worktree and its lease, and its workspace:released says kept', async () => {
-    await withStub({}, async (repo) => {
-      const end = await runIn(repo, { until: 'tests' });
-      const lease = readLease(join(repo.home, '.sail', 'leases'), 'fake', 'sail/FAKE-1');
-      expect({
-        status: end.status,
-        worktreeKept: existsSync(join(end.dir, 'workspace')),
-        kept: endOf(end.dir).kept,
-        leasedBy: lease?.runId,
-      }).toEqual({ status: 'suspended', worktreeKept: true, kept: true, leasedBy: end.runId });
-    });
+test('a suspended run keeps its worktree and its lease, and its workspace:released says kept', async () => {
+  await withStub({}, async (repo) => {
+    const end = await runIn(repo, { until: 'tests' });
+    const lease = readLease(join(repo.home, '.sail', 'leases'), 'fake', 'sail/FAKE-1');
+    expect({
+      status: end.status,
+      worktreeKept: existsSync(join(end.dir, 'workspace')),
+      kept: endOf(end.dir).kept,
+      leasedBy: lease?.runId,
+    }).toEqual({ status: 'suspended', worktreeKept: true, kept: true, leasedBy: end.runId });
   });
+});
