@@ -5,9 +5,13 @@ import type { AdapterOptions, Env } from '../../ports/adapter';
 /** The cloud providers a session can run on, by the flag that selects each. */
 const CLOUD_FLAGS = { CLAUDE_CODE_USE_BEDROCK: 'bedrock', CLAUDE_CODE_USE_VERTEX: 'vertex' } as const;
 
+/** The values the SDK reads as on, after trimming and lower-casing. Any other value, 0 and false included, is off. */
+const ON_VALUES = ['1', 'true', 'yes', 'on'];
+
 /** The cloud provider the environment selects, or nothing for the direct API. Its cost is an estimate in session.log. */
 export function cloudProviderOf(env: Env): 'bedrock' | 'vertex' | undefined {
-  const selected = Object.entries(CLOUD_FLAGS).find(([name]) => (env[name] ?? '') !== '');
+  const isOn = (name: string) => ON_VALUES.includes((env[name] ?? '').trim().toLowerCase());
+  const selected = Object.entries(CLOUD_FLAGS).find(([name]) => isOn(name));
   return selected?.[1];
 }
 
