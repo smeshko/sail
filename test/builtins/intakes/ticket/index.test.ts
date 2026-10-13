@@ -272,7 +272,7 @@ test("on the fixture's FAKE-1, once it is claimed and commented on as the golden
   const ticketSource = createFakeTicketSource({
     seed: join(dir, 'tickets.json'),
     state: join(dir, 'state.json'),
-    now: () => new Date('2026-09-25T09:00:00.300Z'),
+    now: () => new Date('2026-09-25T09:00:00.400Z'),
   });
   await ticketSource.claim('FAKE-1');
   await ticketSource.comment('FAKE-1', 'sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started');
