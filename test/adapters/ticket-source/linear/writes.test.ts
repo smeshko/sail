@@ -65,6 +65,40 @@ test('a claim whose move Linear reports as successful, with no issue, is a confl
   expect(portFailure(await rejection(adapter.claim('ADW-1')))).toMatchObject({ code: 'conflict' });
 });
 
+// Review fix (review #3.3): a provider's identifier is cleaned before it is quoted in a refusal.
+test('a refusal names the ticket with its control characters removed', async () => {
+  const hostile = 'ADW-1\x1b[2J\rspoofed';
+  const node = {
+    id: 'issue-1',
+    identifier: hostile,
+    title: 'Ticket',
+    description: null,
+    url: 'https://linear.app/sail-fixture/issue/ADW-1',
+    priority: 0,
+    state: { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 1 },
+    labels: { nodes: [{ name: 'sail' }] },
+    assignee: null,
+    comments: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+    relations: { nodes: [] },
+    attachments: { nodes: [] },
+  };
+  // The world answers the team's states; the test answers the ticket read and the refused move.
+  const world = createLinearWorld({ issues: [ISSUE('ADW-1', 'Todo')] });
+  const transport = (async (input: string, init?: RequestInit) => {
+    const sent = JSON.parse(String(init?.body)) as { operationName?: string };
+    if (sent.operationName === 'FetchIssue') {
+      return new Response(JSON.stringify({ data: { issues: { nodes: [node] } } }), { status: 200 });
+    }
+    if (sent.operationName === 'UpdateIssue') {
+      return new Response(JSON.stringify({ data: { issueUpdate: { success: false, issue: null } } }), { status: 200 });
+    }
+    return world.transport(input, init);
+  }) as unknown as typeof fetch;
+  const adapter = createLinearTicketSource({ apiKey: KEY, team: 'ADW', fetch: transport });
+  const message = messageOf(await rejection(adapter.claim('ADW-1')));
+  expect([message.includes('\x1b'), message.includes('\r')]).toEqual([false, false]);
+});
+
 test('a comment Linear reports as posted, with no comment, is a conflict', async () => {
   const world = createLinearWorld({ issues: [ISSUE('ADW-1', 'Todo')] });
   const fetch = silentlyAccepting(world, 'CreateComment', { commentCreate: { success: true } });
