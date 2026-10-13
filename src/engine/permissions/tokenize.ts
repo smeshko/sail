@@ -283,9 +283,16 @@ function doubleQuoted(state: State): void {
   state.pos = i + 1;
 }
 
-/** The index just past the `)` that closes a `$(` whose body starts at `start`. */
-function substitutionEnd(src: string, start: number): number {
-  let depth = 0;
+/** How many substitutions may nest inside one another. Past it the scan refuses, before the call stack runs out. */
+const MAX_NESTING = 64;
+
+/**
+ * The index just past the `)` that closes a `$(` whose body starts at `start`. `depth` counts the substitutions
+ * around it, so a nest deeper than MAX_NESTING is refused as unparseable rather than overflowing the stack.
+ */
+function substitutionEnd(src: string, start: number, depth = 0): number {
+  if (depth > MAX_NESTING) throw new Unparseable('substitutions nested too deeply');
+  let open = 0;
   let i = start;
   while (i < src.length) {
     const c = src.charAt(i);
@@ -294,19 +301,19 @@ function substitutionEnd(src: string, start: number): number {
       if (close < 0) throw new Unparseable('an unclosed single quote');
       i = close + 1;
     } else if (c === '"') {
-      i = doubleQuoteEnd(src, i + 1);
+      i = doubleQuoteEnd(src, i + 1, depth);
     } else if (c === '`') {
       i = backtickEnd(src, i + 1);
     } else if (c === '\\') {
       i += 2;
     } else if (c === '$' && src.charAt(i + 1) === '(') {
-      i = substitutionEnd(src, i + 2);
+      i = substitutionEnd(src, i + 2, depth + 1);
     } else if (c === '(') {
-      depth += 1;
+      open += 1;
       i += 1;
     } else if (c === ')') {
-      if (depth === 0) return i + 1;
-      depth -= 1;
+      if (open === 0) return i + 1;
+      open -= 1;
       i += 1;
     } else {
       i += 1;
@@ -316,13 +323,13 @@ function substitutionEnd(src: string, start: number): number {
 }
 
 /** The index just past the quote that closes a double-quoted run whose body starts at `start`. */
-function doubleQuoteEnd(src: string, start: number): number {
+function doubleQuoteEnd(src: string, start: number, depth: number): number {
   let i = start;
   while (i < src.length) {
     const c = src.charAt(i);
     if (c === '"') return i + 1;
     if (c === '\\') i += 2;
-    else if (c === '$' && src.charAt(i + 1) === '(') i = substitutionEnd(src, i + 2);
+    else if (c === '$' && src.charAt(i + 1) === '(') i = substitutionEnd(src, i + 2, depth + 1);
     else if (c === '`') i = backtickEnd(src, i + 1);
     else i += 1;
   }
