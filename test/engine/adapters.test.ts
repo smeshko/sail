@@ -672,33 +672,25 @@ test('resolving a subset of the ports gives a relay too, which the adapters reso
 
 // TASK-006: the claude-code built-in
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('harness: claude-code resolves to the built-in claude-code harness, which records the SDK version it pins', async () => {
+test('harness: claude-code resolves to the built-in claude-code harness, which records the SDK version it pins', async () => {
   const { sailDir } = repo();
   const result = await resolve(sailDir, { harness: { use: 'claude-code' } }, { env: { ANTHROPIC_API_KEY: 'sk-test' } });
-  const seen = 'issues' in result ? { issues: result.issues } : { name: result.ports.harness.name, entry: result.entries.harness };
+  const seen =
+    'issues' in result ? { issues: result.issues } : { name: result.ports.harness.name, entry: result.entries.harness };
   expect(seen).toEqual({
     name: 'claude-code',
     entry: { use: 'claude-code', origin: 'builtin', versions: { 'claude-agent-sdk': '0.3.282' } },
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('harness: claude-code with no ANTHROPIC_API_KEY is an issue at /adapters/harness, naming the variable', async () => {
+test('harness: claude-code with no ANTHROPIC_API_KEY is an issue at /adapters/harness, naming the variable', async () => {
   const { sailDir } = repo();
   expect(await resolve(sailDir, { harness: { use: 'claude-code' } }, { env: {} })).toEqual(
     issue('harness', 'needs ANTHROPIC_API_KEY, which is not set'),
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('harness: claude-code with a cloud provider flag set needs no key, and resolves without one', async () => {
+test('harness: claude-code with a cloud provider flag set needs no key, and resolves without one', async () => {
   const { sailDir } = repo();
   const result = await resolve(sailDir, { harness: { use: 'claude-code' } }, { env: { CLAUDE_CODE_USE_VERTEX: '1' } });
   expect('issues' in result ? result.issues : result.ports.harness.name).toBe('claude-code');

@@ -59,10 +59,7 @@ async function runWith(harness: ReturnType<typeof harnessOver>, request: Harness
   return { result, events: capture.events, capture };
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a scripted session that reads a file and submits done gives the done result, its events in order and one session end', async () => {
+test('a scripted session that reads a file and submits done gives the done result, its events in order and one session end', async () => {
   const probe = new Probe();
   const { result, events, capture } = await runWith(
     harnessOver({ 'Write the spec.': { messages: COMPLETE } }, probe),
@@ -111,10 +108,7 @@ test
   expect(result.transcript).toBe(renderTranscript(events));
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('query is called once per run, with the request prompt and the session options the request names', async () => {
+test('query is called once per run, with the request prompt and the session options the request names', async () => {
   const probe = new Probe();
   await runWith(
     harnessOver({ 'Write the spec.': { messages: COMPLETE } }, probe),
@@ -139,15 +133,16 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an abort mid-stream ends the session as aborted, stops pulling messages, closes the stream and emits one session end', async () => {
+test('an abort mid-stream ends the session as aborted, stops pulling messages, closes the stream and emits one session end', async () => {
   const probe = new Probe();
   const controller = new AbortController();
   const events: string[] = [];
   const result = await harnessOver(
-    { 'Write the spec.': { messages: [init(), assistant('msg_a', [text('one')]), assistant('msg_b', [text('two')]), ...COMPLETE.slice(4)] } },
+    {
+      'Write the spec.': {
+        messages: [init(), assistant('msg_a', [text('one')]), assistant('msg_b', [text('two')]), ...COMPLETE.slice(4)],
+      },
+    },
     probe,
   ).run({
     ...requestOf(),
@@ -166,23 +161,20 @@ test
   }).toEqual({ outcome: 'error', message: 'aborted', pulled: 2, closed: 1, ends: 1 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a request whose signal is already aborted gives error aborted, and query is never called', async () => {
+test('a request whose signal is already aborted gives error aborted, and query is never called', async () => {
   const probe = new Probe();
   const result = await harnessOver({ 'Write the spec.': { messages: COMPLETE } }, probe).run({
     ...requestOf(),
     signal: AbortSignal.abort(),
   });
-  expect({ outcome: result.outcome, message: result.outcome === 'error' ? result.message : undefined, calls: probe.calls.length })
-    .toEqual({ outcome: 'error', message: 'aborted', calls: 0 });
+  expect({
+    outcome: result.outcome,
+    message: result.outcome === 'error' ? result.message : undefined,
+    calls: probe.calls.length,
+  }).toEqual({ outcome: 'error', message: 'aborted', calls: 0 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a query that throws before any message gives error harness with its message, error:harness and one session end, and the run resolves', async () => {
+test('a query that throws before any message gives error harness with its message, error:harness and one session end, and the run resolves', async () => {
   const { result, events } = await runWith(
     harnessOver({ 'Write the spec.': { messages: [], throwNow: new Error('spawn claude ENOENT') } }),
     requestOf(),
@@ -200,10 +192,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a stream that throws after the init gives error harness, with the session started and ended once', async () => {
+test('a stream that throws after the init gives error harness, with the session started and ended once', async () => {
   const { result, events } = await runWith(
     harnessOver({ 'Write the spec.': { messages: [init()], failAfter: 1, failWith: new Error('stream reset') } }),
     requestOf(),
@@ -221,10 +210,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a stream that ends with no result gives error harness, and the session still ends once', async () => {
+test('a stream that ends with no result gives error harness, and the session still ends once', async () => {
   const { result, events } = await runWith(
     harnessOver({ 'Write the spec.': { messages: [init(), assistant('msg_a', [text('Thinking.')])] } }),
     requestOf(),
@@ -237,10 +223,7 @@ test
   }).toEqual({ outcome: 'error', reason: 'harness', message: expect.stringMatching(/result/i), ends: 1 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a result error emits error:harness after the session start, and ends the session once with budget_exceeded', async () => {
+test('a result error emits error:harness after the session start, and ends the session once with budget_exceeded', async () => {
   const { result, events } = await runWith(
     harnessOver({ 'Write the spec.': { messages: [init(), failure('error_max_turns')] } }),
     requestOf(),
@@ -256,10 +239,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('run never rejects when onEvent throws, and the error carries what was thrown', async () => {
+test('run never rejects when onEvent throws, and the error carries what was thrown', async () => {
   const harness = harnessOver({ 'Write the spec.': { messages: COMPLETE } });
   const result = await harness.run({
     ...requestOf(),
@@ -273,10 +253,7 @@ test
   }).toEqual({ outcome: 'error', message: expect.stringContaining('listener down') });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a zero dollar budget gives error budget_exceeded naming maxUsd, before query is called, and ends the session once without a start', async () => {
+test('a zero dollar budget gives error budget_exceeded naming maxUsd, before query is called, and ends the session once without a start', async () => {
   const probe = new Probe();
   const { result, events } = await runWith(
     harnessOver({ 'Write the spec.': { messages: COMPLETE } }, probe),
@@ -295,10 +272,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the harness declares structured output, usage, abort and the turn and dollar budgets, with no permissions gate yet', () => {
+test('the harness declares structured output, usage, abort and the turn and dollar budgets, with no permissions gate yet', () => {
   expect(createClaudeCodeHarness().capabilities()).toEqual({
     structuredOutput: true,
     permissions: false,
@@ -308,20 +282,14 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the definition creates a harness named claude-code, and refuses an option it does not know, naming it', async () => {
+test('the definition creates a harness named claude-code, and refuses an option it does not know, naming it', async () => {
   const context = { root: '/work', sailDir: '/work/.sail', runsDir: '/work/.sail-runs', env: {} };
   const harness = await claudeCodeAdapters.create({}, context);
   expect(harness.name).toBe('claude-code');
   expect(() => claudeCodeAdapters.create({ bogus: 1 }, context)).toThrow(/bogus/);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the definition declares the pinned SDK version, which package.json pins exactly', () => {
+test('the definition declares the pinned SDK version, which package.json pins exactly', () => {
   const pinned = JSON.parse(readFileSync(join(import.meta.dir, '../../../package.json'), 'utf8')) as {
     dependencies: Record<string, string>;
   };
@@ -331,10 +299,7 @@ test
   }).toEqual({ versions: { 'claude-agent-sdk': '0.3.282' }, pin: '0.3.282' });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('only sdk.ts imports the Agent SDK among the claude-code modules, and no module there imports the engine permissions', () => {
+test('only sdk.ts imports the Agent SDK among the claude-code modules, and no module there imports the engine permissions', () => {
   const dir = join(import.meta.dir, '../../../src/adapters/claude-code');
   const modules = readdirSync(dir).filter((name) => name.endsWith('.ts'));
   // Any mention of the module by its specifier counts: a static, type-only, side-effect or dynamic import alike.

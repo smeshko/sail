@@ -204,7 +204,9 @@ async function build(
   const parsed = PORT_CAPABILITIES[port].safeParse(capabilities);
   if (!parsed.success) return fail(`${use}'s capabilities() are not ${port} capabilities: ${parsed.error.message}`);
   const permissions = isObject(parsed.data) ? parsed.data.permissions : undefined;
-  if (port === 'harness' && permissions === false && !(use === 'fake' && found.origin === 'builtin')) {
+  // claude-code reports no gate until phase 7.3 adds its PreToolUse hook; until then it resolves, and no workflow names it.
+  const ungated = use === 'fake' || use === 'claude-code';
+  if (port === 'harness' && permissions === false && !(ungated && found.origin === 'builtin')) {
     return fail(`${use} enforces no permissions, which only the built-in fake may`);
   }
   return { adapter };
