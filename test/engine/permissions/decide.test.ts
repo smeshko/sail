@@ -111,6 +111,14 @@ test('an argument built by a substitution is refused, since its output can suppl
     expect(decide(bash("echo '$(printf hi)'"), policy, p.roots)).toEqual({ allow: true });
   }));
 
+test('doas is denied as sudo is: it is the same privilege escalation under another name', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['doas *', 'sudo *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('sudo rm build'), policy, p.roots)).toMatchObject({ deny: true, rule: 'deny:sudo' });
+    expect(decide(bash('doas rm build'), policy, p.roots)).toMatchObject({ deny: true, rule: 'deny:sudo' });
+  }));
+
 test('git configuration, helper paths and shell state the engine cannot check are refused as command:unparseable', () =>
   inRoots((p) => {
     const policy: Permissions = {
