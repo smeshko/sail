@@ -93,7 +93,7 @@ test.each<[string, (dir: string) => void, string]>([
     'one event changed by a millisecond',
     (dir) => {
       const file = join(dir, 'events.ndjson');
-      writeFileSync(file, readFileSync(file, 'utf8').replace('T09:00:00.500Z', 'T09:00:00.501Z'));
+      writeFileSync(file, readFileSync(file, 'utf8').replace('T09:00:00.900Z', 'T09:00:00.901Z'));
     },
     'events.ndjson is stale',
   ],
