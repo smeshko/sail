@@ -73,7 +73,11 @@ test
       ) as { path?: string; kept?: boolean }[];
       expect({ code: resumed.code, released: released.map(({ path, kept }) => ({ path, kept })) }).toEqual({
         code: EXIT_OK,
-        released: [{ path: `.sail-runs/${runId}/workspace`, kept: false }],
+        // The suspension kept the worktree, then the resumed run released it at its end.
+        released: [
+          { path: `.sail-runs/${runId}/workspace`, kept: true },
+          { path: `.sail-runs/${runId}/workspace`, kept: false },
+        ],
       });
     });
   });
