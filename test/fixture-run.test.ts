@@ -282,11 +282,17 @@ test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that 
         resultPath: '02-implement/call-2/try-2/result.json',
       });
       expect(json(copy, '02-implement', 'call-2', 'try-2', 'result.json')).toMatchObject({ outcome: 'done', try: 2 });
+      // The source clone's HEAD, read from git rather than from the fake's event: the commit the run pushes is the source's,
+      // and the copied clone has a HEAD of its own, so a push from the wrong directory would not match.
+      const sourceHead = repo.git('rev-parse', 'HEAD');
+      expect([
+        other.git('rev-parse', 'HEAD') === sourceHead,
+        readEvents(copy).find((event) => event.type === 'codehost:pushed')?.headSha,
+      ]).toEqual([false, sourceHead]);
       expect(fakeState(other.dir, 'prs.json').pullRequests.at(-1)).toMatchObject({
         number: 5,
         state: 'open',
-        // The run committed in its worktree, so the pull request's head is the commit it pushed, not the clone's HEAD.
-        headSha: readEvents(copy).find((event) => event.type === 'codehost:pushed')?.headSha,
+        headSha: sourceHead,
       });
       expect(validateRunDir(copy).issues).toEqual([]);
     });
