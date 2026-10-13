@@ -5,10 +5,16 @@
 //
 // `sail` inside a script is the sail that runs it: `PATH` starts with this package's `bin/`, and `SAIL_BUN` names the
 // running Bun, which `bin/sail` executes. Both name this machine, so neither is recorded.
+//
+// `SAIL_EVENTS` names the step's port events file, `port-events.ndjson` in its call directory, where a `sail port` the
+// script runs leaves its provider events. Once the process has ended, however it ended, the file is read and each event
+// emitted, after `script:exec` and before `script:exit`. A line that is no provider event ends the step in `error`,
+// with the reason `port`. The variable is this kind's, not the preamble's: an agent step gets none.
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { delimiter, join, relative, resolve } from 'node:path';
 import { systemClock } from '../engine/clock';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
+import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
 import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
@@ -137,12 +143,13 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   const emit = context.emit ?? (() => {});
   const command = resolve(context.stageDir, step.run);
   const timeoutSeconds = step.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
-  const variables = preamble(context);
+  const portEvents = join(context.paths.dir, PORT_EVENTS_FILE);
+  const variables = [...preamble(context), { name: 'SAIL_EVENTS', value: portEvents, path: true }];
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
 
-  // Recorded relative to the workspace, and only the preamble: the inherited environment may hold secrets.
+  // Recorded relative to the workspace, and only these variables: the inherited environment may hold secrets.
   const at = (path: string) => relative(context.workspace, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
   const recorded = { command: at(command), env };
@@ -171,15 +178,22 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     ...(context.signal === undefined ? {} : { signal: context.signal }),
   });
   const durationMs = clock().getTime() - startedAt;
+  /** What the port events file holds that is no provider event: each ends the step in `error`, whatever else does. */
+  const unported: ContractError[] = [];
   const ended = (error: ContractError, record: Record<string, unknown>): StepRun => ({
     outcome: 'error',
     output: null,
     files: {},
-    errors: [error],
+    errors: [error, ...unported],
     record,
   });
 
   if (!end.started) return ended({ reason: 'not_started', message: end.message }, recorded);
+
+  // What the script's port commands reported, now that no child can still be writing. The call's emit adds the key.
+  const ported = readPortEvents(portEvents, { runId: context.runId, key: `${context.stage}#${context.call}` });
+  for (const event of ported.events) emit(event);
+  unported.push(...ported.problems.map((message) => ({ reason: 'port' as const, message })));
 
   const map = exitCodeMap(step);
   const mapped: ScriptOutcome | undefined =
@@ -233,7 +247,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   for (const [name, { path, bytes, sha256 }] of Object.entries(produced.files)) {
     emit({ type: 'file:produced', name, path, bytes, sha256 });
   }
-  errors.push(...produced.errors);
+  errors.push(...produced.errors, ...unported);
   return {
     outcome: errors.length > 0 ? 'error' : mapped,
     output: errors.length > 0 || !output.ok ? null : output.data,

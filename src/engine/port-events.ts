@@ -1,16 +1,72 @@
 // The port events file: `port-events.ndjson` in a script step's call directory, where a `sail port` the script runs
-// leaves the provider events its adapter emitted.
+// leaves the provider events its adapter emitted. `SAIL_EVENTS` names it. The child appends one line per event, with no
+// envelope, and the script kind reads the file once the script has ended and emits each event under the step's key.
+//
+// What a line must be is decided here alone: a JSON object whose type is a `ticket:*` or `codehost:*` event, with none
+// of the fields the run stamps, that validates against `sail.event.v1` once enveloped. A script can write the file
+// itself, so nothing else is taken from it. A `workspace:*` event carries no key, and no port command emits one.
+import { appendFileSync, readFileSync } from 'node:fs';
 import type { ProviderEvent } from '../events/types';
+import { validateDocument } from './schemas';
 
 export const PORT_EVENTS_FILE = 'port-events.ndjson';
 
-/** Appends `event` to the file at `path` as one line, in one write. The file's directory must exist. */
-export function appendPortEvent(_path: string, _event: ProviderEvent): void {}
+/** The fields the run stamps on an event: a line that carries one is refused. */
+const STAMPED = ['seq', 'ts', 'runId', 'key'] as const;
 
-/** The provider events the file at `path` holds, in order, and a problem for each whole line that is none. */
+/** Appends `event` to the file at `path` as one line, in one write. The file's directory must exist. */
+export function appendPortEvent(path: string, event: ProviderEvent): void {
+  appendFileSync(path, `${JSON.stringify(event)}\n`);
+}
+
+/** The provider event `line` holds, or why it holds none. */
+function parseLine(line: string, envelope: { runId: string; key: string }): ProviderEvent | string {
+  let data: unknown;
+  try {
+    data = JSON.parse(line);
+  } catch {
+    return 'it is not JSON';
+  }
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return 'it is not a JSON object';
+  const stamped = STAMPED.find((field) => Object.hasOwn(data, field));
+  if (stamped !== undefined) return `it carries ${stamped}, which the run stamps`;
+  const { type } = data as { type?: unknown };
+  if (typeof type !== 'string' || !(type.startsWith('ticket:') || type.startsWith('codehost:'))) {
+    return `its type ${JSON.stringify(type) ?? 'is missing: it'} is no ticket:* or codehost:* event`;
+  }
+  const enveloped = { seq: 1, ts: new Date(0).toISOString(), ...envelope, ...data };
+  const issues = validateDocument('sail.event.v1', enveloped);
+  if (issues.length > 0) return issues.map((issue) => `${issue.path} ${issue.message}`).join('; ');
+  return data as ProviderEvent;
+}
+
+/**
+ * The provider events the file at `path` holds, in order, and a problem for each whole line that is none:
+ * `port-events.ndjson line <n> is not a provider event: <why>`. The valid lines around a bad one are still given. A
+ * last line with no newline is left out: a child was killed while writing it. A file that isn't there holds nothing.
+ */
 export function readPortEvents(
-  _path: string,
-  _envelope: { runId: string; key: string },
+  path: string,
+  envelope: { runId: string; key: string },
 ): { events: ProviderEvent[]; problems: string[] } {
-  return { events: [], problems: [] };
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? (error as Error).message;
+    return { events: [], problems: code === 'ENOENT' ? [] : [`${PORT_EVENTS_FILE} can't be read (${code})`] };
+  }
+  const events: ProviderEvent[] = [];
+  const problems: string[] = [];
+  const lines = text
+    .slice(0, text.lastIndexOf('\n') + 1)
+    .split('\n')
+    .slice(0, -1);
+  lines.forEach((line, index) => {
+    const parsed = parseLine(line, envelope);
+    if (typeof parsed === 'string')
+      problems.push(`${PORT_EVENTS_FILE} line ${index + 1} is not a provider event: ${parsed}`);
+    else events.push(parsed);
+  });
+  return { events, problems };
 }

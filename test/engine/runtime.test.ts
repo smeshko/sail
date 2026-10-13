@@ -1723,10 +1723,7 @@ test("a resume on a clock of its own stamps what it adds with that clock's readi
 
 const SPEC_SCRIPT = 'workflows/ticket-to-pr/stages/spec/run.sh';
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a script step's sail port leaves its provider event in the run's stream under the step's key, between the step's script:exec and script:exit, and in the call directory's port events file", async () => {
+test("a script step's sail port leaves its provider event in the run's stream under the step's key, between the step's script:exec and script:exit, and in the call directory's port events file", async () => {
   const fetches = (sail: string) =>
     edit(sail, SPEC_SCRIPT, "printf '# Spec", "sail port ticket-source get FAKE-1 >/dev/null\nprintf '# Spec");
   await stubRun({}, fetches, (end) => {

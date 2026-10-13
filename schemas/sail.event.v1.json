@@ -640,7 +640,11 @@
       "properties": {
         "command": { "description": "relative to the workspace", "type": "string" },
         "cwd": { "type": "string" },
-        "envKeys": { "description": "the preamble's names, in order", "type": "array", "items": { "type": "string" } }
+        "envKeys": {
+          "description": "the preamble's names, in order, then SAIL_EVENTS",
+          "type": "array",
+          "items": { "type": "string" }
+        }
       },
       "required": ["command", "cwd", "envKeys"],
       "unevaluatedProperties": false

@@ -121,10 +121,7 @@ export const which = script('which', { run: './run.sh', output: z.object({ path:
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a stage run in isolation gets SAIL_EVENTS too: it has no stream, so what the script reports stays in the file', async () => {
+test('a stage run in isolation gets SAIL_EVENTS too: it has no stream, so what the script reports stays in the file', async () => {
   await withTempRepo(async (repo) => {
     const dir = join(fixtureCopy(repo), 'stages', 'reports');
     mkdirSync(dir);

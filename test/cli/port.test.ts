@@ -92,10 +92,7 @@ test("sail port ticket-source get prints the ticket as one line of JSON, the por
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('with SAIL_EVENTS set, a get prints the ticket as before and appends its ticket:fetched to the file, one line per call with no envelope, and without it no file is written', async () => {
+test('with SAIL_EVENTS set, a get prints the ticket as before and appends its ticket:fetched to the file, one line per call with no envelope, and without it no file is written', async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
     const file = join(repo.dir, 'out', 'port-events.ndjson');
@@ -127,10 +124,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a SAIL_EVENTS whose directory doesn't exist exits 3, naming it, before the port is called", async () => {
+test("a SAIL_EVENTS whose directory doesn't exist exits 3, naming it, before the port is called", async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
     const missing = join(repo.dir, 'gone', 'port-events.ndjson');

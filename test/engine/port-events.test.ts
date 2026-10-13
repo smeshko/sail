@@ -26,10 +26,7 @@ const COMMENTED: ProviderEvent = { type: 'ticket:commented', ticketKey: 'FAKE-1'
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 const problem = (at: number, why: string) => `port-events.ndjson line ${at} is not a provider event: ${why}`;
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the file is port-events.ndjson, and each event appended is one line of JSON with no envelope, in the order appended', () => {
+test('the file is port-events.ndjson, and each event appended is one line of JSON with no envelope, in the order appended', () => {
   const path = eventsFile();
   expect(PORT_EVENTS_FILE).toBe('port-events.ndjson');
   appendPortEvent(path, PUSHED);
@@ -40,20 +37,14 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('reading gives back the events appended, ticket and codehost events alike, and a file that is not there holds none', () => {
+test('reading gives back the events appended, ticket and codehost events alike, and a file that is not there holds none', () => {
   const path = eventsFile();
   expect(readPortEvents(path, ENVELOPE)).toEqual({ events: [], problems: [] });
   for (const event of [PUSHED, COMMENTED, LABELLED]) appendPortEvent(path, event);
   expect(readPortEvents(path, ENVELOPE)).toEqual({ events: [PUSHED, COMMENTED, LABELLED], problems: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   ['text that is not JSON', 'pushed sail/FAKE-1\n', 'it is not JSON'],
   ['a blank line', '\n', 'it is not JSON'],
   ['a JSON array', line([PUSHED]), 'it is not a JSON object'],
@@ -104,10 +95,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('every bad line is a problem of its own, numbered by its place in the file', () => {
+test('every bad line is a problem of its own, numbered by its place in the file', () => {
   const path = eventsFile();
   writeFileSync(path, `nope\n${line(PUSHED)}${line({ ...LABELLED, key: 'open#1' })}`);
   expect(readPortEvents(path, ENVELOPE)).toEqual({
@@ -116,10 +104,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a last line with no newline is dropped, whatever it holds: a child was killed while writing it', () => {
+test('a last line with no newline is dropped, whatever it holds: a child was killed while writing it', () => {
   const path = eventsFile();
   const whole = JSON.stringify(LABELLED);
   for (const tail of [whole, whole.slice(0, 20), 'nope']) {
@@ -130,10 +115,7 @@ test
   expect(readPortEvents(path, ENVELOPE)).toEqual({ events: [], problems: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a file that can't be read is one problem, naming why", () => {
+test("a file that can't be read is one problem, naming why", () => {
   const path = eventsFile();
   mkdirSync(path);
   expect(readPortEvents(path, ENVELOPE)).toEqual({

@@ -6,16 +6,22 @@
 //   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
 //
 // A result is one line of JSON on stdout. A failed port call exits 1 with the port's message, and anything refused
-// before a call is made exits 3. It emits no events: no run is attached to the adapters it resolves.
+// before a call is made exits 3.
+//
+// No run is attached to the adapters it resolves, so their provider events go to the port events file: with
+// `SAIL_EVENTS` set, as the script kind sets it for every script step, each event is appended to the file it names,
+// and the engine emits them when the step ends. Without it nothing is emitted.
 //
 // `.sail/` is the directory of `SAIL_CONFIG` when the environment sets it, as the preamble does for every script step,
 // and is found from the working directory otherwise. Only the port asked for is resolved, so no other adapter is
 // loaded or asked for its credentials. `render` is a helper beside the ports: it needs no `.sail/`.
 import { statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
 import { findSailDir } from '../../engine/sail-dir';
 import { notATicket } from '../../engine/source';
+import type { ProviderEmit } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
@@ -63,6 +69,27 @@ function findSail(io: Io): { dir: string } | { refused: string } {
   return { dir: dirname(file) };
 }
 
+/** Whether `path` is a directory. */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where the adapters' provider events go: appended to the file `SAIL_EVENTS` names, or nowhere when it is unset. A
+ * file whose directory doesn't exist is refused, before any port is called: nothing could be appended to it.
+ */
+function portEmit(io: Io): { emit?: ProviderEmit } | { refused: string } {
+  const named = (io.env ?? process.env).SAIL_EVENTS;
+  if (named === undefined || named === '') return {};
+  const file = resolve(io.cwd, named);
+  if (!isDirectory(dirname(file))) return { refused: `SAIL_EVENTS names ${named}, whose directory doesn't exist` };
+  return { emit: (event) => appendPortEvent(file, event) };
+}
+
 /**
  * `sail port render --untrusted --source <text> [--inline]`: stdin, wrapped exactly as the engine wraps a passage. Every
  * refusal comes before stdin is read.
@@ -99,7 +126,9 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
   if (run === undefined) return usage(`unknown operation '${operation}' of ${name}`);
   if (ref === undefined) return usage(`${name} ${operation} needs a ticket`);
 
-  const project = await findProject(io, COMMAND, { found: findSail(io), ports: [entry.port] });
+  const events = portEmit(io);
+  if ('refused' in events) return refuse(events.refused);
+  const project = await findProject(io, COMMAND, { found: findSail(io), ports: [entry.port], ...events });
   if (typeof project === 'number') return project;
   const source = project.adapters.ports[entry.port];
   const ticketKey = source.parseKey(ref);

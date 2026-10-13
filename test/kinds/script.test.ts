@@ -568,10 +568,7 @@ function withTicket(s: Setup): void {
   writeFileSync(join(sail, 'fake', 'tickets.json'), JSON.stringify({ tickets: [TICKET] }));
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded relative to the workspace and listed last in envKeys, and a script that calls no port leaves no file', async () => {
+test('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded relative to the workspace and listed last in envKeys, and a script that calls no port leaves no file', async () => {
   const s = setup();
   s.run(`${JUNIT}\nprintf '%s' "\${SAIL_EVENTS:-unset}" > "$STAGE_OUT/named"\necho '${PASSING}'`);
   const { context, events } = collecting(s);
@@ -591,10 +588,7 @@ test
   expect(typesOf(events)).toEqual(['script:exec', 'script:exit', 'output:validated', 'file:produced']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a script that runs sail port has its provider event emitted between script:exec and script:exit, and the file stays in the call directory, holding what the child wrote', async () => {
+test('a script that runs sail port has its provider event emitted between script:exec and script:exit, and the file stays in the call directory, holding what the child wrote', async () => {
   const s = setup();
   withTicket(s);
   s.run(`sail port ticket-source get FAKE-1 >/dev/null\n${JUNIT}\necho '${PASSING}'`);
@@ -613,10 +607,7 @@ test
   expect(lines.map((line) => (line === '' ? '' : JSON.parse(line)))).toEqual([events[1], '']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, string, number | undefined, string, string[]]>([
+test.each<[string, string, number | undefined, string, string[]]>([
   ['times out', 'sleep 5', 1, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
   [
     'exits with a failing code',
@@ -652,10 +643,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a line of the port events file that is no provider event ends the step in error with the reason port, and the valid lines before and after it are emitted', async () => {
+test('a line of the port events file that is no provider event ends the step in error with the reason port, and the valid lines before and after it are emitted', async () => {
   const s = setup();
   s.run(
     `${reports(PUSHED)}\necho 'opened a pull request' >> "$SAIL_EVENTS"\n${reports(LABELLED)}\n${JUNIT}\necho '${PASSING}'`,
@@ -677,10 +665,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a bad line joins the errors the step already has: a script that timed out, or left a declared file out, has both', async () => {
+test('a bad line joins the errors the step already has: a script that timed out, or left a declared file out, has both', async () => {
   const forged = { type: 'run:end', status: 'completed', replays: 1 };
   const port = {
     reason: 'port' as const,
@@ -700,10 +685,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a last line with no newline is dropped, and the step's outcome is what it would have been", async () => {
+test("a last line with no newline is dropped, and the step's outcome is what it would have been", async () => {
   const s = setup();
   s.run(`${reports(PUSHED)}\nprintf '%s' '${JSON.stringify(LABELLED)}' >> "$SAIL_EVENTS"\n${JUNIT}\necho '${PASSING}'`);
   const { context, events } = collecting(s);
@@ -718,10 +700,7 @@ test
   expect([run.outcome, run.errors]).toEqual(['passed', []]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a script that removes the file after reporting emits nothing for it, and has no error from it', async () => {
+test('a script that removes the file after reporting emits nothing for it, and has no error from it', async () => {
   const s = setup();
   s.run(
     `${reports(PUSHED)}\nif [ -f "\${SAIL_EVENTS:-unset}" ]; then had=true; else had=false; fi\n` +
