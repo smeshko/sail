@@ -5,6 +5,17 @@ import { PortError, type PortErrorCode } from '../../../ports/errors';
 const ENDPOINT = 'https://api.linear.app/graphql';
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/** Terminal escape sequences, which provider text must not carry into an error a person reads. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control characters is the point
+const CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
+
+/** `text` without escape sequences, and with every other control character as a space. */
+function clean(text: string): string {
+  return text.replace(ESCAPES, '').replace(CONTROLS, ' ');
+}
+
 /** Linear's `extensions.code` values that map to a code other than `invalid`. Any other code is `invalid`. */
 const GRAPHQL_CODES: Readonly<Record<string, PortErrorCode>> = {
   AUTHENTICATION_ERROR: 'unauthorized',
@@ -62,10 +73,11 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
     request: async (operation, document, variables) => {
       // Read at each call, so a test (or a caller) may replace globalThis.fetch after the client was made.
       const send = options.fetch ?? ((input: string, init?: RequestInit) => globalThis.fetch(input, init));
-      // Every failure goes through here, and nothing it is given may carry the key.
-      const fail = (code: PortErrorCode, message: string, raw?: unknown): PortError => {
-        const safe = options.apiKey === '' ? message : message.split(options.apiKey).join('[redacted]');
-        return new PortError('ticketSource', operation, code, safe, raw);
+      // Every failure goes through here. Nothing it is given may carry the key or a control character, and the answer's
+      // body is never attached: it may echo the key, and no caller needs it.
+      const fail = (code: PortErrorCode, message: string): PortError => {
+        const redacted = options.apiKey === '' ? message : message.split(options.apiKey).join('[redacted]');
+        return new PortError('ticketSource', operation, code, clean(redacted));
       };
 
       let response: Response;
@@ -81,23 +93,32 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
         throw fail('unavailable', `Linear did not answer: ${text}`);
       }
 
-      const body: unknown = await response.json().catch(() => undefined);
+      // A body that fails to read is the transport's failure, unless it is simply not JSON.
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch (reason) {
+        if (!(reason instanceof SyntaxError)) {
+          const text = reason instanceof Error ? reason.message : 'the body failed';
+          throw fail('unavailable', `Linear did not finish its answer: ${text}`);
+        }
+        body = undefined;
+      }
       const detail = providerMessage(body) ?? `HTTP ${response.status}`;
 
-      const code = statusCode(response.status);
+      // A recognised GraphQL code names the cause even on a 4xx, where Linear reports rate limits and failed auth.
+      const recognised = graphqlCode(body);
+      const coded = recognised === undefined ? undefined : GRAPHQL_CODES[recognised];
+      const code = coded ?? statusCode(response.status);
       if (code !== undefined) {
-        const prefix = response.status === 429 ? 'Linear rate limit reached: ' : '';
-        throw fail(code, `${prefix}${detail}`, body);
+        const rateLimited = response.status === 429 || recognised === 'RATELIMITED';
+        throw fail(code, `${rateLimited ? 'Linear rate limit reached: ' : ''}${detail}`);
       }
 
-      if (providerMessage(body) !== undefined) {
-        const coded = graphqlCode(body);
-        const mapped = coded === undefined ? 'invalid' : (GRAPHQL_CODES[coded] ?? 'invalid');
-        throw fail(mapped, detail, body);
-      }
+      if (providerMessage(body) !== undefined) throw fail('invalid', detail);
 
       const data = (body as { data?: unknown } | undefined)?.data;
-      if (data === undefined || data === null) throw fail('invalid', 'Linear answered with no data', body);
+      if (data === undefined || data === null) throw fail('invalid', 'Linear answered with no data');
       return data;
     },
   };
