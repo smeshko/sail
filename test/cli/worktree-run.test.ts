@@ -47,9 +47,7 @@ async function withOriginRepo(check: (repo: TempRepo, origin: TempRepo) => Promi
 
 // STICKER: each case below is part of ADW-93's TASK-005 to TASK-007. The sticker names the task that makes it pass.
 
-// biome-ignore format: TDD-PENDING TASK-005
 test
-  .skip // TDD-PENDING TASK-005
   ('sail FAKE-1 on a clone with no origin, configured for git-worktree, is refused with exit 3 naming origin, and nothing is written', async () => {
     await withTempRepo(async (repo) => {
       const sail = writeStub(repo.dir);

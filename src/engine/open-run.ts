@@ -20,6 +20,8 @@ import { dirname, join, relative } from 'node:path';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
+import { PortError } from '../ports/errors';
+import type { WorkspacePort } from '../ports/workspace';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
@@ -143,6 +145,17 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
   return undefined;
 }
 
+/** Why the workspace can't name the remote of the clone at `root`, as a refusal. Other failures throw. */
+async function remoteKeyFor(workspace: WorkspacePort, root: string): Promise<string | undefined> {
+  try {
+    await workspace.remoteKey(root);
+    return undefined;
+  } catch (error) {
+    if (error instanceof PortError && error.code === 'invalid') return error.message;
+    throw error;
+  }
+}
+
 /**
  * Finds `.sail/`, reads its config, loads the workflow and checks the ticket, refusing at the first that fails, in the
  * order the header comment gives. It then mints the run id, builds the run header and checks it, and only then claims
@@ -179,6 +192,10 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       refused: `--until names '${until}', which is no stage of workflow '${loaded.name}': its stages are ${known}`,
     };
   }
+  // The workspace names the remote its leases are keyed by before anything is claimed: a clone that can't name one is
+  // refused here, with no run directory and no ticket move.
+  const keyed = await remoteKeyFor(options.adapters.ports.workspace, dirname(found.dir));
+  if (keyed !== undefined) return { refused: keyed };
   const { ticketSource } = options.adapters.ports;
   const resolved = await resolveSource({ ref: ticket, ticketSource, label: config.label ?? DEFAULT_LABEL, force });
   if ('refused' in resolved) return resolved;

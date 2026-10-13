@@ -21,26 +21,20 @@ async function resolvedWith(repoDir: string, env: Record<string, string>, use: s
 
 // STICKER: git-worktree is registered as a built-in in TASK-005.
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a repository that names git-worktree for its workspace resolves it to that adapter', async () => {
-    await withTempRepo(async (repo) => {
-      const resolved = await resolvedWith(repo.dir, repo.env, 'git-worktree');
-      expect('issues' in resolved).toBe(false);
-      if ('issues' in resolved) throw new Error('unreachable');
-      expect(resolved.entries.workspace.use).toBe('git-worktree');
-    });
+test('a repository that names git-worktree for its workspace resolves it to that adapter', async () => {
+  await withTempRepo(async (repo) => {
+    const resolved = await resolvedWith(repo.dir, repo.env, 'git-worktree');
+    expect('issues' in resolved).toBe(false);
+    if ('issues' in resolved) throw new Error('unreachable');
+    expect(resolved.entries.workspace.use).toBe('git-worktree');
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a workspace name nothing fills refuses, listing git-worktree among the built-ins that fill the workspace port', async () => {
-    await withTempRepo(async (repo) => {
-      const resolved = await resolvedWith(repo.dir, repo.env, 'no-such-workspace');
-      expect('issues' in resolved).toBe(true);
-      if (!('issues' in resolved)) throw new Error('unreachable');
-      expect(JSON.stringify(resolved.issues)).toContain('fake, git-worktree');
-    });
+test('a workspace name nothing fills refuses, listing git-worktree among the built-ins that fill the workspace port', async () => {
+  await withTempRepo(async (repo) => {
+    const resolved = await resolvedWith(repo.dir, repo.env, 'no-such-workspace');
+    expect('issues' in resolved).toBe(true);
+    if (!('issues' in resolved)) throw new Error('unreachable');
+    expect(JSON.stringify(resolved.issues)).toContain('fake, git-worktree');
   });
+});
