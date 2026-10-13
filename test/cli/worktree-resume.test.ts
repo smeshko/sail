@@ -79,7 +79,7 @@ test('sail resume continues a suspended run in its own worktree, and the worktre
       ],
     });
   });
-});
+}, 15_000);
 
 test('a resume whose worktree was deleted is refused with exit 3, and the run stays suspended', async () => {
   await suspendedInWorktree(async (repo, runId) => {

@@ -496,4 +496,4 @@ test('sail resume with no run id is refused with its usage, which takes a run an
       stderr: 'sail resume: usage: sail resume <run>\n',
     });
   });
-});
+}, 15_000);

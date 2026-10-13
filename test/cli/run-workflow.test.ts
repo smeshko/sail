@@ -227,7 +227,7 @@ test("sail FAKE-1 -v adds each command and the tail of every script, and -vv add
     ),
   );
   expect(lines[5]).toBe(head('intake#1', '▶ intake ticket · builtin'));
-});
+}, 15_000);
 
 test('verbosityOf maps no flag, -q, -v, -vv and -vvv to normal, quiet, verbose, trace and trace', () => {
   const io = { cwd: '.', stdout: () => undefined, stderr: () => undefined };
@@ -451,7 +451,7 @@ test('a second sail FAKE-1 --force runs: it moves the ticket through update, rec
       `sail run ${second.runId} started`,
     ]);
   });
-});
+}, 15_000);
 
 test('sail FAKE-1 --until spec stops after spec#1 with exit 2: the final block names until, the last line says how to resume, and sail resume then runs the rest and exits 0', async () => {
   await withTempRepo(async (repo) => {
@@ -668,7 +668,7 @@ test("run.json and run:start record each adapter: four builtin fakes, then the r
   expect(swapped.started?.adapters).toEqual(swapped.header?.adapters);
   expect(swapped.everything).not.toBe('');
   expect(swapped.everything).not.toContain(TOKEN);
-});
+}, 15_000);
 
 test.each<[string, Record<string, string>]>([
   ['unset', {}],

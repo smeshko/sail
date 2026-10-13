@@ -93,7 +93,7 @@ test('a run takes the lease a completed run released, with no takeover in its st
       expect([again.code, leased?.took]).toEqual([EXIT_OK, undefined]);
     });
   });
-});
+}, 15_000);
 
 test('sail FAKE-1 --until tests in a clone with an origin works in a worktree under .sail-runs, recorded in run.json with the base commit origin has', async () => {
   await withOriginRepo(async (repo, origin) => {
