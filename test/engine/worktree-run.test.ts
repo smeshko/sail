@@ -4,11 +4,11 @@
 import { expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { readLease } from '../../src/adapters/leases';
 import { type RunEnd, type RunWorkflowOptions, runWorkflow } from '../../src/engine/runtime';
 import { readEvents } from '../../src/events/consumers/ndjson';
-import { readLease } from '../../src/adapters/leases';
 import { fakeAdapters } from '../helpers/adapters';
-import { writeStub, type StubOptions } from '../helpers/stub-workflow';
+import { type StubOptions, writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 /** The stub's ticket-to-pr, run from `repo` on `FAKE-1` under the repository's own HOME, which must not be refused. */
