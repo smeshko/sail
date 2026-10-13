@@ -1,10 +1,13 @@
 // The git-worktree Workspace adapter's `create`, and what it reports: a real origin and a clone of it, in temporary
 // directories, so no test needs the network (ADR-0018). Each case says what the clone and origin hold before it runs.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGitWorktreeWorkspace } from '../../../src/adapters/git-worktree/index';
+import { git as runGitCmd } from '../../../src/adapters/git-worktree/git';
+import { removeWorktree, sweepRuns } from '../../../src/adapters/worktree-git';
+import { writeStatus } from '../../../src/engine/run-dir';
 import type { RunRef } from '../../../src/ports/workspace';
 import { captureEvents, eventIssues, messageOf, portFailure, rejection, timed } from '../../helpers/ports';
 
@@ -172,4 +175,21 @@ test('the git-worktree workspace declares keep and sweep, as the fake does', () 
     keep: true,
     sweep: true,
   });
+});
+
+test('a run directory or workspace reached through a symbolic link is neither swept nor removed, and its target survives', async () => {
+  const p = pair();
+  const external = realpathSync(mkdtempSync(join(tmpdir(), 'sail-gw-outside-')));
+  dirs.push(external);
+  const outside = join(external, 'workspace');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'keep.txt'), 'not the run\n');
+  writeStatus(external, 'completed');
+  const runsDir = join(p.clone, '.sail-runs');
+  mkdirSync(runsDir, { recursive: true });
+  symlinkSync(external, join(runsDir, 'copied'));
+  const runGit = (cwd: string, args: readonly string[]) => runGitCmd(cwd, [...args], p.env);
+  const swept = await sweepRuns(runGit, p.clone, runsDir);
+  await expect(removeWorktree(runGit, p.clone, 'release', join(runsDir, 'copied', 'workspace'))).rejects.toThrow();
+  expect({ swept, kept: existsSync(join(outside, 'keep.txt')) }).toEqual({ swept: [], kept: true });
 });
