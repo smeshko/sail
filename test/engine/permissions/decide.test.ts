@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Denial, decide, RULES, type ToolCall } from '../../../src/engine/permissions';
 import type { Permissions } from '../../../src/sdk/steps';
@@ -122,6 +122,22 @@ test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev
     expect(decide(bash('echo x >/dev/stdout'), policy, p.roots)).toMatchObject({
       deny: true,
       rule: 'write:outside-roots',
+    });
+  }));
+
+test('cd is logical, as bash is: .. is removed from the path before the directory is entered', () =>
+  inRoots((p) => {
+    mkdirSync(join(p.roots.worktree, 'inc'));
+    mkdirSync(join(p.elsewhere, 'lib', 'real'), { recursive: true });
+    symlinkSync(join(p.elsewhere, 'lib', 'real'), join(p.roots.worktree, 'inc', 'xcb'));
+    const policy: Permissions = { read: [], write: ['inc/blocked'], commands: ['echo *', 'cd *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    // bash enters worktree/inc, so the redirect lands at inc/blocked, which the glob allows.
+    expect(decide(bash('cd inc/xcb/..; echo x > blocked'), policy, p.roots)).toEqual({ allow: true });
+    // entering inc/xcb itself is entering the symlink's target, outside the roots.
+    expect(decide(bash('cd inc/xcb; echo x > blocked'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'path:outside-roots',
     });
   }));
 
