@@ -51,3 +51,10 @@ test("its arguments reach the CLI unchanged, spaces included, and its exit code 
     });
   });
 });
+
+test('it finds the CLI with nothing on PATH: no tool but the shell is run on the way', async () => {
+  await withTempRepo((repo) => {
+    const env = { HOME: repo.home, PATH: '', SAIL_BUN: process.execPath };
+    expect(sail(['--version'], repo.dir, env)).toEqual({ code: 0, stdout: `${pkg.version}\n`, stderr: '' });
+  });
+});

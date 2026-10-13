@@ -531,6 +531,26 @@ test("sail inside a script step is this checkout's, on the running Bun: PATH sta
   expect([exec?.includes('PATH'), exec?.includes('SAIL_BUN')]).toEqual([false, false]);
 });
 
+test("with no PATH in the engine's environment a script step still runs, and finds sail: PATH is bin/, then the system's default", async () => {
+  const s = setup();
+  s.run(WHICH_SAIL);
+  const had = process.env.PATH;
+  delete process.env.PATH;
+  try {
+    const run = await scriptKind.run(script('tests', { run: './run.sh', output: Which }), s.context);
+    expect(run.errors).toEqual([]);
+    expect(run.output).toEqual({
+      version: pkg.version,
+      path: join(ROOT, 'bin', 'sail'),
+      first: join(ROOT, 'bin'),
+      rest: '/usr/bin:/bin',
+      bun: process.execPath,
+    });
+  } finally {
+    if (had !== undefined) process.env.PATH = had;
+  }
+});
+
 // A script's port events (D12): what a `sail port` under the step leaves in `$SAIL_EVENTS` joins the step's events once
 // the script has ended.
 
