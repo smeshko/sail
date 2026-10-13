@@ -214,3 +214,17 @@ test.each([
   const client = createLinearClient({ apiKey: KEY, fetch: (async () => response) as unknown as typeof fetch });
   expect(portFailure(await rejection(request(client)))).toEqual({ port: 'ticketSource', op: 'FetchIssue', code });
 });
+
+// Review fix (round 2, Codex's partial output): a GraphQL code refines a 400, but an HTTP 401, 403, 429 or 5xx keeps its
+// own class whatever code the body carries.
+test.each([
+  [401, 'FORBIDDEN', 'unauthorized'],
+  [503, 'AUTHENTICATION_ERROR', 'unavailable'],
+])('HTTP %i with the code %s is %s, the status deciding', async (status, code, expected) => {
+  const { client } = failing({ status, body: { data: null, errors: [{ message: 'x', extensions: { code } }] } });
+  expect(portFailure(await rejection(request(client)))).toEqual({
+    port: 'ticketSource',
+    op: 'FetchIssue',
+    code: expected,
+  });
+});
