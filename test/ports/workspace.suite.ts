@@ -84,85 +84,70 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
   };
 
   // STICKER: each case below carries the TASK that makes it pass for every adapter it runs for (see its sticker line).
-  // biome-ignore format: TDD-PENDING TASK-003
-  test
-    .skip // TDD-PENDING TASK-003
-    (`${label}: a lease on a free branch is taken, and emits workspace:leased`, async () => {
-      const { adapter, world, capture } = await start();
-      const result = await adapter.lease(world.remote, BRANCH, await world.run('r1'));
-      expect(parseIssues(LeaseResult, result)).toEqual([]);
-      expect(result.leased).toBe(true);
-      expect(capture.events).toEqual([{ type: 'workspace:leased', remote: world.remote, branch: BRANCH }]);
-      expectValidEvents(capture);
-    });
+  test(`${label}: a lease on a free branch is taken, and emits workspace:leased`, async () => {
+    const { adapter, world, capture } = await start();
+    const result = await adapter.lease(world.remote, BRANCH, await world.run('r1'));
+    expect(parseIssues(LeaseResult, result)).toEqual([]);
+    expect(result.leased).toBe(true);
+    expect(capture.events).toEqual([{ type: 'workspace:leased', remote: world.remote, branch: BRANCH }]);
+    expectValidEvents(capture);
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-003
-  test
-    .skip // TDD-PENDING TASK-003
-    (`${label}: a second run is refused the leased branch, naming the holder, and the holder renews it`, async () => {
-      const { adapter, world, capture } = await start();
-      const r1 = await world.run('r1');
-      await adapter.lease(world.remote, BRANCH, r1);
-      const refused = await adapter.lease(world.remote, BRANCH, await world.run('r2'));
-      const renewed = await adapter.lease(world.remote, BRANCH, r1);
-      expect([refused.leased ? 'leased' : refused.holder.runId, renewed.leased]).toEqual(['r1', true]);
-      const leased = { type: 'workspace:leased', remote: world.remote, branch: BRANCH } as const;
-      expect(capture.events).toEqual([leased, leased]);
-      expectValidEvents(capture);
-    });
+  test(`${label}: a second run is refused the leased branch, naming the holder, and the holder renews it`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = await world.run('r1');
+    await adapter.lease(world.remote, BRANCH, r1);
+    const refused = await adapter.lease(world.remote, BRANCH, await world.run('r2'));
+    const renewed = await adapter.lease(world.remote, BRANCH, r1);
+    expect([refused.leased ? 'leased' : refused.holder.runId, renewed.leased]).toEqual(['r1', true]);
+    const leased = { type: 'workspace:leased', remote: world.remote, branch: BRANCH } as const;
+    expect(capture.events).toEqual([leased, leased]);
+    expectValidEvents(capture);
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-003
-  test
-    .skip // TDD-PENDING TASK-003
-    (`${label}: a stale lease is taken over, and the event names the run it took from`, async () => {
-      const { adapter, world, capture } = await start();
-      await adapter.lease(world.remote, BRANCH, await world.run('r1', 'running', false));
-      const taken = await adapter.lease(world.remote, BRANCH, await world.run('r2'));
-      expect(parseIssues(LeaseResult, taken)).toEqual([]);
-      expect({ leased: taken.leased, took: taken.leased ? taken.took : undefined }).toEqual({
-        leased: true,
-        took: 'r1',
-      });
-      expect(capture.events.at(-1)).toEqual({
-        type: 'workspace:leased',
-        remote: world.remote,
-        branch: BRANCH,
-        took: 'r1',
-      });
-      expectValidEvents(capture);
+  test(`${label}: a stale lease is taken over, and the event names the run it took from`, async () => {
+    const { adapter, world, capture } = await start();
+    await adapter.lease(world.remote, BRANCH, await world.run('r1', 'running', false));
+    const taken = await adapter.lease(world.remote, BRANCH, await world.run('r2'));
+    expect(parseIssues(LeaseResult, taken)).toEqual([]);
+    expect({ leased: taken.leased, took: taken.leased ? taken.took : undefined }).toEqual({
+      leased: true,
+      took: 'r1',
     });
+    expect(capture.events.at(-1)).toEqual({
+      type: 'workspace:leased',
+      remote: world.remote,
+      branch: BRANCH,
+      took: 'r1',
+    });
+    expectValidEvents(capture);
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-003
-  test
-    .skip // TDD-PENDING TASK-003
-    (`${label}: only the holder releases a lease, which frees the branch, and emits workspace:lease_released`, async () => {
-      const { adapter, world, capture } = await start();
-      await adapter.lease(world.remote, BRANCH, await world.run('r1'));
-      const byOther = await adapter.releaseLease(world.remote, BRANCH, 'r2');
-      const byHolder = await adapter.releaseLease(world.remote, BRANCH, 'r1');
-      expect([byOther, byHolder].flatMap((result) => parseIssues(Released, result))).toEqual([]);
-      expect([byOther.released, byHolder.released]).toEqual([false, true]);
-      expect((await adapter.lease(world.remote, BRANCH, await world.run('r2'))).leased).toBe(true);
-      expect(capture.events).toEqual([
-        { type: 'workspace:leased', remote: world.remote, branch: BRANCH },
-        { type: 'workspace:lease_released', remote: world.remote, branch: BRANCH },
-        { type: 'workspace:leased', remote: world.remote, branch: BRANCH },
-      ]);
-      expectValidEvents(capture);
-    });
+  test(`${label}: only the holder releases a lease, which frees the branch, and emits workspace:lease_released`, async () => {
+    const { adapter, world, capture } = await start();
+    await adapter.lease(world.remote, BRANCH, await world.run('r1'));
+    const byOther = await adapter.releaseLease(world.remote, BRANCH, 'r2');
+    const byHolder = await adapter.releaseLease(world.remote, BRANCH, 'r1');
+    expect([byOther, byHolder].flatMap((result) => parseIssues(Released, result))).toEqual([]);
+    expect([byOther.released, byHolder.released]).toEqual([false, true]);
+    expect((await adapter.lease(world.remote, BRANCH, await world.run('r2'))).leased).toBe(true);
+    expect(capture.events).toEqual([
+      { type: 'workspace:leased', remote: world.remote, branch: BRANCH },
+      { type: 'workspace:lease_released', remote: world.remote, branch: BRANCH },
+      { type: 'workspace:leased', remote: world.remote, branch: BRANCH },
+    ]);
+    expectValidEvents(capture);
+  });
 
-  // biome-ignore format: TDD-PENDING TASK-003
-  test
-    .skip // TDD-PENDING TASK-003
-    (`${label}: remoteKey names the remote the same way on every call, and it is no path`, async () => {
-      const { adapter, world } = await start();
-      const key = await adapter.remoteKey(world.clone);
-      expect({
-        empty: key === '',
-        stable: key === (await adapter.remoteKey(world.clone)),
-        absolute: isAbsolute(key),
-      }).toEqual({ empty: false, stable: true, absolute: false });
-    });
+  test(`${label}: remoteKey names the remote the same way on every call, and it is no path`, async () => {
+    const { adapter, world } = await start();
+    const key = await adapter.remoteKey(world.clone);
+    expect({
+      empty: key === '',
+      stable: key === (await adapter.remoteKey(world.clone)),
+      absolute: isAbsolute(key),
+    }).toEqual({ empty: false, stable: true, absolute: false });
+  });
 
   // biome-ignore format: TDD-PENDING TASK-004
   test

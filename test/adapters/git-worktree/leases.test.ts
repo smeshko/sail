@@ -40,64 +40,57 @@ const ORIGIN = 'https://example.com/org/sail.git';
 
 // STICKER: git-worktree's remote key and leases land in TASK-003. Each sticker names that task.
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("remoteKey is origin's URL with the user and the password removed", async () => {
-    await withTempRepo(async (repo) => {
-      repo.git('remote', 'add', 'origin', 'https://user:s3cret@example.com/org/sail.git');
-      const adapter = createGitWorktreeWorkspace({ repo: repo.dir, env: repo.env, leasesDir: tempDir() });
-      expect(await adapter.remoteKey(repo.dir)).toBe(ORIGIN);
-    });
+test("remoteKey is origin's URL with the user and the password removed", async () => {
+  await withTempRepo(async (repo) => {
+    repo.git('remote', 'add', 'origin', 'https://user:s3cret@example.com/org/sail.git');
+    const adapter = createGitWorktreeWorkspace({ repo: repo.dir, env: repo.env, leasesDir: tempDir() });
+    expect(await adapter.remoteKey(repo.dir)).toBe(ORIGIN);
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('remoteKey refuses a clone with no origin, as invalid', async () => {
-    await withTempRepo(async (repo) => {
-      const adapter = createGitWorktreeWorkspace({ repo: repo.dir, env: repo.env, leasesDir: tempDir() });
-      const error = await rejection(adapter.remoteKey(repo.dir));
-      expect(portFailure(error)).toEqual({ port: 'workspace', op: 'remoteKey', code: 'invalid' });
-      expect(messageOf(error)).toContain('origin');
-    });
+test('remoteKey refuses a clone with no origin, as invalid', async () => {
+  await withTempRepo(async (repo) => {
+    const adapter = createGitWorktreeWorkspace({ repo: repo.dir, env: repo.env, leasesDir: tempDir() });
+    const error = await rejection(adapter.remoteKey(repo.dir));
+    expect(portFailure(error)).toEqual({ port: 'workspace', op: 'remoteKey', code: 'invalid' });
+    expect(messageOf(error)).toContain('origin');
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('two clones of one origin share one lease: the second is refused, naming the run that holds it', async () => {
-    await withTempRepo(async (first) => {
-      await withTempRepo(async (second) => {
-        const origin = 'https://example.com/org/sail.git';
-        first.git('remote', 'add', 'origin', origin);
-        second.git('remote', 'add', 'origin', origin);
-        const leases = tempDir();
-        const holder = holderIn(tempDir(), 'r1');
-        const a = createGitWorktreeWorkspace({ repo: first.dir, env: first.env, leasesDir: leases });
-        const b = createGitWorktreeWorkspace({ repo: second.dir, env: second.env, leasesDir: leases });
-        const taken = await a.lease(await a.remoteKey(first.dir), BRANCH, holder);
-        const refused = await b.lease(await b.remoteKey(second.dir), BRANCH, holderIn(tempDir(), 'r2'));
-        expect([taken.leased, refused.leased ? 'leased' : refused.holder.runId]).toEqual([true, 'r1']);
-      });
-    });
-  });
-
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a credential in the origin URL reaches no lease file and no event, and the lease names the stripped remote', async () => {
-    await withTempRepo(async (repo) => {
-      const secret = 'tok_SECRET_7f3';
-      repo.git('remote', 'add', 'origin', `https://user:${secret}@example.com/org/sail.git`);
+test('two clones of one origin share one lease: the second is refused, naming the run that holds it', async () => {
+  await withTempRepo(async (first) => {
+    await withTempRepo(async (second) => {
+      const origin = 'https://example.com/org/sail.git';
+      first.git('remote', 'add', 'origin', origin);
+      second.git('remote', 'add', 'origin', origin);
       const leases = tempDir();
-      const capture = captureEvents();
-      const adapter = createGitWorktreeWorkspace({ repo: repo.dir, env: repo.env, leasesDir: leases, emit: capture.emit });
-      await adapter.lease(await adapter.remoteKey(repo.dir), BRANCH, holderIn(tempDir(), 'r1'));
-      expect({
-        inLeases: leaseTexts(leases).some((text) => text.includes(secret)),
-        inEvents: JSON.stringify(capture.events).includes(secret),
-        remote: readLease(leases, ORIGIN, BRANCH)?.remote,
-      }).toEqual({ inLeases: false, inEvents: false, remote: ORIGIN });
+      const holder = holderIn(tempDir(), 'r1');
+      const a = createGitWorktreeWorkspace({ repo: first.dir, env: first.env, leasesDir: leases });
+      const b = createGitWorktreeWorkspace({ repo: second.dir, env: second.env, leasesDir: leases });
+      const taken = await a.lease(await a.remoteKey(first.dir), BRANCH, holder);
+      const refused = await b.lease(await b.remoteKey(second.dir), BRANCH, holderIn(tempDir(), 'r2'));
+      expect([taken.leased, refused.leased ? 'leased' : refused.holder.runId]).toEqual([true, 'r1']);
     });
   });
+});
+
+test('a credential in the origin URL reaches no lease file and no event, and the lease names the stripped remote', async () => {
+  await withTempRepo(async (repo) => {
+    const secret = 'tok_SECRET_7f3';
+    repo.git('remote', 'add', 'origin', `https://user:${secret}@example.com/org/sail.git`);
+    const leases = tempDir();
+    const capture = captureEvents();
+    const adapter = createGitWorktreeWorkspace({
+      repo: repo.dir,
+      env: repo.env,
+      leasesDir: leases,
+      emit: capture.emit,
+    });
+    await adapter.lease(await adapter.remoteKey(repo.dir), BRANCH, holderIn(tempDir(), 'r1'));
+    expect({
+      inLeases: leaseTexts(leases).some((text) => text.includes(secret)),
+      inEvents: JSON.stringify(capture.events).includes(secret),
+      remote: readLease(leases, ORIGIN, BRANCH)?.remote,
+    }).toEqual({ inLeases: false, inEvents: false, remote: ORIGIN });
+  });
+});

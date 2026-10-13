@@ -1,14 +1,15 @@
 // The git-worktree Workspace adapter: one detached worktree per run, built from `origin/HEAD` of the clone, with branch
-// leases kept machine-wide on origin's remote key (ADR-0018). STUB (tdd-plan): final signatures and wrong return values,
-// so the tests written against it fail on their assertions until the tasks of ADW-93 fill them in.
+// leases kept machine-wide on origin's remote key (ADR-0018).
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
-import type { Lease, LeaseResult, Released, Swept, Workspace, WorkspaceCapabilities } from '../../ports/types';
+import type { Swept, Workspace, WorkspaceCapabilities } from '../../ports/types';
 import type { RunRef, WorkspacePort } from '../../ports/workspace';
+import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
 import { git } from './git';
+import { remoteKeyOf } from './remote';
 
 export interface GitWorktreeOptions extends ProviderOptions {
   /** The clone the adapter works in. Its `origin` is the remote leases are keyed by. */
@@ -18,15 +19,6 @@ export interface GitWorktreeOptions extends ProviderOptions {
   /** The environment for the git the adapter runs. */
   readonly env?: Readonly<Record<string, string>>;
 }
-
-const HOLDER: Lease = {
-  runId: 'stub',
-  runDir: 'stub',
-  pid: 1,
-  remote: 'stub',
-  branch: 'stub',
-  takenAt: 'stub',
-};
 
 /**
  * Keeps the clone's `.sail-runs/` out of its `git status`, through the clone's own `info/exclude`: a checked-in
@@ -44,14 +36,22 @@ async function excludeRunsDir(clone: string, env?: Readonly<Record<string, strin
 
 export function createGitWorktreeWorkspace(options: GitWorktreeOptions): WorkspacePort {
   const emit = (event: ProviderEvent) => options.emit?.(event);
+  const now = () => options.now?.() ?? new Date();
+  const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
   const { repo, env } = options;
   return {
     name: 'git-worktree',
-    async lease(): Promise<LeaseResult> {
-      return { leased: false, holder: HOLDER, raw: null };
+    async lease(remote, branch, holder) {
+      const result = takeLease(leasesDir(), remote, branch, holder, now());
+      if (result.leased) {
+        emit({ type: 'workspace:leased', remote, branch, ...(result.took === undefined ? {} : { took: result.took }) });
+      }
+      return result;
     },
-    async releaseLease(): Promise<Released> {
-      return { released: false, raw: null };
+    async releaseLease(remote, branch, runId) {
+      const result = releaseLease(leasesDir(), remote, branch, runId);
+      if (result.released) emit({ type: 'workspace:lease_released', remote, branch });
+      return result;
     },
     async create(run: RunRef, from: { readonly base: string; readonly branch: string }): Promise<Workspace> {
       const started = Date.now();
@@ -92,9 +92,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     async sweep(): Promise<Swept> {
       return { paths: [], raw: null };
     },
-    async remoteKey() {
-      return '';
-    },
+    remoteKey: (clone) => remoteKeyOf(clone, env),
     async isBasedOn() {
       return false;
     },
