@@ -96,10 +96,7 @@ test('the fixture tests stage runs in place from sail’s root, and fails as its
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a script step run in isolation finds this checkout's sail first on its PATH", async () => {
+test("a script step run in isolation finds this checkout's sail first on its PATH", async () => {
   await withTempRepo(async (repo) => {
     const dir = join(fixtureCopy(repo), 'stages', 'which');
     mkdirSync(dir);

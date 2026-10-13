@@ -511,10 +511,7 @@ const WHICH_SAIL =
   '"$(command -v sail)" "$(printf %s "$PATH" | cut -d: -f1)" "$(printf %s "$PATH" | cut -d: -f2-)" "$SAIL_BUN"';
 const Which = z.object({ version: z.string(), path: z.string(), first: z.string(), rest: z.string(), bun: z.string() });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("sail inside a script step is this checkout's, on the running Bun: PATH starts with its bin/, ahead of the PATH the engine has, and neither PATH nor SAIL_BUN is recorded", async () => {
+test("sail inside a script step is this checkout's, on the running Bun: PATH starts with its bin/, ahead of the PATH the engine has, and neither PATH nor SAIL_BUN is recorded", async () => {
   const s = setup();
   s.run(WHICH_SAIL);
   const { context, events } = collecting(s);

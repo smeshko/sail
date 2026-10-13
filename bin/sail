@@ -1,3 +1,3 @@
 #!/bin/sh
-# The sail a script step finds first on its PATH: this checkout's CLI, on the Bun that runs the run.
-exit 0
+# The sail a script step finds first on its PATH: this checkout's CLI, on the Bun that runs the run when SAIL_BUN names it.
+exec "${SAIL_BUN:-bun}" "$(dirname "$0")/../src/cli/main.ts" "$@"

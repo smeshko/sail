@@ -2,8 +2,11 @@
 // `passed` or `failed` through `exitCodes`, its last stdout line is its JSON output, and it must leave every declared
 // file in `$STAGE_OUT`. Every broken promise is collected as an error. It reports the facts only it knows as events:
 // how the process ran and ended, whether the output was read and held its schema, and which files it recorded.
+//
+// `sail` inside a script is the sail that runs it: `PATH` starts with this package's `bin/`, and `SAIL_BUN` names the
+// running Bun, which `bin/sail` executes. Both name this machine, so neither is recorded.
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { delimiter, join, relative, resolve } from 'node:path';
 import { systemClock } from '../engine/clock';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { preamble } from '../engine/preamble';
@@ -12,7 +15,7 @@ import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
 
 /** This package's `bin/`, which holds the `sail` a script step runs. */
-export const BIN_DIR = '';
+export const BIN_DIR = join(import.meta.dir, '..', '..', 'bin');
 
 /** How long a script may run when it sets no `timeoutSeconds`. */
 export const DEFAULT_TIMEOUT_SECONDS = 600;
@@ -155,7 +158,12 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   const end = await runProcess({
     command: [command],
     cwd: context.workspace,
-    env: { ...inherited, ...Object.fromEntries(variables.map(({ name, value }) => [name, value])) },
+    env: {
+      ...inherited,
+      PATH: inherited.PATH === undefined ? BIN_DIR : `${BIN_DIR}${delimiter}${inherited.PATH}`,
+      SAIL_BUN: process.execPath,
+      ...Object.fromEntries(variables.map(({ name, value }) => [name, value])),
+    },
     stdout: context.paths.stdout,
     stderr: context.paths.stderr,
     timeoutMs: timeoutSeconds * 1000,

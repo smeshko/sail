@@ -81,6 +81,7 @@ including as examples in this file.
 - `src/dashboard`: reads the watcher registry, the branch leases and run files across the machine.
 - `src/cli`: the `sail` command. `src/cli/main.ts` is the bin, `src/cli/commands/` holds one module per subcommand,
   and `src/cli/exit-codes.ts` holds the exit codes every command returns.
+- `bin/sail`: the `sail` a script step finds first on its `PATH`: this checkout's CLI, on the Bun that runs the run.
 - `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
 - `types/`: generated from `src/sdk` by `bun run types`. `sail check` type-checks a repository against it.
 - `test/fixtures/`: `repo/` is the fixture repository, `runs/` the golden run directories, `terminal/` the golden

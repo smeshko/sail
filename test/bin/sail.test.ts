@@ -16,10 +16,7 @@ function sail(args: string[], cwd: string, env: Record<string, string>) {
   return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString() };
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('bin/sail is executable, and with SAIL_BUN naming the running Bun and no bun on PATH it prints the version and exits 0', async () => {
+test('bin/sail is executable, and with SAIL_BUN naming the running Bun and no bun on PATH it prints the version and exits 0', async () => {
   await withTempRepo((repo) => {
     const env = { HOME: repo.home, PATH: SYSTEM_PATH, SAIL_BUN: process.execPath };
     expect(sail(['--version'], repo.dir, env)).toEqual({ code: 0, stdout: `${pkg.version}\n`, stderr: '' });
@@ -27,10 +24,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('without SAIL_BUN it runs the bun it finds on PATH', async () => {
+test('without SAIL_BUN it runs the bun it finds on PATH', async () => {
   await withTempRepo((repo) => {
     // A directory holding only `bun`, whatever the running Bun's own file is called.
     const tools = join(repo.home, 'tools');
@@ -41,10 +35,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("its arguments reach the CLI unchanged, spaces included, and its exit code and message are the CLI's own", async () => {
+test("its arguments reach the CLI unchanged, spaces included, and its exit code and message are the CLI's own", async () => {
   await withTempRepo((repo) => {
     const env = { HOME: repo.home, PATH: SYSTEM_PATH, SAIL_BUN: process.execPath };
     const usage = "Run 'sail --help' for usage.\n";
