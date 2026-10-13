@@ -185,6 +185,25 @@ test('an abort the SDK surfaces as a thrown error ends the session as aborted, n
   });
 });
 
+test('an abort after which the stream simply closes, with no result, still ends as aborted', async () => {
+  // review #2.3: a clean close after an abort is the abort, not a session that ended without a result.
+  const controller = new AbortController();
+  const query: QueryFn = ({ options }) =>
+    (async function* () {
+      yield init();
+      setTimeout(() => controller.abort(), 0);
+      await new Promise<void>((resolve) => options.abortController?.signal.addEventListener('abort', () => resolve()));
+    })();
+  const result = await createClaudeCodeHarness({ query, env: { ANTHROPIC_API_KEY: 'sk-test' } }).run({
+    ...requestOf(),
+    signal: controller.signal,
+  });
+  expect({ outcome: result.outcome, message: result.outcome === 'error' ? result.message : undefined }).toEqual({
+    outcome: 'error',
+    message: 'aborted',
+  });
+});
+
 test('a request whose signal is already aborted gives error aborted, and query is never called', async () => {
   const probe = new Probe();
   const result = await harnessOver({ 'Write the spec.': { messages: COMPLETE } }, probe).run({
