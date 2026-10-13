@@ -35,10 +35,7 @@ function _readResult(message: SDKResultMessage): string {
   return `${message.subtype}${message.errors.join()}`;
 }
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('sdk.ts re-exports the SDK query and nothing else at runtime, so importing it starts nothing', () => {
+test('sdk.ts re-exports the SDK query and nothing else at runtime, so importing it starts nothing', () => {
   expect(Object.keys(adapterSdk)).toEqual(['query']);
   expect(adapterSdk.query).toBe(sdk.query);
 });

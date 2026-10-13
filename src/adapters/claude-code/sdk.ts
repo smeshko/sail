@@ -1,6 +1,5 @@
-// The only module that imports the Agent SDK. STUB (TASK-001): the final file re-exports `query` and the SDK types the
-// adapter reads, and nothing else.
-import type { query as SdkQuery } from '@anthropic-ai/claude-agent-sdk';
+// The only module that imports the Agent SDK. The adapter reads the SDK through these re-exports and nothing else: the
+// SDK's `query` and the message and option types it names. Importing this module starts no process and writes no file.
 
 export type {
   Options,
@@ -12,6 +11,4 @@ export type {
   SDKSystemMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-
-/** Stub: a query that yields nothing. The final file re-exports the SDK's own `query`. */
-export const query = (() => (async function* () {})()) as unknown as typeof SdkQuery;
+export { query } from '@anthropic-ai/claude-agent-sdk';
