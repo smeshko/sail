@@ -59,11 +59,10 @@ function changedCopy(name: string, change: (dir: string) => void): string {
 }
 
 // STICKER: a fresh run writes the workspace events of ADW-93 once TASK-006 lands; the committed golden follows at TASK-011.
-test
-  ('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
-    expect(stale(fresh, committed)).toEqual([]);
-    expect(filesIn(committed)).toHaveLength(50);
-  });
+test('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
+  expect(stale(fresh, committed)).toEqual([]);
+  expect(filesIn(committed)).toHaveLength(50);
+});
 
 test("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
   const runtimeOf = (dir: string): unknown =>

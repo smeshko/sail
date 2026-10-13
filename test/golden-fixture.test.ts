@@ -96,8 +96,7 @@ test("the golden run is the fixture's: its id, its startedAt the clock's first r
 });
 
 // STICKER: the regenerated golden holds the workspace events and run.json's workspace, which TASK-011 writes.
-test
-  ('it holds nothing a run cannot write yet: no tool, thinking, validated-file, denial or step event, no ticket:updated, no repository in run.json, and no publish in its roster', () => {
+test('it holds nothing a run cannot write yet: no tool, thinking, validated-file, denial or step event, no ticket:updated, no repository in run.json, and no publish in its roster', () => {
   const types = new Set(lines('events.ndjson').map((event) => String(event.type)));
   const absent = [...types].filter(
     (type) =>
