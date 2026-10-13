@@ -5,37 +5,25 @@ import { expandStageOut, globToRegExp, matchesAny, resolveReal, rootOf } from '.
 import { permissionRoots } from '../../helpers/permission-roots';
 import { withTempRepo } from '../../helpers/temp-repo';
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a ** glob matches a file at any depth and a * stays within one segment', () => {
+test('a ** glob matches a file at any depth and a * stays within one segment', () => {
   expect(globToRegExp('**/*.ts').test('a.ts')).toBe(true);
   expect(globToRegExp('**/*.ts').test('x/y/a.ts')).toBe(true);
   expect(globToRegExp('lib/*').test('lib/a/b')).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('lib/** matches below lib and not a sibling that shares its prefix', () => {
+test('lib/** matches below lib and not a sibling that shares its prefix', () => {
   expect(matchesAny('lib/x/a.ts', ['lib/**'])).toBe(true);
   expect(matchesAny('lib-other/a', ['lib/**'])).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the $STAGE_OUT prefix expands to the call directory before matching', () => {
+test('the $STAGE_OUT prefix expands to the call directory before matching', () => {
   const stageOut = '/work/call/out';
   const globs = [expandStageOut('$STAGE_OUT/**', stageOut)];
   expect(matchesAny(join(stageOut, 'out.md'), globs)).toBe(true);
   expect(matchesAny(join(stageOut, '..', 'in', 'a.md'), globs)).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a path that climbs out of the worktree resolves outside every root', async () => {
+test('a path that climbs out of the worktree resolves outside every root', async () => {
   await withTempRepo(async (repo) => {
     const { roots, base } = permissionRoots(repo);
     const resolved = resolveReal('../../etc/passwd', roots.worktree);
@@ -44,10 +32,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a symlink in the worktree that points outside it resolves outside', async () => {
+test('a symlink in the worktree that points outside it resolves outside', async () => {
   await withTempRepo(async (repo) => {
     const { roots, elsewhere } = permissionRoots(repo);
     symlinkSync(elsewhere, join(roots.worktree, 'link'));
@@ -57,10 +42,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a symlink in the worktree that points inside it resolves inside', async () => {
+test('a symlink in the worktree that points inside it resolves inside', async () => {
   await withTempRepo(async (repo) => {
     const { roots } = permissionRoots(repo);
     mkdirSync(join(roots.worktree, 'real'));
@@ -71,10 +53,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a dangling symlink whose target lies outside the roots resolves outside', async () => {
+test('a dangling symlink whose target lies outside the roots resolves outside', async () => {
   await withTempRepo(async (repo) => {
     const { roots, elsewhere } = permissionRoots(repo);
     symlinkSync(join(elsewhere, 'missing.txt'), join(roots.worktree, 'dangle'));
@@ -84,10 +63,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a path that does not exist yet under the worktree resolves inside it', async () => {
+test('a path that does not exist yet under the worktree resolves inside it', async () => {
   await withTempRepo(async (repo) => {
     const { roots } = permissionRoots(repo);
     const resolved = resolveReal('new/deep/file.ts', roots.worktree);
@@ -96,10 +72,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a path starting with ~ is unresolvable', async () => {
+test('a path starting with ~ is unresolvable', async () => {
   await withTempRepo(async (repo) => {
     const { roots } = permissionRoots(repo);
     expect(resolveReal('~/x', roots.worktree)).toBeNull();
