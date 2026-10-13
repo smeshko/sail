@@ -129,10 +129,7 @@ test('the usage lists sail port ticket-source and its three operations', async (
   expect(stdout).toContain('\n  sail port ticket-source get|links|attachments <ticket>  ');
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the usage lists sail port codehost, by its operation', async () => {
+test('the usage lists sail port codehost, by its operation', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toContain('\n  sail port codehost <operation> [arguments]  ');
 });

@@ -69,10 +69,7 @@ const opening = (head: string, ...more: string[]) => [
   ...more,
 ];
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("push pushes HEAD as the branch and prints the port's Pushed as one line of JSON, and the fake's state file holds the branch", async () => {
+test("push pushes HEAD as the branch and prints the port's Pushed as one line of JSON, and the fake's state file holds the branch", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const headSha = repo.git('rev-parse', 'HEAD');
@@ -85,10 +82,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("open-pull-request prints the port's PullRequest: the next number after the seed's highest, both labels in the order given, the ticket key as given, open and no draft, with the body the file holds", async () => {
+test("open-pull-request prints the port's PullRequest: the next number after the seed's highest, both labels in the order given, the ticket key as given, open and no draft, with the body the file holds", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     writeFileSync(join(repo.dir, 'body.md'), 'Adds the flag.\n\nCloses FAKE-9.\n');
@@ -115,10 +109,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('--draft opens a draft, and with neither --ticket nor --label the pull request has no ticket key and no label', async () => {
+test('--draft opens a draft, and with neither --ticket nor --label the pull request has no ticket key and no label', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     await codehost(repo, ['push', 'sail/FAKE-9']);
@@ -130,10 +121,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('without --body-file the body is all of stdin, and with neither a file nor a stdin it exits 3 before anything is opened', async () => {
+test('without --body-file the body is all of stdin, and with neither a file nor a stdin it exits 3 before anything is opened', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     await codehost(repo, ['push', 'sail/FAKE-9']);
@@ -150,10 +138,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a --body-file that can't be read exits 3 with why, and nothing is opened", async () => {
+test("a --body-file that can't be read exits 3 with why, and nothing is opened", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     await codehost(repo, ['push', 'sail/FAKE-9']);
@@ -168,10 +153,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('--body-file is read relative to the working directory, and push pushes the checkout it runs from', async () => {
+test('--body-file is read relative to the working directory, and push pushes the checkout it runs from', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     await withTempRepo(async (other) => {
@@ -189,10 +171,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, string[], string]>([
+test.each<[string, string[], string]>([
   [
     '--base',
     ['open-pull-request', '--head', 'sail/x', '--title', 'T'],
@@ -224,10 +203,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("push outside a git checkout exits 1 with the port's message and code", async () => {
+test("push outside a git checkout exits 1 with the port's message and code", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const cwd = outside();
@@ -241,10 +217,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('open-pull-request from a head that was never pushed exits 1 as invalid, and a second one from the same head into the same base exits 1 as a conflict', async () => {
+test('open-pull-request from a head that was never pushed exits 1 as invalid, and a second one from the same head into the same base exits 1 as a conflict', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     expect(await codehost(repo, opening('sail/x'), { stdin: 'body' })).toEqual({
@@ -262,10 +235,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, string[], string]>([
+test.each<[string, string[], string]>([
   [
     '--title given to push',
     ['codehost', 'push', 'sail/x', '--title', 'T'],
@@ -286,10 +256,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("an operation the code host does not have exits 3, naming it, and so do codehost with no operation and with an option of render's", async () => {
+test("an operation the code host does not have exits 3, naming it, and so do codehost with no operation and with an option of render's", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const unknown = await codehost(repo, ['nonsense']);
@@ -308,10 +275,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("only the code host is resolved: with the harness on the fixture's own adapter and its token unset, push and open-pull-request still run", async () => {
+test("only the code host is resolved: with the harness on the fixture's own adapter and its token unset, push and open-pull-request still run", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/echo-harness.ts }');
@@ -324,10 +288,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('with SAIL_EVENTS set, push appends codehost:pushed, and open-pull-request appends codehost:pr_opened and then one codehost:labelled per label', async () => {
+test('with SAIL_EVENTS set, push appends codehost:pushed, and open-pull-request appends codehost:pr_opened and then one codehost:labelled per label', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const file = join(repo.dir, 'port-events.ndjson');
@@ -374,10 +335,7 @@ export default {
 };
 `;
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("an answer that is not the port's, from a repository's own code host, exits 1 naming the operation and where the answer is wrong", async () => {
+test("an answer that is not the port's, from a repository's own code host, exits 1 naming the operation and where the answer is wrong", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     write(sail, 'adapters/odd-host.ts', ODD_HOST);

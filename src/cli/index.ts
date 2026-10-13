@@ -37,6 +37,7 @@ Usage:
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
+  sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version
   sail --help                                                Print this help
@@ -157,7 +158,18 @@ const commands = new Map<string, CommandSpec>([
   [
     'port',
     {
-      options: { untrusted: { type: 'boolean' }, source: { type: 'string' }, inline: { type: 'boolean' } },
+      options: {
+        untrusted: { type: 'boolean' },
+        source: { type: 'string' },
+        inline: { type: 'boolean' },
+        base: { type: 'string' },
+        head: { type: 'string' },
+        title: { type: 'string' },
+        'body-file': { type: 'string' },
+        draft: { type: 'boolean' },
+        ticket: { type: 'string' },
+        label: { type: 'string', multiple: true },
+      },
       positionals: 3,
       command: port,
     },
