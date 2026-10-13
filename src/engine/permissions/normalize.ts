@@ -207,6 +207,9 @@ function segmentBody(walk: Walk, segment: Segment, ctx: Context, fedByCurl: bool
     throw new Unparseable('a brace expansion the engine does not expand');
   }
   if (name === 'cd') {
+    // With CDPATH set, bash may enter a directory found through it, which the engine does not look in.
+    if (env.CDPATH !== undefined)
+      throw new Unparseable('a cd with CDPATH set enters a directory the engine does not track');
     const next = changeDirectory(walk.roots, args, ctx.cwd);
     if (writes.length > 0 || reads.length > 0) emit(walk, argv, ctx, env, writes, reads);
     return next;
