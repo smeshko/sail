@@ -71,7 +71,7 @@ test('sail FAKE-1 --force while a suspended run leases its branch is refused wit
       expect([forced.code, forced.stderr.includes(firstRun ?? 'no run'), runIds(second.dir)]).toEqual([
         EXIT_REFUSED,
         true,
-        [firstRun],
+        [firstRun ?? 'no run'],
       ]);
     });
   });
