@@ -254,9 +254,10 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         adapters: header.adapters,
         ...(header.budget === undefined ? {} : { budget: header.budget }),
       });
-      // What the claim did to the ticket, before this stream existed to hear it. No call was running, so no key.
-      for (const event of opened.claimed) bus.emit(event);
     }
+    // What the claim did to the ticket, before this stream existed to hear it, or the lease a resume renewed. No call
+    // was running, so no key.
+    for (const event of opened.claimed) bus.emit(event);
     // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
     let [intake] = readJournal(dir).entries;
     if (intake === undefined) {

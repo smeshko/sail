@@ -8,7 +8,7 @@ import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { WorkspacePort } from '../../ports/workspace';
 import { leasesDirFor, releaseLease, takeLease } from '../leases';
-import { clonePath, diffFrom, type GitResult, removeWorktree, sweepRuns } from '../worktree-git';
+import { basedOn, clonePath, diffFrom, type GitResult, removeWorktree, sweepRuns } from '../worktree-git';
 
 export interface FakeWorkspaceOptions extends ProviderOptions {
   /** The local git repository that stands in for the remote. */
@@ -87,9 +87,7 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     async remoteKey() {
       return 'fake';
     },
-    async isBasedOn() {
-      return false;
-    },
+    isBasedOn: (path, baseSha) => basedOn(runGit, path, baseSha),
     capabilities: () => ({ keep: true, sweep: true }),
   };
 }

@@ -31,7 +31,9 @@ function gitIn(cwd: string, env: Record<string, string>, ...args: string[]): str
 
 /** The runs in `repoDir`'s `.sail-runs/`, or none: the fake adapters keep their own state under `fake/`. */
 const runIds = (repoDir: string): string[] =>
-  existsSync(join(repoDir, '.sail-runs')) ? readdirSync(join(repoDir, '.sail-runs')).filter((name) => name !== 'fake') : [];
+  existsSync(join(repoDir, '.sail-runs'))
+    ? readdirSync(join(repoDir, '.sail-runs')).filter((name) => name !== 'fake')
+    : [];
 
 /** The lease file of the one lease in a HOME, as its JSON text path. */
 function leaseFileUnder(home: string): string {
@@ -62,90 +64,78 @@ async function suspendedInWorktree(check: (repo: TempRepo, runId: string) => Pro
 
 // STICKER: each case below is one of ADW-93's TASK-009 cases. The sticker names the task that makes it pass.
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('sail resume continues a suspended run in its own worktree, and the worktree is the one the run releases at its end', async () => {
-    await suspendedInWorktree(async (repo, runId) => {
-      const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
-      const released = readEvents(join(repo.dir, '.sail-runs', runId)).filter(
-        (event) => event.type === 'workspace:released',
-      ) as { path?: string; kept?: boolean }[];
-      expect({ code: resumed.code, released: released.map(({ path, kept }) => ({ path, kept })) }).toEqual({
-        code: EXIT_OK,
-        // The suspension kept the worktree, then the resumed run released it at its end.
-        released: [
-          { path: `.sail-runs/${runId}/workspace`, kept: true },
-          { path: `.sail-runs/${runId}/workspace`, kept: false },
-        ],
-      });
+test('sail resume continues a suspended run in its own worktree, and the worktree is the one the run releases at its end', async () => {
+  await suspendedInWorktree(async (repo, runId) => {
+    const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
+    const released = readEvents(join(repo.dir, '.sail-runs', runId)).filter(
+      (event) => event.type === 'workspace:released',
+    ) as { path?: string; kept?: boolean }[];
+    expect({ code: resumed.code, released: released.map(({ path, kept }) => ({ path, kept })) }).toEqual({
+      code: EXIT_OK,
+      // The suspension kept the worktree, then the resumed run released it at its end.
+      released: [
+        { path: `.sail-runs/${runId}/workspace`, kept: true },
+        { path: `.sail-runs/${runId}/workspace`, kept: false },
+      ],
     });
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('a resume whose worktree was deleted is refused with exit 3, and the run stays suspended', async () => {
-    await suspendedInWorktree(async (repo, runId) => {
-      rmSync(join(repo.dir, '.sail-runs', runId, 'workspace'), { recursive: true, force: true });
-      const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
-      expect({
-        code: resumed.code,
-        status: readStatus(join(repo.dir, '.sail-runs', runId)).status,
-      }).toEqual({ code: EXIT_REFUSED, status: 'suspended' });
-    });
+test('a resume whose worktree was deleted is refused with exit 3, and the run stays suspended', async () => {
+  await suspendedInWorktree(async (repo, runId) => {
+    rmSync(join(repo.dir, '.sail-runs', runId, 'workspace'), { recursive: true, force: true });
+    const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
+    expect({
+      code: resumed.code,
+      status: readStatus(join(repo.dir, '.sail-runs', runId)).status,
+    }).toEqual({ code: EXIT_REFUSED, status: 'suspended' });
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("a resume whose baseSha is no ancestor of the worktree's HEAD is refused with exit 3, naming both commits", async () => {
-    await suspendedInWorktree(async (repo, runId) => {
-      const runDir = join(repo.dir, '.sail-runs', runId);
-      const baseSha: string = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')).repository.baseSha;
-      // A commit with no parent, made in the clone's object store and checked out in the worktree: the base is not in it.
-      const orphan = gitIn(repo.dir, repo.env, 'commit-tree', EMPTY_TREE, '-m', 'an unrelated commit');
-      gitIn(join(runDir, 'workspace'), repo.env, 'checkout', '--detach', orphan);
-      const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
-      expect([resumed.code, resumed.stderr.includes(baseSha), resumed.stderr.includes(orphan)]).toEqual([
-        EXIT_REFUSED,
-        true,
-        true,
-      ]);
-    });
+test("a resume whose baseSha is no ancestor of the worktree's HEAD is refused with exit 3, naming both commits", async () => {
+  await suspendedInWorktree(async (repo, runId) => {
+    const runDir = join(repo.dir, '.sail-runs', runId);
+    const baseSha: string = JSON.parse(readFileSync(join(runDir, 'run.json'), 'utf8')).repository.baseSha;
+    // A commit with no parent, made in the clone's object store and checked out in the worktree: the base is not in it.
+    const orphan = gitIn(repo.dir, repo.env, 'commit-tree', EMPTY_TREE, '-m', 'an unrelated commit');
+    gitIn(join(runDir, 'workspace'), repo.env, 'checkout', '--detach', orphan);
+    const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
+    expect([resumed.code, resumed.stderr.includes(baseSha), resumed.stderr.includes(orphan)]).toEqual([
+      EXIT_REFUSED,
+      true,
+      true,
+    ]);
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('a resume whose lease a live run has taken over is refused with exit 3, naming that run', async () => {
-    await suspendedInWorktree(async (repo, runId) => {
-      const other = join(repo.dir, '.sail-runs', 'FAKE-1-01TAKENOVERBYANOTHERRUN');
-      mkdirSync(other, { recursive: true });
-      writeStatus(other, 'running');
-      const file = leaseFileUnder(repo.home);
-      const lease = JSON.parse(readFileSync(file, 'utf8'));
-      writeFileSync(file, JSON.stringify({ ...lease, runId: 'FAKE-1-01TAKENOVERBYANOTHERRUN', runDir: other, pid: process.pid }));
-      const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
-      expect([resumed.code, resumed.stderr.includes('FAKE-1-01TAKENOVERBYANOTHERRUN')]).toEqual([EXIT_REFUSED, true]);
-    });
+test('a resume whose lease a live run has taken over is refused with exit 3, naming that run', async () => {
+  await suspendedInWorktree(async (repo, runId) => {
+    const other = join(repo.dir, '.sail-runs', 'FAKE-1-01TAKENOVERBYANOTHERRUN');
+    mkdirSync(other, { recursive: true });
+    writeStatus(other, 'running');
+    const file = leaseFileUnder(repo.home);
+    const lease = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(
+      file,
+      JSON.stringify({ ...lease, runId: 'FAKE-1-01TAKENOVERBYANOTHERRUN', runDir: other, pid: process.pid }),
+    );
+    const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
+    expect([resumed.code, resumed.stderr.includes('FAKE-1-01TAKENOVERBYANOTHERRUN')]).toEqual([EXIT_REFUSED, true]);
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('a resume renews its own lease under its run id, and the stream reports the renewal without a takeover', async () => {
-    await suspendedInWorktree(async (repo, runId) => {
-      const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
-      const leased = readEvents(join(repo.dir, '.sail-runs', runId)).filter((event) => event.type === 'workspace:leased');
-      expect({
-        code: resumed.code,
-        leases: leased.length,
-        tookOnRenewal: (leased.at(-1) as { took?: string } | undefined)?.took,
-      }).toEqual({
-        code: EXIT_OK,
-        leases: 2,
-        tookOnRenewal: undefined,
-      });
+test('a resume renews its own lease under its run id, and the stream reports the renewal without a takeover', async () => {
+  await suspendedInWorktree(async (repo, runId) => {
+    const resumed = await sailProcess(['resume', runId], repo.dir, repo.env);
+    const leased = readEvents(join(repo.dir, '.sail-runs', runId)).filter((event) => event.type === 'workspace:leased');
+    expect({
+      code: resumed.code,
+      leases: leased.length,
+      tookOnRenewal: (leased.at(-1) as { took?: string } | undefined)?.took,
+    }).toEqual({
+      code: EXIT_OK,
+      leases: 2,
+      tookOnRenewal: undefined,
     });
   });
+});

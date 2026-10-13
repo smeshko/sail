@@ -272,22 +272,19 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-009
-  test
-    .skip // TDD-PENDING TASK-009
-    (`${label}: isBasedOn holds for the base a workspace is on, and for a commit above it, and not for a commit above the base it is not on`, async () => {
-      const { adapter, world } = await start();
-      const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
-      const above = commitOn(world, world.baseSha, 'landed on the base\n');
-      expect([
-        await adapter.isBasedOn(workspace.path, world.baseSha),
-        await adapter.isBasedOn(workspace.path, above),
-      ]).toEqual([true, false]);
-      writeFileSync(join(workspace.path, 'run.txt'), 'the run\n');
-      world.git(workspace.path, 'add', 'run.txt');
-      world.git(workspace.path, 'commit', '-m', 'the run');
-      expect(await adapter.isBasedOn(workspace.path, world.baseSha)).toBe(true);
-    });
+  test(`${label}: isBasedOn holds for the base a workspace is on, and for a commit above it, and not for a commit above the base it is not on`, async () => {
+    const { adapter, world } = await start();
+    const workspace = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    const above = commitOn(world, world.baseSha, 'landed on the base\n');
+    expect([
+      await adapter.isBasedOn(workspace.path, world.baseSha),
+      await adapter.isBasedOn(workspace.path, above),
+    ]).toEqual([true, false]);
+    writeFileSync(join(workspace.path, 'run.txt'), 'the run\n');
+    world.git(workspace.path, 'add', 'run.txt');
+    world.git(workspace.path, 'commit', '-m', 'the run');
+    expect(await adapter.isBasedOn(workspace.path, world.baseSha)).toBe(true);
+  });
 
   test(`${label}: capabilities parse`, async () => {
     const { adapter } = await start();

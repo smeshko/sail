@@ -15,8 +15,8 @@
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail <ticket>`, `sail resume` and the watcher's dispatch each
 // start one run per process.
-import { existsSync, realpathSync, rmSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
@@ -359,6 +359,22 @@ export function findRun(
   return { dir, header: readRunHeader(dir), status };
 }
 
+/**
+ * The commit a worktree's HEAD names while it is detached, read from the `.git` file that points at its git directory:
+ * `undefined` when it can't be read, or when HEAD names a branch.
+ */
+function headOfWorktree(path: string): string | undefined {
+  try {
+    const gitdir = readFileSync(join(path, '.git'), 'utf8')
+      .trim()
+      .replace(/^gitdir:\s*/, '');
+    const head = readFileSync(join(resolve(path, gitdir), 'HEAD'), 'utf8').trim();
+    return head.startsWith('ref:') ? undefined : head;
+  } catch {
+    return undefined;
+  }
+}
+
 /** One line per port whose adapter, by `use` or `origin`, differs from the one the run started with. */
 export function changedAdapters(header: RunHeader, entries: Record<Port, AdapterEntry>): string[] {
   const named = ({ use, origin }: AdapterEntry) => `${use} (${origin})`;
@@ -388,8 +404,25 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in loaded) return loaded;
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
-  const keyed = await remoteKeyFor(options.adapters.ports.workspace, dirname(found.dir));
+  const workspace = options.adapters.ports.workspace;
+  const keyed = await remoteKeyFor(workspace, dirname(found.dir));
   if ('refused' in keyed) return keyed;
+  // A run resumes in its own worktree, which must still be there and still on the base the run started from.
+  const worktree = run.header.workspace === undefined ? undefined : join(dirname(found.dir), run.header.workspace);
+  if (worktree !== undefined && !existsSync(worktree)) {
+    return { refused: `run ${runId}'s worktree ${run.header.workspace} is gone: the run stays suspended` };
+  }
+  const base = run.header.repository?.baseSha;
+  if (worktree !== undefined && base !== undefined && !(await workspace.isBasedOn(worktree, base))) {
+    const head = headOfWorktree(worktree) ?? 'a commit sail could not read';
+    return {
+      refused: `run ${runId}'s base ${base} is no ancestor of the HEAD of its worktree, ${head}: the run stays suspended`,
+    };
+  }
+  // The lease is renewed under the run's own id and this process: another live run holding it refuses the resume.
+  const branch = `sail/${run.header.source.ticketKey}`;
+  const leasing = await leaseBranch(workspace, keyed.remote, branch, { runId, runDir: run.dir, pid: process.pid });
+  if ('refused' in leasing) return leasing;
   // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
   const firstSeq = nextSeq(run.dir);
   if (typeof firstSeq !== 'number') return firstSeq;
@@ -401,12 +434,12 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     header: run.header,
     sailDir: found.dir,
     workspace: run.header.workspace === undefined ? dirname(found.dir) : join(dirname(found.dir), run.header.workspace),
-    lease: { remote: keyed.remote, branch: `sail/${run.header.source.ticketKey}` },
+    lease: { remote: keyed.remote, branch },
     adapters: options.adapters.ports,
     relay: options.adapters.relay,
     config: found.config,
     loaded,
-    claimed: [],
+    claimed: leasing.events,
     firstSeq,
   };
 }

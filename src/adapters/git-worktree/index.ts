@@ -8,7 +8,7 @@ import type { ProviderOptions } from '../../ports/ticket-source';
 import type { Workspace, WorkspaceCapabilities } from '../../ports/types';
 import type { RunRef, WorkspacePort } from '../../ports/workspace';
 import { leasesDirFor, releaseLease, takeLease } from '../leases';
-import { clonePath, diffFrom, removeWorktree, sweepRuns } from '../worktree-git';
+import { basedOn, clonePath, diffFrom, removeWorktree, sweepRuns } from '../worktree-git';
 import { git } from './git';
 import { remoteKeyOf } from './remote';
 
@@ -104,9 +104,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       return { paths: await sweepRuns(runGit, repo, runsDir), raw: null };
     },
     remoteKey: (clone) => remoteKeyOf(clone, env),
-    async isBasedOn() {
-      return false;
-    },
+    isBasedOn: (path, baseSha) => basedOn(runGit, path, baseSha),
     capabilities(): WorkspaceCapabilities {
       return { keep: true, sweep: true };
     },

@@ -66,6 +66,11 @@ export async function diffFrom(git: GitRunner, path: string, from: string): Prom
 }
 
 /** Removes the worktree at `path` from the repository, and fails only when it is still there. */
+/** Whether `baseSha` is an ancestor of the HEAD of the worktree at `path`, so a resumed run is still on its base. */
+export async function basedOn(git: GitRunner, path: string, baseSha: string): Promise<boolean> {
+  return (await git(path, ['merge-base', '--is-ancestor', baseSha, 'HEAD'])).code === 0;
+}
+
 export async function removeWorktree(git: GitRunner, repo: string, op: string, path: string): Promise<GitResult> {
   const removed = await git(repo, ['worktree', 'remove', '--force', resolve(path)]);
   await git(repo, ['worktree', 'prune']);
