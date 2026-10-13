@@ -1,28 +1,50 @@
 // Linear's answers as sail's Ticket, and Linear's state types as sail's. Free of I/O, so its mapping takes plain values.
-// Stub: the mapping is written in TASK-003.
+import { PortError } from '../../../ports/errors';
 import type { Ticket, TicketStateType } from '../../../ports/types';
+import type { CommentNode, IssueNode } from './queries';
 
-/** A Linear issue node, as FetchIssue answers it, as a Ticket whose `raw` is the node. */
-export function toTicket(_node: unknown): Ticket {
-  return {
-    ticketKey: '',
-    title: '',
-    url: '',
-    description: '',
-    state: { type: 'unstarted', name: '' },
-    labels: [],
-    comments: [],
-    links: [],
-    attachments: [],
-    raw: null,
-  };
-}
+/** Linear's state types, each as the sail state type it folds onto. `triage` and any other type are not in it. */
+const STATE_TYPES: ReadonlyMap<string, TicketStateType> = new Map([
+  ['backlog', 'unstarted'],
+  ['unstarted', 'unstarted'],
+  ['started', 'started'],
+  ['completed', 'completed'],
+  ['canceled', 'canceled'],
+  ['duplicate', 'canceled'],
+]);
 
 /**
  * sail's state type for a Linear state type: backlog and unstarted are unstarted, started is started, completed is
  * completed, canceled and duplicate are canceled. Any other type, triage included, is refused with a PortError `invalid`
  * that names it.
  */
-export function stateTypeOf(_linearType: string): TicketStateType {
-  return 'unstarted';
+export function stateTypeOf(linearType: string, op = 'get'): TicketStateType {
+  const mapped = STATE_TYPES.get(linearType);
+  if (mapped === undefined) {
+    throw new PortError('ticketSource', op, 'invalid', `Linear state type ${linearType} is not one sail maps`);
+  }
+  return mapped;
+}
+
+/** A Linear issue as a Ticket, with `comments` (every page of them) and `raw` the node as FetchIssue answered it. */
+export function toTicket(node: IssueNode, comments: readonly CommentNode[] = node.comments.nodes): Ticket {
+  return {
+    ticketKey: node.identifier,
+    title: node.title,
+    url: node.url,
+    description: node.description ?? '',
+    state: { type: stateTypeOf(node.state.type), name: node.state.name },
+    labels: node.labels.nodes.map((label) => label.name),
+    comments: comments.map((comment) => ({
+      author: comment.user?.name ?? 'unknown',
+      body: comment.body,
+      createdAt: comment.createdAt,
+    })),
+    links: node.relations.nodes.map(({ relatedIssue }) => ({
+      url: relatedIssue.url,
+      title: `${relatedIssue.identifier} ${relatedIssue.title}`,
+    })),
+    attachments: node.attachments.nodes.map(({ title, url }) => ({ name: title, url })),
+    raw: node,
+  };
 }

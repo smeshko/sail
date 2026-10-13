@@ -15,7 +15,7 @@ const GRAPHQL_CODES: Readonly<Record<string, PortErrorCode>> = {
 export interface LinearClientOptions {
   readonly apiKey: string;
   /** The transport. Left out, the client reads `globalThis.fetch` at each call. */
-  readonly fetch?: typeof fetch;
+  readonly fetch?: typeof fetch | undefined;
   /** How long one request may take before it fails as unavailable. Left out: 30 seconds. */
   readonly timeoutMs?: number;
 }
