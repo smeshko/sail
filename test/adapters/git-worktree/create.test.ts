@@ -109,7 +109,7 @@ test
 // biome-ignore format: TDD-PENDING TASK-002
 test
   .skip // TDD-PENDING TASK-002
-  ("create refuses a clone whose origin/HEAD is unset as invalid, and the message names git remote set-head origin --auto", async () => {
+  ('create refuses a clone whose origin/HEAD is unset as invalid, and the message names git remote set-head origin --auto', async () => {
     const p = pair();
     p.git(p.clone, 'remote', 'set-head', 'origin', '-d');
     const run = runIn(p, 'r1');
