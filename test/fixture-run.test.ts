@@ -285,7 +285,8 @@ test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that 
       expect(fakeState(other.dir, 'prs.json').pullRequests.at(-1)).toMatchObject({
         number: 5,
         state: 'open',
-        headSha: other.git('rev-parse', 'HEAD'),
+        // The run committed in its worktree, so the pull request's head is the commit it pushed, not the clone's HEAD.
+        headSha: readEvents(copy).find((event) => event.type === 'codehost:pushed')?.headSha,
       });
       expect(validateRunDir(copy).issues).toEqual([]);
     });
