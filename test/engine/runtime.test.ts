@@ -586,6 +586,8 @@ const STUB_OUTLINE = [
   route('self-review#1', 'publish#1'),
   ...callOutline('publish#1', 1, 0),
   route('publish#1', 'end'),
+  'workspace:released',
+  'workspace:lease_released',
   'run:end',
 ];
 
@@ -666,8 +668,14 @@ test('a run whose loop exceeds its max ends its stream with loop:exit exceeded, 
     () => undefined,
     (end) => {
       const list = events(end.dir);
-      expect(outline(list.slice(-3))).toEqual(['journal:append tests#3', 'loop:exit', 'run:end']);
-      expect(list.slice(-2)).toMatchObject([
+      expect(outline(list.slice(-5))).toEqual([
+        'journal:append tests#3',
+        'loop:exit',
+        'workspace:released',
+        'workspace:lease_released',
+        'run:end',
+      ]);
+      expect([list.at(-4), list.at(-1)]).toMatchObject([
         { type: 'loop:exit', loop: 'fix', iterations: 3, max: 3, reason: 'exceeded' },
         {
           type: 'run:end',
@@ -869,7 +877,13 @@ test('a replay abandoned by an abort reports nothing after run:end, even once it
     });
     expect(end).toMatchObject({ status: 'suspended', message: 'stopped during the replay' });
     while (!existsSync(moved)) await Bun.sleep(10);
-    expect(outline(events(end.dir)).slice(-2)).toEqual(['journal:append spec#1', 'run:end']);
+    // Suspended, so the worktree is kept and the lease with it: only the kept release goes out before run:end.
+    expect(outline(events(end.dir)).slice(-4)).toEqual([
+      'stage:end spec#1',
+      'journal:append spec#1',
+      'workspace:released',
+      'run:end',
+    ]);
   });
 });
 
