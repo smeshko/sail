@@ -1,6 +1,7 @@
 // Linear's answers as sail's Ticket, and Linear's state types as sail's. Free of I/O, so its mapping takes plain values.
 import { PortError } from '../../../ports/errors';
 import type { Ticket, TicketStateType } from '../../../ports/types';
+import { clean } from './client';
 import type { CommentNode, IssueNode } from './queries';
 
 /** Linear's state types, each as the sail state type it folds onto. `triage` and any other type are not in it. */
@@ -21,7 +22,8 @@ const STATE_TYPES: ReadonlyMap<string, TicketStateType> = new Map([
 export function stateTypeOf(linearType: string, op = 'get'): TicketStateType {
   const mapped = STATE_TYPES.get(linearType);
   if (mapped === undefined) {
-    throw new PortError('ticketSource', op, 'invalid', `Linear state type ${linearType} is not one sail maps`);
+    // The type is Linear's text, so it is cleaned before a person reads it (review #2.2).
+    throw new PortError('ticketSource', op, 'invalid', `Linear state type ${clean(linearType)} is not one sail maps`);
   }
   return mapped;
 }
