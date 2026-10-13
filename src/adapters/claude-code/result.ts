@@ -61,6 +61,11 @@ function errorOf(message: SDKResultMessage, context: ResultContext): HarnessResu
 /** The result of a session that ended with `message`. */
 export function resultOf(message: SDKResultMessage, context: ResultContext): HarnessResult {
   if (message.subtype !== 'success') return errorOf(message, context);
+  // An API failure arrives as a success with is_error, and its diagnostic is the result text (review #1.2).
+  if (message.is_error) {
+    const text = typeof message.result === 'string' ? message.result.trim() : '';
+    return failed(message, context, 'harness', text === '' ? 'the session ended with an API error' : message.result);
+  }
   const { usage } = context;
   const tokens = [usage.inputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens];
   if (tokens.every((count) => (count ?? 0) === 0)) {
