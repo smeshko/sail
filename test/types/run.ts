@@ -27,6 +27,13 @@ const spec = agent('spec', {
   permissions,
   budget,
 });
+// A step may list the tools and MCP calls it reaches. An unknown key under permissions is refused (test/types/expect-error).
+const _lint = agent('lint', {
+  prompt,
+  output: SpecOutput,
+  permissions: { read: ['**'], write: [], commands: [], tools: ['Read'], mcp: ['linear:get_issue'] },
+  budget,
+});
 const implement = agent('implement', {
   prompt,
   consumes: { spec: file('spec.md'), feedback: value(Feedback).optional() },
