@@ -57,6 +57,7 @@ const GIT_VALUE_OPTIONS = new Set([
 ]);
 const GIT_PATH_OPTIONS = new Set(['-C', '--git-dir', '--work-tree']);
 const INJECTING_OPTIONS = new Set(['-c', '--config-env', '--exec-path']);
+const NULL_DEVICE = '/dev/null';
 // Builtins that change the shell's variables or run a file. The engine does not follow them into later segments.
 const SHELL_STATE = new Set(['export', 'declare', 'typeset', 'local', 'readonly', 'unset', 'alias', 'source', '.']);
 
@@ -218,6 +219,8 @@ function assignment(walk: Walk, word: Word, own: Record<string, string>, cwd: st
 }
 
 function redirectPath(walk: Walk, target: RedirectTarget, cwd: string, writes: string[], reads: string[]): void {
+  // The null device takes what a command writes and gives nothing back: no file is reached, so it needs no root.
+  if (target.path === NULL_DEVICE) return;
   const resolved = resolveReal(target.path, cwd);
   const root = resolved === null ? null : rootOf(resolved, walk.roots);
   if (target.kind === 'write') {
