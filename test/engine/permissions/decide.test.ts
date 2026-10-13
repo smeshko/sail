@@ -125,6 +125,20 @@ test('a redirect to or from /dev/null is allowed: it writes nothing, though /dev
     });
   }));
 
+test('git push --mirror is a force update of every remote ref, so it is denied deny:git-push-force', () =>
+  inRoots((p) => {
+    const policy: Permissions = { read: [], write: [], commands: ['git push *'], tools: ['Bash'] };
+    const bash = (command: string): ToolCall => ({ tool: 'Bash', kind: 'execute', command });
+    expect(decide(bash('git push --mirror origin'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'deny:git-push-force',
+    });
+    expect(decide(bash('git push --mir origin'), policy, p.roots)).toMatchObject({
+      deny: true,
+      rule: 'deny:git-push-force',
+    });
+  }));
+
 test('doas is denied as sudo is: it is the same privilege escalation under another name', () =>
   inRoots((p) => {
     const policy: Permissions = { read: [], write: [], commands: ['doas *', 'sudo *'], tools: ['Bash'] };
