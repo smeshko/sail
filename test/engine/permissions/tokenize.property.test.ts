@@ -1,7 +1,8 @@
 // A seeded property test: for random words built from quotes, escapes and plain text, the tokenizer splits the command
 // into the same argv that bash does. Bash is the reference, so a split the engine reads differently is a finding.
-import { spawnSync } from 'node:child_process';
+
 import { expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { tokenize } from '../../../src/engine/permissions/tokenize';
 
 // Pieces that bash reads the same way with globbing off: no unquoted `$`, backtick, glob or operator characters.
