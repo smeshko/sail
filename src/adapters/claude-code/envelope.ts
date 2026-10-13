@@ -7,6 +7,23 @@ export type Submission =
   | { readonly outcome: 'done'; readonly output: unknown }
   | { readonly outcome: 'blocked'; readonly reason: string };
 
+/** Where the step schema sits in the envelope: the `done` branch's `output`. Local references are relative to the root. */
+const OUTPUT_POINTER = '#/oneOf/0/properties/output';
+
+/** The step schema with each local `$ref` pointed where the schema now sits, so `#` and `#/…` still reach it (review #1.4). */
+function rebase(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(rebase);
+  if (typeof node !== 'object' || node === null) return node;
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => [
+      key,
+      key === '$ref' && typeof value === 'string' && value.startsWith('#')
+        ? OUTPUT_POINTER + value.slice(1)
+        : rebase(value),
+    ]),
+  );
+}
+
 /** The draft-07 JSON Schema the SDK receives as `outputFormat.schema`: one branch per outcome, and no other shape. */
 export function submissionSchema(outputSchema: Readonly<Record<string, unknown>>): Record<string, unknown> {
   return {
@@ -14,7 +31,7 @@ export function submissionSchema(outputSchema: Readonly<Record<string, unknown>>
     oneOf: [
       {
         type: 'object',
-        properties: { outcome: { const: 'done' }, output: outputSchema },
+        properties: { outcome: { const: 'done' }, output: rebase(outputSchema) },
         required: ['outcome', 'output'],
         additionalProperties: false,
       },
