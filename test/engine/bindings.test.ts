@@ -89,7 +89,7 @@ test.each([
     'a gitDiff binding',
     { diff: gitDiff('origin/main...HEAD') },
     { diff: given('x') },
-    ["'diff' is a gitDiff binding, which can't be supplied here"],
+    ["'diff' is a gitDiff binding, but a value was supplied"],
   ],
   [
     'a fromStep binding, even left out',
@@ -163,7 +163,7 @@ test('every problem is reported, in consumes order, and materialise refuses to w
   expect(problems.map((problem) => problem.split(':')[0])).toEqual([
     "'spec' is required",
     "'ticket'",
-    "'diff' is a gitDiff binding, which can't be supplied here",
+    "'diff' is a gitDiff binding, but a value was supplied",
   ]);
   expect(() => materialise(consumes, supplied, s.stageIn)).toThrow("'spec' is required");
   expect(readdirSync(s.stageIn)).toEqual([]);
