@@ -12,6 +12,7 @@ import {
   validateRunDir,
 } from '../../src/engine/schemas';
 import type { NewEvent } from '../../src/events/types';
+import { writeTwoStepRun } from '../helpers/run-dir';
 
 const root = join(import.meta.dir, '..', '..');
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
@@ -464,16 +465,21 @@ const lease = { remote: 'fake://codehost/fixture', branch: 'sail/FAKE-1' };
 const WORKSPACE = '.sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace';
 
 /** One sample of each provider type, from the golden run where it has one (ports-and-fakes D10). */
+/** The intake's fetch, which names its ticket by its title and URL. */
+const FETCHED: NewEvent = {
+  type: 'ticket:fetched',
+  key: 'intake#1',
+  ticketKey: 'FAKE-1',
+  title: 'Add a --shout flag to the greet command',
+  url: 'fake://tickets/FAKE-1',
+  comments: 1,
+  links: 0,
+  attachments: 0,
+  durationMs: 310,
+};
+
+/** One sample of each other provider type. */
 const PROVIDER: NewEvent[] = [
-  {
-    type: 'ticket:fetched',
-    key: 'intake#1',
-    ticketKey: 'FAKE-1',
-    comments: 1,
-    links: 0,
-    attachments: 0,
-    durationMs: 310,
-  },
   { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: { type: 'started', name: 'In Progress' } },
   {
     type: 'ticket:updated',
@@ -524,6 +530,16 @@ test.each(PROVIDER.map((sample) => [sample.type, sample] as const))(
     ]);
   },
 );
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('ticket:fetched accepts its provider payload, with its title and URL, and rejects a field it does not declare', () => {
+  expect(validateDocument('sail.event.v1', stamped(FETCHED))).toEqual([]);
+  expect(validateDocument('sail.event.v1', { ...stamped(FETCHED), surprise: 1 })).toEqual([
+    { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+  ]);
+});
 
 test('provider events: a key where D10 allows one, and the rules each payload adds', () => {
   const issue = (path: string, message: string) => [{ schema: 'sail.event.v1' as const, path, message }];
@@ -1110,4 +1126,108 @@ test('event: run:start takes source.forced as the list, and refuses a boolean', 
   expect(forcedIssues('sail.event.v1', event, ['designation', 'state'])).toEqual([]);
   expect(forcedIssues('sail.event.v1', event, false)).toEqual(['/source/forced']);
   expect(forcedIssues('sail.event.v1', event, ['label'])).toEqual(['/source/forced/0']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('event: a ticket:fetched names its ticket: one without title, or without url, breaks sail.event.v1, with a key and without one', () => {
+  const fetched = {
+    seq: 1,
+    ts: '2026-09-25T09:00:00.000Z',
+    runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+    type: 'ticket:fetched',
+    ticketKey: 'FAKE-1',
+    title: 'Add a --shout flag to the greet command',
+    url: 'fake://tickets/FAKE-1',
+    comments: 1,
+    links: 0,
+    attachments: 0,
+    durationMs: 310,
+  };
+  const issues = (event: object) =>
+    validateDocument('sail.event.v1', event).map((issue) => `${issue.path} ${issue.message}`);
+  expect([issues(fetched), issues({ ...fetched, key: 'intake#1' })]).toEqual([[], []]);
+  for (const key of [{}, { key: 'intake#1' }]) {
+    const { title: _title, ...untitled } = { ...fetched, ...key };
+    const { url: _url, ...unlinked } = { ...fetched, ...key };
+    expect([issues(untitled), issues(unlinked)]).toEqual([['/title is required'], ['/url is required']]);
+    expect(issues({ ...fetched, ...key, title: 7 })).toEqual(['/title must be string']);
+  }
+});
+
+// A two-step call in a run directory (D9), on a run directory written by hand: the engine can't run a multi-step stage
+// yet, so no run, and no golden run, holds one.
+
+/** The hand-written two-step run, in a temporary directory of its own. */
+function twoStepRun(): string {
+  const dir = tempDir({});
+  writeTwoStepRun(dir);
+  return dir;
+}
+
+const PUBLISH = '05-publish/call-1';
+const readJson = (dir: string, path: string) => JSON.parse(readFileSync(join(dir, path), 'utf8'));
+/** Rewrites the JSON document at `path` in `dir` as `change` leaves it. */
+function rewrite(dir: string, path: string, change: (data: Record<string, unknown>) => unknown): void {
+  writeFileSync(join(dir, path), json(change(readJson(dir, path))));
+}
+
+test('a run directory that holds a two-step call, its two step results, its three journal lines and its events passes validateRunDir with no issue', () => {
+  const dir = twoStepRun();
+  expect(validateRunDir(dir)).toEqual({
+    counts: {
+      'sail.run.v1': 1,
+      'sail.journal.v1': 3,
+      'sail.event.v1': 31,
+      'sail.summary.v1': 1,
+      'sail.result.v1': 3,
+    },
+    issues: [],
+  });
+  expect(readJson(dir, `${PUBLISH}/result.json`).steps.map((step: { step: string }) => step.step)).toEqual([
+    'describe',
+    'open',
+  ]);
+});
+
+test("a multi-step call's outcome is its last step's, as that step's result.json records it: a step result that says otherwise is named by the call's link and by its own journal line", () => {
+  const dir = twoStepRun();
+  const call = readJson(dir, `${PUBLISH}/result.json`);
+  const last = call.steps.at(-1);
+  expect([call.outcome, last.outcome, readJson(dir, last.resultPath).outcome]).toEqual(['passed', 'passed', 'passed']);
+
+  rewrite(dir, last.resultPath, (result) => ({ ...result, outcome: 'failed', exit: { code: 1, mapped: 'failed' } }));
+  expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
+    `journal.ndjson:2  [sail.journal.v1]  /resultPath points at ${PUBLISH}/steps/2-open/result.json, which differs in outcome ("failed", not "passed")`,
+    `${PUBLISH}/result.json  [sail.result.v1]  /steps/1/resultPath points at ${PUBLISH}/steps/2-open/result.json, which differs in outcome ("failed", not "passed")`,
+  ]);
+});
+
+test("a multi-step call linked to another call's result names the link, and each field that differs", () => {
+  const dir = twoStepRun();
+  // Another call of the run, journaled as a call is: tests#2.
+  const other = { ...scriptResult, stage: 'tests', call: 2, key: 'tests#2' };
+  mkdirSync(join(dir, '03-tests', 'call-2'), { recursive: true });
+  writeFileSync(join(dir, '03-tests', 'call-2', 'result.json'), json(other));
+  const line = {
+    ...journal,
+    seq: 4,
+    key: 'tests#2',
+    stage: 'tests',
+    call: 2,
+    resultPath: '03-tests/call-2/result.json',
+  };
+  writeFileSync(join(dir, 'journal.ndjson'), `${readFileSync(join(dir, 'journal.ndjson'), 'utf8')}${ndjson(line)}`);
+  expect(validateRunDir(dir).issues).toEqual([]);
+
+  rewrite(dir, `${PUBLISH}/result.json`, (result) => {
+    const [describe, open] = result.steps as Record<string, unknown>[];
+    return { ...result, steps: [describe, { ...open, resultPath: '03-tests/call-2/result.json' }] };
+  });
+  expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([
+    `${PUBLISH}/result.json  [sail.result.v1]  /steps/1/resultPath points at 03-tests/call-2/result.json, ` +
+      'which differs in key ("tests#2", not "publish#1/open"), stage ("tests", not "publish"), call (2, not 1), ' +
+      'step (undefined, not "open")',
+  ]);
 });

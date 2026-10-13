@@ -133,3 +133,58 @@ export const route = (from: string, value: Outcome, took: string): NewEvent => (
   value,
   took,
 });
+
+/** A `ticket:fetched` for `FAKE-1`, under `key` when one is given: the intake's, or a script step's own fetch. */
+export const fetched = (key: string | undefined, title: string, url = 'fake://tickets/FAKE-1'): NewEvent => ({
+  type: 'ticket:fetched',
+  ...(key === undefined ? {} : { key }),
+  ticketKey: 'FAKE-1',
+  title,
+  url,
+  comments: 1,
+  links: 0,
+  attachments: 0,
+  durationMs: 310,
+});
+
+// What a real harness and a multi-step stage report, which no run writes yet: built by hand until one does.
+
+/** What an agent thought, as its harness reports it. */
+export const thinking = (key: string, text: string): NewEvent => ({ type: 'agent:thinking', key, text });
+
+/** The start of the tool call `callId` of the session under `key`. */
+export const toolStart = (key: string, callId: string, tool: string, input: unknown): NewEvent => ({
+  type: 'tool:start',
+  key,
+  callId,
+  tool,
+  input,
+});
+
+/** The end of the tool call `callId`: completed, denied by the step's permissions, or failed. */
+export const toolEnd = (
+  key: string,
+  callId: string,
+  status: 'completed' | 'denied' | 'failed',
+  durationMs: number,
+): NewEvent => ({ type: 'tool:end', key, callId, status, durationMs });
+
+/** A Bash call the step's `commands` permission denied, with the reason the harness gave. */
+export const denied = (key: string, callId: string, commands: string[], reason: string): NewEvent => ({
+  type: 'permission:denied',
+  key,
+  callId,
+  tool: 'Bash',
+  rule: 'commands',
+  permissions: { commands },
+  reason,
+});
+
+/** A produced file's verdict, with the checks it was held to. */
+export const validated = (key: string, name: string, checks: string[], ok = true): NewEvent => ({
+  type: 'file:validated',
+  key,
+  name,
+  ok,
+  checks,
+});

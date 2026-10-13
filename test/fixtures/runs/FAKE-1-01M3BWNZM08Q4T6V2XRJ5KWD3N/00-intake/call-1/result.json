@@ -25,25 +25,18 @@
     "ticket.json": {
       "path": "00-intake/call-1/ticket.json",
       "bytes": 1786,
-      "sha256": "ab499f9c5b756afdc86d6fd5d31eb9530b4d46208bf9d82181f7cdf1fde1600b"
+      "sha256": "c15564d252350007791152b78bcb8aed91bc51b468cde4121264eb6542df0355"
     },
     "brief.md": {
       "path": "00-intake/call-1/brief.md",
       "bytes": 1369,
-      "sha256": "d6c0a5bbf7fa91c2c5d8e662b582692cca824794e9fbf67bcac3e2e78a22a49c",
-      "validation": {
-        "ok": true,
-        "checks": [
-          "hasSections(Request, Acceptance criteria, Context)",
-          "untrustedInputWrapped"
-        ]
-      }
+      "sha256": "d6c0a5bbf7fa91c2c5d8e662b582692cca824794e9fbf67bcac3e2e78a22a49c"
     }
   },
   "consumed": {
     "source": "run.json#/source"
   },
-  "startedAt": "2026-09-25T09:00:00.940Z",
-  "finishedAt": "2026-09-25T09:00:02.990Z",
-  "durationMs": 2050
+  "startedAt": "2026-09-25T09:00:00.800Z",
+  "finishedAt": "2026-09-25T09:00:01.500Z",
+  "durationMs": 700
 }

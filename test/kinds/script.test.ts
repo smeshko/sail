@@ -11,11 +11,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir } from '../../src/engine/call-dir';
 import type { CallEvent } from '../../src/events/types';
-import { KINDS, type StepContext } from '../../src/kinds/index';
-import { DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
+import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
+import { BIN_DIR, DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
 import { type ExitCodes, type ScriptStep, script, z } from '../../src/sdk/index';
+import { steppingClock } from '../helpers/clock';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -81,6 +83,15 @@ const tests = (options: { exitCodes?: ExitCodes; timeoutSeconds?: number; run?: 
 
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 
+/**
+ * A step's run with its recorded `env` cut down to the preamble's variables: `SAIL_EVENTS`, which the script kind adds
+ * after them, has cases of its own.
+ */
+function preambleOnly(run: StepRun): StepRun {
+  const { SAIL_EVENTS: _events, ...env } = run.record.env as Record<string, string>;
+  return { ...run, record: { ...run.record, env } };
+}
+
 test('KINDS holds the script kind', () => {
   expect(KINDS.script).toBe(scriptKind);
   expect(scriptKind.kind).toBe('script');
@@ -91,7 +102,7 @@ test('exit 0 is passed, with the parsed report and junit.xml recorded', async ()
   const s = setup();
   s.run(`${JUNIT}\necho 'running 1 test'\necho '${PASSING}'`);
   const run = await scriptKind.run(tests(), s.context);
-  expect(run).toEqual({
+  expect(preambleOnly(run)).toEqual({
     outcome: 'passed',
     output: JSON.parse(PASSING),
     files: {
@@ -333,7 +344,7 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
     CWD: realpathSync(s.workspace),
     HAS_PATH: 'true',
   });
-  expect(Object.keys(run.record.env as object)).toEqual(names);
+  expect(Object.keys(preambleOnly(run).record.env as object)).toEqual(names);
   expect((run.record.env as Record<string, string>).INPUT_SPEC).toBe(`.sail-runs/${RUN_ID}/00-tests/call-1/in/spec.md`);
 });
 
@@ -400,13 +411,20 @@ test('a script that is missing reports script:exec, and nothing more', async () 
   const s = setup();
   const { context, events } = collecting(s);
   await scriptKind.run(tests({ run: './missing.sh' }), context);
-  expect(events).toEqual([
-    {
-      type: 'script:exec',
-      command: '.sail/stages/tests/missing.sh',
-      cwd: '.',
-      envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG'],
-    },
+  const [exec, ...more] = events;
+  expect(more).toEqual([]);
+  expect(exec).toMatchObject({ type: 'script:exec', command: '.sail/stages/tests/missing.sh', cwd: '.' });
+  // The preamble's names, in order. The one the script kind adds after them has a case of its own.
+  const envKeys = exec?.type === 'script:exec' ? exec.envKeys : [];
+  expect(envKeys.filter((name) => name !== 'SAIL_EVENTS')).toEqual([
+    'RUN_ID',
+    'STAGE',
+    'CALL',
+    'TRY',
+    'STAGE_IN',
+    'STAGE_OUT',
+    'WORKSPACE',
+    'SAIL_CONFIG',
   ]);
 });
 
@@ -438,4 +456,289 @@ test('problems() refuses a script that would produce prompt.md or session.log: t
     "'prompt.md' can't be produced: the engine writes it in $STAGE_OUT",
     "'session.log' can't be produced: the engine writes it in $STAGE_OUT",
   ]);
+});
+
+const HOUR_MS = 3_600_000;
+/** A run's clock that jumps an hour at every reading: nothing that waits may read it. */
+const jumping = () => steppingClock('2026-09-25T09:00:00.000Z', HOUR_MS);
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("script:exit's duration is two readings of the run's clock apart, and a clock that jumps an hour times no script out", async () => {
+  const s = setup();
+  s.run(`${JUNIT}\necho '${PASSING}'`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests({ timeoutSeconds: 5 }), { ...context, clock: jumping() });
+  expect(events.find((event) => event.type === 'script:exit')).toMatchObject({
+    code: 0,
+    outcome: 'passed',
+    durationMs: HOUR_MS,
+  });
+  expect(events.map((event) => event.type)).toEqual([
+    'script:exec',
+    'script:exit',
+    'output:validated',
+    'file:produced',
+  ]);
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('a clock that jumps an hour at every reading stretches no grace period', async () => {
+  const s = setup();
+  s.run('trap "" TERM\ntouch "$STAGE_OUT/ready"\nwhile :; do sleep 0.05; done');
+  const { context, events } = collecting(s);
+  const controller = new AbortController();
+  const running = scriptKind.run(tests(), { ...context, signal: controller.signal, clock: jumping() });
+  while (!existsSync(join(s.context.paths.dir, 'ready'))) await Bun.sleep(20);
+  const aborted = performance.now();
+  controller.abort();
+  const run = await running;
+  const stopped = performance.now() - aborted;
+  expect(events.find((event) => event.type === 'script:exit')).toMatchObject({
+    code: null,
+    signal: 'SIGKILL',
+    durationMs: HOUR_MS,
+  });
+  expect(run.errors).toEqual([{ reason: 'exit_code', message: 'interrupted, then ended by signal SIGKILL' }]);
+  // The context's grace period is 200 ms of real time.
+  expect(stopped).toBeLessThan(2000);
+});
+
+// sail on a script step's PATH (D13).
+
+const ROOT = join(import.meta.dir, '..', '..');
+/** Prints what `sail` is inside the step: its version, where the shell found it, the head of PATH and the rest of it. */
+const WHICH_SAIL =
+  'printf \'{"version":"%s","path":"%s","first":"%s","rest":"%s","bun":"%s"}\\n\' "$(sail --version)" ' +
+  '"$(command -v sail)" "$(printf %s "$PATH" | cut -d: -f1)" "$(printf %s "$PATH" | cut -d: -f2-)" "$SAIL_BUN"';
+const Which = z.object({ version: z.string(), path: z.string(), first: z.string(), rest: z.string(), bun: z.string() });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("sail inside a script step is this checkout's, on the running Bun: PATH starts with its bin/, ahead of the PATH the engine has, and neither PATH nor SAIL_BUN is recorded", async () => {
+  const s = setup();
+  s.run(WHICH_SAIL);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(script('tests', { run: './run.sh', output: Which }), context);
+  expect(run.errors).toEqual([]);
+  expect(run.output).toEqual({
+    version: pkg.version,
+    path: join(ROOT, 'bin', 'sail'),
+    first: join(ROOT, 'bin'),
+    rest: process.env.PATH ?? '',
+    bun: process.execPath,
+  });
+  expect(BIN_DIR).toBe(join(ROOT, 'bin'));
+  const recorded = Object.keys(run.record.env as object);
+  const [exec] = events.flatMap((event) => (event.type === 'script:exec' ? [event.envKeys] : []));
+  expect([recorded.includes('PATH'), recorded.includes('SAIL_BUN')]).toEqual([false, false]);
+  expect([exec?.includes('PATH'), exec?.includes('SAIL_BUN')]).toEqual([false, false]);
+});
+
+// A script's port events (D12): what a `sail port` under the step leaves in `$SAIL_EVENTS` joins the step's events once
+// the script has ended.
+
+const PORT_EVENTS = 'port-events.ndjson';
+const PUSHED = { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'a'.repeat(40) } as const;
+const LABELLED = { type: 'codehost:labelled', number: 5, label: 'sail', change: 'added' } as const;
+/** A script line that appends `event` to the port events file, as a `sail port` would. */
+const reports = (event: object) => `echo '${JSON.stringify(event)}' >> "$SAIL_EVENTS"`;
+const typesOf = (events: readonly CallEvent[]) => events.map((event) => event.type);
+
+const PROJECT = `name: script-kind
+sail: ">=0.0.0 <1"
+adapters:
+  ticketSource: { use: fake }
+  codeHost: { use: fake }
+  harness: { use: fake }
+  workspace: { use: fake }
+`;
+const TICKET = {
+  ticketKey: 'FAKE-1',
+  title: 'Add a greeting',
+  description: 'Greet the user by name.',
+  state: { type: 'unstarted', name: 'Todo' },
+  labels: ['sail'],
+  comments: [],
+  links: [],
+  attachments: [],
+};
+
+/** Gives the setup's `.sail/` a config and a ticket, so `sail port ticket-source get FAKE-1` in its script answers. */
+function withTicket(s: Setup): void {
+  const sail = join(s.workspace, '.sail');
+  writeFileSync(join(sail, 'project.yaml'), PROJECT);
+  mkdirSync(join(sail, 'fake'));
+  writeFileSync(join(sail, 'fake', 'tickets.json'), JSON.stringify({ tickets: [TICKET] }));
+}
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded relative to the workspace and listed last in envKeys, and a script that calls no port leaves no file', async () => {
+  const s = setup();
+  s.run(`${JUNIT}\nprintf '%s' "\${SAIL_EVENTS:-unset}" > "$STAGE_OUT/named"\necho '${PASSING}'`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  const file = join(s.context.paths.dir, PORT_EVENTS);
+  expect(readFileSync(join(s.context.paths.dir, 'named'), 'utf8')).toBe(file);
+  const env = run.record.env as Record<string, string>;
+  expect([env.SAIL_EVENTS, Object.keys(env).at(-1)]).toEqual([
+    `.sail-runs/${RUN_ID}/00-tests/call-1/${PORT_EVENTS}`,
+    'SAIL_EVENTS',
+  ]);
+  expect(events[0]).toMatchObject({
+    type: 'script:exec',
+    envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG', 'SAIL_EVENTS'],
+  });
+  expect(existsSync(file)).toBe(false);
+  expect(typesOf(events)).toEqual(['script:exec', 'script:exit', 'output:validated', 'file:produced']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a script that runs sail port has its provider event emitted between script:exec and script:exit, and the file stays in the call directory, holding what the child wrote', async () => {
+  const s = setup();
+  withTicket(s);
+  s.run(`sail port ticket-source get FAKE-1 >/dev/null\n${JUNIT}\necho '${PASSING}'`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  expect(typesOf(events)).toEqual([
+    'script:exec',
+    'ticket:fetched',
+    'script:exit',
+    'output:validated',
+    'file:produced',
+  ]);
+  expect(events[1]).toMatchObject({ ticketKey: 'FAKE-1', comments: 0, links: 0, attachments: 0 });
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+  const lines = readFileSync(join(s.context.paths.dir, PORT_EVENTS), 'utf8').split('\n');
+  expect(lines.map((line) => (line === '' ? '' : JSON.parse(line)))).toEqual([events[1], '']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  .each<[string, string, number | undefined, string, string[]]>([
+  ['times out', 'sleep 5', 1, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
+  [
+    'exits with a failing code',
+    `${JUNIT}\necho '${FAILING}'\nexit 1`,
+    undefined,
+    'failed',
+    ['script:exec', 'codehost:pushed', 'script:exit', 'output:validated', 'file:produced'],
+  ],
+  [
+    'is interrupted',
+    'touch "$STAGE_OUT/ready"\nwhile :; do sleep 0.05; done',
+    undefined,
+    'error',
+    ['script:exec', 'codehost:pushed', 'script:exit'],
+  ],
+])(
+  'a script that reports a provider event and then %s has it emitted before script:exit',
+  async (how, body, timeoutSeconds, outcome, types) => {
+    const s = setup();
+    s.run(`${reports(PUSHED)}\n${body}`);
+    const { context, events } = collecting(s);
+    const controller = new AbortController();
+    const step = tests(timeoutSeconds === undefined ? {} : { timeoutSeconds });
+    const running = scriptKind.run(step, { ...context, signal: controller.signal });
+    if (how === 'is interrupted') {
+      while (!existsSync(join(s.context.paths.dir, 'ready'))) await Bun.sleep(20);
+      controller.abort();
+    }
+    const run = await running;
+    expect<string[]>(typesOf(events)).toEqual(types);
+    expect<unknown>(events[1]).toEqual(PUSHED);
+    expect(run.outcome).toBe(outcome);
+  },
+);
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a line of the port events file that is no provider event ends the step in error with the reason port, and the valid lines before and after it are emitted', async () => {
+  const s = setup();
+  s.run(
+    `${reports(PUSHED)}\necho 'opened a pull request' >> "$SAIL_EVENTS"\n${reports(LABELLED)}\n${JUNIT}\necho '${PASSING}'`,
+  );
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  expect(typesOf(events)).toEqual([
+    'script:exec',
+    'codehost:pushed',
+    'codehost:labelled',
+    'script:exit',
+    'output:validated',
+    'file:produced',
+  ]);
+  expect(run).toMatchObject({
+    outcome: 'error',
+    output: null,
+    errors: [{ reason: 'port', message: 'port-events.ndjson line 2 is not a provider event: it is not JSON' }],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a bad line joins the errors the step already has: a script that timed out, or left a declared file out, has both', async () => {
+  const forged = { type: 'run:end', status: 'completed', replays: 1 };
+  const port = {
+    reason: 'port' as const,
+    message: 'port-events.ndjson line 1 is not a provider event: its type "run:end" is no ticket:* or codehost:* event',
+  };
+  const timedOut = setup();
+  timedOut.run(`${reports(forged)}\nsleep 5`);
+  expect((await scriptKind.run(tests({ timeoutSeconds: 1 }), timedOut.context)).errors).toEqual([
+    { reason: 'timeout', message: 'timed out after 1s' },
+    port,
+  ]);
+  const noFile = setup();
+  noFile.run(`${reports(forged)}\necho '${PASSING}'`);
+  expect(await scriptKind.run(tests(), noFile.context)).toMatchObject({
+    outcome: 'error',
+    errors: [{ reason: 'missing_file', message: "'junit.xml' was not produced in $STAGE_OUT" }, port],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a last line with no newline is dropped, and the step's outcome is what it would have been", async () => {
+  const s = setup();
+  s.run(`${reports(PUSHED)}\nprintf '%s' '${JSON.stringify(LABELLED)}' >> "$SAIL_EVENTS"\n${JUNIT}\necho '${PASSING}'`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  expect(typesOf(events)).toEqual([
+    'script:exec',
+    'codehost:pushed',
+    'script:exit',
+    'output:validated',
+    'file:produced',
+  ]);
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a script that removes the file after reporting emits nothing for it, and has no error from it', async () => {
+  const s = setup();
+  s.run(
+    `${reports(PUSHED)}\nif [ -f "\${SAIL_EVENTS:-unset}" ]; then had=true; else had=false; fi\n` +
+      'rm -f "$SAIL_EVENTS"\necho "{\\"had\\":$had}"',
+  );
+  const { context, events } = collecting(s);
+  const step = script('tests', { run: './run.sh', output: z.object({ had: z.boolean() }) });
+  const run = await scriptKind.run(step, context);
+  expect(run).toMatchObject({ outcome: 'passed', output: { had: true }, errors: [] });
+  expect(typesOf(events)).toEqual(['script:exec', 'script:exit', 'output:validated']);
 });

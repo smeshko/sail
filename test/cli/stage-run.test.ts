@@ -12,13 +12,13 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import { SPEC, SPEC_STAGE, submits, TICKET, writeAgentFixture } from '../helpers/agent-fixture';
-import { edit, write } from '../helpers/fixture';
+import { edit, write, writePublish } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -70,7 +70,7 @@ function writeScript(path: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
-test('the fixture tests stage runs in place from sail’s root, and passes', async () => {
+test('the fixture tests stage runs in place from sail’s root, and fails as its first call does: with its report', async () => {
   const runs = join(inRepoFixture, '.sail-runs');
   const existing = existsSync(runs) ? readdirSync(runs) : [];
   let callDir: string | undefined;
@@ -78,21 +78,76 @@ test('the fixture tests stage runs in place from sail’s root, and passes', asy
     const { code, stdout, stderr } = await runCaptured(['stage', 'run', 'test/fixtures/repo/.sail/stages/tests'], root);
     console.log(stdout.trimEnd());
     expect(stderr).toBe('');
-    expect(code).toBe(EXIT_OK);
+    expect(code).toBe(EXIT_FAILED);
     expect(stdout).toMatch(
-      /^tests#1 passed {2}test\/fixtures\/repo\/\.sail-runs\/tests-[0-9A-HJKMNP-TV-Z]{26}\/00-tests\/call-1\n$/,
+      /^tests#1 failed {2}test\/fixtures\/repo\/\.sail-runs\/tests-[0-9A-HJKMNP-TV-Z]{26}\/00-tests\/call-1\n$/,
     );
     callDir = callDirOf(stdout, root);
     expect(readdirSync(callDir).sort()).toEqual(['in', 'junit.xml', 'result.json', 'stderr.log', 'stdout.log']);
     expect(readResult(callDir)).toMatchObject({
       key: 'tests#1',
-      outcome: 'passed',
+      outcome: 'failed',
+      output: { ok: false, total: 6, failed: 1 },
       command: '.sail/stages/tests/run.sh',
     });
   } finally {
     if (callDir !== undefined) rmSync(join(callDir, '..', '..'), { recursive: true, force: true });
     if (existing.length === 0 && existsSync(runs) && readdirSync(runs).length === 0) rmdirSync(runs);
   }
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a script step run in isolation finds this checkout's sail first on its PATH", async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(fixtureCopy(repo), 'stages', 'which');
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, 'stage.ts'),
+      `import { script, z } from 'sail';
+
+export const which = script('which', { run: './run.sh', output: z.object({ path: z.string(), version: z.string() }) });
+`,
+    );
+    writeScript(
+      join(dir, 'run.sh'),
+      'printf \'{"path":"%s","version":"%s"}\\n\' "$(command -v sail)" "$(sail --version)"',
+    );
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', '.sail/stages/which'], repo.dir);
+    expect(stderr).toBe('');
+    expect(readResult(callDirOf(stdout, repo.dir)).output).toEqual({
+      path: join(root, 'bin', 'sail'),
+      version: pkg.version,
+    });
+    expect(code).toBe(EXIT_OK);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a stage run in isolation gets SAIL_EVENTS too: it has no stream, so what the script reports stays in the file', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(fixtureCopy(repo), 'stages', 'reports');
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, 'stage.ts'),
+      `import { script, z } from 'sail';
+
+export const reports = script('reports', { run: './run.sh', output: z.object({ ok: z.boolean() }) });
+`,
+    );
+    const pushed = `{"type":"codehost:pushed","branch":"sail/FAKE-1","headSha":"${'a'.repeat(40)}"}`;
+    writeScript(join(dir, 'run.sh'), `echo '${pushed}' >> "$SAIL_EVENTS"\necho '{"ok":true}'`);
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', '.sail/stages/reports'], repo.dir);
+    expect(stderr).toBe('');
+    const callDir = callDirOf(stdout, repo.dir);
+    const file = join(callDir, 'port-events.ndjson');
+    expect((readResult(callDir).env as Record<string, string>).SAIL_EVENTS).toBe(relative(repo.dir, file));
+    expect(readFileSync(file, 'utf8')).toBe(`${pushed}\n`);
+    expect(code).toBe(EXIT_OK);
+  });
 });
 
 test('a stage that binds a file and a value runs from a subdirectory, with both under $STAGE_IN', async () => {
@@ -134,11 +189,12 @@ test.each([
     renameSync(join(sail, 'stages', 'tests'), join(sail, folder));
     const { code, stdout, stderr } = await runCaptured(['stage', 'run', `.sail/${folder}`], repo.dir);
     expect(stderr).toBe('');
-    expect(code).toBe(EXIT_OK);
-    expect(stdout).toMatch(/^tests#1 passed {2}\.sail-runs\/tests-[0-9A-HJKMNP-TV-Z]{26}\/00-tests\/call-1\n$/);
+    // The fixture's tests stage fails on its first call: it ran, under its name, from where it was moved.
+    expect(code).toBe(EXIT_FAILED);
+    expect(stdout).toMatch(/^tests#1 failed {2}\.sail-runs\/tests-[0-9A-HJKMNP-TV-Z]{26}\/00-tests\/call-1\n$/);
     expect(readResult(callDirOf(stdout, repo.dir))).toMatchObject({
       key: 'tests#1',
-      outcome: 'passed',
+      outcome: 'failed',
       command: `.sail/${folder}/run.sh`,
     });
   });
@@ -178,7 +234,9 @@ test('a type error in an unrelated workflow does not stop the stage', async () =
       readFileSync(workflow, 'utf8').replace("s.files['spec.md'], feedback", 'run.input, feedback'),
     );
     expect((await runCaptured(['check'], repo.dir)).code).toBe(EXIT_REFUSED);
-    expect((await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir)).code).toBe(EXIT_OK);
+    // Not refused: the stage ran, and reports the failing tests of the fixture's first call.
+    const ran = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir);
+    expect([ran.code, ran.stdout.slice(0, 15), ran.stderr]).toEqual([EXIT_FAILED, 'tests#1 failed ', '']);
   });
 });
 
@@ -282,11 +340,6 @@ test.each([
     ['.sail/stages/bound', '--bind', 'ticket=1', '--bind', 'ticket=2'],
     "sail stage run: 'ticket' is bound twice\n",
   ],
-  [
-    'the multi-step stage publish',
-    ['.sail/workflows/ticket-to-pr/stages/publish'],
-    "sail stage run: publish can't run:\n  multi-step stages can't run yet\n",
-  ],
   ['a directory without stage.ts', ['.sail/stages'], 'sail stage run: no stage.ts in .sail/stages\n'],
 ])('%s is refused', async (_, argv, message) => {
   await withTempRepo(async (repo) => {
@@ -295,6 +348,19 @@ test.each([
     expect(code).toBe(EXIT_REFUSED);
     expect(stdout).toBe('');
     expect(stderr).toStartWith(message);
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('a multi-step stage is refused before anything is written: one can not run yet', async () => {
+  await withTempRepo(async (repo) => {
+    writePublish(fixtureCopy(repo));
+    const argv = ['stage', 'run', '.sail/workflows/ticket-to-pr/stages/publish'];
+    expect(await runCaptured(argv, repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: "sail stage run: publish can't run:\n  multi-step stages can't run yet\n",
+    });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
@@ -541,9 +607,10 @@ test('an isolated agent stage needs its harness and nothing else: a ticket sourc
   await withTempRepo(async (repo) => {
     const sail = agentRepo(repo, [submits(SPEC, 0.25)]);
     edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: ./adapters/echo-harness.ts }');
-    // A script stage takes no harness, so it runs whatever the harness needs.
+    // A script stage takes no harness, so it runs whatever the harness needs: here it fails, as its first call does.
     const script = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir, { env: {} });
-    expect({ code: script.code, stderr: script.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect({ code: script.code, stderr: script.stderr }).toEqual({ code: EXIT_FAILED, stderr: '' });
+    expect(script.stdout).toStartWith('tests#1 failed  ');
 
     // The echo harness submits its prompt, which is no spec: twice, so the stage ends in error on its second try.
     const env = { ECHO_HARNESS_TOKEN: 'set' };

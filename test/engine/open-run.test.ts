@@ -20,12 +20,12 @@ import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engi
 import { findRun, type OpenedRun, openRun, reopenRun } from '../../src/engine/open-run';
 import { type Forced, readStatus, writeStatus } from '../../src/engine/run-dir';
 import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
-import { ulid } from '../../src/engine/run-id';
 import { validateRunDir } from '../../src/engine/schemas';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { TicketState } from '../../src/ports/types';
 import { fakeAdapters } from '../helpers/adapters';
+import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { rejection } from '../helpers/ports';
 import { copyRun, writePrOnly, writeStub } from '../helpers/stub-workflow';
@@ -47,7 +47,7 @@ async function opened(cwd: string, now = NOW): Promise<OpenedRun> {
     workflow: 'ticket-to-pr',
     ticket: 'FAKE-1',
     adapters: await fakeAdapters(cwd),
-    now,
+    clock: () => now,
   });
   if ('refused' in run) throw new Error(`refused: ${run.refused}`);
   return run;
@@ -80,14 +80,15 @@ test('a run opened from a subdirectory gets .sail-runs/FAKE-1-<ulid>/ with its h
     mkdirSync(cwd, { recursive: true });
     const run = await opened(cwd);
 
-    expect(run.runId).toMatch(new RegExp(`^FAKE-1-${ulid(NOW.getTime()).slice(0, 10)}[0-9A-HJKMNP-TV-Z]{16}$`));
+    // Which reading of its clock the id and startedAt are has a case of its own.
+    expect(run.runId).toMatch(/^FAKE-1-[0-9A-HJKMNP-TV-Z]{26}$/);
     expect([run.sailDir, run.loaded.workflow.name]).toEqual([sail, 'ticket-to-pr']);
     expect(run.dir).toBe(join(repo.dir, '.sail-runs', run.runId));
     expect(readStatus(run.dir)).toEqual({ status: 'running' });
     expect(readJournal(run.dir)).toEqual({ entries: [], torn: false });
     expect(readFileSync(join(run.dir, 'journal.ndjson'), 'utf8')).toBe('');
     expect(run.header.runId).toBe(run.runId);
-    expect(run.header.startedAt).toBe(NOW.toISOString());
+    expect(run.header.startedAt).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     expect(validateRunDir(run.dir)).toEqual({ counts: { 'sail.run.v1': 1 }, issues: [] });
   });
 });
@@ -565,7 +566,7 @@ async function openStub(repoDir: string, run: StubRun, adapters?: ResolvedAdapte
   return openRun({
     cwd: repoDir,
     workflow: 'ticket-to-pr',
-    now: NOW,
+    clock: () => NOW,
     ...run,
     adapters: adapters ?? (await fakeAdapters(repoDir)),
   });
@@ -885,5 +886,46 @@ test.each<[string, StubRun, string]>([
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     expect([await openStub(repo.dir, run), existsSync(join(repo.dir, '.sail-runs'))]).toEqual([{ refused }, false]);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("openRun reads its clock before anything else does: the run id's time and startedAt are its first reading, and the id's random part is the bytes it is given", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    // The fakes read the same clock, twice for the fetch that comes before the id is minted.
+    const clock = steppingClock(GOLDEN_START, GOLDEN_STEP_MS);
+    const run = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+      adapters: await fakeAdapters(repo.dir, {}, { now: clock }),
+      clock,
+      random: goldenRandom,
+    });
+    if ('refused' in run) throw new Error(`refused: ${run.refused}`);
+    expect(run.runId).toBe('FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N');
+    expect(run.header.startedAt).toBe(GOLDEN_START);
+    expect(clock.readings.length).toBeGreaterThan(1);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('without random bytes, two runs opened at the same reading get different ids on that reading', async () => {
+  await withTempRepo(async (repo) => {
+    const [first, second] = ['first', 'second'].map((name) => {
+      const dir = join(repo.dir, name);
+      mkdirSync(dir);
+      writeStub(dir);
+      return dir;
+    });
+    if (first === undefined || second === undefined) throw new Error('two copies');
+    const [one, two] = [await opened(first, new Date(GOLDEN_START)), await opened(second, new Date(GOLDEN_START))];
+    expect([one.runId.slice(0, 17), two.runId.slice(0, 17)]).toEqual(['FAKE-1-01M3BWNZM0', 'FAKE-1-01M3BWNZM0']);
+    expect(one.runId).not.toBe(two.runId);
   });
 });

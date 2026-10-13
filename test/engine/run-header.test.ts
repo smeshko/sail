@@ -101,7 +101,7 @@ test.each<[string, (sail: string) => void]>([
   ['a new file in a roster stage', (sail) => write(sail, 'stages/tests/templates/x.md', 'x\n')],
   [
     'a new dotfile in a roster stage',
-    (sail) => write(sail, 'workflows/ticket-to-pr/stages/publish/.env.example', 'X=1\n'),
+    (sail) => write(sail, 'workflows/ticket-to-pr/stages/open/.env.example', 'X=1\n'),
   ],
 ])('the workflow hash changes when %s changes', async (_, change) => {
   expect(await hashAfter(change)).not.toBe(await hashAfter());
@@ -162,7 +162,7 @@ test("the fixture's header validates, with the workflow's folder, the adapters a
   expect(header.workflow.sha256).toMatch(/^[0-9a-f]{64}$/);
   const fake = { use: 'fake', origin: 'builtin' };
   expect(header.adapters).toEqual({ ticketSource: fake, codeHost: fake, harness: fake, workspace: fake });
-  expect(Object.keys(header.stages)).toEqual(['implement', 'publish', 'self-review', 'spec', 'tests']);
+  expect(Object.keys(header.stages)).toEqual(['describe', 'implement', 'open', 'self-review', 'spec', 'tests']);
   expect(header.intake.name).toBe('ticket');
 });
 

@@ -128,18 +128,29 @@ test('a new instance on the same state file carries on where the last left off, 
   expect(readFileSync(world.seed, 'utf8')).toBe(seed);
 });
 
-test('the fixture seed holds the golden pull request, three designated ones, and every capability', async () => {
+test("the fixture seed holds four pull requests, three of them designated, every capability, and nothing of FAKE-1's: no branch sail/FAKE-1 and no open pull request from it, so its run opens pull request 5", async () => {
   const host = createFakeCodeHost({ seed: SEED, state: join(tempDir(), 'prs.json') });
   const { number, url, base, head, headSha, ticketKey, state } = await host.getPullRequest(1);
   expect({ number, url, base, head, headSha, ticketKey, state }).toEqual({
     number: 1,
     url: 'fake://codehost/fixture/pull/1',
     base: 'main',
-    head: 'sail/FAKE-1',
+    head: 'sail/FAKE-5',
     headSha: 'b4efb0c5de84d87c1455d4504b8b75b095a8e10b',
-    ticketKey: 'FAKE-1',
+    ticketKey: 'FAKE-5',
     state: 'open',
   });
+  const seeded = await Promise.all([1, 2, 3, 4].map((each) => host.getPullRequest(each)));
+  expect(seeded.map((pr) => [pr.head, pr.ticketKey])).toEqual([
+    ['sail/FAKE-5', 'FAKE-5'],
+    ['sail/FAKE-2', 'FAKE-2'],
+    ['sail/FAKE-3', 'FAKE-3'],
+    ['sail/FAKE-4', 'FAKE-4'],
+  ]);
+  expect(await rejection(host.getPullRequest(5))).toMatchObject({ code: 'not_found' });
+  // Never pushed, rather than a conflict: the seed holds neither the branch nor a pull request from it.
+  const opening = host.openPullRequest({ base: 'main', head: 'sail/FAKE-1', title: 'FAKE-1', body: '' });
+  expect(await rejection(opening)).toMatchObject({ code: 'invalid', message: expect.stringContaining('never pushed') });
   expect((await host.listDesignated('sail')).map((pr) => pr.number)).toEqual([1, 3, 4]);
   expect(host.capabilities()).toEqual({
     checks: true,

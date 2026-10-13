@@ -35,17 +35,33 @@
     "spec": "01-spec/call-1/spec.md",
     "feedback": null
   },
-  "startedAt": "2026-09-25T09:00:13.965Z",
-  "finishedAt": "2026-09-25T09:00:26.595Z",
-  "durationMs": 12630,
+  "startedAt": "2026-09-25T09:00:04.000Z",
+  "finishedAt": "2026-09-25T09:00:05.200Z",
+  "durationMs": 1200,
+  "try": 1,
+  "validationTry": 1,
+  "prompt": {
+    "path": "02-implement/call-1/prompt.md",
+    "untrusted": 0,
+    "fragments": [
+      {
+        "name": "untrusted-input",
+        "origin": "builtin"
+      },
+      {
+        "name": "finish",
+        "origin": "builtin"
+      }
+    ],
+    "conventions": []
+  },
   "harness": {
     "adapter": "fake",
     "model": "claude-sonnet-5",
-    "provider": "fake",
     "sessionId": "fake-session-implement-1",
     "turns": 5,
-    "toolCalls": 3,
-    "denials": 1
+    "toolCalls": 0,
+    "denials": 0
   },
   "usage": {
     "inputTokens": 9800,
@@ -54,9 +70,5 @@
     "outputTokens": 3900,
     "costUsd": 0.476
   },
-  "workspace": {
-    "headSha": "17c569cb442d288920415d862cfabdb2bb335469",
-    "commitsAdded": 2,
-    "diffStat": "3 files changed, 12 insertions(+), 3 deletions(-)"
-  }
+  "validationFailed": false
 }

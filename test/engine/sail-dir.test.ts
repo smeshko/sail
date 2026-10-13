@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { findSailDir, projectIssues } from '../../src/engine/sail-dir';
+import { findGitRoot, findSailDir, projectIssues } from '../../src/engine/sail-dir';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const fixtureProject = join(import.meta.dir, '..', 'fixtures', 'repo', '.sail', 'project.yaml');
@@ -107,4 +107,25 @@ test('projectIssues reports invalid YAML as one issue at /', async () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ schema: 'sail.project.v1', path: '/' });
   });
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('findGitRoot gives the first directory upwards that holds a .git entry, a .git file included, and none outside a repository', async () => {
+  await withTempRepo((repo) => {
+    const deep = join(repo.dir, 'a', 'b');
+    mkdirSync(deep, { recursive: true });
+    expect([findGitRoot(repo.dir), findGitRoot(deep)]).toEqual([repo.dir, repo.dir]);
+    // A worktree's `.git` is a file, and makes its directory a root of its own.
+    writeFileSync(join(repo.dir, 'a', '.git'), 'gitdir: elsewhere\n');
+    expect([findGitRoot(deep), findGitRoot(join(repo.dir, 'a'))]).toEqual([join(repo.dir, 'a'), join(repo.dir, 'a')]);
+  });
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'sail-no-git-')));
+  try {
+    mkdirSync(join(outside, 'x'));
+    expect([findGitRoot(outside), findGitRoot(join(outside, 'x'))]).toEqual([undefined, undefined]);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
