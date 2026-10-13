@@ -44,6 +44,34 @@ test('a claim lands on In Progress when the review state is ordered before it', 
   expect((await adapter.claim('ADW-1')).state).toEqual({ type: 'started', name: 'In Progress' });
 });
 
+// Review fix (review #2.9): a success Linear reports with no issue or comment is a conflict, not a crash.
+/** A transport that answers `operation` with `data`, and every other operation from `world`. */
+function silentlyAccepting(
+  world: ReturnType<typeof createLinearWorld>,
+  operation: string,
+  data: unknown,
+): typeof fetch {
+  return (async (input: string, init?: RequestInit) => {
+    const sent = JSON.parse(String(init?.body)) as { operationName?: string };
+    if (sent.operationName === operation) return new Response(JSON.stringify({ data }), { status: 200 });
+    return world.transport(input, init);
+  }) as unknown as typeof fetch;
+}
+
+test('a claim whose move Linear reports as successful, with no issue, is a conflict', async () => {
+  const world = createLinearWorld({ issues: [ISSUE('ADW-1', 'Todo')] });
+  const fetch = silentlyAccepting(world, 'UpdateIssue', { issueUpdate: { success: true } });
+  const adapter = createLinearTicketSource({ apiKey: KEY, team: 'ADW', fetch });
+  expect(portFailure(await rejection(adapter.claim('ADW-1')))).toMatchObject({ code: 'conflict' });
+});
+
+test('a comment Linear reports as posted, with no comment, is a conflict', async () => {
+  const world = createLinearWorld({ issues: [ISSUE('ADW-1', 'Todo')] });
+  const fetch = silentlyAccepting(world, 'CreateComment', { commentCreate: { success: true } });
+  const adapter = createLinearTicketSource({ apiKey: KEY, team: 'ADW', fetch });
+  expect(portFailure(await rejection(adapter.comment('ADW-1', 'hello')))).toMatchObject({ code: 'conflict' });
+});
+
 test.each(['Todo', 'Backlog'])(
   'a claim of a %s ticket writes once, and returns and emits the In Progress state',
   async (from) => {
