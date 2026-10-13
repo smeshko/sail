@@ -21,16 +21,17 @@ function tempDir(): string {
 
 // STICKER: the environment-keyed lease directory lands in TASK-006.
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the fake's leases live under the HOME its environment names, not the process's", async () => {
-    const root = tempDir();
-    const home = tempDir();
-    const workspace = await fakeAdapters.workspace.create(
-      {},
-      { root, sailDir: join(root, '.sail'), runsDir: join(root, '.sail-runs'), env: { HOME: home } },
-    );
-    await workspace.lease('fake', 'sail/FAKE-1', { runId: 'r1', runDir: join(root, '.sail-runs', 'r1'), pid: process.pid });
-    expect(readLease(join(home, '.sail', 'leases'), 'fake', 'sail/FAKE-1')?.runId).toBe('r1');
+test("the fake's leases live under the HOME its environment names, not the process's", async () => {
+  const root = tempDir();
+  const home = tempDir();
+  const workspace = await fakeAdapters.workspace.create(
+    {},
+    { root, sailDir: join(root, '.sail'), runsDir: join(root, '.sail-runs'), env: { HOME: home } },
+  );
+  await workspace.lease('fake', 'sail/FAKE-1', {
+    runId: 'r1',
+    runDir: join(root, '.sail-runs', 'r1'),
+    pid: process.pid,
   });
+  expect(readLease(join(home, '.sail', 'leases'), 'fake', 'sail/FAKE-1')?.runId).toBe('r1');
+});

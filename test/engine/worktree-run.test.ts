@@ -47,20 +47,16 @@ function endOf(dir: string) {
 
 // STICKER: each case below is one of ADW-93's TASK-006 to TASK-008. The sticker names the task that makes it pass.
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a fresh run reports its lease right after run:start, before what the claim did', async () => {
-    await withStub({}, async (repo) => {
-      const end = await runIn(repo);
-      expect(readEvents(end.dir).slice(0, 4).map((event) => event.type)).toEqual([
-        'run:start',
-        'workspace:leased',
-        'ticket:claimed',
-        'ticket:commented',
-      ]);
-    });
+test('a fresh run reports its lease right after run:start, before what the claim did', async () => {
+  await withStub({}, async (repo) => {
+    const end = await runIn(repo);
+    expect(
+      readEvents(end.dir)
+        .slice(0, 4)
+        .map((event) => event.type),
+    ).toEqual(['run:start', 'workspace:leased', 'ticket:claimed', 'ticket:commented']);
   });
+});
 
 // biome-ignore format: TDD-PENDING TASK-007
 test

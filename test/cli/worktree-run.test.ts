@@ -26,7 +26,10 @@ const leasesUnder = (home: string): string[] => {
 
 /** The tracked files' status lines: an untracked `.sail/` or `.sail-runs/` is not the clone's own state. */
 const trackedStatus = (repo: TempRepo): string[] =>
-  repo.git('status', '--porcelain').split('\n').filter((line) => line !== '' && !line.startsWith('??'));
+  repo
+    .git('status', '--porcelain')
+    .split('\n')
+    .filter((line) => line !== '' && !line.startsWith('??'));
 
 /**
  * A stub repository whose origin is a repository of its own, with `origin/HEAD` set, and whose workspace is git-worktree:
@@ -47,57 +50,50 @@ async function withOriginRepo(check: (repo: TempRepo, origin: TempRepo) => Promi
 
 // STICKER: each case below is part of ADW-93's TASK-005 to TASK-007. The sticker names the task that makes it pass.
 
-test
-  ('sail FAKE-1 on a clone with no origin, configured for git-worktree, is refused with exit 3 naming origin, and nothing is written', async () => {
-    await withTempRepo(async (repo) => {
-      const sail = writeStub(repo.dir);
-      edit(sail, 'project.yaml', 'workspace: { use: fake }', 'workspace: { use: git-worktree }');
-      const captured = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
-      expect([captured.code, captured.stderr.includes('origin'), runIds(repo.dir)]).toEqual([EXIT_REFUSED, true, []]);
-    });
+test('sail FAKE-1 on a clone with no origin, configured for git-worktree, is refused with exit 3 naming origin, and nothing is written', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(sail, 'project.yaml', 'workspace: { use: fake }', 'workspace: { use: git-worktree }');
+    const captured = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect([captured.code, captured.stderr.includes('origin'), runIds(repo.dir)]).toEqual([EXIT_REFUSED, true, []]);
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail FAKE-1 --force while a suspended run leases its branch is refused with exit 3, naming that run, with no run directory of its own', async () => {
-    await withTempRepo(async (first) => {
-      writeStub(first.dir);
-      const suspended = await runCaptured(['FAKE-1', '--until', 'tests'], first.dir, { env: first.env });
-      expect(suspended.code).toBe(EXIT_SUSPENDED);
-      const [firstRun] = runIds(first.dir);
-      await withTempRepo(async (second) => {
-        copyRun(first.dir, second.dir);
-        const forced = await runCaptured(['FAKE-1', '--force'], second.dir, { env: first.env });
-        expect([forced.code, forced.stderr.includes(firstRun ?? 'no run'), runIds(second.dir)]).toEqual([
-          EXIT_REFUSED,
-          true,
-          [firstRun],
-        ]);
-      });
+test('sail FAKE-1 --force while a suspended run leases its branch is refused with exit 3, naming that run, with no run directory of its own', async () => {
+  await withTempRepo(async (first) => {
+    writeStub(first.dir);
+    const suspended = await runCaptured(['FAKE-1', '--until', 'tests'], first.dir, { env: first.env });
+    expect(suspended.code).toBe(EXIT_SUSPENDED);
+    const [firstRun] = runIds(first.dir);
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const forced = await runCaptured(['FAKE-1', '--force'], second.dir, { env: first.env });
+      expect([forced.code, forced.stderr.includes(firstRun ?? 'no run'), runIds(second.dir)]).toEqual([
+        EXIT_REFUSED,
+        true,
+        [firstRun],
+      ]);
     });
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a run takes over the lease a completed run left, and its stream says which run it took it from', async () => {
-    await withTempRepo(async (first) => {
-      writeStub(first.dir);
-      const done = await runCaptured(['FAKE-1'], first.dir, { env: first.env });
-      expect(done.code).toBe(EXIT_OK);
-      const [firstRun] = runIds(first.dir);
-      await withTempRepo(async (second) => {
-        copyRun(first.dir, second.dir);
-        const again = await runCaptured(['FAKE-1', '--force'], second.dir, { env: first.env });
-        const secondRun = runIds(second.dir).find((id) => id !== firstRun) ?? '';
-        const leased = readEvents(join(second.dir, '.sail-runs', secondRun)).find(
-          (event) => event.type === 'workspace:leased',
-        ) as { took?: string } | undefined;
-        expect([again.code, leased?.took]).toEqual([EXIT_OK, firstRun]);
-      });
+test('a run takes over the lease a completed run left, and its stream says which run it took it from', async () => {
+  await withTempRepo(async (first) => {
+    writeStub(first.dir);
+    const done = await runCaptured(['FAKE-1'], first.dir, { env: first.env });
+    expect(done.code).toBe(EXIT_OK);
+    const [firstRun] = runIds(first.dir);
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const again = await runCaptured(['FAKE-1', '--force'], second.dir, { env: first.env });
+      const secondRun = runIds(second.dir).find((id) => id !== firstRun) ?? '';
+      const leased = readEvents(join(second.dir, '.sail-runs', secondRun)).find(
+        (event) => event.type === 'workspace:leased',
+      ) as { took?: string } | undefined;
+      expect([again.code, leased?.took]).toEqual([EXIT_OK, firstRun]);
     });
   });
+});
 
 // biome-ignore format: TDD-PENDING TASK-007
 test

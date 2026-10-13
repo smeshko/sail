@@ -145,15 +145,34 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
   return undefined;
 }
 
-/** Why the workspace can't name the remote of the clone at `root`, as a refusal. Other failures throw. */
-async function remoteKeyFor(workspace: WorkspacePort, root: string): Promise<string | undefined> {
+/** The remote the workspace keys leases by for the clone at `root`, or the refusal when the clone can't name one. */
+async function remoteKeyFor(workspace: WorkspacePort, root: string): Promise<{ remote: string } | { refused: string }> {
   try {
-    await workspace.remoteKey(root);
-    return undefined;
+    return { remote: await workspace.remoteKey(root) };
   } catch (error) {
-    if (error instanceof PortError && error.code === 'invalid') return error.message;
+    if (error instanceof PortError && error.code === 'invalid') return { refused: error.message };
     throw error;
   }
+}
+
+/**
+ * Takes the lease on `branch` for `holder`. A leased branch is a refusal naming the run that holds it, and `--force` does
+ * not lift it (D3). A taken lease gives the event the run reports after its start.
+ */
+async function leaseBranch(
+  workspace: WorkspacePort,
+  remote: string,
+  branch: string,
+  holder: { runId: string; runDir: string; pid: number },
+): Promise<{ events: ProviderEvent[] } | { refused: string }> {
+  const result = await workspace.lease(remote, branch, holder);
+  if (!result.leased) {
+    return {
+      refused: `${branch} is leased by run ${result.holder.runId}, which holds it until that run ends: a second run of the branch is refused, and --force does not lift that`,
+    };
+  }
+  const took = result.took === undefined ? {} : { took: result.took };
+  return { events: [{ type: 'workspace:leased', remote, branch, ...took }] };
 }
 
 /**
@@ -194,8 +213,9 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   }
   // The workspace names the remote its leases are keyed by before anything is claimed: a clone that can't name one is
   // refused here, with no run directory and no ticket move.
-  const keyed = await remoteKeyFor(options.adapters.ports.workspace, dirname(found.dir));
-  if (keyed !== undefined) return { refused: keyed };
+  const workspace = options.adapters.ports.workspace;
+  const keyed = await remoteKeyFor(workspace, dirname(found.dir));
+  if ('refused' in keyed) return keyed;
   const { ticketSource } = options.adapters.ports;
   const resolved = await resolveSource({ ref: ticket, ticketSource, label: config.label ?? DEFAULT_LABEL, force });
   if ('refused' in resolved) return resolved;
@@ -216,8 +236,24 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   assertRunHeader(unclaimed);
   // The last moment the ticket is as it was. Everything up to here only read, so one check covers an abort at any of it.
   if (options.signal?.aborted) return { refused: 'stopped before the ticket was claimed' };
-  const made = await claimSource({ ticketKey, runId, ticketSource, force });
-  if ('refused' in made) return made;
+  // The branch is leased before the ticket is claimed, so a refused start leaves the ticket as it was (D2). The lease is
+  // released on every refusal or throw before the run directory exists; once it does, the run holds it to its end.
+  const branch = `sail/${ticketKey}`;
+  const holder = { runId, runDir: join(runsDir(found.dir), runId), pid: process.pid };
+  const leasing = await leaseBranch(workspace, keyed.remote, branch, holder);
+  if ('refused' in leasing) return leasing;
+  const releaseLease = () => workspace.releaseLease(keyed.remote, branch, runId);
+  let made: Awaited<ReturnType<typeof claimSource>>;
+  try {
+    made = await claimSource({ ticketKey, runId, ticketSource, force });
+  } catch (error) {
+    await releaseLease();
+    throw error;
+  }
+  if ('refused' in made) {
+    await releaseLease();
+    return made;
+  }
   const forced = [...resolved.forced, ...made.forced];
   const header: RunHeader = { ...unclaimed, source: { ...source, forced }, claim: made.claim };
   // The ticket has moved, so whatever fails from here says where it stands. It is still thrown on, not refused: these
@@ -231,6 +267,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     createEventsFile(dir);
     writeStatus(dir, 'running');
   } catch (error) {
+    await releaseLease();
     const why = error instanceof Error ? error.message : String(error);
     throw new Error(
       `the ticket is now ${made.claim.state.name} and its comment names run ${runId}, but the run directory was not written: ${why}. --force runs the ticket in a new run`,
@@ -246,7 +283,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     relay: options.adapters.relay,
     config,
     loaded,
-    claimed: made.events,
+    claimed: [...leasing.events, ...made.events],
     ...(until === undefined ? {} : { until }),
     firstSeq: 1,
   };

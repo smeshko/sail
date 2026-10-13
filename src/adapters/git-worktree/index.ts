@@ -7,7 +7,7 @@ import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { Workspace, WorkspaceCapabilities } from '../../ports/types';
 import type { RunRef, WorkspacePort } from '../../ports/workspace';
-import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
+import { leasesDirFor, releaseLease, takeLease } from '../leases';
 import { clonePath, diffFrom, removeWorktree, sweepRuns } from '../worktree-git';
 import { git } from './git';
 import { remoteKeyOf } from './remote';
@@ -15,7 +15,7 @@ import { remoteKeyOf } from './remote';
 export interface GitWorktreeOptions extends ProviderOptions {
   /** The clone the adapter works in. Its `origin` is the remote leases are keyed by. */
   readonly repo: string;
-  /** Where leases live. `defaultLeasesDir()` when left out. */
+  /** Where leases live. Under the environment's HOME when left out. */
   readonly leasesDir?: string;
   /** The environment for the git the adapter runs. */
   readonly env?: Readonly<Record<string, string>>;
@@ -38,7 +38,7 @@ async function excludeRunsDir(clone: string, env?: Readonly<Record<string, strin
 export function createGitWorktreeWorkspace(options: GitWorktreeOptions): WorkspacePort {
   const emit = (event: ProviderEvent) => options.emit?.(event);
   const now = () => options.now?.() ?? new Date();
-  const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
+  const leasesDir = () => options.leasesDir ?? leasesDirFor(options.env, options.repo);
   const { repo, env } = options;
   const runGit = (cwd: string, args: readonly string[]) => git(cwd, [...args], env);
   return {

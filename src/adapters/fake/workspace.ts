@@ -7,13 +7,13 @@ import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { WorkspacePort } from '../../ports/workspace';
-import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
+import { leasesDirFor, releaseLease, takeLease } from '../leases';
 import { clonePath, diffFrom, type GitResult, removeWorktree, sweepRuns } from '../worktree-git';
 
 export interface FakeWorkspaceOptions extends ProviderOptions {
   /** The local git repository that stands in for the remote. */
   readonly repo: string;
-  /** Where leases live. `defaultLeasesDir()` when left out. */
+  /** Where leases live. Under the environment's HOME when left out. */
   readonly leasesDir?: string;
   /** The environment for the git the fake runs. */
   readonly env?: Readonly<Record<string, string>>;
@@ -22,7 +22,7 @@ export interface FakeWorkspaceOptions extends ProviderOptions {
 export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePort {
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
-  const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
+  const leasesDir = () => options.leasesDir ?? leasesDirFor(options.env, options.repo);
   const git = (cwd: string, ...args: string[]): GitResult => {
     try {
       const result = Bun.spawnSync(['git', ...args], { cwd, ...(options.env ? { env: { ...options.env } } : {}) });

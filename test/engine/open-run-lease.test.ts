@@ -70,66 +70,65 @@ const runIds = (repoDir: string): string[] =>
 
 // STICKER: the lease taken before the claim is TASK-006's. Each sticker names that task.
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a run takes the lease on its remote key and sail/FAKE-1 before it claims the ticket, and releases it when the claim is refused', async () => {
-    await withTempRepo(async (repo) => {
-      writeStub(repo.dir);
-      const calls: Call[] = [];
-      const run = await openRun({
-        cwd: repo.dir,
-        workflow: 'ticket-to-pr',
-        ticket: 'FAKE-1',
-        adapters: await recording(repo.dir, calls),
-        clock: () => NOW,
-      });
-      expect('refused' in run).toBe(true);
-      expect(calls.map((call) => call.op)).toEqual(['remoteKey', 'lease', 'claim', 'releaseLease']);
-      const leased = calls[1];
-      expect(calls.slice(1)).toEqual([
-        { op: 'lease', remote: 'remote-x', branch: 'sail/FAKE-1', runId: leased?.op === 'lease' ? leased.runId : '' },
-        { op: 'claim', ticketKey: 'FAKE-1' },
-        { op: 'releaseLease', remote: 'remote-x', branch: 'sail/FAKE-1', runId: leased?.op === 'lease' ? leased.runId : '' },
-      ]);
+test('a run takes the lease on its remote key and sail/FAKE-1 before it claims the ticket, and releases it when the claim is refused', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const calls: Call[] = [];
+    const run = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+      adapters: await recording(repo.dir, calls),
+      clock: () => NOW,
     });
+    expect('refused' in run).toBe(true);
+    expect(calls.map((call) => call.op)).toEqual(['remoteKey', 'lease', 'claim', 'releaseLease']);
+    const leased = calls[1];
+    expect(calls.slice(1)).toEqual([
+      { op: 'lease', remote: 'remote-x', branch: 'sail/FAKE-1', runId: leased?.op === 'lease' ? leased.runId : '' },
+      { op: 'claim', ticketKey: 'FAKE-1' },
+      {
+        op: 'releaseLease',
+        remote: 'remote-x',
+        branch: 'sail/FAKE-1',
+        runId: leased?.op === 'lease' ? leased.runId : '',
+      },
+    ]);
   });
+});
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a branch another run leases refuses the start before the claim, naming that run, with no run directory, and --force does not lift it', async () => {
-    await withTempRepo(async (repo) => {
-      writeStub(repo.dir);
-      const calls: Call[] = [];
-      const refused = await openRun({
-        cwd: repo.dir,
+test('a branch another run leases refuses the start before the claim, naming that run, with no run directory, and --force does not lift it', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const calls: Call[] = [];
+    const refused = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+      adapters: await recording(repo.dir, calls, HELD),
+      clock: () => NOW,
+    });
+    await withTempRepo(async (forced) => {
+      writeStub(forced.dir);
+      const forcedCalls: Call[] = [];
+      const again = await openRun({
+        cwd: forced.dir,
         workflow: 'ticket-to-pr',
         ticket: 'FAKE-1',
-        adapters: await recording(repo.dir, calls, HELD),
+        force: true,
+        adapters: await recording(forced.dir, forcedCalls, HELD),
         clock: () => NOW,
-      });
-      await withTempRepo(async (forced) => {
-        writeStub(forced.dir);
-        const forcedCalls: Call[] = [];
-        const again = await openRun({
-          cwd: forced.dir,
-          workflow: 'ticket-to-pr',
-          ticket: 'FAKE-1',
-          force: true,
-          adapters: await recording(forced.dir, forcedCalls, HELD),
-          clock: () => NOW,
-        });
-        expect({
-          refusedNamesHolder: 'refused' in again && again.refused.includes(HELD.runId),
-          claimed: forcedCalls.some((call) => call.op === 'claim'),
-          runs: runIds(forced.dir),
-        }).toEqual({ refusedNamesHolder: true, claimed: false, runs: [] });
       });
       expect({
-        refusedNamesHolder: 'refused' in refused && refused.refused.includes(HELD.runId),
-        claimed: calls.some((call) => call.op === 'claim'),
-        runs: runIds(repo.dir),
+        refusedNamesHolder: 'refused' in again && again.refused.includes(HELD.runId),
+        claimed: forcedCalls.some((call) => call.op === 'claim'),
+        runs: runIds(forced.dir),
       }).toEqual({ refusedNamesHolder: true, claimed: false, runs: [] });
     });
+    expect({
+      refusedNamesHolder: 'refused' in refused && refused.refused.includes(HELD.runId),
+      claimed: calls.some((call) => call.op === 'claim'),
+      runs: runIds(repo.dir),
+    }).toEqual({ refusedNamesHolder: true, claimed: false, runs: [] });
   });
+});

@@ -6,8 +6,8 @@
 // STATUS yet. A suspended run holds its lease whatever its pid. Two accepted risks: a reused pid makes a dead run read as
 // alive, and three processes interleaving on one stale lease within microseconds could drop the lease just taken.
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { readStatus } from '../engine/run-dir';
 import { PortError } from '../ports/errors';
 import { Lease, LeaseHolder, type LeaseResult, type Released } from '../ports/types';
@@ -15,6 +15,18 @@ import { Lease, LeaseHolder, type LeaseResult, type Released } from '../ports/ty
 /** Where leases live unless a caller names a directory. Computed per call, so importing this reads nothing. */
 export function defaultLeasesDir(): string {
   return join(homedir(), '.sail', 'leases');
+}
+
+/**
+ * Where leases live for a run with `env` in the clone at `repo`: under the HOME that environment names, so a repository's
+ * runs keep their leases apart from another's in one process. With no HOME in the environment, which only a test that
+ * resolves adapters with none has, the leases are kept per repository under the temp directory, so such tests cannot
+ * share one lease directory.
+ */
+export function leasesDirFor(env: Readonly<Record<string, string>> | undefined, repo: string): string {
+  if (env?.HOME !== undefined) return join(env.HOME, '.sail', 'leases');
+  const key = new Bun.CryptoHasher('sha256').update(resolve(repo)).digest('hex');
+  return join(tmpdir(), 'sail-leases', key.slice(0, 16));
 }
 
 /** The lease file for `remote` and `branch`: the first 16 hex of sha256(`<remote>\n<branch>`), plus `.json`. */
