@@ -123,7 +123,7 @@ const DENY_SET: readonly DenyEntry[] = [
   },
   {
     rule: 'deny:sudo',
-    matches: (argv) => commandName(argv) === 'sudo',
+    matches: (argv) => ['sudo', 'doas'].includes(commandName(argv)),
   },
   {
     rule: 'deny:curl-pipe-shell',
