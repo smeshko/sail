@@ -7,7 +7,8 @@
 //   drain skips dot-files.
 // - A file that isn't a command, or whose apply throws, is deleted and reported, so it can't wedge the inbox. So is
 //   anything in the inbox that isn't a plain file, as a directory or a link, and a file that can't be read. A file gone
-//   before it is read is passed over: there is nothing left to apply.
+//   before it is read is passed over: there is nothing left to apply. One that can't be deleted is reported, and the
+//   drain goes on.
 import {
   type Dirent,
   existsSync,
@@ -58,7 +59,7 @@ export function dropCommand(runsDir: string, command: Command): string {
 export interface Drained {
   /** How many commands were applied. */
   applied: number;
-  /** The files that weren't, each deleted, with why. */
+  /** The files that weren't applied, or couldn't be removed, with why. Each is removed when it can be. */
   rejected: { file: string; reason: string }[];
 }
 
@@ -100,17 +101,23 @@ export function drainCommands(runsDir: string, apply: (command: Command) => void
     const file = join(dir, name);
     const command = readCommand(dir, entry);
     if (command === undefined) continue;
+    let reason: string | undefined;
     if ('reason' in command) {
-      drained.rejected.push({ file, reason: command.reason });
+      reason = command.reason;
     } else {
       try {
         apply(command);
         drained.applied += 1;
       } catch (error) {
-        drained.rejected.push({ file, reason: `${name} failed: ${messageOf(error)}` });
+        reason = `${name} failed: ${messageOf(error)}`;
       }
     }
-    rmSync(file, { recursive: true, force: true });
+    try {
+      rmSync(file, { recursive: true, force: true });
+    } catch (error) {
+      reason = `${reason ?? `${name} was applied`}, and it can't be removed: ${messageOf(error)}`;
+    }
+    if (reason !== undefined) drained.rejected.push({ file, reason });
   }
   return drained;
 }
