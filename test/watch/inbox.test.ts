@@ -1,6 +1,7 @@
 // The command inbox: a command file is applied once, oldest first, and removed; anything else is rejected and removed.
 import { afterEach, expect, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -8,6 +9,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -111,4 +113,30 @@ test("draining commands leaves a store's queue.json as it was, and only the stor
     if (text.includes('QUEUE_FILE') || /['"`]queue\.json['"`]/.test(text)) naming.push(file);
   }
   expect(naming).toEqual(['watch/queue-store.ts']);
+});
+
+test('a directory, a link or an unreadable file in the inbox is removed and rejected, and the commands around it apply (review #1.5)', () => {
+  const runs = runsDir();
+  const dir = commandsDir(runs);
+  mkdirSync(join(dir, '1-stray.json', 'inside'), { recursive: true });
+  writeFileSync(join(dir, '2-locked.json'), JSON.stringify({ op: 'poll', workflow: 'locked' }));
+  chmodSync(join(dir, '2-locked.json'), 0o000);
+  const outside = join(runs, 'outside.json');
+  writeFileSync(outside, JSON.stringify({ op: 'poll', workflow: 'linked' }));
+  symlinkSync(outside, join(dir, '3-link.json'));
+  writeFileSync(join(dir, '4-fine.json'), JSON.stringify({ op: 'poll', workflow: 'ticket-to-pr' }));
+  const { applied, drained } = drain(runs);
+  expect(applied).toEqual([{ op: 'poll', workflow: 'ticket-to-pr' }]);
+  expect(drained.applied).toBe(1);
+  expect(drained.rejected.map((rejected) => basename(rejected.file))).toEqual([
+    '1-stray.json',
+    '2-locked.json',
+    '3-link.json',
+  ]);
+  const [stray, locked, link] = drained.rejected.map((rejected) => rejected.reason);
+  expect(stray).toBe('1-stray.json is not a file');
+  expect(locked).toStartWith("2-locked.json can't be read: ");
+  expect(link).toBe('3-link.json is not a file');
+  expect(readdirSync(dir)).toEqual([]);
+  expect(existsSync(outside)).toBe(true);
 });
