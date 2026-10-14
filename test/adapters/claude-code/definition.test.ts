@@ -12,10 +12,7 @@ import { FIXTURE_SAIL } from '../../helpers/fixture';
 
 const definition = claudeCodeAdapters.harness;
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each<[string, Env, string[]]>([
+test.each<[string, Env, string[]]>([
   ['an empty environment', {}, ['ANTHROPIC_API_KEY']],
   ['Bedrock', { CLAUDE_CODE_USE_BEDROCK: '1' }, ['AWS_REGION']],
   ['Vertex', { CLAUDE_CODE_USE_VERTEX: '1' }, ['CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID']],
@@ -38,10 +35,7 @@ const resolveHarness = (entry: Record<string, unknown>, env: Env) => {
   return resolveAdapters({ sailDir: FIXTURE_SAIL, config, builtins: BUILTINS, env, ports: ['harness'] });
 };
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('harness: { use: claude-code } resolves to the built-in, with its SDK version recorded and its permissions enforced', async () => {
+test('harness: { use: claude-code } resolves to the built-in, with its SDK version recorded and its permissions enforced', async () => {
   const resolved = await resolveHarness({ use: 'claude-code' }, { ANTHROPIC_API_KEY: 'offline-test' });
   expect('issues' in resolved ? resolved.issues : []).toEqual([]);
   if ('issues' in resolved) return;
@@ -56,10 +50,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('without its key, the preflight names it; with an option it takes none, the option is named', async () => {
+test('without its key, the preflight names it; with an option it takes none, the option is named', async () => {
   const missing = await resolveHarness({ use: 'claude-code' }, {});
   const option = await resolveHarness({ use: 'claude-code', model: 'x' }, { ANTHROPIC_API_KEY: 'offline-test' });
   expect(missing).toEqual({
@@ -69,19 +60,13 @@ test
   expect('issues' in option ? option.issues[0]?.message : '').toContain('option model');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("the SDK version it declares is the installed package's", () => {
+test("the SDK version it declares is the installed package's", () => {
   const installed = join(import.meta.dir, '..', '..', '..', 'node_modules', '@anthropic-ai', 'claude-agent-sdk');
   const { version } = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'));
   expect([SDK_VERSION, definition.versions?.()]).toEqual([version, { '@anthropic-ai/claude-agent-sdk': version }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('BUILTINS holds the fake and claude-code, which fills the harness alone, with a preflight and a version', () => {
+test('BUILTINS holds the fake and claude-code, which fills the harness alone, with a preflight and a version', () => {
   expect(Object.keys(BUILTINS)).toEqual(['fake', 'claude-code']);
   const ports = Object.entries(BUILTINS['claude-code'] ?? {}).map(([port, found]) => [port, Object.keys(found).sort()]);
   expect(ports).toEqual([['harness', ['create', 'requires', 'versions']]]);

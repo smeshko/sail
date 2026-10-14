@@ -53,10 +53,7 @@ async function runSpec(stream: Stream) {
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('sail FAKE-1 --until spec on claude-code suspends after spec with spec.md, session.log, its session id, cost and cache tokens', async () => {
+test('sail FAKE-1 --until spec on claude-code suspends after spec with spec.md, session.log, its session id, cost and cache tokens', async () => {
   const run = await runSpec(specSession(SPEC));
   expect({ code: run.code, stderr: run.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
   expect(run.header.adapters.harness).toEqual({
@@ -89,10 +86,7 @@ test
   expect(last?.type === 'usage:update' ? last.costUsdSoFar : undefined).toBe(COST);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("an invalid API key fails the run with stage_error and exit 1, keeping the provider's message in error:harness", async () => {
+test("an invalid API key fails the run with stage_error and exit 1, keeping the provider's message in error:harness", async () => {
   const run = await runSpec(invalidKeySession());
   expect({ code: run.code, status: run.status }).toEqual({
     code: EXIT_FAILED,
