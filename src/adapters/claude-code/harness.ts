@@ -85,7 +85,9 @@ export function sessionOptions(
     env: sessionEnv(request.env, env),
     additionalDirectories: [...new Set(stageDirs)],
     settingSources: [],
-    settings: { autoMemoryEnabled: false },
+    // The CLI allows some reads and writes of its own (task, plan, scratchpad and memory files) before it asks
+    // canUseTool. A whole-tool ask rule is checked ahead of those, so every file tool call reaches the guard.
+    settings: { autoMemoryEnabled: false, permissions: { ask: [...FILE_TOOLS] } },
     skills: [],
     strictMcpConfig: true,
     mcpServers: {},
