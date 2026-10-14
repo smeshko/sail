@@ -75,10 +75,7 @@ function verdictOf(line: Line): Verdict {
   return { rule: decision.rule, mentions: decision.reason.includes(mentions) ? mentions : decision.reason };
 }
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('every distinct recorded call gets the verdict its line expects; where sail differs, the line says why', () => {
+test('every distinct recorded call gets the verdict its line expects; where sail differs, the line says why', () => {
   expect(lines.length).toBe(header.calls);
   const unexplained = lines.filter(
     (line) => header.stages[line.stage] === undefined || (line.was === undefined) !== (line.why === undefined),
@@ -97,10 +94,7 @@ test
   expect(mismatches.length === 0 ? [] : [summary, ...mismatches]).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("verdict-fix's write to the merge agent's config is a write denial, as the prototype refused it", () => {
+test("verdict-fix's write to the merge agent's config is a write denial, as the prototype refused it", () => {
   const merge = lines.filter(
     (line) =>
       line.stage === 'verdict-fix' &&
