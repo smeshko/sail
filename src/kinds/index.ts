@@ -35,7 +35,12 @@ export interface StepContext {
   try: number;
   /** The directory of the `stage.ts` that declared the step: its `run` and `prompt` are relative to it. */
   stageDir: string;
+  /** Where the step runs: the run's workspace. */
   workspace: string;
+  /** The directory that holds `.sail/`: every path a result or an event records is relative to it. */
+  root: string;
+  /** The run's branch, which the step pushes. Empty for a stage run in isolation, which no run owns. */
+  branch: string;
   /** `project.yaml`. */
   config: string;
   paths: CallPaths;

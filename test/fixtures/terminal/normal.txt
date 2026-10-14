@@ -39,7 +39,7 @@ open#1           exit 0 → passed · 100ms
 open#1           output valid
 open#1         ✓ passed · 900ms
 
-completed · 15.5s
+completed · 15.9s
   calls    9 · 3 passed, 5 done, 1 failed
   loops    fix 2/3
   replays  9

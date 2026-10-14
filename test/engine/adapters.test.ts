@@ -402,8 +402,8 @@ test('two ports broken at pass one give two issues in port order, and no definit
   const made: string[] = [];
   const result = await resolve(
     sailDir,
-    { ticketSource: { use: 'nope1' }, codeHost: { use: 'counting' }, harness: { use: 'nope2' } },
-    { builtins: builtin('counting', 'codeHost', counting('codeHost', made)) },
+    { ticketSource: { use: 'nope1' }, codeHost: { use: 'nope2' }, harness: { use: 'counting' } },
+    { builtins: builtin('counting', 'harness', counting('harness', made)) },
   );
   expect(result).toEqual({
     issues: [
@@ -412,8 +412,8 @@ test('two ports broken at pass one give two issues in port order, and no definit
         message: "no built-in adapter 'nope1' fills ticketSource: the built-ins that do are fake, linear",
       },
       {
-        path: '/adapters/harness',
-        message: "no built-in adapter 'nope2' fills harness: the built-ins that do are fake",
+        path: '/adapters/codeHost',
+        message: "no built-in adapter 'nope2' fills codeHost: the built-ins that do are fake",
       },
     ],
   });
@@ -443,6 +443,21 @@ test.each<[string, Env]>([
   const result = await withHarness(harness({ requires: () => ['A_TOKEN'] }), env, made);
   expect(result).toEqual(issue('harness', 'needs A_TOKEN, which is not set'));
   expect(made).toEqual([]);
+});
+
+test('an entry that lists alternatives is met by any one of them, and refused naming all of them', async () => {
+  const either = harness({ requires: () => [['A_TOKEN', 'B_TOKEN'], 'C_KEY'] });
+  expect(resolvedOrThrow(await withHarness(either, { B_TOKEN: 'x', C_KEY: 'y' })).ports.harness?.name).toBe('stub');
+  expect(await withHarness(either, { A_TOKEN: '', C_KEY: 'y' })).toEqual(
+    issue('harness', 'needs one of A_TOKEN, B_TOKEN, none of which is set'),
+  );
+  expect(await withHarness(either, { A_TOKEN: 'x' })).toEqual(issue('harness', 'needs C_KEY, which is not set'));
+});
+
+test('an empty list of alternatives is not environment variable names', async () => {
+  expect(await withHarness(harness({ requires: () => [[]] }))).toEqual(
+    issue('harness', "only's requires() must return environment variable names"),
+  );
 });
 
 test('every missing variable is reported, one issue each, in port order', async () => {

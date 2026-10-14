@@ -1,8 +1,9 @@
-// The Workspace port suite: what every Workspace adapter must do (D9, D12, ADR-0018). The fake runs it in
-// test/adapters/fake/workspace.test.ts, and a real adapter's test runs it on demand (SAIL_LIVE_WORKSPACE=1). Each case
-// starts from a fresh make(), and every event it captures must validate against sail.event.v1 with no key.
+// The Workspace port suite: what every Workspace adapter must do (D9, D12, ADR-0018, and D2 and D10 of the git-worktree
+// plan). The fake runs it in test/adapters/fake/workspace.test.ts, and git-worktree in
+// test/adapters/workspace/git-worktree.test.ts, over a clone of a local bare origin. Each case starts from a fresh
+// make(), and every event it captures must validate against sail.event.v1 with no key.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Status } from '../../src/engine/run-dir';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
@@ -10,19 +11,31 @@ import {
   Diff,
   LeaseResult,
   Released,
+  Repository,
   Swept,
   Workspace,
   WorkspaceCapabilities,
   WorkspaceReleased,
 } from '../../src/ports/types';
 import type { RunRef, WorkspacePort } from '../../src/ports/workspace';
-import { type Captured, captureEvents, eventIssues, parseIssues, timed } from '../helpers/ports';
+import {
+  type Captured,
+  captureEvents,
+  eventIssues,
+  messageOf,
+  parseIssues,
+  portFailure,
+  settle,
+  timed,
+} from '../helpers/ports';
 
 /** The repository and runs a suite run works in. */
 export interface WorkspaceWorld {
   readonly remote: string;
   /** A ref to create workspaces from. */
   readonly base: string;
+  /** The branch `repository()` names, whose tip `base` is. */
+  readonly defaultBranch: string;
   /** The commit `base` names. */
   readonly baseSha: string;
   /** A file tracked at `base`. */
@@ -46,6 +59,19 @@ const BRANCH = 'sail/FAKE-1';
 function bare(result: { raw: unknown }): Record<string, unknown> {
   const { raw: _raw, ...rest } = result;
   return rest;
+}
+
+/** A workspace's path, branch and base, without its raw: what a test compares, or the rejection `settle()` gave. */
+function held(workspace: { path: string; branch: string; baseSha: string } | { rejected: unknown }) {
+  return 'rejected' in workspace
+    ? workspace
+    : { path: workspace.path, branch: workspace.branch, baseSha: workspace.baseSha };
+}
+
+/** The pid of a process that stays alive until `stop()`. */
+function liveProcess(): { pid: number; stop: () => void } {
+  const child = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+  return { pid: child.pid, stop: () => child.kill('SIGKILL') };
 }
 
 /** Every captured event validates against sail.event.v1 with no key. */
@@ -220,6 +246,136 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(parseIssues(Swept, swept)).toEqual([]);
     expect(swept.paths).toEqual(paths.slice(0, 2).sort());
     expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
+  });
+
+  test(`${label}: repository() names the remote that keys the leases, and the default branch`, async () => {
+    const { adapter, world } = await start();
+    const repository = await settle(adapter.repository());
+    expect(parseIssues(Repository, repository)).toEqual([]);
+    expect('rejected' in repository ? repository : bare(repository)).toEqual({
+      url: world.remote,
+      defaultBranch: world.defaultBranch,
+    });
+  });
+
+  test(`${label}: a workspace created with no base starts from the default branch's tip`, async () => {
+    const { adapter, world } = await start();
+    const r1 = await world.run('r1');
+    const workspace = held(await settle(adapter.create(r1, { branch: BRANCH })));
+    expect(workspace).toEqual({ path: join(r1.runDir, 'workspace'), branch: BRANCH, baseSha: world.baseSha });
+    const path = 'path' in workspace ? workspace.path : r1.runDir;
+    expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
+  });
+
+  test(`${label}: diff over <rev>...HEAD is taken against the merge-base, and diff over a sha against that sha`, async () => {
+    const { adapter, world } = await start();
+    const { path } = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    const commit = (file: string) => {
+      writeFileSync(join(path, file), `${file}\n`);
+      world.git(path, 'add', file);
+      world.git(path, 'commit', '-q', '-m', file);
+      return world.git(path, 'rev-parse', 'HEAD').stdout;
+    };
+    // Two lines of work from the base: `aside` on one, then `ahead` and an uncommitted edit on the other, checked out.
+    const aside = commit('aside.txt');
+    world.git(path, 'checkout', '-q', '--detach', world.baseSha);
+    const ahead = commit('ahead.txt');
+    writeFileSync(join(path, world.tracked), 'an uncommitted edit\n', { flag: 'a' });
+    const files = (patch: string) => [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]).sort();
+    const patchOf = async (range: string) => {
+      const diff = await settle(adapter.diff(path, range));
+      return 'rejected' in diff ? diff : files(diff.patch);
+    };
+    expect({
+      threeDots: await patchOf(`${aside}...HEAD`),
+      openEnded: await patchOf(`${aside}...`),
+      sha: await patchOf(ahead),
+    }).toEqual({
+      threeDots: ['ahead.txt', world.tracked].sort(),
+      openEnded: ['ahead.txt', world.tracked].sort(),
+      sha: [world.tracked],
+    });
+  });
+
+  test(`${label}: diff refuses as invalid a range outside <rev>, <rev>... and <rev>...HEAD, and a rev that names nothing`, async () => {
+    const { adapter, world } = await start();
+    const { path } = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
+    /** How `diff()` refused `range`, and whether it said the range itself is none: `'diffed'` when it didn't refuse. */
+    const refusal = async (range: string) => {
+      try {
+        await adapter.diff(path, range);
+        return 'diffed';
+      } catch (error) {
+        const said = messageOf(error).includes('is not a range') ? 'not a range' : 'a range';
+        return { rejected: portFailure(error), range: said };
+      }
+    };
+    const invalid = { port: 'workspace', op: 'diff', code: 'invalid' };
+    expect({
+      twoDots: await refusal(`${world.base}..HEAD`),
+      otherRight: await refusal(`${world.base}...${world.base}`),
+      option: await refusal('--output=/dev/null'),
+      optionOnTheLeft: await refusal('-p...HEAD'),
+      nothing: await refusal('no-such-rev...HEAD'),
+    }).toEqual({
+      twoDots: { rejected: invalid, range: 'not a range' },
+      otherRight: { rejected: invalid, range: 'not a range' },
+      option: { rejected: invalid, range: 'not a range' },
+      optionOnTheLeft: { rejected: invalid, range: 'not a range' },
+      nothing: { rejected: invalid, range: 'a range' },
+    });
+  });
+
+  test(`${label}: reopen gives back the run's workspace while its HEAD descends from its base, and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const r1 = await world.run('r1');
+    const created = await adapter.create(r1, { base: world.base, branch: BRANCH });
+    writeFileSync(join(created.path, 'work.txt'), 'work\n');
+    world.git(created.path, 'add', 'work.txt');
+    world.git(created.path, 'commit', '-q', '-m', 'work');
+    const before = capture.events.length;
+    const reopened = await settle(adapter.reopen(r1, { branch: BRANCH, baseSha: world.baseSha }));
+    expect(parseIssues(Workspace, reopened)).toEqual([]);
+    expect(held(reopened)).toEqual({ path: created.path, branch: BRANCH, baseSha: world.baseSha });
+    expect(capture.events.length).toBe(before);
+  });
+
+  test(`${label}: reopen refuses as invalid a workspace that is gone, is no worktree, or has lost its base`, async () => {
+    const { adapter, world } = await start();
+    const reopened = async (spoil: (path: string) => void) => {
+      const run = await world.run(`r-${Math.random().toString(36).slice(2, 8)}`);
+      const { path } = await adapter.create(run, { base: world.base, branch: BRANCH });
+      spoil(path);
+      return settle(adapter.reopen(run, { branch: BRANCH, baseSha: world.baseSha }));
+    };
+    const invalid = { rejected: { port: 'workspace', op: 'reopen', code: 'invalid' } };
+    expect({
+      gone: await reopened((path) => rmSync(path, { recursive: true, force: true })),
+      notAWorktree: await reopened((path) => rmSync(join(path, '.git'), { force: true })),
+      baseLost: await reopened((path) => {
+        const orphan = world.git(path, 'commit-tree', 'HEAD^{tree}', '-m', 'orphan').stdout;
+        world.git(path, 'checkout', '-q', '--detach', orphan);
+      }),
+    }).toEqual({ gone: invalid, notAWorktree: invalid, baseLost: invalid });
+  });
+
+  test(`${label}: a renewal is refused while its run is alive in another process, and taken once that process is gone`, async () => {
+    const { adapter, world } = await start();
+    const r1 = await world.run('r1');
+    const other = liveProcess();
+    try {
+      await adapter.lease(world.remote, BRANCH, { ...r1, pid: other.pid });
+      const whileAlive = await adapter.lease(world.remote, BRANCH, r1);
+      other.stop();
+      await Bun.sleep(50);
+      const once = await adapter.lease(world.remote, BRANCH, r1);
+      expect({
+        whileAlive: whileAlive.leased ? 'renewed' : { runId: whileAlive.holder.runId, pid: whileAlive.holder.pid },
+        once: once.leased ? once.lease.pid : 'refused',
+      }).toEqual({ whileAlive: { runId: 'r1', pid: other.pid }, once: r1.pid });
+    } finally {
+      other.stop();
+    }
   });
 
   test(`${label}: capabilities parse`, async () => {

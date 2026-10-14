@@ -45,7 +45,12 @@ export interface CallRequest {
   definition: StageDefinition;
   /** The `stage.ts` that exported the definition: a script's `run` is relative to its directory. */
   stageFile: string;
+  /** Where the call's step runs. */
   workspace: string;
+  /** The directory that holds `.sail/`: what the call records paths relative to. */
+  root: string;
+  /** The run's branch. Empty for a stage run in isolation. */
+  branch: string;
   /** `project.yaml`. */
   config: string;
   supplied: Record<string, Supplied>;
@@ -138,6 +143,8 @@ export async function runCall(request: CallRequest): Promise<Ran> {
     try: tryNumber,
     stageDir: dirname(request.stageFile),
     workspace: request.workspace,
+    root: request.root,
+    branch: request.branch,
     config: request.config,
     paths,
     inputs,
@@ -361,6 +368,8 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
       try: tryNumber,
       stageDir: dirname(request.stageFile),
       workspace: request.workspace,
+      root: request.root,
+      branch: request.branch,
       config: request.config,
       paths,
       inputs,

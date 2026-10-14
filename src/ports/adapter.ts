@@ -24,8 +24,11 @@ export interface AdapterContext extends ProviderOptions {
 }
 
 export interface AdapterDefinition<A> {
-  /** The environment variables this adapter needs, given its options and the environment. */
-  requires?(options: AdapterOptions, env: Env): readonly string[];
+  /**
+   * The environment variables this adapter needs, given its options and the environment. An entry that is a list is
+   * met by any one of its variables.
+   */
+  requires?(options: AdapterOptions, env: Env): readonly (string | readonly string[])[];
   versions?(): Readonly<Record<string, string>>;
   create(options: AdapterOptions, context: AdapterContext): A | Promise<A>;
 }
@@ -81,9 +84,11 @@ export const PORT_OPERATIONS = {
   ]),
   harness: operations<Harness>()(['run', 'capabilities']),
   workspace: operations<WorkspacePort>()([
+    'repository',
     'lease',
     'releaseLease',
     'create',
+    'reopen',
     'diff',
     'release',
     'sweep',

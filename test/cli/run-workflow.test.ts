@@ -196,14 +196,16 @@ test('sail FAKE-1 -q prints the header, a call that ends in error with its messa
   );
 });
 
-test("sail FAKE-1 -v adds each command and the tail of every script, and -vv adds each journal line and the claim's two events", async () => {
+test("sail FAKE-1 -v adds each command, where it runs and the tail of every script, and -vv adds each journal line and the start's four events", async () => {
   const verbose = await sailIn(['FAKE-1', '-v']);
   expect(verbose.code).toBe(EXIT_OK);
+  const [run] = verbose.runs;
   const specTail = [
     detail('spec#1', 'stdout.log'),
     detail('spec#1', '│ {"summary":"Add a greeting.","tasks":[{"title":"Add greet()","files":["src/greet.ts"]}]}'),
   ].join('\n');
-  expect(verbose.view).toContain(`\n${detail('tests#1', '$ .sail/stages/tests/run.sh')}\n`);
+  const command = `$ .sail/stages/tests/run.sh · in .sail-runs/${run}/workspace`;
+  expect(verbose.view).toContain(`\n${detail('tests#1', command)}\n`);
   expect(verbose.view).toContain(`\n${specTail}\n`);
   expect(verbose.view).not.toContain('journal line');
   expect(verbose.view).not.toContain('ticket:claimed');
@@ -212,9 +214,20 @@ test("sail FAKE-1 -v adds each command and the tail of every script, and -vv add
   expect(trace.view).toContain(`\n${specTail}\n`);
   expect(trace.view).toContain(`\n${detail('intake#1', 'journal line 1')}\n${head('spec#1', '▶ spec · script')}\n`);
   expect(trace.view).toContain(`\n${detail('spec#1', 'journal line 2')}\n`);
-  // The claim belongs to no call: its two events print as generic lines with no key, right under the header.
+  // The lease, the workspace and the claim belong to no call: their events print as generic lines with no key, right
+  // under the header.
   const [traced] = trace.runs;
-  expect(trace.view.split('\n').slice(1, 4)).toEqual([
+  const branch = 'sail/FAKE-1-add-a-greeting';
+  expect(
+    trace.view
+      .split('\n')
+      .slice(1, 3)
+      .map((line) => line.replace(/"baseSha":"[0-9a-f]{40}","durationMs":\d+/, '…')),
+  ).toEqual([
+    `${' '.repeat(15)}· workspace:leased {"remote":"fake://origin","branch":"${branch}"}`,
+    `${' '.repeat(15)}· workspace:created {"path":".sail-runs/${traced}/workspace","branch":"${branch}",…}`,
+  ]);
+  expect(trace.view.split('\n').slice(3, 6)).toEqual([
     `${' '.repeat(15)}· ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}`,
     `${' '.repeat(15)}· ticket:commented {"ticketKey":"FAKE-1","body":"sail run ${traced} started"}`,
     head('intake#1', '▶ intake ticket · builtin'),
@@ -363,8 +376,10 @@ test('sail FAKE-1 claims the ticket for its one run: run.json records nothing fo
       { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
       { claimed: true, state: IN_PROGRESS },
     ]);
-    expect(events.slice(0, 4).map((event) => event.type)).toEqual([
+    expect(events.slice(0, 6).map((event) => event.type)).toEqual([
       'run:start',
+      'workspace:leased',
+      'workspace:created',
       'ticket:claimed',
       'ticket:commented',
       'intake:start',
@@ -435,7 +450,7 @@ test('a second sail FAKE-1 --force runs: it moves the ticket through update, rec
       ['state'],
       { claimed: false, state: IN_PROGRESS },
     ]);
-    expect(second.events.slice(1, 3).map((event) => event.type)).toEqual(['ticket:updated', 'ticket:commented']);
+    expect(second.events.slice(3, 5).map((event) => event.type)).toEqual(['ticket:updated', 'ticket:commented']);
     expect(second.ticket.comments.map((comment) => comment.body).slice(1)).toEqual([
       `sail run ${first} started`,
       `sail run ${second.runId} started`,
@@ -921,3 +936,57 @@ test('sail FAKE-1 stops an agent stage at its maxTurns: budget_exceeded, the usa
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 30_000);
+
+test('sail FAKE-1 --force on a branch a suspended run leases exits 3 naming that run, with no second run directory and the ticket as that run left it', async () => {
+  await withTempRepo(async (repo) => {
+    await withTempRepo(async (from) => {
+      writeStub(from.dir);
+      const first = await runCaptured(['FAKE-1', '--until', 'spec'], from.dir);
+      expect(first.code).toBe(EXIT_SUSPENDED);
+      // A second process of its own: the copy shares the fakes' state, their leases included, and the git directory.
+      copyRun(from.dir, repo.dir);
+      const [held = ''] = runIds(repo.dir);
+      const ticket = await (await fakeAdapters(repo.dir)).ports.ticketSource.get('FAKE-1');
+      const comments = ticket.comments.map((comment) => comment.body);
+      const second = await started(repo.dir, ['FAKE-1', '--force']);
+      expect({
+        code: second.code,
+        stderr: second.stderr,
+        runs: second.runs,
+        comments: second.ticket.comments.map((comment) => comment.body),
+      }).toEqual({
+        code: EXIT_REFUSED,
+        stderr: `sail FAKE-1: the branch sail/FAKE-1-add-a-greeting is leased by run ${held} (suspended)\n`,
+        runs: [held],
+        comments,
+      });
+    });
+  });
+});
+
+test("sail FAKE-1 whose workspace can't be made exits 3, with the ticket untouched and no run directory, worktree or lease left", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(sail, 'project.yaml', 'workspace: { use: fake }', 'workspace: { use: fake, defaultBranch: missing }');
+    const refused = await started(repo.dir, ['FAKE-1']);
+    const leases = join(repo.dir, '.sail-runs', 'fake', 'leases');
+    expect({
+      code: refused.code,
+      stderr: refused.stderr,
+      runs: refused.runs,
+      worktrees: repo
+        .git('worktree', 'list', '--porcelain')
+        .split('\n')
+        .filter((line) => line.startsWith('worktree ')),
+      leases: existsSync(leases) ? readdirSync(leases) : [],
+      ticket: { state: refused.ticket.state.name, comments: refused.ticket.comments.length },
+    }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: 'sail FAKE-1: the workspace could not be made: workspace.create: missing names no commit (invalid)\n',
+      runs: [],
+      worktrees: [`worktree ${repo.dir}`],
+      leases: [],
+      ticket: { state: 'Todo', comments: 1 },
+    });
+  });
+});
