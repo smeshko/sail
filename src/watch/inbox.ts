@@ -1,5 +1,12 @@
 // The watcher's command inbox: `.sail-runs/watcher/commands/`, where anything other than the watcher asks it for a
-// change by dropping a command file. Stubbed for queue-store-and-polling: TASK-004 writes it.
+// change by dropping a command file. The watcher stays the only writer of its own state (ADR-0019).
+//
+// - A command is applied, then deleted. A crash between the two applies it again at the next drain, so every command
+//   is safe to apply twice: a poll, and the set changes and queue edits 13.2 and 13.3 add to `Command`.
+// - A command is written to a dot-prefixed temp file and renamed into place, so a drain never reads half of one: the
+//   drain skips dot-files.
+// - A file that isn't a command, or whose apply throws, is deleted and reported, so it can't wedge the inbox.
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 
@@ -16,9 +23,25 @@ export const Command = z.discriminatedUnion('op', [
 ]);
 export type Command = z.infer<typeof Command>;
 
-/** Drops `command` in the inbox, and gives its file. */
-export function dropCommand(runsDir: string, _command: Command): string {
-  return join(commandsDir(runsDir), 'stub.json');
+/** Commands this process dropped, so two in one millisecond still sort in the order they were dropped. */
+let dropped = 0;
+
+/**
+ * Drops `command` in the inbox, and gives its file: `<UTC time>-<pid>-<count>-<random>.json`, so names sort by when
+ * they were dropped.
+ */
+export function dropCommand(runsDir: string, command: Command): string {
+  const dir = commandsDir(runsDir);
+  mkdirSync(dir, { recursive: true });
+  dropped += 1;
+  const time = new Date().toISOString().replace(/[-:.]/g, '').replace('Z', '');
+  const random = Math.random().toString(16).slice(2, 10);
+  const name = `${time}-${process.pid}-${String(dropped).padStart(9, '0')}-${random}`;
+  const tmp = join(dir, `.${name}.tmp`);
+  const file = join(dir, `${name}.json`);
+  writeFileSync(tmp, `${JSON.stringify(command)}\n`);
+  renameSync(tmp, file);
+  return file;
 }
 
 export interface Drained {
@@ -28,7 +51,44 @@ export interface Drained {
   rejected: { file: string; reason: string }[];
 }
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** Why the text of the command file `name` is no command, or the command. */
+function parseCommand(name: string, text: string): Command | { reason: string } {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch (error) {
+    return { reason: `${name} is not JSON: ${messageOf(error)}` };
+  }
+  const parsed = Command.safeParse(data);
+  if (parsed.success) return parsed.data;
+  const [issue] = parsed.error.issues;
+  return { reason: `${name} is not a command: ${[issue?.path.join('.'), issue?.message].filter(Boolean).join(' ')}` };
+}
+
 /** Applies each command in the inbox, oldest first, deleting each once it is applied or rejected. */
-export function drainCommands(_runsDir: string, _apply: (command: Command) => void): Drained {
-  return { applied: 0, rejected: [] };
+export function drainCommands(runsDir: string, apply: (command: Command) => void): Drained {
+  const dir = commandsDir(runsDir);
+  const drained: Drained = { applied: 0, rejected: [] };
+  if (!existsSync(dir)) return drained;
+  const names = readdirSync(dir)
+    .filter((name) => !name.startsWith('.') && name.endsWith('.json'))
+    .sort();
+  for (const name of names) {
+    const file = join(dir, name);
+    const command = parseCommand(name, readFileSync(file, 'utf8'));
+    if ('reason' in command) {
+      drained.rejected.push({ file, reason: command.reason });
+    } else {
+      try {
+        apply(command);
+        drained.applied += 1;
+      } catch (error) {
+        drained.rejected.push({ file, reason: `${name} failed: ${messageOf(error)}` });
+      }
+    }
+    rmSync(file, { force: true });
+  }
+  return drained;
 }

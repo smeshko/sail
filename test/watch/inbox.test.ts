@@ -34,10 +34,7 @@ function drain(runs: string): { applied: Command[]; drained: ReturnType<typeof d
   return { applied, drained };
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a dropped poll command is applied exactly once, then removed, and a .tmp beside it is left alone', () => {
+test('a dropped poll command is applied exactly once, then removed, and a .tmp beside it is left alone', () => {
   const runs = runsDir();
   const file = dropCommand(runs, { op: 'poll', workflow: 'ticket-to-pr' });
   expect(file.startsWith(`${commandsDir(runs)}/`)).toBe(true);
@@ -51,10 +48,7 @@ test
   expect(drain(runs)).toEqual({ applied: [], drained: { applied: 0, rejected: [] } });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('commands dropped in order, many within one millisecond, are applied in that order', () => {
+test('commands dropped in order, many within one millisecond, are applied in that order', () => {
   const runs = runsDir();
   const order = ['c', 'a', 'b', 'q', 'e', 'z', 'm', 'd', 'x', 'f', 'k', 'g', 'w', 'h', 'r', 'i', 'y', 'j', 'n', 'l'];
   for (const workflow of order) dropCommand(runs, { op: 'poll', workflow });
@@ -62,10 +56,7 @@ test
   expect(readdirSync(commandsDir(runs))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a file that is no command, or whose apply throws, is removed and rejected naming the file, and the drain goes on', () => {
+test('a file that is no command, or whose apply throws, is removed and rejected naming the file, and the drain goes on', () => {
   const runs = runsDir();
   const dir = commandsDir(runs);
   mkdirSync(dir, { recursive: true });
@@ -95,10 +86,7 @@ test
   expect(readdirSync(dir)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("draining commands leaves a store's queue.json as it was, and only the store names that file", async () => {
+test("draining commands leaves a store's queue.json as it was, and only the store names that file", async () => {
   const runs = runsDir();
   const store = openQueue({
     runsDir: runs,

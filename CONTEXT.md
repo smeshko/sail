@@ -471,6 +471,10 @@ _Avoid_: item id, queue key
 A queue item's state once it has failed its last attempt: kept with the reason, never retried, until a person requeues or drops it.
 _Avoid_: dead-lettered, stuck, quarantined
 
+**Command file**:
+A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/commands/`. The watcher applies it and deletes it, so it stays the only writer of its own state (ADR-0019). Every command is safe to apply twice.
+_Avoid_: message, signal, IPC
+
 **Dispatch**:
 The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, dispatch begins with the claim.
 _Avoid_: pickup, schedule, spawn
