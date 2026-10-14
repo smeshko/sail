@@ -61,6 +61,10 @@ export interface OpenedRun {
   config: ProjectConfig;
   /** The workflow, with the stages it reaches: what the run replays. */
   loaded: LoadedWorkflow;
+  /** The run's workspace, its branch and base, and the remote its lease is keyed by. */
+  workspace: OpenedWorkspace;
+  /** What the Workspace adapter reported while the run was being opened, in order. */
+  started: readonly ProviderEvent[];
   /**
    * What the claim did to the ticket, in order, for a fresh run's stream: the adapter's own events found no run
    * attached. Empty for a reopened run.
@@ -70,6 +74,29 @@ export interface OpenedRun {
   until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
+}
+
+/** Where a run works, and what holds it there. */
+export interface OpenedWorkspace {
+  /** The absolute path of the workspace. */
+  path: string;
+  branch: string;
+  baseSha: string;
+  /** The remote the run's lease is keyed by. */
+  remote: string;
+}
+
+/** Stub for TASK-004 (ADW-93): the directory that holds `.sail/`, on no branch, with no base and no remote. */
+const noWorkspace = (sailDir: string): OpenedWorkspace => ({
+  path: dirname(sailDir),
+  branch: '',
+  baseSha: '',
+  remote: '',
+});
+
+/** `event` with its `path` made relative to the repository `root`. Stub for TASK-004 (ADW-93): unchanged. */
+export function rootRelative(event: ProviderEvent, _root: string): ProviderEvent {
+  return event;
 }
 
 export interface OpenRunOptions {
@@ -229,6 +256,8 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     relay: options.adapters.relay,
     config,
     loaded,
+    workspace: noWorkspace(found.dir),
+    started: [],
     claimed: made.events,
     ...(until === undefined ? {} : { until }),
     firstSeq: 1,
@@ -311,6 +340,8 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     relay: options.adapters.relay,
     config: found.config,
     loaded,
+    workspace: noWorkspace(found.dir),
+    started: [],
     claimed: [],
     firstSeq,
   };

@@ -58,7 +58,13 @@ export const fakeAdapters: { [P in Port]: AdapterDefinition<PortAdapters[P]> } =
   },
   workspace: {
     create(options, context) {
-      const { repo } = parse('workspace', { repo: z.string().optional() }, options);
+      // Stub for TASK-001 (ADW-93): remote and defaultBranch are read and dropped, and leases stay machine-wide.
+      const shape = {
+        repo: z.string().optional(),
+        remote: z.string().min(1).optional(),
+        defaultBranch: z.string().min(1).optional(),
+      };
+      const { repo } = parse('workspace', shape, options);
       return createFakeWorkspace({
         ...provider(context),
         repo: repo === undefined ? context.root : resolve(context.sailDir, repo),

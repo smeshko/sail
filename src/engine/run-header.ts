@@ -40,6 +40,19 @@ export interface RunHeader {
   stages: Record<string, RosterEntry>;
   budget?: { maxUsd?: number; maxMinutes?: number };
   startedAt: string;
+  /** The run's branch, named once at its start. A run from before workspaces has none. */
+  branch?: string;
+  /** The repository the workspace was made from, and the base it started at. */
+  repository?: { url: string; defaultBranch: string; baseSha: string };
+  /** The workspace, relative to the run directory. */
+  workspace?: string;
+}
+
+/** What a run's workspace adds to its header. */
+export interface HeaderWorkspace {
+  branch: string;
+  repository: { url: string; defaultBranch: string };
+  baseSha: string;
 }
 
 const sha256 = (data: string | Uint8Array) => new Bun.CryptoHasher('sha256').update(data).digest('hex');
@@ -80,6 +93,15 @@ export interface HeaderFields {
   config: ProjectConfig;
   adapters: Record<Port, AdapterEntry>;
   now: Date;
+  /** The run's workspace, once it exists. Stub for TASK-003 (ADW-93): unread. */
+  workspace?: HeaderWorkspace;
+}
+
+/** The header fields of `workspace`. Stub for TASK-003 (ADW-93): empty values. */
+export function workspaceFields(
+  _workspace: HeaderWorkspace,
+): Required<Pick<RunHeader, 'branch' | 'repository' | 'workspace'>> {
+  return { branch: '', repository: { url: '', defaultBranch: '', baseSha: '' }, workspace: '' };
 }
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */

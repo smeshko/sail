@@ -14,6 +14,10 @@ import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
 export interface FakeWorkspaceOptions extends ProviderOptions {
   /** The local git repository that stands in for the remote. */
   readonly repo: string;
+  /** The remote `repository()` reports. Stub for TASK-001 (ADW-93): unread. */
+  readonly remote?: string;
+  /** The branch a workspace starts from when `create()` is given no base. Stub for TASK-001 (ADW-93): unread. */
+  readonly defaultBranch?: string;
   /** Where leases live. `defaultLeasesDir()` when left out. */
   readonly leasesDir?: string;
   /** The environment for the git the fake runs. */
@@ -65,6 +69,10 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
 
   return {
     name: 'fake',
+    // Stub for TASK-001 (ADW-93).
+    async repository() {
+      return { url: '', defaultBranch: '', raw: null };
+    },
     async lease(remote, branch, holder) {
       const result = takeLease(leasesDir(), remote, branch, holder, now());
       if (result.leased) {
@@ -87,6 +95,10 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
       emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
       return { path, branch, baseSha, raw: added };
+    },
+    // Stub for TASK-001 (ADW-93).
+    async reopen() {
+      return { path: '', branch: '', baseSha: '', raw: null };
     },
     async diff(path, from) {
       const resolved = git(path, 'rev-parse', '--verify', '--quiet', `${from}^{commit}`);

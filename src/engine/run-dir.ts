@@ -41,6 +41,9 @@ export function createRunDir(sailDir: string, runId: string): string {
   return dir;
 }
 
+/** Removes the run directory `dir`. Stub for TASK-004 (ADW-93): removes nothing. */
+export function removeRunDir(_dir: string): void {}
+
 const STATUSES = ['running', 'suspended', 'completed', 'failed'] as const;
 export type Status = (typeof STATUSES)[number];
 
