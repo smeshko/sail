@@ -23,11 +23,13 @@ const OUTPUT_POINTER = '#/properties/output';
 
 /**
  * `node` with every local reference into the step schema rebased onto the envelope's `output`: `#` (Zod's reference to
- * a recursive schema's root) and any `#/…` pointer but the hoisted `#/definitions/…` and `#/$defs/…`.
+ * a recursive schema's root) and any `#/…` pointer but the hoisted `#/definitions/…` and `#/$defs/…`. A schema below the
+ * root with a `$id` of its own is a resource whose local references mean it, so it is left as it is.
  */
-function rebased(node: unknown, names = false): unknown {
+function rebased(node: unknown, names = false, root = false): unknown {
   if (Array.isArray(node)) return node.map((item) => rebased(item));
   if (typeof node !== 'object' || node === null) return node;
+  if (!names && !root && '$id' in node) return node;
   return Object.fromEntries(
     Object.entries(node).map(([key, value]) => {
       if (names) return [key, rebased(value)];
@@ -43,11 +45,14 @@ function rebased(node: unknown, names = false): unknown {
 /**
  * The JSON Schema the session submits against: the envelope, with `schema` as its `output`. The step schema's own
  * definitions move to the envelope's root, so a `#/definitions/…` or `#/$defs/…` reference inside it still resolves, and
- * every other local reference is rebased onto `output`.
+ * every other local reference is rebased onto `output`. Its `$id` moves to the root too, since the references now
+ * resolve against the envelope.
  */
 export function submissionEnvelope(outputSchema: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  const { $schema: _schema, definitions, $defs, ...output } = rebased(outputSchema) as Record<string, unknown>;
+  const rebasedSchema = rebased(outputSchema, false, true) as Record<string, unknown>;
+  const { $schema: _schema, $id, definitions, $defs, ...output } = rebasedSchema;
   return {
+    ...($id === undefined ? {} : { $id }),
     type: 'object',
     properties: {
       outcome: { enum: ['done', 'blocked'] },
