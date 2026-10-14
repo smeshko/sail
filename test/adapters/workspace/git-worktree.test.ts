@@ -365,6 +365,28 @@ test("git variables a hook hands down never point git at the clone: GIT_INDEX_FI
   });
 });
 
+test("a workspace is made with no hook of the clone's: neither its post-checkout hook nor one under core.hooksPath runs (review #1.4)", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const dir = tempDir();
+    const log = join(dir, 'hooks.log');
+    const hook = (hooks: string) => {
+      mkdirSync(hooks, { recursive: true });
+      logging(join(hooks, 'post-checkout'), log, 'exit 0');
+    };
+    hook(join(repo.dir, '.git', 'hooks'));
+    const created = await settle(adapterOf(repo, w).create(runIn(w.runsDir, 'r1'), { branch: BRANCH }));
+    hook(join(dir, 'husky'));
+    repo.git('config', 'core.hooksPath', join(dir, 'husky'));
+    const configured = await settle(adapterOf(repo, w).create(runIn(w.runsDir, 'r2'), { branch: BRANCH }));
+    expect({
+      made: ['rejected' in created ? created : 'made', 'rejected' in configured ? configured : 'made'],
+      hooks: existsSync(log) ? readFileSync(log, 'utf8') : '',
+    }).toEqual({ made: ['made', 'made'], hooks: '' });
+  });
+});
+
 test('git-worktree is a built-in for the workspace port alone: its options are remote and defaultBranch, and any other is refused by name', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
