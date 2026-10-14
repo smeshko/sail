@@ -74,6 +74,81 @@ test.each<[string, string, string]>([
   expect(denied).toEqual([['toolu_9', reason]]);
 });
 
+// Review R1-2: the CLI expands a leading `~` to the home folder and trims a path, so the guard must not read either as a
+// folder inside the workspace.
+test.each<[string, string, Record<string, unknown>, string]>([
+  ['Read of a ~ path', 'Read', { file_path: '~/.ssh/id_rsa' }, '~/.ssh/id_rsa'],
+  ['Write of a bare ~', 'Write', { file_path: '~' }, '~'],
+  ['Grep of ~', 'Grep', { pattern: '.', path: '~' }, '~'],
+  ['Glob of a ~ folder', 'Glob', { pattern: '*', path: '~/.aws' }, '~/.aws'],
+  ['Edit of a ~ path behind a space', 'Edit', { file_path: ' ~/.zshrc' }, ' ~/.zshrc'],
+])('denies %s, since the CLI reads it from the home folder', async (_, tool, input, shown) => {
+  const { canUseTool, denied } = guard();
+  const reason = `${tool} of ${shown}: a path through ~ is not allowed, name it in full`;
+  expect(await ask(canUseTool, tool, input, 'toolu_7')).toEqual({ behavior: 'deny', message: reason });
+  expect(denied).toEqual([['toolu_7', reason]]);
+});
+
+test.each<[string, string, Record<string, unknown>, string]>([
+  ['Read of an absolute path behind a space', 'Read', { file_path: ' /etc/hosts' }, ' /etc/hosts'],
+  ['Grep of the parent folder behind a space', 'Grep', { pattern: 'x', path: ' ..' }, ' ..'],
+])('denies %s, which the CLI trims to a path outside', async (_, tool, input, shown) => {
+  const { canUseTool } = guard();
+  const reason = `${tool} of ${shown} is outside the run's directories: ${ROOTS}`;
+  expect(await ask(canUseTool, tool, input)).toEqual({ behavior: 'deny', message: reason });
+});
+
+test('allows a workspace path with a trailing space, inside whether trimmed or not', async () => {
+  const input = { file_path: 'src/a.ts ' };
+  expect(await ask(guard().canUseTool, 'Read', input)).toEqual({ behavior: 'allow', updatedInput: input });
+});
+
+// Review R1-1: an absolute Glob pattern searches from its own folder, ahead of `path`, so the pattern's folder is
+// checked as a path is.
+test.each<[string, Record<string, unknown>, string]>([
+  ['an absolute pattern outside every root', { pattern: '/etc/*' }, "Glob of /etc/* is outside the run's directories"],
+  [
+    'an absolute pattern outside, beside a path inside',
+    { pattern: join(base, 'elsewhere', '*'), path: '.' },
+    `Glob of ${join(base, 'elsewhere', '*')} is outside the run's directories`,
+  ],
+  [
+    'a pattern that climbs out of the workspace',
+    { pattern: '../elsewhere/*' },
+    "Glob of ../elsewhere/* is outside the run's directories",
+  ],
+  [
+    'a pattern that climbs out of its path',
+    { pattern: '../../*', path: 'src' },
+    "Glob of ../../* is outside the run's directories",
+  ],
+  ['a ~ pattern', { pattern: '~/.ssh/*' }, 'Glob of ~/.ssh/*: a path through ~ is not allowed, name it in full'],
+  [
+    'a pattern that climbs after a wildcard',
+    { pattern: 'src/*/../../../elsewhere/*' },
+    'Glob of src/*/../../../elsewhere/*: a pattern may not climb with .. after a wildcard',
+  ],
+  ['a pattern that is not a string', { pattern: 3 }, 'Glob needs pattern as a string'],
+])('denies Glob with %s', async (_, input, start) => {
+  const { canUseTool, denied } = guard();
+  const answer = await ask(canUseTool, 'Glob', input, 'toolu_8');
+  expect(answer).toMatchObject({ behavior: 'deny' });
+  expect((answer as { message: string }).message.startsWith(start)).toBe(true);
+  expect(denied).toHaveLength(1);
+});
+
+test.each<[string, Record<string, unknown>]>([
+  ['an absolute pattern inside the workspace', { pattern: join(cwd, 'src', '*.ts') }],
+  [
+    'an absolute pattern in $STAGE_IN, beside the workspace as its path',
+    { pattern: join(stageIn, '**', '*.md'), path: cwd },
+  ],
+  ['a pattern that climbs and comes back', { pattern: '../work/src/*.ts' }],
+  ['a pattern with a wildcard first', { pattern: '**/*.ts', path: 'src' }],
+])('allows Glob with %s', async (_, input) => {
+  expect(await ask(guard().canUseTool, 'Glob', input)).toEqual({ behavior: 'allow', updatedInput: input });
+});
+
 test('every tool but the file tools and StructuredOutput is denied, without interrupting the session', async () => {
   const { canUseTool, denied } = guard();
   const tools = ['Bash', 'WebFetch', 'WebSearch', 'mcp__x__y', 'Task', 'NotebookEdit', 'Unheard'];
