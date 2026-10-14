@@ -101,6 +101,50 @@ async function play(stream: Stream, extra: Partial<HarnessRequest> = {}, env: Re
   return { query, result, capture, types: capture.events.map((event) => event.type) };
 }
 
+/** What the session's system prompt gets appended for `req`: where it works, then the submit contract. */
+const appended = (req: HarnessRequest) =>
+  [
+    '## Where you work',
+    '',
+    `Your working directory is the workspace, ${req.cwd}. You have no shell, so you can't read environment`,
+    'variables: where a prompt names one of these, it means the value given.',
+    '',
+    ...Object.entries(req.env).map(([name, value]) => `- \`$${name}\`: ${value}`),
+    '',
+    'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
+    'directory below it.',
+    '',
+    SUBMIT_CONTRACT,
+  ].join('\n');
+
+// Live run 1: the session has file tools only, so it can't read $STAGE_OUT from its environment. It wrote spec.md
+// into a directory it guessed, and the stage ended missing_file. The system prompt now gives it the paths.
+test("the system prompt gives the session its working directory and every preamble variable's value, then the submit contract", () => {
+  const req = request('Write `$STAGE_OUT/spec.md` from `$INPUT_BRIEF`.');
+  const env = { ...req.env, INPUT_BRIEF: join(req.env.STAGE_IN ?? '', 'brief.md') };
+  const { systemPrompt } = sessionOptions({ ...req, env }, {});
+  expect(systemPrompt).toEqual({
+    type: 'preset',
+    preset: 'claude_code',
+    append: [
+      '## Where you work',
+      '',
+      `Your working directory is the workspace, ${req.cwd}. You have no shell, so you can't read environment`,
+      'variables: where a prompt names one of these, it means the value given.',
+      '',
+      `- \`$STAGE_IN\`: ${req.env.STAGE_IN}`,
+      `- \`$STAGE_OUT\`: ${req.env.STAGE_OUT}`,
+      '- `$TRY`: 1',
+      `- \`$INPUT_BRIEF\`: ${req.env.STAGE_IN}/brief.md`,
+      '',
+      'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
+      'directory below it.',
+      '',
+      SUBMIT_CONTRACT,
+    ].join('\n'),
+  });
+});
+
 test("the session's options are the step's model, workspace, envelope and budgets, isolated from the user's settings", () => {
   const req = request();
   const options = sessionOptions(req, {});
@@ -121,7 +165,7 @@ test("the session's options are the step's model, workspace, envelope and budget
     tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
     permissionMode: 'default',
     outputFormat: { type: 'json_schema', schema: submissionEnvelope(req.outputSchema) },
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: SUBMIT_CONTRACT },
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: appended(req) },
     maxTurns: 40,
     maxBudgetUsd: 2,
   });
