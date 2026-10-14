@@ -91,6 +91,23 @@ test('readDocument reads each heading with its level, and each section as the to
   ]);
 });
 
+test('readDocument reads headings and items in the order the document holds them, a heading inside a list item after that item (review R1-2)', () => {
+  const todo = { checked: false };
+  const same = readDocument('spec.md', '## Tasks\n\n- [ ] implement it\n\n  ## Notes\n\n  Details\n\n- second\n');
+  expect(same.sections).toEqual([
+    { heading: 'Tasks', level: 2, items: [todo] },
+    { heading: 'Notes', level: 2, items: [{}] },
+  ]);
+  const deeper = readDocument('spec.md', '## Tasks\n\n- [ ] a\n\n  ### Detail\n\n- b\n\n## Notes\n');
+  expect(deeper.headings.map((heading) => heading.text)).toEqual(['Tasks', 'Detail', 'Notes']);
+  expect(deeper.sections).toEqual([
+    { heading: 'Tasks', level: 2, items: [todo, {}] },
+    { heading: 'Detail', level: 3, items: [{}] },
+    { heading: 'Notes', level: 2, items: [] },
+  ]);
+  expect(deeper.items).toEqual([todo, {}]);
+});
+
 test('renderDocuments writes each template into $STAGE_OUT under its name, with its variables filled, an untrusted value wrapped and every placeholder as written', () => {
   const stageDir = tempDir();
   const outDir = tempDir();
