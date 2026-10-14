@@ -11,7 +11,7 @@ import {
   validateProjectFile,
   validateRunDir,
 } from '../../src/engine/schemas';
-import type { NewEvent } from '../../src/events/types';
+import type { NewEvent, NewQueueEvent } from '../../src/events/types';
 import { writeTwoStepRun } from '../helpers/run-dir';
 
 const root = join(import.meta.dir, '..', '..');
@@ -1253,4 +1253,50 @@ test("a multi-step call linked to another call's result names the link, and each
       'which differs in key ("tests#2", not "publish#1/open"), stage ("tests", not "publish"), call (2, not 1), ' +
       'step (undefined, not "open")',
   ]);
+});
+
+// A queue's event stream: the run's envelope without runId, with the watched workflow (DECISIONS D4).
+const queueEnvelope = { seq: 1, ts: TS };
+const QUEUED: NewQueueEvent[] = [
+  { type: 'queue:polled', workflow: 'ticket-to-pr', kind: 'ticket', label: 'sail', found: 3, added: 2, durationMs: 41 },
+  {
+    type: 'queue:item_added',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-1',
+    source: { kind: 'ticket', ticketKey: 'FAKE-1' },
+    title: 'Add a --shout flag to the greet command',
+  },
+  { type: 'queue:parked', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-1', attempts: 2, reason: 'spec blocked' },
+  {
+    type: 'queue:error',
+    workflow: 'ticket-to-pr',
+    port: 'ticketSource',
+    adapter: 'linear',
+    code: 'unauthorized',
+    message: 'ticketSource.listDesignated: Authentication required',
+    paused: true,
+  },
+];
+
+test.each(QUEUED.map((sample) => [sample.type, sample] as const))(
+  '%s accepts its payload without runId, and rejects a field it does not declare',
+  (_, sample) => {
+    expect(validateDocument('sail.event.v1', { ...queueEnvelope, ...sample })).toEqual([]);
+    expect(validateDocument('sail.event.v1', { ...queueEnvelope, ...sample, surprise: 1 })).toEqual([
+      { schema: 'sail.event.v1', path: '/surprise', message: 'is not allowed' },
+    ]);
+  },
+);
+
+test('a queue event refuses a runId, needs its workflow, and keeps retryInMs, dedupKey and an open payload to their rules', () => {
+  const [polled, added, , error] = QUEUED.map((sample) => ({ ...queueEnvelope, ...sample }));
+  expect(paths('sail.event.v1', { ...polled, runId: RUN_ID })).toEqual(['/runId']);
+  expect(paths('sail.event.v1', omit(polled as Record<string, unknown>, 'workflow'))).toEqual(['/workflow']);
+  expect(paths('sail.event.v1', { ...error, retryInMs: 60_000 })).toEqual(['/retryInMs']);
+  expect(paths('sail.event.v1', { ...error, paused: false })).toEqual(['/retryInMs']);
+  expect(paths('sail.event.v1', { ...error, paused: false, retryInMs: 60_000 })).toEqual([]);
+  expect(paths('sail.event.v1', { ...added, dedupKey: 'FAKE-1' })).toEqual(['/dedupKey']);
+  const dispatched = { ...queueEnvelope, type: 'queue:dispatched', workflow: 'ticket-to-pr', anything: [1, 2] };
+  expect(paths('sail.event.v1', dispatched)).toEqual([]);
+  expect(paths('sail.event.v1', omit(dispatched, 'workflow'))).toEqual(['/workflow']);
 });

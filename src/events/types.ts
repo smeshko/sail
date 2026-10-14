@@ -3,17 +3,18 @@
 // payload beside it. The families the engine emits have closed payloads, and a call-level event carries the key of the
 // call it belongs to. So do the provider families the port adapters emit: ticket:*, codehost:* and workspace:*, and the
 // families a harness emits, which the agent kind stamps with its call's key. The families later epics emit are declared
-// with open payloads, and close as they are built (ADR-0012). Types only, apart from `EVENT_TYPES`, so importing this
-// module does nothing.
+// with open payloads, and close as they are built (ADR-0012). Types only, apart from `EVENT_TYPES` and
+// `QUEUE_EVENT_TYPES`, so importing this module does nothing.
 import type { ContractError } from '../engine/contract';
 import type { JournalEntry } from '../engine/journal';
 import type { IntakeEntry, RosterEntry } from '../engine/roster';
 import type { StopReason } from '../engine/run-dir';
 import type { RunHeader } from '../engine/run-header';
+import type { PortErrorCode } from '../ports/errors';
 import type { CheckStatus, MergeMethod, TicketMove, TicketState, Usage } from '../ports/types';
 import type { Budget, Permissions } from '../sdk/steps';
 
-/** Every event type, in `sail.event.v1`'s order. */
+/** Every type a run's event stream carries, in `sail.event.v1`'s order. A queue's follow in the schema's enum. */
 export const EVENT_TYPES = [
   'run:start',
   'run:end',
@@ -304,3 +305,67 @@ export interface Consumer {
   readonly name: string;
   onEvent(event: SailEvent): void;
 }
+
+/**
+ * Every type a watched workflow's queue event stream carries, after `EVENT_TYPES` in `sail.event.v1`'s enum. Phase
+ * 13.1 closes the polls, queued items, parking and errors. 13.2 closes `watch:*`, `queue:dispatched` and
+ * `queue:skipped_leased`.
+ */
+export const QUEUE_EVENT_TYPES = [
+  'watch:added',
+  'watch:removed',
+  'queue:polled',
+  'queue:item_added',
+  'queue:dispatched',
+  'queue:skipped_leased',
+  'queue:parked',
+  'queue:error',
+] as const;
+export type QueueEventType = (typeof QUEUE_EVENT_TYPES)[number];
+
+/** What a queue event stream stamps on every event: the run's envelope without `runId`. */
+export interface QueueEnvelope {
+  /** 1, 2, 3… in the queue's events file, without a gap across restarts. */
+  seq: number;
+  /** ISO 8601, UTC. */
+  ts: string;
+}
+
+/** The closed queue payloads. Each names the watched workflow it belongs to. */
+export interface QueuePayloads {
+  'queue:polled': { workflow: string; kind: 'ticket'; label: string; found: number; added: number; durationMs: number };
+  /** The title is the provider's: untrusted text. */
+  'queue:item_added': {
+    workflow: string;
+    dedupKey: string;
+    source: { kind: 'ticket'; ticketKey: string };
+    title: string;
+  };
+  'queue:parked': { workflow: string; dedupKey: string; attempts: number; reason: string };
+  /** `retryInMs` is given exactly when the workflow isn't paused. */
+  'queue:error': {
+    workflow: string;
+    port: 'ticketSource' | 'codeHost';
+    adapter: string;
+    code?: PortErrorCode;
+    message: string;
+    paused: boolean;
+    retryInMs?: number;
+  };
+}
+
+/** A queue type 13.2 closes: any fields beside its workflow. */
+interface OpenQueuePayload {
+  workflow: string;
+  [field: string]: unknown;
+}
+
+type QueuePayloadOf<T extends QueueEventType> = T extends keyof QueuePayloads ? QueuePayloads[T] : OpenQueuePayload;
+
+/** One line of a queue's event stream. */
+export type QueueEvent = {
+  [T in QueueEventType]: QueueEnvelope & { type: T } & QueuePayloadOf<T>;
+}[QueueEventType];
+
+/** A queue event as it is emitted: the stream stamps the envelope. */
+export type NewQueueEvent = { [T in QueueEventType]: { type: T } & QueuePayloadOf<T> }[QueueEventType];

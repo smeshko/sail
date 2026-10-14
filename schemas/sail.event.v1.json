@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.event.v1.json",
-  "title": "sail event: one line of a run's event stream",
-  "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. The families later epics emit keep open payloads until they are built.",
-  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash, error:consumer, ticket:*, codehost:* and workspace:*. Open, and closed as their epics emit them (ADR-0012): run:adopted, run:resumed, all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* and error:harness. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
+  "title": "sail event: one line of a run's or a queue's event stream",
+  "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. The families later epics emit keep open payloads until they are built. A watched workflow's queue event stream, .sail-runs/queue/<workflow>/events.ndjson, uses the same envelope without runId or key, with the workflow it belongs to.",
+  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash, error:consumer, ticket:*, codehost:* and workspace:*. Open, and closed as their epics emit them (ADR-0012): run:adopted, run:resumed, all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* and error:harness. Of the queue family, which follows error:consumer in the enum and alone may leave out runId, queue:polled, queue:item_added, queue:parked and queue:error are closed, and watch:*, queue:dispatched and queue:skipped_leased are open. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -61,13 +61,21 @@
         "error:harness",
         "error:timeout",
         "error:crash",
-        "error:consumer"
+        "error:consumer",
+        "watch:added",
+        "watch:removed",
+        "queue:polled",
+        "queue:item_added",
+        "queue:dispatched",
+        "queue:skipped_leased",
+        "queue:parked",
+        "queue:error"
       ]
     },
     "runId": { "type": "string" },
     "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+(/[a-z0-9-]+)?$" }
   },
-  "required": ["seq", "ts", "type", "runId"],
+  "required": ["seq", "ts", "type"],
   "additionalProperties": true,
   "allOf": [
     {
@@ -261,6 +269,51 @@
     {
       "if": { "properties": { "type": { "const": "error:harness" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/errorHarness" }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "enum": [
+              "watch:added",
+              "watch:removed",
+              "queue:polled",
+              "queue:item_added",
+              "queue:dispatched",
+              "queue:skipped_leased",
+              "queue:parked",
+              "queue:error"
+            ]
+          }
+        },
+        "required": ["type"]
+      },
+      "else": { "properties": { "runId": true }, "required": ["runId"] }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": { "enum": ["watch:added", "watch:removed", "queue:dispatched", "queue:skipped_leased"] }
+        },
+        "required": ["type"]
+      },
+      "then": { "$ref": "#/$defs/queueEnvelope" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:polled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queuePolled" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:item_added" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queueItemAdded" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:parked" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queueParked" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:error" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queueError" }
     }
   ],
   "$defs": {
@@ -1103,6 +1156,85 @@
       "$ref": "#/$defs/callEnvelope",
       "properties": { "message": { "type": "string" } },
       "required": ["message"],
+      "unevaluatedProperties": false
+    },
+    "queueEnvelope": {
+      "description": "a queue event's envelope: the run's without runId or key, and the watched workflow it belongs to. A closed queue payload $refs this, so its unevaluatedProperties counts these names as its own",
+      "type": "object",
+      "properties": {
+        "seq": true,
+        "ts": true,
+        "type": true,
+        "workflow": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "runId": false,
+        "key": false
+      },
+      "required": ["workflow"]
+    },
+    "dedupKey": { "type": "string", "pattern": "^ticket:.+$" },
+    "queuePolled": {
+      "description": "one poll of a watched workflow's designated sources: how many it found, and how many of them it queued",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "kind": { "const": "ticket" },
+        "label": { "type": "string", "minLength": 1 },
+        "found": { "type": "integer", "minimum": 0 },
+        "added": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["kind", "label", "found", "added", "durationMs"],
+      "unevaluatedProperties": false
+    },
+    "queueItemAdded": {
+      "description": "a source queued under its dedup key; the title is the provider's, untrusted text",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" },
+        "source": {
+          "type": "object",
+          "properties": { "kind": { "const": "ticket" }, "ticketKey": { "type": "string", "minLength": 1 } },
+          "required": ["kind", "ticketKey"],
+          "additionalProperties": false
+        },
+        "title": { "type": "string" }
+      },
+      "required": ["dedupKey", "source", "title"],
+      "unevaluatedProperties": false
+    },
+    "queueParked": {
+      "description": "an item that failed its last attempt: kept with the reason, and never retried",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" },
+        "attempts": { "type": "integer", "minimum": 1 },
+        "reason": { "type": "string", "pattern": "\\S" }
+      },
+      "required": ["dedupKey", "attempts", "reason"],
+      "unevaluatedProperties": false
+    },
+    "queueError": {
+      "description": "a poll that failed: paused when the provider refused the credentials, else retried in retryInMs",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "port": { "enum": ["ticketSource", "codeHost"] },
+        "adapter": { "type": "string" },
+        "code": { "enum": ["not_found", "unauthorized", "forbidden", "conflict", "invalid", "unavailable"] },
+        "message": { "type": "string" },
+        "paused": { "type": "boolean" },
+        "retryInMs": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["port", "adapter", "message", "paused"],
+      "allOf": [
+        {
+          "if": { "properties": { "paused": { "const": false } }, "required": ["paused"] },
+          "then": { "properties": { "retryInMs": true }, "required": ["retryInMs"] },
+          "else": { "properties": { "retryInMs": false } }
+        }
+      ],
       "unevaluatedProperties": false
     }
   }
