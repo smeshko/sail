@@ -246,3 +246,28 @@ test('an events.ndjson that links out of the run is refused before the upgrade, 
   expect(socket.messages.at(-1)).toEqual({ kind: 'error', message: expect.stringContaining('events.ndjson') });
   expect(socket.closed).toBe(1011);
 }, 15_000);
+
+test('a repository whose runs cannot be listed gets a problem in the index, and a registry that cannot be read stalls nothing (review #1.4)', async () => {
+  const server = start();
+  const socket = connect(server, 'index=1');
+  expect(await until(() => socket.messages.length > 0)).toBe(true);
+  renameSync(join(m.alpha.clone, '.sail-runs'), join(m.alpha.clone, 'runs-moved'));
+  writeFileSync(join(m.alpha.clone, '.sail-runs'), 'not a directory\n');
+  copyGoldenRun(m.beta.clone, { runId: RUNNING_ID, startedAt: '2026-09-26T09:00:00.000Z' });
+  expect(await until(() => socket.messages.length > 1)).toBe(true);
+  const latest = socket.messages.at(-1).repos;
+  expect(latest.map((repo: Received) => [repo.name, repo.runs.length, typeof repo.problem])).toEqual([
+    ['alpha', 0, 'string'],
+    ['beta', 2, 'undefined'],
+  ]);
+  renameSync(m.registryDir, `${m.registryDir}-moved`);
+  writeFileSync(m.registryDir, 'not a directory\n');
+  const late = connect(server, 'index=1');
+  await Bun.sleep(100);
+  rmSync(m.registryDir);
+  renameSync(`${m.registryDir}-moved`, m.registryDir);
+  expect(await until(() => late.messages.length > 0)).toBe(true);
+  expect(late.messages.at(-1).repos.map((repo: Received) => repo.name)).toEqual(['alpha', 'beta']);
+  const listed = await fetch(`http://127.0.0.1:${server.port}/api/repos`, { headers: HEADER });
+  expect(listed.status).toBe(200);
+}, 15_000);
