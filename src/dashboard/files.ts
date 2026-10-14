@@ -2,13 +2,13 @@
 // runs, and a call's files. Every path comes from a registry entry, never from a request, and every file is checked by
 // realpath to lie inside its run directory, so a name with `..`, an encoded separator, a symlink a step left, or an
 // edited `events.ndjson` can't lead out. Nothing here writes.
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 import { isPlainName } from '../engine/call-dir';
 import { runsDir, type Source } from '../engine/run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
 import { listRuns, type RunListing } from '../engine/runs';
-import { readEvents } from '../events/consumers/ndjson';
+import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
 import { type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
 
@@ -49,6 +49,17 @@ export function containedFile(dir: string, path: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Why the run's `events.ndjson` isn't a regular file of its own, or undefined. One not written yet is fine. */
+export function eventsProblem(runDir: string): string | undefined {
+  const path = join(runDir, EVENTS_FILE);
+  try {
+    lstatSync(path);
+  } catch {
+    return undefined;
+  }
+  return containedFile(runDir, path) === undefined ? `${EVENTS_FILE} is not a file of this run` : undefined;
 }
 
 /** Every registered repository, each with `problem` when its `.sail/` no longer exists, and the registry's problems. */
@@ -121,6 +132,8 @@ function plainResultPath(resultPath: string): boolean {
 export function callFile(runDir: string, key: string, name: string): string | { missing: string } {
   const missing = { missing: `no ${name} for '${key}'` };
   if (!(CALL_FILES as readonly string[]).includes(name)) return missing;
+  const unread = eventsProblem(runDir);
+  if (unread !== undefined) return { missing: unread };
   let resultPath: string | undefined;
   try {
     for (const event of readEvents(runDir)) {

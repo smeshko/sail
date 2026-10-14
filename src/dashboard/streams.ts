@@ -6,7 +6,7 @@
 // `{ kind: 'error', message }` before a close with 1011, or `{ kind: 'index', repos }`.
 import { followEvents } from '../events/follow';
 import type { SailEvent } from '../events/types';
-import { findRepo, findRunDir, type IndexRepo, index } from './files';
+import { eventsProblem, findRepo, findRunDir, type IndexRepo, index } from './files';
 
 /** What a socket is opened on: one run's events, or the index. */
 export type Target = { run: { runDir: string } } | { index: true };
@@ -42,7 +42,9 @@ export function resolveTarget(url: URL, registryDir: string): Target | { status:
   const entry = slash < 1 ? undefined : findRepo(registryDir, value.slice(0, slash));
   if (entry === undefined) return { status: 404, error: `no repository for '${value}'` };
   const runDir = findRunDir(entry, value.slice(slash + 1));
-  return typeof runDir === 'string' ? { run: { runDir } } : { status: 404, error: runDir.missing };
+  if (typeof runDir !== 'string') return { status: 404, error: runDir.missing };
+  const unread = eventsProblem(runDir);
+  return unread === undefined ? { run: { runDir } } : { status: 404, error: unread };
 }
 
 /** Replays the run's events to `socket` and follows them until the run ends. Returns what stops the follow. */
@@ -56,6 +58,7 @@ export function openRunStream(socket: Socket, runDir: string, pollMs: number): (
     onEvent: (event) => sendMessage(socket, { kind: 'event', event }),
     signal: controller.signal,
     pollMs,
+    check: () => eventsProblem(runDir),
   }).then(
     (result) => {
       if (result === 'aborted') return;
