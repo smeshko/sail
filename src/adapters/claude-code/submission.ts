@@ -12,12 +12,41 @@ You submit through structured output, exactly once, when the work is over. The o
 
 Submit nothing else, and do not submit before the work is done.`;
 
+/** Keywords whose values are data, not schemas: a `$ref` inside them is no reference. */
+const DATA_KEYWORDS = new Set(['const', 'enum', 'default', 'examples']);
+
+/** Keywords whose values map names to schemas: a name there is no keyword, whatever it reads. */
+const NAMED_SCHEMAS = new Set(['properties', 'patternProperties', 'definitions', '$defs', 'dependencies']);
+
+/** Where the step schema's root sits in the envelope. */
+const OUTPUT_POINTER = '#/properties/output';
+
+/**
+ * `node` with every local reference into the step schema rebased onto the envelope's `output`: `#` (Zod's reference to
+ * a recursive schema's root) and any `#/…` pointer but the hoisted `#/definitions/…` and `#/$defs/…`.
+ */
+function rebased(node: unknown, names = false): unknown {
+  if (Array.isArray(node)) return node.map((item) => rebased(item));
+  if (typeof node !== 'object' || node === null) return node;
+  return Object.fromEntries(
+    Object.entries(node).map(([key, value]) => {
+      if (names) return [key, rebased(value)];
+      if (key === '$ref' && typeof value === 'string') {
+        const hoisted = value.startsWith('#/definitions/') || value.startsWith('#/$defs/');
+        return [key, value === '#' || (value.startsWith('#/') && !hoisted) ? OUTPUT_POINTER + value.slice(1) : value];
+      }
+      return [key, DATA_KEYWORDS.has(key) ? value : rebased(value, NAMED_SCHEMAS.has(key))];
+    }),
+  );
+}
+
 /**
  * The JSON Schema the session submits against: the envelope, with `schema` as its `output`. The step schema's own
- * definitions move to the envelope's root, so a `#/definitions/…` or `#/$defs/…` reference inside it still resolves.
+ * definitions move to the envelope's root, so a `#/definitions/…` or `#/$defs/…` reference inside it still resolves, and
+ * every other local reference is rebased onto `output`.
  */
 export function submissionEnvelope(outputSchema: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  const { $schema: _schema, definitions, $defs, ...output } = outputSchema;
+  const { $schema: _schema, definitions, $defs, ...output } = rebased(outputSchema) as Record<string, unknown>;
   return {
     type: 'object',
     properties: {
