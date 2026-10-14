@@ -92,6 +92,16 @@ test('noPlaceholders names each {{name: hint}} tag left, with its line, and pass
   });
 });
 
+test('noPlaceholders names a placeholder after an unclosed {{ by its own line and name, from the last {{ before its }} that holds the colon (review R1-7)', () => {
+  const validator = noPlaceholders();
+  expect(validator.validate(parsed('# Spec\n\n{{ open\n\n{{tasks: one per task}}\n'))).toEqual({
+    problems: ['line 5 still holds the placeholder {{tasks: …}}'],
+  });
+  expect(validator.validate(parsed('{{ x\n{{ y: one\n{{z}}\n\n{{a: b {{c}}\n'))).toEqual({
+    problems: ['line 2 still holds the placeholder {{y: …}}', 'line 5 still holds the placeholder {{a: …}}'],
+  });
+});
+
 test('countItems counts the items of the section its heading names, derives the count, and reports an absent section or a count out of bounds', () => {
   const document = parsed('', [
     ['Spec', 1, []],
