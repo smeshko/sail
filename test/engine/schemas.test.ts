@@ -204,6 +204,41 @@ test('run: an unknown key is not allowed and a missing source is required', () =
   ]);
 });
 
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('a roster entry lists its tools by name, in run.json and in run:start, each a non-empty string', () => {
+  const tools = ['WebFetch', 'linear:get_issue', 'github:*'];
+  const entry = (permissions: unknown) => ({ spec: { kind: 'agent', origin: 'repo:.sail/stages/spec', permissions } });
+  const listing = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [], tools };
+  expect(validateDocument('sail.run.v1', { ...run, stages: entry(listing) })).toEqual([]);
+  expect(
+    validateDocument('sail.event.v1', { ...event, roster: { ...runStart.roster, stages: entry(listing) } }),
+  ).toEqual([]);
+  expect(paths('sail.run.v1', { ...run, stages: entry({ tools: [1, ''] }) })).toEqual([
+    '/stages/spec/permissions/tools/0',
+    '/stages/spec/permissions/tools/1',
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('permission:denied names tools as its rule, with the tools the step lists; mcp is no rule', () => {
+  const denied = {
+    ...envelope,
+    type: 'permission:denied',
+    key: 'implement#1',
+    callId: 'tool-9',
+    tool: 'get_issue',
+    rule: 'tools',
+    permissions: { tools: [] },
+    reason: "linear:get_issue is not among the step's tools",
+  };
+  expect(validateDocument('sail.event.v1', denied)).toEqual([]);
+  expect(paths('sail.event.v1', { ...denied, rule: 'mcp' })).toEqual(['/rule']);
+});
+
 test("event: the type is exhaustive, runId is required, and a later family's payload is open, key and all", () => {
   expect(paths('sail.event.v1', { ...later, type: 'agent:thought' })).toEqual(['/type']);
   expect(paths('sail.event.v1', omit(later, 'runId'))).toEqual(['/runId']);
