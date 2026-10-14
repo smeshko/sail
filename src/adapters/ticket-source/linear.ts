@@ -29,12 +29,14 @@ const TICKET_COMMENTS = `query SailTicketComments($id: String!, $after: String) 
   issue(id: $id) { comments(first: 250, after: $after) { nodes { ${COMMENT_FIELDS} } pageInfo { hasNextPage endCursor } } }
 }`;
 
+// The list names the tickets only. Fifty tickets with their five connections would score about 130,000 points of
+// Linear's query complexity, over its 10,000 cap, so each listed ticket is read as `get` reads it.
 const DESIGNATED = `query SailDesignated($team: String!, $label: String!, $types: [String!], $after: String) {
   issues(
     filter: { team: { key: { eq: $team } }, labels: { some: { name: { eq: $label } } }, state: { type: { in: $types } } }
     first: 50
     after: $after
-  ) { nodes { ${TICKET_FIELDS} } pageInfo { hasNextPage endCursor } }
+  ) { nodes { identifier } pageInfo { hasNextPage endCursor } }
 }`;
 
 const TEAM = `query SailTeam($team: String!) {
@@ -200,18 +202,25 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
     async listDesignated(label) {
-      const tickets: Ticket[] = [];
+      const keys: string[] = [];
       let after: string | null = null;
       do {
-        const data: { issues: Page<Node> } = await client.request('listDesignated', 'SailDesignated', DESIGNATED, {
-          team,
-          label,
-          types: UNSTARTED_TYPES,
-          after,
-        });
-        for (const node of data.issues.nodes) tickets.push(toTicket(node, node.comments.nodes, 'listDesignated'));
+        const data: { issues: Page<{ identifier: string }> } = await client.request(
+          'listDesignated',
+          'SailDesignated',
+          DESIGNATED,
+          { team, label, types: UNSTARTED_TYPES, after },
+        );
+        keys.push(...data.issues.nodes.map((node) => node.identifier));
         after = data.issues.pageInfo.hasNextPage ? data.issues.pageInfo.endCursor : null;
       } while (after !== null);
+      const tickets: Ticket[] = [];
+      for (const key of keys) {
+        const { node, comments } = await lookup('listDesignated', key);
+        const ticket = toTicket(node, comments, 'listDesignated');
+        // Read after the list: a ticket claimed or unlabelled since is no longer one to list.
+        if (ticket.state.type === 'unstarted' && ticket.labels.includes(label)) tickets.push(ticket);
+      }
       const number = (ticket: Ticket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
       return tickets.sort((a, b) => number(a) - number(b));
     },
