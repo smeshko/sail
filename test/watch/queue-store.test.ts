@@ -340,3 +340,29 @@ test('a write that throws after its rename leaves the store holding what queue.j
   store.polled({ kind: 'ticket', found: 0, added: 0, durationMs: 0 });
   expect(onDisk().items[0]).toMatchObject({ state: 'dispatched', attempts: 1, runId: 'FAKE-1-01' });
 });
+
+test("a write that fails after its rename, when queue.json then can't be read back, blocks changes until it can (review #3.1)", () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1')]);
+  const dir = queueDir(runs, 'ticket-to-pr');
+  const path = join(dir, 'queue.json');
+  // The new queue.json is created unreadable, and the directory's sync after the rename fails.
+  const umask = process.umask(0o777);
+  chmodSync(dir, 0o333);
+  try {
+    expect(() => store.dispatched('ticket:FAKE-1', 'FAKE-1-01')).toThrow('EACCES');
+  } finally {
+    process.umask(umask);
+    chmodSync(dir, 0o755);
+  }
+  expect(() => store.polled({ kind: 'ticket', found: 0, added: 0, durationMs: 0 })).toThrow(
+    `${path} can't be read: EACCES`,
+  );
+  chmodSync(path, 0o644);
+  const onDisk = () => JSON.parse(readFileSync(path, 'utf8'));
+  expect(onDisk().items[0]).toMatchObject({ state: 'dispatched', attempts: 1, runId: 'FAKE-1-01' });
+  store.polled({ kind: 'ticket', found: 0, added: 0, durationMs: 0 });
+  expect(onDisk().items[0]).toMatchObject({ state: 'dispatched', attempts: 1, runId: 'FAKE-1-01' });
+  expect(store.snapshot()).toEqual(onDisk());
+});
