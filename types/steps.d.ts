@@ -1,6 +1,7 @@
 // Generated from src/sdk by `bun run types`. Do not edit.
 import type { z } from 'zod';
 import type { Consumes, FileBinding, ValueBinding } from './bindings';
+import type { Document } from './documents';
 /** How a script step ended. The engine maps the exit code through `exitCodes`, and anything unmapped is `error`. */
 export type ScriptOutcome = 'passed' | 'failed' | 'error';
 /** How an agent step ended: what the agent declared, or `error`. Its judgments travel in the output. */
@@ -30,6 +31,8 @@ export interface Budget {
 }
 /** The files a stage or step must leave in `$STAGE_OUT`, by name. */
 export type Produces = Record<string, 'file'>;
+/** The files an agent step must leave in `$STAGE_OUT`, by name: any may be a document, which the agent completes. */
+export type AgentProduces = Record<string, 'file' | Document>;
 /** Which exit codes mean `passed` and `failed`. The engine defaults to `{ passed: [0], failed: [1] }`. */
 export interface ExitCodes {
     readonly passed?: readonly number[];
@@ -38,7 +41,7 @@ export interface ExitCodes {
 }
 /** What nothing consumed or produced looks like. It admits no keys, where `{}` would admit any. */
 type None = Record<never, never>;
-export interface AgentOptions<C extends Consumes, P extends Produces, O extends z.ZodType> {
+export interface AgentOptions<C extends Consumes, P extends AgentProduces, O extends z.ZodType> {
     /** The step's instructions, relative to its stage directory. */
     readonly prompt: string;
     readonly consumes?: C;
@@ -77,7 +80,7 @@ export interface StageOptions<C extends Consumes, P extends Produces, O extends 
     /** Run in order, sharing `$STAGE_OUT`. */
     readonly steps: Steps;
 }
-export interface AgentStep<C extends Consumes = Consumes, P extends Produces = Produces, O extends z.ZodType = z.ZodType> extends Omit<AgentOptions<C, P, O>, 'consumes' | 'produces'> {
+export interface AgentStep<C extends Consumes = Consumes, P extends AgentProduces = AgentProduces, O extends z.ZodType = z.ZodType> extends Omit<AgentOptions<C, P, O>, 'consumes' | 'produces'> {
     readonly kind: 'agent';
     readonly name: string;
     readonly consumes: C;
@@ -108,7 +111,7 @@ export type OutcomeOf<S extends StageDefinition> = {
     script: ScriptOutcome;
 }[KindOf<S>];
 /** Declares an agent step: the agent works to its prompt within its permissions and budget, then submits `output`. */
-export declare function agent<C extends Consumes = None, P extends Produces = None, O extends z.ZodType = z.ZodType>(name: string, options: AgentOptions<C, P, O>): AgentStep<C, P, O>;
+export declare function agent<C extends Consumes = None, P extends AgentProduces = None, O extends z.ZodType = z.ZodType>(name: string, options: AgentOptions<C, P, O>): AgentStep<C, P, O>;
 /** Declares a script step: any executable, whose exit code decides `passed` or `failed`. */
 export declare function script<C extends Consumes = None, P extends Produces = None, O extends z.ZodType = z.ZodType>(name: string, options: ScriptOptions<C, P, O>): ScriptStep<C, P, O>;
 /** A stage's steps, whose last step's output fits the stage's `output`: the stage's output is its last step's. */
