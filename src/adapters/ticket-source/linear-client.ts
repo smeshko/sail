@@ -67,9 +67,10 @@ export function linearMessage(status: number, body: Body): string {
   return `Linear ${status}: ${words}`;
 }
 
+/** When the rate limit resets, from Linear's header, or nothing when the header holds no time a Date can. */
 const resetOf = (response: Response): string => {
-  const reset = Number(response.headers.get('X-RateLimit-Requests-Reset') ?? Number.NaN);
-  return Number.isFinite(reset) ? `; the rate limit resets at ${new Date(reset).toISOString()}` : '';
+  const reset = new Date(Number(response.headers.get('X-RateLimit-Requests-Reset') ?? Number.NaN));
+  return Number.isFinite(reset.getTime()) ? `; the rate limit resets at ${reset.toISOString()}` : '';
 };
 
 export function createLinearClient(options: LinearClientOptions): LinearClient {
