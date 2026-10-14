@@ -58,11 +58,13 @@ const STREAMS: Record<string, string> = { session: 'session.log', stdout: 'stdou
 /**
  * A file served as `type`, once it is known to be a regular file inside `runDir`. The checked real path is what is
  * read, and it is streamed, so a symlink swapped in after the check isn't followed and a huge log isn't held whole.
+ * An empty file is answered with an empty body: Bun 1.3.14 turns an empty `Bun.file` into a 204, whatever the status.
  */
 function file(runDir: string, path: string, type: string): Response {
   const real = containedFile(runDir, path);
   if (real === undefined) return error(404, 'no such file in this run');
-  return new Response(Bun.file(real), { headers: { 'Content-Type': type } });
+  const body = Bun.file(real);
+  return new Response(body.size === 0 ? '' : body, { headers: { 'Content-Type': type } });
 }
 
 /** The answer to a GET of `/api/…`, from the path's decoded segments. */
@@ -171,7 +173,10 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
       feed.stop();
       for (const ws of sockets) ws.close(1001);
       sockets.clear();
-      await server.stop(true);
+      // A forced stop closes the listener and every connection before it returns. Its promise also waits for Bun's
+      // count of open WebSockets, which Bun 1.3.14 never lowers for a socket closed from this side, so it can stay
+      // pending for good. Raced against a settled promise, it is not waited on, and a rejection is still handled.
+      await Promise.race([server.stop(true), Promise.resolve()]);
     },
   };
 }
