@@ -73,6 +73,26 @@ interface LinearState {
   position: number;
 }
 
+/**
+ * The cursor of the page after `page`, or null after the last. A page that says another follows but gives no cursor, or
+ * one already `seen`, is a PortError `unavailable` of `op`: asking again would loop, and stopping would cut `what` short.
+ */
+function nextCursor(op: string, what: string, page: Page<unknown>, seen: Set<string>): string | null {
+  const { hasNextPage, endCursor } = page.pageInfo;
+  if (!hasNextPage) return null;
+  if (endCursor === null || seen.has(endCursor)) {
+    const gave = endCursor === null ? 'no cursor' : `cursor ${endCursor} again`;
+    throw new PortError(
+      'ticketSource',
+      op,
+      'unavailable',
+      `Linear said another page of ${what} follows, but gave ${gave}`,
+    );
+  }
+  seen.add(endCursor);
+  return endCursor;
+}
+
 /** A state as the port reports it: its type and name, nothing of Linear's. */
 const portState = (state: { name: string; type: string }, op: string): TicketState => ({
   type: stateTypeOf(state.type, op),
@@ -112,19 +132,17 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey} in team ${team}`);
     }
     const comments = [...node.comments.nodes];
-    let page = node.comments.pageInfo;
-    while (page.hasNextPage) {
+    const seen = new Set<string>();
+    const what = `the comments of ${ticketKey}`;
+    for (let after = nextCursor(op, what, node.comments, seen); after !== null; ) {
       const more = await client.request<{ issue: { comments: Page<unknown> } }>(
         op,
         'SailTicketComments',
         TICKET_COMMENTS,
-        {
-          id: node.id,
-          after: page.endCursor,
-        },
+        { id: node.id, after },
       );
       comments.push(...more.issue.comments.nodes);
-      page = more.issue.comments.pageInfo;
+      after = nextCursor(op, what, more.issue.comments, seen);
     }
     return { node, comments };
   }
@@ -206,6 +224,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     isDesignated: (ticket, label) => ticket.labels.includes(label),
     async listDesignated(label) {
       const keys: string[] = [];
+      const seen = new Set<string>();
       let after: string | null = null;
       do {
         const data: { issues: Page<{ identifier: string }> } = await client.request(
@@ -215,7 +234,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
           { team, label, types: UNSTARTED_TYPES, after },
         );
         keys.push(...data.issues.nodes.map((node) => node.identifier));
-        after = data.issues.pageInfo.hasNextPage ? data.issues.pageInfo.endCursor : null;
+        after = nextCursor('listDesignated', 'the designated tickets', data.issues, seen);
       } while (after !== null);
       // A team Linear doesn't have lists nothing too: an empty list is checked against the team's existence.
       if (keys.length === 0) await states('listDesignated');
