@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { gitSync, nonInteractive, stripUserinfo } from '../../../src/adapters/workspace/git';
 import { withTempRepo } from '../../helpers/temp-repo';
 
-test("git never asks: no terminal prompt, no askpass, no credential manager dialog, the caller's ssh kept, and none of a hook's repository variables", () => {
+test("git never asks: no terminal prompt, no askpass, no credential manager dialog, the caller's ssh kept, and none of a hook's repository variables, but the user's own -c config (review #2.1)", () => {
   const never = { GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS_REQUIRE: 'never', GCM_INTERACTIVE: 'never' };
   const plain = nonInteractive({ HOME: '/home/sail' });
   const own = nonInteractive({
@@ -27,10 +27,16 @@ test("git never asks: no terminal prompt, no askpass, no credential manager dial
     GIT_OBJECT_DIRECTORY: '/clone/.git/objects',
     GIT_ALTERNATE_OBJECT_DIRECTORIES: '/elsewhere/objects',
     GIT_PREFIX: 'src/',
-    GIT_CONFIG_PARAMETERS: "'core.hooksPath'='/x'",
-    GIT_CONFIG_COUNT: '1',
   });
-  expect({ plain, own, hooked }).toEqual({
+  // The user's own `-c` config, which git keeps when it enters another repository too.
+  const configured = nonInteractive({
+    HOME: '/home/sail',
+    GIT_CONFIG_PARAMETERS: "'safe.directory'='*'",
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'url.https://mirror/.insteadOf',
+    GIT_CONFIG_VALUE_0: 'https://origin/',
+  });
+  expect({ plain, own, hooked, configured }).toEqual({
     plain: { HOME: '/home/sail', ...never },
     own: {
       HOME: '/home/sail',
@@ -40,6 +46,14 @@ test("git never asks: no terminal prompt, no askpass, no credential manager dial
       ...never,
     },
     hooked: { HOME: '/home/sail', ...never },
+    configured: {
+      HOME: '/home/sail',
+      GIT_CONFIG_PARAMETERS: "'safe.directory'='*'",
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'url.https://mirror/.insteadOf',
+      GIT_CONFIG_VALUE_0: 'https://origin/',
+      ...never,
+    },
   });
 });
 
