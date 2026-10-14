@@ -179,6 +179,27 @@ const TABLE: Row[] = [
     want: 'commands',
     mention: 'PATH',
   },
+  {
+    label: 'deny set: git reset --hard abbreviated to a prefix git accepts',
+    call: bash('git reset --har'),
+    open: { commands: ['git reset *'] },
+    want: 'commands',
+    mention: 'git reset --hard',
+  },
+  {
+    label: 'deny set: git push --force-with-lease abbreviated',
+    call: bash('git push --force-w origin x'),
+    open: { commands: ['git push *'] },
+    want: 'commands',
+    mention: 'git push --force',
+  },
+  {
+    label: 'deny set: rm --recursive --force abbreviated',
+    call: bash('rm --rec --forc x'),
+    open: { commands: ['rm *'] },
+    want: 'commands',
+    mention: 'rm -rf',
+  },
   // Legitimate calls pass.
   {
     label: 'legit: git diff origin/main...HEAD | head -50',

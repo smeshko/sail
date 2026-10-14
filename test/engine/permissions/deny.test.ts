@@ -72,6 +72,17 @@ test.each([
   ['git -c core.pager=less log', 'git -c'],
   ['git --config-env=a=B status', 'git -c'],
   ['git --exec-path=/tmp status', 'git -c'],
+  // git's option parser, and GNU getopt_long, take any unambiguous prefix of a long option.
+  ['rm --rec --forc x', 'rm -rf'],
+  ['rm -r --f x', 'rm -rf'],
+  ['git push --force-w origin x', 'git push --force'],
+  ['git push --force-if', 'git push --force'],
+  ['git push --mirr', 'git push --force'],
+  ['git reset --har', 'git reset --hard'],
+  ['git reset --h HEAD~1', 'git reset --hard'],
+  ['git clean --forc -d', 'git clean -f'],
+  ['git branch --delet --forc x', 'git branch -D'],
+  ['git branch --del -f x', 'git branch -D'],
 ])('denied: %j falls under %s', (text, name) => {
   expect(denied(words(text))?.name).toBe(name);
 });
@@ -88,6 +99,11 @@ test.each([
   'git log --format=%H',
   'git --exec-path',
   'find . -name x',
+  'git push --follow-tags',
+  'git push --no-force',
+  'git reset -- --hard',
+  'git clean --dry-run -d',
+  'git branch --del x',
 ])('not denied: %j', (text) => {
   expect(denied(words(text))).toBeUndefined();
 });
