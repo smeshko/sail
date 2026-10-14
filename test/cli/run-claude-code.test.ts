@@ -125,10 +125,7 @@ const deniedThenSpec = (): Stream => [
   ...specSession(SPEC).slice(1),
 ];
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a call the spec stage's commands deny is recorded in the run, and the session recovers to submit", async () => {
+test("a call the spec stage's commands deny is recorded in the run, and the session recovers to submit", async () => {
   const run = await runSpec(deniedThenSpec());
   expect({
     code: run.code,
@@ -216,10 +213,7 @@ async function eventIn(repoDir: string, type: string, ms = 20_000): Promise<bool
   return false;
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('Ctrl-C during the spec session suspends the run interrupted with spec#1 unjournaled, and sail resume runs it again to done', async () => {
+test('Ctrl-C during the spec session suspends the run interrupted with spec#1 unjournaled, and sail resume runs it again to done', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     // The session's stand-in process tree writes its group's id where the test can find it.
