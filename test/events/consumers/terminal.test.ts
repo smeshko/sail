@@ -928,7 +928,7 @@ test('verbose shows the tail of a script that passed, and none for an agent call
 // TASK-005: the whole run on resume.
 
 /** The `seq` of the golden run's `journal:append` for tests#1: the last event of the process a resume takes over from. */
-const RESUMED_AFTER = 50;
+const RESUMED_AFTER = 52;
 
 test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then opens with the resume line and ends with the whole run', () => {
   const events = fake1();

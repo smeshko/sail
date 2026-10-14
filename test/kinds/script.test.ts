@@ -63,6 +63,8 @@ function setup(): Setup {
     try: 1,
     stageDir,
     workspace,
+    root: workspace,
+    branch: 'sail/FAKE-1',
     config: join(workspace, '.sail', 'project.yaml'),
     paths,
     inputs: {},
@@ -120,6 +122,7 @@ test('exit 0 is passed, with the parsed report and junit.xml recorded', async ()
         STAGE_IN: `.sail-runs/${RUN_ID}/00-tests/call-1/in`,
         STAGE_OUT: `.sail-runs/${RUN_ID}/00-tests/call-1`,
         WORKSPACE: '.',
+        BRANCH: 'sail/FAKE-1',
         SAIL_CONFIG: '.sail/project.yaml',
       },
     },
@@ -320,7 +323,18 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
   const spec = join(s.context.paths.stageIn, 'spec.md');
   writeFileSync(spec, '# spec\n');
   const context = { ...s.context, inputs: { INPUT_SPEC: spec } };
-  const names = ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG', 'INPUT_SPEC'];
+  const names = [
+    'RUN_ID',
+    'STAGE',
+    'CALL',
+    'TRY',
+    'STAGE_IN',
+    'STAGE_OUT',
+    'WORKSPACE',
+    'BRANCH',
+    'SAIL_CONFIG',
+    'INPUT_SPEC',
+  ];
   writeFileSync(
     join(context.stageDir, 'env.ts'),
     `#!${process.execPath}\n` +
@@ -339,6 +353,7 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
     STAGE_IN: context.paths.stageIn,
     STAGE_OUT: context.paths.dir,
     WORKSPACE: s.workspace,
+    BRANCH: 'sail/FAKE-1',
     SAIL_CONFIG: context.config,
     INPUT_SPEC: spec,
     CWD: realpathSync(s.workspace),
@@ -346,6 +361,35 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
   });
   expect(Object.keys(preambleOnly(run).record.env as object)).toEqual(names);
   expect((run.record.env as Record<string, string>).INPUT_SPEC).toBe(`.sail-runs/${RUN_ID}/00-tests/call-1/in/spec.md`);
+});
+
+test("a script inherits none of the variables that tie git to a repository: a sail started from a git hook can't point the step's git at the clone (review #2.3)", async () => {
+  const s = setup();
+  const names = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_CONFIG_COUNT'];
+  const hooked = { GIT_DIR: '/clone/.git', GIT_WORK_TREE: '/clone', GIT_INDEX_FILE: '/clone/.git/index' };
+  writeFileSync(
+    join(s.context.stageDir, 'git-env.ts'),
+    `#!${process.execPath}\n` +
+      `console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(names)}.map((name) => [name, process.env[name] ?? 'unset']))));\n`,
+  );
+  chmodSync(join(s.context.stageDir, 'git-env.ts'), 0o755);
+  const step = script('git-env', { run: './git-env.ts', output: z.record(z.string(), z.string()) });
+  const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  Object.assign(process.env, hooked, { GIT_CONFIG_COUNT: '0' });
+  try {
+    const run = await scriptKind.run(step, s.context);
+    expect(run.output).toEqual({
+      GIT_DIR: 'unset',
+      GIT_WORK_TREE: 'unset',
+      GIT_INDEX_FILE: 'unset',
+      GIT_CONFIG_COUNT: '0',
+    });
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
 
 test('a script on a later try sees TRY as that try', async () => {
@@ -424,6 +468,7 @@ test('a script that is missing reports script:exec, and nothing more', async () 
     'STAGE_IN',
     'STAGE_OUT',
     'WORKSPACE',
+    'BRANCH',
     'SAIL_CONFIG',
   ]);
 });
@@ -611,7 +656,18 @@ test('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded
   ]);
   expect(events[0]).toMatchObject({
     type: 'script:exec',
-    envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG', 'SAIL_EVENTS'],
+    envKeys: [
+      'RUN_ID',
+      'STAGE',
+      'CALL',
+      'TRY',
+      'STAGE_IN',
+      'STAGE_OUT',
+      'WORKSPACE',
+      'BRANCH',
+      'SAIL_CONFIG',
+      'SAIL_EVENTS',
+    ],
   });
   expect(existsSync(file)).toBe(false);
   expect(typesOf(events)).toEqual(['script:exec', 'script:exit', 'output:validated', 'file:produced']);

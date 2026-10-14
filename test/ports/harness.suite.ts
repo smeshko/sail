@@ -1,6 +1,6 @@
 // The Harness port suite: what every Harness adapter must do (ADR-0008). The fake runs it in
 // test/adapters/fake/harness.test.ts, and a real adapter's test runs it against its provider on demand
-// (SAIL_LIVE_HARNESS=1). A harness never rejects: every failure resolves as the `error` outcome. Every event it emits
+// (SAIL_LIVE=1). A harness never rejects: every failure resolves as the `error` outcome. Every event it emits
 // must validate against sail.event.v1 once stamped with the request's key.
 import { expect, test } from 'bun:test';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../src/ports/harness';

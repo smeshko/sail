@@ -11,9 +11,12 @@
 // script writes its own pid and its `sleep`'s to `.stub/sleeping`, so a test can interrupt it there and check that
 // neither process survives.
 //
+// The scripts keep `.stub/` in the repository root, two directories above `$SAIL_CONFIG`, not in `$WORKSPACE`: a
+// run's steps run in a worktree of their own, and a test reads `<repo>/.stub/` whichever workspace the run had.
+//
 // A helper, not a committed fixture: the fixture repository's agent-based `ticket-to-pr` takes over end to end once
 // agents run on fakes, and what stays here are cheap edge cases a test sets up by editing its own copy.
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { edit, write } from './fixture';
 
@@ -95,13 +98,14 @@ budgets: { run: { maxUsd: 25, maxMinutes: 90 } }
 const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 # ${purpose}
 set -euo pipefail
-mkdir -p "$WORKSPACE/.stub"
-echo "$STAGE#$CALL" >>"$WORKSPACE/.stub/executions.log"
-if [ -f "$WORKSPACE/.stub/sleep-at" ] && [ "$(cat "$WORKSPACE/.stub/sleep-at")" = "$STAGE#$CALL" ]; then
-  rm "$WORKSPACE/.stub/sleep-at"
+STUB="$(dirname "$(dirname "$SAIL_CONFIG")")/.stub"
+mkdir -p "$STUB"
+echo "$STAGE#$CALL" >>"$STUB/executions.log"
+if [ -f "$STUB/sleep-at" ] && [ "$(cat "$STUB/sleep-at")" = "$STAGE#$CALL" ]; then
+  rm "$STUB/sleep-at"
   sleep 30 &
-  echo "$$ $!" >"$WORKSPACE/.stub/sleeping.tmp"
-  mv "$WORKSPACE/.stub/sleeping.tmp" "$WORKSPACE/.stub/sleeping"
+  echo "$$ $!" >"$STUB/sleeping.tmp"
+  mv "$STUB/sleeping.tmp" "$STUB/sleeping"
   wait
 fi
 ${body}`;
@@ -128,7 +132,7 @@ export const tests = script('tests', {
   'stages/tests/run.sh': shell(
     'The stub tests: a failing report while $CALL is below the threshold, then a passing one.',
     `pass_at=2
-if [ -f "$WORKSPACE/.stub/tests-pass-at" ]; then pass_at=$(cat "$WORKSPACE/.stub/tests-pass-at"); fi
+if [ -f "$STUB/tests-pass-at" ]; then pass_at=$(cat "$STUB/tests-pass-at"); fi
 if [ "$CALL" -lt "$pass_at" ]; then
   echo '<testsuites tests="1" failures="1"/>' >"$STAGE_OUT/junit.xml"
   echo '{"ok":false,"total":1,"failed":1,"durationMs":0,"failures":[{"test":"greets","file":"test/greet.test.ts","message":"expected a greeting"}]}'
@@ -419,12 +423,21 @@ export async function interruptWhenAsleep<T>(
 /**
  * Copies a repository's `.sail/`, `.sail-runs/` and, when it exists, `.stub/` into `to`, so a run can resume there: a
  * fresh `.sail/` path gets a claim and modules of its own. Paths in a run directory are relative, so the copy resumes
- * as the original would.
+ * as the original would. A run's workspace is a worktree of the repository, so `to` takes `from`'s git directory too,
+ * and git is told where each copied workspace now is.
  */
 export function copyRun(from: string, to: string): void {
   for (const name of ['.sail', '.sail-runs', '.stub']) {
     if (existsSync(join(from, name))) cpSync(join(from, name), join(to, name), { recursive: true });
   }
+  rmSync(join(to, '.git'), { recursive: true, force: true });
+  cpSync(join(from, '.git'), join(to, '.git'), { recursive: true });
+  const runs = join(to, '.sail-runs');
+  const workspaces = (existsSync(runs) ? readdirSync(runs) : [])
+    .map((run) => join(runs, run, 'workspace'))
+    .filter((path) => existsSync(join(path, '.git')));
+  const repaired = Bun.spawnSync(['git', 'worktree', 'repair', ...workspaces], { cwd: to, stdin: 'ignore' });
+  if (repaired.exitCode !== 0) throw new Error(`git worktree repair: ${repaired.stderr.toString().trim()}`);
 }
 
 /** What the stub's scripts actually ran, one `<stage>#<call>` per line: `<repo>/.stub/executions.log`. */

@@ -14,8 +14,14 @@ const committed = join(fixtures, 'runs', GOLDEN_RUN_ID);
 const temp = mkdtempSync(join(tmpdir(), 'sail-golden-fresh-'));
 const fresh = join(temp, 'fresh');
 
+/** Why the fresh run couldn't be generated: each test then fails on what the fresh run lacks, not on the hook. */
+let unmade = '';
 beforeAll(async () => {
-  await generateGoldenRun(fresh);
+  try {
+    await generateGoldenRun(fresh);
+  } catch (error) {
+    unmade = error instanceof Error ? error.message : String(error);
+  }
 });
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
@@ -59,6 +65,7 @@ function changedCopy(name: string, change: (dir: string) => void): string {
 }
 
 test('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
+  expect(unmade).toBe('');
   expect(stale(fresh, committed)).toEqual([]);
   expect(filesIn(committed)).toHaveLength(50);
 });
@@ -89,7 +96,7 @@ test.each<[string, (dir: string) => void, string]>([
     'one event changed by a millisecond',
     (dir) => {
       const file = join(dir, 'events.ndjson');
-      writeFileSync(file, readFileSync(file, 'utf8').replace('T09:00:00.500Z', 'T09:00:00.501Z'));
+      writeFileSync(file, readFileSync(file, 'utf8').replace('T09:00:00.700Z', 'T09:00:00.701Z'));
     },
     'events.ndjson is stale',
   ],

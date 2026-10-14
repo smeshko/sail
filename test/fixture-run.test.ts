@@ -32,7 +32,8 @@ const JOURNAL = [
   'open#1 passed',
 ];
 const PR = { number: 5, url: 'fake://codehost/fixture/pull/5', draft: false };
-const CONFLICT = 'sail port: codeHost.openPullRequest: #5 is already open from sail/FAKE-1 into main (conflict)';
+const CONFLICT =
+  'sail port: codeHost.openPullRequest: #5 is already open from sail/FAKE-1-add-a-shout-flag-to-the-greet-command into main (conflict)';
 
 /** The run directory of a repository's latest run, or '' when it has none. */
 function latestRun(repoDir: string): string {
@@ -122,7 +123,7 @@ test('implement#2 consumed the failing report as its feedback, and implement#1 c
   expect(existsSync(join(dir, '02-implement', 'call-1', 'in', 'feedback.json'))).toBe(false);
 });
 
-test("the run leaves pull request 5 on the fake code host: open, no draft, from sail/FAKE-1 into main at the repository's HEAD, labelled sail, with the ticket key, the title describe submitted and the body of its pr-body.md", async () => {
+test("the run leaves pull request 5 on the fake code host: open, no draft, from the run's branch into main at the repository's HEAD, labelled sail, with the ticket key, the title describe submitted and the body of its pr-body.md", async () => {
   const { dir, repo } = await completed();
   const { pullRequests, branches } = fakeState(repo.dir, 'prs.json');
   expect(pullRequests.map((pr: { number: number }) => pr.number)).toEqual([1, 2, 3, 4, 5]);
@@ -134,7 +135,7 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
     title: described.title,
     body: readFileSync(join(dir, '05-describe', 'call-1', 'pr-body.md'), 'utf8'),
     base: 'main',
-    head: 'sail/FAKE-1',
+    head: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
     headSha,
     draft: false,
     state: 'open',
@@ -142,7 +143,7 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
     ticketKey: 'FAKE-1',
   });
   expect(pullRequests[4].body).toStartWith('## Summary\n');
-  expect(branches['sail/FAKE-1']).toBe(headSha);
+  expect(branches['sail/FAKE-1-add-a-shout-flag-to-the-greet-command']).toBe(headSha);
 });
 
 test("open#1's output is the pull request's number, URL and draft flag, kept from the code host's whole answer, and run:end's result is { pr: that }", async () => {
@@ -171,8 +172,18 @@ test("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled 
   const stamped = own.slice(from + 1, from + 4) as unknown as Record<string, unknown>[];
   const provider = stamped.map(({ seq: _seq, ts: _ts, runId: _runId, key: _key, ...rest }) => rest);
   expect<unknown>(provider).toEqual([
-    { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: repo.git('rev-parse', 'HEAD') },
-    { type: 'codehost:pr_opened', ...PR, base: 'main', head: 'sail/FAKE-1', ticketKey: 'FAKE-1' },
+    {
+      type: 'codehost:pushed',
+      branch: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
+      headSha: repo.git('rev-parse', 'HEAD'),
+    },
+    {
+      type: 'codehost:pr_opened',
+      ...PR,
+      base: 'main',
+      head: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
+      ticketKey: 'FAKE-1',
+    },
     { type: 'codehost:labelled', number: 5, label: 'sail', change: 'added' },
   ]);
   const file = readFileSync(join(dir, '06-open', 'call-1', 'port-events.ndjson'), 'utf8');

@@ -323,7 +323,7 @@ test('openRun creates an empty events.ndjson beside the journal, and its events 
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const run = await opened(repo.dir);
-    expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'events.ndjson', 'journal.ndjson', 'run.json']);
+    expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'events.ndjson', 'journal.ndjson', 'run.json', 'workspace']);
     expect(readFileSync(join(run.dir, 'events.ndjson'), 'utf8')).toBe('');
     expect(run.firstSeq).toBe(1);
   });
@@ -589,12 +589,13 @@ async function adaptersWith<Op extends 'claim' | 'comment'>(
   return adapters;
 }
 
-test('openRun from a ticket claims it before the run directory exists: run.json holds the source with nothing forced and the claim, and the ticket is In Progress with a comment naming the run', async () => {
+test('openRun from a ticket claims it once its workspace exists and before run.json is written: run.json holds the source with nothing forced and the claim, and the ticket is In Progress with a comment naming the run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runsAtComment: string[][] = [];
     const adapters = await adaptersWith(repo.dir, 'comment', (comment) => (ticketKey, body) => {
-      runsAtComment.push(runIds(repo.dir));
+      const runs = join(repo.dir, '.sail-runs');
+      runsAtComment.push(runIds(repo.dir).flatMap((id) => readdirSync(join(runs, id)).map((name) => `${id}/${name}`)));
       return comment(ticketKey, body);
     });
     const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
@@ -614,7 +615,7 @@ test('openRun from a ticket claims it before the run directory exists: run.json 
     ]);
     const ticket = await ticketIn(repo.dir, 'FAKE-1');
     expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, body]);
-    expect([runsAtComment, runIds(repo.dir)]).toEqual([[[]], [run.runId]]);
+    expect([runsAtComment, runIds(repo.dir)]).toEqual([[[`${run.runId}/workspace`]], [run.runId]]);
   });
 });
 
@@ -759,15 +760,16 @@ test('a run directory that cannot be written once the ticket has moved throws, n
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runs = join(repo.dir, '.sail-runs');
-    // Read-only once the comment is posted: the fake has written its state by then, and only the run is left to make.
+    const runDirs = () => runIds(repo.dir).map((id) => join(runs, id));
+    // Read-only once the comment is posted: the run directory and its workspace exist by then, and run.json is left.
     const adapters = await adaptersWith(repo.dir, 'comment', (comment) => async (ticketKey, body) => {
       const posted = await comment(ticketKey, body);
-      chmodSync(runs, 0o555);
+      for (const dir of runDirs()) chmodSync(dir, 0o555);
       return posted;
     });
-    const thrown = await rejection(openStub(repo.dir, { ticket: 'FAKE-1' }, adapters)).finally(() =>
-      chmodSync(runs, 0o755),
-    );
+    const thrown = await rejection(openStub(repo.dir, { ticket: 'FAKE-1' }, adapters)).finally(() => {
+      for (const dir of runDirs()) chmodSync(dir, 0o755);
+    });
     expect(thrown).toMatchObject({
       message: expect.stringMatching(
         new RegExp(
@@ -777,8 +779,9 @@ test('a run directory that cannot be written once the ticket has moved throws, n
       cause: { code: 'EACCES' },
     });
     const ticket = await ticketIn(repo.dir, 'FAKE-1');
-    expect([runIds(repo.dir), ticket.state, ticket.comments.at(-1)?.body]).toEqual([
-      [],
+    const headers = runDirs().map((dir) => existsSync(join(dir, RUN_HEADER_FILE)));
+    expect([headers, ticket.state, ticket.comments.at(-1)?.body]).toEqual([
+      [false],
       IN_PROGRESS,
       expect.stringMatching(new RegExp(`^sail run FAKE-1-${ULID} started$`)),
     ]);

@@ -129,7 +129,7 @@ async function find(port: Port, use: string, options: ResolveOptions): Promise<F
   return { definition, origin: origin(root, path) };
 }
 
-/** Pass 2: the issues for each environment variable `found` needs and `env` lacks. */
+/** Pass 2: the issues for each environment variable `found` needs and `env` lacks, or none of the alternatives it lists. */
 function preflight(use: string, found: Found, options: AdapterOptions, env: Env): string[] {
   if (found.definition.requires === undefined) return [];
   let names: unknown;
@@ -138,12 +138,17 @@ function preflight(use: string, found: Found, options: AdapterOptions, env: Env)
   } catch (error) {
     return [`${use}'s requires() failed: ${message(error)}`];
   }
-  if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || name === '')) {
+  const isName = (name: unknown): boolean => typeof name === 'string' && name !== '';
+  const isEntry = (entry: unknown): boolean =>
+    isName(entry) || (Array.isArray(entry) && entry.length > 0 && entry.every(isName));
+  if (!Array.isArray(names) || !names.every(isEntry)) {
     return [`${use}'s requires() must return environment variable names`];
   }
-  return names
-    .filter((name: string) => env[name] === undefined || env[name] === '')
-    .map((name) => `needs ${name}, which is not set`);
+  const unset = (name: string): boolean => env[name] === undefined || env[name] === '';
+  return (names as (string | string[])[]).flatMap((entry) => {
+    if (typeof entry === 'string') return unset(entry) ? [`needs ${entry}, which is not set`] : [];
+    return entry.every(unset) ? [`needs one of ${entry.join(', ')}, none of which is set`] : [];
+  });
 }
 
 /** An object written as `{ … }`: not an array, a promise or any other class's instance. */

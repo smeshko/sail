@@ -14,6 +14,7 @@ import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { delimiter, join, relative, resolve } from 'node:path';
 import { systemClock } from '../engine/clock';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
+import { withoutRepositoryVariables } from '../engine/git-env';
 import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
@@ -151,12 +152,12 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   const timeoutSeconds = step.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
   const portEvents = join(context.paths.dir, PORT_EVENTS_FILE);
   const variables = [...preamble(context), { name: 'SAIL_EVENTS', value: portEvents, path: true }];
-  const inherited = Object.fromEntries(
-    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );
+  // Without the variables that tie git to a repository: the step's git must work on the workspace it runs in.
+  const inherited = withoutRepositoryVariables(process.env);
 
-  // Recorded relative to the workspace, and only these variables: the inherited environment may hold secrets.
-  const at = (path: string) => relative(context.workspace, path) || '.';
+  // Recorded relative to the root, and only these variables: the inherited environment may hold secrets. The script
+  // runs in the workspace.
+  const at = (path: string) => relative(context.root, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
   const recorded = { command: at(command), env };
 

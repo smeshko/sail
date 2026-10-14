@@ -42,8 +42,8 @@
   "consumed": {
     "brief": "00-intake/call-1/brief.md"
   },
-  "startedAt": "2026-09-25T09:00:02.100Z",
-  "finishedAt": "2026-09-25T09:00:03.300Z",
+  "startedAt": "2026-09-25T09:00:02.600Z",
+  "finishedAt": "2026-09-25T09:00:03.800Z",
   "durationMs": 1200,
   "try": 1,
   "validationTry": 1,

@@ -6,10 +6,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { fakeAdapters } from '../../../src/adapters/fake/definitions';
 import { BUILTINS } from '../../../src/adapters/index';
+import { readLease } from '../../../src/adapters/leases';
 import type { Port } from '../../../src/engine/config';
 import type { AdapterContext } from '../../../src/ports/adapter';
 import { copyFixture } from '../../helpers/fixture';
-import { captureEvents } from '../../helpers/ports';
+import { captureEvents, settle } from '../../helpers/ports';
 import { type TempRepo, withTempRepo } from '../../helpers/temp-repo';
 
 /** The context a run gives an adapter in `repo`, whose `.sail/` is a copy of the fixture's. */
@@ -112,12 +113,31 @@ test('the workspace fake defaults its repo to context.root: it leases and create
   });
 });
 
+test('the workspace fake takes remote and defaultBranch, and keeps its leases in runsDir/fake/leases', async () => {
+  await withTempRepo(async (repo) => {
+    const ctx = context(repo);
+    const workspace = await fakeAdapters.workspace.create({ remote: 'fake://elsewhere', defaultBranch: 'main' }, ctx);
+    const repository = await settle(workspace.repository());
+    const runDir = join(ctx.runsDir, 'r1');
+    mkdirSync(runDir, { recursive: true });
+    await workspace.lease('fake://elsewhere', 'sail/FAKE-1', { runId: 'r1', runDir, pid: process.pid });
+    const leases = join(ctx.runsDir, 'fake', 'leases');
+    expect({
+      repository: 'rejected' in repository ? repository : { url: repository.url, branch: repository.defaultBranch },
+      lease: readLease(leases, 'fake://elsewhere', 'sail/FAKE-1')?.runId,
+    }).toEqual({ repository: { url: 'fake://elsewhere', branch: 'main' }, lease: 'r1' });
+    await workspace.releaseLease('fake://elsewhere', 'sail/FAKE-1', 'r1');
+  });
+});
+
 test.each<[Port, Record<string, unknown>, string]>([
   ['ticketSource', { seeds: 'x' }, 'seeds'],
   ['ticketSource', { seed: 3 }, 'seed'],
   ['codeHost', { seed: 3 }, 'seed'],
   ['harness', { script: 3 }, 'script'],
   ['workspace', { repo: 3 }, 'repo'],
+  ['workspace', { remote: '' }, 'remote'],
+  ['workspace', { defaultBranch: 7 }, 'defaultBranch'],
   ['harness', { seed: './fake/tickets.json' }, 'seed'],
 ])('%s created with %j throws, naming %s', async (port, options, name) => {
   await withTempRepo(async (repo) => {
@@ -138,8 +158,8 @@ test('an emit in the context receives ticket:fetched from the ticket source', as
   });
 });
 
-test('BUILTINS holds the fake for every port, each a definition with create alone, and linear for the ticket source, which requires its key', () => {
-  expect(Object.keys(BUILTINS)).toEqual(['fake', 'linear']);
+test('BUILTINS holds the fake for every port, each a definition with create alone, linear for the ticket source, which requires its key, and claude-code', () => {
+  expect(Object.keys(BUILTINS)).toEqual(['fake', 'linear', 'claude-code', 'git-worktree']);
   const definitions = Object.entries(BUILTINS.fake ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(definitions)).toEqual({
     ticketSource: ['create'],

@@ -168,7 +168,11 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
       call: 1,
       definition,
       stageFile,
+      // In the directory that holds `.sail/`, and on no branch: a stage in isolation belongs to no run, so it has no
+      // workspace or branch of its own.
       workspace,
+      root: workspace,
+      branch: '',
       config: join(found.dir, 'project.yaml'),
       supplied: given.supplied,
       signal: controller.signal,

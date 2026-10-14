@@ -243,7 +243,7 @@ The named reason a run ended without completing, such as `workflow_failed`, `sta
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
-A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, or a leased branch. A refusal leaves no run directory.
+A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory.
 _Avoid_: rejection, abort, error (an outcome)
 
 **Suspended**:
@@ -257,6 +257,10 @@ _Avoid_: restart, rerun, retry, continue
 **Workspace**:
 The checkout a run works in, on its own branch. How it is made (a branch in the current clone, a git worktree, a container) is up to the workspace adapter.
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
+
+**Base**:
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`.
+_Avoid_: start point, fork point
 
 **Branch**:
 Always the git branch, such as the one a run's workspace sits on. A workflow's routing decision is a route, never a branch.
@@ -440,7 +444,7 @@ The watched workflows a watcher is watching now: exactly those named with `sail 
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:
-The machine-level record of watchers in `~/.sail/watchers/`: the repository's `name`, remote, clone path, pid and the labels each polls. A watcher refuses to start if a live one has the same `name` or holds one of its labels on the same TicketSource. The dashboard reads it to find every repository, including those whose watcher has stopped.
+The machine-level record of repositories in `~/.sail/watchers/` (`$SAIL_HOME/watchers/` when set), one `<name>.json` per repository: its `name`, remote, clone path and `.sail/` path, and later the watcher's pid and the labels it polls. Every `sail <ticket>` and `sail resume` writes its repository's entry before the run opens, so an entry exists before any watcher does. A watcher refuses to start if a live one has the same `name` or holds one of its labels on the same TicketSource. The dashboard reads it to find every repository, including those whose watcher has stopped.
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
 
 **Branch lease**:
@@ -458,6 +462,22 @@ _Avoid_: sweep, scan, sync
 **Queue**:
 The sources waiting for a run, kept per workflow and deduplicated. A queued item is always a source, never a resolved input.
 _Avoid_: backlog, inbox, buffer
+
+**Queue event stream**:
+A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
+_Avoid_: queue log, daemon log
+
+**Dedup key**:
+The key a queue item is known by, minted from its source: `ticket:<ticket key>`, and `pr:<number>@<sha>` so a new push is a new item. A key already queued, dispatched, waiting to retry or parked is not queued again.
+_Avoid_: item id, queue key
+
+**Parked**:
+A queue item's state once it has failed its last attempt: kept with the reason, never retried, until a person requeues or drops it.
+_Avoid_: dead-lettered, stuck, quarantined
+
+**Command file**:
+A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/commands/`. The watcher applies it and deletes it, so it stays the only writer of its own state (ADR-0019). Every command is safe to apply twice.
+_Avoid_: message, signal, IPC
 
 **Dispatch**:
 The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, dispatch begins with the claim.
