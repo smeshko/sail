@@ -28,15 +28,23 @@
     "spec.md": {
       "path": "01-spec/call-1/spec.md",
       "bytes": 427,
-      "sha256": "7cfdb9431ea6aa3d875a9c8f607989903c30cfee471b39a7891077bbd96f5cd6"
+      "sha256": "7cfdb9431ea6aa3d875a9c8f607989903c30cfee471b39a7891077bbd96f5cd6",
+      "validation": {
+        "ok": true,
+        "checks": [
+          "hasSections(Requirements, Tasks)",
+          "noPlaceholders",
+          "countItems(Tasks, min 1)"
+        ]
+      }
     }
   },
   "consumed": {
     "brief": "00-intake/call-1/brief.md"
   },
   "startedAt": "2026-09-25T09:00:02.100Z",
-  "finishedAt": "2026-09-25T09:00:03.200Z",
-  "durationMs": 1100,
+  "finishedAt": "2026-09-25T09:00:03.300Z",
+  "durationMs": 1200,
   "try": 1,
   "validationTry": 1,
   "prompt": {
@@ -68,6 +76,9 @@
     "cacheWriteTokens": 3100,
     "outputTokens": 1450,
     "costUsd": 0.3125
+  },
+  "derived": {
+    "tasks": 2
   },
   "validationFailed": false
 }

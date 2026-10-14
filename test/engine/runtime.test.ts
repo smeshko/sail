@@ -35,6 +35,7 @@ import {
   SPEC,
   SPEC_CALL,
   SPEC_CALL_RETURNING_ERRORS,
+  SPEC_STAGE,
   sessions,
   specDir,
   specFile,
@@ -1761,3 +1762,58 @@ test("a run's summary.json names its ticket by its key, title and URL, from the 
     expect(validateRunDir(dir).issues).toEqual([]);
   });
 });
+
+// Documents through the runtime: the stage declares one, and the run's bindings fill its template.
+
+/** Gives the agent fixture's spec stage `produces`, with `doc` and `countItems` imported, and its template. */
+function documentedSpec(sail: string, produces: string): void {
+  write(
+    sail,
+    `${SPEC_STAGE}/templates/spec.md`,
+    '# Spec for {{ticket.ticketKey}}\n\n{{ticket.title}}\n\n{{tasks: one per task}}\n',
+  );
+  edit(
+    sail,
+    `${SPEC_STAGE}/stage.ts`,
+    "import { agent, file, value, z } from 'sail';",
+    "import { agent, countItems, doc, file, value, z } from 'sail';",
+  );
+  edit(sail, `${SPEC_STAGE}/stage.ts`, "  produces: { 'spec.md': 'file' },", `  produces: ${produces},`);
+}
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a run's agent step finds its document's template in $STAGE_OUT, filled with the run's bindings, and a session that leaves it as it is produces it so", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25, { files: {} })]);
+    documentedSpec(sail, "{ 'spec.md': doc('./templates/spec.md') }");
+    const end = await ranAgent(repo.dir);
+
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed', 'spec#1 done', 'publish#1 passed']);
+    expect(specFile(end.dir, 'spec.md')).toBe(
+      '# Spec for FAKE-1\n\n<untrusted-input source="ticket.title">\nAdd a --shout flag\n</untrusted-input>\n\n{{tasks: one per task}}\n',
+    );
+  });
+}, 20_000);
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a run whose agent step's documents derive one key twice fails before the call, as one that can't run", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
+    const twice = "doc('./templates/spec.md', [countItems('Tasks')])";
+    documentedSpec(sail, `{ 'spec.md': ${twice}, 'plan.md': ${twice} }`);
+    const end = await ranAgent(repo.dir);
+
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'workflow_failed',
+      message:
+        "spec#1 can't run: derived key 'tasks' comes from both 'spec.md' (countItems(Tasks)) and 'plan.md' (countItems(Tasks))",
+    });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed']);
+  });
+}, 20_000);

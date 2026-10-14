@@ -21,8 +21,8 @@
     "ticket": "00-intake/call-1/result.json#/output",
     "spec": "01-spec/call-1/spec.md"
   },
-  "startedAt": "2026-09-25T09:00:12.500Z",
-  "finishedAt": "2026-09-25T09:00:13.600Z",
+  "startedAt": "2026-09-25T09:00:12.600Z",
+  "finishedAt": "2026-09-25T09:00:13.700Z",
   "durationMs": 1100,
   "try": 1,
   "validationTry": 1,

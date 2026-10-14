@@ -4,7 +4,8 @@ intake#1         output valid
 intake#1       ✓ passed
 spec#1         ▶ spec · agent · claude-opus-5-5
 spec#1           output valid
-spec#1         ✓ done · 1.1s
+spec#1           file spec.md valid
+spec#1         ✓ done · 1.2s
 fix            ↻ iteration 1/3
 implement#1    ▶ implement · agent · claude-sonnet-5
 implement#1      output valid
@@ -39,7 +40,7 @@ open#1           exit 0 → passed · 100ms
 open#1           output valid
 open#1         ✓ passed · 900ms
 
-completed · 15.5s
+completed · 15.6s
   calls    9 · 3 passed, 5 done, 1 failed
   loops    fix 2/3
   replays  9

@@ -14,8 +14,8 @@
   },
   "status": "completed",
   "startedAt": "2026-09-25T09:00:00.400Z",
-  "endedAt": "2026-09-25T09:00:15.900Z",
-  "durationMs": 15500,
+  "endedAt": "2026-09-25T09:00:16.000Z",
+  "durationMs": 15600,
   "result": {
     "pr": {
       "number": 5,
@@ -39,7 +39,7 @@
       "key": "spec#1",
       "kind": "agent",
       "outcome": "done",
-      "durationMs": 1100,
+      "durationMs": 1200,
       "turns": 4,
       "toolCalls": 0,
       "denials": 0,

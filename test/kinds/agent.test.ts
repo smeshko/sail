@@ -15,8 +15,19 @@ import { agentKind } from '../../src/kinds/agent';
 import type { AgentTry, StepContext, StepRun } from '../../src/kinds/index';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../src/ports/harness';
 import type { HarnessResult } from '../../src/ports/types';
-import { type AgentStep, agent, file, z } from '../../src/sdk/index';
-import { scripted, throwing } from '../helpers/scripted-harness';
+import {
+  type AgentStep,
+  agent,
+  countItems,
+  doc,
+  file,
+  hasSections,
+  noPlaceholders,
+  untrusted,
+  value,
+  z,
+} from '../../src/sdk/index';
+import { recording, scripted, throwing } from '../helpers/scripted-harness';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -90,16 +101,23 @@ interface Setup {
 
 /**
  * A workspace holding `.sail/stages/spec/` with `template` as its prompt, and try `tryNumber` of `spec#1` under
- * `.sail-runs/`, with `step`'s bindings materialised: a brief, when it consumes one.
+ * `.sail-runs/`, with `step`'s bindings materialised: a brief, when it consumes one, and whatever `more` supplies.
  */
-function setup(step: AgentStep, template = 'Write the spec.\n', tryNumber = 1): Setup {
+function setup(
+  step: AgentStep,
+  template = 'Write the spec.\n',
+  tryNumber = 1,
+  more: Record<string, Supplied> = {},
+): Setup {
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'sail-agent-')));
   dirs.push(workspace);
   const stageDir = join(workspace, '.sail', 'stages', 'spec');
   write(join(stageDir, 'prompt.md'), template);
   const brief = write(join(workspace, 'docs', 'brief.md'), '# Brief\n');
-  const supplied: Record<string, Supplied> =
-    'brief' in step.consumes ? { brief: { kind: 'file', path: brief, from: 'docs/brief.md' } } : {};
+  const supplied: Record<string, Supplied> = {
+    ...('brief' in step.consumes ? { brief: { kind: 'file', path: brief, from: 'docs/brief.md' } } : {}),
+    ...more,
+  };
   const runDir = join(workspace, '.sail-runs', RUN_ID);
   const paths = callPaths(runDir, 1, 'spec', 1, tryNumber);
   if (tryNumber > 1) createCallDir(callPaths(runDir, 1, 'spec', 1));
@@ -678,4 +696,221 @@ test("what a harness's events say of its session is recorded only where it is a 
   const third = await tried(spec(), scripted({ resolves: new Error('socket hang up'), emits: garbled }));
   expect(third.run.record.harness).toEqual(UNSTARTED);
   expect(resultIssues(third.run)).toEqual([]);
+});
+
+// Documents: each try's session starts from the templates, rendered with its bindings, and what it leaves is validated.
+
+const Ticket = z.object({ key: z.string(), title: untrusted() });
+const TICKET = { key: 'FAKE-1', title: 'Add a --shout flag' };
+const ticketBound: Record<string, Supplied> = { ticket: { kind: 'value', value: TICKET, from: 'workflow' } };
+const TEMPLATE = `# Spec for {{ticket.key}}
+
+{{ticket.title}}
+
+## Requirements
+
+{{requirements: one bullet per acceptance criterion}}
+
+## Tasks
+
+{{tasks: one item per task}}
+`;
+/** TEMPLATE as the try renders it for TICKET. */
+const RENDERED = `# Spec for FAKE-1
+
+<untrusted-input source="ticket.title">
+Add a --shout flag
+</untrusted-input>
+
+## Requirements
+
+{{requirements: one bullet per acceptance criterion}}
+
+## Tasks
+
+{{tasks: one item per task}}
+`;
+const COMPLETED =
+  '# Spec for FAKE-1\n\n## Requirements\n\n- greet --shout shouts\n\n## Tasks\n\n1. Add the flag\n2. Test it\n';
+const CHECKS = ['hasSections(Requirements, Tasks)', 'noPlaceholders', 'countItems(Tasks, min 1)'];
+const specDoc = (template = './templates/spec.md') =>
+  doc(template, [hasSections('Requirements', 'Tasks'), noPlaceholders(), countItems('Tasks', { min: 1, as: 'tasks' })]);
+
+/** The `spec` step with `spec.md` as a document, binding the ticket as well as the brief. */
+const documented = (options: Options = {}): AgentStep =>
+  spec({
+    consumes: { brief: file('brief.md'), ticket: value(Ticket) },
+    produces: { 'spec.md': specDoc() },
+    ...options,
+  });
+
+/** A setup of `step` whose stage holds TEMPLATE as `templates/spec.md`, for try `tryNumber`. */
+function documentSetup(step: AgentStep, tryNumber = 1): Setup {
+  const s = setup(step, 'Write the spec.\n', tryNumber, 'ticket' in step.consumes ? ticketBound : {});
+  write(join(s.workspace, '.sail', 'stages', 'spec', 'templates', 'spec.md'), TEMPLATE);
+  return s;
+}
+
+/** `harness`, noting what `spec.md` in each session's `$STAGE_OUT` holds as the session starts, or null if nothing. */
+function noting(harness: Harness): { harness: Harness; seen: (string | null)[] } {
+  const seen: (string | null)[] = [];
+  const before = (request: HarnessRequest) => {
+    const path = join(request.env.STAGE_OUT ?? '', 'spec.md');
+    seen.push(existsSync(path) ? readFileSync(path, 'utf8') : null);
+  };
+  return { harness: recording(harness, { before }), seen };
+}
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a document's template is in $STAGE_OUT when its session starts, rendered with the try's bindings: a value filled, an untrusted one wrapped, and every placeholder as written", async () => {
+  const step = documented();
+  const s = documentSetup(step);
+  const { harness, seen } = noting(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } }));
+  await agentKind.run(step, s.context(harness));
+  expect(seen).toEqual([RENDERED]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a later try starts from the template rendered afresh in its own directory, not from what an earlier try left', async () => {
+  const step = documented();
+  const s = documentSetup(step, 2);
+  const first = join(dirname(s.paths.dir), 'spec.md');
+  writeFileSync(first, '# Draft\n');
+  const { harness, seen } = noting(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } }));
+  await agentKind.run(step, s.context(harness, { validationTry: 2, feedback: ['spec.md: noPlaceholders: …'] }));
+  expect(seen).toEqual([RENDERED]);
+  expect(readFileSync(first, 'utf8')).toBe('# Draft\n');
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a template that is missing, or names an unknown variable, ends the try as not_started before any session: no prompt, no events, an empty session.log and no usage', async () => {
+  const unknown = '# Spec for {{ticket.keey}}\n';
+  const cases: [AgentStep, string][] = [
+    [
+      documented({ produces: { 'spec.md': specDoc('./templates/missing.md') } }),
+      "'spec.md': template ./templates/missing.md can't be read (ENOENT)",
+    ],
+    [
+      documented({ produces: { 'spec.md': specDoc('./unknown.md') } }),
+      "'spec.md': template ./unknown.md: line 1: unknown path `ticket.keey`",
+    ],
+  ];
+  for (const [step, message] of cases) {
+    const s = documentSetup(step);
+    write(join(s.workspace, '.sail', 'stages', 'spec', 'unknown.md'), unknown);
+    const harness = scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } });
+    const run = await agentKind.run(step, s.context(harness));
+    expect(run).toEqual({
+      outcome: 'error',
+      output: null,
+      files: {},
+      errors: [{ reason: 'not_started', message }],
+      record: { try: 1, validationTry: 1, validationFailed: false, harness: UNSTARTED, usage: { costUsd: 0 } },
+    });
+    expect([harness.requests, s.events, s.read('session.log'), s.read('prompt.md')]).toEqual([[], [], '', null]);
+  }
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("problems() reports a derived key two of a step's documents share, naming both, and a produces value that is neither 'file' nor a document", () => {
+  expect(agentKind.problems(documented())).toEqual([]);
+  const step = spec({
+    produces: {
+      'spec.md': specDoc(),
+      'plan.md': doc('./templates/plan.md', [countItems('Tasks', { as: 'tasks' })]),
+      'notes.md': { kind: 'notes' } as never,
+    },
+  });
+  expect(agentKind.problems(step)).toEqual([
+    "derived key 'tasks' comes from both 'spec.md' (countItems(Tasks, min 1)) and 'plan.md' (countItems(Tasks))",
+    "'notes.md' is neither 'file' nor a document",
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a valid document is reported produced and then valid, and the result records its checks on the file and the facts in derived, as sail.result.v1 holds them', async () => {
+  const step = documented();
+  const s = documentSetup(step);
+  const run = await agentKind.run(
+    step,
+    s.context(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } })),
+  );
+  const entry = { path: '01-spec/call-1/spec.md', bytes: Buffer.byteLength(COMPLETED), sha256: sha256(COMPLETED) };
+  expect([run.outcome, run.errors, run.files]).toEqual([
+    'done',
+    [],
+    { 'spec.md': { ...entry, validation: { ok: true, checks: CHECKS } } },
+  ]);
+  expect(run.record).toMatchObject({ validationFailed: false, derived: { tasks: 2 } });
+  expect(s.events.slice(-3)).toEqual([
+    { type: 'output:validated' },
+    { type: 'file:produced', name: 'spec.md', ...entry },
+    { type: 'file:validated', name: 'spec.md', ok: true, checks: CHECKS },
+  ]);
+  expect(resultIssues(run)).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a document with a placeholder left, or a required section missing, ends the try in error with an invalid_output per problem naming the file and check, beside any output problem, and still records the facts derived', async () => {
+  const step = documented();
+  // The session leaves the template as it was.
+  const left = documentSetup(step);
+  const unfilled = await agentKind.run(step, left.context(scripted({ resolves: done(VALID) })));
+  expect([unfilled.outcome, unfilled.errors]).toEqual([
+    'error',
+    [
+      'spec.md: noPlaceholders: line 9 still holds the placeholder {{requirements: …}}',
+      'spec.md: noPlaceholders: line 13 still holds the placeholder {{tasks: …}}',
+      "spec.md: countItems(Tasks, min 1): 'Tasks' has 0 items, fewer than 1",
+    ].map((message) => ({ reason: 'invalid_output', message })),
+  ]);
+  expect(unfilled.record).toMatchObject({ validationFailed: true, derived: { tasks: 0 } });
+  expect(unfilled.files['spec.md']?.validation).toEqual({ ok: false, checks: CHECKS });
+  expect(left.events.at(-1)).toEqual({ type: 'file:validated', name: 'spec.md', ok: false, checks: CHECKS });
+  expect(resultIssues(unfilled)).toEqual([]);
+
+  // The session drops a section and submits an output its schema refuses: both are reported, the output's first.
+  const dropped = documentSetup(step);
+  const harness = scripted({
+    resolves: done({ summary: 3, tasks: ['x'] }),
+    files: { 'spec.md': COMPLETED.replace('## Requirements\n\n- greet --shout shouts\n\n', '') },
+  });
+  const both = await agentKind.run(step, dropped.context(harness));
+  expect(both.errors).toEqual([
+    { reason: 'invalid_output', message: expect.stringContaining('expected string, received number') },
+    { reason: 'invalid_output', message: "spec.md: hasSections(Requirements, Tasks): has no 'Requirements' section" },
+  ]);
+  expect(both.record).toMatchObject({ validationFailed: true, derived: { tasks: 2 } });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {
+  const step = documented({
+    produces: { 'spec.md': specDoc(), 'plan.md': doc('./templates/spec.md', [noPlaceholders()]) },
+  });
+  const s = documentSetup(step);
+  const removing = recording(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } }), {
+    after: (request) => rmSync(join(request.env.STAGE_OUT ?? '', 'plan.md'), { force: true }),
+  });
+  const run = await agentKind.run(step, s.context(removing));
+  expect(run.errors).toEqual([{ reason: 'missing_file', message: "'plan.md' was not produced in $STAGE_OUT" }]);
+  expect(Object.keys(run.files)).toEqual(['spec.md']);
+  expect(s.events.filter((event) => event.type.startsWith('file:')).map((event) => event.type)).toEqual([
+    'file:produced',
+    'file:validated',
+  ]);
 });

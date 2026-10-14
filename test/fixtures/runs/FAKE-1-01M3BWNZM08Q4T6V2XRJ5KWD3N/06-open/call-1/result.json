@@ -17,8 +17,8 @@
     "body": "05-describe/call-1/pr-body.md",
     "ticketKey": "workflow"
   },
-  "startedAt": "2026-09-25T09:00:14.500Z",
-  "finishedAt": "2026-09-25T09:00:15.400Z",
+  "startedAt": "2026-09-25T09:00:14.600Z",
+  "finishedAt": "2026-09-25T09:00:15.500Z",
   "durationMs": 900,
   "exit": {
     "code": 0,
