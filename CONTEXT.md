@@ -348,8 +348,16 @@ Any limit the engine enforces on a run: permissions, budgets, untrusted-input wr
 _Avoid_: policy, safety prompt, rule
 
 **Permissions**:
-What a step may do, declared per step: paths it may read and write, commands it may run, tools and servers it may reach. Enforced for agents; declared and recorded for scripts.
+What a step may do, declared per step: paths it may read and write, commands it may run, tools and servers it may reach. Enforced for agents; declared and recorded for scripts. Tools and MCP servers are listed by name (`WebFetch`, `server:tool`, or `server:*` for every tool of a server), and anything not listed is denied. Reads and writes are confined to the run's workspace and the step's `$STAGE_OUT`.
 _Avoid_: policy, allowlist, sandbox, scope
+
+**Deny set**:
+The commands no step's permissions can allow: `rm -rf`, a forced push, `git reset --hard`, `git clean -f`, `git branch -D`, `git checkout`, `git switch`, `sudo`, `curl` piped into a shell, and git configuration overrides. Checked before the step's own commands.
+_Avoid_: blocklist, denylist, banned commands, safe commands
+
+**Tool call**:
+One action an agent asks its harness for (read, write, edit, execute a command, call an MCP server's tool, or another tool) in sail's harness-neutral form: the tool, its kind, the paths it touches, its command or server. Every tool call is decided against its step's permissions before it runs.
+_Avoid_: tool use, action, request, invocation
 
 **Denial**:
 A tool call refused for falling outside the step's permissions, recorded with the permissions that refused it. The agent carries on.
