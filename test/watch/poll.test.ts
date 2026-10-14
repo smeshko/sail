@@ -504,3 +504,36 @@ test('an answer holding a ticket with an empty key fails the poll as invalid, an
   expect('refused' in openQueue({ runsDir: dir, workflow: 'a', label: 'sail', now: clock })).toBe(false);
   expect(queueEventIssues(queueDir(dir, 'a'))).toEqual([]);
 });
+
+test('a pause saved to queue.json whose queue:error append throws still stops timed polls (review #2.4)', async () => {
+  const dir = tempDir();
+  const timers = fakeTimers(START);
+  const a = counted(fakeSource(dir));
+  a.failWith = unauthorized;
+  const polled = target(dir, 'a', 'sail', a.source, timers.now);
+  const { store } = polled;
+  const savedThenThrows: WatchTarget = {
+    ...polled,
+    store: {
+      ...store,
+      pollFailed(failure) {
+        store.pollFailed(failure);
+        throw new Error('ENOSPC: no space left on device, write');
+      },
+    },
+  };
+  const heard: string[] = [];
+  const poller = createPoller({
+    targets: [savedThenThrows],
+    timers,
+    now: timers.now,
+    onError: (workflow) => heard.push(workflow),
+  });
+  await poller.start();
+  expect(heard).toEqual(['a']);
+  expect(queueFile(dir, 'a').polling.paused).toMatchObject({ code: 'unauthorized' });
+  expect(timers.pending()).toEqual([]);
+  await timers.advance(60 * 60_000);
+  expect(a.calls).toBe(1);
+  poller.stop();
+});
