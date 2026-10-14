@@ -34,10 +34,7 @@ const DENY = (name: string): Want => ['commands', `default deny: ${name}`];
 const CANT: Want = ['commands', "can't be checked:"];
 const UNLISTED = (text: string): Want => ['commands', `\`${text}\` matches none of the step's commands`];
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['sudo ls', {}, DENY('sudo')],
   ['unlisted > lib/a.dart', {}, UNLISTED('unlisted > lib/a.dart')],
   ['echo x > lib/a.dart', { commands: ['echo *'], write: ['src/**'] }, ['write', 'lib/a.dart']],
@@ -45,10 +42,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['echo $(rm -rf /)', { commands: ['echo *'] }, DENY('rm -rf')],
   ['echo `sudo x`', { commands: ['echo *'] }, DENY('sudo')],
   ['echo $(git rev-parse HEAD)', { commands: ['echo *', 'git rev-parse *'] }, 'allow'],
@@ -61,10 +55,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['bash -c "rm -rf ."', { commands: ['bash *'] }, DENY('rm -rf')],
   ["sh -c 'git checkout main'", { commands: ['sh *', 'git *'] }, DENY('git checkout')],
   ['bash -lc "sudo x"', {}, DENY('sudo')],
@@ -88,10 +79,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['xargs rm -rf', {}, DENY('rm -rf')],
   ['xargs -0 -n1 rm -rf', {}, DENY('rm -rf')],
   ['git ls-files | xargs rm', { commands: ['git ls-files *', 'rm *'] }, DENY('rm -rf')],
@@ -120,10 +108,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['$CMD x', { commands: ['* x'] }, CANT],
   ['$(which rm) -rf a', { commands: ['which *'] }, CANT],
   ['"git diff" x', { commands: ['git diff *'] }, CANT],
@@ -142,10 +127,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['git diff origin/main...HEAD | head -50', { commands: ['git diff *', 'head *'] }, 'allow'],
   ['npm test -- a.test.ts', { commands: ['npm test *'] }, 'allow'],
   ['FOO=1 npm test', { commands: ['npm test *'] }, 'allow'],
@@ -159,10 +141,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['PATH=. git status', { commands: ['git status *'] }, DENY('environment override')],
   ['PATH=/tmp; git status', { commands: ['git status *'] }, DENY('environment override')],
   ['GIT_PAGER=sh git -p log', { commands: ['git *'] }, DENY('environment override')],
@@ -174,10 +153,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['cd sub && echo x > out.txt', { commands: ['echo *'], write: ['sub/**'] }, 'allow'],
   ['cd sub && echo x > out.txt', { commands: ['echo *'], write: ['out.txt'] }, ['write', 'sub/out.txt']],
   ['cd $STAGE_OUT && echo x > r.md', { commands: ['echo *'], write: ['$STAGE_OUT/**'] }, 'allow'],
@@ -196,10 +172,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['git -C <elsewhere> commit', { commands: ['git *'] }, ['commands', 'outside the workspace']],
   ['git --git-dir=<elsewhere>/.git log', { commands: ['git *'] }, ['commands', 'outside the workspace']],
   ['git --work-tree ../.. status', { commands: ['git *'] }, ['commands', 'outside the workspace']],
@@ -219,10 +192,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['echo x > $STAGE_OUT/r.md', { write: ['$STAGE_OUT/**'] }, 'allow'],
   ['echo x > "$STAGE_OUT/r.md"', { write: ['$STAGE_OUT/**'] }, 'allow'],
   ["echo x > '$STAGE_OUT/r.md'", { write: ['**'] }, ['write', "can't be resolved"]],
@@ -246,10 +216,7 @@ test
   expect(verdict(run(command, { commands, ...open }), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each([
+test.each([
   ['', {}, ['commands', "can't be checked: an empty command"]],
   ['  \n ', {}, ['commands', "can't be checked: an empty command"]],
   ['(cd x; ls)', { commands: ['ls *'] }, ['commands', "can't be checked: a subshell"]],
@@ -261,10 +228,7 @@ test
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a command run from a cwd outside the roots is denied; from a subdirectory, relative paths start there', () => {
+test('a command run from a cwd outside the roots is denied; from a subdirectory, relative paths start there', () => {
   const write = { commands: ['echo *'], write: ['sub/**'] };
   expect([
     verdict(run('echo x > a.txt', write, '<elsewhere>'), ['commands', 'working directory']),
@@ -272,10 +236,7 @@ test
   ]).toEqual([['commands', 'working directory'], 'allow']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a reason quotes the refused command as written, cut at 200 characters', () => {
+test('a reason quotes the refused command as written, cut at 200 characters', () => {
   const long = `unlisted ${'x'.repeat(300)}`;
   const decision = run(long, {});
   expect(decision.allow ? '' : decision.reason).toBe(`\`${long.slice(0, 200)}…\` matches none of the step's commands`);
