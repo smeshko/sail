@@ -6,9 +6,11 @@
 // STATUS yet. A suspended run holds its lease whatever its pid. Two accepted risks: a reused pid makes a dead run read as
 // alive, and three processes interleaving on one stale lease within microseconds could drop the lease just taken.
 //
-// A renewal is the same run taking its lease again: a resume, with its own pid. It is refused while the run is still
-// alive in another process, that is while it is `running`, or has no STATUS yet, and the pid on the lease is alive and
-// isn't the renewing one. So a resume can't run a run that is still running.
+// A renewal is the same run taking its lease again: a resume, with its own pid. It is refused while the pid on the lease
+// is alive and isn't the renewing one, whatever STATUS says: a run's STATUS reads `suspended` both while another
+// resume is starting it and while its own process is suspending it. So a resume can't run a run that is still running,
+// and two resumes of one run can't both go ahead. A reused pid refuses a resume until that process ends: the same
+// accepted risk.
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -79,23 +81,16 @@ export function isStale(lease: Lease): boolean {
   return !isAlive(lease.pid);
 }
 
-/** Whether `lease`'s run is alive in a process other than `pid`: running, or not yet started, with a live pid of its own. */
+/** Whether `lease`'s run is alive in a process other than `pid`: its pid is alive and isn't `pid`. */
 function stillRunning(lease: Lease, pid: number): boolean {
-  if (lease.pid === pid) return false;
-  let status: string | undefined;
-  try {
-    status = readStatus(lease.runDir).status;
-  } catch {
-    status = undefined;
-  }
-  return (status === 'running' || status === undefined) && isAlive(lease.pid);
+  return lease.pid !== pid && isAlive(lease.pid);
 }
 
 const text = (lease: Lease): string => `${JSON.stringify(lease)}\n`;
 
 /** Creates `file` holding `lease` all at once, by linking a written temp file to it. False when `file` exists. */
 function create(file: string, lease: Lease): boolean {
-  const tmp = `${file}.${lease.runId}.tmp`;
+  const tmp = `${file}.${lease.runId}.${process.pid}.tmp`;
   writeFileSync(tmp, text(lease));
   try {
     linkSync(tmp, file);
@@ -109,12 +104,13 @@ function create(file: string, lease: Lease): boolean {
 }
 
 /**
- * Drops the lease in `file` when it is still `read`: moves it aside under a name only `runId` uses, then checks that what
- * moved is that lease, and not one another taker has just written in its place. False when the file held another lease,
- * which is put back unless a third taker has created the file meanwhile, or when there was no file.
+ * Drops the lease in `file` when it is still `read`: moves it aside under a name only `runId` in this process uses,
+ * then checks that what moved is that lease, and not one another taker has just written in its place. False when the
+ * file held another lease, which is put back unless a third taker has created the file meanwhile, or when there was no
+ * file.
  */
 function dropIfStill(file: string, read: Lease, runId: string): boolean {
-  const aside = `${file}.${runId}.aside`;
+  const aside = `${file}.${runId}.${process.pid}.aside`;
   try {
     renameSync(file, aside);
   } catch (error) {
@@ -137,7 +133,7 @@ function dropIfStill(file: string, read: Lease, runId: string): boolean {
 /**
  * Leases `branch` of `remote` to `holder`: a new lease, a renewal by the same run (a resume), or a stale lease taken
  * over, with `took` naming the run it replaced. A lease a live run holds is refused, naming it, and so is a renewal
- * while the run is still alive in another process. A renewal or a takeover
+ * while the lease's pid is alive in another process. A renewal or a takeover
  * replaces only the lease it read, so one landing in between is never overwritten.
  */
 export function takeLease(
