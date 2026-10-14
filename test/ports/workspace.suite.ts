@@ -248,9 +248,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test
-    .skip // TDD-PENDING TASK-001
     (`${label}: repository() names the remote that keys the leases, and the default branch`, async () => {
     const { adapter, world } = await start();
     const repository = await settle(adapter.repository());
@@ -261,9 +259,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     });
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test
-    .skip // TDD-PENDING TASK-001
     (`${label}: a workspace created with no base starts from the default branch's tip`, async () => {
     const { adapter, world } = await start();
     const r1 = await world.run('r1');
@@ -273,9 +269,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test
-    .skip // TDD-PENDING TASK-001
     (`${label}: diff over <rev>...HEAD is taken against the merge-base, and diff over a sha against that sha`, async () => {
     const { adapter, world } = await start();
     const { path } = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
@@ -306,9 +300,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     });
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test
-    .skip // TDD-PENDING TASK-001
     (`${label}: diff refuses as invalid a range outside <rev>, <rev>... and <rev>...HEAD, and a rev that names nothing`, async () => {
     const { adapter, world } = await start();
     const { path } = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
@@ -338,9 +330,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     });
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test
-    .skip // TDD-PENDING TASK-001
     (`${label}: reopen gives back the run's workspace while its HEAD descends from its base, and emits nothing`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');
@@ -355,9 +345,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(capture.events.length).toBe(before);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test
-    .skip // TDD-PENDING TASK-001
     (`${label}: reopen refuses as invalid a workspace that is gone, is no worktree, or has lost its base`, async () => {
     const { adapter, world } = await start();
     const reopened = async (spoil: (path: string) => void) => {

@@ -123,9 +123,7 @@ test('the fake declares keep and sweep', () => {
   expect(createFakeWorkspace({ repo: repo().dir }).capabilities()).toEqual({ keep: true, sweep: true });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
 test
-  .skip // TDD-PENDING TASK-001
   ('the fake reports fake://origin and main unless told otherwise, and starts a workspace from the branch it names', async () => {
   const w = world();
   repo().git('branch', '-f', 'trunk', 'main');
@@ -153,9 +151,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
 test
-  .skip // TDD-PENDING TASK-001
   ('a workspace git no longer knows is still removed, and nothing beside it in the run directory is', async () => {
   const w = world();
   const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });

@@ -1,5 +1,14 @@
 // The git plumbing the built-in Workspace adapters share: `git-worktree`, and the fake, which runs on it with no fetch.
-// Stubs for TASK-001 and TASK-002 (ADW-93): the signatures, with wrong values.
+// Every git call gets `nonInteractive()`'s environment, so none can ask for credentials (D7). A local call is a
+// synchronous spawn with stdin ignored and a timeout. Only a fetch, the one call that reaches the network, runs as a
+// process group under `runProcess()`, with its own timeout and the start's signal.
+//
+// A workspace is `<runDir>/workspace`: a detached worktree of the repository. git is handed every path resolved, since
+// it runs in the repository and a caller's paths are relative to where the caller runs.
+import { existsSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { readStatus } from '../../engine/run-dir';
+import { PortError } from '../../ports/errors';
 import type { Diff, Workspace } from '../../ports/types';
 
 export interface GitResult {
@@ -15,75 +24,192 @@ export const LOCAL_TIMEOUT_MS = 30_000;
 /** The directory a run's workspace takes, inside its run directory. */
 export const WORKSPACE_DIR = 'workspace';
 
-/** `env` with every way git could ask for credentials turned off. */
+/**
+ * `env` with every way git could ask for credentials turned off: no terminal prompt, no credential manager dialog,
+ * and an ssh that fails rather than asks, unless the caller set an ssh command of its own.
+ */
 export function nonInteractive(env: Readonly<Record<string, string>> = {}): Record<string, string> {
-  return { ...env };
+  return {
+    ...env,
+    GIT_TERMINAL_PROMPT: '0',
+    GCM_INTERACTIVE: 'never',
+    ...(env.GIT_SSH_COMMAND === undefined ? { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } : {}),
+  };
 }
 
-/** Runs git in `cwd` with `env`, never reading stdin. */
+/** This process's environment, without its unset variables: what git runs with when a caller passes none. */
+function inherited(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
+
+/**
+ * Runs git in `cwd` with `env` (this process's when left out), never reading stdin. A directory that isn't there, or a
+ * call that times out, is a failed result.
+ */
 export function gitSync(
-  _cwd: string,
-  _args: readonly string[],
-  _env?: Readonly<Record<string, string>>,
-  _timeoutMs: number = LOCAL_TIMEOUT_MS,
+  cwd: string,
+  args: readonly string[],
+  env?: Readonly<Record<string, string>>,
+  timeoutMs: number = LOCAL_TIMEOUT_MS,
 ): GitResult {
-  return { code: 0, stdout: '', stderr: '' };
+  try {
+    const result = Bun.spawnSync(['git', ...args], {
+      cwd,
+      env: nonInteractive(env ?? inherited()),
+      stdin: 'ignore',
+      timeout: timeoutMs,
+    });
+    const stderr = result.stderr.toString().trim();
+    if (result.exitedDueToTimeout) {
+      return { code: -1, stdout: '', stderr: `git ${args[0]} timed out after ${timeoutMs} ms ${stderr}`.trim() };
+    }
+    return { code: result.exitCode ?? -1, stdout: result.stdout.toString(), stderr };
+  } catch (error) {
+    // No such directory to run in.
+    return { code: -1, stdout: '', stderr: (error as Error).message };
+  }
 }
 
 /** The commit `rev` names in `repo`, or undefined when it names none. */
-export function resolveCommit(
-  _repo: string,
-  _rev: string,
-  _env?: Readonly<Record<string, string>>,
-): string | undefined {
-  return undefined;
+export function resolveCommit(repo: string, rev: string, env?: Readonly<Record<string, string>>): string | undefined {
+  if (rev.startsWith('-')) return undefined;
+  const resolved = gitSync(repo, ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`], env);
+  return resolved.code === 0 ? resolved.stdout.trim() : undefined;
 }
 
-/** Adds a detached worktree of `sha` at `path`. */
+/** Adds a detached worktree of `sha` at `path`. A failure is `unavailable`, with git's own words. */
 export function addDetached(
-  _repo: string,
-  _path: string,
-  _sha: string,
-  _env?: Readonly<Record<string, string>>,
+  repo: string,
+  path: string,
+  sha: string,
+  env?: Readonly<Record<string, string>>,
 ): GitResult {
-  return { code: 0, stdout: '', stderr: '' };
+  const added = gitSync(repo, ['worktree', 'add', '--detach', resolve(path), sha], env);
+  if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
+  return added;
 }
 
-/** Removes the workspace of the run in `runDir`. */
+/**
+ * Removes the workspace of the run in `runDir`: `git worktree remove --force`, then, when the path is still there, a
+ * plain removal of exactly `<runDir>/workspace` and nothing else, then a prune of what git still lists. It fails, as
+ * `unavailable`, only when the path is still there.
+ */
 export function removeWorktree(
-  _repo: string,
-  _runDir: string,
-  _op: string,
-  _env?: Readonly<Record<string, string>>,
+  repo: string,
+  runDir: string,
+  op: string,
+  env?: Readonly<Record<string, string>>,
 ): GitResult {
-  return { code: 0, stdout: '', stderr: '' };
+  const path = resolve(runDir, WORKSPACE_DIR);
+  const removed = gitSync(repo, ['worktree', 'remove', '--force', path], env);
+  let why = removed.stderr;
+  if (existsSync(path)) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+    } catch (error) {
+      why = `${why} ${(error as Error).message}`.trim();
+    }
+  }
+  gitSync(repo, ['worktree', 'prune'], env);
+  if (existsSync(path)) throw new PortError('workspace', op, 'unavailable', `${path}: ${why}`);
+  return removed;
 }
 
-/** The working tree at `path` against `range`. */
-export function diffWorkingTree(_path: string, _range: string, _env?: Readonly<Record<string, string>>): Diff {
-  return { patch: '', raw: null };
+/** What `range` diffs against: a rev, and whether it is the merge-base of that rev and `HEAD`. Undefined: no range. */
+function parseRange(range: string): { rev: string; mergeBase: boolean } | undefined {
+  const dots = range.indexOf('...');
+  const rev = dots === -1 ? range : range.slice(0, dots);
+  const right = dots === -1 ? undefined : range.slice(dots + 3);
+  if (rev === '' || rev.startsWith('-') || rev.includes('..') || /\s/.test(rev)) return undefined;
+  if (right !== undefined && right !== '' && right !== 'HEAD') return undefined;
+  return { rev, mergeBase: right !== undefined };
 }
 
-/** The workspace at `path`, checked to be a worktree whose `HEAD` descends from `baseSha`. */
+/**
+ * The working tree at `path` against `range` (the port's grammar), tracked changes and every new file that isn't
+ * ignored. A new file is diffed against nothing, which leaves the index alone; `--no-index` exits 1 when the two
+ * differ, as a new file always does.
+ */
+export function diffWorkingTree(path: string, range: string, env?: Readonly<Record<string, string>>): Diff {
+  const parsed = parseRange(range);
+  if (parsed === undefined) {
+    throw new PortError('workspace', 'diff', 'invalid', `'${range}' is not a range: <rev>, <rev>... or <rev>...HEAD`);
+  }
+  const sha = resolveCommit(path, parsed.rev, env);
+  if (sha === undefined) throw new PortError('workspace', 'diff', 'invalid', `${path}: ${parsed.rev} names no commit`);
+  let from = sha;
+  if (parsed.mergeBase) {
+    const base = gitSync(path, ['merge-base', sha, 'HEAD'], env);
+    if (base.code !== 0) {
+      throw new PortError('workspace', 'diff', 'invalid', `${path}: ${parsed.rev} and HEAD share no commit`);
+    }
+    from = base.stdout.trim();
+  }
+  const tracked = gitSync(path, ['diff', '--binary', from, '--'], env);
+  if (tracked.code !== 0) throw new PortError('workspace', 'diff', 'unavailable', `${path}: ${tracked.stderr}`);
+  const listed = gitSync(path, ['ls-files', '--others', '--exclude-standard', '-z'], env);
+  const created = listed.stdout
+    .split('\0')
+    .filter((file) => file !== '')
+    .map((file) => gitSync(path, ['diff', '--no-index', '--binary', '--', '/dev/null', file], env));
+  const failed = created.find((result) => result.code !== 1);
+  if (listed.code !== 0 || failed !== undefined) {
+    throw new PortError('workspace', 'diff', 'unavailable', `${path}: ${(failed ?? listed).stderr}`);
+  }
+  const patch = tracked.stdout + created.map((result) => result.stdout).join('');
+  return { patch, raw: { from, tracked, created } };
+}
+
+/**
+ * The workspace at `path`, checked to be a worktree of its own, not a directory inside another checkout, and to have
+ * `baseSha` as an ancestor of its `HEAD`. Anything else is `invalid`.
+ */
 export function reopenWorktree(
-  _path: string,
-  _branch: string,
-  _baseSha: string,
-  _env?: Readonly<Record<string, string>>,
+  path: string,
+  branch: string,
+  baseSha: string,
+  env?: Readonly<Record<string, string>>,
 ): Workspace {
-  return { path: '', branch: '', baseSha: '', raw: null };
+  const invalid = (why: string) => new PortError('workspace', 'reopen', 'invalid', `${path}: ${why}`);
+  if (!existsSync(path)) throw invalid('the workspace is gone');
+  const top = gitSync(path, ['rev-parse', '--show-toplevel'], env);
+  if (top.code !== 0 || top.stdout.trim() !== realpathSync(path)) throw invalid('the workspace is no git worktree');
+  const descends = gitSync(path, ['merge-base', '--is-ancestor', baseSha, 'HEAD'], env);
+  if (descends.code !== 0) throw invalid(`its HEAD no longer descends from its base ${baseSha}`);
+  return { path, branch, baseSha, raw: null };
+}
+
+/** Whether the run in `runDir` has ended, so its workspace can go. A run with no STATUS hasn't. */
+function ended(runDir: string): boolean {
+  try {
+    const { status } = readStatus(runDir);
+    return status === 'completed' || status === 'failed';
+  } catch {
+    return false;
+  }
 }
 
 /** Removes, through `remove`, the workspace of each ended run under `runsDir`, and gives their paths, sorted. */
-export function sweepEnded(_runsDir: string, _remove: (runDir: string) => void): string[] {
-  return [];
+export function sweepEnded(runsDir: string, remove: (runDir: string) => void): string[] {
+  const paths: string[] = [];
+  for (const entry of existsSync(runsDir) ? readdirSync(runsDir) : []) {
+    const runDir = join(runsDir, entry);
+    const path = join(runDir, WORKSPACE_DIR);
+    if (!existsSync(path) || !ended(runDir)) continue;
+    remove(runDir);
+    paths.push(path);
+  }
+  return paths.sort();
 }
 
-/** `url` without its userinfo. */
+/** `url` without its userinfo: `https://user:token@host/o/r` is `https://host/o/r`. Anything else is kept as it is. */
 export function stripUserinfo(url: string): string {
-  return url;
+  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1');
 }
 
+// TASK-002 (ADW-93) replaces this stub.
 /** `git fetch --no-tags <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. */
 export async function fetchRemote(
   _repo: string,

@@ -113,9 +113,7 @@ test('the workspace fake defaults its repo to context.root: it leases and create
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
 test
-  .skip // TDD-PENDING TASK-001
   ('the workspace fake takes remote and defaultBranch, and keeps its leases in runsDir/fake/leases', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
