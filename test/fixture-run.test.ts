@@ -8,7 +8,7 @@
 import { afterAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { HarnessScript } from '../src/adapters/fake/harness';
+import type { HarnessScript, ScriptedAnswer } from '../src/adapters/fake/harness';
 import { EXIT_FAILED, EXIT_OK, EXIT_SUSPENDED, type ExitCode } from '../src/cli/exit-codes';
 import { readJournal } from '../src/engine/journal';
 import { validateRunDir } from '../src/engine/schemas';
@@ -322,5 +322,84 @@ test("a second run of FAKE-1, forced, in a copy of a repository whose first run 
     const hosted = readEvents(dir).flatMap((event) => (event.type.startsWith('codehost:') ? [event.type] : []));
     expect(hosted).toEqual(['codehost:pushed']);
     expect(fakeState(other.dir, 'prs.json').pullRequests).toHaveLength(5);
+  });
+}, 60_000);
+
+// spec's document: the template is in place before the session, and its validators check what the session left.
+
+const SPEC_CHECKS = ['hasSections(Requirements, Tasks)', 'noPlaceholders', 'countItems(Tasks, min 1)'];
+
+test('spec#1 completes spec.md from its template: its file:validated follows its file:produced, and its result records the three checks as valid and derived.tasks as 2', async () => {
+  const { dir, events } = await completed();
+  const result = json(dir, '01-spec', 'call-1', 'result.json');
+  expect([result.files['spec.md'].validation, result.derived]).toEqual([
+    { ok: true, checks: SPEC_CHECKS },
+    { tasks: 2 },
+  ]);
+  const own = events.flatMap((event) => ('key' in event && event.key === 'spec#1' ? [event] : []));
+  const at = own.findIndex((event) => event.type === 'file:produced');
+  expect(own.slice(at, at + 2)).toMatchObject([
+    { type: 'file:produced', name: 'spec.md' },
+    { type: 'file:validated', name: 'spec.md', ok: true, checks: SPEC_CHECKS },
+  ]);
+  expect(events.filter((event) => event.type === 'file:validated')).toHaveLength(1);
+});
+
+/** The fixture's harness script, with spec's tries answered by `answers` made from its own answer. */
+function specTries(...answers: ((answer: ScriptedAnswer & { outcome: 'done' }) => ScriptedAnswer)[]): HarnessScript {
+  const script: HarnessScript = JSON.parse(readFileSync(join(FIXTURE_SAIL, 'fake', 'harness.json'), 'utf8'));
+  const [answer] = script.spec ?? [];
+  if (answer?.outcome !== 'done') throw new Error("the fixture scripts no 'done' answer for spec");
+  return { ...script, spec: answers.map((make) => make(answer)) };
+}
+
+test('a first spec try that leaves the template as it is gets one correction: try-2 is told each validator message, writes a valid spec, and the run completes', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeHarnessScript(
+      repo.dir,
+      specTries(
+        (answer) => ({ ...answer, files: {} }),
+        (answer) => answer,
+      ),
+    );
+    const ran = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    const dir = latestRun(repo.dir);
+    expect([ran.code, journalOf(dir)]).toEqual([EXIT_OK, JOURNAL]);
+    const messages = [
+      'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
+      'spec.md: noPlaceholders: line 9 still holds the placeholder {{tasks: …}}',
+      "spec.md: countItems(Tasks, min 1): 'Tasks' has 0 items, fewer than 1",
+    ];
+    const prompt = readFileSync(join(dir, '01-spec', 'call-1', 'try-2', 'prompt.md'), 'utf8');
+    expect(prompt.trimEnd()).toEndWith(messages.join('\n\n'));
+    expect(json(dir, '01-spec', 'call-1', 'try-2', 'result.json')).toMatchObject({
+      outcome: 'done',
+      try: 2,
+      derived: { tasks: 2 },
+    });
+    expect(validateRunDir(dir).issues).toEqual([]);
+  });
+}, 60_000);
+
+test('a spec without its Requirements section in both tries ends spec#1 in error, naming the check, and the run fails with stage_error, exit 1', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const dropped = (answer: ScriptedAnswer & { outcome: 'done' }): ScriptedAnswer => {
+      const spec = answer.files?.['spec.md'] ?? '';
+      return { ...answer, files: { 'spec.md': spec.replace(/## Requirements\n[\s\S]*?(?=## Tasks)/, '') } };
+    };
+    writeHarnessScript(repo.dir, specTries(dropped, dropped));
+    const ran = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    const dir = latestRun(repo.dir);
+    expect([ran.code, journalOf(dir)]).toEqual([EXIT_FAILED, ['intake#1 passed', 'spec#1 error']]);
+    expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('failed stage_error\n');
+    expect(json(dir, '01-spec', 'call-1', 'try-2', 'result.json').errors).toEqual([
+      {
+        reason: 'invalid_output',
+        message: "spec.md: hasSections(Requirements, Tasks): has no 'Requirements' section",
+      },
+    ]);
+    expect(validateRunDir(dir).issues).toEqual([]);
   });
 }, 60_000);

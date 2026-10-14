@@ -41,10 +41,11 @@ export type AgentPrompt =
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
- * The prompt's values, by binding name: a value as its schema parsed it, with the strings the schema marks untrusted
- * marked so; a file as where `$STAGE_IN` holds its copy; and null for a binding left unbound, so `#if` can read it.
+ * The values a prompt or a document's template is rendered with, by binding name: a value as its schema parsed it,
+ * with the strings the schema marks untrusted marked so; a file as where `$STAGE_IN` holds its copy; and null for a
+ * binding left unbound, so `#if` can read it.
  */
-function valuesOf(bindings: PreparedBindings, inputs: Readonly<Record<string, string>>): RenderValues {
+export function bindingValues(bindings: PreparedBindings, inputs: Readonly<Record<string, string>>): RenderValues {
   const values: [string, unknown][] = [];
   for (const [key, binding] of Object.entries(bindings.consumes)) {
     if (binding.kind === 'value' && Object.hasOwn(bindings.values, key)) {
@@ -103,7 +104,7 @@ export function prepareAgentPrompt(options: AgentPromptOptions): AgentPrompt {
   if ('message' in conventions) return { ok: false, message: conventions.message };
   let rendered: ReturnType<typeof renderPrompt>;
   try {
-    rendered = renderPrompt({ sailDir, file, values: valuesOf(bindings, inputs) });
+    rendered = renderPrompt({ sailDir, file, values: bindingValues(bindings, inputs) });
   } catch (error) {
     return { ok: false, message: messageOf(error) };
   }
