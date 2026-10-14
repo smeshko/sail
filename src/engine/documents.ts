@@ -35,6 +35,19 @@ function isDocument(value: unknown): value is Document {
   return kind === 'document' && typeof template === 'string' && Array.isArray(validators);
 }
 
+/** Whether `value` is a validator, as `doc()` checks one: a hand-built document's validators are checked here. */
+function isValidator(value: unknown): value is Validator {
+  if (typeof value !== 'object' || value === null) return false;
+  const { check, derives, validate } = value as Partial<Validator>;
+  return (
+    typeof check === 'string' &&
+    check !== '' &&
+    Array.isArray(derives) &&
+    derives.every((key) => typeof key === 'string' && key !== '') &&
+    typeof validate === 'function'
+  );
+}
+
 /** The documents among a step's `produces`, as `[name, document]` in declaration order. */
 export function documentsOf(produces: Readonly<Record<string, unknown>>): [string, Document][] {
   return Object.entries(produces).filter((entry): entry is [string, Document] => isDocument(entry[1]));
@@ -54,9 +67,15 @@ export function documentProblems(produces: Readonly<Record<string, unknown>>): s
       found.push(`'${name}' is neither 'file' nor a document`);
       continue;
     }
-    for (const validator of value.validators) {
+    for (const [index, validator] of value.validators.entries()) {
+      if (!isValidator(validator)) {
+        found.push(
+          `'${name}' validator ${index} is not a validator: it needs a check label, the keys it derives and a validate function`,
+        );
+        continue;
+      }
       const here = `'${name}' (${validator.check})`;
-      for (const key of Array.isArray(validator.derives) ? validator.derives : []) {
+      for (const key of validator.derives) {
         const earlier = first.get(key);
         if (earlier === undefined) first.set(key, here);
         else found.push(`derived key '${key}' comes from both ${earlier} and ${here}`);
