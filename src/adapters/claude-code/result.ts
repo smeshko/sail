@@ -48,22 +48,28 @@ export function toHarnessResult(input: ResultInput): Ended {
   if (input.thrown !== undefined) return failed(`claude-code: ${messageOf(input.thrown.error)}`, 'failed');
   if (result === undefined) return failed('the session ended without a result', 'failed');
 
+  /** `text`, then what an error result said after a colon, when it said anything. */
+  const saying = (text: string, errors: readonly string[]) => {
+    const said = errors.join('; ');
+    return said === '' ? text : `${text}: ${said}`;
+  };
   switch (result.subtype) {
     case 'error_max_turns':
-      return failed(`budget exceeded: maxTurns ${budget.maxTurns}`, 'max_turns', 'budget_exceeded');
-    case 'error_max_budget_usd':
-      return failed(`budget exceeded: maxUsd ${budget.maxUsd}`, 'max_budget_usd', 'budget_exceeded');
-    case 'error_max_structured_output_retries': {
-      const said = result.errors.join('; ');
       return failed(
-        `the output never matched its schema${said === '' ? '' : `: ${said}`}`,
-        'max_structured_output_retries',
+        saying(`budget exceeded: maxTurns ${budget.maxTurns}`, result.errors),
+        'max_turns',
+        'budget_exceeded',
       );
-    }
-    case 'error_during_execution': {
-      const said = result.errors.join('; ');
-      return failed(`the session failed during execution${said === '' ? '' : `: ${said}`}`, 'failed');
-    }
+    case 'error_max_budget_usd':
+      return failed(
+        saying(`budget exceeded: maxUsd ${budget.maxUsd}`, result.errors),
+        'max_budget_usd',
+        'budget_exceeded',
+      );
+    case 'error_max_structured_output_retries':
+      return failed(saying('the output never matched its schema', result.errors), 'max_structured_output_retries');
+    case 'error_during_execution':
+      return failed(saying('the session failed during execution', result.errors), 'failed');
   }
 
   if (result.is_error) {

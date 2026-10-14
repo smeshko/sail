@@ -182,7 +182,9 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
         if (stopped()) break;
       }
     } catch (error) {
-      thrown = { error };
+      // After an error result the SDK throws, restating it as "Claude Code returned an error result: …". The result,
+      // already read, says more: a budget's name, its subtype. A throw from onEvent fails the session all the same.
+      if (result?.is_error !== true || progress.deaf) thrown = { error };
       sessionAt.abortController.abort();
     }
 
