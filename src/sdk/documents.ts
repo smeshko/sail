@@ -162,11 +162,13 @@ export function noPlaceholders(): Validator {
       for (let start = text.indexOf('{{'); start !== -1; ) {
         const close = text.indexOf('}}', start + 2);
         if (close === -1) break;
-        const body = text.slice(start + 2, close);
-        if (body.includes(':')) {
-          for (let at = text.indexOf('\n', counted); at !== -1 && at < start; at = text.indexOf('\n', at + 1))
-            line += 1;
-          counted = start;
+        const colon = text.slice(start + 2, close).lastIndexOf(':');
+        if (colon !== -1) {
+          // An unclosed `{{` runs on into the tag after it: the tag named is the last `{{` before the colon.
+          const from = text.lastIndexOf('{{', start + colon);
+          for (let at = text.indexOf('\n', counted); at !== -1 && at < from; at = text.indexOf('\n', at + 1)) line += 1;
+          counted = from;
+          const body = text.slice(from + 2, close);
           const name = body.slice(0, body.indexOf(':')).trim();
           problems.push(`line ${line} still holds the placeholder {{${name}: …}}`);
         }
