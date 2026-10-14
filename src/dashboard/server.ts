@@ -1,13 +1,24 @@
-// The dashboard's server. A stub: the signatures are final, and it answers `{}` to everything, on every address, until
-// ADW-120's fourth task.
+// The dashboard's server: the registry's run files, read-only, on 127.0.0.1. Every request passes the guard first:
+//
+// 1. `Host` must be this server's (`127.0.0.1:<port>` or `localhost:<port>`), so a DNS-rebinding page gets 403.
+// 2. Only GET: anything else is 405, OPTIONS included, so a cross-origin preflight fails.
+// 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
+//    on an upgrade, but always send `Origin`.
+// 4. Any other request needs `X-Sail-Dashboard: 1`, which a cross-origin page can't send without a preflight.
+//
+// No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Server } from 'bun';
+import { callFile, findRepo, findRunDir, inside, repos, runItems } from './files';
 
 export interface DashboardOptions {
   registryDir: string;
   /** 0 picks a free port. */
   port: number;
-  /** How often a run stream polls its events once caught up. 200 ms by default. */
+  /** How often a run stream polls its events once caught up. 200 ms by default. Read once the streams land. */
   followPollMs?: number;
-  /** How often the index stream rereads the registry. 1000 ms by default. */
+  /** How often the index stream rereads the registry. 1000 ms by default. Read once the streams land. */
   indexPollMs?: number;
 }
 
@@ -20,16 +31,104 @@ export interface Dashboard {
 /** The header every client sends, and its one value. */
 export const CLIENT_HEADER = 'X-Sail-Dashboard';
 
-export function guard(_request: Request, _port: number): Response | undefined {
-  return undefined;
+const error = (status: number, message: string, headers: Record<string, string> = {}) =>
+  Response.json({ error: message }, { status, headers });
+
+const origins = (port: number) => [`127.0.0.1:${port}`, `localhost:${port}`];
+
+/** The refusal of a request the dashboard doesn't serve, or undefined to let it through. */
+export function guard(request: Request, port: number): Response | undefined {
+  const allowed = origins(port);
+  if (!allowed.includes(request.headers.get('host') ?? ''))
+    return error(403, 'this dashboard answers only its own host');
+  if (request.method !== 'GET') return error(405, 'the dashboard is read-only', { Allow: 'GET' });
+  const client = request.headers.get(CLIENT_HEADER) === '1';
+  if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+    const origin = request.headers.get('origin');
+    const ok = origin === null ? client : allowed.some((host) => origin === `http://${host}`);
+    return ok ? undefined : error(403, 'a WebSocket needs this dashboard as its origin');
+  }
+  return client ? undefined : error(403, `send ${CLIENT_HEADER}: 1`);
 }
 
-export function startDashboard(options: DashboardOptions): Dashboard | { refused: string } {
-  try {
-    const server = Bun.serve({ port: options.port, fetch: () => Response.json({}) });
-    const port = server.port ?? options.port;
-    return { url: `http://localhost:${port}/`, port, stop: () => server.stop(true) };
-  } catch {
-    return { refused: '' };
+const STREAMS: Record<string, string> = { session: 'session.log', stdout: 'stdout.log', stderr: 'stderr.log' };
+
+/** A file served as `type`, once it is known to lie inside `runDir`. */
+function file(runDir: string, path: string, type: string): Response {
+  if (!existsSync(path) || !inside(runDir, path)) return error(404, 'no such file in this run');
+  return new Response(readFileSync(path), { headers: { 'Content-Type': type } });
+}
+
+/** The answer to a GET of `/api/…`, from the path's decoded segments. */
+function route(registryDir: string, segments: string[], url: URL): Response {
+  const [api, reposWord, name, kind, runId, part, key, what, ...rest] = segments;
+  if (api !== 'api' || reposWord !== 'repos') return error(404, 'no such route');
+  if (name === undefined) return Response.json(repos(registryDir));
+  const entry = findRepo(registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  if (kind === 'queues' && runId === undefined) return Response.json([]);
+  if (kind !== 'runs') return error(404, 'no such route');
+  if (runId === undefined) return Response.json(runItems(entry));
+  const runDir = findRunDir(entry, runId);
+  if (typeof runDir !== 'string') return error(404, runDir.missing);
+  if (part === 'summary' && key === undefined) return file(runDir, join(runDir, 'summary.json'), 'application/json');
+  if (part === 'events' && key === undefined) {
+    return file(runDir, join(runDir, 'events.ndjson'), 'application/x-ndjson');
   }
+  if (part !== 'calls' || key === undefined || rest.length > 0) return error(404, 'no such route');
+  if (what === 'result') return served(runDir, callFile(runDir, key, 'result.json'), 'application/json');
+  if (what !== 'log') return error(404, 'no such route');
+  const stream = url.searchParams.get('stream');
+  if (stream !== null && STREAMS[stream] === undefined) return error(400, '?stream takes session, stdout or stderr');
+  if (stream !== null) return served(runDir, callFile(runDir, key, STREAMS[stream] ?? ''), 'text/plain; charset=utf-8');
+  const session = callFile(runDir, key, 'session.log');
+  const log = typeof session === 'string' ? session : callFile(runDir, key, 'stdout.log');
+  return served(runDir, log, 'text/plain; charset=utf-8');
+}
+
+function served(runDir: string, path: string | { missing: string }, type: string): Response {
+  return typeof path === 'string' ? file(runDir, path, type) : error(404, path.missing);
+}
+
+/** The path's segments, each decoded after the split, so an encoded `/` stays inside its segment. */
+function segmentsOf(url: URL): string[] | undefined {
+  try {
+    return url.pathname.split('/').slice(1).map(decodeURIComponent);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Starts the dashboard on 127.0.0.1. A port in use is refused. */
+export function startDashboard(options: DashboardOptions): Dashboard | { refused: string } {
+  const { registryDir } = options;
+  let server: Server<undefined>;
+  try {
+    server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: options.port,
+      fetch(request, self) {
+        const port = self.port ?? 0;
+        const refused = guard(request, port);
+        if (refused !== undefined) return refused;
+        const url = new URL(request.url);
+        const segments = segmentsOf(url);
+        if (segments === undefined) return error(400, 'the path is not percent-encoded properly');
+        return route(registryDir, segments, url);
+      },
+    });
+  } catch (thrown) {
+    if ((thrown as { code?: string }).code === 'EADDRINUSE') {
+      return { refused: `port ${options.port} is in use` };
+    }
+    throw thrown;
+  }
+  const port = server.port ?? options.port;
+  return {
+    url: `http://127.0.0.1:${port}/`,
+    port,
+    async stop() {
+      await server.stop(true);
+    },
+  };
 }

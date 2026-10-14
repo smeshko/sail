@@ -75,10 +75,7 @@ async function connects(host: string, port: number): Promise<boolean> {
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the server answers on 127.0.0.1 only: its url, and a connection to the machine\'s own address is refused', async () => {
+test("the server answers on 127.0.0.1 only: its url, and a connection to the machine's own address is refused", async () => {
   const server = start();
   expect(server.url).toBe(`http://127.0.0.1:${server.port}/`);
   expect((await get(server, '/api/repos')).status).toBe(200);
@@ -86,10 +83,7 @@ test
   expect(await connects(external, server.port)).toBe(false);
 }, 10_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the repositories, each one\'s runs, and a run\'s summary and events, byte for byte, change nothing on disk', async () => {
+test("the repositories, each one's runs, and a run's summary and events, byte for byte, change nothing on disk", async () => {
   const server = start();
   const before = treeHash(m.root);
   const listed = await get(server, '/api/repos');
@@ -108,10 +102,7 @@ test
   expect(treeHash(m.root)).toBe(before);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a call\'s result and logs: the stream asked for, else the session for an agent call and stdout for a script call', async () => {
+test("a call's result and logs: the stream asked for, else the session for an agent call and stdout for a script call", async () => {
   const server = start();
   const before = treeHash(m.root);
   const result = await get(server, `${RUN}/calls/implement%231/result`);
@@ -128,19 +119,13 @@ test
   expect(treeHash(m.root)).toBe(before);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a repository\'s queues are an empty list until the watcher', async () => {
+test("a repository's queues are an empty list until the watcher", async () => {
   const server = start();
   const queues = await get(server, '/api/repos/alpha/queues');
   expect([queues.status, JSON.parse(queues.body)]).toEqual([200, []]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   ['no client header', {}],
   ['X-Sail-Dashboard: 0', { 'X-Sail-Dashboard': '0' }],
   ['X-Sail-Dashboard: true', { 'X-Sail-Dashboard': 'true' }],
@@ -153,10 +138,7 @@ test
   expect(refused.body).not.toContain('alpha');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the Host check takes this server\'s own host and port only, by address or as localhost', () => {
+test("the Host check takes this server's own host and port only, by address or as localhost", () => {
   const at = (host: string) =>
     guard(new Request('http://127.0.0.1:4000/api/repos', { headers: { ...HEADER, Host: host } }), 4000)?.status;
   expect([at('127.0.0.1:4000'), at('localhost:4000')]).toEqual([undefined, undefined]);
@@ -165,35 +147,44 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each(['POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'])('%s gets 405 with Allow: GET, with or without the header', async (method) => {
-  const server = start();
-  for (const headers of [HEADER, {}]) {
-    const response = await fetch(`http://127.0.0.1:${server.port}/api/repos`, { method, headers });
-    expect(response.headers.get('access-control-allow-origin')).toBeNull();
-    expect([response.status, response.headers.get('allow')]).toEqual([405, 'GET']);
-  }
-});
+test.each(['POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'])(
+  '%s gets 405 with Allow: GET, with or without the header',
+  async (method) => {
+    const server = start();
+    for (const headers of [HEADER, {}]) {
+      const response = await fetch(`http://127.0.0.1:${server.port}/api/repos`, { method, headers });
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      expect([response.status, response.headers.get('allow')]).toEqual([405, 'GET']);
+    }
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   ['an unregistered repository', '/api/repos/gamma/runs', () => {}],
   ['a run id with encoded separators', '/api/repos/alpha/runs/..%2F..%2F..%2Foutside/summary', () => {}],
   ['a run id of ..', '/api/repos/alpha/runs/%2E%2E/summary', () => {}],
-  ['a call whose resultPath was edited to lead out', `${RUN}/calls/evil%231/result`, (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', join(m.outside, 'result.json'))],
-  ['a session.log that links out of the run', `${RUN}/calls/spec%231/log`, (m: Machine) => {
-    const log = join(m.alpha.runDir, '01-spec/call-1/session.log');
-    rmSync(log);
-    symlinkSync(join(m.outside, 'session.log'), log);
-  }],
-  ['a summary.json that links out of the run', `${RUN}/summary`, (m: Machine) => {
-    rmSync(join(m.alpha.runDir, 'summary.json'));
-    symlinkSync(join(m.outside, 'secret.txt'), join(m.alpha.runDir, 'summary.json'));
-  }],
+  [
+    'a call whose resultPath was edited to lead out',
+    `${RUN}/calls/evil%231/result`,
+    (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', join(m.outside, 'result.json')),
+  ],
+  [
+    'a session.log that links out of the run',
+    `${RUN}/calls/spec%231/log`,
+    (m: Machine) => {
+      const log = join(m.alpha.runDir, '01-spec/call-1/session.log');
+      rmSync(log);
+      symlinkSync(join(m.outside, 'session.log'), log);
+    },
+  ],
+  [
+    'a summary.json that links out of the run',
+    `${RUN}/summary`,
+    (m: Machine) => {
+      rmSync(join(m.alpha.runDir, 'summary.json'));
+      symlinkSync(join(m.outside, 'secret.txt'), join(m.alpha.runDir, 'summary.json'));
+    },
+  ],
 ] as const)('%s gets 404 and nothing of the file', async (_, path, tamper) => {
   tamper(m);
   const server = start();
@@ -204,10 +195,7 @@ test
   expect(JSON.parse(refused.body)).toEqual({ error: expect.any(String) });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a second dashboard on a port in use is refused, naming the port, and stop() frees it', async () => {
+test('a second dashboard on a port in use is refused, naming the port, and stop() frees it', async () => {
   const first = start();
   const second = startDashboard({ registryDir: m.registryDir, port: first.port });
   expect(second).toEqual({ refused: expect.stringContaining(String(first.port)) });
