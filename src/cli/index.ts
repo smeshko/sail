@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
 import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
+import { dashboard } from './commands/dashboard';
 import { init } from './commands/init';
 import { port } from './commands/port';
 import { resume } from './commands/resume';
@@ -139,6 +140,7 @@ const VERBOSITY_OPTIONS: Readonly<Record<string, OptionSpec>> = {
 /** Each command, with what it takes. Anything else after its name is refused. */
 const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
+  ['dashboard', { options: { port: { type: 'string' } }, positionals: 0, command: dashboard }],
   ['init', bare(init)],
   ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
   ['runs', bare(runs)],

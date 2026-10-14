@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.registry.v1.json",
+  "title": "sail registry entry: one repository on this machine",
+  "description": "A stub until ADW-120's first task: it takes any object.",
+  "type": "object"
+}

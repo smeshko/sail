@@ -7,6 +7,7 @@ import Ajv2020, { type AnySchemaObject, type ErrorObject, type ValidateFunction 
 import event from '../../schemas/sail.event.v1.json' with { type: 'json' };
 import journal from '../../schemas/sail.journal.v1.json' with { type: 'json' };
 import project from '../../schemas/sail.project.v1.json' with { type: 'json' };
+import registry from '../../schemas/sail.registry.v1.json' with { type: 'json' };
 import result from '../../schemas/sail.result.v1.json' with { type: 'json' };
 import run from '../../schemas/sail.run.v1.json' with { type: 'json' };
 import summary from '../../schemas/sail.summary.v1.json' with { type: 'json' };
@@ -18,6 +19,7 @@ export const SCHEMA_NAMES = [
   'sail.summary.v1',
   'sail.result.v1',
   'sail.project.v1',
+  'sail.registry.v1',
 ] as const;
 export type SchemaName = (typeof SCHEMA_NAMES)[number];
 
@@ -28,6 +30,7 @@ const SCHEMAS: Record<SchemaName, AnySchemaObject> = {
   'sail.summary.v1': summary,
   'sail.result.v1': result,
   'sail.project.v1': project,
+  'sail.registry.v1': registry,
 };
 
 /** One way a document breaks its schema. `path` is a JSON pointer into the document, `/` for the whole of it. */
