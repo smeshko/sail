@@ -2,8 +2,9 @@
 //
 // - The watcher alone writes `queue.json`, through this store, which keeps the queue in memory and replaces the whole
 //   file atomically on each change. Anything else asks for a change by dropping a command file (`inbox.ts`).
-// - A change is made on a copy, which becomes the queue only once it is on disk: a write that throws leaves the store
-//   as it was.
+// - A change is made on a copy, which becomes the queue only once it is on disk. A write that throws leaves the store
+//   holding what `queue.json` holds: the old queue when the write failed before its rename, and the new one when only
+//   the directory's sync after it failed. So the next change never writes an old queue back over a newer one.
 // - Items are known by their dedup key. A key whose item is done may be queued again: the ticket system is the memory
 //   of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
@@ -177,7 +178,13 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
     const next = structuredClone(queue);
     const result = make(next);
     next.updatedAt = now().toISOString();
-    replaceFile(path, `${JSON.stringify(next, null, 2)}\n`);
+    try {
+      replaceFile(path, `${JSON.stringify(next, null, 2)}\n`);
+    } catch (error) {
+      const onDisk = readQueueFile(path);
+      if (!('refused' in onDisk)) queue = onDisk;
+      throw error;
+    }
     queue = next;
     return result;
   };
