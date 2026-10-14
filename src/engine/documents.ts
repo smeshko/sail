@@ -72,17 +72,23 @@ export function documentProblems(produces: Readonly<Record<string, unknown>>): s
  * same or a higher level.
  */
 export function readDocument(name: string, text: string): DocumentContent {
-  const marks: ({ heading: DocumentHeading } | { item: DocumentItem })[] = [];
-  Bun.markdown.render(text, {
-    heading: (children, meta) => {
-      marks.push({ heading: { text: children.trim(), level: meta.level } });
-      return '';
-    },
-    listItem: (_children, meta) => {
-      if (meta.depth === 0) marks.push({ item: typeof meta.checked === 'boolean' ? { checked: meta.checked } : {} });
-      return '';
-    },
+  // Bun calls an element's callback after its children's, so a heading inside a list item comes before the item. Each
+  // callback returns a token for its mark instead, in front of its children, and the rendered text holds the tokens in
+  // the document's order. The nonce keeps a document's own text, code included, from passing for a token.
+  type Mark = { heading: DocumentHeading } | { item: DocumentItem };
+  const found: Mark[] = [];
+  const nonce = Bun.randomUUIDv7();
+  const token = (mark: Mark) => `\u0000${nonce}:${found.push(mark) - 1}\u0000`;
+  const rendered = Bun.markdown.render(text, {
+    heading: (children, meta) => token({ heading: { text: children.trim(), level: meta.level } }),
+    listItem: (children, meta) =>
+      meta.depth === 0
+        ? token({ item: typeof meta.checked === 'boolean' ? { checked: meta.checked } : {} }) + children
+        : children,
   });
+  const marks = [...rendered.matchAll(new RegExp(`\u0000${nonce}:(\\d+)\u0000`, 'g'))].map(
+    (match) => found[Number(match[1])] as Mark,
+  );
   const headings: DocumentHeading[] = [];
   const sections: DocumentSection[] = [];
   const items: DocumentItem[] = [];
