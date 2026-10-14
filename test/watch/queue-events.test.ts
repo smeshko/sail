@@ -73,7 +73,7 @@ test('a last line that is no event refuses, naming its line, and leaves the file
   expect(readFileSync(join(dir, 'events.ndjson'), 'utf8')).toBe(text);
 });
 
-test('the event after a failed append first cuts what that append left, so the stream reopens whole (review #1.6)', () => {
+test('the event after a failed append first cuts what that append left, and writes its line again (review #1.6, #2.3)', () => {
   const dir = queueDir();
   const stream = open(dir);
   stream.emit(polled(1));
@@ -83,11 +83,33 @@ test('the event after a failed append first cuts what that append left, so the s
   chmodSync(path, 0o644);
   // What a write that failed part way leaves behind.
   appendFileSync(path, '{"seq":2,"ts":"2026-10-14T09:00:00.000Z","type":"queue:po');
-  expect(stream.emit(polled(3))).toMatchObject({ seq: 2, added: 3 });
+  expect(stream.emit(polled(3))).toMatchObject({ seq: 3, added: 3 });
   expect(queueEvents(dir).map((event) => [event.seq, event.added])).toEqual([
     [1, 1],
-    [2, 3],
+    [2, 2],
+    [3, 3],
   ]);
   expect(queueEventIssues(dir)).toEqual([]);
-  expect(open(dir).emit(polled(4)).seq).toBe(3);
+  expect(open(dir).emit(polled(4)).seq).toBe(4);
+});
+
+test('an append that wrote its whole line but threw is not cut and replaced: its line is kept once, in order (review #2.3)', () => {
+  const dir = queueDir();
+  const stream = open(dir);
+  stream.emit(polled(1));
+  const path = join(dir, 'events.ndjson');
+  chmodSync(path, 0o444);
+  expect(() => stream.emit(polled(2))).toThrow('EACCES');
+  chmodSync(path, 0o644);
+  // What a write that landed whole and then failed its sync leaves behind: the line itself.
+  appendFileSync(path, `${JSON.stringify({ seq: 2, ts: '2026-10-14T09:00:00.000Z', ...polled(2) })}\n`);
+  const before = readFileSync(path, 'utf8');
+  stream.emit(polled(3));
+  expect(readFileSync(path, 'utf8').startsWith(before)).toBe(true);
+  expect(queueEvents(dir).map((event) => [event.seq, event.added])).toEqual([
+    [1, 1],
+    [2, 2],
+    [3, 3],
+  ]);
+  expect(queueEventIssues(dir)).toEqual([]);
 });
