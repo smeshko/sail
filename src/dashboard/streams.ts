@@ -85,12 +85,23 @@ export function createIndexFeed(registryDir: string, pollMs: number): IndexFeed 
   const sockets = new Set<Socket>();
   let last = '';
   let timer: ReturnType<typeof setInterval> | undefined;
-  const current = () => JSON.stringify({ kind: 'index', repos: index(registryDir) } satisfies Message);
+  /** The index message, or undefined while the registry can't be read: the next poll tries again. */
+  const current = () => {
+    try {
+      return JSON.stringify({ kind: 'index', repos: index(registryDir) } satisfies Message);
+    } catch {
+      return undefined;
+    }
+  };
+  /** Sockets that joined while the registry couldn't be read, and have had no index yet. */
+  const waiting = new Set<Socket>();
   const tick = () => {
     const text = current();
-    if (text === last) return;
+    if (text === undefined) return;
+    const changed = text !== last;
     last = text;
-    for (const socket of sockets) socket.send(text);
+    for (const socket of changed ? sockets : waiting) socket.send(text);
+    waiting.clear();
   };
   const stop = () => {
     clearInterval(timer);
@@ -99,20 +110,26 @@ export function createIndexFeed(registryDir: string, pollMs: number): IndexFeed 
   return {
     add(socket) {
       const text = current();
-      socket.send(text);
       sockets.add(socket);
+      timer ??= setInterval(tick, pollMs);
+      if (text === undefined) {
+        waiting.add(socket);
+        return;
+      }
+      socket.send(text);
       if (text !== last) {
         last = text;
         for (const other of sockets) if (other !== socket) other.send(text);
       }
-      timer ??= setInterval(tick, pollMs);
     },
     remove(socket) {
       sockets.delete(socket);
+      waiting.delete(socket);
       if (sockets.size === 0) stop();
     },
     stop() {
       sockets.clear();
+      waiting.clear();
       stop();
     },
   };

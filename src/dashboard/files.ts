@@ -128,9 +128,15 @@ export function runItems(entry: RegistryEntry): RunItem[] {
   });
 }
 
-/** Every repository with its runs. */
+/** Every repository with its runs. A repository whose runs can't be listed has none, and a problem that says why. */
 export function index(registryDir: string): IndexRepo[] {
-  return repos(registryDir).repos.map((repo) => ({ ...repo, runs: runItems(repo) }));
+  return repos(registryDir).repos.map((repo) => {
+    try {
+      return { ...repo, runs: runItems(repo) };
+    } catch (error) {
+      return { ...repo, runs: [], problem: `its runs can't be listed: ${messageOf(error)}` };
+    }
+  });
 }
 
 /** The directory of run `runId` in the repository, or why there is none. */
