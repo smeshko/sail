@@ -2,7 +2,17 @@
 // registry under `SAIL_HOME` just before the run opens. Each case runs a copy of the fixture repository in a temp
 // repository of its own, because a process opens one run per .sail/.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { validateDocument } from '../../src/engine/schemas';
@@ -129,3 +139,19 @@ test('a registry that cannot be written is a warning, and the run still complete
     expect(stderr.split('\n').filter((line) => line !== '')).toHaveLength(1);
   });
 }, 60_000);
+
+test('a .sail/ that is a symlink is recorded where the run writes: beside the link, in its own clone (review #3.2)', async () => {
+  await withTempRepo(async (repo) => {
+    const sailHome = join(repo.home, 'sail-home');
+    copyFixture(repo.dir);
+    const shared = join(repo.home, 'shared', 'config');
+    mkdirSync(join(repo.home, 'shared'));
+    renameSync(join(repo.dir, '.sail'), shared);
+    symlinkSync(shared, join(repo.dir, '.sail'));
+    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '-q']);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const clone = realpathSync(repo.dir);
+    expect(fixtureEntry(sailHome)).toMatchObject({ clone, sailDir: join(clone, '.sail') });
+    expect(readdirSync(join(clone, '.sail-runs')).length).toBeGreaterThan(0);
+  });
+});
