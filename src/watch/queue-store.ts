@@ -125,6 +125,7 @@ export interface QueueStore {
   failed(key: string, reason: string): 'retry' | 'parked';
   /** Records a poll that succeeded, which clears the failures and the pause. */
   polled(poll: { kind: 'ticket'; found: number; added: number; durationMs: number }): void;
+  /** Records a failed poll: a refusal of the credentials pauses the workflow, and any other failure clears the pause. */
   pollFailed(failure: PollFailure): void;
 }
 
@@ -292,6 +293,9 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
             at: now().toISOString(),
           };
         } else {
+          // The provider no longer refuses the credentials, it fails some other way: the workflow is back on the
+          // backoff, so the file says so. A refusal on a later poll pauses it again.
+          delete next.polling.paused;
           next.polling.failures += 1;
         }
       });
