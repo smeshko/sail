@@ -50,10 +50,7 @@ function summary(ended: ReturnType<typeof toHarnessResult>): Record<string, unkn
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a success that submits done gives done with its output, the session id, the spend from modelUsage at the total cost, and the result as raw', () => {
+test('a success that submits done gives done with its output, the session id, the spend from modelUsage at the total cost, and the result as raw', () => {
   const result = resultSuccess({ structured: done(SPEC) });
   const ended = ending(result);
   expect(ended.result).toEqual({
@@ -70,10 +67,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a success that submits blocked gives blocked with its reason', () => {
+test('a success that submits blocked gives blocked with its reason', () => {
   const ended = ending(resultSuccess({ structured: { outcome: 'blocked', reason: 'No acceptance criteria.' } }));
   expect(summary(ended)).toEqual({
     said: 'No acceptance criteria.',
@@ -84,10 +78,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("an API error keeps the provider's text, once, with any other failure the session reported after it", () => {
+test("an API error keeps the provider's text, once, with any other failure the session reported after it", () => {
   const invalid = resultSuccess({ isError: true, result: INVALID_KEY, cost: 0, models: {} });
   const once = ending(invalid, [init(), assistantText('m1', INVALID_KEY, { error: 'authentication_failed' })]);
   const more = ending(invalid, [init(), authStatus('token expired')]);
@@ -117,10 +108,7 @@ const failure = (said: string, endReason = 'failed', reason = 'harness') => ({
   issues: [],
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, SDKResultMessage | undefined, ReturnType<typeof failure>]>([
+test.each<[string, SDKResultMessage | undefined, ReturnType<typeof failure>]>([
   ['a success with no submission', resultSuccess(), failure('the session ended without submitting')],
   [
     'a success whose submission is unreadable',
@@ -167,10 +155,7 @@ test
   expect(summary(ending(result))).toEqual(expected);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, unknown, boolean, string]>([
+test.each<[string, unknown, boolean, string]>([
   ['an Error', new Error('spawn claude ENOENT'), false, 'claude-code: spawn claude ENOENT'],
   ['a string', 'stream closed', false, 'claude-code: stream closed'],
   ['null', null, false, 'claude-code: null'],
@@ -181,19 +166,13 @@ test
   expect(summary(ended)).toEqual(failure(message, aborted ? 'aborted' : 'failed'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an aborted session is error aborted, even when a result came', () => {
+test('an aborted session is error aborted, even when a result came', () => {
   expect(summary(ending(resultSuccess({ structured: done(SPEC) }), [init()], { aborted: true }))).toEqual(
     failure('aborted', 'aborted'),
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the session id is the init's, else the result's, else empty", () => {
+test("the session id is the init's, else the result's, else empty", () => {
   const result = resultSuccess({ structured: done(SPEC), sessionId: 'from-result' });
   expect([
     ending(result, [init({ sessionId: 'from-init' })]).result.sessionId,
@@ -202,10 +181,7 @@ test
   ]).toEqual(['from-init', 'from-result', '']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, string | undefined, boolean]>([
+test.each<[string, string | undefined, boolean]>([
   ['bedrock', 'bedrock', true],
   ['vertex', 'vertex', true],
   ['the first party', 'firstParty', false],

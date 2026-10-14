@@ -1,11 +1,11 @@
 // How a Claude Code session ended, as one HarnessResult. A submission is `done` or `blocked`; everything else is
 // `error`, with the provider's text kept: an error subtype, an API error, no submission, no usage, no result, a throw or
 // an abort. A session that reports no tokens never counts as a success, whatever it submitted (ADR-0008).
-//
-// STUB (TASK-004): the signature only, returning a wrong value.
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { Budget, HarnessResult } from '../../ports/types';
+import type { Budget, HarnessFailure, HarnessResult } from '../../ports/types';
 import type { ReaderState } from './messages';
+import { resultTokens } from './messages';
+import { readSubmission } from './submission';
 
 export interface ResultInput {
   /** The session's result message, when one came. */
@@ -27,10 +27,60 @@ export interface Ended {
   readonly costEstimate: boolean;
 }
 
-export function toHarnessResult(_input: ResultInput): Ended {
-  return {
-    result: { outcome: 'error', message: 'stub', sessionId: '', usage: { costUsd: 0 }, transcript: '', raw: null },
-    endReason: '',
-    costEstimate: false,
-  };
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** Bedrock and Vertex report cost as an estimate. */
+const isEstimate = (result: SDKResultMessage | undefined): boolean =>
+  Object.values(result?.modelUsage ?? {}).some((model) => model.provider === 'bedrock' || model.provider === 'vertex');
+
+export function toHarnessResult(input: ResultInput): Ended {
+  const { result, reader, budget } = input;
+  const costEstimate = isEstimate(result);
+  const raw = result === undefined ? null : costEstimate ? { ...result, costEstimate: true } : result;
+  const session = { sessionId: reader.sessionId ?? result?.session_id ?? '', usage: reader.spent, transcript: '', raw };
+  const failed = (message: string, endReason: string, reason: HarnessFailure = 'harness'): Ended => ({
+    result: { outcome: 'error', message, reason, ...session },
+    endReason,
+    costEstimate,
+  });
+
+  if (input.aborted) return failed('aborted', 'aborted');
+  if (input.thrown !== undefined) return failed(`claude-code: ${messageOf(input.thrown.error)}`, 'failed');
+  if (result === undefined) return failed('the session ended without a result', 'failed');
+
+  switch (result.subtype) {
+    case 'error_max_turns':
+      return failed(`budget exceeded: maxTurns ${budget.maxTurns}`, 'max_turns', 'budget_exceeded');
+    case 'error_max_budget_usd':
+      return failed(`budget exceeded: maxUsd ${budget.maxUsd}`, 'max_budget_usd', 'budget_exceeded');
+    case 'error_max_structured_output_retries': {
+      const said = result.errors.join('; ');
+      return failed(
+        `the output never matched its schema${said === '' ? '' : `: ${said}`}`,
+        'max_structured_output_retries',
+      );
+    }
+    case 'error_during_execution': {
+      const said = result.errors.join('; ');
+      return failed(`the session failed during execution${said === '' ? '' : `: ${said}`}`, 'failed');
+    }
+  }
+
+  if (result.is_error) {
+    const said = [result.result, ...reader.failures.filter((text) => text !== result.result)].filter(
+      (text) => text !== '',
+    );
+    return failed(`the session failed${said.length === 0 ? '' : `: ${said.join('; ')}`}`, 'failed');
+  }
+  const tokens = resultTokens(result);
+  if (tokens.input + tokens.cacheRead + tokens.cacheWrite + tokens.output === 0) {
+    return failed('the session reported no usage', 'failed');
+  }
+  if (result.structured_output === undefined) return failed('the session ended without submitting', 'failed');
+  const submission = readSubmission(result.structured_output);
+  if ('unreadable' in submission) return failed(submission.unreadable, 'failed');
+  if (submission.outcome === 'done') {
+    return { result: { outcome: 'done', output: submission.output, ...session }, endReason: 'submitted', costEstimate };
+  }
+  return { result: { outcome: 'blocked', reason: submission.reason, ...session }, endReason: 'blocked', costEstimate };
 }
