@@ -293,6 +293,52 @@ test('a workflow that throws on import is refused, naming the file', async () =>
   });
 });
 
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a watched workflow with a cap of 0, written past the types, is refused, naming its workflow.ts', async () => {
+  await withTempRepo(async (repo) => {
+    const workflow = join(copyFixture(repo.dir), 'workflows', 'ticket-to-pr', 'workflow.ts');
+    const text = readFileSync(workflow, 'utf8');
+    expect(text).toContain('maxConcurrentRuns: 2 }');
+    writeFileSync(workflow, text.replace('maxConcurrentRuns: 2 }', 'maxConcurrentRuns: 0 as never }'));
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        '.sail/workflows/ticket-to-pr/workflow.ts  has maxConcurrentRuns 0, which is not a whole number of 1 or more\n',
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a watched workflow whose own intake accepts only pr is refused, naming its workflow.ts', async () => {
+  await withTempRepo(async (repo) => {
+    const reviews = join(copyFixture(repo.dir), 'workflows', 'reviews');
+    mkdirSync(reviews);
+    writeFileSync(
+      join(reviews, 'intake.ts'),
+      "import { intake, z } from 'sail';\n\n" +
+        "export const reviewIntake = intake('reviews', { accepts: ['pr'], output: z.object({}) });\n",
+    );
+    writeFileSync(
+      join(reviews, 'workflow.ts'),
+      "import { workflow } from 'sail';\n" +
+        "import { reviewIntake } from './intake';\n\n" +
+        "export default workflow('reviews', { intake: reviewIntake, watch: { every: '5m' }, maxConcurrentRuns: 1 }, " +
+        'async () => {});\n',
+    );
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        ".sail/workflows/reviews/workflow.ts  its intake 'reviews' accepts pr, and sail polls only ticket sources so far\n",
+    });
+  });
+});
+
 test('a sail range the running version does not satisfy is refused, naming the file and /sail', async () => {
   await withTempRepo(async (repo) => {
     const project = join(copyFixture(repo.dir), 'project.yaml');
