@@ -271,3 +271,25 @@ test('a repository whose runs cannot be listed gets a problem in the index, and 
   const listed = await fetch(`http://127.0.0.1:${server.port}/api/repos`, { headers: HEADER });
   expect(listed.status).toBe(200);
 }, 15_000);
+
+test('a STATUS that links out of the run is refused before the upgrade, and a FIFO swapped in mid-follow ends the stream with an error (review #2.2)', async () => {
+  rmSync(join(m.alpha.runDir, 'STATUS'));
+  symlinkSync(join(m.outside, 'secret.txt'), join(m.alpha.runDir, 'STATUS'));
+  const server = start();
+  expect(await upgradeStatus(server, `run=alpha/${GOLDEN_RUN_ID}`, HEADER)).toBe(404);
+  const { dir, rest } = runningRun(40);
+  const socket = connect(server, `run=alpha/${RUNNING_ID}`);
+  expect(await until(() => events(socket).length === 40)).toBe(true);
+  Bun.spawnSync(['mkfifo', join(dir, 'STATUS.fifo')]);
+  renameSync(join(dir, 'STATUS.fifo'), join(dir, 'STATUS'));
+  // Unblocks a server that opened the FIFO, so a broken check fails an assertion rather than hanging the test.
+  const writer = Bun.spawn(['sh', '-c', `sleep 2; printf 'completed\\n' > '${join(dir, 'STATUS')}'`]);
+  try {
+    append(dir, rest);
+    expect(await until(() => socket.closed !== undefined)).toBe(true);
+    expect(socket.messages.at(-1)).toEqual({ kind: 'error', message: expect.stringContaining('STATUS') });
+    expect(socket.closed).toBe(1011);
+  } finally {
+    writer.kill();
+  }
+}, 15_000);
