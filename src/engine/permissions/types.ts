@@ -44,5 +44,6 @@ export const allow: Decision = { allow: true };
 
 /** The verdict that refuses a call: a denial always says why. */
 export function deny(rule: DenialRule, reason: string): Decision {
-  return { allow: false, rule: rule === 'read' ? 'write' : 'read', reason: `stub: ${reason.length}` };
+  if (reason.trim() === '') throw new Error(`a ${rule} denial needs a reason`);
+  return { allow: false, rule, reason };
 }
