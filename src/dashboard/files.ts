@@ -78,11 +78,37 @@ export function findRepo(registryDir: string, name: string): RegistryEntry | und
   return readRegistry(registryDir).entries.find((entry) => entry.name === name);
 }
 
-/** The repository's runs in `listRuns()` order, each with its header's source and its parsed `summary.json`. */
+/** The files a listing reads from a run. */
+const LISTED_FILES = [RUN_HEADER_FILE, 'STATUS', 'summary.json'];
+
+/** Which of the files a listing reads aren't the run's own regular files, or undefined when all are. */
+function strayFiles(dir: string): string | undefined {
+  const stray = LISTED_FILES.filter((name) => {
+    try {
+      lstatSync(join(dir, name));
+    } catch {
+      return false;
+    }
+    return containedFile(dir, join(dir, name)) === undefined;
+  });
+  return stray.length === 0 ? undefined : `${stray.join(', ')}: not a file of this run, so nothing of it is read`;
+}
+
+/**
+ * The repository's runs in `listRuns()` order, each with its header's source and its parsed `summary.json`. A run whose
+ * `run.json`, `STATUS` or `summary.json` links out of it, or isn't a regular file, is listed by id and problem alone.
+ */
 export function runItems(entry: RegistryEntry): RunItem[] {
   if (!existsSync(entry.sailDir)) return [];
-  return listRuns(entry.sailDir).map(({ dir, ...listed }) => {
+  const refused = new Set<string>();
+  const refuse = (dir: string) => {
+    const problem = strayFiles(dir);
+    if (problem !== undefined) refused.add(dir);
+    return problem;
+  };
+  return listRuns(entry.sailDir, refuse).map(({ dir, ...listed }) => {
     const item: RunItem = { ...listed, summary: null };
+    if (refused.has(dir)) return item;
     const problems = listed.problem === undefined ? [] : [listed.problem];
     try {
       item.source = readRunHeader(dir).source;

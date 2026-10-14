@@ -65,13 +65,19 @@ function byStart(a: RunListing, b: RunListing): number {
   return Date.parse(a.startedAt) - Date.parse(b.startedAt);
 }
 
-/** Every run beside `sailDir`, oldest first, then by id. A run with no start goes last. */
-export function listRuns(sailDir: string): RunListing[] {
+/**
+ * Every run beside `sailDir`, oldest first, then by id. A run with no start goes last. A run `refuse` gives a reason
+ * for is listed with that reason as its problem, and none of its files is read.
+ */
+export function listRuns(sailDir: string, refuse?: (dir: string) => string | undefined): RunListing[] {
   const runs = runsDir(sailDir);
+  const listed = (runId: string): RunListing => {
+    const dir = join(runs, runId);
+    const problem = refuse?.(dir);
+    return problem === undefined ? listing(runs, runId) : { runId, dir, problem };
+  };
   // The ids come sorted, and the sort is stable, so runs that started together stay in id order.
-  return runIds(runs)
-    .map((runId) => listing(runs, runId))
-    .sort(byStart);
+  return runIds(runs).map(listed).sort(byStart);
 }
 
 /** The run `name` names: its exact id, or a prefix only one run's id starts with. */
