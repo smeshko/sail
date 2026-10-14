@@ -15,6 +15,12 @@ export interface Permissions {
     readonly commands: readonly string[];
     /** The hosts the step may reach, or `'none'`. */
     readonly network?: 'none' | readonly string[];
+    /**
+     * The tools and MCP servers the step may reach, by name: a tool (`WebFetch`), a server's tool (`linear:get_issue`)
+     * or every tool of a server (`github:*`). Anything not listed is denied, and absent lists none. Reads, writes and
+     * commands are governed by their own lists.
+     */
+    readonly tools?: readonly string[];
 }
 /** The most one step may spend. Going over ends the step in `error`. */
 export interface Budget {

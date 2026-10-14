@@ -213,7 +213,7 @@ interface Payloads {
     callId: string;
     tool: string;
     /** The permission that denied the call. */
-    rule: 'read' | 'write' | 'commands' | 'network';
+    rule: 'read' | 'write' | 'commands' | 'network' | 'tools';
     /** The step's permissions under `rule`. */
     permissions: Partial<Permissions>;
     reason: string;
