@@ -21,23 +21,39 @@ const NAMED_SCHEMAS = new Set(['properties', 'patternProperties', 'definitions',
 /** Where the step schema's root sits in the envelope. */
 const OUTPUT_POINTER = '#/properties/output';
 
+/** A `$ref` to the step schema's root resource as the local pointer it names, or undefined when it names another. */
+function localOf(ref: string, rootId: string | undefined): string | undefined {
+  if (ref.startsWith('#')) return ref;
+  if (rootId === undefined || !ref.startsWith(rootId)) return undefined;
+  const fragment = ref.slice(rootId.length);
+  if (fragment === '') return '#';
+  return fragment.startsWith('#') ? fragment : undefined;
+}
+
+/** `ref`, a reference inside the step schema's root resource, as it resolves from the envelope. */
+function rebasedRef(ref: string, rootId: string | undefined): string {
+  const local = localOf(ref, rootId);
+  if (local === undefined) return ref;
+  if (local === '#' || local === '#/') return OUTPUT_POINTER;
+  if (local.startsWith('#/definitions/') || local.startsWith('#/$defs/')) return local;
+  return local.startsWith('#/') ? OUTPUT_POINTER + local.slice(1) : ref;
+}
+
 /**
- * `node` with every local reference into the step schema rebased onto the envelope's `output`: `#` (Zod's reference to
- * a recursive schema's root) and any `#/…` pointer but the hoisted `#/definitions/…` and `#/$defs/…`. A schema below the
- * root with a `$id` of its own is a resource whose local references mean it, so it is left as it is.
+ * `node` with every reference into the step schema's root resource rebased onto the envelope's `output`: `#` (Zod's
+ * reference to a recursive schema's root), any `#/…` pointer but the hoisted `#/definitions/…` and `#/$defs/…`, and
+ * the same written absolutely through the root's `$id`. A schema below the root with a `$id` of its own is a resource
+ * whose local references mean it, so it is left as it is.
  */
-function rebased(node: unknown, names = false, root = false): unknown {
-  if (Array.isArray(node)) return node.map((item) => rebased(item));
+function rebased(node: unknown, rootId: string | undefined, names = false, root = false): unknown {
+  if (Array.isArray(node)) return node.map((item) => rebased(item, rootId));
   if (typeof node !== 'object' || node === null) return node;
   if (!names && !root && '$id' in node) return node;
   return Object.fromEntries(
     Object.entries(node).map(([key, value]) => {
-      if (names) return [key, rebased(value)];
-      if (key === '$ref' && typeof value === 'string') {
-        const hoisted = value.startsWith('#/definitions/') || value.startsWith('#/$defs/');
-        return [key, value === '#' || (value.startsWith('#/') && !hoisted) ? OUTPUT_POINTER + value.slice(1) : value];
-      }
-      return [key, DATA_KEYWORDS.has(key) ? value : rebased(value, NAMED_SCHEMAS.has(key))];
+      if (names) return [key, rebased(value, rootId)];
+      if (key === '$ref' && typeof value === 'string') return [key, rebasedRef(value, rootId)];
+      return [key, DATA_KEYWORDS.has(key) ? value : rebased(value, rootId, NAMED_SCHEMAS.has(key))];
     }),
   );
 }
@@ -49,7 +65,8 @@ function rebased(node: unknown, names = false, root = false): unknown {
  * resolve against the envelope.
  */
 export function submissionEnvelope(outputSchema: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  const rebasedSchema = rebased(outputSchema, false, true) as Record<string, unknown>;
+  const rootId = typeof outputSchema.$id === 'string' ? outputSchema.$id.replace(/#$/, '') : undefined;
+  const rebasedSchema = rebased(outputSchema, rootId, false, true) as Record<string, unknown>;
   const { $schema: _schema, $id, definitions, $defs, ...output } = rebasedSchema;
   return {
     ...($id === undefined ? {} : { $id }),
