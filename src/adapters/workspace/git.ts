@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { withoutRepositoryVariables } from '../../engine/git-env';
 import { runProcess } from '../../engine/process';
 import { readStatus } from '../../engine/run-dir';
 import { PortError } from '../../ports/errors';
@@ -36,28 +37,6 @@ export const LOCAL_TIMEOUT_MS = 30_000;
 export const WORKSPACE_DIR = 'workspace';
 
 /**
- * What `git rev-parse --local-env-vars` lists, the variables that tie git to one repository, but the user's own `-c`
- * config (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`), which git keeps when it enters another repository too. git
- * exports them to its hooks, so a sail started from a hook would otherwise point every call at the clone, its index
- * included.
- */
-const REPOSITORY_VARIABLES = new Set([
-  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
-  'GIT_CONFIG',
-  'GIT_OBJECT_DIRECTORY',
-  'GIT_DIR',
-  'GIT_WORK_TREE',
-  'GIT_IMPLICIT_WORK_TREE',
-  'GIT_GRAFT_FILE',
-  'GIT_INDEX_FILE',
-  'GIT_NO_REPLACE_OBJECTS',
-  'GIT_REPLACE_REF_BASE',
-  'GIT_PREFIX',
-  'GIT_SHALLOW_FILE',
-  'GIT_COMMON_DIR',
-]);
-
-/**
  * `env` with every way git could ask for credentials turned off, and none of the variables that tie git to a
  * repository. git tries an askpass program before it looks at `GIT_TERMINAL_PROMPT`, so an empty `GIT_ASKPASS` turns
  * off `core.askPass` and `SSH_ASKPASS` too, and ssh never uses one. ssh's own prompts need a terminal, which a fetch,
@@ -66,7 +45,7 @@ const REPOSITORY_VARIABLES = new Set([
  */
 export function nonInteractive(env: Readonly<Record<string, string>> = {}): Record<string, string> {
   return {
-    ...Object.fromEntries(Object.entries(env).filter(([name]) => !REPOSITORY_VARIABLES.has(name))),
+    ...withoutRepositoryVariables(env),
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: '',
     SSH_ASKPASS_REQUIRE: 'never',
