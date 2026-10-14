@@ -160,3 +160,25 @@ test("an entry that can't be removed is reported, and the drain goes on to the c
     chmodSync(locked, 0o755);
   }
 });
+
+test('a command applied but not removable is applied once, and removed by a later drain that can (review #3.3)', () => {
+  const runs = runsDir();
+  const file = dropCommand(runs, { op: 'poll', workflow: 'ticket-to-pr' });
+  const dir = commandsDir(runs);
+  chmodSync(dir, 0o555);
+  try {
+    const first = drain(runs);
+    expect(first.applied).toEqual([{ op: 'poll', workflow: 'ticket-to-pr' }]);
+    expect(first.drained.applied).toBe(1);
+    expect(first.drained.rejected.map((rejected) => rejected.file)).toEqual([file]);
+    expect(first.drained.rejected[0]?.reason).toStartWith(`${basename(file)} was applied, and it can't be removed: `);
+    const second = drain(runs);
+    expect(second.applied).toEqual([]);
+    expect(second.drained.applied).toBe(0);
+    expect(second.drained.rejected.map((rejected) => rejected.file)).toEqual([file]);
+  } finally {
+    chmodSync(dir, 0o755);
+  }
+  expect(drain(runs)).toEqual({ applied: [], drained: { applied: 0, rejected: [] } });
+  expect(readdirSync(dir)).toEqual([]);
+});
