@@ -123,8 +123,7 @@ test('the fake declares keep and sweep', () => {
   expect(createFakeWorkspace({ repo: repo().dir }).capabilities()).toEqual({ keep: true, sweep: true });
 });
 
-test
-  ('the fake reports fake://origin and main unless told otherwise, and starts a workspace from the branch it names', async () => {
+test('the fake reports fake://origin and main unless told otherwise, and starts a workspace from the branch it names', async () => {
   const w = world();
   repo().git('branch', '-f', 'trunk', 'main');
   const defaults = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
@@ -151,8 +150,7 @@ test
   });
 });
 
-test
-  ('a workspace git no longer knows is still removed, and nothing beside it in the run directory is', async () => {
+test('a workspace git no longer knows is still removed, and nothing beside it in the run directory is', async () => {
   const w = world();
   const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
   const run = await w.run('r1');

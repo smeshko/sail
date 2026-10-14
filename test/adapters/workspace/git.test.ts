@@ -6,8 +6,7 @@ import { join } from 'node:path';
 import { gitSync, nonInteractive, stripUserinfo } from '../../../src/adapters/workspace/git';
 import { withTempRepo } from '../../helpers/temp-repo';
 
-test
-  ("git never asks: no terminal prompt, no credential manager dialog, and an ssh in batch mode unless the caller's own is set", () => {
+test("git never asks: no terminal prompt, no credential manager dialog, and an ssh in batch mode unless the caller's own is set", () => {
   const plain = nonInteractive({ HOME: '/home/sail' });
   const own = nonInteractive({ HOME: '/home/sail', GIT_SSH_COMMAND: 'ssh -i key', GIT_TERMINAL_PROMPT: '1' });
   expect({ plain, own }).toEqual({
@@ -21,8 +20,7 @@ test
   });
 });
 
-test
-  ("a git call in a directory that is not there, or one that outruns its timeout, is a failed result and no throw, and one given no env runs with this process's", async () => {
+test("a git call in a directory that is not there, or one that outruns its timeout, is a failed result and no throw, and one given no env runs with this process's", async () => {
   await withTempRepo(async (repo) => {
     const missing = gitSync(join(repo.dir, 'missing'), ['status'], repo.env);
     // An alias that sleeps stands in for a git call that hangs.
@@ -37,8 +35,7 @@ test
   });
 });
 
-test
-  ("a remote's URL keys and logs without its credentials, and any other URL as it is", () => {
+test("a remote's URL keys and logs without its credentials, and any other URL as it is", () => {
   const urls = [
     'https://user:token@github.com/o/r.git',
     'https://token@github.com/o/r',

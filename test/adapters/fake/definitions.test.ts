@@ -113,8 +113,7 @@ test('the workspace fake defaults its repo to context.root: it leases and create
   });
 });
 
-test
-  ('the workspace fake takes remote and defaultBranch, and keeps its leases in runsDir/fake/leases', async () => {
+test('the workspace fake takes remote and defaultBranch, and keeps its leases in runsDir/fake/leases', async () => {
   await withTempRepo(async (repo) => {
     const ctx = context(repo);
     const workspace = await fakeAdapters.workspace.create({ remote: 'fake://elsewhere', defaultBranch: 'main' }, ctx);

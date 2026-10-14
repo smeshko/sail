@@ -5,8 +5,10 @@
 //
 // A workspace is `<runDir>/workspace`: a detached worktree of the repository. git is handed every path resolved, since
 // it runs in the repository and a caller's paths are relative to where the caller runs.
-import { existsSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { runProcess } from '../../engine/process';
 import { readStatus } from '../../engine/run-dir';
 import { PortError } from '../../ports/errors';
 import type { Diff, Workspace } from '../../ports/types';
@@ -209,12 +211,41 @@ export function stripUserinfo(url: string): string {
   return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1');
 }
 
-// TASK-002 (ADW-93) replaces this stub.
-/** `git fetch --no-tags <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. */
+/**
+ * `git fetch --no-tags <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. Any end
+ * but a clean exit is `unavailable`, with what git wrote to stderr.
+ */
 export async function fetchRemote(
-  _repo: string,
-  _remote: string,
-  _env: Readonly<Record<string, string>> | undefined,
-  _timeoutMs: number,
-  _signal?: AbortSignal,
-): Promise<void> {}
+  repo: string,
+  remote: string,
+  env: Readonly<Record<string, string>> | undefined,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const logs = mkdtempSync(join(tmpdir(), 'sail-fetch-'));
+  try {
+    const stderr = join(logs, 'stderr');
+    const end = await runProcess({
+      command: ['git', 'fetch', '--no-tags', remote],
+      cwd: repo,
+      env: nonInteractive(env ?? inherited()),
+      stdout: join(logs, 'stdout'),
+      stderr,
+      timeoutMs,
+      graceMs: 1_000,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (end.started && end.code === 0) return;
+    const said = existsSync(stderr) ? readFileSync(stderr, 'utf8').trim() : '';
+    const how = !end.started
+      ? end.message
+      : end.timedOut
+        ? `timed out after ${timeoutMs} ms`
+        : end.aborted
+          ? 'stopped'
+          : `exited ${end.code ?? end.signal}`;
+    throw new PortError('workspace', 'create', 'unavailable', `git fetch ${remote} ${how}: ${said}`.trim());
+  } finally {
+    rmSync(logs, { recursive: true, force: true });
+  }
+}

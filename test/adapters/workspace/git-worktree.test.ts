@@ -109,10 +109,7 @@ async function withServer<T>(
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-describe
-  .skip // TDD-PENDING TASK-002
-  ('the port suite', () => {
+describe('the port suite', () => {
   workspaceSuite('git-worktree', async (emit) => {
     const repo = clone();
     const w = world(repo);
@@ -120,10 +117,7 @@ describe
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('create fetches first: a commit pushed to the origin after the clone fetched is the new base, and origin/main moves to it', async () => {
+test('create fetches first: a commit pushed to the origin after the clone fetched is the new base, and origin/main moves to it', async () => {
   await withTempRepo(async (repo) => {
     const origin = withOrigin(repo);
     const pushed = origin.push('later.txt');
@@ -136,10 +130,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("the clone is left as it was: its HEAD, its checked-out branch and its status, with an uncommitted edit and the run's branch checked out", async () => {
+test("the clone is left as it was: its HEAD, its checked-out branch and its status, with an uncommitted edit and the run's branch checked out", async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     repo.git('checkout', '-q', '-b', BRANCH);
@@ -162,10 +153,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('no git call can prompt: an origin that asks for credentials fails create as unavailable, with terminal prompts disabled', async () => {
+test('no git call can prompt: an origin that asks for credentials fails create as unavailable, with terminal prompts disabled', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     const w = world(repo);
@@ -193,10 +181,7 @@ test
   });
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a fetch that hangs is killed at fetchTimeoutMs, and one whose signal aborts is stopped', async () => {
+test('a fetch that hangs is killed at fetchTimeoutMs, and one whose signal aborts is stopped', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     const w = world(repo);
@@ -220,10 +205,7 @@ test
   });
 }, 5_000);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('credentials are stripped from the remote: neither repository() nor workspace:leased holds them', async () => {
+test('credentials are stripped from the remote: neither repository() nor workspace:leased holds them', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     repo.git('remote', 'set-url', 'origin', 'https://user:secret@127.0.0.1:9/o/r.git');
@@ -240,10 +222,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a missing default branch is refused as invalid, naming git remote set-head and the option, and the option wins over origin's HEAD", async () => {
+test("a missing default branch is refused as invalid, naming git remote set-head and the option, and the option wins over origin's HEAD", async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     const w = world(repo);
@@ -268,10 +247,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('release removes a workspace git no longer knows, and never a path beside it', async () => {
+test('release removes a workspace git no longer knows, and never a path beside it', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     const w = world(repo);
@@ -298,10 +274,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('nothing is symlinked or copied into a workspace: the clone has an untracked .env, and the workspace has no untracked or ignored file', async () => {
+test('nothing is symlinked or copied into a workspace: the clone has an untracked .env, and the workspace has no untracked or ignored file', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     writeFileSync(join(repo.dir, '.env'), 'TOKEN=secret\n');
@@ -315,10 +288,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('git-worktree is a built-in for the workspace port alone: its options are remote and defaultBranch, and any other is refused by name', async () => {
+test('git-worktree is a built-in for the workspace port alone: its options are remote and defaultBranch, and any other is refused by name', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     const sailDir = copyFixture(repo.dir);

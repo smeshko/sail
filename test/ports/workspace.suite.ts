@@ -248,8 +248,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(paths.map((path) => existsSync(path))).toEqual([false, false, true, true, true]);
   });
 
-  test
-    (`${label}: repository() names the remote that keys the leases, and the default branch`, async () => {
+  test(`${label}: repository() names the remote that keys the leases, and the default branch`, async () => {
     const { adapter, world } = await start();
     const repository = await settle(adapter.repository());
     expect(parseIssues(Repository, repository)).toEqual([]);
@@ -259,8 +258,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     });
   });
 
-  test
-    (`${label}: a workspace created with no base starts from the default branch's tip`, async () => {
+  test(`${label}: a workspace created with no base starts from the default branch's tip`, async () => {
     const { adapter, world } = await start();
     const r1 = await world.run('r1');
     const workspace = held(await settle(adapter.create(r1, { branch: BRANCH })));
@@ -269,8 +267,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(world.git(path, 'rev-parse', 'HEAD')).toEqual({ code: 0, stdout: world.baseSha });
   });
 
-  test
-    (`${label}: diff over <rev>...HEAD is taken against the merge-base, and diff over a sha against that sha`, async () => {
+  test(`${label}: diff over <rev>...HEAD is taken against the merge-base, and diff over a sha against that sha`, async () => {
     const { adapter, world } = await start();
     const { path } = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
     const commit = (file: string) => {
@@ -300,8 +297,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     });
   });
 
-  test
-    (`${label}: diff refuses as invalid a range outside <rev>, <rev>... and <rev>...HEAD, and a rev that names nothing`, async () => {
+  test(`${label}: diff refuses as invalid a range outside <rev>, <rev>... and <rev>...HEAD, and a rev that names nothing`, async () => {
     const { adapter, world } = await start();
     const { path } = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });
     /** How `diff()` refused `range`, and whether it said the range itself is none: `'diffed'` when it didn't refuse. */
@@ -330,8 +326,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     });
   });
 
-  test
-    (`${label}: reopen gives back the run's workspace while its HEAD descends from its base, and emits nothing`, async () => {
+  test(`${label}: reopen gives back the run's workspace while its HEAD descends from its base, and emits nothing`, async () => {
     const { adapter, world, capture } = await start();
     const r1 = await world.run('r1');
     const created = await adapter.create(r1, { base: world.base, branch: BRANCH });
@@ -345,8 +340,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(capture.events.length).toBe(before);
   });
 
-  test
-    (`${label}: reopen refuses as invalid a workspace that is gone, is no worktree, or has lost its base`, async () => {
+  test(`${label}: reopen refuses as invalid a workspace that is gone, is no worktree, or has lost its base`, async () => {
     const { adapter, world } = await start();
     const reopened = async (spoil: (path: string) => void) => {
       const run = await world.run(`r-${Math.random().toString(36).slice(2, 8)}`);
