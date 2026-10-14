@@ -332,6 +332,36 @@ test('listDesignated skips a listed ticket gone from the team by its read, and k
   ]);
 });
 
+test('listDesignated skips a listed ticket deleted while its comment pages are read, and keeps the rest (review R3-1)', async () => {
+  const comments = [1, 2, 3].map((n) => ({ body: `Comment ${n}`, createdAt: `2026-10-0${n}T09:00:00.000Z` }));
+  const world = createLinearWorld(
+    seedOf(
+      RENAMED_STATES,
+      [
+        { number: 1, title: 'Gone', state: 'Ready', labels: ['sail'], comments },
+        { number: 2, title: 'Kept', state: 'Ready', labels: ['sail'] },
+      ],
+      2,
+    ),
+  );
+  let deleted = false;
+  const answer = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  // ADW-1 is deleted after its first read: its next comment page, and any later read of it, find nothing.
+  const fetch: Fetch = async (input, init) => {
+    const { operationName, variables } = JSON.parse(String(init.body));
+    if (operationName === 'SailTicketComments' && variables.id === 'issue-1') {
+      deleted = true;
+      return answer({ errors: [{ message: 'Entity not found: Issue', extensions: { code: 'INPUT_ERROR' } }] }, 400);
+    }
+    if (deleted && operationName === 'SailTicket' && variables.number === 1)
+      return answer({ data: { issues: { nodes: [] } } });
+    return world.fetch(input, init);
+  };
+  const adapter = createLinearTicketSource({ team: 'ADW', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch });
+  expect((await adapter.listDesignated('sail')).map((ticket) => ticket.ticketKey)).toEqual(['ADW-2']);
+});
+
 test('a team Linear doesn’t have is not_found, naming it, where an empty list or no ticket would hide it, and an empty list of a real team is empty (review R1-3)', async () => {
   const world = createLinearWorld(SEED);
   const typo = createLinearTicketSource({ team: 'ADX', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch: world.fetch });
