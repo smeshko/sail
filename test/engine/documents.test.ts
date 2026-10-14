@@ -288,6 +288,24 @@ test("documentProblems names two documents' validators that derive one key, with
   expect(documentProblems({ 'spec.md': specDoc, 'notes.md': 'file' })).toEqual([]);
 });
 
+test('documentProblems names a hand-built document whose validator has no check label, derives or validate function, rather than throwing (review R1-5)', () => {
+  const validate = () => ({ problems: [] });
+  const produces = {
+    'spec.md': { kind: 'document', template: 'spec.md', validators: [null, { check: 'x', validate }] },
+    'plan.md': { kind: 'document', template: 'plan.md', validators: [{ derives: ['n'], validate }] },
+    'notes.md': { kind: 'document', template: 'notes.md', validators: [{ check: 'x', derives: [7], validate }] },
+    'todo.md': { kind: 'document', template: 'todo.md', validators: [{ check: 'x', derives: [] }] },
+  };
+  const not = 'is not a validator: it needs a check label, the keys it derives and a validate function';
+  expect(documentProblems(produces)).toEqual([
+    `'spec.md' validator 0 ${not}`,
+    `'spec.md' validator 1 ${not}`,
+    `'plan.md' validator 0 ${not}`,
+    `'notes.md' validator 0 ${not}`,
+    `'todo.md' validator 0 ${not}`,
+  ]);
+});
+
 test('a document of 1 MiB that is all placeholders is validated in time, and each check gives at most its first 20 problems, then how many more it found (review R1-1)', () => {
   const out = produced({ 'spec.md': '{{x:y}}\n'.repeat(MAX_DOCUMENT_BYTES / 8) });
   const many = { check: 'many', derives: [], validate: () => ({ problems: ['a', 'b', ...Array(20).fill('c')] }) };
