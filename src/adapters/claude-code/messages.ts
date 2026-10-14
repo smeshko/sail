@@ -105,23 +105,26 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
   let model: string | undefined;
   let turns = 0;
   let toolCalls = 0;
-  let closed: Tokens = ZERO;
   let spent: Usage = usageOf(ZERO, 0);
-  let turn: { id: string; usage: TurnUsage } | undefined;
+  // The last usage each of the session's own turns carried, by message id. A tool's result can come between two
+  // messages of one turn, since the CLI runs a tool while the model still writes, so a turn closed early is reopened by
+  // its id's next message and its usage replaced, never added twice.
+  const turnUsage = new Map<string, TurnUsage>();
+  let openTurn: string | undefined;
 
   const out = (found: HarnessEvent[]): HarnessEvent[] => {
     events.push(...found);
     return found;
   };
 
-  /** Closes the open turn, giving its usage update. */
+  /** Closes the open turn, giving the usage update of every turn so far. */
   const closeTurn = (): HarnessEvent[] => {
-    if (turn === undefined) return [];
-    turns++;
-    closed = add(closed, tokensOf(turn.usage));
+    if (openTurn === undefined) return [];
+    openTurn = undefined;
+    turns = turnUsage.size;
+    const closed = [...turnUsage.values()].reduce<Tokens>((sum, usage) => add(sum, tokensOf(usage)), ZERO);
     spent = usageOf(closed, 0);
-    turn = undefined;
-    return [{ type: 'usage:update', turn: turns, tokens: { ...closed }, costUsdSoFar: 0 }];
+    return [{ type: 'usage:update', turn: turns, tokens: closed, costUsdSoFar: 0 }];
   };
 
   const endTool = (callId: string, status: 'completed' | 'failed'): HarnessEvent => {
@@ -139,8 +142,9 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     const found: HarnessEvent[] = [];
     // A subagent's messages are no turns of this session: their tokens reach it through the result's modelUsage.
     if (message.parent_tool_use_id === null) {
-      if (turn !== undefined && turn.id !== message.message.id) found.push(...closeTurn());
-      turn = { id: message.message.id, usage: message.message.usage };
+      if (openTurn !== undefined && openTurn !== message.message.id) found.push(...closeTurn());
+      openTurn = message.message.id;
+      turnUsage.set(openTurn, message.message.usage);
     }
     if (message.error !== undefined) failures.push(textOf(message) || message.error);
     for (const block of message.message.content) {
