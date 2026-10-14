@@ -3,15 +3,15 @@
 // so each failure keeps Linear's message. The definition reads the API key, and the endpoint, from the operator's
 // environment alone (D3).
 //
-// TDD stub (linear-ticket-source TASK-004 to TASK-005): the reads are final, the writes and the definition answer wrong.
+// TDD stub (linear-ticket-source TASK-005): the operations are final, the definition answers wrong.
 // The stub is registered in BUILTINS already, so the built-in lists the existing tests name stay true from here on.
 import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions, TicketSource } from '../../ports/ticket-source';
-import type { Ticket } from '../../ports/types';
+import { type Ticket, TicketMove, type TicketState } from '../../ports/types';
 import { createLinearClient, type Fetch, LINEAR_ENDPOINT } from './linear-client';
-import { COMMENT_FIELDS, TICKET_FIELDS, toTicket } from './linear-ticket';
+import { COMMENT_FIELDS, stateTypeOf, TICKET_FIELDS, toTicket } from './linear-ticket';
 
 export interface LinearTicketSourceOptions extends ProviderOptions {
   /** The team key, such as `ADW`. */
@@ -39,6 +39,18 @@ const DESIGNATED = `query SailDesignated($team: String!, $label: String!, $types
   ) { nodes { ${TICKET_FIELDS} } pageInfo { hasNextPage endCursor } }
 }`;
 
+const TEAM = `query SailTeam($team: String!) {
+  teams(filter: { key: { eq: $team } }) { nodes { id key states { nodes { id name type position } } } }
+}`;
+
+const MOVE = `mutation SailMove($id: String!, $stateId: String!) {
+  issueUpdate(id: $id, input: { stateId: $stateId }) { success issue { id state { id name type } } }
+}`;
+
+const COMMENT = `mutation SailComment($id: String!, $body: String!) {
+  commentCreate(input: { issueId: $id, body: $body }) { success comment { id url } }
+}`;
+
 /** The Linear state types a designated ticket may be in to be listed: those sail reads as unstarted. */
 const UNSTARTED_TYPES = ['triage', 'backlog', 'unstarted'];
 
@@ -54,11 +66,21 @@ interface Node {
   number: number;
   comments: Page<unknown>;
 }
+interface LinearState {
+  id: string;
+  name: string;
+  type: string;
+  position: number;
+}
 
-const NOWHERE = { type: 'unstarted', name: '' } as const;
+/** A state as the port reports it: its type and name, nothing of Linear's. */
+const portState = (state: { name: string; type: string }, op: string): TicketState => ({
+  type: stateTypeOf(state.type, op),
+  name: state.name,
+});
 
 export function createLinearTicketSource(options: LinearTicketSourceOptions): TicketSource {
-  const { team } = options;
+  const { team, inReview } = options;
   const client = createLinearClient({
     endpoint: options.endpoint,
     apiKey: options.apiKey,
@@ -66,6 +88,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   });
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
+  let teamStates: LinearState[] | undefined;
 
   /** The ticket node and every page of its comments, or a PortError of `op`. Emits nothing. */
   async function lookup(op: string, ticketKey: string): Promise<{ node: Node; comments: unknown[] }> {
@@ -101,6 +124,61 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       page = more.issue.comments.pageInfo;
     }
     return { node, comments };
+  }
+
+  async function states(op: string): Promise<LinearState[]> {
+    if (teamStates !== undefined) return teamStates;
+    const data = await client.request<{ teams: { nodes: { states: { nodes: LinearState[] } }[] } }>(
+      op,
+      'SailTeam',
+      TEAM,
+      {
+        team,
+      },
+    );
+    const [found] = data.teams.nodes;
+    if (found === undefined) throw new PortError('ticketSource', op, 'not_found', `Linear has no team ${team}`);
+    teamStates = [...found.states.nodes].sort((a, b) => a.position - b.position);
+    return teamStates;
+  }
+
+  /** The id of the state `move` lands on. */
+  async function target(op: string, move: TicketMove): Promise<string> {
+    const all = await states(op);
+    const ofType = (type: string) => all.filter((state) => state.type === type);
+    const review = inReview === undefined ? undefined : ofType('started').find((state) => state.name === inReview);
+    if (move === 'in-review' && review === undefined) {
+      throw new PortError(
+        'ticketSource',
+        op,
+        'invalid',
+        inReview === undefined
+          ? 'in-review is no move without the inReview option'
+          : `the inReview option names '${inReview}', which is no started state of team ${team}`,
+      );
+    }
+    const chosen =
+      move === 'in-review'
+        ? review
+        : move === 'in-progress'
+          ? ofType('started').find((state) => state.name !== inReview)
+          : move === 'done'
+            ? ofType('completed')[0]
+            : (ofType('unstarted')[0] ?? ofType('backlog')[0]);
+    if (chosen === undefined)
+      throw new PortError('ticketSource', op, 'invalid', `team ${team} has no state for ${move}`);
+    return chosen.id;
+  }
+
+  async function move(op: string, id: string, to: TicketMove): Promise<{ state: TicketState; raw: object }> {
+    const stateId = await target(op, to);
+    const data = await client.request<{
+      issueUpdate: { success: boolean; issue: { state: { name: string; type: string } } | null };
+    }>(op, 'SailMove', MOVE, { id, stateId });
+    if (!data.issueUpdate.success || data.issueUpdate.issue === null) {
+      throw new PortError('ticketSource', op, 'conflict', `Linear did not move ticket ${id}`, data);
+    }
+    return { state: portState(data.issueUpdate.issue.state, op), raw: data };
   }
 
   return {
@@ -139,10 +217,47 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const number = (ticket: Ticket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
       return tickets.sort((a, b) => number(a) - number(b));
     },
-    claim: async () => ({ claimed: false, state: { ...NOWHERE }, raw: null }),
-    update: async () => ({ state: { ...NOWHERE }, raw: null }),
-    comment: async () => ({ id: '', raw: null }),
-    capabilities: () => ({ comments: false, links: false, attachments: false, moves: [] }),
+    async claim(ticketKey) {
+      const { node } = await lookup('claim', ticketKey);
+      const read = (node as unknown as { state: { name: string; type: string } }).state;
+      const state = portState(read, 'claim');
+      if (state.type !== 'unstarted') return { claimed: false, state, raw: node };
+      const moved = await move('claim', node.id, 'in-progress');
+      emit({ type: 'ticket:claimed', ticketKey, state: moved.state });
+      return { claimed: true, ...moved };
+    },
+    async update(ticketKey, change) {
+      if (!TicketMove.safeParse(change.state).success) {
+        throw new PortError('ticketSource', 'update', 'invalid', `${String(change.state)} is not a move`);
+      }
+      const { node } = await lookup('update', ticketKey);
+      const moved = await move('update', node.id, change.state);
+      emit({ type: 'ticket:updated', ticketKey, change: { state: change.state }, state: moved.state });
+      return moved;
+    },
+    async comment(ticketKey, body) {
+      const { node } = await lookup('comment', ticketKey);
+      const data = await client.request<{
+        commentCreate: { success: boolean; comment: { id: string; url: string } | null };
+      }>('comment', 'SailComment', COMMENT, { id: node.id, body });
+      if (!data.commentCreate.success || data.commentCreate.comment === null) {
+        throw new PortError(
+          'ticketSource',
+          'comment',
+          'conflict',
+          `Linear did not post the comment on ${ticketKey}`,
+          data,
+        );
+      }
+      emit({ type: 'ticket:commented', ticketKey, body });
+      return { id: data.commentCreate.comment.id, url: data.commentCreate.comment.url, raw: data };
+    },
+    capabilities: () => ({
+      comments: true,
+      links: true,
+      attachments: true,
+      moves: ['unstarted', 'in-progress', ...(inReview === undefined ? [] : (['in-review'] as const)), 'done'],
+    }),
   };
 }
 

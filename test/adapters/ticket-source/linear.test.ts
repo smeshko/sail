@@ -108,10 +108,7 @@ const context = (env: Env): AdapterContext => ({
 
 // The port suite, offline: a fresh world per case, its review state named Code Review.
 
-// biome-ignore format: TDD-PENDING TASK-004
-describe
-  .skip // TDD-PENDING TASK-004
-  ('the port suite', () => {
+describe('the port suite', () => {
   ticketSourceSuite('linear', async (emit) => ({
     adapter: linear(SEED, { inReview: 'Code Review', emit }).adapter,
     world: {
@@ -305,10 +302,7 @@ test('a failure Linear answers to SailDesignated or SailTicket rejects with the 
 
 // Writes.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a claim takes a designated backlog-type ticket to the first started state by position that is not the review state, and a claim on a completed-type ticket is not taken and moves nothing', async () => {
+test('a claim takes a designated backlog-type ticket to the first started state by position that is not the review state, and a claim on a completed-type ticket is not taken and moves nothing', async () => {
   const { world, adapter, capture } = linear(SEED, { inReview: 'Code Review' });
   const taken = await adapter.claim('ADW-8');
   const kept = await adapter.claim('ADW-9');
@@ -328,10 +322,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('update lands each move by state type: done on the lowest-position completed state of two, and unstarted on the backlog state of a team with no unstarted-type state', async () => {
+test('update lands each move by state type: done on the lowest-position completed state of two, and unstarted on the backlog state of a team with no unstarted-type state', async () => {
   const states: WorldState[] = [
     { id: 's-later', name: 'Later', type: 'backlog', position: 0 },
     { id: 's-doing', name: 'Doing', type: 'started', position: 1 },
@@ -350,10 +341,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('without inReview, capabilities leave in-review out and update to it is invalid, naming the option; an inReview that names no started state is invalid too', async () => {
+test('without inReview, capabilities leave in-review out and update to it is invalid, naming the option; an inReview that names no started state is invalid too', async () => {
   const plain = linear(SEED);
   const misnamed = linear(SEED, { inReview: 'Shipped' });
   const errors = [
@@ -379,19 +367,13 @@ test
   expect([plain.world.ticket(1).state, misnamed.world.ticket(1).state]).toEqual(['Ready', 'Ready']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('update with something that is no move is invalid, and sends Linear nothing', async () => {
+test('update with something that is no move is invalid, and sends Linear nothing', async () => {
   const { world, adapter } = linear(SEED, { inReview: 'Code Review' });
   const error = await rejection(adapter.update('ADW-1', { state: 'closed' as TicketMove }));
   expect([portFailure(error), world.requests]).toEqual([{ port: 'ticketSource', op: 'update', code: 'invalid' }, []]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the team’s states are read once per adapter, across several writes', async () => {
+test('the team’s states are read once per adapter, across several writes', async () => {
   const { world, adapter } = linear(SEED, { inReview: 'Code Review' });
   await adapter.claim('ADW-1');
   await adapter.update('ADW-1', { state: 'done' });
@@ -400,10 +382,7 @@ test
   expect([count('SailTeam'), count('SailMove')]).toEqual([1, 3]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a rate limit on the move rejects the claim as unavailable with Linear’s message, leaves the ticket where it was, and emits nothing', async () => {
+test('a rate limit on the move rejects the claim as unavailable with Linear’s message, leaves the ticket where it was, and emits nothing', async () => {
   const { world, adapter, capture } = linear(SEED, { inReview: 'Code Review' });
   world.failNext('SailMove', RATE_LIMITED);
   const error = await rejection(adapter.claim('ADW-1'));
@@ -417,10 +396,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('Linear answering success: false to the move or the comment is a conflict, and emits nothing', async () => {
+test('Linear answering success: false to the move or the comment is a conflict, and emits nothing', async () => {
   const { world, adapter, capture } = linear(SEED, { inReview: 'Code Review' });
   const ready = { id: 'state-ready', name: 'Ready', type: 'unstarted' };
   const comment = { id: 'comment-9', url: `${URL_OF('ADW-1')}#comment-9` };
