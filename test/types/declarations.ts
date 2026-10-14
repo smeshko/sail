@@ -13,6 +13,21 @@ agent('no-permissions', { prompt: './prompt.md', output: Output, budget });
 // @ts-expect-error TS2741: an agent step must declare its budget
 agent('no-budget', { prompt: './prompt.md', output: Output, permissions });
 
+agent('with-tools', {
+  prompt: './prompt.md',
+  output: Output,
+  permissions: { ...permissions, tools: ['WebFetch', 'linear:get_issue', 'github:*'] },
+  budget,
+});
+
+agent('one-tool', {
+  prompt: './prompt.md',
+  output: Output,
+  // @ts-expect-error TS2322: a step lists its tools, so one name is not enough
+  permissions: { ...permissions, tools: 'WebFetch' },
+  budget,
+});
+
 agent('raw-schema', {
   prompt: './prompt.md',
   // @ts-expect-error TS2322: a schema is not a binding until value() wraps it

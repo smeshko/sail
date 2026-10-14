@@ -159,6 +159,35 @@ test("an agent records its permissions as declared, network included, and leaves
   });
 });
 
+test('an agent records the tools it lists as declared, and run.json takes them', () => {
+  const listing = { ...permissions, tools: ['WebFetch', 'linear:*'] };
+  const step = agent('fetcher', { prompt: './p.md', output: Out, permissions: listing, budget });
+  const entry = entryOf(step);
+  expect(entry).toEqual({
+    kind: 'agent',
+    origin: 'repo:.sail/stages/fetcher',
+    model: 'model-default',
+    output: 'Out',
+    permissions: listing,
+    budget,
+  });
+  const header = {
+    schema: 'sail.run.v1',
+    runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+    source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+    claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
+    workflow: { name: 'unit', version: 1 },
+    sail: { version: '0.0.0', runtime: 'bun' },
+    adapters: Object.fromEntries(
+      Object.keys(CONFIG.adapters).map((port) => [port, { use: 'fake', origin: 'builtin' }]),
+    ),
+    intake: { name: 'ticket', origin: 'builtin' },
+    stages: { fetcher: entry },
+    startedAt: '2026-09-27T09:00:00.000Z',
+  };
+  expect(validateDocument('sail.run.v1', header)).toEqual([]);
+});
+
 test("a script's network of none records [], a list stays, and none declared is left out", () => {
   const none = script('none', { run: './r.sh', output: Out, network: 'none' });
   const hosts = script('hosts', { run: './r.sh', output: Out, network: ['api.example.com'] });
