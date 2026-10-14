@@ -479,3 +479,28 @@ test('a paused workflow whose poll command fails otherwise is no longer paused, 
   expect(timers.pending()).toEqual([]);
   poller.stop();
 });
+
+test('an answer holding a ticket with an empty key fails the poll as invalid, and the queue still opens (review #2.2)', async () => {
+  const dir = tempDir();
+  const clock = manualClock(START);
+  const fake = fakeSource(dir);
+  const source: TicketSource = { ...fake, listDesignated: async () => [ticket('FAKE-1'), ticket('')] };
+  const a = target(dir, 'a', 'sail', source, clock);
+  expect(await pollOnce(a, clock)).toBe('failed');
+  expect(queueFile(dir, 'a').items).toEqual([]);
+  expect(events(dir, 'a')).toEqual([
+    {
+      type: 'queue:error',
+      port: 'ticketSource',
+      adapter: 'fake',
+      code: 'invalid',
+      message: expect.stringMatching(
+        /^ticketSource\.listDesignated: the answer is not a list of tickets: 1\.ticketKey /,
+      ),
+      paused: false,
+      retryInMs: 60_000,
+    },
+  ]);
+  expect('refused' in openQueue({ runsDir: dir, workflow: 'a', label: 'sail', now: clock })).toBe(false);
+  expect(queueEventIssues(queueDir(dir, 'a'))).toEqual([]);
+});
