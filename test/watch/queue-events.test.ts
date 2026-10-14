@@ -113,3 +113,25 @@ test('an append that wrote its whole line but threw is not cut and replaced: its
   ]);
   expect(queueEventIssues(dir)).toEqual([]);
 });
+
+test('an event whose cut of a torn tail fails is kept, and written in order once the file recovers (review #3.2)', () => {
+  const dir = queueDir();
+  const stream = open(dir);
+  stream.emit(polled(1));
+  const path = join(dir, 'events.ndjson');
+  chmodSync(path, 0o444);
+  expect(() => stream.emit(polled(2))).toThrow('EACCES');
+  chmodSync(path, 0o644);
+  appendFileSync(path, '{"seq":2,"ts":"2026-10-14T09:00:00.000Z","type":"queue:po');
+  chmodSync(path, 0o444);
+  expect(() => stream.emit(polled(3))).toThrow('EACCES');
+  chmodSync(path, 0o644);
+  expect(stream.emit(polled(4)).seq).toBe(4);
+  expect(queueEvents(dir).map((event) => [event.seq, event.added])).toEqual([
+    [1, 1],
+    [2, 2],
+    [3, 3],
+    [4, 4],
+  ]);
+  expect(queueEventIssues(dir)).toEqual([]);
+});
