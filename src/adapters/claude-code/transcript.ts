@@ -35,6 +35,8 @@ function lineOf(event: HarnessEvent): string | undefined {
       return `tool ${event.tool} ${inputOf(event.input)} [${event.callId}]`;
     case 'tool:end':
       return `tool ${event.callId} ${event.status} in ${event.durationMs} ms`;
+    case 'permission:denied':
+      return `denied ${event.tool} [${event.callId}] by ${event.rule}: ${block(event.reason)}`;
     case 'usage:update': {
       const { input, cacheRead, cacheWrite, output } = event.tokens;
       return `usage: turn ${event.turn}, in ${input}, cache read ${cacheRead}, cache write ${cacheWrite}, out ${output}, $${event.costUsdSoFar}`;

@@ -81,10 +81,7 @@ test('a tool input with a newline or a control character stays on one line, cut 
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a denial renders between its tool's start and end, with its rule and reason", () => {
+test("a denial renders between its tool's start and end, with its rule and reason", () => {
   const text = renderTranscript([
     { type: 'tool:start', callId: 't1', tool: 'Bash', input: { command: 'tail README.md' } },
     {

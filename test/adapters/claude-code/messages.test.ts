@@ -337,10 +337,7 @@ const DENIAL: Denial = {
   reason: 'tail README.md: tail is not among the allowed commands',
 };
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a denied call emits permission:denied with its denial just before its tool:end denied, and counts once', () => {
+test('a denied call emits permission:denied with its denial just before its tool:end denied, and counts once', () => {
   const { reader: r, at } = reader();
   const capture = captureEvents<HarnessEvent>();
   at(100);
@@ -359,10 +356,7 @@ test
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a denial heard before its tool use arrives still comes out after the tool:start', () => {
+test('a denial heard before its tool use arrives still comes out after the tool:start', () => {
   const { reader: r } = reader();
   r.markDenied('t1', DENIAL);
   const events = readAll(r, [
@@ -372,10 +366,7 @@ test
   expect(events.map((event) => event.type)).toEqual(['tool:start', 'usage:update', 'permission:denied', 'tool:end']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("settling emits a held denial ahead of its call's failed end, and one for a call never started alone", () => {
+test("settling emits a held denial ahead of its call's failed end, and one for a call never started alone", () => {
   const { reader: r, at } = reader();
   at(10);
   readAll(r, [assistantToolUse('m1', 't1', 'Bash', { command: 'tail README.md' })]);
