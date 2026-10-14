@@ -156,12 +156,17 @@ export function noPlaceholders(): Validator {
     derives: [],
     validate: ({ text }) => {
       const problems: string[] = [];
+      // The line is counted on from the last tag, so the text is read once however many tags it holds.
+      let line = 1;
+      let counted = 0;
       for (let start = text.indexOf('{{'); start !== -1; ) {
         const close = text.indexOf('}}', start + 2);
         if (close === -1) break;
         const body = text.slice(start + 2, close);
         if (body.includes(':')) {
-          const line = text.slice(0, start).split('\n').length;
+          for (let at = text.indexOf('\n', counted); at !== -1 && at < start; at = text.indexOf('\n', at + 1))
+            line += 1;
+          counted = start;
           const name = body.slice(0, body.indexOf(':')).trim();
           problems.push(`line ${line} still holds the placeholder {{${name}: …}}`);
         }

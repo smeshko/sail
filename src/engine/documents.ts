@@ -19,6 +19,12 @@ import { type RenderValues, render } from './render';
 /** The most a produced document may hold for its validators to read it: it is read whole. */
 export const MAX_DOCUMENT_BYTES = 1024 * 1024;
 
+/**
+ * The most problems one check of a document reports: the rest are counted. Each goes into `result.json` and the
+ * corrective try's prompt, so a document full of one mistake must not make either huge.
+ */
+export const MAX_PROBLEMS_PER_CHECK = 20;
+
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const codeOf = (error: unknown) => (error as NodeJS.ErrnoException).code ?? messageOf(error);
 
@@ -172,7 +178,10 @@ function judge(
       else kept.push([key, value]);
     }
   }
-  return { problems: found, derived: kept };
+  if (found.length <= MAX_PROBLEMS_PER_CHECK) return { problems: found, derived: kept };
+  const more = found.length - MAX_PROBLEMS_PER_CHECK;
+  const tail = `and ${more} more problem${more === 1 ? '' : 's'}`;
+  return { problems: [...found.slice(0, MAX_PROBLEMS_PER_CHECK), tail], derived: kept };
 }
 
 export interface ValidateDocumentsOptions {
