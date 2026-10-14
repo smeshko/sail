@@ -458,10 +458,7 @@ test('problems() refuses a script that would produce prompt.md or session.log: t
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('problems() refuses a document in produces, which a script step can declare only by getting past the types: only an agent step completes one', () => {
+test('problems() refuses a document in produces, which a script step can declare only by getting past the types: only an agent step completes one', () => {
   const documented = script('tests', {
     run: './run.sh',
     produces: { 'junit.xml': 'file', 'report.md': doc('./templates/report.md', [noPlaceholders()]) as never },

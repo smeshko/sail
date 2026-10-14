@@ -761,10 +761,7 @@ function noting(harness: Harness): { harness: Harness; seen: (string | null)[] }
   return { harness: recording(harness, { before }), seen };
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a document's template is in $STAGE_OUT when its session starts, rendered with the try's bindings: a value filled, an untrusted one wrapped, and every placeholder as written", async () => {
+test("a document's template is in $STAGE_OUT when its session starts, rendered with the try's bindings: a value filled, an untrusted one wrapped, and every placeholder as written", async () => {
   const step = documented();
   const s = documentSetup(step);
   const { harness, seen } = noting(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } }));
@@ -772,10 +769,7 @@ test
   expect(seen).toEqual([RENDERED]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a later try starts from the template rendered afresh in its own directory, not from what an earlier try left', async () => {
+test('a later try starts from the template rendered afresh in its own directory, not from what an earlier try left', async () => {
   const step = documented();
   const s = documentSetup(step, 2);
   const first = join(dirname(s.paths.dir), 'spec.md');
@@ -786,10 +780,7 @@ test
   expect(readFileSync(first, 'utf8')).toBe('# Draft\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a template that is missing, or names an unknown variable, ends the try as not_started before any session: no prompt, no events, an empty session.log and no usage', async () => {
+test('a template that is missing, or names an unknown variable, ends the try as not_started before any session: no prompt, no events, an empty session.log and no usage', async () => {
   const unknown = '# Spec for {{ticket.keey}}\n';
   const cases: [AgentStep, string][] = [
     [
@@ -817,10 +808,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("problems() reports a derived key two of a step's documents share, naming both, and a produces value that is neither 'file' nor a document", () => {
+test("problems() reports a derived key two of a step's documents share, naming both, and a produces value that is neither 'file' nor a document", () => {
   expect(agentKind.problems(documented())).toEqual([]);
   const step = spec({
     produces: {

@@ -8,9 +8,10 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
-import { prepareAgentPrompt } from '../engine/agent-prompt';
+import { bindingValues, prepareAgentPrompt } from '../engine/agent-prompt';
 import { runRelative, writeOwnFile } from '../engine/call-dir';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
+import { documentProblems, renderDocuments } from '../engine/documents';
 import { preamble } from '../engine/preamble';
 import type { CallEmit } from '../events/types';
 import type { Harness, HarnessEvent, HarnessRequest } from '../ports/harness';
@@ -32,7 +33,7 @@ function submissionSchema(step: AgentStep): { schema: Record<string, unknown> } 
 }
 
 function problems(step: AgentStep): string[] {
-  const found = [...producesProblems(step.produces)];
+  const found = [...producesProblems(step.produces), ...documentProblems(step.produces)];
   const { maxTurns, maxUsd, maxMinutes } = step.budget;
   if (!(Number.isInteger(maxTurns) && maxTurns >= 1)) {
     found.push(`budget.maxTurns must be a whole number of 1 or more: ${maxTurns}`);
@@ -221,16 +222,25 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     ...(agent.conventions === undefined ? {} : { conventions: agent.conventions }),
     ...(agent.feedback === undefined ? {} : { feedback: agent.feedback }),
   });
-  if (!prompt.ok) {
-    // No session started, so there is nothing to say of one: an empty transcript, and nothing spent.
+  /** A try that never reached a session: there is nothing to say of one, so an empty transcript and nothing spent. */
+  const unstarted = (message: string): StepRun => {
     writeFileSync(sessionLog, '');
-    return ended([{ reason: 'not_started', message: prompt.message }], {
+    return ended([{ reason: 'not_started', message }], {
       ...place,
       validationFailed: false,
       harness: { ...on, turns: 0, toolCalls: 0, denials: 0 },
       usage: { costUsd: 0 },
     });
-  }
+  };
+  if (!prompt.ok) return unstarted(prompt.message);
+  // Each document starts the session as its template, rendered fresh into this try's own directory.
+  const templates = renderDocuments({
+    produces: step.produces,
+    stageDir: context.stageDir,
+    values: bindingValues(agent.bindings, context.inputs),
+    outDir: context.paths.dir,
+  });
+  if (!templates.ok) return unstarted(templates.message);
   const promptPath = join(context.paths.dir, 'prompt.md');
   writeFileSync(promptPath, prompt.text);
   const rendered = {

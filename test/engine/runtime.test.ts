@@ -1781,10 +1781,7 @@ function documentedSpec(sail: string, produces: string): void {
   edit(sail, `${SPEC_STAGE}/stage.ts`, "  produces: { 'spec.md': 'file' },", `  produces: ${produces},`);
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a run's agent step finds its document's template in $STAGE_OUT, filled with the run's bindings, and a session that leaves it as it is produces it so", async () => {
+test("a run's agent step finds its document's template in $STAGE_OUT, filled with the run's bindings, and a session that leaves it as it is produces it so", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25, { files: {} })]);
     documentedSpec(sail, "{ 'spec.md': doc('./templates/spec.md') }");
@@ -1798,10 +1795,7 @@ test
   });
 }, 20_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a run whose agent step's documents derive one key twice fails before the call, as one that can't run", async () => {
+test("a run whose agent step's documents derive one key twice fails before the call, as one that can't run", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
     const twice = "doc('./templates/spec.md', [countItems('Tasks')])";

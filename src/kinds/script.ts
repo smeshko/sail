@@ -52,6 +52,9 @@ function problems(step: ScriptStep): string[] {
     }
   }
   found.push(...producesProblems(step.produces));
+  for (const [name, value] of Object.entries(step.produces)) {
+    if (value !== 'file') found.push(`'${name}' is a document: only an agent step completes one`);
+  }
   const timeout = step.timeoutSeconds;
   if (timeout !== undefined && !(Number.isFinite(timeout) && timeout > 0)) {
     found.push(`timeoutSeconds must be a positive number: ${timeout}`);
