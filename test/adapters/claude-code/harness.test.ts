@@ -192,10 +192,7 @@ test("the session's options are the step's model, workspace, envelope and budget
   }).toEqual({ controller: true, bypass: [], mode: false });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the session gates every call with one PreToolUse hook and the fallback, is offered only the tools its step can use, and asks no rule', () => {
+test('the session gates every call with one PreToolUse hook and the fallback, is offered only the tools its step can use, and asks no rule', () => {
   const req = request();
   const options = sessionOptions(req, {});
   const matchers = options.hooks?.PreToolUse ?? [];
@@ -386,10 +383,7 @@ test('a throw after an error result leaves the result to decide, but an onEvent 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a call that reaches the fallback is denied and recorded, its tool ends denied, and the session still submits', async () => {
+test('a call that reaches the fallback is denied and recorded, its tool ends denied, and the session still submits', async () => {
   const { query, result, capture } = await play([
     init(),
     assistantToolUse('m1', 't1', 'Bash', { command: 'cat ~/.ssh/id_rsa' }, { usage: { output: 5 } }),
@@ -572,10 +566,7 @@ test('claude-code declares structured output, permissions, usage and abort', () 
   expect(createClaudeCodeHarness({ env: {} }).name).toBe('claude-code');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the session's environment turns on the credential scrub and the fixed Bash directory, whatever sail's says", () => {
+test("the session's environment turns on the credential scrub and the fixed Bash directory, whatever sail's says", () => {
   const env = sessionOptions(request(), {
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '0',
     CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '0',
@@ -583,10 +574,7 @@ test
   expect([env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR]).toEqual(['1', '1']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a step with commands is told its variables are in its environment too, where one without is told it has no shell', () => {
+test('a step with commands is told its variables are in its environment too, where one without is told it has no shell', () => {
   const req = request('Write the spec.', {
     permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] },
   });
@@ -616,10 +604,7 @@ test
 const only = (events: readonly HarnessEvent[], ...types: string[]) =>
   events.filter((event) => types.includes(event.type));
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("commands ['git status']: the gate denies tail README.md through run(), the session records it and carries on to submit", async () => {
+test("commands ['git status']: the gate denies tail README.md through run(), the session records it and carries on to submit", async () => {
   const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] };
   const { query, result, capture } = await play(
     [
@@ -671,10 +656,7 @@ test
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('through run(), an MCP call with no tools and a write outside the workspace are denied and recorded, and a read inside runs', async () => {
+test('through run(), an MCP call with no tools and a write outside the workspace are denied and recorded, and a read inside runs', async () => {
   const outside = join(tmpdir(), 'sail-harness-elsewhere', 'x.md');
   const { query, result, capture } = await play([
     init(),

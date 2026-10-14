@@ -4,9 +4,9 @@
 // every session that started ends once, and every failure, an abort included, is the `error` outcome: run() never
 // rejects.
 //
-// For 7.3: the session's environment carries the provider's credentials (D7). No tool can read it while Bash is
-// unavailable; once 7.3 enables Bash, it must scrub or deny that. 7.3 also checks that the process is gone after an
-// abort: here the abort only fires the session's controller.
+// Every tool call passes the gate first (7.3 D1): its PreToolUse hook asks the permission engine, and canUseTool denies
+// whatever still reaches it. The session is offered only the tools its step can use (D2). The CLI scrubs the provider's
+// credentials from the Bash tool's environment (D3), and returns that tool to the workspace after each command (D4).
 import {
   type Options,
   type SDKMessage,
@@ -17,11 +17,11 @@ import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
 import type { BudgetTimers } from './budget';
-import { createFileGuard, FILE_TOOLS } from './guard';
+import { createGate } from './gate';
 import { createSessionReader, type SessionReader } from './messages';
 import { toHarnessResult } from './result';
 import { SUBMIT_CONTRACT, submissionEnvelope } from './submission';
-import type { Denial } from './tool-call';
+import { type Denial, sessionTools } from './tool-call';
 import { renderTranscript } from './transcript';
 
 /** What the harness calls to start a session: the SDK's `query()`, or a test's stand-in. */
@@ -71,21 +71,35 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
   const picked = Object.entries(env).filter(
     (entry): entry is [string, string] => entry[1] !== undefined && allowed(entry[0]),
   );
-  return { ...Object.fromEntries(picked), CLAUDE_AGENT_SDK_CLIENT_APP: 'sail', ...preamble };
+  return {
+    ...Object.fromEntries(picked),
+    CLAUDE_AGENT_SDK_CLIENT_APP: 'sail',
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+    CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
+    ...preamble,
+  };
 }
 
 /**
- * The text appended to the preset system prompt: where the session works, then how it submits. The session has no
- * shell, so it can't read its environment: a prompt that names `$STAGE_OUT` resolves only through the values given
- * here (D23).
+ * The text appended to the preset system prompt: where the session works, then how it submits. A session without a
+ * shell can't read its environment: a prompt that names `$STAGE_OUT` resolves only through the values given here (D23).
+ * A session with one has them in its environment too (D16).
  */
 export function appendedSystemPrompt(request: HarnessRequest): string {
   const variables = Object.entries(request.env).map(([name, value]) => `- \`$${name}\`: ${value}`);
+  const shell = sessionTools(request.permissions).tools.includes('Bash')
+    ? [
+        `Your working directory is the workspace, ${request.cwd}. Where a prompt names one of these environment`,
+        'variables, it means the value given: the same values are in your environment.',
+      ]
+    : [
+        `Your working directory is the workspace, ${request.cwd}. You have no shell, so you can't read environment`,
+        'variables: where a prompt names one of these, it means the value given.',
+      ];
   return [
     '## Where you work',
     '',
-    `Your working directory is the workspace, ${request.cwd}. You have no shell, so you can't read environment`,
-    'variables: where a prompt names one of these, it means the value given.',
+    ...shell,
     '',
     ...variables,
     '',
@@ -96,15 +110,26 @@ export function appendedSystemPrompt(request: HarnessRequest): string {
   ].join('\n');
 }
 
-/** The SDK options of `request`'s session, with a controller of its own and the file guard. */
+/** The SDK options of `request`'s session, with a controller of its own and the gate. */
 export function sessionOptions(
   request: HarnessRequest,
   env: Env,
-  onDenied?: (toolUseId: string, denial?: Denial) => void,
+  onDenied?: (toolUseId: string, denial: Denial) => void,
 ): Options & { abortController: AbortController } {
   const stageDirs = [request.env.STAGE_IN, request.env.STAGE_OUT].filter(
     (dir): dir is string => dir !== undefined && dir !== '',
   );
+  const gate = createGate({
+    permissions: request.permissions,
+    // An empty root makes decide() deny, never allow (7.1 D4).
+    ctx: {
+      worktree: request.cwd,
+      stageOut: request.env.STAGE_OUT ?? '',
+      stageIn: request.env.STAGE_IN ?? '',
+      env: request.env,
+    },
+    ...(onDenied === undefined ? {} : { onDenied }),
+  });
   return {
     abortController: new AbortController(),
     cwd: request.cwd,
@@ -112,21 +137,16 @@ export function sessionOptions(
     env: sessionEnv(request.env, env),
     additionalDirectories: [...new Set(stageDirs)],
     settingSources: [],
-    // The CLI allows some reads and writes of its own (task, plan, scratchpad and memory files) before it asks
-    // canUseTool. A whole-tool ask rule is checked ahead of those, so every file tool call reaches the guard.
-    settings: { autoMemoryEnabled: false, permissions: { ask: [...FILE_TOOLS] } },
+    settings: { autoMemoryEnabled: false },
     skills: [],
     strictMcpConfig: true,
     mcpServers: {},
     persistSession: false,
     includePartialMessages: false,
-    tools: [...FILE_TOOLS],
+    ...sessionTools(request.permissions),
     permissionMode: 'default',
-    canUseTool: createFileGuard({
-      roots: [request.cwd, ...stageDirs],
-      cwd: request.cwd,
-      ...(onDenied === undefined ? {} : { onDenied: (toolUseId: string) => onDenied(toolUseId) }),
-    }),
+    hooks: { PreToolUse: [{ hooks: [gate.preToolUse] }] },
+    canUseTool: gate.canUseTool,
     outputFormat: { type: 'json_schema', schema: submissionEnvelope(request.outputSchema) },
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendedSystemPrompt(request) },
     maxTurns: request.budget.maxTurns,
@@ -296,7 +316,9 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       const progress: Progress = { said: [], deaf: false, started: false, ended: false };
       let onAbort: (() => void) | undefined;
       try {
-        const sessionAt = sessionOptions(request, options.env, (toolUseId) => reader.markDenied(toolUseId));
+        const sessionAt = sessionOptions(request, options.env, (toolUseId, denial) =>
+          reader.markDenied(toolUseId, denial),
+        );
         onAbort = () => sessionAt.abortController.abort();
         request.signal?.addEventListener('abort', onAbort, { once: true });
         return await session(request, reader, sessionAt, progress);
