@@ -360,6 +360,76 @@ test('a query that throws, a stream that throws, and an onEvent that throws each
   });
 });
 
+// Review R1-6: an onEvent that throws on the session's end fails the session as one that throws earlier does, and the
+// result keeps what it spent.
+test('an onEvent that throws only on the session end turns a done session into error, keeping its usage', async () => {
+  let heard = 0;
+  const result = await createClaudeCodeHarness({ env: {}, query: scriptedQuery([SUITE.done ?? []]) }).run({
+    ...request(),
+    onEvent: (event) => {
+      heard++;
+      if (event.type === 'harness:session_end') throw new Error('journal full');
+    },
+  });
+  const failed = await createClaudeCodeHarness({ env: {}, query: scriptedQuery([SUITE.error ?? []]) }).run({
+    ...request(),
+    onEvent: (event) => {
+      if (event.type === 'harness:session_end') throw new Error('journal full');
+    },
+  });
+  expect({
+    result: summary(result),
+    cost: result.usage.costUsd,
+    sessionId: result.sessionId,
+    ended: result.transcript.split('\n').at(-1),
+    heard,
+    failed: summary(failed),
+  }).toEqual({
+    result: 'error: claude-code: journal full',
+    cost: COST,
+    sessionId: SESSION_ID,
+    ended: 'ended: error: claude-code: journal full',
+    heard: 8,
+    failed: 'error: the session failed during execution: overloaded',
+  });
+});
+
+// Review R1-7: a throw outside the session's stream, building its options or reading its end, resolves as error too.
+test('options that cannot be built, and a result that cannot be read, resolve as error, never a rejection', async () => {
+  const req = request();
+  const unbuildable = await createClaudeCodeHarness({ env: {}, query: scriptedQuery([SUITE.done ?? []]) }).run({
+    ...req,
+    env: new Proxy(req.env, {
+      get: () => {
+        throw new Error('no environment');
+      },
+    }),
+  });
+  const unreadable = resultSuccess({ structured: done(SPEC) });
+  const { result, types } = await play(session({ ...unreadable, modelUsage: undefined } as unknown as SDKMessage));
+  expect({
+    unbuildable: summary(unbuildable),
+    unbuildableUsage: unbuildable.usage,
+    result: String(summary(result)).startsWith('error: claude-code: '),
+    types,
+    transcript: result.transcript.split('\n').at(-1)?.startsWith('ended: error: claude-code: '),
+  }).toEqual({
+    unbuildable: 'error: claude-code: no environment',
+    unbuildableUsage: { inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, costUsd: 0 },
+    result: true,
+    types: [
+      'harness:session_start',
+      'tool:start',
+      'usage:update',
+      'tool:end',
+      'agent:message',
+      'error:harness',
+      'harness:session_end',
+    ],
+    transcript: true,
+  });
+});
+
 test("the transcript renders the session's events and how it ended", async () => {
   const { result } = await play(SUITE.done ?? []);
   expect(result.transcript).toBe(
