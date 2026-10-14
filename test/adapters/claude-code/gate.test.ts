@@ -73,10 +73,7 @@ interface Answer {
 const ask = async (g: Pick<ReturnType<typeof gate>, 'preToolUse'>, input: HookInput): Promise<Answer> =>
   (await g.preToolUse(input, undefined, { signal })) as Answer;
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("commands ['git status']: Bash tail README.md is denied by commands with decide()'s reason, and git status runs", async () => {
+test("commands ['git status']: Bash tail README.md is denied by commands with decide()'s reason, and git status runs", async () => {
   const permissions: Permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] };
   const g = gate(permissions);
   const tail = await ask(g, pre('Bash', { command: 'tail README.md' }, 'toolu_tail'));
@@ -95,10 +92,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('with no tools listed an MCP call is denied by tools, with an empty list; listed, by its name or its server, it runs', async () => {
+test('with no tools listed an MCP call is denied by tools, with an empty list; listed, by its name or its server, it runs', async () => {
   const none = gate({ read: ['**'], write: [], commands: [] });
   const listed = gate({ read: ['**'], write: [], commands: [], tools: ['linear:get_issue'] });
   const answers = [
@@ -137,10 +131,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a Write to an absolute path outside the workspace or to the checkout above it is denied by write, and into $STAGE_OUT runs', async () => {
+test('a Write to an absolute path outside the workspace or to the checkout above it is denied by write, and into $STAGE_OUT runs', async () => {
   const g = gate();
   const answers = [
     await ask(g, pre('Write', { file_path: join(tmpdir(), 'sail-gate-elsewhere', 'x'), content: 'x' }, 'toolu_tmp')),
@@ -155,10 +146,7 @@ test
 });
 
 describe('every escape is denied under its rule, and the denial reported is the reason the model reads', () => {
-  // biome-ignore format: TDD-PENDING TASK-002
-  test
-    .skip // TDD-PENDING TASK-002
-    .each<[string, string, unknown, string]>([
+  test.each<[string, string, unknown, string]>([
     ['an absolute path outside', 'Read', { file_path: '/etc/hosts' }, 'read'],
     ['.. out of the workspace', 'Read', { file_path: '../outside.txt' }, 'read'],
     ['a symlink out of the workspace', 'Read', { file_path: 'link/secret.txt' }, 'read'],
@@ -204,10 +192,7 @@ describe('every escape is denied under its rule, and the denial reported is the 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, string, unknown]>([
+test.each<[string, string, unknown]>([
   ['a Read in the workspace', 'Read', { file_path: 'README.md' }],
   ['a Read of $STAGE_IN', 'Read', { file_path: join(stageIn, 'brief.md') }],
   ['a Write into $STAGE_OUT', 'Write', { file_path: join(stageOut, 'notes', 'spec.md'), content: 'x' }],
@@ -222,10 +207,7 @@ test
   expect({ answer: await ask(g, pre(tool, input)), denials: g.denials }).toEqual({ answer: allowed, denials: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a call's working directory is the one the CLI reports, and an empty one is the workspace", async () => {
+test("a call's working directory is the one the CLI reports, and an empty one is the workspace", async () => {
   const g = gate({ read: ['src/**'], write: [], commands: [] });
   const answers = [
     await ask(g, pre('Read', { file_path: 'a.ts' }, 't1', { cwd: join(work, 'src') })),
@@ -241,10 +223,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('canUseTool allows the submission and denies everything else under the rule of its kind, naming the fallback', async () => {
+test('canUseTool allows the submission and denies everything else under the rule of its kind, naming the fallback', async () => {
   const g = gate();
   const use = (tool: string, input: Record<string, unknown>, id: string) =>
     g.canUseTool(tool, input, { signal, toolUseID: id, requestId: 'r1' });
@@ -272,20 +251,14 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a missing $STAGE_OUT denies even a read the step allows: an empty root fails closed', async () => {
+test('a missing $STAGE_OUT denies even a read the step allows: an empty root fails closed', async () => {
   const g = gate(STEP, { ...CTX, stageOut: '' });
   const answer = await ask(g, pre('Read', { file_path: 'README.md' }));
   expect(answer.hookSpecificOutput?.permissionDecision).toBe('deny');
   expect(g.denials.map(([, denial]) => denial.rule)).toEqual(['read']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the hook never throws: an input it cannot read and a listener that throws still deny, and another event gets no decision', async () => {
+test('the hook never throws: an input it cannot read and a listener that throws still deny, and another event gets no decision', async () => {
   const throwing = new Proxy({} as Record<string, unknown>, {
     get: () => {
       throw new Error('unreadable');
