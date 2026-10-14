@@ -321,3 +321,22 @@ test('a change whose queue.json write throws leaves the store, the file and the 
   expect(store.add([ticket('FAKE-2')])).toBe(1);
   expect(keys(store)).toEqual(['ticket:FAKE-1 queued', 'ticket:FAKE-2 queued']);
 });
+
+test('a write that throws after its rename leaves the store holding what queue.json holds, so the next change keeps it (review #2.1)', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1')]);
+  const dir = queueDir(runs, 'ticket-to-pr');
+  // Writable and searchable but not readable: the temp file is written and renamed, and the directory's sync fails.
+  chmodSync(dir, 0o333);
+  try {
+    expect(() => store.dispatched('ticket:FAKE-1', 'FAKE-1-01')).toThrow('EACCES');
+  } finally {
+    chmodSync(dir, 0o755);
+  }
+  const onDisk = () => JSON.parse(readFileSync(join(dir, 'queue.json'), 'utf8'));
+  expect(onDisk().items[0]).toMatchObject({ state: 'dispatched', attempts: 1, runId: 'FAKE-1-01' });
+  expect(store.snapshot()).toEqual(onDisk());
+  store.polled({ kind: 'ticket', found: 0, added: 0, durationMs: 0 });
+  expect(onDisk().items[0]).toMatchObject({ state: 'dispatched', attempts: 1, runId: 'FAKE-1-01' });
+});
