@@ -6,10 +6,7 @@ import type { HarnessEvent } from '../../../src/ports/harness';
 
 const tokens = { input: 120, cacheRead: 5000, cacheWrite: 800, output: 340 };
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a five-event session renders as this golden text, with no newline at its end', () => {
+test('a five-event session renders as this golden text, with no newline at its end', () => {
   const events: HarnessEvent[] = [
     { type: 'harness:session_start', adapter: 'claude-code', sessionId: 'cc-1', model: 'claude-sonnet-5' },
     { type: 'agent:message', text: 'Reading the brief.' },
@@ -29,10 +26,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('thoughts, failed and denied tools, errors and a blocked end each get their line, multi-line text indented, and other events none', () => {
+test('thoughts, failed and denied tools, errors and a blocked end each get their line, multi-line text indented, and other events none', () => {
   const events: HarnessEvent[] = [
     { type: 'agent:thinking', text: 'First.\nSecond.' },
     { type: 'tool:end', callId: 't2', status: 'failed', durationMs: 3 },
@@ -54,10 +48,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("an estimated cost marks the last usage line, and only that one, as not the provider's bill", () => {
+test("an estimated cost marks the last usage line, and only that one, as not the provider's bill", () => {
   const events: HarnessEvent[] = [
     { type: 'usage:update', turn: 1, tokens, costUsdSoFar: 0 },
     { type: 'usage:update', turn: 2, tokens, costUsdSoFar: 0.05 },
@@ -71,20 +62,14 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('no events and no end render as nothing, and a session with no events as its end alone', () => {
+test('no events and no end render as nothing, and a session with no events as its end alone', () => {
   expect([renderTranscript([]), renderTranscript([], { outcome: 'error', message: 'aborted' })]).toEqual([
     '',
     'ended: error: aborted',
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a tool input with a newline or a control character stays on one line, cut at 200 characters', () => {
+test('a tool input with a newline or a control character stays on one line, cut at 200 characters', () => {
   const long = 'x'.repeat(300);
   const text = renderTranscript([
     { type: 'tool:start', callId: 't1', tool: 'Write', input: { file_path: 'a.md', content: 'one\ntwo\u0007' } },
