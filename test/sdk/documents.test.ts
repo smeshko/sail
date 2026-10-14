@@ -102,6 +102,15 @@ test('noPlaceholders names a placeholder after an unclosed {{ by its own line an
   });
 });
 
+test('noPlaceholders reads a long text of placeholders with no newline between them in time (review R2-2)', () => {
+  const text = '{{:}}'.repeat(2 * 209_715);
+  const started = performance.now();
+  const { problems } = noPlaceholders().validate(parsed(`${text}\n{{tasks: last}}`));
+  expect(performance.now() - started).toBeLessThan(2000);
+  expect(problems).toHaveLength(2 * 209_715 + 1);
+  expect(problems.at(-1)).toBe('line 2 still holds the placeholder {{tasks: …}}');
+});
+
 test('countItems counts the items of the section its heading names, derives the count, and reports an absent section or a count out of bounds', () => {
   const document = parsed('', [
     ['Spec', 1, []],
