@@ -3,7 +3,17 @@
 // the remote's URL without credentials, and removes a workspace git no longer knows. Every git call gets the temp
 // repository's env, whose HOME is empty, so no credential helper of the machine's can answer for git.
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BUILTINS } from '../../../src/adapters/index';
@@ -419,5 +429,65 @@ test('git-worktree is a built-in for the workspace port alone: its options are r
       resolved: 'git-worktree',
       refused: 'names remotes',
     });
+  });
+});
+
+/** The worktrees `repo` registers, by path. */
+const registered = (repo: TempRepo): string[] =>
+  repo
+    .git('worktree', 'list', '--porcelain')
+    .split('\n')
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => line.slice('worktree '.length));
+
+test('a symlink where a workspace should be is unlinked, never followed: release and sweep leave the worktree it names alone (review #1.7)', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const adapter = adapterOf(repo, w);
+    const other = await w.run('other');
+    const { path: target } = await adapter.create(other, { branch: BRANCH });
+    // A run whose workspace is a link to another run's, and an ended run whose directory is a link to that run's.
+    const linked = await w.run('linked', 'completed');
+    symlinkSync(target, join(linked.runDir, 'workspace'));
+    const released = await settle(adapter.release(linked, false));
+    const afterRelease = [existsSync(join(target, 'README.md')), registered(repo).includes(target)];
+    symlinkSync(other.runDir, join(w.runsDir, 'aliased'));
+    writeStatus(other.runDir, 'completed');
+    const swept = await settle(adapter.sweep(w.runsDir));
+    expect({
+      released: 'rejected' in released ? released : released.kept,
+      link: existsSync(join(linked.runDir, 'workspace')),
+      afterRelease,
+      // Swept once, as the ended run's own, and never through the link to it.
+      swept: 'rejected' in swept ? swept : swept.paths,
+      afterSweep: [existsSync(join(target, 'README.md')), registered(repo).includes(target)],
+    }).toEqual({
+      released: false,
+      link: false,
+      afterRelease: [true, true],
+      swept: [target],
+      afterSweep: [false, false],
+    });
+  });
+});
+
+test("a release prunes only what it removed by hand: a worktree of the user's whose directory is away stays registered (review #1.8)", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const adapter = adapterOf(repo, w);
+    const dir = tempDir();
+    const mine = join(dir, 'mine');
+    repo.git('worktree', 'add', '--quiet', '--detach', mine, 'HEAD');
+    // As on a volume that isn't mounted right now.
+    renameSync(mine, join(dir, 'away'));
+    const run = runIn(w.runsDir);
+    await adapter.create(run, { branch: BRANCH });
+    const released = await settle(adapter.release(run, false));
+    expect({
+      released: 'rejected' in released ? released : released.kept,
+      mine: registered(repo).includes(mine),
+    }).toEqual({ released: false, mine: true });
   });
 });
