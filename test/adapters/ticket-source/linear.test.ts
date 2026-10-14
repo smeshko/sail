@@ -303,6 +303,21 @@ test('listDesignated reads each listed ticket whole, every comment page included
   ]);
 });
 
+test('a team Linear doesn’t have is not_found, naming it, where an empty list or no ticket would hide it, and an empty list of a real team is empty (review R1-3)', async () => {
+  const world = createLinearWorld(SEED);
+  const typo = createLinearTicketSource({ team: 'ADX', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch: world.fetch });
+  const errors = [await rejection(typo.listDesignated('sail')), await rejection(typo.get('ADX-5'))];
+  expect(errors.map(failure)).toEqual([
+    [
+      { port: 'ticketSource', op: 'listDesignated', code: 'not_found' },
+      'ticketSource.listDesignated: Linear has no team ADX',
+    ],
+    [{ port: 'ticketSource', op: 'get', code: 'not_found' }, 'ticketSource.get: Linear has no team ADX'],
+  ]);
+  const { world: real, adapter } = linear();
+  expect([await adapter.listDesignated('nobody'), real.operations()]).toEqual([[], ['SailDesignated', 'SailTeam']]);
+});
+
 /**
  * A document's complexity as Linear scores it (https://linear.app/developers/rate-limiting), from above: a field with a
  * selection is an object of 1 point, a leaf 0.1, and a field's children count `first` times, 50 times for a connection
