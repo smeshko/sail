@@ -5,7 +5,7 @@ import type { StepContext } from '../kinds/index';
 export interface PreambleVariable {
   name: string;
   value: string;
-  /** Whether the value is a path, which a result records relative to the workspace. */
+  /** Whether the value is a path, which a result records relative to the root: the directory that holds `.sail/`. */
   path: boolean;
 }
 
@@ -19,6 +19,7 @@ export function preamble(context: StepContext): PreambleVariable[] {
     { name: 'STAGE_IN', value: context.paths.stageIn, path: true },
     { name: 'STAGE_OUT', value: context.paths.dir, path: true },
     { name: 'WORKSPACE', value: context.workspace, path: true },
+    { name: 'BRANCH', value: context.branch, path: false },
     { name: 'SAIL_CONFIG', value: context.config, path: true },
     ...Object.entries(context.inputs).map(([name, value]) => ({ name, value, path: true })),
   ];

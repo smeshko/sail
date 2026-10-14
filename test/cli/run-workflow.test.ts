@@ -196,10 +196,7 @@ test('sail FAKE-1 -q prints the header, a call that ends in error with its messa
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("sail FAKE-1 -v adds each command, where it runs and the tail of every script, and -vv adds each journal line and the start's four events", async () => {
+test("sail FAKE-1 -v adds each command, where it runs and the tail of every script, and -vv adds each journal line and the start's four events", async () => {
   const verbose = await sailIn(['FAKE-1', '-v']);
   expect(verbose.code).toBe(EXIT_OK);
   const [run] = verbose.runs;

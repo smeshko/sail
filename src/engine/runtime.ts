@@ -367,10 +367,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         try: nextTry(dir, call.stageIndex, call.stage, call.call),
         definition: call.definition,
         stageFile: call.stageFile,
-        workspace: dirname(sailDir),
-        // Stub for TASK-005 (ADW-93): the root, and no branch.
-        root: dirname(sailDir),
-        branch: '',
+        workspace: opened.workspace.path,
+        root,
+        branch: opened.workspace.branch,
         config: join(sailDir, 'project.yaml'),
         supplied: call.supplied,
         ...(signal === undefined ? {} : { signal }),

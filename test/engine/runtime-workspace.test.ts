@@ -303,10 +303,7 @@ test.each<[string, 'completed' | 'running']>([
 
 // Steps run in the workspace, and record paths relative to the repository.
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a run's script steps run in its worktree, on its branch, and the clone's checkout is left as it was", async () => {
+test("a run's script steps run in its worktree, on its branch, and the clone's checkout is left as it was", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     before(
@@ -336,10 +333,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("result.json and script:exec record the workspace and the branch, with every path relative to the repository's root", async () => {
+test("result.json and script:exec record the workspace and the branch, with every path relative to the repository's root", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const end = await ran(repo.dir, { until: 'spec' });
@@ -358,10 +352,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("an agent step's session runs in the run's worktree, with BRANCH in its environment", async () => {
+test("an agent step's session runs in the run's worktree, with BRANCH in its environment", async () => {
   await withTempRepo(async (repo) => {
     writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
     const adapters = await fakeAdapters(repo.dir);

@@ -100,10 +100,7 @@ test('KINDS holds the script kind', () => {
   expect(DEFAULT_TIMEOUT_SECONDS).toBe(600);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('exit 0 is passed, with the parsed report and junit.xml recorded', async () => {
+test('exit 0 is passed, with the parsed report and junit.xml recorded', async () => {
   const s = setup();
   s.run(`${JUNIT}\necho 'running 1 test'\necho '${PASSING}'`);
   const run = await scriptKind.run(tests(), s.context);
@@ -321,10 +318,7 @@ test('a script that is missing is not_started, with no exit', async () => {
   expect(run.record.command).toBe('.sail/stages/tests/missing.sh');
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the script sees the whole preamble, inherits the environment, and runs from the workspace', async () => {
+test('the script sees the whole preamble, inherits the environment, and runs from the workspace', async () => {
   const s = setup();
   const spec = join(s.context.paths.stageIn, 'spec.md');
   writeFileSync(spec, '# spec\n');
@@ -428,10 +422,7 @@ function collecting(s: Setup): { context: StepContext; events: CallEvent[] } {
   return { context: { ...s.context, emit: (event) => events.push(event) }, events };
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a script that is missing reports script:exec, and nothing more', async () => {
+test('a script that is missing reports script:exec, and nothing more', async () => {
   const s = setup();
   const { context, events } = collecting(s);
   await scriptKind.run(tests({ run: './missing.sh' }), context);
@@ -613,10 +604,7 @@ function withTicket(s: Setup): void {
   writeFileSync(join(sail, 'fake', 'tickets.json'), JSON.stringify({ tickets: [TICKET] }));
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded relative to the workspace and listed last in envKeys, and a script that calls no port leaves no file', async () => {
+test('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded relative to the workspace and listed last in envKeys, and a script that calls no port leaves no file', async () => {
   const s = setup();
   s.run(`${JUNIT}\nprintf '%s' "\${SAIL_EVENTS:-unset}" > "$STAGE_OUT/named"\necho '${PASSING}'`);
   const { context, events } = collecting(s);

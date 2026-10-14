@@ -121,10 +121,7 @@ export const which = script('which', { run: './run.sh', output: z.object({ path:
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a stage run in isolation runs in the directory that holds .sail/, on no branch: BRANCH is set and empty', async () => {
+test('a stage run in isolation runs in the directory that holds .sail/, on no branch: BRANCH is set and empty', async () => {
   await withTempRepo(async (repo) => {
     const dir = join(fixtureCopy(repo), 'stages', 'where');
     mkdirSync(dir);

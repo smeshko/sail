@@ -152,8 +152,9 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
 
-  // Recorded relative to the workspace, and only these variables: the inherited environment may hold secrets.
-  const at = (path: string) => relative(context.workspace, path) || '.';
+  // Recorded relative to the root, and only these variables: the inherited environment may hold secrets. The script
+  // runs in the workspace.
+  const at = (path: string) => relative(context.root, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
   const recorded = { command: at(command), env };
 
