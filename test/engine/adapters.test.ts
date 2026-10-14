@@ -402,8 +402,8 @@ test('two ports broken at pass one give two issues in port order, and no definit
   const made: string[] = [];
   const result = await resolve(
     sailDir,
-    { ticketSource: { use: 'nope1' }, codeHost: { use: 'counting' }, harness: { use: 'nope2' } },
-    { builtins: builtin('counting', 'codeHost', counting('codeHost', made)) },
+    { ticketSource: { use: 'nope1' }, codeHost: { use: 'nope2' }, harness: { use: 'counting' } },
+    { builtins: builtin('counting', 'harness', counting('harness', made)) },
   );
   expect(result).toEqual({
     issues: [
@@ -412,8 +412,8 @@ test('two ports broken at pass one give two issues in port order, and no definit
         message: "no built-in adapter 'nope1' fills ticketSource: the built-ins that do are fake, linear",
       },
       {
-        path: '/adapters/harness',
-        message: "no built-in adapter 'nope2' fills harness: the built-ins that do are fake",
+        path: '/adapters/codeHost',
+        message: "no built-in adapter 'nope2' fills codeHost: the built-ins that do are fake",
       },
     ],
   });
