@@ -34,6 +34,8 @@ export const CLIENT_HEADER = 'X-Sail-Dashboard';
 const error = (status: number, message: string, headers: Record<string, string> = {}) =>
   Response.json({ error: message }, { status, headers });
 
+const messageOf = (thrown: unknown) => (thrown instanceof Error ? thrown.message : String(thrown));
+
 const origins = (port: number) => [`127.0.0.1:${port}`, `localhost:${port}`];
 
 /** The refusal of a request the dashboard doesn't serve, or undefined to let it through. */
@@ -117,6 +119,9 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
     server = Bun.serve<SocketData>({
       hostname: '127.0.0.1',
       port: options.port,
+      // Without it, Bun answers a thrown error with its development page: HTML, with the stack and the source. Not
+      // `development: false`, which lets a second server take the same port.
+      error: (thrown) => error(500, `the dashboard could not read this: ${messageOf(thrown)}`),
       fetch(request, self) {
         const port = self.port ?? 0;
         const refused = guard(request, port);
