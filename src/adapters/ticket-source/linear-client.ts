@@ -75,10 +75,19 @@ const resetOf = (response: Response): string => {
 export function createLinearClient(options: LinearClientOptions): LinearClient {
   const host = new URL(options.endpoint).host;
   const timeoutMs = options.timeoutMs ?? 30_000;
+  /** A failure of the transport, before the answer or while its body is read, as a PortError `unavailable`. */
+  const transport = (op: string, error: unknown, failed: string): PortError => {
+    const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    const message = timedOut
+      ? `Linear at ${host} did not answer within ${timeoutMs} ms`
+      : `${failed}: ${error instanceof Error ? error.message : String(error)}`;
+    return new PortError('ticketSource', op, 'unavailable', message);
+  };
   return {
     async request<T>(op: string, operationName: string, query: string, variables: Record<string, unknown>) {
       const send = options.fetch ?? fetch;
       let response: Response;
+      let text: string;
       try {
         response = await send(options.endpoint, {
           method: 'POST',
@@ -87,13 +96,13 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (error) {
-        const timedOut = error instanceof Error && error.name === 'TimeoutError';
-        const message = timedOut
-          ? `Linear at ${host} did not answer within ${timeoutMs} ms`
-          : `Linear is unreachable at ${host}: ${error instanceof Error ? error.message : String(error)}`;
-        throw new PortError('ticketSource', op, 'unavailable', message);
+        throw transport(op, error, `Linear is unreachable at ${host}`);
       }
-      const text = await response.text();
+      try {
+        text = await response.text();
+      } catch (error) {
+        throw transport(op, error, `the answer from Linear at ${host} broke off`);
+      }
       let body: Body;
       try {
         const json: unknown = JSON.parse(text);
