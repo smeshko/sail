@@ -20,6 +20,12 @@ test.each<[string, Env, (string | string[])[]]>([
   ['Vertex', { CLAUDE_CODE_USE_VERTEX: '1' }, ['CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID']],
   ['Bedrock switched off', { CLAUDE_CODE_USE_BEDROCK: '0' }, CREDENTIAL],
   ['Vertex set empty', { CLAUDE_CODE_USE_VERTEX: '' }, CREDENTIAL],
+  // Review R3-2: the CLI turns a switch on only for 1, true, yes or on, trimmed and in any case.
+  ['Bedrock set false', { CLAUDE_CODE_USE_BEDROCK: 'false' }, CREDENTIAL],
+  ['Vertex set off', { CLAUDE_CODE_USE_VERTEX: ' Off ' }, CREDENTIAL],
+  ['Bedrock set no', { CLAUDE_CODE_USE_BEDROCK: 'no' }, CREDENTIAL],
+  ['Bedrock set TRUE', { CLAUDE_CODE_USE_BEDROCK: ' TRUE ' }, ['AWS_REGION']],
+  ['Vertex set yes', { CLAUDE_CODE_USE_VERTEX: 'yes' }, ['CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID']],
 ])('on %s, the preflight asks for its credentials', (_, env, names) => {
   expect(definition.requires?.({}, env)).toEqual(names);
 });
