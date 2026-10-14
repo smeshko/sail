@@ -387,10 +387,7 @@ const TABLE: Row[] = [
 
 const RULES: readonly string[] = ['read', 'write', 'commands', 'tools'];
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each(TABLE.map((row) => [row.label, row] as const))('%s', (_, row) => {
+test.each(TABLE.map((row) => [row.label, row] as const))('%s', (_, row) => {
   const decision = decide(row.call, perms(row.open), layout.ctx);
   const mention = row.mention ?? '';
   const seen = decision.allow
@@ -399,10 +396,7 @@ test
   expect(seen).toEqual(row.want === 'allow' ? 'allow' : [row.want, mention]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('every denial explains itself: one of the four rules, and a reason naming the refused path, command or tool', () => {
+test('every denial explains itself: one of the four rules, and a reason naming the refused path, command or tool', () => {
   const denying = TABLE.filter((row) => row.want !== 'allow');
   const explained = denying.map((row) => {
     const decision = decide(row.call, perms(row.open), layout.ctx);
