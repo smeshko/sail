@@ -8,6 +8,7 @@ import type { FileEntry } from '../../src/engine/contract';
 import {
   documentProblems,
   MAX_DOCUMENT_BYTES,
+  MAX_PROBLEMS_PER_CHECK,
   readDocument,
   renderDocuments,
   validateDocuments,
@@ -268,4 +269,25 @@ test("documentProblems names two documents' validators that derive one key, with
     "'odd.md' is neither 'file' nor a document",
   ]);
   expect(documentProblems({ 'spec.md': specDoc, 'notes.md': 'file' })).toEqual([]);
+});
+
+test('a document of 1 MiB that is all placeholders is validated in time, and each check gives at most its first 20 problems, then how many more it found (review R1-1)', () => {
+  const out = produced({ 'spec.md': '{{x:y}}\n'.repeat(MAX_DOCUMENT_BYTES / 8) });
+  const many = { check: 'many', derives: [], validate: () => ({ problems: ['a', 'b', ...Array(20).fill('c')] }) };
+  const produces = { 'spec.md': doc('spec.md', [noPlaceholders(), many as Validator]) };
+  const started = performance.now();
+  const validated = validateDocuments({ produces, ...out });
+  expect(performance.now() - started).toBeLessThan(2000);
+  expect(validated.errors.map((error) => error.message)).toEqual([
+    ...Array.from(
+      { length: MAX_PROBLEMS_PER_CHECK },
+      (_, index) => `spec.md: noPlaceholders: line ${index + 1} still holds the placeholder {{x: …}}`,
+    ),
+    `spec.md: noPlaceholders: and ${MAX_DOCUMENT_BYTES / 8 - MAX_PROBLEMS_PER_CHECK} more problems`,
+    'spec.md: many: a',
+    'spec.md: many: b',
+    ...Array(MAX_PROBLEMS_PER_CHECK - 2).fill('spec.md: many: c'),
+    'spec.md: many: and 2 more problems',
+  ]);
+  expect(MAX_PROBLEMS_PER_CHECK).toBe(20);
 });
