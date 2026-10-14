@@ -76,10 +76,7 @@ function ticketOf(node: Record<string, unknown>, op = 'get'): Ticket {
   return ticket;
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a full Linear ticket is a Ticket with every field: comments in order with their authors, relations both ways and attachments in links, uploads beside attachments, raw as sent', () => {
+test('a full Linear ticket is a Ticket with every field: comments in order with their authors, relations both ways and attachments in links, uploads beside attachments, raw as sent', () => {
   expect(ticketOf(nodeWith({}))).toEqual({
     ticketKey: 'ADW-7',
     title: 'Add a greeting',
@@ -111,10 +108,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the seven Linear state types read as sail’s four, each keeping Linear’s name for the state', () => {
+test('the seven Linear state types read as sail’s four, each keeping Linear’s name for the state', () => {
   const types = ['triage', 'backlog', 'unstarted', 'started', 'completed', 'canceled', 'duplicate'];
   const states = types.map((type) => ticketOf(nodeWith({ state: { id: `s-${type}`, name: `N ${type}`, type } })).state);
   expect(states).toEqual([
@@ -128,10 +122,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a state type sail does not know is invalid for the operation, naming the type', () => {
+test('a state type sail does not know is invalid for the operation, naming the type', () => {
   const node = nodeWith({ state: { id: 's-paused', name: 'Paused', type: 'paused' } });
   const error = caught(() => toTicket(node, [], 'listDesignated'));
   expect(error instanceof PortError ? [error.op, error.code, error.message] : error).toEqual([
@@ -141,18 +132,12 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a null description reads as empty', () => {
+test('a null description reads as empty', () => {
   const { ticketKey, description } = ticketOf(nodeWith({ description: null }));
   expect({ ticketKey, description }).toEqual({ ticketKey: 'ADW-7', description: '' });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a node without a state, or with a null list, is invalid, naming the field: nothing is made up', () => {
+test('a node without a state, or with a null list, is invalid, naming the field: nothing is made up', () => {
   const { state: _, ...stateless } = structuredClone(NODE);
   const errors = [stateless, nodeWith({ labels: null }), nodeWith({ attachments: null })].map((node) =>
     caught(() => toTicket(node, [], 'get')),
