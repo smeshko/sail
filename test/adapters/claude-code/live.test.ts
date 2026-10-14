@@ -4,7 +4,7 @@
 //
 //   SAIL_LIVE=1 bun run test test/adapters/claude-code/live.test.ts
 //
-// SAIL_LIVE_MODEL picks a cheaper model for the port suite and the spec stage; it defaults to the fixture's `default`.
+// SAIL_LIVE_MODEL picks the model for the port suite and the spec stage; it defaults to claude-haiku-5-5, the cheapest.
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,7 @@ import { withTempRepo } from '../../helpers/temp-repo';
 import { harnessSuite } from '../../ports/harness.suite';
 
 const LIVE = process.env.SAIL_LIVE === '1';
-const MODEL = process.env.SAIL_LIVE_MODEL ?? 'claude-sonnet-5';
+const MODEL = process.env.SAIL_LIVE_MODEL ?? 'claude-haiku-5-5';
 const SENTINEL = 'SENTINEL-7Q';
 
 /** A request in a fresh workspace and call directory, prompted `prompt`. */
