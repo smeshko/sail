@@ -424,6 +424,8 @@ test('git-worktree is a built-in for the workspace port alone: its options are r
     }).toEqual({
       builtins: {
         fake: ['ticketSource', 'codeHost', 'harness', 'workspace'],
+        linear: ['ticketSource'],
+        'claude-code': ['harness'],
         'git-worktree': ['workspace'],
       },
       resolved: 'git-worktree',
