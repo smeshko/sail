@@ -103,6 +103,43 @@ test("a recursive output's references to its own root are rebased onto the outpu
   });
 });
 
+// Review R2-1: a `$id` starts a resource of its own, which a `#` inside it means. The root's `$id` moves to the envelope
+// with the definitions, so the rebased references resolve against it, and a nested resource is left as it is.
+test("a recursive output with a $id validates in the envelope, and a nested resource's references are its own", () => {
+  const Node: z.ZodType<{ name: string; children?: unknown[] | undefined }> = z
+    .object({
+      name: z.string(),
+      get children() {
+        return z.array(Node).optional();
+      },
+    })
+    .meta({ $id: 'https://example.test/tree' });
+  const step = deepFreeze(z.toJSONSchema(Node, { target: 'draft-07', io: 'input' }) as Record<string, unknown>);
+  expect(JSON.stringify(step)).toContain('"$ref":"#"');
+  const envelope = submissionEnvelope(step);
+  const validate = new Ajv({ strict: false }).compile(envelope);
+  const nested = submissionEnvelope(
+    deepFreeze({
+      type: 'object',
+      properties: { list: { $id: 'https://example.test/list', type: 'array', items: { $ref: '#' } } },
+    }),
+  );
+  expect({
+    id: envelope.$id,
+    tree: validate({ outcome: 'done', output: { name: 'root', children: [{ name: 'leaf' }] } }),
+    badLeaf: validate({ outcome: 'done', output: { name: 'root', children: [{ name: 3 }] } }),
+    list: (nested.properties as Record<string, unknown>).output,
+  }).toEqual({
+    id: 'https://example.test/tree',
+    tree: true,
+    badLeaf: false,
+    list: {
+      type: 'object',
+      properties: { list: { $id: 'https://example.test/list', type: 'array', items: { $ref: '#' } } },
+    },
+  });
+});
+
 test('a $defs map is hoisted too, beside definitions', () => {
   const step = deepFreeze({
     type: 'object',
