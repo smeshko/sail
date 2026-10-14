@@ -6,6 +6,9 @@
 // - The answer is checked and filtered again: a repository's own adapter is untrusted code, so one that over-answers
 //   still can't queue a started or undesignated ticket (D10).
 // - One poll at a time per workflow: a poll asked for while one is in flight joins it (D11).
+// - A poll that throws, as a queue write on a full disk does, is retried at the backoff all the same. `pollNow` rejects
+//   with it, and a poll nobody awaits (a timer's, a command's, the start's) hands it to `onError`, never to an unhandled
+//   rejection, which would end the watcher.
 // - Only tickets are polled so far. Epic 14.2 adds the CodeHost poll for `pr`.
 import { z } from 'zod';
 import type { ProjectConfig } from '../engine/config';
@@ -58,6 +61,8 @@ export type PollOutcome = 'polled' | 'failed' | 'paused';
 
 const PAUSING: readonly string[] = ['unauthorized', 'forbidden'];
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 /** The wait before the next poll after `failures` polls in a row failed: the backoff, never shorter than `every`. */
 function retryInMs(target: Pick<WatchTarget, 'everyMs'>, failures: number, policy: QueuePolicy): number {
   const backoff = policy.pollBackoffMs;
@@ -90,7 +95,7 @@ export async function pollOnce(
       port: 'ticketSource' as const,
       adapter: target.ticketSource.name,
       ...(code === undefined ? {} : { code }),
-      message: error instanceof Error ? error.message : String(error),
+      message: messageOf(error),
     };
     if (code !== undefined && PAUSING.includes(code)) {
       target.store.pollFailed({ ...failure, paused: true });
@@ -132,7 +137,10 @@ export interface Poller {
   stop(): void;
   /** Polls the workflow now, paused or not, or joins its poll in flight. A workflow it doesn't poll throws. */
   pollNow(workflow: string): Promise<PollOutcome>;
-  /** Applies a command from the inbox. One for a workflow it doesn't poll throws. */
+  /**
+   * Applies a command from the inbox: the poll starts, and a failure goes to `onError`. One for a workflow it doesn't
+   * poll throws.
+   */
   apply(command: Command): void;
 }
 
@@ -141,6 +149,8 @@ export interface PollerOptions {
   timers: Timers;
   now: () => Date;
   policy?: QueuePolicy;
+  /** Hears a poll nobody awaits that threw. Without it, the poller writes the error to stderr. */
+  onError?: (workflow: string, error: unknown) => void;
 }
 
 export function createPoller(options: PollerOptions): Poller {
@@ -165,26 +175,39 @@ export function createPoller(options: PollerOptions): Poller {
       outcome === 'polled' ? target.everyMs : retryInMs(target, target.store.snapshot().polling.failures, policy);
     timer.set(
       target.workflow,
-      timers.set(() => poll(target), ms),
+      timers.set(() => unawaited(target), ms),
     );
   };
   const poll = (target: WatchTarget): Promise<PollOutcome> => {
     const running = inFlight.get(target.workflow);
     if (running !== undefined) return running;
     clear(target);
-    const polling = pollOnce(target, now, policy).then((outcome) => {
-      inFlight.delete(target.workflow);
-      schedule(target, outcome);
-      return outcome;
-    });
+    const polling = pollOnce(target, now, policy).then(
+      (outcome) => {
+        inFlight.delete(target.workflow);
+        schedule(target, outcome);
+        return outcome;
+      },
+      (error: unknown) => {
+        inFlight.delete(target.workflow);
+        schedule(target, 'failed');
+        throw error;
+      },
+    );
     inFlight.set(target.workflow, polling);
     return polling;
   };
+  /** Polls `target` for a caller that won't await it, and hands a failure to `onError`. */
+  const unawaited = (target: WatchTarget): Promise<unknown> =>
+    poll(target).catch((error: unknown) => {
+      if (options.onError !== undefined) options.onError(target.workflow, error);
+      else process.stderr.write(`sail: polling workflow '${target.workflow}' failed: ${messageOf(error)}\n`);
+    });
 
   const poller: Poller = {
     async start() {
       stopped = false;
-      await Promise.all(targets.map(poll));
+      await Promise.all(targets.map(unawaited));
     },
     stop() {
       stopped = true;
@@ -192,7 +215,7 @@ export function createPoller(options: PollerOptions): Poller {
     },
     pollNow: (workflow) => poll(find(workflow)),
     apply(command) {
-      void poller.pollNow(command.workflow);
+      void unawaited(find(command.workflow));
     },
   };
   return poller;
