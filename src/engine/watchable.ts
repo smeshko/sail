@@ -5,6 +5,8 @@
 //
 // - `every` has a floor of 30 s: a Linear poll costs one request plus one per ticket, and a key allows about 1,500 an
 //   hour, so a shorter interval on a few workflows would spend it.
+// - `every` has a ceiling too, the longest a timer can wait: past it, `setTimeout` fires after 1 ms, and the watcher
+//   would poll without pause.
 // - Only ticket sources are polled so far. Epic 14.2 adds `pr` to `POLLABLE_KINDS`, with the CodeHost poll.
 import type { Workflow } from '../sdk/index';
 import type { SourceKind } from '../sdk/intake';
@@ -16,15 +18,26 @@ export const POLLABLE_KINDS: readonly SourceKind[] = ['ticket'];
 /** The shortest `watch.every`. */
 export const MIN_EVERY_MS = 30_000;
 
+/** The longest `watch.every`: the longest a timer can wait, 2^31 - 1 ms. */
+export const MAX_EVERY_MS = 2_147_483_647;
+
 const EVERY = /^(\d+(?:\.\d+)?)(s|m|h)$/;
 const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000 };
 
-/** A `watch.every` in milliseconds: `<n>s`, `<n>m` or `<n>h` of at least `MIN_EVERY_MS`. Anything else is undefined. */
-export function parseEvery(every: unknown): number | undefined {
+/** `every` in milliseconds, when it reads `<n>s`, `<n>m` or `<n>h`, whatever its size. */
+function everyMs(every: unknown): number | undefined {
   const match = typeof every === 'string' ? EVERY.exec(every) : null;
   if (match === null) return undefined;
-  const ms = Math.round(Number(match[1]) * (UNIT_MS[match[2] as string] as number));
-  return ms >= MIN_EVERY_MS ? ms : undefined;
+  return Math.round(Number(match[1]) * (UNIT_MS[match[2] as string] as number));
+}
+
+/**
+ * A `watch.every` in milliseconds: `<n>s`, `<n>m` or `<n>h` from `MIN_EVERY_MS` to `MAX_EVERY_MS`. Anything else is
+ * undefined.
+ */
+export function parseEvery(every: unknown): number | undefined {
+  const ms = everyMs(every);
+  return ms !== undefined && ms >= MIN_EVERY_MS && ms <= MAX_EVERY_MS ? ms : undefined;
 }
 
 /** What keeps the watcher from acting on `workflow`'s watch declaration, or undefined when nothing does. */
@@ -37,6 +50,10 @@ export function watchProblem(workflow: Workflow): string | undefined {
   if (watch === undefined) return 'declares maxConcurrentRuns without watch: only a watched workflow bounds its runs';
   if (!Number.isInteger(maxConcurrentRuns) || maxConcurrentRuns < 1) {
     return `has maxConcurrentRuns ${JSON.stringify(maxConcurrentRuns)}, which is not a whole number of 1 or more`;
+  }
+  if ((everyMs(watch.every) ?? 0) > MAX_EVERY_MS) {
+    const longest = `${MAX_EVERY_MS} ms (about 596h), the longest a timer can wait`;
+    return `has watch.every ${JSON.stringify(watch.every)}, which is longer than ${longest}`;
   }
   if (parseEvery(watch.every) === undefined) {
     return `has watch.every ${JSON.stringify(watch.every)}, which is not a number of s, m or h of at least 30s`;
