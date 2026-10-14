@@ -1,9 +1,15 @@
 import type { Builtins } from '../ports/adapter';
+import { claudeCodeAdapters } from './claude-code/index';
 import { fakeAdapters } from './fake/index';
 import { linearTicketSource } from './ticket-source/linear';
 
+export { createClaudeCodeHarness } from './claude-code/index';
 export { createFakeCodeHost, createFakeHarness, createFakeTicketSource, createFakeWorkspace } from './fake/index';
 export { createLinearTicketSource } from './ticket-source/linear';
 
 /** The built-in adapters by name: the set a composition root hands to the adapter registry. */
-export const BUILTINS: Builtins = { fake: fakeAdapters, linear: { ticketSource: linearTicketSource } };
+export const BUILTINS: Builtins = {
+  fake: fakeAdapters,
+  linear: { ticketSource: linearTicketSource },
+  'claude-code': claudeCodeAdapters,
+};
