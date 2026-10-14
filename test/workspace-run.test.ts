@@ -77,10 +77,7 @@ const leasesIn = (repo: TempRepo): string[] => {
 const find = <T extends SailEvent['type']>(events: SailEvent[], type: T) =>
   events.filter((event): event is Extract<SailEvent, { type: T }> => event.type === type);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('validation 1 and 2: a run starts in a detached worktree of origin/main under its run directory, and a second run on its branch is refused with exit code 3', async () => {
+test('validation 1 and 2: a run starts in a detached worktree of origin/main under its run directory, and a second run on its branch is refused with exit code 3', async () => {
   await withTempRepo(async (repo) => {
     cloneOf(repo);
     const before = checkout(repo);
@@ -113,10 +110,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("validation 3: with an uncommitted edit in the clone and the run's branch checked out there, sail FAKE-2 --force still starts, and leaves the clone exactly as it was", async () => {
+test("validation 3: with an uncommitted edit in the clone and the run's branch checked out there, sail FAKE-2 --force still starts, and leaves the clone exactly as it was", async () => {
   await withTempRepo(async (repo) => {
     cloneOf(repo);
     repo.git('checkout', '-q', '-b', 'sail/FAKE-2-print-the-version-with-version');
@@ -140,10 +134,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("validation 4: a stage consuming gitDiff('origin/main...HEAD') finds the run's diff in $STAGE_IN, with the file an earlier step wrote", async () => {
+test("validation 4: a stage consuming gitDiff('origin/main...HEAD') finds the run's diff in $STAGE_IN, with the file an earlier step wrote", async () => {
   await withTempRepo(async (repo) => {
     const sailDir = cloneOf(repo);
     edit(
@@ -178,10 +169,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('sail resume continues a suspended run in its own worktree, then releases the worktree and the lease', async () => {
+test('sail resume continues a suspended run in its own worktree, then releases the worktree and the lease', async () => {
   await withTempRepo(async (repo) => {
     cloneOf(repo);
     const first = await sail(repo, 'FAKE-1', '--until', 'tests');
