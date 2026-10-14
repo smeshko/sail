@@ -81,9 +81,10 @@ test('a second run is refused while the first is running, and told who holds the
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r1, NOW));
 });
 
-test('the same run leasing again renews its lease with its new pid and time', () => {
+test('the same run leasing again, once its process is gone, renews its lease with its new pid and time', async () => {
   const dir = tempDir();
-  const r1 = run('r1', process.pid, 'suspended', 'interrupted');
+  // A suspended run's own process has exited by the time it is resumed.
+  const r1 = run('r1', await deadPid(), 'suspended', 'interrupted');
   takeLease(dir, REMOTE, BRANCH, r1, NOW);
   const resumed = { ...r1, pid: process.ppid };
   expect(bare(takeLease(dir, REMOTE, BRANCH, resumed, LATER))).toEqual({
@@ -254,7 +255,7 @@ test('two branches of one remote, and one branch of two remotes, lease apart', (
   ]).toEqual(['r1', 'r2', 'r3']);
 });
 
-test('a renewal is refused while its run is alive in another process, running or with no STATUS yet, and taken once that process is gone or the run is suspended', async () => {
+test('a renewal is refused while its run is alive in another process, whatever its STATUS says (a resume or a suspend may be under way), and taken once that process is gone', async () => {
   const dir = tempDir();
   const other = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
   try {
@@ -268,16 +269,21 @@ test('a renewal is refused while its run is alive in another process, running or
     const gone = run('r2', await deadPid(), 'running');
     takeLease(dir, REMOTE, 'sail/gone', gone, NOW);
     const afterDeath = takeLease(dir, REMOTE, 'sail/gone', { ...gone, pid: process.pid }, LATER);
+    const left = run('r3', await deadPid(), 'suspended', 'interrupted');
+    takeLease(dir, REMOTE, 'sail/left', left, NOW);
+    const afterSuspend = takeLease(dir, REMOTE, 'sail/left', { ...left, pid: process.pid }, LATER);
     expect({
       running: renewal('running'),
       starting: renewal(),
       suspended: renewal('suspended', 'interrupted'),
       gone: afterDeath.leased ? `renewed by ${afterDeath.lease.pid}` : 'refused',
+      suspendedAndGone: afterSuspend.leased ? `renewed by ${afterSuspend.lease.pid}` : 'refused',
     }).toEqual({
       running: `refused, held by ${other.pid}`,
       starting: `refused, held by ${other.pid}`,
-      suspended: `renewed by ${process.pid}`,
+      suspended: `refused, held by ${other.pid}`,
       gone: `renewed by ${process.pid}`,
+      suspendedAndGone: `renewed by ${process.pid}`,
     });
   } finally {
     other.kill('SIGKILL');
