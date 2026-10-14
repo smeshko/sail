@@ -12,12 +12,14 @@ import { FIXTURE_SAIL } from '../../helpers/fixture';
 
 const definition = claudeCodeAdapters.harness;
 
-test.each<[string, Env, string[]]>([
-  ['an empty environment', {}, ['ANTHROPIC_API_KEY']],
+const CREDENTIAL = [['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']];
+
+test.each<[string, Env, (string | string[])[]]>([
+  ['an empty environment', {}, CREDENTIAL],
   ['Bedrock', { CLAUDE_CODE_USE_BEDROCK: '1' }, ['AWS_REGION']],
   ['Vertex', { CLAUDE_CODE_USE_VERTEX: '1' }, ['CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID']],
-  ['Bedrock switched off', { CLAUDE_CODE_USE_BEDROCK: '0' }, ['ANTHROPIC_API_KEY']],
-  ['Vertex set empty', { CLAUDE_CODE_USE_VERTEX: '' }, ['ANTHROPIC_API_KEY']],
+  ['Bedrock switched off', { CLAUDE_CODE_USE_BEDROCK: '0' }, CREDENTIAL],
+  ['Vertex set empty', { CLAUDE_CODE_USE_VERTEX: '' }, CREDENTIAL],
 ])('on %s, the preflight asks for its credentials', (_, env, names) => {
   expect(definition.requires?.({}, env)).toEqual(names);
 });
@@ -74,11 +76,16 @@ test('on Bedrock or Vertex an OAuth token does not stand in for the cloud variab
   });
 });
 
-test('without its key, the preflight names it; with an option it takes none, the option is named', async () => {
+test('without its credential, the preflight names it; with an option it takes none, the option is named', async () => {
   const missing = await resolveHarness({ use: 'claude-code' }, {});
   const option = await resolveHarness({ use: 'claude-code', model: 'x' }, { ANTHROPIC_API_KEY: 'offline-test' });
   expect(missing).toEqual({
-    issues: [{ path: '/adapters/harness', message: 'needs ANTHROPIC_API_KEY, which is not set' }],
+    issues: [
+      {
+        path: '/adapters/harness',
+        message: 'needs one of ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, none of which is set',
+      },
+    ],
   });
   expect('issues' in option ? option.issues.map((issue) => issue.path) : option).toEqual(['/adapters/harness']);
   expect('issues' in option ? option.issues[0]?.message : '').toContain('option model');
