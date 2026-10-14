@@ -10,8 +10,9 @@ export { createClaudeCodeHarness } from './harness';
 /** The Agent SDK's version, which `package.json` pins: the SDK exports no way to read it. */
 export const SDK_VERSION = '0.3.282';
 
-/** Whether a switch such as `CLAUDE_CODE_USE_BEDROCK` is on. */
-const on = (value: string | undefined): boolean => value !== undefined && value !== '' && value !== '0';
+/** Whether a switch such as `CLAUDE_CODE_USE_BEDROCK` is on, read as the CLI reads it: 1, true, yes or on, in any case. */
+const on = (value: string | undefined): boolean =>
+  value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
 
 /** The environment variables the session's provider needs: on Anthropic's own API, a key or a Claude subscription's OAuth token. */
 export function requires(env: Env): (string | string[])[] {
