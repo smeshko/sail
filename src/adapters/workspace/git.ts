@@ -107,14 +107,22 @@ export function resolveCommit(repo: string, rev: string, env?: Readonly<Record<s
   return resolved.code === 0 ? resolved.stdout.trim() : undefined;
 }
 
-/** Adds a detached worktree of `sha` at `path`. A failure is `unavailable`, with git's own words. */
+/**
+ * Adds a detached worktree of `sha` at `path`, with the clone's hooks off: a post-checkout hook (an install, a download)
+ * would run under the local timeout, with the terminal, and fail the start. A run's steps prepare their own workspace.
+ * A failure is `unavailable`, with git's own words.
+ */
 export function addDetached(
   repo: string,
   path: string,
   sha: string,
   env?: Readonly<Record<string, string>>,
 ): GitResult {
-  const added = gitSync(repo, ['worktree', 'add', '--detach', resolve(path), sha], env);
+  const added = gitSync(
+    repo,
+    ['-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '--detach', resolve(path), sha],
+    env,
+  );
   if (added.code !== 0) throw new PortError('workspace', 'create', 'unavailable', added.stderr);
   return added;
 }
