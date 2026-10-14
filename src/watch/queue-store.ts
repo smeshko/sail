@@ -4,7 +4,8 @@
 //   file atomically on each change. Anything else asks for a change by dropping a command file (`inbox.ts`).
 // - A change is made on a copy, which becomes the queue only once it is on disk. A write that throws leaves the store
 //   holding what `queue.json` holds: the old queue when the write failed before its rename, and the new one when only
-//   the directory's sync after it failed. So the next change never writes an old queue back over a newer one.
+//   the directory's sync after it failed. So the next change never writes an old queue back over a newer one. When
+//   `queue.json` can't be read back either, no change is made until it can.
 // - Items are known by their dedup key. A key whose item is done may be queued again: the ticket system is the memory
 //   of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
@@ -173,16 +174,30 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
   const stream = openQueueStream(dir, now);
   if ('refused' in stream) return stream;
 
+  /** Set when a write threw and queue.json couldn't be read back: what it holds is unknown until it can be. */
+  let unsure = false;
+  /** Makes what queue.json holds the queue, or says why it can't be read. */
+  const adopt = (): string | undefined => {
+    const onDisk = readQueueFile(path);
+    if ('refused' in onDisk) return onDisk.refused;
+    queue = onDisk;
+    return undefined;
+  };
   /** Makes the change on a copy, writes it, and only then makes it the queue. */
   const change = <T>(make: (next: QueueFile) => T): T => {
+    if (unsure) {
+      const refused = adopt();
+      if (refused !== undefined) throw new Error(refused);
+      unsure = false;
+    }
     const next = structuredClone(queue);
     const result = make(next);
     next.updatedAt = now().toISOString();
     try {
       replaceFile(path, `${JSON.stringify(next, null, 2)}\n`);
     } catch (error) {
-      const onDisk = readQueueFile(path);
-      if (!('refused' in onDisk)) queue = onDisk;
+      // No queue.json means the write never reached it, and the queue is still the one in memory.
+      unsure = existsSync(path) && adopt() !== undefined;
       throw error;
     }
     queue = next;
