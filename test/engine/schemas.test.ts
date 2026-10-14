@@ -1278,10 +1278,7 @@ const QUEUED: NewQueueEvent[] = [
   },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each(QUEUED.map((sample) => [sample.type, sample] as const))(
+test.each(QUEUED.map((sample) => [sample.type, sample] as const))(
   '%s accepts its payload without runId, and rejects a field it does not declare',
   (_, sample) => {
     expect(validateDocument('sail.event.v1', { ...queueEnvelope, ...sample })).toEqual([]);
@@ -1291,10 +1288,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a queue event refuses a runId, needs its workflow, and keeps retryInMs, dedupKey and an open payload to their rules', () => {
+test('a queue event refuses a runId, needs its workflow, and keeps retryInMs, dedupKey and an open payload to their rules', () => {
   const [polled, added, , error] = QUEUED.map((sample) => ({ ...queueEnvelope, ...sample }));
   expect(paths('sail.event.v1', { ...polled, runId: RUN_ID })).toEqual(['/runId']);
   expect(paths('sail.event.v1', omit(polled as Record<string, unknown>, 'workflow'))).toEqual(['/workflow']);

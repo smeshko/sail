@@ -459,6 +459,10 @@ _Avoid_: sweep, scan, sync
 The sources waiting for a run, kept per workflow and deduplicated. A queued item is always a source, never a resolved input.
 _Avoid_: backlog, inbox, buffer
 
+**Queue event stream**:
+A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
+_Avoid_: queue log, daemon log
+
 **Dispatch**:
 The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, dispatch begins with the claim.
 _Avoid_: pickup, schedule, spawn

@@ -37,10 +37,7 @@ const polled = (added: number) =>
     durationMs: 5,
   }) as const;
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a new stream writes seq 1, 2 and 3 as valid events, and reopened it continues at 4', () => {
+test('a new stream writes seq 1, 2 and 3 as valid events, and reopened it continues at 4', () => {
   const dir = queueDir();
   const stream = open(dir);
   expect([3, 0, 0].map((added) => stream.emit(polled(added)).seq)).toEqual([1, 2, 3]);
@@ -54,10 +51,7 @@ test
   expect(queueEventIssues(dir)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a torn last line is cut, and the stream continues after the last whole line', () => {
+test('a torn last line is cut, and the stream continues after the last whole line', () => {
   const dir = queueDir();
   mkdirSync(dir, { recursive: true });
   const whole = (seq: number) => JSON.stringify({ seq, ts: '2026-10-14T09:00:00.000Z', ...polled(1) });
@@ -68,10 +62,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a last line that is no event refuses, naming its line, and leaves the file as it was', () => {
+test('a last line that is no event refuses, naming its line, and leaves the file as it was', () => {
   const dir = queueDir();
   mkdirSync(dir, { recursive: true });
   const text = `${JSON.stringify({ seq: 1, ts: '2026-10-14T09:00:00.000Z', ...polled(1) })}\nnot json\n`;
