@@ -306,6 +306,25 @@ test('documentProblems names a hand-built document whose validator has no check 
   ]);
 });
 
+test('a validator that changes the document it is handed throws, and the next validator still reads the document as written (review R1-6)', () => {
+  const mutates = {
+    check: 'mutates',
+    derives: [],
+    validate: (document: { sections: { items: unknown[] }[]; headings: unknown[] }) => {
+      document.headings.reverse();
+      document.sections[0]?.items.splice(0);
+      return { problems: [] };
+    },
+  } as unknown as Validator;
+  const out = produced({ 'spec.md': '## Tasks\n\n- one\n- two\n' });
+  const produces = { 'spec.md': doc('spec.md', [mutates, hasSections('Tasks'), countItems('Tasks')]) };
+  const validated = validateDocuments({ produces, ...out });
+  expect(validated.derived).toEqual({ tasks: 2 });
+  expect(validated.errors).toHaveLength(1);
+  expect(validated.errors[0]?.message).toStartWith('spec.md: mutates: threw: ');
+  expect(Object.isFrozen(readDocument('spec.md', '## Tasks\n\n- one\n').sections[0]?.items)).toBe(true);
+});
+
 test('a document of 1 MiB that is all placeholders is validated in time, and each check gives at most its first 20 problems, then how many more it found (review R1-1)', () => {
   const out = produced({ 'spec.md': '{{x:y}}\n'.repeat(MAX_DOCUMENT_BYTES / 8) });
   const many = { check: 'many', derives: [], validate: () => ({ problems: ['a', 'b', ...Array(20).fill('c')] }) };
