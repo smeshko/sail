@@ -243,7 +243,7 @@ The named reason a run ended without completing, such as `workflow_failed`, `sta
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
-A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, or a leased branch. A refusal leaves no run directory.
+A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory.
 _Avoid_: rejection, abort, error (an outcome)
 
 **Suspended**:
@@ -257,6 +257,10 @@ _Avoid_: restart, rerun, retry, continue
 **Workspace**:
 The checkout a run works in, on its own branch. How it is made (a branch in the current clone, a git worktree, a container) is up to the workspace adapter.
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
+
+**Base**:
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`.
+_Avoid_: start point, fork point
 
 **Branch**:
 Always the git branch, such as the one a run's workspace sits on. A workflow's routing decision is a route, never a branch.

@@ -127,6 +127,10 @@ export type Released = z.infer<typeof Released>;
 export const Workspace = z.object({ path: z.string(), branch: z.string(), baseSha: z.string(), raw: Raw });
 export type Workspace = z.infer<typeof Workspace>;
 
+/** The repository a Workspace adapter works for: `url` keys its leases, and a run starts from `defaultBranch`. */
+export const Repository = z.object({ url: z.string().min(1), defaultBranch: z.string().min(1), raw: Raw });
+export type Repository = z.infer<typeof Repository>;
+
 export const Diff = z.object({ patch: z.string(), raw: Raw });
 export type Diff = z.infer<typeof Diff>;
 

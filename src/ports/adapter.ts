@@ -84,9 +84,11 @@ export const PORT_OPERATIONS = {
   ]),
   harness: operations<Harness>()(['run', 'capabilities']),
   workspace: operations<WorkspacePort>()([
+    'repository',
     'lease',
     'releaseLease',
     'create',
+    'reopen',
     'diff',
     'release',
     'sweep',

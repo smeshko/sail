@@ -26,6 +26,8 @@ export interface ProjectConfig {
   /** The designation label. `DEFAULT_LABEL` applies when it is left out. */
   label?: string;
   defaultWorkflow?: string;
+  /** What a run's branch starts with. `DEFAULT_BRANCH_PREFIX` applies when it is left out. */
+  branchPrefix?: string;
   adapters: Record<Port, AdapterConfig>;
   /** Model aliases: alias → model id. Empty when `project.yaml` has none. */
   models: Record<string, string>;

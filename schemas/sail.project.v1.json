@@ -17,6 +17,12 @@
       "minLength": 1
     },
     "defaultWorkflow": { "description": "the workflow a run uses when none is named", "$ref": "#/$defs/slug" },
+    "branchPrefix": {
+      "description": "what a run's branch starts with, before the ticket key and the title's slug; sail/ when absent. /-separated segments of letters, digits, '.', '_' and '-', as git takes them in a branch: never starting with '-' or '/', never holding '..', and no segment starting with '.' or ending in '.lock'",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!-)(?!.*\\.\\.)(?:(?!\\.)[A-Za-z0-9._-]+(?<!\\.lock)/)*(?:(?!\\.)[A-Za-z0-9._-]*)$"
+    },
     "adapters": {
       "description": "which adapter fills each port",
       "type": "object",
