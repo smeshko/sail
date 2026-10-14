@@ -321,6 +321,20 @@ const TABLE: Row[] = [
     mention: 'get_issue',
   },
   {
+    label: 'closed: an MCP call with an empty tool name, under server:*',
+    call: mcp('linear', ''),
+    open: { tools: ['linear:*'] },
+    want: 'tools',
+    mention: 'names no tool',
+  },
+  {
+    label: 'closed: another tool with an empty name, though the list holds one',
+    call: other(''),
+    open: { tools: [''] },
+    want: 'tools',
+    mention: 'names no tool',
+  },
+  {
     label: 'closed: a kind outside the six',
     call: { tool: 'Remove', kind: 'delete', paths: ['src/a.ts'] } as unknown as ToolCall,
     open: { write: ['**'], tools: ['Remove'] },
