@@ -365,3 +365,95 @@ test("openWatchTarget gives a fixture copy's ticket-to-pr its label, interval an
     });
   });
 });
+
+/** `target`'s store, whose writes throw while `failing` holds, as on a full disk. */
+function failingWrites(polled: WatchTarget) {
+  const control = { failing: true };
+  const fail = () => {
+    if (control.failing) throw new Error('ENOSPC: no space left on device, write');
+  };
+  const { store } = polled;
+  return {
+    control,
+    target: {
+      ...polled,
+      store: {
+        ...store,
+        add(tickets: readonly Ticket[]) {
+          fail();
+          return store.add(tickets);
+        },
+        polled(poll: Parameters<typeof store.polled>[0]) {
+          fail();
+          store.polled(poll);
+        },
+        pollFailed(failure: Parameters<typeof store.pollFailed>[0]) {
+          fail();
+          store.pollFailed(failure);
+        },
+      },
+    } satisfies WatchTarget,
+  };
+}
+
+test('a poll whose queue write throws rejects its caller, retries at the backoff, and polls again once writes recover (review #1.1)', async () => {
+  const dir = tempDir();
+  const timers = fakeTimers(START);
+  const a = counted(fakeSource(dir));
+  const { control, target: failing } = failingWrites(target(dir, 'a', 'sail', a.source, timers.now, 30_000));
+  const heard: [string, string][] = [];
+  const poller = createPoller({
+    targets: [failing],
+    timers,
+    now: timers.now,
+    onError: (workflow, error) => heard.push([workflow, (error as Error).message]),
+  });
+  await expect(poller.pollNow('a')).rejects.toThrow('ENOSPC');
+  expect(timers.pending().map((timer) => timer.ms)).toEqual([60_000]);
+  await timers.advance(60_000);
+  expect(a.calls).toBe(2);
+  expect(heard).toEqual([['a', 'ENOSPC: no space left on device, write']]);
+  control.failing = false;
+  await timers.advance(60_000);
+  expect(a.calls).toBe(3);
+  expect(itemKeys(dir, 'a')).toEqual(['ticket:FAKE-1', 'ticket:FAKE-5']);
+  expect(await poller.pollNow('a')).toBe('polled');
+  expect(a.calls).toBe(4);
+  expect(timers.pending().map((timer) => timer.ms)).toEqual([30_000]);
+  poller.stop();
+});
+
+test('a poll command or a start whose poll throws reports it to onError, or to stderr without one, and rejects nothing (review #1.2)', async () => {
+  const dir = tempDir();
+  const timers = fakeTimers(START);
+  const a = counted(fakeSource(dir));
+  const { target: failing } = failingWrites(target(dir, 'a', 'sail', a.source, timers.now));
+  const heard: string[] = [];
+  const poller = createPoller({
+    targets: [failing],
+    timers,
+    now: timers.now,
+    onError: (workflow, error) => heard.push(`${workflow}: ${(error as Error).message}`),
+  });
+  await poller.start();
+  dropCommand(dir, { op: 'poll', workflow: 'a' });
+  expect(drainCommands(dir, poller.apply)).toEqual({ applied: 1, rejected: [] });
+  await Bun.sleep(0);
+  expect(heard).toEqual(['a: ENOSPC: no space left on device, write', 'a: ENOSPC: no space left on device, write']);
+  poller.stop();
+
+  const written: string[] = [];
+  const write = process.stderr.write;
+  process.stderr.write = ((text: string) => {
+    written.push(text);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    const quiet = createPoller({ targets: [failing], timers, now: timers.now });
+    await quiet.start();
+    quiet.stop();
+  } finally {
+    process.stderr.write = write;
+  }
+  expect(written).toEqual(["sail: polling workflow 'a' failed: ENOSPC: no space left on device, write\n"]);
+});
