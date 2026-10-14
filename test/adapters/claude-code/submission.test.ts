@@ -140,6 +140,102 @@ test("a recursive output with a $id validates in the envelope, and a nested reso
   });
 });
 
+// Review R3-1, and a property after three rounds of findings here: whatever a step schema's references look like, the
+// envelope takes a done submission exactly when the step schema takes its output. Ajv on the step schema is the
+// reference; the values are a seeded random mix of trees, specs and stray shapes.
+test('over seeded random values, a done envelope validates exactly when the step schema validates its output', () => {
+  const U = 'https://example.test/tree';
+  const Recursive: z.ZodType<{ name: string; children?: unknown[] | undefined }> = z.object({
+    name: z.string(),
+    get children() {
+      return z.array(Recursive).optional();
+    },
+  });
+  const Identified: z.ZodType<{ name: string; children?: unknown[] | undefined }> = z
+    .object({
+      name: z.string(),
+      get children() {
+        return z.array(Identified).optional();
+      },
+    })
+    .meta({ $id: U });
+  const zod = (schema: z.ZodType) => z.toJSONSchema(schema, { target: 'draft-07', io: 'input' });
+  const schemas: Record<string, Record<string, unknown>> = {
+    recursive: zod(Recursive),
+    identified: zod(Identified),
+    spec: zod(Spec),
+    absoluteSelf: {
+      $id: U,
+      type: 'object',
+      properties: { name: { type: 'string' }, children: { type: 'array', items: { $ref: U } } },
+      required: ['name'],
+    },
+    absoluteFragments: {
+      $id: U,
+      type: 'object',
+      properties: {
+        name: { $ref: `${U}#/definitions/text` },
+        children: { type: 'array', items: { $ref: `${U}#` } },
+        first: { $ref: `${U}#/properties/name` },
+      },
+      required: ['name'],
+      definitions: { text: { type: 'string' } },
+    },
+    nestedResource: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        children: {
+          $id: 'https://example.test/list',
+          type: 'array',
+          items: { anyOf: [{ type: 'string' }, { $ref: '#' }] },
+        },
+      },
+      required: ['name'],
+    },
+  };
+
+  let seed = 20261014;
+  const random = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)] as T;
+  const value = (depth: number): unknown => {
+    const kind =
+      depth <= 0 ? pick(['string', 'number']) : pick(['string', 'number', 'null', 'array', 'object', 'object']);
+    if (kind === 'string') return pick(['a', 'root', '']);
+    if (kind === 'number') return pick([0, 3]);
+    if (kind === 'null') return null;
+    if (kind === 'array') return Array.from({ length: Math.floor(random() * 3) }, () => value(depth - 1));
+    const keys = ['name', 'children', 'summary', 'first', 'rest', 'title'].filter(() => random() < 0.5);
+    return Object.fromEntries(keys.map((key) => [key, value(depth - 1)]));
+  };
+  const samples = [
+    { name: 'root', children: [{ name: 'leaf', children: [] }, 'tip'] },
+    { name: 'root', children: [{ name: 3 }] },
+    { summary: 's', first: { title: 't' }, rest: [{ title: 'u' }] },
+    ...Array.from({ length: 400 }, () => value(4)),
+  ];
+
+  const ajv = () => new Ajv({ strict: false });
+  const mismatches: string[] = [];
+  const accepted: Record<string, number> = {};
+  for (const [name, schema] of Object.entries(schemas)) {
+    const original = ajv().compile(schema);
+    const wrapped = ajv().compile(submissionEnvelope(deepFreeze(structuredClone(schema))));
+    accepted[name] = 0;
+    for (const output of samples) {
+      const expected = original(output);
+      if (expected) accepted[name] += 1;
+      if (wrapped({ outcome: 'done', output }) !== expected) mismatches.push(`${name}: ${JSON.stringify(output)}`);
+    }
+  }
+  expect(mismatches).toEqual([]);
+  // Each schema took some of the values, so the property is not vacuous.
+  expect(Object.entries(accepted).filter(([, count]) => count === 0)).toEqual([]);
+});
+
 test('a $defs map is hoisted too, beside definitions', () => {
   const step = deepFreeze({
     type: 'object',
