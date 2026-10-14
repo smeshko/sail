@@ -115,6 +115,17 @@ const CAPABILITIES: HarnessCapabilities = {
   budgets: ['turns', 'usd'],
 };
 
+/** How far a session got: what it said, whether its onEvent still listens, and whether it started and ended. */
+interface Progress {
+  readonly said: HarnessEvent[];
+  deaf: boolean;
+  /** `query()` was called, so the session ends with a `harness:session_end` (D21). */
+  started: boolean;
+  ended: boolean;
+}
+
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harness {
   const query = options.query ?? sdkQuery;
 
@@ -122,17 +133,17 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
     request: HarnessRequest,
     reader: SessionReader,
     sessionAt: Options & { abortController: AbortController },
+    progress: Progress,
   ): Promise<HarnessResult> {
-    const said: HarnessEvent[] = [];
-    let deaf = false;
+    const { said } = progress;
     /** Emits `event`; an onEvent that throws hears no more, and its throw ends the session. */
     const emit = (event: HarnessEvent): void => {
       said.push(event);
-      if (deaf) return;
+      if (progress.deaf) return;
       try {
         request.onEvent?.(event);
       } catch (error) {
-        deaf = true;
+        progress.deaf = true;
         throw error;
       }
     };
@@ -141,6 +152,7 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
     let result: SDKResultMessage | undefined;
     let thrown: { error: unknown } | undefined;
     try {
+      progress.started = true;
       for await (const message of query({ prompt: request.prompt, options: sessionAt })) {
         for (const event of reader.read(message)) emit(event);
         if (message.type === 'result') result = message;
@@ -174,17 +186,63 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       ...(ended.result.outcome === 'blocked' ? { message: ended.result.reason } : {}),
       costEstimate: ended.costEstimate,
     });
-    quietly({
-      type: 'harness:session_end',
-      ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
-      outcome,
-      reason: ended.endReason,
-      turns: state.turns,
-      toolCalls: state.toolCalls,
-      denials: state.denials,
-      usage: state.spent,
-    });
+    progress.ended = true;
+    try {
+      emit({
+        type: 'harness:session_end',
+        ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
+        outcome,
+        reason: ended.endReason,
+        turns: state.turns,
+        toolCalls: state.toolCalls,
+        denials: state.denials,
+        usage: state.spent,
+      });
+    } catch (error) {
+      // An onEvent that throws on the end fails the session as one that throws earlier does, keeping what it spent.
+      if (ended.result.outcome === 'error') return { ...ended.result, transcript };
+      const message = `claude-code: ${messageOf(error)}`;
+      const { sessionId, usage, raw } = ended.result;
+      const failed = renderTranscript(said, { outcome: 'error', message, costEstimate: ended.costEstimate });
+      return { outcome: 'error', message, reason: 'harness', sessionId, usage, transcript: failed, raw };
+    }
     return { ...ended.result, transcript };
+  }
+
+  /**
+   * The error result of a throw that the session's own handling didn't catch, from building its options or reading its
+   * end: a session that started still ends, unless its onEvent won't listen.
+   */
+  function failedOutright(request: HarnessRequest, reader: SessionReader, progress: Progress, error: unknown) {
+    const message = `claude-code: ${messageOf(error)}`;
+    const state = reader.state();
+    if (progress.started && !progress.ended && !progress.deaf) {
+      try {
+        request.onEvent?.({ type: 'error:harness', message });
+        request.onEvent?.({
+          type: 'harness:session_end',
+          ...(state.sessionId === undefined ? {} : { sessionId: state.sessionId }),
+          outcome: 'error',
+          reason: 'failed',
+          turns: state.turns,
+          toolCalls: state.toolCalls,
+          denials: state.denials,
+          usage: state.spent,
+        });
+      } catch {
+        // An onEvent that throws hears no more.
+      }
+    }
+    const said = [...progress.said, { type: 'error:harness', message } as const];
+    return {
+      outcome: 'error',
+      message,
+      reason: 'harness',
+      sessionId: state.sessionId ?? '',
+      usage: state.spent,
+      transcript: renderTranscript(said, { outcome: 'error', message }),
+      raw: null,
+    } satisfies HarnessResult;
   }
 
   return {
@@ -206,13 +264,18 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
         model: request.model,
         ...(options.now === undefined ? {} : { now: options.now }),
       });
-      const sessionAt = sessionOptions(request, options.env, (toolUseId) => reader.markDenied(toolUseId));
-      const onAbort = () => sessionAt.abortController.abort();
-      request.signal?.addEventListener('abort', onAbort, { once: true });
+      const progress: Progress = { said: [], deaf: false, started: false, ended: false };
+      let onAbort: (() => void) | undefined;
       try {
-        return await session(request, reader, sessionAt);
+        const sessionAt = sessionOptions(request, options.env, (toolUseId) => reader.markDenied(toolUseId));
+        onAbort = () => sessionAt.abortController.abort();
+        request.signal?.addEventListener('abort', onAbort, { once: true });
+        return await session(request, reader, sessionAt, progress);
+      } catch (error) {
+        // A harness never rejects (ADR-0008).
+        return failedOutright(request, reader, progress, error);
       } finally {
-        request.signal?.removeEventListener('abort', onAbort);
+        if (onAbort !== undefined) request.signal?.removeEventListener('abort', onAbort);
       }
     },
     capabilities: () => ({ ...CAPABILITIES, budgets: [...CAPABILITIES.budgets] }),
