@@ -64,10 +64,7 @@ const SPEC = `# Spec
 - loose
 `;
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('readDocument reads each heading with its level, and each section as the top-level items up to the next heading of its level or a higher one: fenced code holds neither, a nested item is its parent, and a task item keeps checked', () => {
+test('readDocument reads each heading with its level, and each section as the top-level items up to the next heading of its level or a higher one: fenced code holds neither, a nested item is its parent, and a task item keeps checked', () => {
   const read = readDocument('spec.md', SPEC);
   expect([read.name, read.text]).toEqual(['spec.md', SPEC]);
   expect(read.headings).toEqual([
@@ -93,10 +90,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('renderDocuments writes each template into $STAGE_OUT under its name, with its variables filled, an untrusted value wrapped and every placeholder as written', () => {
+test('renderDocuments writes each template into $STAGE_OUT under its name, with its variables filled, an untrusted value wrapped and every placeholder as written', () => {
   const stageDir = tempDir();
   const outDir = tempDir();
   mkdirSync(join(stageDir, 'templates'));
@@ -122,10 +116,7 @@ test
   expect(readFileSync(join(outDir, 'plan.md'), 'utf8')).toBe('{{ plan : the plan, {{ nested }} }}\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('renderDocuments stops at a template that is missing, names an unknown variable, or meets a file already in $STAGE_OUT, with a message naming the document and its template', () => {
+test('renderDocuments stops at a template that is missing, names an unknown variable, or meets a file already in $STAGE_OUT, with a message naming the document and its template', () => {
   const stageDir = tempDir();
   writeFileSync(join(stageDir, 'spec.md'), '# Spec\n\nFor {{ticket.keey}}\n');
   const values = { ticket: { ticketKey: 'FAKE-1' } };
@@ -167,10 +158,7 @@ const specDoc = doc('./templates/spec.md', [
   countItems('Tasks', { min: 1, as: 'tasks' }),
 ]);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('validateDocuments runs every validator of each produced document in order, all of them after one fails, and gives each problem as invalid_output named by file and check, with the facts derived', () => {
+test('validateDocuments runs every validator of each produced document in order, all of them after one fails, and gives each problem as invalid_output named by file and check, with the facts derived', () => {
   const out = produced({
     'spec.md': SPEC,
     'plan.md': '# Plan\n\n{{steps: one per step}}\n\n## Steps\n',
@@ -205,10 +193,7 @@ test
   expect(derivedIssues(validated.derived)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('validateDocuments leaves out a document the try did not produce, and refuses one over 1 MiB, or one gone from $STAGE_OUT, with one problem and no checks', () => {
+test('validateDocuments leaves out a document the try did not produce, and refuses one over 1 MiB, or one gone from $STAGE_OUT, with one problem and no checks', () => {
   const big = 'x'.repeat(MAX_DOCUMENT_BYTES + 1);
   const out = produced({ 'big.md': big, 'gone.md': '# Gone\n' });
   rmSync(join(out.outDir, 'gone.md'));
@@ -234,10 +219,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a validator that throws, returns no verdict, derives a key it doesn't declare or a value result.json can't hold is a problem named by its check, and what it derived soundly is kept", () => {
+test("a validator that throws, returns no verdict, derives a key it doesn't declare or a value result.json can't hold is a problem named by its check, and what it derived soundly is kept", () => {
   const validator = (check: string, derives: string[], validate: () => unknown): Validator =>
     ({ check, derives, validate }) as Validator;
   const validators = [
@@ -274,10 +256,7 @@ test
   expect(derivedIssues(validated.derived)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("documentProblems names two documents' validators that derive one key, with each document and check, and a produces value that is neither 'file' nor a document", () => {
+test("documentProblems names two documents' validators that derive one key, with each document and check, and a produces value that is neither 'file' nor a document", () => {
   const produces = {
     'spec.md': doc('spec.md', [countItems('Tasks'), hasSections('Tasks')]),
     'notes.md': 'file',
