@@ -32,10 +32,7 @@ const listening = (port: number) =>
     () => false,
   );
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail dashboard --port 0 prints its URL and the registry it reads, serves it, and Ctrl-C ends it with 0 and frees the port', async () => {
+test('sail dashboard --port 0 prints its URL and the registry it reads, serves it, and Ctrl-C ends it with 0 and frees the port', async () => {
   const home = sailHome();
   let stdout = '';
   let stderr = '';
@@ -69,25 +66,23 @@ test
   expect(await listening(Number(new URL(url).port))).toBe(false);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each(['70000', '65536', '-1', 'abc', '1.5', '', '0x50'])('--port %p is refused with exit 3', async (port) => {
-  const { code, stdout, stderr } = await runCaptured(['dashboard', `--port=${port}`], sailHome(), {
-    env: { SAIL_HOME: sailHome() },
-    onInterrupt: fakeInterrupts().onInterrupt,
-  });
-  expect({ code, stdout, stderr }).toEqual({
-    code: EXIT_REFUSED,
-    stdout: '',
-    stderr: 'sail dashboard: --port takes a port number, 0 to 65535\n',
-  });
-}, 15_000);
+test.each(['70000', '65536', '-1', 'abc', '1.5', '', '0x50'])(
+  '--port %p is refused with exit 3',
+  async (port) => {
+    const { code, stdout, stderr } = await runCaptured(['dashboard', `--port=${port}`], sailHome(), {
+      env: { SAIL_HOME: sailHome() },
+      onInterrupt: fakeInterrupts().onInterrupt,
+    });
+    expect({ code, stdout, stderr }).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: 'sail dashboard: --port takes a port number, 0 to 65535\n',
+    });
+  },
+  15_000,
+);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a port in use is refused with exit 3, naming the port', async () => {
+test('a port in use is refused with exit 3, naming the port', async () => {
   const holder = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('held') });
   try {
     const home = sailHome();
@@ -106,10 +101,7 @@ test
   }
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('with nothing to stop it, sail dashboard refuses with exit 3 rather than serve forever; an extra argument is refused', async () => {
+test('with nothing to stop it, sail dashboard refuses with exit 3 rather than serve forever; an extra argument is refused', async () => {
   const home = sailHome();
   const alone = runCaptured(['dashboard', '--port', '0'], home, { env: { SAIL_HOME: home } });
   const ended = await Promise.race([alone, after<undefined>(5000, undefined)]);
@@ -119,13 +111,15 @@ test
     stderr: 'sail dashboard: nothing can stop it here: run it from a terminal\n',
   });
   const extra = await runCaptured(['dashboard', 'extra'], home, { env: { SAIL_HOME: home } });
-  expect([extra.code, extra.stderr]).toEqual([EXIT_REFUSED, "sail: unknown argument 'extra'\nRun 'sail --help' for usage.\n"]);
+  expect([extra.code, extra.stderr]).toEqual([
+    EXIT_REFUSED,
+    "sail: unknown argument 'extra'\nRun 'sail --help' for usage.\n",
+  ]);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the usage lists sail dashboard', async () => {
+test('the usage lists sail dashboard', async () => {
   const { stdout } = await runCaptured(['--help']);
-  expect(stdout).toMatch(/^ {2}sail dashboard \[--port <n>\] {2,}Serve every repository's runs read-only on localhost$/m);
+  expect(stdout).toMatch(
+    /^ {2}sail dashboard \[--port <n>\] {2,}Serve every repository's runs read-only on localhost$/m,
+  );
 }, 15_000);
