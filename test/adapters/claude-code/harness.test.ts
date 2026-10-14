@@ -64,11 +64,17 @@ const session = (result: SDKMessage): Stream => [
   result,
 ];
 
+const OVER_TURNS = 'Reached maximum number of turns (40)';
+
 const SUITE: Record<string, Stream> = {
   done: session(resultSuccess({ structured: done(SPEC) })),
   blocked: session(resultSuccess({ structured: { outcome: 'blocked', reason: 'No acceptance criteria.' } })),
   error: session(resultError('error_during_execution', { errors: ['overloaded'] })),
-  overTurns: session(resultError('error_max_turns')),
+  // Live run 1: after an error result the SDK throws, restating it, as the real session over its turns did.
+  overTurns: [
+    ...session(resultError('error_max_turns', { errors: [OVER_TURNS] })),
+    { act: 'throw', message: `Claude Code returned an error result: ${OVER_TURNS}` },
+  ],
 };
 
 /** A query that plays the suite's stream named by the session's prompt. */
@@ -299,10 +305,10 @@ test('events reach onEvent as the session goes, not when it is over', async () =
 
 test('a failed session emits error:harness once with its message, then its end with the outcome, end reason, counts and usage', async () => {
   const { result, capture, types } = await play(SUITE.overTurns ?? []);
-  expect(summary(result)).toBe('error: budget exceeded: maxTurns 40');
+  expect(summary(result)).toBe(`error: budget exceeded: maxTurns 40: ${OVER_TURNS}`);
   expect(types.filter((type) => type === 'error:harness')).toHaveLength(1);
   expect(capture.events.slice(-2)).toEqual([
-    { type: 'error:harness', message: 'budget exceeded: maxTurns 40' },
+    { type: 'error:harness', message: `budget exceeded: maxTurns 40: ${OVER_TURNS}` },
     {
       type: 'harness:session_end',
       sessionId: SESSION_ID,
@@ -315,6 +321,27 @@ test('a failed session emits error:harness once with its message, then its end w
     },
   ]);
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
+});
+
+// Live run 1: the SDK's throw after an error result named no budget, and it took the result's place.
+test('a throw after an error result leaves the result to decide, but an onEvent that throws after it still fails the session', async () => {
+  const late = [
+    init(),
+    resultError('error_max_budget_usd', { errors: ['Reached maximum budget ($2)'] }),
+    assistantText('m9', 'Late.'),
+    { act: 'throw', message: 'Claude Code returned an error result: Reached maximum budget ($2)' },
+  ] as const;
+  const restated = await play(late);
+  const deaf = await createClaudeCodeHarness({ env: {}, query: scriptedQuery([late]) }).run({
+    ...request(),
+    onEvent: (event) => {
+      if (event.type === 'agent:message') throw new Error('not listening');
+    },
+  });
+  expect({ restated: summary(restated.result), deaf: summary(deaf) }).toEqual({
+    restated: 'error: budget exceeded: maxUsd 2: Reached maximum budget ($2)',
+    deaf: 'error: claude-code: not listening',
+  });
 });
 
 test("a tool the guard denies ends denied, and the session's end counts the denial", async () => {

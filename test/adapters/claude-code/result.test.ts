@@ -135,6 +135,17 @@ test.each<[string, SDKResultMessage | undefined, ReturnType<typeof failure>]>([
     resultError('error_max_budget_usd'),
     failure('budget exceeded: maxUsd 2', 'max_budget_usd', 'budget_exceeded'),
   ],
+  // Live run 1: the budget is named, and the SDK's own text kept after it.
+  [
+    'error_max_turns with the SDK text',
+    resultError('error_max_turns', { errors: ['Reached maximum number of turns (40)'] }),
+    failure('budget exceeded: maxTurns 40: Reached maximum number of turns (40)', 'max_turns', 'budget_exceeded'),
+  ],
+  [
+    'error_max_budget_usd with the SDK text',
+    resultError('error_max_budget_usd', { errors: ['Reached maximum budget ($2)', 'over'] }),
+    failure('budget exceeded: maxUsd 2: Reached maximum budget ($2); over', 'max_budget_usd', 'budget_exceeded'),
+  ],
   [
     'error_max_structured_output_retries',
     resultError('error_max_structured_output_retries', { errors: ['tasks: required', 'summary: too long'] }),
