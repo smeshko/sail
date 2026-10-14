@@ -135,7 +135,8 @@ class Parser {
   private readonly pending: Pending[] = [];
 
   constructor(
-    private readonly src: string,
+    // Not readonly: a line continuation is cut out of it where a token is read (`squash`).
+    private src: string,
     private depth: number,
   ) {
     if (depth > MAX_DEPTH) throw new Refusal(`substitutions nested deeper than ${MAX_DEPTH} levels`);
@@ -158,12 +159,46 @@ class Parser {
     return this.pos >= this.src.length;
   }
 
-  private peek(offset = 0): string | undefined {
+  /**
+   * Cuts the line continuations at `at` out of the source. bash removes a backslash-newline before it reads a token,
+   * everywhere but in single quotes, comments and a quoted heredoc's body, so a token split by one (`&\`+newline+`&`,
+   * `$\`+newline+`{X}`, a heredoc delimiter) is the token joined. Only ever called where a character is read fresh:
+   * never on the character an escaping backslash takes, nor inside single quotes, a comment or a heredoc body.
+   */
+  private squash(at: number): void {
+    while (this.src[at] === '\\' && this.src[at + 1] === '\n')
+      this.src = this.src.slice(0, at) + this.src.slice(at + 2);
+  }
+
+  /** The character at the read position, a line continuation there removed first. */
+  private peek(): string | undefined {
+    this.squash(this.pos);
+    return this.src[this.pos];
+  }
+
+  /** The character `offset` places on, each one before it read fresh: what follows `$`, `<`, `>` or `&`. */
+  private after(offset: number): string | undefined {
+    for (let k = 0; k <= offset; k++) this.squash(this.pos + k);
     return this.src[this.pos + offset];
   }
 
+  /** The character after an escaping backslash: taken as it stands, a newline included. */
+  private escaped(): string | undefined {
+    return this.src[this.pos + 1];
+  }
+
+  /** Squashes from `from` while the characters match `run`: before a name or an operator is matched as a whole. */
+  private squashRun(from: number, run: RegExp): void {
+    for (let at = from; ; at++) {
+      this.squash(at);
+      const c = this.src[at];
+      if (c === undefined || !run.test(c)) return;
+    }
+  }
+
   private startsWith(text: string): boolean {
-    return this.src.startsWith(text, this.pos);
+    for (let k = 0; k < text.length; k++) if (this.after(k) !== text[k]) return false;
+    return true;
   }
 
   /** Spaces and tabs. */
@@ -182,8 +217,9 @@ class Parser {
     }
   }
 
+  /** Up to the newline, read as it stands: a backslash before it continues no comment. */
   private comment(): void {
-    while (!this.atEnd() && this.peek() !== '\n') this.pos++;
+    while (!this.atEnd() && this.src[this.pos] !== '\n') this.pos++;
   }
 
   /** Pipelines up to the end, or up to an unquoted `)` when `nested`, which is left for the caller. */
@@ -249,21 +285,21 @@ class Parser {
       this.spaces();
       const c = this.peek();
       if (c === undefined || c === '\n' || c === ';' || c === '|' || c === ')') break;
-      if (c === '&' && this.peek(1) !== '>') break;
+      if (c === '&' && this.after(1) !== '>') break;
       if (c === '#') {
         this.comment();
         break;
       }
       if (c === '(') {
         if (words.length > 0) throw new Refusal('a function definition');
-        throw new Refusal(this.peek(1) === '(' ? 'an arithmetic command' : 'a subshell ( … )');
+        throw new Refusal(this.after(1) === '(' ? 'an arithmetic command' : 'a subshell ( … )');
       }
       const redirection = this.redirection();
       if (redirection !== undefined) {
         redirections.push(redirection);
         continue;
       }
-      if (words.length === 0 && ASSIGNMENT.test(this.src.slice(this.pos))) {
+      if (words.length === 0 && this.assignmentAhead()) {
         const name = (NAME.exec(this.src.slice(this.pos)) as RegExpExecArray)[0];
         this.pos = this.src.indexOf('=', this.pos) + 1;
         if (this.peek() === '(') throw new Refusal(`an array assignment to ${name}`);
@@ -278,9 +314,16 @@ class Parser {
     return { text: this.src.slice(start, this.pos).trim(), assignments, words, redirections };
   }
 
+  /** Whether `NAME=` or `NAME+=` starts here, a line continuation inside it removed. */
+  private assignmentAhead(): boolean {
+    this.squashRun(this.pos, /[A-Za-z0-9_+]/);
+    return ASSIGNMENT.test(this.src.slice(this.pos));
+  }
+
   private redirection(): Redirection | undefined {
     const c = this.peek();
-    if ((c === '<' || c === '>') && this.peek(1) === '(') throw new Refusal(`a process substitution ${c}( … )`);
+    if ((c === '<' || c === '>') && this.after(1) === '(') throw new Refusal(`a process substitution ${c}( … )`);
+    this.squashRun(this.pos, /[0-9<>&|-]/);
     const match = REDIRECTION.exec(this.src.slice(this.pos));
     if (match === null) return undefined;
     const digits = match[1] as string;
@@ -353,12 +396,11 @@ class Parser {
     return { ...state, raw: this.src.slice(start, this.pos) };
   }
 
-  /** An unquoted backslash: the next character is literal, and a newline after it joins the lines. */
+  /** An unquoted backslash: the next character is literal. A backslash-newline never gets here (`squash`). */
   private escape(state: WordState): void {
-    const next = this.peek(1);
+    const next = this.escaped();
     this.pos += 2;
-    if (next === undefined) state.text += '\\';
-    else if (next !== '\n') state.text += next;
+    state.text += next ?? '\\';
   }
 
   /** An unquoted `{` that opens a brace expansion, such as `{a,b}` or `{1..3}`, which the shell turns into words. */
@@ -383,11 +425,9 @@ class Parser {
         return;
       }
       if (c === '\\') {
-        const next = this.peek(1);
+        const next = this.escaped();
         if (next !== undefined && (next === '$' || next === '`' || next === '\\' || next === end)) {
           state.text += next;
-          this.pos += 2;
-        } else if (next === '\n') {
           this.pos += 2;
         } else {
           state.text += c;
@@ -406,9 +446,9 @@ class Parser {
 
   private dollar(state: WordState, quoted: boolean): void {
     const start = this.pos;
-    const next = this.peek(1);
+    const next = this.after(1);
     if (next === '(') {
-      if (this.peek(2) === '(') throw new Refusal('an arithmetic expansion $(( … ))');
+      if (this.after(2) === '(') throw new Refusal('an arithmetic expansion $(( … ))');
       this.pos += 2;
       this.enter();
       const list = this.list(true);
@@ -417,6 +457,7 @@ class Parser {
       this.pos++;
       state.nested.push(list);
     } else if (next === '{') {
+      this.squashRun(this.pos + 2, /[A-Za-z0-9_]/);
       const close = this.src.indexOf('}', this.pos + 2);
       if (close === -1) throw new Refusal('an unterminated ${');
       const name = this.src.slice(this.pos + 2, close);
@@ -430,6 +471,7 @@ class Parser {
     } else if (!quoted && next === '"') {
       throw new Refusal('a locale quote $"…"');
     } else if (next !== undefined && /[A-Za-z_]/.test(next)) {
+      this.squashRun(this.pos + 1, /[A-Za-z0-9_]/);
       const name = (NAME.exec(this.src.slice(this.pos + 1)) as RegExpExecArray)[0];
       state.vars.push(name);
       this.pos += 1 + name.length;
@@ -453,7 +495,7 @@ class Parser {
       const c = this.peek();
       if (c === undefined) throw new Refusal('an unterminated ` substitution');
       if (c === '`') break;
-      const next = this.peek(1);
+      const next = this.escaped();
       if (c === '\\' && next !== undefined && (next === '$' || next === '`' || next === '\\')) {
         body += next;
         this.pos += 2;
@@ -473,17 +515,28 @@ class Parser {
     if (this.depth > MAX_DEPTH) throw new Refusal(`substitutions nested deeper than ${MAX_DEPTH} levels`);
   }
 
+  /** One line of a heredoc's body. An unquoted body's line goes on past a backslash-newline, as bash reads it. */
+  private bodyLine(quoted: boolean): string {
+    let line = '';
+    for (;;) {
+      const end = this.src.indexOf('\n', this.pos);
+      const stop = end === -1 ? this.src.length : end;
+      const raw = this.src.slice(this.pos, stop);
+      this.pos = end === -1 ? this.src.length : end + 1;
+      const trailing = /\\*$/.exec(raw)?.[0].length ?? 0;
+      if (quoted || end === -1 || trailing % 2 === 0) return line + raw;
+      line += raw.slice(0, -1);
+    }
+  }
+
   /** The bodies of the heredocs the line just ended opened, each up to its delimiter line. */
   private heredocs(): void {
     for (const { delimiter, strip, heredoc } of this.pending.splice(0)) {
       let body = '';
       for (;;) {
         if (this.atEnd()) throw new Refusal(`a heredoc without its closing ${delimiter} line`);
-        const end = this.src.indexOf('\n', this.pos);
-        const stop = end === -1 ? this.src.length : end;
-        const raw = this.src.slice(this.pos, stop);
+        const raw = this.bodyLine(heredoc.quoted);
         const line = strip ? raw.replace(/^\t+/, '') : raw;
-        this.pos = end === -1 ? this.src.length : end + 1;
         if (line === delimiter) break;
         body += `${line}\n`;
       }
