@@ -95,9 +95,12 @@ export function recordEntry(dir: string, entry: RegistryEntry): void {
   renameSync(temp, path);
 }
 
-/** `url` without its userinfo: `https://user:token@host/o/r` is `https://host/o/r`. Any other URL is kept. */
+/**
+ * `url` without its userinfo: `https://user:token@host/o/r` is `https://host/o/r`. The userinfo runs to the authority's
+ * last `@`, since a password may hold one. Any other URL, scp-style `git@host:o/r` included, is kept.
+ */
 export function withoutUserinfo(url: string): string {
-  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1');
+  return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1');
 }
 
 /** The git variables that would point git somewhere other than `cwd`. */
