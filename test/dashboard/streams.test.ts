@@ -293,3 +293,19 @@ test('a STATUS that links out of the run is refused before the upgrade, and a FI
     writer.kill();
   }
 }, 15_000);
+
+test('a message the socket drops ends the replay with a close of 1011, never with end (review #3.1)', async () => {
+  const sent: Received[] = [];
+  const closes: (number | undefined)[] = [];
+  const send = (text: string) => {
+    const message = JSON.parse(text);
+    // Bun's send() answers 0 for a message it dropped.
+    if (message.event?.seq === 3) return 0;
+    return sent.push(message);
+  };
+  openRunStream({ send, close: (code) => closes.push(code) }, m.alpha.runDir, 20);
+  expect(await until(() => closes.length > 0)).toBe(true);
+  await Bun.sleep(100);
+  expect(closes).toEqual([1011]);
+  expect(sent.map((message) => message.kind)).toEqual(['event', 'event']);
+}, 15_000);
