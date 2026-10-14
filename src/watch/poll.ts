@@ -193,7 +193,8 @@ export function createPoller(options: PollerOptions): Poller {
       },
       (error: unknown) => {
         inFlight.delete(target.workflow);
-        schedule(target, 'failed');
+        // The poll may have saved a pause before it threw, as when the pause's event couldn't be appended: honour it.
+        schedule(target, target.store.snapshot().polling.paused === undefined ? 'failed' : 'paused');
         throw error;
       },
     );
