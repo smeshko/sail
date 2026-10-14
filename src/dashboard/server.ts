@@ -7,10 +7,9 @@
 // 4. Any other request needs `X-Sail-Dashboard: 1`, which a cross-origin page can't send without a preflight.
 //
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
-import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
-import { callFile, findRepo, findRunDir, inside, repos, runItems } from './files';
+import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { createIndexFeed, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
@@ -54,10 +53,14 @@ export function guard(request: Request, port: number): Response | undefined {
 
 const STREAMS: Record<string, string> = { session: 'session.log', stdout: 'stdout.log', stderr: 'stderr.log' };
 
-/** A file served as `type`, once it is known to lie inside `runDir`. */
+/**
+ * A file served as `type`, once it is known to be a regular file inside `runDir`. The checked real path is what is
+ * read, and it is streamed, so a symlink swapped in after the check isn't followed and a huge log isn't held whole.
+ */
 function file(runDir: string, path: string, type: string): Response {
-  if (!existsSync(path) || !inside(runDir, path)) return error(404, 'no such file in this run');
-  return new Response(readFileSync(path), { headers: { 'Content-Type': type } });
+  const real = containedFile(runDir, path);
+  if (real === undefined) return error(404, 'no such file in this run');
+  return new Response(Bun.file(real), { headers: { 'Content-Type': type } });
 }
 
 /** The answer to a GET of `/api/…`, from the path's decoded segments. */
