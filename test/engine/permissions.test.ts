@@ -200,6 +200,28 @@ const TABLE: Row[] = [
     want: 'commands',
     mention: 'rm -rf',
   },
+  // A backslash-newline is gone before bash reads a token.
+  {
+    label: 'parser: a heredoc delimiter holding a line continuation is unquoted, so its body is checked',
+    call: bash('cat <<EO\\\nF\n$(rm -rf x)\nEOF'),
+    open: { commands: ['cat *'] },
+    want: 'commands',
+    mention: 'rm -rf',
+  },
+  {
+    label: 'parser: a line continuation between $ and { is still a variable',
+    call: bash('rm $\\\n{IFS}-rf x'),
+    open: { commands: ['rm *'] },
+    want: 'commands',
+    mention: 'rm -rf',
+  },
+  {
+    label: 'parser: a line continuation between $ and ( in double quotes is still a substitution',
+    call: bash('echo "$\\\n(id)"'),
+    open: { commands: ['echo *'] },
+    want: 'commands',
+    mention: '`id`',
+  },
   // Legitimate calls pass.
   {
     label: 'legit: git diff origin/main...HEAD | head -50',

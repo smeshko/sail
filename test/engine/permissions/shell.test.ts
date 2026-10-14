@@ -58,6 +58,39 @@ test('a backslash before a newline joins the lines into one word', () => {
   expect(argv('r\\\nm -rf x')).toEqual([[['rm', '-rf', 'x']]]);
 });
 
+// bash removes a backslash-newline before it reads a token, outside single quotes, comments and quoted heredoc
+// bodies: the parse is the one of the text without it, raw words and command texts included.
+test.each([
+  ['a &\\\n& b', 'a && b'],
+  ['a |\\\n| b', 'a || b'],
+  ['a 2\\\n>\\\n> f', 'a 2>> f'],
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: shell syntax, not a template
+  ['echo $\\\n{X} ${X\\\nY}', 'echo ${X} ${XY}'],
+  ['echo $\\\nX$X\\\nY', 'echo $X$XY'],
+  ['echo $\\\n(a) "$\\\n(b)"', 'echo $(a) "$(b)"'],
+  ['PA\\\nTH\\\n=1 x', 'PATH=1 x'],
+  ['cat <\\\n<EOF\nx\nEOF', 'cat <<EOF\nx\nEOF'],
+  ['cat <<EO\\\nF\n$(a)\nEOF', 'cat <<EOF\n$(a)\nEOF'],
+  ['cat <<EOF\nx\\\nEOF\n$(a)\nEOF', 'cat <<EOF\nxEOF\n$(a)\nEOF'],
+])('a line continuation is removed before tokens are read: %j parses as %j', (text, joined) => {
+  expect(parseCommand(text)).toEqual(parseCommand(joined));
+});
+
+test.each([
+  ['f\\\nor x in y; do z; done', 'a for loop'],
+  ['echo $\\\n((1+2))', 'an arithmetic expansion'],
+])('a line continuation inside a keyword or an operator still refuses: %j, because of %s', (text, reason) => {
+  expect(argv(text)).toEqual({ refused: expect.stringContaining(reason) });
+});
+
+test("a comment ends at its line's newline, a backslash before it included, and a quoted heredoc keeps its body", () => {
+  expect([argv('a # c \\\nb'), argv("cat <<'EOF'\nx\\\nEOF\nb")]).toEqual([
+    [[['a']], [['b']]],
+    [[['cat']], [['b']]],
+  ]);
+  expect(only("cat <<'EOF'\nx\\\nEOF").redirections[0]?.heredoc).toEqual({ body: 'x\\\n', quoted: true, nested: [] });
+});
+
 test('a # starting a word comments out the rest of the line; inside a word or quotes it is text', () => {
   expect(argv('git diff # rm -rf /')).toEqual([[['git', 'diff']]]);
   expect(argv('echo a#b \'#c\' "#d"')).toEqual([[['echo', 'a#b', '#c', '#d']]]);
