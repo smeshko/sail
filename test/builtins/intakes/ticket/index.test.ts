@@ -268,11 +268,11 @@ test("on the fixture's FAKE-1, once it is claimed and commented on as the golden
   copyFileSync(join(FIXTURES, 'repo', '.sail', 'fake', 'tickets.json'), join(dir, 'tickets.json'));
   const out = join(dir, 'out');
   mkdirSync(out);
-  // The golden run's claim: its comment was posted at the fourth reading of the run's clock, 300 ms after its start.
+  // The golden run's claim: its comment was posted at the ninth reading of the run's clock, 600 ms after its start.
   const ticketSource = createFakeTicketSource({
     seed: join(dir, 'tickets.json'),
     state: join(dir, 'state.json'),
-    now: () => new Date('2026-09-25T09:00:00.300Z'),
+    now: () => new Date('2026-09-25T09:00:00.600Z'),
   });
   await ticketSource.claim('FAKE-1');
   await ticketSource.comment('FAKE-1', 'sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started');

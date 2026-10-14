@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { createClaudeCodeHarness } from '../../src/adapters/claude-code/harness';
 import { createFakeHarness, type ScriptedAnswer } from '../../src/adapters/fake/harness';
 import type { Supplied } from '../../src/engine/bindings';
 import { type CallRequest, callProblems, runCall } from '../../src/engine/call';
@@ -25,6 +26,7 @@ import { summarize } from '../../src/events/summary';
 import type { Emit, NewEvent, SailEvent } from '../../src/events/types';
 import type { Harness } from '../../src/ports/harness';
 import { agent, file, type StageDefinition, script, stage, value, z } from '../../src/sdk/index';
+import { scriptedQuery, specSession } from '../helpers/claude-code';
 import { steppingClock } from '../helpers/clock';
 import { runStart } from '../helpers/events';
 import { recording } from '../helpers/scripted-harness';
@@ -67,6 +69,8 @@ function tests(repo: TempRepo): Stage {
       definition,
       stageFile: join(stageDir, 'stage.ts'),
       workspace: repo.dir,
+      root: repo.dir,
+      branch: 'sail/FAKE-1',
       config: join(repo.dir, '.sail', 'project.yaml'),
       supplied,
       graceMs: 500,
@@ -293,7 +297,7 @@ const plainStep = (options: { timeoutSeconds?: number } = {}) =>
 
 const PASSES = `echo "<testsuites/>" > "$STAGE_OUT/junit.xml"\nprintf '${REPORT}\\n' true 0`;
 /** The preamble's names. The script kind adds one of its own after them, which test/kinds/script.test.ts holds. */
-const ENV_KEYS = ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG'];
+const ENV_KEYS = ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'BRANCH', 'SAIL_CONFIG'];
 
 test('a passing call reports its events in order, each keyed by its call', async () => {
   await withTempRepo(async (repo) => {
@@ -515,6 +519,8 @@ function specStage(repo: TempRepo): SpecStage {
       definition,
       stageFile: join(stageDir, 'stage.ts'),
       workspace: repo.dir,
+      root: repo.dir,
+      branch: 'sail/FAKE-1',
       config: join(repo.dir, '.sail', 'project.yaml'),
       supplied: { brief: { kind: 'file', path: join(repo.dir, 'docs', 'brief.md'), from: 'docs/brief.md' } },
       agent: { harness, model: MODEL, conventions: [] },
@@ -705,6 +711,26 @@ test('a declared file left out is corrected as invalid output is, and the second
       validationTry: 2,
       validationFailed: false,
     });
+  });
+});
+
+test('on claude-code, output that fails its schema twice ends the call in error on try 2, never done, and output corrected on try 2 ends it done', async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    const claudeCode = (outputs: unknown[]) =>
+      createClaudeCodeHarness({ env: {}, query: scriptedQuery(outputs.map((output) => specSession(output))) });
+    const twice = await runCall(s.request(specStep(), claudeCode([{ summary: 3 }, { summary: null }])));
+    const corrected = await runCall(s.request(specStep(), claudeCode([{ summary: 3 }, SPEC]), { call: 2 }));
+    const [failed, fixed] = [readBack(twice.paths.result), readBack(corrected.paths.result)];
+    expect([placeOf(failed), placeOf(fixed)]).toEqual([
+      { outcome: 'error', try: 2, validationTry: 2, validationFailed: true },
+      { outcome: 'done', try: 2, validationTry: 2, validationFailed: false },
+    ]);
+    expect({
+      errors: errorsOf(failed).map((error) => error.reason),
+      output: fixed.output,
+      adapter: (fixed.harness as { adapter?: string }).adapter,
+    }).toEqual({ errors: ['invalid_output', 'invalid_output'], output: SPEC, adapter: 'claude-code' });
   });
 });
 

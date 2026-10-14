@@ -2,7 +2,7 @@
 // ended in a repository of its own, then copied into the test's repository and resumed there. A process opens one run
 // per .sail/, and Bun caches the workflow's modules by path, so the run and its resume never share a .sail/.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED, type ExitCode } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
@@ -33,9 +33,10 @@ import {
   type StubOptions,
   setSleepAt,
   swapImplementAndTests,
+  whenSleeping,
   writeStub,
 } from '../helpers/stub-workflow';
-import { withTempRepo } from '../helpers/temp-repo';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 
@@ -497,3 +498,192 @@ test('sail resume with no run id is refused with its usage, which takes a run an
     });
   });
 });
+
+// A resume in its run's own workspace (D8): each `sail` below is a process of its own, spawned with the repository's
+// env, so a lease's pid is the process that took it and one repository holds the run from start to resume.
+
+const MAIN = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
+const STUB_BRANCH = 'sail/FAKE-1-add-a-greeting';
+
+/** `sail <argv>` in its own process in `repo`, run to its end. */
+async function spawned(repo: TempRepo, ...argv: string[]): Promise<{ code: number; stderr: string; pid: number }> {
+  const child = Bun.spawn([process.execPath, MAIN, ...argv], {
+    cwd: repo.dir,
+    env: repo.env,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  return { code, stderr, pid: child.pid };
+}
+
+/** The lease files the fakes keep in `repo`, parsed. */
+const leasesIn = (repo: TempRepo): { runId: string; pid: number; runDir: string }[] => {
+  const dir = join(repo.dir, '.sail-runs', 'fake', 'leases');
+  return existsSync(dir)
+    ? readdirSync(dir)
+        .filter((name) => name.endsWith('.json'))
+        .map((name) => JSON.parse(readFileSync(join(dir, name), 'utf8')))
+    : [];
+};
+
+test("sail resume continues in the run's own worktree under a lease renewed with its pid, reports the renewal first, and releases both once it completes", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(
+      sail,
+      'stages/implement/run.sh',
+      "echo 'diff --git a/src/greet.ts b/src/greet.ts'",
+      [
+        'pwd >>"$STUB/pwd.log"',
+        'if [ "$CALL" = 1 ]; then echo left >"$WORKSPACE/left.txt"; fi',
+        'if [ -f "$WORKSPACE/left.txt" ]; then echo "$CALL" >>"$STUB/left.log"; fi',
+        'cat "$(dirname "$STUB")"/.sail-runs/fake/leases/*.json >>"$STUB/leases.log"',
+        "echo 'diff --git a/src/greet.ts b/src/greet.ts'",
+      ].join('\n'),
+    );
+    const first = await spawned(repo, 'FAKE-1', '--until', 'implement');
+    const runId = runIdIn(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const before = readEvents(dir).length;
+    const resumed = await spawned(repo, 'resume', runId);
+    const stub = (file: string) =>
+      existsSync(join(repo.dir, '.stub', file))
+        ? readFileSync(join(repo.dir, '.stub', file), 'utf8')
+            .trimEnd()
+            .split('\n')
+        : [];
+    const leased = stub('leases.log')
+      .filter((line) => line.startsWith('{'))
+      .map((line) => JSON.parse(line).pid as number);
+    const workspace = join(dir, 'workspace');
+    expect({
+      codes: [first.code, resumed.code],
+      pwd: stub('pwd.log'),
+      left: stub('left.log'),
+      leasedBy: leased,
+      renewal: readEvents(dir)[before]?.type,
+      after: { workspace: existsSync(workspace), leases: leasesIn(repo) },
+    }).toEqual({
+      codes: [EXIT_SUSPENDED, EXIT_OK],
+      pwd: [workspace, workspace],
+      left: ['1', '2'],
+      leasedBy: [first.pid, resumed.pid],
+      renewal: 'workspace:leased',
+      after: { workspace: false, leases: [] },
+    });
+  });
+}, 30_000);
+
+test('sail resume refuses a run still running in another process, naming its pid, and leaves its STATUS and lease as they were', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    setSleepAt(repo.dir, 'implement#1');
+    const running = Bun.spawn([process.execPath, MAIN, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    try {
+      const sleeping = await whenSleeping(repo.dir);
+      const runId = runIdIn(repo.dir);
+      const lease = leasesIn(repo);
+      const refused = await spawned(repo, 'resume', runId);
+      expect({
+        code: refused.code,
+        said: refused.stderr.includes(`is still running, in process ${running.pid}`),
+        status: readStatus(join(repo.dir, '.sail-runs', runId)),
+        lease: leasesIn(repo),
+      }).toEqual({ code: EXIT_REFUSED, said: true, status: { status: 'running' }, lease });
+      for (const pid of sleeping) process.kill(pid, 'SIGKILL');
+    } finally {
+      running.kill('SIGKILL');
+      await running.exited;
+    }
+  });
+}, 30_000);
+
+test('sail resume refuses a run whose lease another run took over once its process died, naming that run', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    setSleepAt(repo.dir, 'implement#1');
+    const running = Bun.spawn([process.execPath, MAIN, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    const sleeping = await whenSleeping(repo.dir);
+    const crashed = runIdIn(repo.dir);
+    running.kill('SIGKILL');
+    await running.exited;
+    for (const pid of sleeping) process.kill(pid, 'SIGKILL');
+    const second = await spawned(repo, 'FAKE-1', '--force', '--until', 'spec');
+    const took = runIds(repo.dir).find((id) => id !== crashed) ?? '';
+    const refused = await spawned(repo, 'resume', crashed);
+    expect({
+      codes: [second.code, refused.code],
+      said: refused.stderr.includes(`the branch ${STUB_BRANCH} is leased by run ${took} (suspended)`),
+    }).toEqual({ codes: [EXIT_SUSPENDED, EXIT_REFUSED], said: true });
+  });
+}, 30_000);
+
+test.each<[string, (repo: TempRepo, dir: string) => void, string]>([
+  [
+    'whose workspace is gone',
+    (repo, dir) => {
+      Bun.spawnSync(['git', 'worktree', 'remove', '--force', join(dir, 'workspace')], { cwd: repo.dir, env: repo.env });
+    },
+    'the workspace is gone (invalid)',
+  ],
+  [
+    "whose workspace's HEAD was reset off its base",
+    (repo, dir) => {
+      const workspace = join(dir, 'workspace');
+      if (!existsSync(workspace)) return;
+      const git = (...args: string[]) =>
+        Bun.spawnSync(['git', ...args], { cwd: workspace, env: repo.env })
+          .stdout.toString()
+          .trim();
+      git('checkout', '-q', '--detach', git('commit-tree', 'HEAD^{tree}', '-m', 'orphan'));
+    },
+    'no longer descends from its base',
+  ],
+  [
+    'from before runs had workspaces',
+    (_, dir) => {
+      const file = join(dir, 'run.json');
+      const {
+        branch: _branch,
+        repository: _repository,
+        workspace: _workspace,
+        ...older
+      } = JSON.parse(readFileSync(file, 'utf8'));
+      chmodSync(file, 0o644);
+      writeFileSync(file, `${JSON.stringify(older, null, 2)}\n`);
+    },
+    'started before runs had workspaces: it has no workspace to resume in',
+  ],
+])(
+  'sail resume refuses a run %s with exit code 3, and leaves it suspended',
+  async (_, spoil, said) => {
+    await withTempRepo(async (repo) => {
+      writeStub(repo.dir);
+      const first = await spawned(repo, 'FAKE-1', '--until', 'spec');
+      const runId = runIdIn(repo.dir);
+      const dir = join(repo.dir, '.sail-runs', runId);
+      spoil(repo, dir);
+      const refused = await spawned(repo, 'resume', runId);
+      expect({
+        codes: [first.code, refused.code],
+        said: refused.stderr.includes(said) ? said : refused.stderr,
+        status: readStatus(dir).status,
+      }).toEqual({ codes: [EXIT_SUSPENDED, EXIT_REFUSED], said, status: 'suspended' });
+    });
+  },
+  30_000,
+);

@@ -71,17 +71,18 @@ export const submits = (output: unknown, costUsd: number, extra: Partial<Submitt
   ...extra,
 });
 
-/** A stub script: it logs the call it is, sleeps if `.stub/sleep-at` names it, then runs `body`. */
+/** A stub script: it logs the call it is in the repository root's `.stub/`, sleeps if `.stub/sleep-at` names it, then runs `body`. */
 const shell = (purpose: string, body: string) => `#!/usr/bin/env bash
 # ${purpose}
 set -euo pipefail
-mkdir -p "$WORKSPACE/.stub"
-echo "$STAGE#$CALL" >>"$WORKSPACE/.stub/executions.log"
-if [ -f "$WORKSPACE/.stub/sleep-at" ] && [ "$(cat "$WORKSPACE/.stub/sleep-at")" = "$STAGE#$CALL" ]; then
-  rm "$WORKSPACE/.stub/sleep-at"
+STUB="$(dirname "$(dirname "$SAIL_CONFIG")")/.stub"
+mkdir -p "$STUB"
+echo "$STAGE#$CALL" >>"$STUB/executions.log"
+if [ -f "$STUB/sleep-at" ] && [ "$(cat "$STUB/sleep-at")" = "$STAGE#$CALL" ]; then
+  rm "$STUB/sleep-at"
   sleep 30 &
-  echo "$$ $!" >"$WORKSPACE/.stub/sleeping.tmp"
-  mv "$WORKSPACE/.stub/sleeping.tmp" "$WORKSPACE/.stub/sleeping"
+  echo "$$ $!" >"$STUB/sleeping.tmp"
+  mv "$STUB/sleeping.tmp" "$STUB/sleeping"
   wait
 fi
 ${body}`;

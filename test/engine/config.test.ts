@@ -160,3 +160,20 @@ test('conventions reads as the list project.yaml gives, empty included, and is l
   expect(read('')).toBeUndefined();
   expect(read('conventions: [AGENTS.md, AGENTS.md]\n')).toEqual(['/conventions']);
 });
+
+test("branchPrefix reads as given, and one git can't start a branch with is an issue at /branchPrefix: a leading '-' or '/', '..', a segment starting with '.' or ending in '.lock' (review #1.9)", () => {
+  const withPrefix = (prefix: string) =>
+    readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\nbranchPrefix: "${prefix}"\n${ADAPTERS}`));
+  const read = ['feature/sail-', 'a.b/x.locked/'].map((prefix) => {
+    const config = withPrefix(prefix);
+    return 'issues' in config ? config.issues : config.branchPrefix;
+  });
+  const paths = ['-x/', 'a/../b/', '/a', '.x/', 'x.lock/', 'x/.y/', 'a/.'].map((prefix) => {
+    const config = withPrefix(prefix);
+    return 'issues' in config ? config.issues.map((issue) => issue.path) : config.branchPrefix;
+  });
+  expect({ read, paths }).toEqual({
+    read: ['feature/sail-', 'a.b/x.locked/'],
+    paths: Array.from({ length: 7 }, () => ['/branchPrefix']),
+  });
+});

@@ -121,6 +121,29 @@ export const which = script('which', { run: './run.sh', output: z.object({ path:
   });
 });
 
+test('a stage run in isolation runs in the directory that holds .sail/, on no branch: BRANCH is set and empty', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(fixtureCopy(repo), 'stages', 'where');
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, 'stage.ts'),
+      `import { script, z } from 'sail';
+
+export const where = script('where', { run: './run.sh', output: z.object({ cwd: z.string(), branch: z.string() }) });
+`,
+    );
+    writeScript(join(dir, 'run.sh'), 'printf \'{"cwd":"%s","branch":"%s"}\\n\' "$(pwd)" "$' + '{BRANCH-unset}"');
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', '.sail/stages/where'], repo.dir);
+    const result = readResult(callDirOf(stdout, repo.dir));
+    expect({ code, stderr, output: result.output, branch: (result.env as Record<string, string>).BRANCH }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      output: { cwd: repo.dir, branch: '' },
+      branch: '',
+    });
+  });
+});
+
 test('a stage run in isolation gets SAIL_EVENTS too: it has no stream, so what the script reports stays in the file', async () => {
   await withTempRepo(async (repo) => {
     const dir = join(fixtureCopy(repo), 'stages', 'reports');
