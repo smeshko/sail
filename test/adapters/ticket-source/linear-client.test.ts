@@ -295,6 +295,21 @@ test('an answer whose body stalls past the timeout, or breaks off, is unavailabl
   ]);
 });
 
+test('a rate limit whose reset header is no time a Date holds keeps Linear’s words and leaves the reset out (review R1-6)', async () => {
+  const error = await failureOf('listDesignated', {
+    status: 429,
+    body: { errors: [{ message: 'Too many requests' }] },
+    headers: { 'X-RateLimit-Requests-Reset': '1e20' },
+  });
+  expect(failureFields(error)).toEqual({
+    port: 'ticketSource',
+    op: 'listDesignated',
+    code: 'unavailable',
+    message: 'ticketSource.listDesignated: Linear 429: Too many requests',
+    raw: { errors: [{ message: 'Too many requests' }] },
+  });
+});
+
 test('no failure carries the API key, in its message or its raw answer', async () => {
   const errors = await Promise.all(FAILURES.map(([, op, canned]) => failureOf(op, canned)));
   expect(errors.map((error) => error instanceof PortError)).toEqual(FAILURES.map(() => true));
