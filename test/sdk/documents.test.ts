@@ -36,10 +36,7 @@ const custom: Validator = {
   validate: () => ({ problems: [], derived: { words: 3 } }),
 };
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('doc() freezes its template and validators in order, and refuses a blank template or a validator without a check, derives or validate, naming its index', () => {
+test('doc() freezes its template and validators in order, and refuses a blank template or a validator without a check, derives or validate, naming its index', () => {
   const sections = hasSections('Tasks');
   const document = doc('./templates/spec.md', [sections, custom]);
   expect(document).toEqual({ kind: 'document', template: './templates/spec.md', validators: [sections, custom] });
@@ -59,10 +56,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('hasSections passes when each name is a heading at any level, names each one missing, and refuses to be built with none', () => {
+test('hasSections passes when each name is a heading at any level, names each one missing, and refuses to be built with none', () => {
   const validator = hasSections('Requirements', 'Tasks', 'Notes');
   expect([validator.check, validator.derives]).toEqual(['hasSections(Requirements, Tasks, Notes)', []]);
   const whole = parsed('', [
@@ -84,10 +78,7 @@ test
   expect(() => hasSections()).toThrow('hasSections(): name at least one section');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('noPlaceholders names each {{name: hint}} tag left, with its line, and passes over variables, unclosed tags and colons outside a tag', () => {
+test('noPlaceholders names each {{name: hint}} tag left, with its line, and passes over variables, unclosed tags and colons outside a tag', () => {
   const validator = noPlaceholders();
   expect([validator.check, validator.derives]).toEqual(['noPlaceholders', []]);
   const clean = parsed('# Spec\n\nNote: {{ticket.key}} stays, as does a time of 10:30.\n\n{{ unclosed: tag\n');
@@ -101,10 +92,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('countItems counts the items of the section its heading names, derives the count, and reports an absent section or a count out of bounds', () => {
+test('countItems counts the items of the section its heading names, derives the count, and reports an absent section or a count out of bounds', () => {
   const document = parsed('', [
     ['Spec', 1, []],
     ['Tasks', 2, [item, item, item]],
@@ -127,10 +115,7 @@ test
   expect(countItems('Notes', { min: 1 }).validate(document)).toEqual({ problems: ["has no 'Notes' section"] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("countItems derives under the section's words in camelCase unless as names a key, and labels only the bounds it was given", () => {
+test("countItems derives under the section's words in camelCase unless as names a key, and labels only the bounds it was given", () => {
   const cases: [Validator, string, string][] = [
     [countItems('Tasks'), 'countItems(Tasks)', 'tasks'],
     [countItems('Out of scope', { min: 0 }), 'countItems(Out of scope, min 0)', 'outOfScope'],
@@ -143,10 +128,7 @@ test
   expect(() => countItems('—')).toThrow('countItems(—): as must be a key of one or more characters');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('checklist counts the top-level task items of the whole document and the checked ones, derives both, and reports a count out of bounds', () => {
+test('checklist counts the top-level task items of the whole document and the checked ones, derives both, and reports a count out of bounds', () => {
   const document = parsed(
     '',
     [
@@ -173,10 +155,7 @@ test
   expect(checklist().check).toBe('checklist');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('bounds that are not whole numbers of 0 or more, a min above its max, or an empty as throw when the validator is built', () => {
+test('bounds that are not whole numbers of 0 or more, a min above its max, or an empty as throw when the validator is built', () => {
   const refused: [() => Validator, string][] = [
     [() => countItems('Tasks', { min: -1 }), 'countItems(Tasks): min must be a whole number of 0 or more: -1'],
     [() => countItems('Tasks', { max: 1.5 }), 'countItems(Tasks): max must be a whole number of 0 or more: 1.5'],
