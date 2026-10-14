@@ -158,6 +158,20 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     return { node, comments };
   }
 
+  /**
+   * A listed ticket read as `read` reads it. A ticket deleted between two of its requests, such as its first read and
+   * a comment page, makes Linear refuse the later one: a refusal (`invalid`, `not_found`) is read once more from the
+   * start, and the ticket is skipped when the team no longer holds it. Any other failure, or a second refusal, rejects.
+   */
+  async function readListed(ticketKey: string): Promise<{ node: Node; comments: unknown[] } | undefined> {
+    try {
+      return await read('listDesignated', ticketKey);
+    } catch (error) {
+      if (!(error instanceof PortError) || !['invalid', 'not_found'].includes(error.code)) throw error;
+      return read('listDesignated', ticketKey);
+    }
+  }
+
   async function states(op: string): Promise<LinearState[]> {
     if (teamStates !== undefined) return teamStates;
     const data = await client.request<{ teams: { nodes: { states: { nodes: LinearState[] } }[] } }>(
@@ -252,7 +266,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const tickets: Ticket[] = [];
       for (const key of keys) {
         // Read after the list: a ticket deleted, moved to another team, claimed or unlabelled since is not listed.
-        const found = await read('listDesignated', key);
+        const found = await readListed(key);
         if (found === undefined) continue;
         const ticket = toTicket(found.node, found.comments, 'listDesignated');
         if (ticket.state.type === 'unstarted' && ticket.labels.includes(label)) tickets.push(ticket);
