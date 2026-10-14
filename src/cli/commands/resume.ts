@@ -14,6 +14,7 @@ import { resumeWorkflow } from '../../engine/runtime';
 import { readEvents } from '../../events/consumers/ndjson';
 import type { ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
+import { registerRepository } from '../registration';
 import {
   findProject,
   interruptibly,
@@ -41,6 +42,7 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
   const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
+  await registerRepository(io, COMMAND, project);
 
   const terminal = terminalFor(io, project.sailDir, verbosity, readEvents(run.dir));
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
