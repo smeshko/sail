@@ -1,7 +1,9 @@
 import type { Builtins } from '../ports/adapter';
 import { fakeAdapters } from './fake/index';
+import { linearTicketSource } from './ticket-source/linear';
 
 export { createFakeCodeHost, createFakeHarness, createFakeTicketSource, createFakeWorkspace } from './fake/index';
+export { createLinearTicketSource } from './ticket-source/linear';
 
 /** The built-in adapters by name: the set a composition root hands to the adapter registry. */
-export const BUILTINS: Builtins = { fake: fakeAdapters };
+export const BUILTINS: Builtins = { fake: fakeAdapters, linear: { ticketSource: linearTicketSource } };
