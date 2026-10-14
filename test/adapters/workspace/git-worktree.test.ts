@@ -491,3 +491,40 @@ test("a release prunes only what it removed by hand: a worktree of the user's wh
     }).toEqual({ released: false, mine: true });
   });
 });
+
+test('a run directory that is a link is refused by release, and the worktree it leads to stays (review #2.5)', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const adapter = adapterOf(repo, w);
+    const other = await w.run('other');
+    const { path: target } = await adapter.create(other, { branch: BRANCH });
+    const linked = { runId: 'linked', runDir: join(w.runsDir, 'linked') };
+    symlinkSync(other.runDir, linked.runDir);
+    const released = await settle(adapter.release(linked, false));
+    expect({
+      released,
+      target: [existsSync(join(target, 'README.md')), registered(repo).includes(target)],
+    }).toEqual({
+      released: { rejected: { port: 'workspace', op: 'release', code: 'unavailable' } },
+      target: [true, true],
+    });
+  });
+});
+
+test('a locked workspace is still removed on release, and git no longer lists it (review #2.6)', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const adapter = adapterOf(repo, w);
+    const run = runIn(w.runsDir);
+    const { path } = await adapter.create(run, { branch: BRANCH });
+    repo.git('worktree', 'lock', path);
+    const released = await settle(adapter.release(run, false));
+    expect({
+      released: 'rejected' in released ? released : released.kept,
+      workspace: existsSync(path),
+      listed: registered(repo).includes(path),
+    }).toEqual({ released: false, workspace: false, listed: false });
+  });
+});

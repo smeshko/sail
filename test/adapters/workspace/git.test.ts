@@ -57,7 +57,7 @@ test("git never asks: no terminal prompt, no askpass, no credential manager dial
   });
 });
 
-test("a git call in a directory that is not there, or one that outruns its timeout, is a failed result and no throw, and one given no env runs with this process's", async () => {
+test("a git call in a directory that is not there, or one that outruns its timeout, is a failed result and no throw, naming its subcommand past any -c, and one given no env runs with this process's (review #2.7)", async () => {
   await withTempRepo(async (repo) => {
     const missing = gitSync(join(repo.dir, 'missing'), ['status'], repo.env);
     // An alias that sleeps stands in for a git call that hangs.
@@ -66,7 +66,7 @@ test("a git call in a directory that is not there, or one that outruns its timeo
     const ran = gitSync(repo.dir, ['rev-parse', '--is-inside-work-tree']);
     expect({
       missing: missing.code,
-      slow: { code: slow.code, said: slow.stderr.includes('timed out after 200 ms') },
+      slow: { code: slow.code, said: slow.stderr.startsWith('git wait timed out after 200 ms') },
       ran: { code: ran.code, stdout: ran.stdout },
     }).toEqual({ missing: -1, slow: { code: -1, said: true }, ran: { code: 0, stdout: 'true\n' } });
   });
