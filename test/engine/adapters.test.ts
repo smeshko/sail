@@ -445,6 +445,21 @@ test.each<[string, Env]>([
   expect(made).toEqual([]);
 });
 
+test('an entry that lists alternatives is met by any one of them, and refused naming all of them', async () => {
+  const either = harness({ requires: () => [['A_TOKEN', 'B_TOKEN'], 'C_KEY'] });
+  expect(resolvedOrThrow(await withHarness(either, { B_TOKEN: 'x', C_KEY: 'y' })).ports.harness?.name).toBe('stub');
+  expect(await withHarness(either, { A_TOKEN: '', C_KEY: 'y' })).toEqual(
+    issue('harness', 'needs one of A_TOKEN, B_TOKEN, none of which is set'),
+  );
+  expect(await withHarness(either, { A_TOKEN: 'x' })).toEqual(issue('harness', 'needs C_KEY, which is not set'));
+});
+
+test('an empty list of alternatives is not environment variable names', async () => {
+  expect(await withHarness(harness({ requires: () => [[]] }))).toEqual(
+    issue('harness', "only's requires() must return environment variable names"),
+  );
+});
+
 test('every missing variable is reported, one issue each, in port order', async () => {
   const { sailDir } = repo();
   const builtins = {

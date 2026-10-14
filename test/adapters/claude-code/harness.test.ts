@@ -158,6 +158,7 @@ test("the session's environment is the allowlisted names of sail's, the client a
     TERM: 'xterm',
     CLAUDE_CONFIG_DIR: '/cfg',
     ANTHROPIC_API_KEY: 'sk-ant-x',
+    CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-x',
     ANTHROPIC_BASE_URL: 'https://proxy',
     CLAUDE_CODE_USE_BEDROCK: '1',
     AWS_REGION: 'eu-central-1',
@@ -178,6 +179,7 @@ test("the session's environment is the allowlisted names of sail's, the client a
     TERM: 'xterm',
     CLAUDE_CONFIG_DIR: '/cfg',
     ANTHROPIC_API_KEY: 'sk-ant-x',
+    CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-x',
     ANTHROPIC_BASE_URL: 'https://proxy',
     CLAUDE_CODE_USE_BEDROCK: '1',
     AWS_REGION: 'eu-central-1',
@@ -189,6 +191,14 @@ test("the session's environment is the allowlisted names of sail's, the client a
     STAGE_OUT: req.env.STAGE_OUT,
     TRY: '1',
   });
+});
+
+test('the session sees the OAuth token, and nothing the harness reports carries a credential', async () => {
+  const env = { ANTHROPIC_API_KEY: 'sk-ant-secret-key', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-secret-token' };
+  expect(sessionOptions(request(), env).env).toMatchObject(env);
+  const { result, capture } = await play(SUITE.done ?? [], {}, env);
+  const reported = JSON.stringify([result, capture.events]);
+  expect([reported.includes('secret-key'), reported.includes('secret-token')]).toEqual([false, false]);
 });
 
 test('a done session runs its prompt with those options, reports its usage at the total cost, and ends last with its counts', async () => {

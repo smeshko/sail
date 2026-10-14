@@ -1,6 +1,6 @@
 // The claude-code harness against the real Agent SDK and a real provider: paid, and opt-in. Every case skips unless
 // SAIL_LIVE=1 (D11), and nothing runs at import, so `bun run verify` without the switch spends nothing. The user runs
-// them with real credentials:
+// them with real credentials, an ANTHROPIC_API_KEY or a subscription's CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`):
 //
 //   SAIL_LIVE=1 bun run test test/adapters/claude-code/live.test.ts
 //
@@ -114,7 +114,7 @@ describe.skipIf(!LIVE)('claude-code live', () => {
   }, 600_000);
 
   test("an invalid API key fails the run with stage_error, keeping the provider's message in error:harness", async () => {
-    const run = await specRun({ ANTHROPIC_API_KEY: 'sk-ant-invalid' });
+    const run = await specRun({ ANTHROPIC_API_KEY: 'sk-ant-invalid', CLAUDE_CODE_OAUTH_TOKEN: '' });
     expect({ code: run.code, status: run.status }).toEqual({
       code: EXIT_FAILED,
       status: { status: 'failed', stopReason: 'stage_error' },

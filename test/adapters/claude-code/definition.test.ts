@@ -50,6 +50,30 @@ test('harness: { use: claude-code } resolves to the built-in, with its SDK versi
   });
 });
 
+test('a Claude subscription OAuth token alone passes the preflight, and neither it nor an API key is refused naming both', async () => {
+  const token = await resolveHarness({ use: 'claude-code' }, { CLAUDE_CODE_OAUTH_TOKEN: 'offline-test' });
+  const empty = await resolveHarness(
+    { use: 'claude-code' },
+    { CLAUDE_CODE_OAUTH_TOKEN: '', ANTHROPIC_API_KEY: undefined },
+  );
+  expect('issues' in token ? token.issues : []).toEqual([]);
+  expect(empty).toEqual({
+    issues: [
+      {
+        path: '/adapters/harness',
+        message: 'needs one of ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, none of which is set',
+      },
+    ],
+  });
+});
+
+test('on Bedrock or Vertex an OAuth token does not stand in for the cloud variables', async () => {
+  const env = { CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_OAUTH_TOKEN: 'offline-test' };
+  expect(await resolveHarness({ use: 'claude-code' }, env)).toEqual({
+    issues: [{ path: '/adapters/harness', message: 'needs AWS_REGION, which is not set' }],
+  });
+});
+
 test('without its key, the preflight names it; with an option it takes none, the option is named', async () => {
   const missing = await resolveHarness({ use: 'claude-code' }, {});
   const option = await resolveHarness({ use: 'claude-code', model: 'x' }, { ANTHROPIC_API_KEY: 'offline-test' });

@@ -45,6 +45,7 @@ export const ENV_ALLOWLIST: readonly string[] = [
   'TERM',
   'CLAUDE_CONFIG_DIR',
   'ANTHROPIC_*',
+  'CLAUDE_CODE_OAUTH_TOKEN',
   'CLAUDE_CODE_USE_BEDROCK',
   'CLAUDE_CODE_USE_VERTEX',
   'AWS_*',

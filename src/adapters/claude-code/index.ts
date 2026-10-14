@@ -1,5 +1,5 @@
 // The built-in claude-code adapter: the Harness over the Agent SDK. It takes no options, and its preflight names the
-// credentials its provider needs (D9): an Anthropic API key, or a cloud region and project on Bedrock or Vertex.
+// credentials its provider needs (D9): an Anthropic API key or a Claude subscription's OAuth token, or a cloud region and project on Bedrock or Vertex.
 import { z } from 'zod';
 import type { AdapterDefinition, Env } from '../../ports/adapter';
 import type { Harness } from '../../ports/harness';
@@ -13,11 +13,11 @@ export const SDK_VERSION = '0.3.282';
 /** Whether a switch such as `CLAUDE_CODE_USE_BEDROCK` is on. */
 const on = (value: string | undefined): boolean => value !== undefined && value !== '' && value !== '0';
 
-/** The environment variables the session's provider needs. */
-export function requires(env: Env): string[] {
+/** The environment variables the session's provider needs: on Anthropic's own API, a key or a Claude subscription's OAuth token. */
+export function requires(env: Env): (string | string[])[] {
   if (on(env.CLAUDE_CODE_USE_BEDROCK)) return ['AWS_REGION'];
   if (on(env.CLAUDE_CODE_USE_VERTEX)) return ['CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID'];
-  return ['ANTHROPIC_API_KEY'];
+  return [['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']];
 }
 
 export const claudeCodeAdapters: { harness: AdapterDefinition<Harness> } = {
