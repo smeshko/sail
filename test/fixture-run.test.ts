@@ -318,10 +318,7 @@ test("a second run of FAKE-1, forced, in a copy of a repository whose first run 
 
 const SPEC_CHECKS = ['hasSections(Requirements, Tasks)', 'noPlaceholders', 'countItems(Tasks, min 1)'];
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('spec#1 completes spec.md from its template: its file:validated follows its file:produced, and its result records the three checks as valid and derived.tasks as 2', async () => {
+test('spec#1 completes spec.md from its template: its file:validated follows its file:produced, and its result records the three checks as valid and derived.tasks as 2', async () => {
   const { dir, events } = await completed();
   const result = json(dir, '01-spec', 'call-1', 'result.json');
   expect([result.files['spec.md'].validation, result.derived]).toEqual([
@@ -345,10 +342,7 @@ function specTries(...answers: ((answer: ScriptedAnswer & { outcome: 'done' }) =
   return { ...script, spec: answers.map((make) => make(answer)) };
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a first spec try that leaves the template as it is gets one correction: try-2 is told each validator message, writes a valid spec, and the run completes', async () => {
+test('a first spec try that leaves the template as it is gets one correction: try-2 is told each validator message, writes a valid spec, and the run completes', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     writeHarnessScript(
@@ -377,10 +371,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a spec without its Requirements section in both tries ends spec#1 in error, naming the check, and the run fails with stage_error, exit 1', async () => {
+test('a spec without its Requirements section in both tries ends spec#1 in error, naming the check, and the run fails with stage_error, exit 1', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const dropped = (answer: ScriptedAnswer & { outcome: 'done' }): ScriptedAnswer => {

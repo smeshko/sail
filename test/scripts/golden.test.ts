@@ -58,18 +58,12 @@ function changedCopy(name: string, change: (dir: string) => void): string {
   return dir;
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
+test('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
   expect(stale(fresh, committed)).toEqual([]);
   expect(filesIn(committed)).toHaveLength(50);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
+test("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
   const runtimeOf = (dir: string): unknown =>
     existsSync(join(dir, 'run.json')) ? JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).sail.runtime : null;
   expect(runtimeOf(fresh)).toBe(`bun ${Bun.version}`);
@@ -82,10 +76,7 @@ test
   expect(stale(fresh, bumped)).toEqual([`run.json is stale: ${REGENERATE}`]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, (dir: string) => void, string]>([
+test.each<[string, (dir: string) => void, string]>([
   [
     'one byte changed',
     (dir) => {
