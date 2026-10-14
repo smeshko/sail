@@ -2,9 +2,7 @@
 // moved by state type (DECISIONS D4), whatever the team calls its states. Every request goes through the GraphQL client,
 // so each failure keeps Linear's message. The definition reads the API key, and the endpoint, from the operator's
 // environment alone (D3).
-//
-// TDD stub (linear-ticket-source TASK-005): the operations are final, the definition answers wrong.
-// The stub is registered in BUILTINS already, so the built-in lists the existing tests name stay true from here on.
+import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
@@ -261,8 +259,28 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   };
 }
 
+const LinearOptions = z.strictObject({
+  team: z.string().regex(/^[A-Z][A-Z0-9]*$/, 'must be a Linear team key, such as ADW'),
+  inReview: z.string().min(1).optional(),
+});
+
 /** `linear` in `project.yaml`: `team` is required, `inReview` optional, and the key comes from `LINEAR_API_KEY`. */
 export const linearTicketSource: AdapterDefinition<TicketSource> = {
-  requires: () => [],
-  create: () => createLinearTicketSource({ team: '', endpoint: LINEAR_ENDPOINT, apiKey: '' }),
+  requires: () => ['LINEAR_API_KEY'],
+  create(options, context) {
+    const parsed = LinearOptions.safeParse(options);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const option = issue?.code === 'unrecognized_keys' ? issue.keys.join(', ') : issue?.path.join('.');
+      throw new Error(`linear ticketSource: option ${option}: ${issue?.message}`);
+    }
+    return createLinearTicketSource({
+      team: parsed.data.team,
+      ...(parsed.data.inReview === undefined ? {} : { inReview: parsed.data.inReview }),
+      apiKey: context.env.LINEAR_API_KEY ?? '',
+      endpoint: context.env.SAIL_LINEAR_API_URL || LINEAR_ENDPOINT,
+      ...(context.emit === undefined ? {} : { emit: context.emit }),
+      ...(context.now === undefined ? {} : { now: context.now }),
+    });
+  },
 };

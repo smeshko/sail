@@ -109,10 +109,7 @@ async function linearRun(argv: string[], options: LinearOptions = {}) {
 
 const moves = (linear: LinearWorld) => linear.operations().filter((operation) => operation === 'SailMove');
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('sail ADW-1 --until spec claims the designated ticket in Linear, writes its ticket.json and a brief that wraps every provider string, and suspends at until', async () => {
+test('sail ADW-1 --until spec claims the designated ticket in Linear, writes its ticket.json and a brief that wraps every provider string, and suspends at until', async () => {
   const run = await linearRun(['ADW-1', '--until', 'spec']);
   expect({ code: run.code, stderr: run.stderr, runs: run.runIds.length }).toEqual({
     code: EXIT_SUSPENDED,
@@ -146,10 +143,7 @@ test
   expect(run.files).not.toContain(KEY);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, string, string]>([
+test.each<[string, string, string]>([
   [
     'an undesignated ticket',
     'ADW-3',
@@ -179,10 +173,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('sail --force runs the undesignated ticket and the started one, and run.json records what each overrode', async () => {
+test('sail --force runs the undesignated ticket and the started one, and run.json records what each overrode', async () => {
   const undesignated = await linearRun(['ADW-3', '--force', '--until', 'spec']);
   const started = await linearRun(['ADW-4', '--force', '--until', 'spec']);
   expect([undesignated.code, undesignated.header?.source.forced, undesignated.world.ticket(3).state]).toEqual([
@@ -197,10 +188,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('without LINEAR_API_KEY, sail ADW-1 is refused at preflight with exit 3, and no request reaches Linear', async () => {
+test('without LINEAR_API_KEY, sail ADW-1 is refused at preflight with exit 3, and no request reaches Linear', async () => {
   const run = await linearRun(['ADW-1'], { env: { LINEAR_API_KEY: undefined } });
   expect({ code: run.code, stderr: run.stderr, requests: run.world.requests, runs: run.runIds }).toEqual({
     code: EXIT_REFUSED,
@@ -210,10 +198,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a linear ticket source without team, or with a team key in lower case, is refused with exit 3, naming the option', async () => {
+test('a linear ticket source without team, or with a team key in lower case, is refused with exit 3, naming the option', async () => {
   const runs = [
     await linearRun(['ADW-1'], { project: 'ticketSource: { use: linear }' }),
     await linearRun(['ADW-1'], { project: 'ticketSource: { use: linear, team: adw }' }),
@@ -228,10 +213,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, { status: number; body: unknown }, string]>([
+test.each<[string, { status: number; body: unknown }, string]>([
   ['a 401', AUTH_FAILED, 'Linear 401: Authentication required, not authenticated (unauthorized)'],
   [
     'a rate limit',
@@ -263,10 +245,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a 401 on the intake’s read, after the claim, fails the run: run:end carries Linear’s message, and the key is in no file', async () => {
+test('a 401 on the intake’s read, after the claim, fails the run: run:end carries Linear’s message, and the key is in no file', async () => {
   const run = await linearRun(['ADW-1'], {
     prepare: (linear) => linear.failNext('SailTicket', AUTH_FAILED, { after: 'SailComment' }),
   });
@@ -285,10 +264,7 @@ test
   expect(run.files).not.toContain(KEY);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('sail port ticket-source get on a Linear URL prints the Linear ticket as one line of JSON', async () => {
+test('sail port ticket-source get on a Linear URL prints the Linear ticket as one line of JSON', async () => {
   const run = await linearRun([
     'port',
     'ticket-source',

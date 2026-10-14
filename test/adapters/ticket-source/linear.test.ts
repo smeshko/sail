@@ -420,20 +420,14 @@ test('Linear answering success: false to the move or the comment is a conflict, 
 
 // The definition: `ticketSource: { use: linear, team, inReview }`, its key and endpoint from the environment.
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the definition requires LINEAR_API_KEY, whatever its options', () => {
+test('the definition requires LINEAR_API_KEY, whatever its options', () => {
   expect([
     linearTicketSource.requires?.({ team: 'ADW' }, {}),
     linearTicketSource.requires?.({ team: 'ADW', inReview: 'In Review' }, { LINEAR_API_KEY: KEY }),
   ]).toEqual([['LINEAR_API_KEY'], ['LINEAR_API_KEY']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the definition creates the adapter from team and inReview without a request, and it reads through SAIL_LINEAR_API_URL with LINEAR_API_KEY as the bare Authorization header', async () => {
+test('the definition creates the adapter from team and inReview without a request, and it reads through SAIL_LINEAR_API_URL with LINEAR_API_KEY as the bare Authorization header', async () => {
   const world = createLinearWorld(SEED);
   const served = world.serve();
   try {
@@ -454,10 +448,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('without SAIL_LINEAR_API_URL, the definition sends to Linear’s own endpoint', async () => {
+test('without SAIL_LINEAR_API_URL, the definition sends to Linear’s own endpoint', async () => {
   const world = createLinearWorld(SEED);
   const sentTo: string[] = [];
   const original = globalThis.fetch;
@@ -477,10 +468,7 @@ test
   expect(sentTo).toEqual(['https://api.linear.app/graphql']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the definition refuses options it cannot read, naming the option: no team, a team key in lower case, an option it does not take', async () => {
+test('the definition refuses options it cannot read, naming the option: no team, a team key in lower case, an option it does not take', async () => {
   const refused = async (options: Record<string, unknown>) =>
     messageOf(await rejection(Promise.resolve().then(() => linearTicketSource.create(options, context({})))));
   expect([
