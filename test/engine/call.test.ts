@@ -710,10 +710,7 @@ test('a declared file left out is corrected as invalid output is, and the second
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('on claude-code, output that fails its schema twice ends the call in error on try 2, never done, and output corrected on try 2 ends it done', async () => {
+test('on claude-code, output that fails its schema twice ends the call in error on try 2, never done, and output corrected on try 2 ends it done', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const claudeCode = (outputs: unknown[]) =>

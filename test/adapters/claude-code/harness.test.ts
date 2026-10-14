@@ -74,10 +74,7 @@ const SUITE: Record<string, Stream> = {
 /** A query that plays the suite's stream named by the session's prompt. */
 const suiteQuery: QueryFunction = (params) => scriptedQuery([SUITE[params.prompt] ?? []])(params);
 
-// biome-ignore format: TDD-PENDING TASK-007
-describe
-  .skip // TDD-PENDING TASK-007
-  ('the port suite', () =>
+describe('the port suite', () =>
   harnessSuite('claude-code (scripted query)', async () => ({
     adapter: createClaudeCodeHarness({ env: {}, query: suiteQuery }),
     world: {
@@ -104,10 +101,7 @@ async function play(stream: Stream, extra: Partial<HarnessRequest> = {}, env: Re
   return { query, result, capture, types: capture.events.map((event) => event.type) };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the session's options are the step's model, workspace, envelope and budgets, isolated from the user's settings", () => {
+test("the session's options are the step's model, workspace, envelope and budgets, isolated from the user's settings", () => {
   const req = request();
   const options = sessionOptions(req, {});
   const { abortController, canUseTool, env: _env, ...rest } = options;
@@ -137,10 +131,7 @@ test
   }).toEqual({ controller: true, guard: 'function', bypass: [], mode: false });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a session with no STAGE_IN gets only $STAGE_OUT as an extra directory, and a session's controller is its own", () => {
+test("a session with no STAGE_IN gets only $STAGE_OUT as an extra directory, and a session's controller is its own", () => {
   const req = request();
   const { STAGE_IN: _in, ...env } = req.env;
   const one = sessionOptions({ ...req, env }, {});
@@ -155,10 +146,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the session's environment is the allowlisted names of sail's, the client app, and the preamble, which wins a clash", () => {
+test("the session's environment is the allowlisted names of sail's, the client app, and the preamble, which wins a clash", () => {
   const plain = request();
   // The preamble names LANG too: it wins over sail's.
   const req: HarnessRequest = { ...plain, env: { ...plain.env, LANG: 'C.UTF-8' } };
@@ -203,10 +191,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a done session runs its prompt with those options, reports its usage at the total cost, and ends last with its counts', async () => {
+test('a done session runs its prompt with those options, reports its usage at the total cost, and ends last with its counts', async () => {
   const { query, result, capture, types } = await play(SUITE.done ?? []);
   expect(query.calls.map((call) => call.prompt)).toEqual(['Write the spec.']);
   expect(types).toEqual([
@@ -244,10 +229,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('events reach onEvent as the session goes, not when it is over', async () => {
+test('events reach onEvent as the session goes, not when it is over', async () => {
   const capture = captureEvents<HarnessEvent>();
   let heardBeforeSecond = -1;
   const query: QueryFunction = async function* () {
@@ -259,10 +241,7 @@ test
   expect(heardBeforeSecond).toBe(1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a failed session emits error:harness once with its message, then its end with the outcome, end reason, counts and usage', async () => {
+test('a failed session emits error:harness once with its message, then its end with the outcome, end reason, counts and usage', async () => {
   const { result, capture, types } = await play(SUITE.overTurns ?? []);
   expect(summary(result)).toBe('error: budget exceeded: maxTurns 40');
   expect(types.filter((type) => type === 'error:harness')).toHaveLength(1);
@@ -282,10 +261,7 @@ test
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a tool the guard denies ends denied, and the session's end counts the denial", async () => {
+test("a tool the guard denies ends denied, and the session's end counts the denial", async () => {
   const { query, result, capture } = await play([
     init(),
     assistantToolUse('m1', 't1', 'Bash', { command: 'cat ~/.ssh/id_rsa' }, { usage: { output: 5 } }),
@@ -311,10 +287,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a request already aborted resolves as error aborted, and no session starts', async () => {
+test('a request already aborted resolves as error aborted, and no session starts', async () => {
   const { query, result, types } = await play(SUITE.done ?? [], { signal: AbortSignal.abort() });
   expect({ result: summary(result), calls: query.calls.length, types }).toEqual({
     result: 'error: aborted',
@@ -323,10 +296,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("an abort during the session fires the session's controller, resolves as error aborted, and ends the session last", async () => {
+test("an abort during the session fires the session's controller, resolves as error aborted, and ends the session last", async () => {
   const controller = new AbortController();
   const query = scriptedQuery([[init(), { act: 'waitForAbort' }]]);
   const types: string[] = [];
@@ -349,10 +319,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a query that throws, a stream that throws, and an onEvent that throws each resolve as error, never a rejection', async () => {
+test('a query that throws, a stream that throws, and an onEvent that throws each resolve as error, never a rejection', async () => {
   const throwing: QueryFunction = () => {
     throw new Error('spawn claude ENOENT');
   };
@@ -381,10 +348,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the transcript renders the session's events and how it ended", async () => {
+test("the transcript renders the session's events and how it ended", async () => {
   const { result } = await play(SUITE.done ?? []);
   expect(result.transcript).toBe(
     [
@@ -400,10 +364,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('claude-code declares structured output, permissions, usage, abort, and turn and dollar budgets', () => {
+test('claude-code declares structured output, permissions, usage, abort, and turn and dollar budgets', () => {
   expect(createClaudeCodeHarness({ env: {} }).capabilities()).toEqual({
     structuredOutput: true,
     permissions: true,
