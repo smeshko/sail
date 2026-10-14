@@ -234,7 +234,7 @@ test('outside a repository, with no .sail/, with a project.yaml that breaks its 
       code: EXIT_REFUSED,
       stdout: '',
       stderr:
-        ".sail/project.yaml  /adapters/ticketSource no built-in adapter 'nope' fills ticketSource: the built-ins that do are fake\n",
+        ".sail/project.yaml  /adapters/ticketSource no built-in adapter 'nope' fills ticketSource: the built-ins that do are fake, linear\n",
     });
     writeFileSync(join(sail, 'project.yaml'), `${readFileSync(join(sail, 'project.yaml'), 'utf8')}bogus: 1\n`);
     expect(await runCaptured(get, repo.dir, { env: {} })).toEqual({

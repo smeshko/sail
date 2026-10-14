@@ -138,8 +138,8 @@ test('an emit in the context receives ticket:fetched from the ticket source', as
   });
 });
 
-test('BUILTINS holds the fake for every port, each a definition with create alone: no requires, no versions', () => {
-  expect(Object.keys(BUILTINS)).toEqual(['fake']);
+test('BUILTINS holds the fake for every port, each a definition with create alone, and linear for the ticket source, which requires its key', () => {
+  expect(Object.keys(BUILTINS)).toEqual(['fake', 'linear']);
   const definitions = Object.entries(BUILTINS.fake ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(definitions)).toEqual({
     ticketSource: ['create'],
@@ -147,4 +147,6 @@ test('BUILTINS holds the fake for every port, each a definition with create alon
     harness: ['create'],
     workspace: ['create'],
   });
+  const linear = Object.entries(BUILTINS.linear ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
+  expect(Object.fromEntries(linear)).toEqual({ ticketSource: ['requires', 'create'] });
 });

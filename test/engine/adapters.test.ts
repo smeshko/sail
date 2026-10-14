@@ -196,7 +196,7 @@ const broken: Broken[] = [
       ...builtin('only', 'harness', counting('harness', [])),
       ...builtin('other', 'ticketSource', counting('ticketSource', [])),
     },
-    message: "no built-in adapter 'only' fills ticketSource: the built-ins that do are fake, other",
+    message: "no built-in adapter 'only' fills ticketSource: the built-ins that do are fake, linear, other",
   },
   {
     label: 'a path outside the repository',
@@ -409,7 +409,7 @@ test('two ports broken at pass one give two issues in port order, and no definit
     issues: [
       {
         path: '/adapters/ticketSource',
-        message: "no built-in adapter 'nope1' fills ticketSource: the built-ins that do are fake",
+        message: "no built-in adapter 'nope1' fills ticketSource: the built-ins that do are fake, linear",
       },
       {
         path: '/adapters/harness',
