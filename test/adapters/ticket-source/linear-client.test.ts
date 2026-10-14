@@ -253,6 +253,48 @@ test('a request Linear never answers is aborted at the timeout, and is unavailab
   });
 });
 
+/** A fetch whose answer's headers arrive, and whose body sends `{"data":` and then `then` does to it. */
+const bodyThat =
+  (then: (controller: ReadableStreamDefaultController<Uint8Array>, signal: AbortSignal | undefined) => void): Fetch =>
+  async (_, init) =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"data":'));
+          then(controller, init.signal ?? undefined);
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+
+test('an answer whose body stalls past the timeout, or breaks off, is unavailable, naming the host, not an error of its own (review R1-2)', async () => {
+  // The timeout aborts the body as fetch does: the stream errors with the signal's reason.
+  const stalled = bodyThat((controller, signal) =>
+    signal?.addEventListener('abort', () => controller.error(signal.reason)),
+  );
+  const broken = bodyThat((controller) => controller.error(new TypeError('socket closed')));
+  const errors = [
+    await rejection(clientOf(stalled, 5).request('get', 'SailTicket', QUERY, {})),
+    await rejection(clientOf(broken).request('claim', 'SailTicket', QUERY, {})),
+  ];
+  expect(errors.map(failureFields)).toEqual([
+    {
+      port: 'ticketSource',
+      op: 'get',
+      code: 'unavailable',
+      message: 'ticketSource.get: Linear at api.linear.app did not answer within 5 ms',
+      raw: undefined,
+    },
+    {
+      port: 'ticketSource',
+      op: 'claim',
+      code: 'unavailable',
+      message: 'ticketSource.claim: the answer from Linear at api.linear.app broke off: socket closed',
+      raw: undefined,
+    },
+  ]);
+});
+
 test('no failure carries the API key, in its message or its raw answer', async () => {
   const errors = await Promise.all(FAILURES.map(([, op, canned]) => failureOf(op, canned)));
   expect(errors.map((error) => error instanceof PortError)).toEqual(FAILURES.map(() => true));
