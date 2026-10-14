@@ -366,3 +366,28 @@ test("a write that fails after its rename, when queue.json then can't be read ba
   expect(onDisk().items[0]).toMatchObject({ state: 'dispatched', attempts: 1, runId: 'FAKE-1-01' });
   expect(store.snapshot()).toEqual(onDisk());
 });
+
+test("when the events of an add can't be appended, every added item's event is written once the file recovers (review #3.4)", () => {
+  const runs = runsDir();
+  const store = open(runs);
+  const events = join(queueDir(runs, 'ticket-to-pr'), 'events.ndjson');
+  store.polled({ kind: 'ticket', found: 0, added: 0, durationMs: 0 });
+  chmodSync(events, 0o444);
+  try {
+    expect(() => store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3')])).toThrow('EACCES');
+  } finally {
+    chmodSync(events, 0o644);
+  }
+  expect(keys(store)).toEqual(['ticket:FAKE-1 queued', 'ticket:FAKE-2 queued', 'ticket:FAKE-3 queued']);
+  store.polled({ kind: 'ticket', found: 3, added: 3, durationMs: 0 });
+  expect(queueEvents(queueDir(runs, 'ticket-to-pr')).map((event) => [event.seq, event.dedupKey ?? event.type])).toEqual(
+    [
+      [1, 'queue:polled'],
+      [2, 'ticket:FAKE-1'],
+      [3, 'ticket:FAKE-2'],
+      [4, 'ticket:FAKE-3'],
+      [5, 'queue:polled'],
+    ],
+  );
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
