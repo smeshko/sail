@@ -149,6 +149,9 @@ export function hasSections(...names: string[]): Validator {
   };
 }
 
+/** A placeholder's name as a problem may quote it: a path, as the renderer reads a variable's. */
+const PLACEHOLDER_NAME = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
+
 /** Passes when no `{{name: hint}}` placeholder is left: a tag whose body holds a colon, as the renderer reads one. */
 export function noPlaceholders(): Validator {
   return {
@@ -170,7 +173,13 @@ export function noPlaceholders(): Validator {
           for (; newline !== -1 && newline < from; newline = text.indexOf('\n', newline + 1)) line += 1;
           const body = text.slice(from + 2, close);
           const name = body.slice(0, body.indexOf(':')).trim();
-          problems.push(`line ${line} still holds the placeholder {{${name}: …}}`);
+          // The problem goes into the corrective prompt, outside any untrusted wrapper, so it names the placeholder
+          // only when the name is one a template author writes: never the text of a ticket the document quotes.
+          problems.push(
+            PLACEHOLDER_NAME.test(name) && name.length <= 64
+              ? `line ${line} still holds the placeholder {{${name}: …}}`
+              : `line ${line} still holds a placeholder`,
+          );
         }
         start = text.indexOf('{{', close + 2);
       }
