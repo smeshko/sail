@@ -6,6 +6,7 @@
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessEvent } from '../../ports/harness';
 import type { Usage } from '../../ports/types';
+import type { Denial } from './tool-call';
 
 type TurnUsage = SDKAssistantMessage['message']['usage'];
 
@@ -47,7 +48,7 @@ export interface SessionReader {
   settle(result: SDKResultMessage | undefined): HarnessEvent[];
   state(): ReaderState;
   /** Marks a tool call as denied, so its end says so and the session counts it. */
-  markDenied(toolUseId: string): void;
+  markDenied(toolUseId: string, denial?: Denial): void;
 }
 
 const ZERO: Tokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };

@@ -14,6 +14,8 @@ export interface ResultInput {
   readonly budget: Budget;
   /** The request was aborted. */
   readonly aborted: boolean;
+  /** STUB (TASK-005): the session ran out of its minutes; unread yet. */
+  readonly overMinutes?: boolean;
   /** What the session threw, when it threw. */
   readonly thrown?: { readonly error: unknown };
 }

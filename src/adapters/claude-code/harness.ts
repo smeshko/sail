@@ -16,10 +16,12 @@ import {
 import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
+import type { BudgetTimers } from './budget';
 import { createFileGuard, FILE_TOOLS } from './guard';
 import { createSessionReader, type SessionReader } from './messages';
 import { toHarnessResult } from './result';
 import { SUBMIT_CONTRACT, submissionEnvelope } from './submission';
+import type { Denial } from './tool-call';
 import { renderTranscript } from './transcript';
 
 /** What the harness calls to start a session: the SDK's `query()`, or a test's stand-in. */
@@ -31,6 +33,8 @@ export interface ClaudeCodeHarnessOptions {
   readonly query?: QueryFunction;
   /** Milliseconds, for tool durations. */
   readonly now?: () => number;
+  /** STUB (TASK-005): the timers the minute budget runs on; unused yet. */
+  readonly timers?: BudgetTimers;
 }
 
 /** The names of sail's environment a session may see, beside its call's preamble (D7). */
@@ -96,7 +100,7 @@ export function appendedSystemPrompt(request: HarnessRequest): string {
 export function sessionOptions(
   request: HarnessRequest,
   env: Env,
-  onDenied?: (toolUseId: string, reason: string) => void,
+  onDenied?: (toolUseId: string, denial?: Denial) => void,
 ): Options & { abortController: AbortController } {
   const stageDirs = [request.env.STAGE_IN, request.env.STAGE_OUT].filter(
     (dir): dir is string => dir !== undefined && dir !== '',
@@ -121,7 +125,7 @@ export function sessionOptions(
     canUseTool: createFileGuard({
       roots: [request.cwd, ...stageDirs],
       cwd: request.cwd,
-      ...(onDenied === undefined ? {} : { onDenied }),
+      ...(onDenied === undefined ? {} : { onDenied: (toolUseId: string) => onDenied(toolUseId) }),
     }),
     outputFormat: { type: 'json_schema', schema: submissionEnvelope(request.outputSchema) },
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appendedSystemPrompt(request) },
