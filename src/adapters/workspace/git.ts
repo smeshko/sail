@@ -36,14 +36,14 @@ export const LOCAL_TIMEOUT_MS = 30_000;
 export const WORKSPACE_DIR = 'workspace';
 
 /**
- * What `git rev-parse --local-env-vars` lists: the variables that tie git to one repository. git exports them to its
- * hooks, so a sail started from a hook would otherwise point every call at the clone, its index included.
+ * What `git rev-parse --local-env-vars` lists, the variables that tie git to one repository, but the user's own `-c`
+ * config (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`), which git keeps when it enters another repository too. git
+ * exports them to its hooks, so a sail started from a hook would otherwise point every call at the clone, its index
+ * included.
  */
 const REPOSITORY_VARIABLES = new Set([
   'GIT_ALTERNATE_OBJECT_DIRECTORIES',
   'GIT_CONFIG',
-  'GIT_CONFIG_PARAMETERS',
-  'GIT_CONFIG_COUNT',
   'GIT_OBJECT_DIRECTORY',
   'GIT_DIR',
   'GIT_WORK_TREE',
