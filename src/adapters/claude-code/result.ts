@@ -14,7 +14,7 @@ export interface ResultInput {
   readonly budget: Budget;
   /** The request was aborted. */
   readonly aborted: boolean;
-  /** STUB (TASK-005): the session ran out of its minutes; unread yet. */
+  /** The session ran out of its minutes, and was aborted for it (D6). */
   readonly overMinutes?: boolean;
   /** What the session threw, when it threw. */
   readonly thrown?: { readonly error: unknown };
@@ -46,6 +46,9 @@ export function toHarnessResult(input: ResultInput): Ended {
     costEstimate,
   });
 
+  if (input.overMinutes === true) {
+    return failed(`budget exceeded: maxMinutes ${budget.maxMinutes}`, 'max_minutes', 'budget_exceeded');
+  }
   if (input.aborted) return failed('aborted', 'aborted');
   if (input.thrown !== undefined) return failed(`claude-code: ${messageOf(input.thrown.error)}`, 'failed');
   if (result === undefined) return failed('the session ended without a result', 'failed');

@@ -101,10 +101,7 @@ test("a denial renders between its tool's start and end, with its rule and reaso
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a budget warning and an overrun each get their line, naming the budget and what was used of it', () => {
+test('a budget warning and an overrun each get their line, naming the budget and what was used of it', () => {
   const text = renderTranscript([
     { type: 'budget:warning', budget: 'turns', limit: 40, used: 32 },
     { type: 'budget:warning', budget: 'minutes', limit: 1, used: 0.8 },

@@ -41,6 +41,10 @@ function lineOf(event: HarnessEvent): string | undefined {
       const { input, cacheRead, cacheWrite, output } = event.tokens;
       return `usage: turn ${event.turn}, in ${input}, cache read ${cacheRead}, cache write ${cacheWrite}, out ${output}, $${event.costUsdSoFar}`;
     }
+    case 'budget:warning':
+      return `budget ${event.budget} at ${event.used} of ${event.limit}`;
+    case 'budget:exceeded':
+      return `budget ${event.budget} exceeded: ${event.used} of ${event.limit}`;
     case 'error:harness':
       return `error: ${block(event.message)}`;
     default:

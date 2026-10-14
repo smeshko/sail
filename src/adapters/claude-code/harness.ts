@@ -16,7 +16,7 @@ import {
 import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
-import type { BudgetTimers } from './budget';
+import { type BudgetTimers, createBudgetWatch } from './budget';
 import { createGate } from './gate';
 import { createSessionReader, type SessionReader } from './messages';
 import { toHarnessResult } from './result';
@@ -31,11 +31,16 @@ export interface ClaudeCodeHarnessOptions {
   /** The adapter context's environment, which the session's is picked from. */
   readonly env: Env;
   readonly query?: QueryFunction;
-  /** Milliseconds, for tool durations. */
+  /** Milliseconds, for tool durations and the minutes a session has used. */
   readonly now?: () => number;
-  /** STUB (TASK-005): the timers the minute budget runs on; unused yet. */
+  /** The timers the minute budget runs on: the system's when left out (D14). */
   readonly timers?: BudgetTimers;
 }
+
+const SYSTEM_TIMERS: BudgetTimers = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 
 /** The names of sail's environment a session may see, beside its call's preamble (D7). */
 export const ENV_ALLOWLIST: readonly string[] = [
@@ -159,7 +164,7 @@ const CAPABILITIES: HarnessCapabilities = {
   permissions: true,
   usage: true,
   abort: true,
-  budgets: ['turns', 'usd'],
+  budgets: ['turns', 'usd', 'minutes'],
 };
 
 /** How far a session got: what it said, whether its onEvent still listens, and whether it started and ended. */
@@ -198,10 +203,30 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
 
     let result: SDKResultMessage | undefined;
     let thrown: { error: unknown } | undefined;
+    let overMinutes = false;
+    const quietly = (event: HarnessEvent) => {
+      try {
+        emit(event);
+      } catch (error) {
+        thrown ??= { error };
+      }
+    };
+    const watch = createBudgetWatch({
+      budget: request.budget,
+      timers: options.timers ?? SYSTEM_TIMERS,
+      now: () => options.now?.() ?? Date.now(),
+      emit: quietly,
+      onOverMinutes: () => {
+        overMinutes = true;
+        sessionAt.abortController.abort();
+      },
+    });
     try {
       progress.started = true;
+      watch.start();
       for await (const message of query({ prompt: request.prompt, options: sessionAt })) {
         for (const event of reader.read(message)) emit(event);
+        watch.turn(reader.state().turns);
         if (message.type === 'result') result = message;
         if (stopped()) break;
       }
@@ -210,22 +235,21 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       // already read, says more: a budget's name, its subtype. A throw from onEvent fails the session all the same.
       if (result?.is_error !== true || progress.deaf) thrown = { error };
       sessionAt.abortController.abort();
+    } finally {
+      watch.stop();
     }
 
-    const quietly = (event: HarnessEvent) => {
-      try {
-        emit(event);
-      } catch (error) {
-        thrown ??= { error };
-      }
-    };
     for (const event of reader.settle(result)) quietly(event);
     const state = reader.state();
+    // Budget events go out before the error and the end (D12).
+    watch.turn(state.turns);
+    if (result !== undefined) watch.result(result);
     const ended = toHarnessResult({
       result,
       reader: state,
       budget: request.budget,
       aborted: stopped(),
+      overMinutes,
       ...(thrown === undefined ? {} : { thrown }),
     });
     const { outcome } = ended.result;

@@ -23,10 +23,7 @@ function watch(budget = { maxTurns: 10, maxUsd: 0.05, maxMinutes: 1 }) {
   return { watch: made, timers, events, over: () => over };
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('turns warn once, at the first close that reaches 80%, and their overrun follows at the result without a second warning', () => {
+test('turns warn once, at the first close that reaches 80%, and their overrun follows at the result without a second warning', () => {
   const { watch: w, events } = watch();
   for (const n of [1, 7, 8, 9]) w.turn(n);
   w.result(resultError('error_max_turns', { numTurns: 10, cost: 0.001 }));
@@ -36,10 +33,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a turns overrun with no warning yet gives the warning first', () => {
+test('a turns overrun with no warning yet gives the warning first', () => {
   const { watch: w, events } = watch();
   w.turn(1);
   w.result(resultError('error_max_turns', { numTurns: 10, cost: 0.001 }));
@@ -49,10 +43,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('dollars warn at a result that reaches 80%, overrun only on error_max_budget_usd, and stay quiet below', () => {
+test('dollars warn at a result that reaches 80%, overrun only on error_max_budget_usd, and stay quiet below', () => {
   const below = watch();
   below.watch.result(resultSuccess({ cost: 0.01 }));
   const near = watch();
@@ -69,10 +60,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('minutes warn at 80% on the clock and overrun at the budget, once, then end the session; stop clears what is left', async () => {
+test('minutes warn at 80% on the clock and overrun at the budget, once, then end the session; stop clears what is left', async () => {
   const { watch: w, timers, events, over } = watch();
   w.start();
   expect(timers.pending().map((timer) => timer.ms)).toEqual([48_000, 60_000]);
@@ -92,10 +80,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a watch stopped before its minutes are up leaves no timer and says nothing of them', async () => {
+test('a watch stopped before its minutes are up leaves no timer and says nothing of them', async () => {
   const { watch: w, timers, events } = watch();
   w.start();
   const set = timers.pending().length;

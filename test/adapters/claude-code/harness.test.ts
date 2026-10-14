@@ -693,10 +693,7 @@ test('through run(), an MCP call with no tools and a write outside the workspace
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('claude-code declares turn, dollar and minute budgets, as the port reads them', () => {
+test('claude-code declares turn, dollar and minute budgets, as the port reads them', () => {
   const capabilities = createClaudeCodeHarness({ env: {} }).capabilities();
   expect({ budgets: capabilities.budgets, issues: parseIssues(HarnessCapabilities, capabilities) }).toEqual({
     budgets: ['turns', 'usd', 'minutes'],
@@ -714,10 +711,7 @@ const budgetTrail = (events: readonly HarnessEvent[]) =>
     return `${event.type} ${event.type === 'harness:session_end' ? event.reason : ''}`;
   });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('maxUsd 0.05 over at 0.051 ends in error budget exceeded: maxUsd 0.05, after the dollar warning and overrun', async () => {
+test('maxUsd 0.05 over at 0.051 ends in error budget exceeded: maxUsd 0.05, after the dollar warning and overrun', async () => {
   const { result, capture } = await play(
     [
       init(),
@@ -739,10 +733,7 @@ test
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('maxTurns 2 with two closed turns ends in error naming maxTurns 2, after one turns warning and one overrun', async () => {
+test('maxTurns 2 with two closed turns ends in error naming maxTurns 2, after one turns warning and one overrun', async () => {
   const { result, capture } = await play(
     [
       init(),
@@ -764,10 +755,7 @@ test
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a session's last turn, closed only as it ends, still counts toward the turns warning", async () => {
+test("a session's last turn, closed only as it ends, still counts toward the turns warning", async () => {
   const { result, capture } = await play(SUITE.done ?? [], { budget: { maxTurns: 2, maxUsd: 2, maxMinutes: 10 } });
   expect({ result: summary(result), trail: budgetTrail(capture.events) }).toEqual({
     result: SPEC,
@@ -810,10 +798,7 @@ async function onTheClock(stream: Stream, whileRunning: (timers: ReturnType<type
   return { result, capture, query, timers, pendingAtStart };
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('maxMinutes 1 on the clock: the warning at 48 s, the overrun at 60 s aborts the session, which ends in error naming maxMinutes', async () => {
+test('maxMinutes 1 on the clock: the warning at 48 s, the overrun at 60 s aborts the session, which ends in error naming maxMinutes', async () => {
   const { result, capture, query, timers } = await onTheClock([init(), { act: 'waitForAbort' }], async (clock) => {
     await clock.advance(48_000);
     await clock.advance(12_000);
@@ -833,10 +818,7 @@ test
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a session that ends inside its minutes set both timers at its start, leaves none, and says nothing of minutes', async () => {
+test('a session that ends inside its minutes set both timers at its start, leaves none, and says nothing of minutes', async () => {
   const { result, capture, timers, pendingAtStart } = await onTheClock(SUITE.done ?? [], async () => undefined);
   expect({
     result: summary(result),
