@@ -51,15 +51,25 @@ export function containedFile(dir: string, path: string): string | undefined {
   }
 }
 
-/** Why the run's `events.ndjson` isn't a regular file of its own, or undefined. One not written yet is fine. */
-export function eventsProblem(runDir: string): string | undefined {
-  const path = join(runDir, EVENTS_FILE);
+/** Why the run's file `name` isn't a regular file of its own, or undefined. One not written yet is fine. */
+function ownFileProblem(runDir: string, name: string): string | undefined {
+  const path = join(runDir, name);
   try {
     lstatSync(path);
   } catch {
     return undefined;
   }
-  return containedFile(runDir, path) === undefined ? `${EVENTS_FILE} is not a file of this run` : undefined;
+  return containedFile(runDir, path) === undefined ? `${name} is not a file of this run` : undefined;
+}
+
+/** Why the run's `events.ndjson` isn't a regular file of its own, or undefined. */
+export function eventsProblem(runDir: string): string | undefined {
+  return ownFileProblem(runDir, EVENTS_FILE);
+}
+
+/** Why a follow can't read the run: its `events.ndjson` or its `STATUS` isn't a regular file of its own. */
+export function followProblem(runDir: string): string | undefined {
+  return eventsProblem(runDir) ?? ownFileProblem(runDir, STATUS_FILE);
 }
 
 /** Every registered repository, each with `problem` when its `.sail/` no longer exists, and the registry's problems. */
@@ -78,8 +88,10 @@ export function findRepo(registryDir: string, name: string): RegistryEntry | und
   return readRegistry(registryDir).entries.find((entry) => entry.name === name);
 }
 
+const STATUS_FILE = 'STATUS';
+
 /** The files a listing reads from a run. */
-const LISTED_FILES = [RUN_HEADER_FILE, 'STATUS', 'summary.json'];
+const LISTED_FILES = [RUN_HEADER_FILE, STATUS_FILE, 'summary.json'];
 
 /** Which of the files a listing reads aren't the run's own regular files, or undefined when all are. */
 function strayFiles(dir: string): string | undefined {

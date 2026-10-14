@@ -6,7 +6,7 @@
 // `{ kind: 'error', message }` before a close with 1011, or `{ kind: 'index', repos }`.
 import { followEvents } from '../events/follow';
 import type { SailEvent } from '../events/types';
-import { eventsProblem, findRepo, findRunDir, type IndexRepo, index } from './files';
+import { findRepo, findRunDir, followProblem, type IndexRepo, index } from './files';
 
 /** What a socket is opened on: one run's events, or the index. */
 export type Target = { run: { runDir: string } } | { index: true };
@@ -43,7 +43,7 @@ export function resolveTarget(url: URL, registryDir: string): Target | { status:
   if (entry === undefined) return { status: 404, error: `no repository for '${value}'` };
   const runDir = findRunDir(entry, value.slice(slash + 1));
   if (typeof runDir !== 'string') return { status: 404, error: runDir.missing };
-  const unread = eventsProblem(runDir);
+  const unread = followProblem(runDir);
   return unread === undefined ? { run: { runDir } } : { status: 404, error: unread };
 }
 
@@ -58,7 +58,7 @@ export function openRunStream(socket: Socket, runDir: string, pollMs: number): (
     onEvent: (event) => sendMessage(socket, { kind: 'event', event }),
     signal: controller.signal,
     pollMs,
-    check: () => eventsProblem(runDir),
+    check: () => followProblem(runDir),
   }).then(
     (result) => {
       if (result === 'aborted') return;
