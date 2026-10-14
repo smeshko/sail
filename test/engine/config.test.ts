@@ -160,3 +160,20 @@ test('conventions reads as the list project.yaml gives, empty included, and is l
   expect(read('')).toBeUndefined();
   expect(read('conventions: [AGENTS.md, AGENTS.md]\n')).toEqual(['/conventions']);
 });
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("branchPrefix reads as given, and one that starts with '-' or '/' or holds '..' is an issue at /branchPrefix", () => {
+  const withPrefix = (prefix: string) =>
+    readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\nbranchPrefix: "${prefix}"\n${ADAPTERS}`));
+  const read = withPrefix('feature/sail-');
+  const paths = ['-x/', 'a/../b/', '/a'].map((prefix) => {
+    const config = withPrefix(prefix);
+    return 'issues' in config ? config.issues.map((issue) => issue.path) : config.branchPrefix;
+  });
+  expect({ read: 'issues' in read ? read.issues : read.branchPrefix, paths }).toEqual({
+    read: 'feature/sail-',
+    paths: [['/branchPrefix'], ['/branchPrefix'], ['/branchPrefix']],
+  });
+});

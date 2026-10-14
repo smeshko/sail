@@ -211,3 +211,30 @@ test('preparing bindings with a problem throws it, as materialise() does', () =>
   const consumes: Consumes = { ticket: value(TicketInput), spec: file('spec.md') };
   expect(() => prepareBindings(consumes, { ticket: given({ key: 7 }) })).toThrow("'spec' is required");
 });
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("the engine's patch for a gitDiff binding is written to $STAGE_IN as <name>.patch, which INPUT_<NAME> names", () => {
+  const s = scratch();
+  const patch = 'diff --git a/README.md b/README.md\n+an edit\n';
+  const consumes: Consumes = { diff: gitDiff('main...HEAD'), since: gitDiff('main').optional() };
+  const supplied: Record<string, Supplied> = {
+    diff: { kind: 'gitDiff', patch, from: 'gitDiff(main...HEAD)' },
+    since: { kind: 'gitDiff', patch: '', from: 'gitDiff(main)' },
+  };
+  const problems = bindingProblems(consumes, supplied);
+  const written = problems.length === 0 ? materialise(consumes, supplied, s.stageIn) : problems;
+  expect({
+    written,
+    files: readdirSync(s.stageIn).sort(),
+    patch: existsSync(join(s.stageIn, 'diff.patch')) ? readFileSync(join(s.stageIn, 'diff.patch'), 'utf8') : null,
+  }).toEqual({
+    written: {
+      inputs: { INPUT_DIFF: join(s.stageIn, 'diff.patch'), INPUT_SINCE: join(s.stageIn, 'since.patch') },
+      consumed: { diff: 'gitDiff(main...HEAD)', since: 'gitDiff(main)' },
+    },
+    files: ['diff.patch', 'since.patch'],
+    patch,
+  });
+});

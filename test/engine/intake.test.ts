@@ -25,6 +25,7 @@ import { appendJournal, readJournal } from '../../src/engine/journal';
 import type { LoadedIntake } from '../../src/engine/load-workflow';
 import { openRun } from '../../src/engine/open-run';
 import { readStatus, type Source, writeStatus } from '../../src/engine/run-dir';
+import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
 import type { Consumer, Emit, NewEvent, SailEvent } from '../../src/events/types';
@@ -489,13 +490,18 @@ test('a run journals intake#1 as its first line before the workflow function is 
   });
 });
 
-test("its events start with run:start and what the claim did, with no key, then the intake's, each keyed intake#1, its ticket:fetched the stream's only one; no route leaves intake#1, and the intake adds no replay", async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("its events start with run:start, the lease and workspace and what the claim did, with no key, then the intake's, each keyed intake#1, its ticket:fetched the stream's only one; no route leaves intake#1, and the intake adds no replay", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ticketRun(repo.dir);
     const list = events(end.dir);
-    expect(outline(list.slice(0, 11))).toEqual([
+    expect(outline(list.slice(0, 13))).toEqual([
       'run:start',
+      'workspace:leased',
+      'workspace:created',
       'ticket:claimed',
       'ticket:commented',
       'intake:start intake#1',
@@ -507,11 +513,11 @@ test("its events start with run:start and what the claim did, with no key, then 
       'journal:append intake#1',
       'stage:start spec#1',
     ]);
-    expect(list[3]).toMatchObject({ intake: 'ticket', kind: 'builtin', origin: 'builtin' });
+    expect(list[5]).toMatchObject({ intake: 'ticket', kind: 'builtin', origin: 'builtin' });
     // The intake fetched the ticket after the claim, so it counts the claim's comment beside the ticket's own.
-    expect(list[4]).toMatchObject({ ticketKey: 'FAKE-1', comments: 2, links: 0, attachments: 0 });
+    expect(list[6]).toMatchObject({ ticketKey: 'FAKE-1', comments: 2, links: 0, attachments: 0 });
     expect(list.filter((event) => event.type === 'ticket:fetched')).toHaveLength(1);
-    expect(list[9]).toMatchObject({ line: 1, outcome: 'passed' });
+    expect(list[11]).toMatchObject({ line: 1, outcome: 'passed' });
     const routes = list.flatMap((event) => (event.type === 'workflow:route' ? [event.at] : []));
     expect(routes).toEqual(['spec#1', 'implement#1', 'tests#1', 'self-review#1', 'publish#1']);
     // Five stage calls and the replay that ends the run: neither the claim nor the intake is a replay.
@@ -683,7 +689,9 @@ test('a run left with intake#1 journaled as error and STATUS running fails with 
     });
     const dir = join(repo.dir, '.sail-runs', runId);
     const journal = journalText(dir);
+    // As after a crash: STATUS still running, and the workspace the failed run released still there.
     writeFileSync(join(dir, 'STATUS'), 'running\n');
+    repo.git('worktree', 'add', '--detach', join(dir, 'workspace'), readRunHeader(dir).repository?.baseSha ?? 'HEAD');
     const adapters = await fakeAdapters(repo.dir);
     const gets = countGets(adapters);
     const entered = workflowEntries(repo.dir);

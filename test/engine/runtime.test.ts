@@ -550,9 +550,14 @@ const callOutline = (key: string, bindings: number, files: number): string[] => 
 ];
 const route = (at: string, took: string) => `workflow:route ${at}→${took}`;
 
-/** How every run's stream opens: its start, what the claim did to the ticket, then the intake, to its journal line. */
+/**
+ * How every run's stream opens: its start, its lease and workspace, what the claim did to the ticket, then the intake,
+ * to its journal line.
+ */
 const OPENING = [
   'run:start',
+  'workspace:leased',
+  'workspace:created',
   'ticket:claimed',
   'ticket:commented',
   'intake:start intake#1',
@@ -584,13 +589,18 @@ const STUB_OUTLINE = [
   route('self-review#1', 'publish#1'),
   ...callOutline('publish#1', 1, 0),
   route('publish#1', 'end'),
+  'workspace:released',
+  'workspace:lease_released',
   'run:end',
 ];
 
 const seqs = (list: readonly SailEvent[]) => list.map((event) => event.seq);
 const gapless = (list: readonly SailEvent[]) => list.map((_, i) => i + 1);
 
-test("the stub's run writes its whole event stream to events.ndjson, numbered from 1: its start, what the claim did, the intake, then every call", async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("the stub's run writes its whole event stream to events.ndjson, numbered from 1: its start, what the claim did, the intake, then every call", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const end = await ran(repo.dir);
@@ -615,9 +625,9 @@ test("the stub's run writes its whole event stream to events.ndjson, numbered fr
     expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
     // What the claim did, as the engine reports it: neither event belongs to a call, so neither has a key.
     const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-1' };
-    expect(list.slice(1, 3)).toEqual([
-      { seq: 2, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
-      { seq: 3, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+    expect(list.slice(3, 5)).toEqual([
+      { seq: 4, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
+      { seq: 5, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
     ]);
     expect(list.at(-1)).toEqual({
       seq: list.length,
@@ -649,14 +659,23 @@ test("the stub's run writes its whole event stream to events.ndjson, numbered fr
   });
 });
 
-test('a run whose loop exceeds its max ends its stream with loop:exit exceeded, then run:end failed', async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a run whose loop exceeds its max ends its stream with loop:exit exceeded, then run:end failed', async () => {
   await stubRun(
     { testsPassAt: 99 },
     () => undefined,
     (end) => {
       const list = events(end.dir);
-      expect(outline(list.slice(-3))).toEqual(['journal:append tests#3', 'loop:exit', 'run:end']);
-      expect(list.slice(-2)).toMatchObject([
+      expect(outline(list.slice(-5))).toEqual([
+        'journal:append tests#3',
+        'loop:exit',
+        'workspace:released',
+        'workspace:lease_released',
+        'run:end',
+      ]);
+      expect([list.at(-4), list.at(-1)]).toMatchObject([
         { type: 'loop:exit', loop: 'fix', iterations: 3, max: 3, reason: 'exceeded' },
         {
           type: 'run:end',
@@ -671,7 +690,10 @@ test('a run whose loop exceeds its max ends its stream with loop:exit exceeded, 
   );
 });
 
-test("a resume appends to the interrupted run's events, continuing seq with no marker", async () => {
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("a resume appends to the interrupted run's events, continuing seq with no marker", async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -691,35 +713,41 @@ test("a resume appends to the interrupted run's events, continuing seq with no m
     const list = events(dir);
     expect(seqs(list)).toEqual(gapless(list));
     const resumed = list.slice(interrupted.length);
-    expect(outline(resumed.slice(0, 3))).toEqual([
+    expect(outline(resumed.slice(0, 4))).toEqual([
+      'workspace:leased',
       'loop:iteration',
       'workflow:route tests#1→implement#2',
       'stage:start implement#2',
     ]);
-    expect(resumed[2]).toMatchObject({ try: 2 });
+    expect(resumed[3]).toMatchObject({ try: 2 });
     expect(outline(resumed).filter((line) => line.startsWith('run:start'))).toEqual([]);
     expect(resumed.at(-1)).toMatchObject({ type: 'run:end', status: 'completed', replays: 5 });
     expect(validateRunDir(dir).issues).toEqual([]);
   });
 }, 30_000);
 
-test("a forced run of a ticket that is not unstarted reports the move in the claim's place: ticket:updated, then ticket:commented, and run:start lists the state check as overridden", async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a forced run of a ticket that is not unstarted reports the move in the claim's place: ticket:updated, then ticket:commented, and run:start lists the state check as overridden", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ran(repo.dir, { ticket: 'FAKE-4', force: true });
     expect([end.status, end.runId.slice(0, 7)]).toEqual(['completed', 'FAKE-4-']);
     const list = events(end.dir);
-    expect(outline(list.slice(0, 4))).toEqual([
+    expect(outline(list.slice(0, 6))).toEqual([
       'run:start',
+      'workspace:leased',
+      'workspace:created',
       'ticket:updated',
       'ticket:commented',
       'intake:start intake#1',
     ]);
     const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-4' };
     const inProgress = { type: 'started', name: 'In Progress' } as const;
-    expect(list.slice(1, 3)).toEqual([
-      { seq: 2, ...reported, type: 'ticket:updated', change: { state: 'in-progress' }, state: inProgress },
-      { seq: 3, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+    expect(list.slice(3, 5)).toEqual([
+      { seq: 4, ...reported, type: 'ticket:updated', change: { state: 'in-progress' }, state: inProgress },
+      { seq: 5, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
     ]);
     expect(list[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-4', via: 'cli', forced: ['state'] } });
     expect(outline(list)).not.toContain('ticket:claimed');
@@ -779,7 +807,10 @@ test("an events file whose last line can't be read refuses the resume, and leave
   });
 }, 30_000);
 
-test('a consumer that throws is reported after each event it failed on, and the run completes', async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a consumer that throws is reported after each event it failed on, and the run completes', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const flaky: Consumer = {
@@ -1032,7 +1063,10 @@ test("after an interrupt and a resume, summary.json is completed with the retrie
   });
 }, 30_000);
 
-test("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     let blocked = false;

@@ -58,6 +58,18 @@ export async function rejection(promise: Promise<unknown>): Promise<unknown> {
   }
 }
 
+/**
+ * What `promise` resolved to, or `{ rejected }` with what it rejected with: a PortError's port, op and code, or the
+ * message of anything else. A call that throws then fails a test's assertion rather than the test itself.
+ */
+export async function settle<T>(promise: Promise<T>): Promise<T | { rejected: ReturnType<typeof portFailure> }> {
+  try {
+    return await promise;
+  } catch (error) {
+    return { rejected: portFailure(error) };
+  }
+}
+
 /** What `fn` threw, or `'returned'` when it returned. */
 export function caught(fn: () => unknown): unknown {
   try {

@@ -63,6 +63,8 @@ function setup(): Setup {
     try: 1,
     stageDir,
     workspace,
+    root: workspace,
+    branch: 'sail/FAKE-1',
     config: join(workspace, '.sail', 'project.yaml'),
     paths,
     inputs: {},
@@ -98,7 +100,10 @@ test('KINDS holds the script kind', () => {
   expect(DEFAULT_TIMEOUT_SECONDS).toBe(600);
 });
 
-test('exit 0 is passed, with the parsed report and junit.xml recorded', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('exit 0 is passed, with the parsed report and junit.xml recorded', async () => {
   const s = setup();
   s.run(`${JUNIT}\necho 'running 1 test'\necho '${PASSING}'`);
   const run = await scriptKind.run(tests(), s.context);
@@ -120,6 +125,7 @@ test('exit 0 is passed, with the parsed report and junit.xml recorded', async ()
         STAGE_IN: `.sail-runs/${RUN_ID}/00-tests/call-1/in`,
         STAGE_OUT: `.sail-runs/${RUN_ID}/00-tests/call-1`,
         WORKSPACE: '.',
+        BRANCH: 'sail/FAKE-1',
         SAIL_CONFIG: '.sail/project.yaml',
       },
     },
@@ -315,12 +321,26 @@ test('a script that is missing is not_started, with no exit', async () => {
   expect(run.record.command).toBe('.sail/stages/tests/missing.sh');
 });
 
-test('the script sees the whole preamble, inherits the environment, and runs from the workspace', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('the script sees the whole preamble, inherits the environment, and runs from the workspace', async () => {
   const s = setup();
   const spec = join(s.context.paths.stageIn, 'spec.md');
   writeFileSync(spec, '# spec\n');
   const context = { ...s.context, inputs: { INPUT_SPEC: spec } };
-  const names = ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG', 'INPUT_SPEC'];
+  const names = [
+    'RUN_ID',
+    'STAGE',
+    'CALL',
+    'TRY',
+    'STAGE_IN',
+    'STAGE_OUT',
+    'WORKSPACE',
+    'BRANCH',
+    'SAIL_CONFIG',
+    'INPUT_SPEC',
+  ];
   writeFileSync(
     join(context.stageDir, 'env.ts'),
     `#!${process.execPath}\n` +
@@ -339,6 +359,7 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
     STAGE_IN: context.paths.stageIn,
     STAGE_OUT: context.paths.dir,
     WORKSPACE: s.workspace,
+    BRANCH: 'sail/FAKE-1',
     SAIL_CONFIG: context.config,
     INPUT_SPEC: spec,
     CWD: realpathSync(s.workspace),
@@ -407,7 +428,10 @@ function collecting(s: Setup): { context: StepContext; events: CallEvent[] } {
   return { context: { ...s.context, emit: (event) => events.push(event) }, events };
 }
 
-test('a script that is missing reports script:exec, and nothing more', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a script that is missing reports script:exec, and nothing more', async () => {
   const s = setup();
   const { context, events } = collecting(s);
   await scriptKind.run(tests({ run: './missing.sh' }), context);
@@ -424,6 +448,7 @@ test('a script that is missing reports script:exec, and nothing more', async () 
     'STAGE_IN',
     'STAGE_OUT',
     'WORKSPACE',
+    'BRANCH',
     'SAIL_CONFIG',
   ]);
 });
@@ -588,7 +613,10 @@ function withTicket(s: Setup): void {
   writeFileSync(join(sail, 'fake', 'tickets.json'), JSON.stringify({ tickets: [TICKET] }));
 }
 
-test('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded relative to the workspace and listed last in envKeys, and a script that calls no port leaves no file', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded relative to the workspace and listed last in envKeys, and a script that calls no port leaves no file', async () => {
   const s = setup();
   s.run(`${JUNIT}\nprintf '%s' "\${SAIL_EVENTS:-unset}" > "$STAGE_OUT/named"\necho '${PASSING}'`);
   const { context, events } = collecting(s);
@@ -602,7 +630,18 @@ test('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded
   ]);
   expect(events[0]).toMatchObject({
     type: 'script:exec',
-    envKeys: ['RUN_ID', 'STAGE', 'CALL', 'TRY', 'STAGE_IN', 'STAGE_OUT', 'WORKSPACE', 'SAIL_CONFIG', 'SAIL_EVENTS'],
+    envKeys: [
+      'RUN_ID',
+      'STAGE',
+      'CALL',
+      'TRY',
+      'STAGE_IN',
+      'STAGE_OUT',
+      'WORKSPACE',
+      'BRANCH',
+      'SAIL_CONFIG',
+      'SAIL_EVENTS',
+    ],
   });
   expect(existsSync(file)).toBe(false);
   expect(typesOf(events)).toEqual(['script:exec', 'script:exit', 'output:validated', 'file:produced']);

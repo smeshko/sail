@@ -55,7 +55,10 @@ const SAME_START = 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const WORKFLOW = 'ticket-to-pr@1';
 const GOLDEN_START = '2026-09-25T09:00:00.000Z';
 
-test('listRuns gives the runs that hold run.json, oldest first and then by id, with their workflow, start and status', () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('listRuns gives the runs that hold run.json, oldest first and then by id, with their workflow, start and status', () => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
     expect(listRuns(sail)).toEqual([]);
@@ -106,7 +109,10 @@ test('listRuns gives the runs that hold run.json, oldest first and then by id, w
   });
 });
 
-test("a run whose run.json or STATUS can't be read is listed with its problem, and one with no start goes last", () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a run whose run.json or STATUS can't be read is listed with its problem, and one with no start goes last", () => {
   return withTempRepo((repo) => {
     const sail = emptySailDir(repo.dir);
     const noHeader = copyGoldenRun(repo.dir, { runId: 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3N', status: 'completed\n' });

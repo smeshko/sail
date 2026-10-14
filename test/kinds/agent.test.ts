@@ -119,6 +119,8 @@ function setup(step: AgentStep, template = 'Write the spec.\n', tryNumber = 1): 
       try: tryNumber,
       stageDir,
       workspace,
+      root: workspace,
+      branch: 'sail/FAKE-1',
       config: join(workspace, '.sail', 'project.yaml'),
       paths,
       inputs,
@@ -181,7 +183,10 @@ test('problems() reports a produced name the engine writes, a budget out of rang
   ]);
 });
 
-test('the harness receives the rendered prompt with its feedback, the preamble alone as its environment, the resolved model, the step permissions and budget, the signal, and a draft-07 schema of what to submit', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('the harness receives the rendered prompt with its feedback, the preamble alone as its environment, the resolved model, the step permissions and budget, the signal, and a draft-07 schema of what to submit', async () => {
   // A transform and a refinement: the schema the agent submits against is the input's, and says nothing of either.
   const Submission = z.object({
     summary: z.string().max(400),
@@ -214,6 +219,7 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
       STAGE_IN: join(dir, 'in'),
       STAGE_OUT: dir,
       WORKSPACE: s.workspace,
+      BRANCH: 'sail/FAKE-1',
       SAIL_CONFIG: join(s.workspace, '.sail', 'project.yaml'),
       INPUT_BRIEF: join(dir, 'in', 'brief.md'),
     },

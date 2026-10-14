@@ -1,7 +1,7 @@
 // The golden run directory: a complete sail run, validated against every sail.*.v1 schema. It is generated: the run the
 // engine makes of the fixture repository's ticket-to-pr on FAKE-1, written by `bun run golden`, which
-// test/scripts/golden.test.ts holds it equal to. So it shows what a run writes today, and nothing a run can't write
-// yet: no workspace, no tool call, no validated file and no multi-step call.
+// test/scripts/golden.test.ts holds it equal to. So it shows what a run writes today, its workspace included, and
+// nothing a run can't write yet: no tool call, no validated file and no multi-step call.
 import { afterEach, expect, test } from 'bun:test';
 import { accessSync, constants, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,7 +40,10 @@ function mutatedCopy(path: string, mutate: (content: string) => string): string 
   return dir;
 }
 
-test('the golden run directory is valid against every run-directory schema', () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('the golden run directory is valid against every run-directory schema', () => {
   const { counts, issues } = validateRunDir(fixture);
   expect(issues.map(formatIssue)).toEqual([]);
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
@@ -52,7 +55,7 @@ test('the golden run directory is valid against every run-directory schema', () 
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
     'sail.journal.v1': 9,
-    'sail.event.v1': 121,
+    'sail.event.v1': 125,
     'sail.summary.v1': 1,
     'sail.result.v1': 9,
   });
@@ -62,7 +65,10 @@ test('the fixture repository config is valid', () => {
   expect(validateProjectFile(join(import.meta.dir, 'fixtures', 'repo', '.sail', 'project.yaml'))).toEqual([]);
 });
 
-test('an unknown outcome in a mutated copy names the file, line and field', () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('an unknown outcome in a mutated copy names the file, line and field', () => {
   const result = mutatedCopy('04-self-review/call-1/result.json', (content) =>
     content.replace('"outcome": "done"', '"outcome": "approved"'),
   );
@@ -95,15 +101,21 @@ test("the golden run is the fixture's: its id, its startedAt the clock's first r
   ]);
 });
 
-test('it holds nothing a run cannot write yet: no workspace, tool, thinking, validated-file, denial or step event, no ticket:updated, no repository or workspace in run.json, and no publish in its roster', () => {
+test('it holds nothing a run cannot write yet: no tool, thinking, validated-file, denial or step event, no ticket:updated, and no publish in its roster; its workspace is in run.json and in the stream', () => {
   const types = new Set(lines('events.ndjson').map((event) => String(event.type)));
   const absent = [...types].filter(
     (type) =>
-      /^(workspace|tool|step):/.test(type) ||
+      /^(tool|step):/.test(type) ||
       ['agent:thinking', 'file:validated', 'permission:denied', 'ticket:updated'].includes(type),
   );
   expect(absent).toEqual([]);
-  expect(types.size).toBe(26);
+  expect([...types].filter((type) => type.startsWith('workspace:')).sort()).toEqual([
+    'workspace:created',
+    'workspace:lease_released',
+    'workspace:leased',
+    'workspace:released',
+  ]);
+  expect(types.size).toBe(30);
   const header = JSON.parse(text('run.json'));
   expect(Object.keys(header)).toEqual([
     'schema',
@@ -117,6 +129,9 @@ test('it holds nothing a run cannot write yet: no workspace, tool, thinking, val
     'stages',
     'budget',
     'startedAt',
+    'branch',
+    'repository',
+    'workspace',
   ]);
   expect(Object.keys(header.stages)).toEqual(['describe', 'implement', 'open', 'self-review', 'spec', 'tests']);
 });
@@ -135,7 +150,11 @@ test("open#1's provider events are codehost:pushed, codehost:pr_opened and codeh
   expect(lines('06-open/call-1/port-events.ndjson')).toEqual(
     provider.map(({ seq: _seq, ts: _ts, runId: _runId, key: _key, ...event }) => event),
   );
-  expect(provider[1]).toMatchObject({ number: 5, url: 'fake://codehost/fixture/pull/5', head: 'sail/FAKE-1' });
+  expect(provider[1]).toMatchObject({
+    number: 5,
+    url: 'fake://codehost/fixture/pull/5',
+    head: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
+  });
   expect(lines('events.ndjson').filter((event) => String(event.type).startsWith('codehost:'))).toHaveLength(3);
 });
 
@@ -156,23 +175,25 @@ test('events are numbered without a gap, never go back in time, and all belong t
   expect(text('STATUS')).toBe('completed\n');
 });
 
-test('the golden run records its claim: run.json holds it, the stream reports it right after run:start with no key, and the ticket the intake fetched carries its comment', () => {
+test('the golden run records its claim: run.json holds it, the stream reports it after run:start and the workspace with no key, and the ticket the intake fetched carries its comment', () => {
   const inProgress = { type: 'started', name: 'In Progress' };
   const comment = `sail run ${RUN_ID} started`;
   const header = JSON.parse(text('run.json'));
   expect([header.source.forced, header.claim]).toEqual([[], { claimed: true, state: inProgress }]);
 
   const events = lines('events.ndjson');
-  expect(events.slice(0, 4).map((event) => event.type)).toEqual([
+  expect(events.slice(0, 6).map((event) => event.type)).toEqual([
     'run:start',
+    'workspace:leased',
+    'workspace:created',
     'ticket:claimed',
     'ticket:commented',
     'intake:start',
   ]);
   const envelope = (seq: number, ts: string, type: string) => ({ seq, ts, type, runId: RUN_ID, ticketKey: 'FAKE-1' });
-  expect(events.slice(1, 3)).toEqual([
-    { ...envelope(2, '2026-09-25T09:00:00.500Z', 'ticket:claimed'), state: inProgress },
-    { ...envelope(3, '2026-09-25T09:00:00.600Z', 'ticket:commented'), body: comment },
+  expect(events.slice(3, 5)).toEqual([
+    { ...envelope(4, '2026-09-25T09:00:01.000Z', 'ticket:claimed'), state: inProgress },
+    { ...envelope(5, '2026-09-25T09:00:01.100Z', 'ticket:commented'), body: comment },
   ]);
   expect(events[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] } });
 
@@ -184,7 +205,7 @@ test('the golden run records its claim: run.json holds it, the stream reports it
   const ticket = JSON.parse(text('00-intake/call-1/ticket.json'));
   expect([ticket.state, ticket.comments.at(-1)]).toEqual([
     inProgress,
-    { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:00.300Z' },
+    { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:00.600Z' },
   ]);
   expect(text('00-intake/call-1/brief.md')).toEndWith(
     `<untrusted-input source="ticket FAKE-1, comment 2">\n${comment}\n</untrusted-input>\n`,

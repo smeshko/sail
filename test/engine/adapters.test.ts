@@ -517,7 +517,10 @@ test.each<[string, () => unknown, string]>([
   expect(await withHarness(harness({ requires }))).toEqual(issue('harness', message));
 });
 
-test('a declared versions is recorded in the entry, and a header carrying it validates against sail.run.v1', async () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a declared versions is recorded in the entry, and a header carrying it validates against sail.run.v1', async () => {
   const resolved = resolvedOrThrow(await withHarness(harness({ versions: () => ({ echo: '1.0.0' }) })));
   expect(resolved.entries.harness).toEqual({ use: 'only', origin: 'builtin', versions: { echo: '1.0.0' } });
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as RunHeader;
@@ -590,7 +593,10 @@ test.each<[string, object, string]>([
   },
 );
 
-test("a version named 'issue' is recorded like any other", async () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a version named 'issue' is recorded like any other", async () => {
   const resolved = resolvedOrThrow(await withHarness(harness({ versions: () => ({ issue: '4.2.0' }) })));
   expect(resolved.entries.harness).toEqual({ use: 'only', origin: 'builtin', versions: { issue: '4.2.0' } });
   const golden = JSON.parse(readFileSync(GOLDEN, 'utf8')) as RunHeader;

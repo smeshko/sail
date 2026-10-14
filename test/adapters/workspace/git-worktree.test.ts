@@ -1,0 +1,354 @@
+// The git-worktree Workspace adapter: the port suite over a clone of a local bare origin, then what only it does (D6,
+// D7): it fetches before it makes a workspace, leaves the clone's checkout alone, never lets git prompt, keys leases by
+// the remote's URL without credentials, and removes a workspace git no longer knows. Every git call gets the temp
+// repository's env, whose HOME is empty, so no credential helper of the machine's can answer for git.
+import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BUILTINS } from '../../../src/adapters/index';
+import { createGitWorktreeWorkspace, gitWorktreeDefinition } from '../../../src/adapters/workspace/git-worktree';
+import { resolveAdapters } from '../../../src/engine/adapters';
+import { readConfig } from '../../../src/engine/config';
+import { writeStatus } from '../../../src/engine/run-dir';
+import { copyFixture, edit } from '../../helpers/fixture';
+import { holdTempRepo } from '../../helpers/held-repo';
+import { withOrigin } from '../../helpers/origin';
+import { captureEvents, messageOf, portFailure, settle } from '../../helpers/ports';
+import { type TempRepo, withTempRepo } from '../../helpers/temp-repo';
+import { type WorkspaceWorld, workspaceSuite } from '../../ports/workspace.suite';
+
+const BRANCH = 'sail/FAKE-1-add-a-shout-flag';
+const held = holdTempRepo();
+let origined = false;
+/** The held repository, given its origin the first time a test asks. */
+const clone = (): TempRepo => {
+  if (!origined) withOrigin(held());
+  origined = true;
+  return held();
+};
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+/** A temp directory by its real path, as git reports worktree paths. */
+function tempDir(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'sail-git-worktree-')));
+  dirs.push(dir);
+  return dir;
+}
+
+/** The pid of a process that has exited. */
+async function deadPid(): Promise<number> {
+  const child = Bun.spawn(['true']);
+  await child.exited;
+  return child.pid;
+}
+
+/** Runs git in `cwd` with `repo`'s env, giving its exit code and trimmed stdout, and never throwing. */
+function gitIn(repo: TempRepo, cwd: string, ...args: string[]): { code: number; stdout: string } {
+  try {
+    const result = Bun.spawnSync(['git', ...args], { cwd, env: repo.env, stdin: 'ignore' });
+    return { code: result.exitCode, stdout: result.stdout.toString().trim() };
+  } catch {
+    return { code: -1, stdout: '' };
+  }
+}
+
+/** A world over `repo`, a clone whose origin is set, with runs and leases of its own. */
+function world(repo: TempRepo): WorkspaceWorld & { leasesDir: string } {
+  const runsDir = tempDir();
+  return {
+    remote: repo.git('remote', 'get-url', 'origin'),
+    base: 'origin/main',
+    defaultBranch: 'main',
+    baseSha: repo.git('rev-parse', 'origin/main'),
+    tracked: 'README.md',
+    runsDir,
+    leasesDir: tempDir(),
+    run: async (runId, status = 'running', alive = true) => {
+      const runDir = join(runsDir, runId);
+      mkdirSync(runDir);
+      if (status === 'failed') writeStatus(runDir, status, 'workflow_failed');
+      else if (status === 'suspended') writeStatus(runDir, status, 'interrupted');
+      else if (status !== 'none') writeStatus(runDir, status);
+      return { runId, runDir, pid: alive ? process.pid : await deadPid() };
+    },
+    git: (cwd, ...args) => gitIn(repo, cwd, ...args),
+  };
+}
+
+/** The adapter over `repo`, with `world`'s leases. */
+function adapterOf(
+  repo: TempRepo,
+  w: { leasesDir: string },
+  extra: Partial<Parameters<typeof createGitWorktreeWorkspace>[0]> = {},
+) {
+  return createGitWorktreeWorkspace({ repo: repo.dir, leasesDir: w.leasesDir, env: repo.env, ...extra });
+}
+
+/** A run directory under a fresh temp directory. */
+function runIn(dir: string, runId = 'r1'): { runId: string; runDir: string } {
+  const runDir = join(dir, runId);
+  mkdirSync(runDir, { recursive: true });
+  return { runId, runDir };
+}
+
+/** A local server for `origin` to point at, stopped afterwards: it answers every request with `respond`. */
+async function withServer<T>(
+  respond: (request: Request) => Response | Promise<Response>,
+  fn: (url: string) => Promise<T>,
+): Promise<T> {
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: respond });
+  try {
+    return await fn(`http://127.0.0.1:${server.port}/r.git`);
+  } finally {
+    server.stop(true);
+  }
+}
+
+// biome-ignore format: TDD-PENDING TASK-002
+describe
+  .skip // TDD-PENDING TASK-002
+  ('the port suite', () => {
+  workspaceSuite('git-worktree', async (emit) => {
+    const repo = clone();
+    const w = world(repo);
+    return { adapter: adapterOf(repo, w, { emit }), world: w };
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('create fetches first: a commit pushed to the origin after the clone fetched is the new base, and origin/main moves to it', async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    const pushed = origin.push('later.txt');
+    const w = world(repo);
+    const created = await settle(adapterOf(repo, w).create(runIn(w.runsDir), { branch: BRANCH }));
+    expect({
+      baseSha: 'rejected' in created ? created : created.baseSha,
+      originMain: repo.git('rev-parse', 'origin/main'),
+    }).toEqual({ baseSha: pushed, originMain: pushed });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("the clone is left as it was: its HEAD, its checked-out branch and its status, with an uncommitted edit and the run's branch checked out", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    repo.git('checkout', '-q', '-b', BRANCH);
+    writeFileSync(join(repo.dir, 'README.md'), 'an uncommitted edit\n', { flag: 'a' });
+    writeFileSync(join(repo.dir, 'scratch.txt'), 'untracked\n');
+    const look = () => ({
+      head: repo.git('rev-parse', 'HEAD'),
+      branch: repo.git('symbolic-ref', '--short', 'HEAD'),
+      status: repo.git('status', '--porcelain'),
+      readme: readFileSync(join(repo.dir, 'README.md'), 'utf8'),
+    });
+    const before = look();
+    const w = world(repo);
+    const created = await settle(adapterOf(repo, w).create(runIn(w.runsDir), { branch: BRANCH }));
+    const listed = repo.git('worktree', 'list', '--porcelain').split('\n');
+    expect({ ...look(), made: 'rejected' in created ? created : listed.includes(`worktree ${created.path}`) }).toEqual({
+      ...before,
+      made: true,
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('no git call can prompt: an origin that asks for credentials fails create as unavailable, with terminal prompts disabled', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const unauthorised = () =>
+      new Response('credentials, please', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="sail"' } });
+    const failure = await withServer(unauthorised, async (url) => {
+      repo.git('remote', 'set-url', 'origin', url);
+      const started = performance.now();
+      try {
+        await adapterOf(repo, w, { fetchTimeoutMs: 10_000 }).create(runIn(w.runsDir), { branch: BRANCH });
+        return 'created';
+      } catch (error) {
+        return {
+          failure: portFailure(error),
+          prompts: messageOf(error).includes('terminal prompts disabled'),
+          quick: performance.now() - started < 10_000,
+        };
+      }
+    });
+    expect(failure).toEqual({
+      failure: { port: 'workspace', op: 'create', code: 'unavailable' },
+      prompts: true,
+      quick: true,
+    });
+  });
+}, 15_000);
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('a fetch that hangs is killed at fetchTimeoutMs, and one whose signal aborts is stopped', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const never = () => new Promise<Response>(() => undefined);
+    const ends = await withServer(never, async (url) => {
+      repo.git('remote', 'set-url', 'origin', url);
+      const adapter = adapterOf(repo, w, { fetchTimeoutMs: 300 });
+      const timedOut = await settle(adapter.create(runIn(w.runsDir, 'r1'), { branch: BRANCH }));
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100);
+      const slow = adapterOf(repo, w, { fetchTimeoutMs: 60_000 });
+      const aborted = await settle(slow.create(runIn(w.runsDir, 'r2'), { branch: BRANCH, signal: controller.signal }));
+      return { timedOut, aborted };
+    });
+    const unavailable = { rejected: { port: 'workspace', op: 'create', code: 'unavailable' } };
+    expect(ends).toEqual({ timedOut: unavailable, aborted: unavailable });
+    expect([existsSync(join(w.runsDir, 'r1', 'workspace')), existsSync(join(w.runsDir, 'r2', 'workspace'))]).toEqual([
+      false,
+      false,
+    ]);
+  });
+}, 5_000);
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('credentials are stripped from the remote: neither repository() nor workspace:leased holds them', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    repo.git('remote', 'set-url', 'origin', 'https://user:secret@127.0.0.1:9/o/r.git');
+    const w = world(repo);
+    const capture = captureEvents();
+    const adapter = adapterOf(repo, w, { emit: capture.emit });
+    const repository = await settle(adapter.repository());
+    const url = 'rejected' in repository ? 'rejected' : repository.url;
+    await adapter.lease(url, BRANCH, { ...runIn(w.runsDir), pid: process.pid });
+    expect({ url, said: JSON.stringify(capture.events).includes('secret') }).toEqual({
+      url: 'https://127.0.0.1:9/o/r.git',
+      said: false,
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("a missing default branch is refused as invalid, naming git remote set-head and the option, and the option wins over origin's HEAD", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    repo.git('branch', '-f', 'trunk', 'main');
+    repo.git('push', '--quiet', 'origin', 'trunk');
+    const told = await settle(adapterOf(repo, w, { defaultBranch: 'trunk' }).repository());
+    repo.git('remote', 'set-head', 'origin', '--delete');
+    let refusal: unknown = 'resolved';
+    try {
+      await adapterOf(repo, w).repository();
+    } catch (error) {
+      refusal = {
+        failure: portFailure(error),
+        setHead: messageOf(error).includes('git remote set-head origin --auto'),
+        option: messageOf(error).includes('defaultBranch'),
+      };
+    }
+    expect({ told: 'rejected' in told ? told : told.defaultBranch, refusal }).toEqual({
+      told: 'trunk',
+      refusal: { failure: { port: 'workspace', op: 'repository', code: 'invalid' }, setHead: true, option: true },
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('release removes a workspace git no longer knows, and never a path beside it', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const adapter = adapterOf(repo, w);
+    const run = runIn(w.runsDir);
+    const { path } = await adapter.create(run, { branch: BRANCH });
+    // Its admin entry pruned: `git worktree remove` no longer takes it for a worktree.
+    const dotGit = join(path, '.git');
+    const gitdir = existsSync(dotGit)
+      ? readFileSync(dotGit, 'utf8')
+          .replace(/^gitdir: /, '')
+          .trim()
+      : '';
+    if (gitdir !== '') rmSync(gitdir, { recursive: true, force: true });
+    mkdirSync(join(run.runDir, 'workspace-notes'));
+    writeFileSync(join(run.runDir, 'workspace-notes', 'keep.txt'), 'keep\n');
+    writeFileSync(join(run.runDir, 'keep.txt'), 'keep\n');
+    const released = await settle(adapter.release(run, false));
+    expect({
+      released: 'rejected' in released ? released : released.kept,
+      workspace: existsSync(path),
+      beside: [existsSync(join(run.runDir, 'workspace-notes', 'keep.txt')), existsSync(join(run.runDir, 'keep.txt'))],
+    }).toEqual({ released: false, workspace: false, beside: [true, true] });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('nothing is symlinked or copied into a workspace: the clone has an untracked .env, and the workspace has no untracked or ignored file', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    writeFileSync(join(repo.dir, '.env'), 'TOKEN=secret\n');
+    const w = world(repo);
+    const created = await settle(adapterOf(repo, w).create(runIn(w.runsDir), { branch: BRANCH }));
+    const path = 'rejected' in created ? w.runsDir : created.path;
+    expect({
+      made: gitIn(repo, path, 'rev-parse', '--show-toplevel').stdout === path,
+      extra: gitIn(repo, path, 'status', '--porcelain', '--ignored').stdout,
+    }).toEqual({ made: true, extra: '' });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('git-worktree is a built-in for the workspace port alone: its options are remote and defaultBranch, and any other is refused by name', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const sailDir = copyFixture(repo.dir);
+    edit(
+      sailDir,
+      'project.yaml',
+      'workspace: { use: fake }',
+      'workspace: { use: git-worktree, remote: origin, defaultBranch: main }',
+    );
+    const config = readConfig(sailDir);
+    if ('issues' in config) throw new Error(JSON.stringify(config.issues));
+    const resolved = await resolveAdapters({ sailDir, config, builtins: BUILTINS, env: repo.env });
+    const context = { root: repo.dir, sailDir, runsDir: join(repo.dir, '.sail-runs'), env: repo.env };
+    let refused = 'created';
+    try {
+      await gitWorktreeDefinition.create({ remotes: 'origin' }, context);
+    } catch (error) {
+      refused = messageOf(error);
+    }
+    expect({
+      builtins: Object.fromEntries(Object.entries(BUILTINS).map(([name, ports]) => [name, Object.keys(ports)])),
+      resolved: 'issues' in resolved ? resolved.issues : resolved.ports.workspace.name,
+      refused: refused.includes('remotes') ? 'names remotes' : refused,
+    }).toEqual({
+      builtins: {
+        fake: ['ticketSource', 'codeHost', 'harness', 'workspace'],
+        'git-worktree': ['workspace'],
+      },
+      resolved: 'git-worktree',
+      refused: 'names remotes',
+    });
+  });
+});

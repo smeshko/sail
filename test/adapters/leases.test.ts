@@ -253,3 +253,36 @@ test('two branches of one remote, and one branch of two remotes, lease apart', (
     readLease(dir, 'fake://codehost/other', 'sail/a')?.runId,
   ]).toEqual(['r1', 'r2', 'r3']);
 });
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('a renewal is refused while its run is alive in another process, running or with no STATUS yet, and taken once that process is gone or the run is suspended', async () => {
+  const dir = tempDir();
+  const other = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+  try {
+    const renewal = (status?: Status, stopReason?: StopReason) => {
+      const branch = `sail/${status ?? 'none'}`;
+      const held = run('r1', other.pid, status, stopReason);
+      takeLease(dir, REMOTE, branch, held, NOW);
+      const result = takeLease(dir, REMOTE, branch, { ...held, pid: process.pid }, LATER);
+      return result.leased ? `renewed by ${result.lease.pid}` : `refused, held by ${result.holder.pid}`;
+    };
+    const gone = run('r2', await deadPid(), 'running');
+    takeLease(dir, REMOTE, 'sail/gone', gone, NOW);
+    const afterDeath = takeLease(dir, REMOTE, 'sail/gone', { ...gone, pid: process.pid }, LATER);
+    expect({
+      running: renewal('running'),
+      starting: renewal(),
+      suspended: renewal('suspended', 'interrupted'),
+      gone: afterDeath.leased ? `renewed by ${afterDeath.lease.pid}` : 'refused',
+    }).toEqual({
+      running: `refused, held by ${other.pid}`,
+      starting: `refused, held by ${other.pid}`,
+      suspended: `renewed by ${process.pid}`,
+      gone: `renewed by ${process.pid}`,
+    });
+  } finally {
+    other.kill('SIGKILL');
+  }
+});

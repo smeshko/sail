@@ -14,8 +14,14 @@ const committed = join(fixtures, 'runs', GOLDEN_RUN_ID);
 const temp = mkdtempSync(join(tmpdir(), 'sail-golden-fresh-'));
 const fresh = join(temp, 'fresh');
 
+/** Why the fresh run couldn't be generated: each test then fails on what the fresh run lacks, not on the hook. */
+let unmade = '';
 beforeAll(async () => {
-  await generateGoldenRun(fresh);
+  try {
+    await generateGoldenRun(fresh);
+  } catch (error) {
+    unmade = error instanceof Error ? error.message : String(error);
+  }
 });
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
@@ -58,12 +64,19 @@ function changedCopy(name: string, change: (dir: string) => void): string {
   return dir;
 }
 
-test('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
+  expect(unmade).toBe('');
   expect(stale(fresh, committed)).toEqual([]);
   expect(filesIn(committed)).toHaveLength(50);
 });
 
-test("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
   const runtimeOf = (dir: string): unknown =>
     existsSync(join(dir, 'run.json')) ? JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).sail.runtime : null;
   expect(runtimeOf(fresh)).toBe(`bun ${Bun.version}`);
@@ -76,7 +89,10 @@ test("run.json's sail.runtime is the one field compared apart: a fresh run names
   expect(stale(fresh, bumped)).toEqual([`run.json is stale: ${REGENERATE}`]);
 });
 
-test.each<[string, (dir: string) => void, string]>([
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  .each<[string, (dir: string) => void, string]>([
   [
     'one byte changed',
     (dir) => {
@@ -89,7 +105,7 @@ test.each<[string, (dir: string) => void, string]>([
     'one event changed by a millisecond',
     (dir) => {
       const file = join(dir, 'events.ndjson');
-      writeFileSync(file, readFileSync(file, 'utf8').replace('T09:00:00.500Z', 'T09:00:00.501Z'));
+      writeFileSync(file, readFileSync(file, 'utf8').replace('T09:00:00.700Z', 'T09:00:00.701Z'));
     },
     'events.ndjson is stale',
   ],
@@ -124,7 +140,10 @@ test('a view rendered from a changed stream differs from the committed one: a st
   expect(committedView.replace('fix            ↻ break after 2/3\n', '')).toBe(rendered);
 });
 
-test('no file of a fresh run holds the path of the temporary repository it ran in, or of this checkout', () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('no file of a fresh run holds the path of the temporary repository it ran in, or of this checkout', () => {
   const files = filesIn(fresh);
   expect(files).toHaveLength(50);
   const machine = [tmpdir(), 'sail-golden-', join(import.meta.dir, '..', '..')];
@@ -134,7 +153,10 @@ test('no file of a fresh run holds the path of the temporary repository it ran i
   expect(holding).toEqual([]);
 });
 
-test('every file of a fresh run is an ordinary, writable file: run.json too, which the run itself leaves read-only', () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('every file of a fresh run is an ordinary, writable file: run.json too, which the run itself leaves read-only', () => {
   const files = filesIn(fresh);
   expect(files).toHaveLength(50);
   expect(files.filter((file) => (statSync(join(fresh, file)).mode & 0o200) === 0)).toEqual([]);

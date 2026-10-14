@@ -1,14 +1,23 @@
 // The fake Workspace port: the port suite over detached worktrees of a throwaway repository, then what only the fake
 // does (D9, D12). Every git spawn gets the repository's env.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createFakeWorkspace } from '../../../src/adapters/fake/workspace';
 import { defaultLeasesDir, readLease } from '../../../src/adapters/leases';
 import { writeStatus } from '../../../src/engine/run-dir';
 import { holdTempRepo } from '../../helpers/held-repo';
-import { portFailure, rejection } from '../../helpers/ports';
+import { portFailure, rejection, settle } from '../../helpers/ports';
 import { type WorkspaceWorld, workspaceSuite } from '../../ports/workspace.suite';
 
 const REMOTE = 'fake://codehost/fixture';
@@ -40,6 +49,7 @@ function world(): WorkspaceWorld & { leasesDir: string } {
   return {
     remote: REMOTE,
     base: 'main',
+    defaultBranch: 'main',
     baseSha: git('rev-parse', 'main'),
     tracked: 'README.md',
     runsDir,
@@ -62,7 +72,7 @@ function world(): WorkspaceWorld & { leasesDir: string } {
 workspaceSuite('fake', async (emit) => {
   const w = world();
   return {
-    adapter: createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env, emit }),
+    adapter: createFakeWorkspace({ repo: repo().dir, remote: REMOTE, leasesDir: w.leasesDir, env: repo().env, emit }),
     world: w,
   };
 });
@@ -111,4 +121,59 @@ test("a relative run directory is the caller's, not the stand-in repository's: t
 
 test('the fake declares keep and sweep', () => {
   expect(createFakeWorkspace({ repo: repo().dir }).capabilities()).toEqual({ keep: true, sweep: true });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('the fake reports fake://origin and main unless told otherwise, and starts a workspace from the branch it names', async () => {
+  const w = world();
+  repo().git('branch', '-f', 'trunk', 'main');
+  const defaults = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
+  const told = createFakeWorkspace({
+    repo: repo().dir,
+    remote: 'fake://elsewhere',
+    defaultBranch: 'trunk',
+    leasesDir: w.leasesDir,
+    env: repo().env,
+  });
+  const bare = async (adapter: typeof told) => {
+    const repository = await settle(adapter.repository());
+    return 'rejected' in repository ? repository : { url: repository.url, defaultBranch: repository.defaultBranch };
+  };
+  const created = await settle(told.create(await w.run('r1'), { branch: 'sail/FAKE-1' }));
+  expect({
+    defaults: await bare(defaults),
+    told: await bare(told),
+    base: 'rejected' in created ? created : created.baseSha,
+  }).toEqual({
+    defaults: { url: 'fake://origin', defaultBranch: 'main' },
+    told: { url: 'fake://elsewhere', defaultBranch: 'trunk' },
+    base: repo().git('rev-parse', 'trunk'),
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a workspace git no longer knows is still removed, and nothing beside it in the run directory is', async () => {
+  const w = world();
+  const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });
+  const run = await w.run('r1');
+  const { path } = await workspace.create(run, { base: 'main', branch: 'sail/FAKE-1' });
+  // git can't remove what it no longer takes for a worktree: the plain removal has to.
+  unlinkSync(join(path, '.git'));
+  writeFileSync(join(path, 'left.txt'), 'left behind\n');
+  mkdirSync(join(run.runDir, 'workspace-notes'));
+  writeFileSync(join(run.runDir, 'workspace-notes', 'keep.txt'), 'keep\n');
+  writeFileSync(join(run.runDir, 'keep.txt'), 'keep\n');
+  const released = await settle(workspace.release(run, false));
+  expect({
+    released: 'rejected' in released ? released : released.kept,
+    workspace: existsSync(path),
+    beside: [
+      readFileSync(join(run.runDir, 'workspace-notes', 'keep.txt'), 'utf8'),
+      readFileSync(join(run.runDir, 'keep.txt'), 'utf8'),
+    ],
+  }).toEqual({ released: false, workspace: false, beside: ['keep\n', 'keep\n'] });
 });

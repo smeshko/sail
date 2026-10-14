@@ -32,7 +32,8 @@ const JOURNAL = [
   'open#1 passed',
 ];
 const PR = { number: 5, url: 'fake://codehost/fixture/pull/5', draft: false };
-const CONFLICT = 'sail port: codeHost.openPullRequest: #5 is already open from sail/FAKE-1 into main (conflict)';
+const CONFLICT =
+  'sail port: codeHost.openPullRequest: #5 is already open from sail/FAKE-1-add-a-shout-flag-to-the-greet-command into main (conflict)';
 
 /** The run directory of a repository's latest run, or '' when it has none. */
 function latestRun(repoDir: string): string {
@@ -83,7 +84,10 @@ async function completed(): Promise<Ran & { events: SailEvent[]; runId: string }
   return { ...ran, events: readEvents(ran.dir), runId: ran.dir.split('/').at(-1) ?? '' };
 }
 
-test('sail FAKE-1 takes ticket-to-pr from its ticket to a pull request: it exits 0 with nine journal lines, in call directories 00-intake to 06-open, where implement and tests each ran twice', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('sail FAKE-1 takes ticket-to-pr from its ticket to a pull request: it exits 0 with nine journal lines, in call directories 00-intake to 06-open, where implement and tests each ran twice', async () => {
   const { dir, stderr, stdout } = await completed();
   expect(stderr).toBe('');
   expect(stdout).toContain('\ncompleted · ');
@@ -109,7 +113,10 @@ test('sail FAKE-1 takes ticket-to-pr from its ticket to a pull request: it exits
   expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('completed\n');
 });
 
-test('implement#2 consumed the failing report as its feedback, and implement#1 consumed none', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('implement#2 consumed the failing report as its feedback, and implement#1 consumed none', async () => {
   const { dir } = await completed();
   const [first, second] = [1, 2].map((call) => json(dir, '02-implement', `call-${call}`, 'result.json'));
   expect([first.consumed, second.consumed]).toEqual([
@@ -122,7 +129,10 @@ test('implement#2 consumed the failing report as its feedback, and implement#1 c
   expect(existsSync(join(dir, '02-implement', 'call-1', 'in', 'feedback.json'))).toBe(false);
 });
 
-test("the run leaves pull request 5 on the fake code host: open, no draft, from sail/FAKE-1 into main at the repository's HEAD, labelled sail, with the ticket key, the title describe submitted and the body of its pr-body.md", async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("the run leaves pull request 5 on the fake code host: open, no draft, from the run's branch into main at the repository's HEAD, labelled sail, with the ticket key, the title describe submitted and the body of its pr-body.md", async () => {
   const { dir, repo } = await completed();
   const { pullRequests, branches } = fakeState(repo.dir, 'prs.json');
   expect(pullRequests.map((pr: { number: number }) => pr.number)).toEqual([1, 2, 3, 4, 5]);
@@ -134,7 +144,7 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
     title: described.title,
     body: readFileSync(join(dir, '05-describe', 'call-1', 'pr-body.md'), 'utf8'),
     base: 'main',
-    head: 'sail/FAKE-1',
+    head: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
     headSha,
     draft: false,
     state: 'open',
@@ -142,10 +152,13 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
     ticketKey: 'FAKE-1',
   });
   expect(pullRequests[4].body).toStartWith('## Summary\n');
-  expect(branches['sail/FAKE-1']).toBe(headSha);
+  expect(branches['sail/FAKE-1-add-a-shout-flag-to-the-greet-command']).toBe(headSha);
 });
 
-test("open#1's output is the pull request's number, URL and draft flag, kept from the code host's whole answer, and run:end's result is { pr: that }", async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("open#1's output is the pull request's number, URL and draft flag, kept from the code host's whole answer, and run:end's result is { pr: that }", async () => {
   const { dir, events } = await completed();
   const result = json(dir, '06-open', 'call-1', 'result.json');
   expect([result.outcome, result.output]).toEqual(['passed', PR]);
@@ -156,7 +169,10 @@ test("open#1's output is the pull request's number, URL and draft flag, kept fro
   expect(result.consumed).toEqual({ title: 'workflow', body: '05-describe/call-1/pr-body.md', ticketKey: 'workflow' });
 });
 
-test("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled under the key open#1, after open#1's script:exec and before its script:exit, and the call directory keeps them in its port events file", async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled under the key open#1, after open#1's script:exec and before its script:exit, and the call directory keeps them in its port events file", async () => {
   const { dir, events, repo } = await completed();
   const own = events.filter((event) => 'key' in event && event.key === 'open#1');
   const from = own.findIndex((event) => event.type === 'script:exec');
@@ -171,8 +187,18 @@ test("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled 
   const stamped = own.slice(from + 1, from + 4) as unknown as Record<string, unknown>[];
   const provider = stamped.map(({ seq: _seq, ts: _ts, runId: _runId, key: _key, ...rest }) => rest);
   expect<unknown>(provider).toEqual([
-    { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: repo.git('rev-parse', 'HEAD') },
-    { type: 'codehost:pr_opened', ...PR, base: 'main', head: 'sail/FAKE-1', ticketKey: 'FAKE-1' },
+    {
+      type: 'codehost:pushed',
+      branch: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
+      headSha: repo.git('rev-parse', 'HEAD'),
+    },
+    {
+      type: 'codehost:pr_opened',
+      ...PR,
+      base: 'main',
+      head: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
+      ticketKey: 'FAKE-1',
+    },
     { type: 'codehost:labelled', number: 5, label: 'sail', change: 'added' },
   ]);
   const file = readFileSync(join(dir, '06-open', 'call-1', 'port-events.ndjson'), 'utf8');
@@ -185,14 +211,20 @@ test("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled 
   expect(events.filter((event) => event.type.startsWith('codehost:'))).toHaveLength(3);
 });
 
-test("the fake's FAKE-1 is In Progress, with the comment that names the run", async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("the fake's FAKE-1 is In Progress, with the comment that names the run", async () => {
   const { repo, runId } = await completed();
   const ticket = fakeState(repo.dir, 'tickets.json').tickets[0];
   expect([ticket.ticketKey, ticket.state]).toEqual(['FAKE-1', { type: 'started', name: 'In Progress' }]);
   expect(ticket.comments.at(-1)).toMatchObject({ author: 'sail', body: `sail run ${runId} started` });
 });
 
-test('the run directory validates against the five sail.*.v1 schemas: one header, nine journal lines, nine results and one summary, with no issue', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('the run directory validates against the five sail.*.v1 schemas: one header, nine journal lines, nine results and one summary, with no issue', async () => {
   const { dir, events } = await completed();
   expect(validateRunDir(dir)).toEqual({
     counts: {
@@ -217,7 +249,10 @@ test('the run directory validates against the five sail.*.v1 schemas: one header
   ]);
 });
 
-test('summary.json says completed, names the ticket with its title and URL, lists the loop fix with two iterations, and totals the scripted cost of $1.35', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('summary.json says completed, names the ticket with its title and URL, lists the loop fix with two iterations, and totals the scripted cost of $1.35', async () => {
   const { dir } = await completed();
   const summary = json(dir, 'summary.json');
   expect({
@@ -241,7 +276,10 @@ test('summary.json says completed, names the ticket with its title and URL, list
   });
 });
 
-test("no file of the run directory holds the temporary repository's path", async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("no file of the run directory holds the temporary repository's path", async () => {
   const { dir, repo } = await completed();
   const files = readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
@@ -258,7 +296,10 @@ function delayingImplement2(): HarnessScript {
   return { ...script, 'implement#2': [{ ...answer, delayMs: 10_000 }, answer] };
 }
 
-test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that ends at tests#1, and sail resume then runs implement#2 as its second try and finishes with the same nine journal lines', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that ends at tests#1, and sail resume then runs implement#2 as its second try and finishes with the same nine journal lines', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     writeHarnessScript(repo.dir, delayingImplement2());
@@ -292,7 +333,10 @@ test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that 
   });
 }, 60_000);
 
-test("a second run of FAKE-1, forced, in a copy of a repository whose first run completed fails: its open#1 ends in error on the fake's conflict, and the run is failed with stage_error", async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("a second run of FAKE-1, forced, in a copy of a repository whose first run completed fails: its open#1 ends in error on the fake's conflict, and the run is failed with stage_error", async () => {
   const first = await completed();
   await withTempRepo(async (other) => {
     copyRun(first.repo.dir, other.dir);

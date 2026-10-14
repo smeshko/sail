@@ -10,6 +10,7 @@ import {
   type AdapterEntry,
   buildRunHeader,
   type ClaimRecord,
+  type HeaderWorkspace,
   RUN_HEADER_FILE,
   type RunHeader,
   readRunHeader,
@@ -59,8 +60,11 @@ const CLAIMED: ClaimRecord = { claimed: true, state: { type: 'started', name: 'I
 const FAKE: AdapterEntry = { use: 'fake', origin: 'builtin' };
 const FAKE_ENTRIES: Record<Port, AdapterEntry> = { ticketSource: FAKE, codeHost: FAKE, harness: FAKE, workspace: FAKE };
 
-/** The fixture's header, built on a fresh copy, recording `adapters`. */
-async function fixtureHeader(adapters: Record<Port, AdapterEntry> = FAKE_ENTRIES): Promise<RunHeader> {
+/** The fixture's header, built on a fresh copy, recording `adapters`, and the run's workspace when one is given. */
+async function fixtureHeader(
+  adapters: Record<Port, AdapterEntry> = FAKE_ENTRIES,
+  workspace?: HeaderWorkspace,
+): Promise<RunHeader> {
   return withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const { loaded, config } = await load(sail);
@@ -73,6 +77,7 @@ async function fixtureHeader(adapters: Record<Port, AdapterEntry> = FAKE_ENTRIES
       config,
       adapters,
       now: NOW,
+      ...(workspace === undefined ? {} : { workspace }),
     });
   });
 }
@@ -221,7 +226,10 @@ test('an invalid header is a bug in sail: it throws, and nothing is written', as
   expect(existsSync(join(dir, RUN_HEADER_FILE))).toBe(false);
 });
 
-test("the golden run's run.json reads, and one missing runId or not JSON throws naming the problem", () => {
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("the golden run's run.json reads, and one missing runId or not JSON throws naming the problem", () => {
   expect(validateRunHeader(JSON.parse(readFileSync(join(GOLDEN, RUN_HEADER_FILE), 'utf8')))).toEqual([]);
   expect(readRunHeader(GOLDEN).runId).toBe(RUN_ID);
 
@@ -267,4 +275,34 @@ test('a header holds the claim it is given and the checks its source lists, as c
     { claimed: false, state: { type: 'started', name: 'In Review' } },
   ]);
   expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'source', 'claim']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a header built with the run's workspace records its branch, repository and base, and validates; one built without it holds none of them", async () => {
+  const baseSha = 'a'.repeat(40);
+  const workspace: HeaderWorkspace = {
+    branch: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
+    repository: { url: 'fake://origin', defaultBranch: 'main' },
+    baseSha,
+  };
+  const withWorkspace = await fixtureHeader(FAKE_ENTRIES, workspace);
+  const without = await fixtureHeader();
+  const { branch, repository, workspace: path, ...rest } = withWorkspace;
+  expect({
+    issues: validateRunHeader(withWorkspace),
+    recorded: { branch, repository, workspace: path },
+    rest: JSON.stringify({ ...rest, sail: null, workflow: null }),
+    without: Object.keys(without).filter((key) => ['branch', 'repository', 'workspace'].includes(key)),
+  }).toEqual({
+    issues: [],
+    recorded: {
+      branch: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
+      repository: { url: 'fake://origin', defaultBranch: 'main', baseSha },
+      workspace: 'workspace',
+    },
+    rest: JSON.stringify({ ...without, sail: null, workflow: null }),
+    without: [],
+  });
 });

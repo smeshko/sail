@@ -21,8 +21,8 @@
     }
   },
   "consumed": {},
-  "startedAt": "2026-09-25T09:00:09.100Z",
-  "finishedAt": "2026-09-25T09:00:09.800Z",
+  "startedAt": "2026-09-25T09:00:09.600Z",
+  "finishedAt": "2026-09-25T09:00:10.300Z",
   "durationMs": 700,
   "exit": {
     "code": 0,
@@ -36,7 +36,8 @@
     "TRY": "1",
     "STAGE_IN": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/in",
     "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2",
-    "WORKSPACE": ".",
+    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace",
+    "BRANCH": "sail/FAKE-1-add-a-shout-flag-to-the-greet-command",
     "SAIL_CONFIG": ".sail/project.yaml",
     "SAIL_EVENTS": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/port-events.ndjson"
   }

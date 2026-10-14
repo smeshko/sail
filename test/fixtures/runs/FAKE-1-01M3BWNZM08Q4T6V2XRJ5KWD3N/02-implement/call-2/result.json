@@ -30,8 +30,8 @@
     "spec": "01-spec/call-1/spec.md",
     "feedback": "03-tests/call-1/result.json#/output"
   },
-  "startedAt": "2026-09-25T09:00:07.400Z",
-  "finishedAt": "2026-09-25T09:00:08.500Z",
+  "startedAt": "2026-09-25T09:00:07.900Z",
+  "finishedAt": "2026-09-25T09:00:09.000Z",
   "durationMs": 1100,
   "try": 1,
   "validationTry": 1,
