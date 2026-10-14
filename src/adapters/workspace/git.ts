@@ -5,7 +5,16 @@
 //
 // A workspace is `<runDir>/workspace`: a detached worktree of the repository. git is handed every path resolved, since
 // it runs in the repository and a caller's paths are relative to where the caller runs.
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  unlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { runProcess } from '../../engine/process';
@@ -127,10 +136,21 @@ export function addDetached(
   return added;
 }
 
+/** Whether `path` is a symbolic link, dangling or not. */
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Removes the workspace of the run in `runDir`: `git worktree remove --force`, then, when the path is still there, a
- * plain removal of exactly `<runDir>/workspace` and nothing else, then a prune of what git still lists. It fails, as
- * `unavailable`, only when the path is still there.
+ * plain removal of exactly `<runDir>/workspace` and nothing else, and a prune of what that removal left registered.
+ * The prune is the repository's whole, so it runs only then: a worktree of the user's on a volume that isn't mounted
+ * stays registered otherwise. A link at the path is unlinked and never followed, since git would remove the worktree
+ * it names. It fails, as `unavailable`, only when the path is still there.
  */
 export function removeWorktree(
   repo: string,
@@ -139,6 +159,10 @@ export function removeWorktree(
   env?: Readonly<Record<string, string>>,
 ): GitResult {
   const path = resolve(runDir, WORKSPACE_DIR);
+  if (isLink(path)) {
+    unlinkSync(path);
+    return { code: 0, stdout: '', stderr: '' };
+  }
   const removed = gitSync(repo, ['worktree', 'remove', '--force', path], env);
   let why = removed.stderr;
   if (existsSync(path)) {
@@ -147,8 +171,8 @@ export function removeWorktree(
     } catch (error) {
       why = `${why} ${(error as Error).message}`.trim();
     }
+    gitSync(repo, ['worktree', 'prune'], env);
   }
-  gitSync(repo, ['worktree', 'prune'], env);
   if (existsSync(path)) throw new PortError('workspace', op, 'unavailable', `${path}: ${why}`);
   return removed;
 }
@@ -227,13 +251,16 @@ function ended(runDir: string): boolean {
   }
 }
 
-/** Removes, through `remove`, the workspace of each ended run under `runsDir`, and gives their paths, sorted. */
+/**
+ * Removes, through `remove`, the workspace of each ended run under `runsDir`, and gives their paths, sorted. An entry
+ * that is a link is no run directory, and is never followed.
+ */
 export function sweepEnded(runsDir: string, remove: (runDir: string) => void): string[] {
   const paths: string[] = [];
   for (const entry of existsSync(runsDir) ? readdirSync(runsDir) : []) {
     const runDir = join(runsDir, entry);
     const path = join(runDir, WORKSPACE_DIR);
-    if (!existsSync(path) || !ended(runDir)) continue;
+    if (isLink(runDir) || !existsSync(path) || !ended(runDir)) continue;
     remove(runDir);
     paths.push(path);
   }
