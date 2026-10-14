@@ -303,6 +303,35 @@ test('listDesignated reads each listed ticket whole, every comment page included
   ]);
 });
 
+test('listDesignated skips a listed ticket gone from the team by its read, and keeps the rest, but a failed read still rejects (review R2-1)', async () => {
+  const designated = [
+    { number: 1, title: 'Gone', state: 'Ready', labels: ['sail'] },
+    { number: 2, title: 'Kept', state: 'Ready', labels: ['sail'] },
+  ];
+  const gone = linear(seedOf(RENAMED_STATES, designated));
+  // ADW-1 is deleted, or moved to another team, after the list: its read by team and number finds nothing.
+  gone.world.failNext(
+    'SailTicket',
+    { status: 200, body: { data: { issues: { nodes: [] } } } },
+    { after: 'SailDesignated' },
+  );
+  const listed = await gone.adapter.listDesignated('sail');
+  expect([listed.map((ticket) => ticket.ticketKey), gone.world.operations()]).toEqual([
+    ['ADW-2'],
+    ['SailDesignated', 'SailTicket', 'SailTeam', 'SailTicket'],
+  ]);
+  const failed = linear(seedOf(RENAMED_STATES, designated));
+  failed.world.failNext(
+    'SailTicket',
+    { status: 401, body: { errors: [{ message: 'Authentication required, not authenticated' }] } },
+    { after: 'SailDesignated' },
+  );
+  expect(failure(await rejection(failed.adapter.listDesignated('sail')))).toEqual([
+    { port: 'ticketSource', op: 'listDesignated', code: 'unauthorized' },
+    'ticketSource.listDesignated: Linear 401: Authentication required, not authenticated',
+  ]);
+});
+
 test('a team Linear doesn’t have is not_found, naming it, where an empty list or no ticket would hide it, and an empty list of a real team is empty (review R1-3)', async () => {
   const world = createLinearWorld(SEED);
   const typo = createLinearTicketSource({ team: 'ADX', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch: world.fetch });
