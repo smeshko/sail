@@ -201,3 +201,45 @@ test('bounds that are not whole numbers of 0 or more, a min above its max, or an
   for (const [build, message] of refused) expect(build).toThrow(message);
   expect(countItems('Tasks', { min: 0, max: 0 }).check).toBe('countItems(Tasks, min 0, max 0)');
 });
+
+/**
+ * The renderer's rule read naively, to hold noPlaceholders to: each tag from a `{{` to the next `}}` whose body holds a
+ * colon is a placeholder, named from the last `{{` in it whose rest still holds the colon, and its line counted afresh.
+ */
+function leftPlaceholders(text: string): string[] {
+  const found: string[] = [];
+  for (let start = text.indexOf('{{'); start !== -1; ) {
+    const close = text.indexOf('}}', start + 2);
+    if (close === -1) break;
+    if (text.slice(start + 2, close).includes(':')) {
+      let from = start;
+      for (let at = start; at !== -1 && at < close; at = text.indexOf('{{', at + 1)) {
+        if (text.slice(at + 2, close).includes(':')) from = at;
+      }
+      const name = (text.slice(from + 2, close).split(':')[0] ?? '').trim();
+      const line = text.slice(0, from).split('\n').length;
+      const path = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(name) && name.length <= 64;
+      found.push(`line ${line} still holds ${path ? `the placeholder {{${name}: …}}` : 'a placeholder'}`);
+    }
+    start = text.indexOf('{{', close + 2);
+  }
+  return found;
+}
+
+test('noPlaceholders agrees with a naive reading of the renderer rule on 3,000 seeded random texts (review R2-1, R2-2)', () => {
+  let state = 20261014;
+  const random = (below: number) => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return Math.floor((state / 2147483648) * below);
+  };
+  const validator = noPlaceholders();
+  for (let index = 0; index < 3000; index += 1) {
+    const pieces = ['{{', '}}', '{', '}', ':', '\n', 'a', 'tasks', '.', ' ', '|', '\r\n'];
+    let text = '';
+    for (let piece = 0, count = random(40); piece < count; piece += 1) text += pieces[random(pieces.length)];
+    expect({ text, problems: validator.validate(parsed(text)).problems }).toEqual({
+      text,
+      problems: leftPlaceholders(text),
+    });
+  }
+});
