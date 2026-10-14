@@ -1,7 +1,7 @@
-// The event union and `sail.event.v1` name the same types, in the same order.
+// The event unions and `sail.event.v1` name the same types, in the same order: a run's, then a queue's.
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { EVENT_TYPES, type ProviderEvent } from '../../src/events/types';
+import { EVENT_TYPES, type ProviderEvent, QUEUE_EVENT_TYPES } from '../../src/events/types';
 
 // An adapter emits a provider event without a key, and its caller stamps one: a workspace event never has one. Checked
 // by `bun run typecheck`, which fails if the directive goes unused.
@@ -23,10 +23,16 @@ function typeEnum(schema: unknown): unknown {
   return undefined;
 }
 
-test("EVENT_TYPES is sail.event.v1's type enum, error:consumer and prompt:rendered included", async () => {
-  const schema = await Bun.file(join(import.meta.dir, '..', '..', 'schemas', 'sail.event.v1.json')).json();
-  expect(typeEnum(schema)).toEqual([...EVENT_TYPES]);
+test("EVENT_TYPES holds a run's 52 types, error:consumer and prompt:rendered included", () => {
   expect(EVENT_TYPES).toHaveLength(52);
   expect(EVENT_TYPES.indexOf('error:consumer')).toBe(EVENT_TYPES.indexOf('error:crash') + 1);
   expect(EVENT_TYPES.indexOf('prompt:rendered')).toBe(EVENT_TYPES.indexOf('input:materialised') + 1);
+});
+
+test("sail.event.v1's type enum is EVENT_TYPES, then the 8 QUEUE_EVENT_TYPES from error:consumer on", async () => {
+  const schema = await Bun.file(join(import.meta.dir, '..', '..', 'schemas', 'sail.event.v1.json')).json();
+  const types = typeEnum(schema) as string[];
+  expect(types).toEqual([...EVENT_TYPES, ...QUEUE_EVENT_TYPES]);
+  expect(QUEUE_EVENT_TYPES).toHaveLength(8);
+  expect(types.indexOf('watch:added')).toBe(types.indexOf('error:consumer') + 1);
 });

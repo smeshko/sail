@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, sep } from 'node:path';
 import type { Intake, StageDefinition, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
 import * as intakes from '../sdk/intakes';
+import { watchProblem } from './watchable';
 
 let registered = false;
 
@@ -171,7 +172,10 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
     } else if (workflow.name !== folder) {
       found.problems.push({ file, message: `declares workflow '${workflow.name}', but its folder is '${folder}'` });
     } else {
-      found.workflows.push({ name: workflow.name, intake: workflow.intake.name, folder, file });
+      // A watch the watcher couldn't act on is a broken definition, so a run of the workflow is refused too.
+      const problem = watchProblem(workflow);
+      if (problem !== undefined) found.problems.push({ file, message: problem });
+      else found.workflows.push({ name: workflow.name, intake: workflow.intake.name, folder, file });
     }
   });
 
