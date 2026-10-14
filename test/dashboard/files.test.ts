@@ -34,10 +34,7 @@ const goldenItem = () => ({
   summary: golden('summary.json'),
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('two registered clones are listed side by side, each with its run, its status, source and summary, and reading changes nothing', () => {
+test('two registered clones are listed side by side, each with its run, its status, source and summary, and reading changes nothing', () => {
   const before = treeHash(m.root);
   expect(repos(m.registryDir)).toEqual({ repos: [entryOf(m.alpha), entryOf(m.beta)], problems: [] });
   expect(findRepo(m.registryDir, 'beta')).toEqual(entryOf(m.beta));
@@ -50,10 +47,7 @@ test
   expect(treeHash(m.root)).toBe(before);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a clone whose .sail/ was deleted is listed with a problem and no runs, beside the one that still has its run', () => {
+test('a clone whose .sail/ was deleted is listed with a problem and no runs, beside the one that still has its run', () => {
   rmSync(m.alpha.sailDir, { recursive: true });
   const listed = repos(m.registryDir).repos;
   expect(listed.map((repo) => [repo.name, typeof repo.problem])).toEqual([
@@ -68,19 +62,13 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('an unregistered repository name finds nothing, and a registered one its entry', () => {
+test('an unregistered repository name finds nothing, and a registered one its entry', () => {
   expect(findRepo(m.registryDir, 'alpha')).toEqual(entryOf(m.alpha));
   expect(findRepo(m.registryDir, 'gamma')).toBeUndefined();
   expect(findRepo(m.registryDir, '../alpha')).toBeUndefined();
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each([
+test.each([
   ['..', '..'],
   ['.', '.'],
   ['a path', `${GOLDEN_RUN_ID}/00-intake`],
@@ -103,10 +91,7 @@ test
   expect(findRunDir(entryOf(m.alpha), runId)).toEqual({ missing: expect.any(String) });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('callFile finds a stage call through stage:end, a script call\'s log, and a step through the last step:end with its key', () => {
+test("callFile finds a stage call through stage:end, a script call's log, and a step through the last step:end with its key", () => {
   const run = m.alpha.runDir;
   expect(callFile(run, 'implement#1', 'result.json')).toBe(join(run, '02-implement/call-1/result.json'));
   expect(callFile(run, 'tests#1', 'stdout.log')).toBe(join(run, '03-tests/call-1/stdout.log'));
@@ -127,27 +112,54 @@ test
   expect(callFile(run, 'publish#1', 'stderr.log')).toBe(join(run, '06-open/call-1/stderr.log'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each([
+test.each([
   ['an unknown key', 'nope#1', 'result.json', () => {}],
   ['a name outside the four', 'implement#1', 'prompt.md', () => {}],
   ['a produced file by name', 'implement#1', 'diff.patch', () => {}],
-  ['an absolute resultPath', 'evil#1', 'result.json', (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', join(m.outside, 'result.json'))],
-  ['a resultPath with .. segments', 'evil#1', 'result.json', (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '../../../outside/result.json')],
-  ['a resultPath with an empty segment', 'evil#1', 'stdout.log', (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '03-tests//call-1/result.json')],
-  ['a resultPath that is not a result.json', 'evil#1', 'result.json', (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '01-spec/call-1/spec.md')],
-  ['a session.log that links out of the run', 'spec#1', 'session.log', (m: Machine) => {
-    const log = join(m.alpha.runDir, '01-spec/call-1/session.log');
-    rmSync(log);
-    symlinkSync(join(m.outside, 'session.log'), log);
-  }],
-  ['a call directory that links out of the run', 'evil#1', 'stdout.log', (m: Machine) => {
-    symlinkSync(m.outside, join(m.alpha.runDir, '03-tests/call-9'));
-    appendStageEnd(m.alpha.runDir, 'evil#1', '03-tests/call-9/result.json');
-  }],
-] as const)('callFile finds a call\'s result, and refuses %s', (_, key, name, tamper) => {
+  [
+    'an absolute resultPath',
+    'evil#1',
+    'result.json',
+    (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', join(m.outside, 'result.json')),
+  ],
+  [
+    'a resultPath with .. segments',
+    'evil#1',
+    'result.json',
+    (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '../../../outside/result.json'),
+  ],
+  [
+    'a resultPath with an empty segment',
+    'evil#1',
+    'stdout.log',
+    (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '03-tests//call-1/result.json'),
+  ],
+  [
+    'a resultPath that is not a result.json',
+    'evil#1',
+    'result.json',
+    (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '01-spec/call-1/spec.md'),
+  ],
+  [
+    'a session.log that links out of the run',
+    'spec#1',
+    'session.log',
+    (m: Machine) => {
+      const log = join(m.alpha.runDir, '01-spec/call-1/session.log');
+      rmSync(log);
+      symlinkSync(join(m.outside, 'session.log'), log);
+    },
+  ],
+  [
+    'a call directory that links out of the run',
+    'evil#1',
+    'stdout.log',
+    (m: Machine) => {
+      symlinkSync(m.outside, join(m.alpha.runDir, '03-tests/call-9'));
+      appendStageEnd(m.alpha.runDir, 'evil#1', '03-tests/call-9/result.json');
+    },
+  ],
+] as const)("callFile finds a call's result, and refuses %s", (_, key, name, tamper) => {
   tamper(m);
   expect(callFile(m.alpha.runDir, 'implement#1', 'result.json')).toBe(
     join(m.alpha.runDir, '02-implement/call-1/result.json'),
