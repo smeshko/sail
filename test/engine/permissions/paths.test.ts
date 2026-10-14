@@ -43,10 +43,7 @@ function verdict(decision: Decision, phrase: string): Want {
   return [decision.rule, decision.reason.includes(phrase) ? phrase : decision.reason];
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a path lands in $STAGE_IN, $STAGE_OUT, the worktree or outside; $STAGE_IN first, and without case', () => {
+test('a path lands in $STAGE_IN, $STAGE_OUT, the worktree or outside; $STAGE_IN first, and without case', () => {
   const at = roots(ctx);
   const cases = [
     join(worktree, 'src', 'a.ts'),
@@ -74,10 +71,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([
+test.each([
   ['src/a.ts', { write: ['src/**'] }, 'allow'],
   ['src/new/b.ts', { write: ['src/**'] }, 'allow'],
   ['lib/a.dart', { write: ['src/**'] }, ['write', 'lib/a.dart']],
@@ -89,10 +83,7 @@ test
   expect(verdict(checkWrite([path], perms(open), ctx), phraseOf(expected))).toEqual(expected);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([
+test.each([
   ['src', ['src/**'], 'allow'],
   ['', ['**'], 'allow'],
   ['.', ['src/**'], ['read', "matches none of the step's read globs"]],
@@ -106,10 +97,7 @@ test
   expect(verdict(checkRead(paths, perms({ read }), ctx), phraseOf(expected))).toEqual(expected);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a read denial names the path as given and where it resolved', () => {
+test('a read denial names the path as given and where it resolved', () => {
   const decision = checkRead([join(clone, 'lib', 'a.dart')], perms({ read: ['**'] }), ctx);
   expect(decision).toEqual({
     allow: false,
@@ -118,10 +106,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([
+test.each([
   ['$STAGE_IN/brief.md', '$STAGE_IN'],
   ['$STAGE_IN/new.md', '$STAGE_IN'],
   ['$STAGE_OUT/IN/brief.md', '$STAGE_IN'],
@@ -137,20 +122,14 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([[join(clone, 'lib', 'a.dart')], ['../../../lib/a.dart'], ['wlib/a.dart'], ['esc/deeper/../a.dart']])(
+test.each([[join(clone, 'lib', 'a.dart')], ['../../../lib/a.dart'], ['wlib/a.dart'], ['esc/deeper/../a.dart']])(
   "a write into the clone's own checkout, %s, is outside the worktree",
   (path) => {
     expect(verdict(checkWrite([path], perms({ write: ['**'] }), ctx), 'outside')).toEqual(['write', 'outside']);
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([
+test.each([
   ['out/x', 'outside', 'a link inside pointing outside is outside'],
   ['dang', 'outside', 'a dangling link whose target would be outside is outside'],
   ['esc2/../a.dart', 'outside', "link/.. is the link target's parent, outside here"],
@@ -158,10 +137,7 @@ test
   expect(verdict(checkWrite([path], perms({ write: ['**'] }), ctx), phrase)).toEqual(['write', phrase]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("link/.. resolves from the link target's parent, and a link inside pointing inside is inside", () => {
+test("link/.. resolves from the link target's parent, and a link inside pointing inside is inside", () => {
   const write = perms({ write: ['src/**'] });
   expect(resolvePhysical('top/../a.ts', worktree)).toEqual({ ok: true, path: join(worktree, 'src', 'a.ts') });
   expect([
@@ -170,10 +146,7 @@ test
   ]).toEqual(['allow', 'allow']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a link loop, and a chain of more than 40 links, are denials that say so', () => {
+test('a link loop, and a chain of more than 40 links, are denials that say so', () => {
   expect(verdict(checkRead(['l1/x'], perms({ read: ['**'] }), ctx), 'symbolic links')).toEqual([
     'read',
     'symbolic links',
@@ -184,20 +157,14 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('.. below a directory that does not exist is not resolved lexically', () => {
+test('.. below a directory that does not exist is not resolved lexically', () => {
   expect(resolvePhysical('nope/../../x', worktree)).toEqual({
     ok: false,
     reason: expect.stringContaining("doesn't exist"),
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('$STAGE_OUT, braced or bare, expands from the env; an unknown variable, ~ and ~user leave a path unresolvable', () => {
+test('$STAGE_OUT, braced or bare, expands from the env; an unknown variable, ~ and ~user leave a path unresolvable', () => {
   expect([
     expand('$STAGE_OUT/x.md', ctx.env),
     // biome-ignore lint/suspicious/noTemplateCurlyInString: shell syntax, not a template
@@ -216,20 +183,14 @@ test
   expect(verdict(checkRead(['~/x'], perms({ read: ['**'] }), ctx), '~')).toEqual(['read', '~']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('/dev/null, /dev/stdout and /dev/stderr take writes with no write globs; any other /dev path is outside', () => {
+test('/dev/null, /dev/stdout and /dev/stderr take writes with no write globs; any other /dev path is outside', () => {
   expect([
     verdict(checkWrite(['/dev/null', '/dev/stdout', '/dev/stderr'], perms(), ctx), ''),
     verdict(checkWrite(['/dev/zero'], perms({ write: ['**'] }), ctx), 'outside'),
   ]).toEqual(['allow', ['write', 'outside']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('relative paths resolve from the cwd; a cwd outside the roots is itself a denial', () => {
+test('relative paths resolve from the cwd; a cwd outside the roots is itself a denial', () => {
   const write = perms({ write: ['src/**'] });
   expect([
     verdict(checkWrite(['a.ts'], write, ctx, join(worktree, 'src')), ''),
@@ -244,10 +205,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('roots reached through a symlink are realpathed: the same calls decide the same way', () => {
+test('roots reached through a symlink are realpathed: the same calls decide the same way', () => {
   const alias = join(layout.root, 'alias');
   symlinkSync(clone, alias);
   const via = (path: string) => path.replace(clone, alias);
@@ -265,10 +223,7 @@ test
   ]).toEqual(['allow', 'allow', ['write', 'lib/a.dart']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('insideRoots resolves a directory for cd and git, and says why one outside is refused', () => {
+test('insideRoots resolves a directory for cd and git, and says why one outside is refused', () => {
   expect([insideRoots('src', ctx), insideRoots(elsewhere, ctx), insideRoots('..', ctx)]).toEqual([
     { ok: true, path: join(worktree, 'src') },
     { ok: false, reason: expect.stringContaining('outside the workspace') },
