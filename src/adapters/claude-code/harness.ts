@@ -1,7 +1,8 @@
 // The claude-code Harness: one isolated Agent SDK `query()` session per request. The session gets the step's model,
-// the workspace, the submission envelope and the turn and dollar budgets, and none of the user's own Claude Code
-// settings, skills, memory or MCP servers (D8). Its messages become events as they come, every session that started
-// ends once, and every failure, an abort included, is the `error` outcome: run() never rejects.
+// the workspace, the paths its preamble names (D23), the submission envelope and the turn and dollar budgets, and none
+// of the user's own Claude Code settings, skills, memory or MCP servers (D8). Its messages become events as they come,
+// every session that started ends once, and every failure, an abort included, is the `error` outcome: run() never
+// rejects.
 //
 // For 7.3: the session's environment carries the provider's credentials (D7). No tool can read it while Bash is
 // unavailable; once 7.3 enables Bash, it must scrub or deny that. 7.3 also checks that the process is gone after an
@@ -69,6 +70,28 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
   return { ...Object.fromEntries(picked), CLAUDE_AGENT_SDK_CLIENT_APP: 'sail', ...preamble };
 }
 
+/**
+ * The text appended to the preset system prompt: where the session works, then how it submits. The session has no
+ * shell, so it can't read its environment: a prompt that names `$STAGE_OUT` resolves only through the values given
+ * here (D23).
+ */
+export function appendedSystemPrompt(request: HarnessRequest): string {
+  const variables = Object.entries(request.env).map(([name, value]) => `- \`$${name}\`: ${value}`);
+  return [
+    '## Where you work',
+    '',
+    `Your working directory is the workspace, ${request.cwd}. You have no shell, so you can't read environment`,
+    'variables: where a prompt names one of these, it means the value given.',
+    '',
+    ...variables,
+    '',
+    'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
+    'directory below it.',
+    '',
+    SUBMIT_CONTRACT,
+  ].join('\n');
+}
+
 /** The SDK options of `request`'s session, with a controller of its own and the file guard. */
 export function sessionOptions(
   request: HarnessRequest,
@@ -101,7 +124,7 @@ export function sessionOptions(
       ...(onDenied === undefined ? {} : { onDenied }),
     }),
     outputFormat: { type: 'json_schema', schema: submissionEnvelope(request.outputSchema) },
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: SUBMIT_CONTRACT },
+    systemPrompt: { type: 'preset', preset: 'claude_code', append: appendedSystemPrompt(request) },
     maxTurns: request.budget.maxTurns,
     maxBudgetUsd: request.budget.maxUsd,
   };

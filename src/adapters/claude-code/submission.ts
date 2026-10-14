@@ -2,7 +2,7 @@
 // step's output, or `blocked`, with a reason, so the agent can submit the outcome its prompt promises. The adapter reads
 // the envelope back; the agent kind checks the output against the step's schema again, so nothing here validates it.
 
-/** The text appended to the preset system prompt: how this harness takes a submission. */
+/** The last section appended to the preset system prompt: how this harness takes a submission. */
 export const SUBMIT_CONTRACT = `## Submitting
 
 You submit through structured output, exactly once, when the work is over. The object you submit is an envelope:
