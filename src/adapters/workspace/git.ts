@@ -60,6 +60,16 @@ function inherited(): Record<string, string> {
   );
 }
 
+/** The subcommand `args` run: the first argument past git's own options and `-c`'s value. */
+function subcommand(args: readonly string[]): string {
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index] ?? '';
+    if (arg === '-c') index++;
+    else if (!arg.startsWith('-')) return arg;
+  }
+  return args[0] ?? '';
+}
+
 /**
  * Runs git in `cwd` with `env` (this process's when left out), never reading stdin. A directory that isn't there, or a
  * call that times out, is a failed result.
@@ -79,7 +89,8 @@ export function gitSync(
     });
     const stderr = result.stderr.toString().trim();
     if (result.exitedDueToTimeout) {
-      return { code: -1, stdout: '', stderr: `git ${args[0]} timed out after ${timeoutMs} ms ${stderr}`.trim() };
+      const said = `git ${subcommand(args)} timed out after ${timeoutMs} ms ${stderr}`.trim();
+      return { code: -1, stdout: '', stderr: said };
     }
     return { code: result.exitCode ?? -1, stdout: result.stdout.toString(), stderr };
   } catch (error) {
@@ -125,11 +136,12 @@ function isLink(path: string): boolean {
 }
 
 /**
- * Removes the workspace of the run in `runDir`: `git worktree remove --force`, then, when the path is still there, a
- * plain removal of exactly `<runDir>/workspace` and nothing else, and a prune of what that removal left registered.
- * The prune is the repository's whole, so it runs only then: a worktree of the user's on a volume that isn't mounted
- * stays registered otherwise. A link at the path is unlinked and never followed, since git would remove the worktree
- * it names. It fails, as `unavailable`, only when the path is still there.
+ * Removes the workspace of the run in `runDir`: `git worktree remove --force --force`, which takes a locked one too,
+ * then, when the path is still there, a plain removal of exactly `<runDir>/workspace` and nothing else, and a prune of
+ * what that removal left registered. The prune is the repository's whole, so it runs only then: a worktree of the
+ * user's on a volume that isn't mounted stays registered otherwise. A link at the path is unlinked and never followed,
+ * since git would remove the worktree it names, and a run directory that is a link is refused for the same reason. It
+ * fails, as `unavailable`, when the run directory is a link or the path is still there.
  */
 export function removeWorktree(
   repo: string,
@@ -138,11 +150,14 @@ export function removeWorktree(
   env?: Readonly<Record<string, string>>,
 ): GitResult {
   const path = resolve(runDir, WORKSPACE_DIR);
+  if (isLink(runDir)) {
+    throw new PortError('workspace', op, 'unavailable', `${runDir} is a link: the run's workspace is left where it is`);
+  }
   if (isLink(path)) {
     unlinkSync(path);
     return { code: 0, stdout: '', stderr: '' };
   }
-  const removed = gitSync(repo, ['worktree', 'remove', '--force', path], env);
+  const removed = gitSync(repo, ['worktree', 'remove', '--force', '--force', path], env);
   let why = removed.stderr;
   if (existsSync(path)) {
     try {
