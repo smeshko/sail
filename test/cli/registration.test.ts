@@ -39,10 +39,7 @@ function otherClone(sailHome: string, clone: string, remote: string | null, live
   writeFileSync(join(sailHome, 'watchers', 'fixture.json'), `${JSON.stringify(entry)}\n`);
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('sail FAKE-1 records its repository: the name, no remote, the clone and its .sail/; a start refused first records nothing', async () => {
+test('sail FAKE-1 records its repository: the name, no remote, the clone and its .sail/; a start refused first records nothing', async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'sail-home');
     copyFixture(repo.dir);
@@ -66,10 +63,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('sail resume records its repository again: an entry deleted since the run started is written anew, later', async () => {
+test('sail resume records its repository again: an entry deleted since the run started is written anew, later', async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'sail-home');
     copyFixture(repo.dir);
@@ -89,10 +83,7 @@ test
   });
 }, 90_000);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('another live clone with another remote under the same name: one warning, the run goes on, and this clone takes the entry', async () => {
+test('another live clone with another remote under the same name: one warning, the run goes on, and this clone takes the entry', async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'sail-home');
     const elsewhere = join(repo.home, 'elsewhere');
@@ -107,27 +98,25 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each([
+test.each([
   ['a live clone with the same remote', null, true],
   ['a clone whose .sail/ is gone, with another remote', 'https://example.com/other.git', false],
-] as const)('the entry of %s moves to this clone without a warning', async (_, remote, live) => {
-  await withTempRepo(async (repo) => {
-    const sailHome = join(repo.home, 'sail-home');
-    otherClone(sailHome, join(repo.home, 'elsewhere'), remote, live);
-    copyFixture(repo.dir);
-    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '--until', 'spec', '-q']);
-    expect({ code, stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
-    expect(fixtureEntry(sailHome).clone).toBe(realpathSync(repo.dir));
-  });
-}, 60_000);
+] as const)(
+  'the entry of %s moves to this clone without a warning',
+  async (_, remote, live) => {
+    await withTempRepo(async (repo) => {
+      const sailHome = join(repo.home, 'sail-home');
+      otherClone(sailHome, join(repo.home, 'elsewhere'), remote, live);
+      copyFixture(repo.dir);
+      const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '--until', 'spec', '-q']);
+      expect({ code, stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+      expect(fixtureEntry(sailHome).clone).toBe(realpathSync(repo.dir));
+    });
+  },
+  60_000,
+);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a registry that cannot be written is a warning, and the run still completes', async () => {
+test('a registry that cannot be written is a warning, and the run still completes', async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'not-a-directory');
     writeFileSync(sailHome, 'a file\n');
