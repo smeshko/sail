@@ -345,3 +345,82 @@ test('a document of 1 MiB that is all placeholders is validated in time, and eac
   ]);
   expect(MAX_PROBLEMS_PER_CHECK).toBe(20);
 });
+
+/** A seeded generator of small random numbers, so a failing document can be found again. */
+function seeded(seed: number): (below: number) => number {
+  let state = seed;
+  return (below) => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return Math.floor((state / 2147483648) * below);
+  };
+}
+
+/** A random Markdown block: headings (ATX and setext), lists nested up to twice, task items, fences and quotes. */
+function randomBlock(random: (below: number) => number, indent: string, depth: number): string {
+  const word = ['Tasks', 'Notes', 'Out of scope', 'x'][random(4)];
+  switch (random(9)) {
+    case 0:
+    case 1:
+      return `${indent}${'#'.repeat(1 + random(4))} ${word}\n`;
+    case 2:
+      return `${indent}${word}\n${indent}${random(2) === 0 ? '===' : '---'}\n`;
+    case 3:
+      return `${indent}${word} text\n`;
+    case 4:
+      return `${indent}\`\`\`\n${indent}## ${word}\n${indent}- item\n${indent}\`\`\`\n`;
+    case 5:
+      return `${indent}> ${['## Quoted', '- quoted', 'text'][random(3)]}\n`;
+    default: {
+      const ordered = random(3) === 0;
+      let out = '';
+      for (let index = 0, count = 1 + random(3); index < count; index += 1) {
+        out += `${indent}${ordered ? `${index + 1}.` : '-'} ${['', '[ ] ', '[x] '][random(3)]}${word}\n`;
+        if (depth < 2 && random(3) === 0)
+          out += `\n${randomBlock(random, indent + (ordered ? '   ' : '  '), depth + 1)}\n`;
+      }
+      return out;
+    }
+  }
+}
+
+/** The sections of `text` as Bun's HTML holds them, in document order: an independent reading to hold readDocument to. */
+function sectionsFromHtml(text: string): { heading: string; level: number; items: { checked?: boolean }[] }[] {
+  const html = Bun.markdown.html(text);
+  const sections: { heading: string; level: number; items: { checked?: boolean }[] }[] = [];
+  let open: typeof sections = [];
+  let lists = 0;
+  for (const match of html.matchAll(/<(\/?)(ul|ol|li|h[1-6])\b[^>]*>/g)) {
+    const [, close, tag = ''] = match;
+    const after = (match.index ?? 0) + match[0].length;
+    if (tag === 'ul' || tag === 'ol') lists += close ? -1 : 1;
+    else if (tag === 'li' && !close && lists === 1) {
+      const box = /^\s*<input[^>]*type="checkbox"[^>]*>/.exec(html.slice(after, after + 200));
+      const item = box === null ? {} : { checked: /checked/.test(box[0]) };
+      for (const section of open) section.items.push(item);
+    } else if (tag.startsWith('h') && !close) {
+      const level = Number(tag[1]);
+      const heading = html
+        .slice(after, html.indexOf(`</${tag}>`, after))
+        .replace(/<[^>]+>/g, '')
+        .trim();
+      open = open.filter((section) => section.level < level);
+      const section = { heading, level, items: [] };
+      sections.push(section);
+      open.push(section);
+    }
+  }
+  return sections;
+}
+
+test("readDocument reads 1,000 random documents' sections as Bun's HTML holds them, in document order (review R1-2)", () => {
+  const random = seeded(20261014);
+  for (let index = 0; index < 1000; index += 1) {
+    let text = '';
+    for (let block = 0, count = 2 + random(6); block < count; block += 1) text += `${randomBlock(random, '', 0)}\n`;
+    if (random(5) === 0) text = text.replaceAll('\n', '\r\n');
+    expect({ text, sections: readDocument('spec.md', text).sections }).toEqual({
+      text,
+      sections: sectionsFromHtml(text),
+    });
+  }
+});
