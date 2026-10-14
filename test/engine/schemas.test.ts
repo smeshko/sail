@@ -204,10 +204,7 @@ test('run: an unknown key is not allowed and a missing source is required', () =
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a roster entry lists its tools by name, in run.json and in run:start, each a non-empty string', () => {
+test('a roster entry lists its tools by name, in run.json and in run:start, each a non-empty string', () => {
   const tools = ['WebFetch', 'linear:get_issue', 'github:*'];
   const entry = (permissions: unknown) => ({ spec: { kind: 'agent', origin: 'repo:.sail/stages/spec', permissions } });
   const listing = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [], tools };
@@ -221,10 +218,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('permission:denied names tools as its rule, with the tools the step lists; mcp is no rule', () => {
+test('permission:denied names tools as its rule, with the tools the step lists; mcp is no rule', () => {
   const denied = {
     ...envelope,
     type: 'permission:denied',

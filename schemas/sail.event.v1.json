@@ -318,7 +318,8 @@
         "commands": { "type": "array", "items": { "type": "string" } },
         "network": {
           "oneOf": [{ "const": "none" }, { "type": "array", "items": { "type": "string" } }]
-        }
+        },
+        "tools": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       },
       "additionalProperties": false
     },
@@ -1055,7 +1056,7 @@
       "properties": {
         "callId": { "type": "string" },
         "tool": { "type": "string" },
-        "rule": { "enum": ["read", "write", "commands", "network"] },
+        "rule": { "enum": ["read", "write", "commands", "network", "tools"] },
         "permissions": { "$ref": "#/$defs/permissions" },
         "reason": { "type": "string" }
       },

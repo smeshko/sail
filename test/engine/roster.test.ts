@@ -159,10 +159,7 @@ test("an agent records its permissions as declared, network included, and leaves
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('an agent records the tools it lists as declared, and run.json takes them', () => {
+test('an agent records the tools it lists as declared, and run.json takes them', () => {
   const listing = { ...permissions, tools: ['WebFetch', 'linear:*'] };
   const step = agent('fetcher', { prompt: './p.md', output: Out, permissions: listing, budget });
   const entry = entryOf(step);
