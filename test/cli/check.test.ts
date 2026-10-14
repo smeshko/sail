@@ -293,10 +293,7 @@ test('a workflow that throws on import is refused, naming the file', async () =>
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a watched workflow with a cap of 0, written past the types, is refused, naming its workflow.ts', async () => {
+test('a watched workflow with a cap of 0, written past the types, is refused, naming its workflow.ts', async () => {
   await withTempRepo(async (repo) => {
     const workflow = join(copyFixture(repo.dir), 'workflows', 'ticket-to-pr', 'workflow.ts');
     const text = readFileSync(workflow, 'utf8');
@@ -311,10 +308,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a watched workflow whose own intake accepts only pr is refused, naming its workflow.ts', async () => {
+test('a watched workflow whose own intake accepts only pr is refused, naming its workflow.ts', async () => {
   await withTempRepo(async (repo) => {
     const reviews = join(copyFixture(repo.dir), 'workflows', 'reviews');
     mkdirSync(reviews);

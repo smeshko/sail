@@ -10,10 +10,7 @@ const declared = (options: Record<string, unknown>, on = ticket): Workflow =>
 
 const prOnly = intake('pr-review', { accepts: ['pr'], output: z.object({}) });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each([
+test.each([
   ['30s', 30_000],
   ['5m', 300_000],
   ['1.5h', 5_400_000],
@@ -29,10 +26,7 @@ test
   expect(parseEvery(every)).toBe(ms);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each([
+test.each([
   [
     'watch without maxConcurrentRuns',
     { watch: { every: '5m' } },
@@ -77,28 +71,19 @@ test
   expect(watchProblem(declared(options))).toBe(message);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('watchProblem refuses an intake that accepts only pr, naming pr and the ticket-only polling', () => {
+test('watchProblem refuses an intake that accepts only pr, naming pr and the ticket-only polling', () => {
   expect(watchProblem(declared({ watch: { every: '5m' }, maxConcurrentRuns: 2 }, prOnly as never))).toBe(
     "its intake 'pr-review' accepts pr, and sail polls only ticket sources so far",
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("watchProblem finds nothing in an unwatched workflow, or in the fixture's watch on the ticket intake", () => {
+test("watchProblem finds nothing in an unwatched workflow, or in the fixture's watch on the ticket intake", () => {
   expect(watchProblem(declared({}))).toBeUndefined();
   expect(watchProblem(declared({ watch: { every: '5m' }, maxConcurrentRuns: 2 }))).toBeUndefined();
   expect(watchProblem(declared({}, prOnly as never))).toBeUndefined();
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("watchLabel is the watch's own label, then project.yaml's, then sail's", () => {
+test("watchLabel is the watch's own label, then project.yaml's, then sail's", () => {
   const own = declared({ watch: { every: '5m', label: 'review' }, maxConcurrentRuns: 2 });
   const plain = declared({ watch: { every: '5m' }, maxConcurrentRuns: 2 });
   expect(watchLabel(own, { label: 'team' })).toBe('review');
