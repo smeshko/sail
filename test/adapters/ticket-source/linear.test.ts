@@ -318,6 +318,43 @@ test('a team Linear doesn’t have is not_found, naming it, where an empty list 
   expect([await adapter.listDesignated('nobody'), real.operations()]).toEqual([[], ['SailDesignated', 'SailTeam']]);
 });
 
+test('a page that says another follows but gives no cursor, or one it gave before, is unavailable, not a loop or a short answer (review R1-7)', async () => {
+  const comments = [1, 2, 3, 4, 5].map((n) => ({ body: `Comment ${n}`, createdAt: `2026-10-0${n}T09:00:00.000Z` }));
+  const seed = seedOf(RENAMED_STATES, [{ number: 1, title: 'Talk', state: 'Ready', labels: ['sail'], comments }], 2);
+  const commentsPage = (endCursor: string | null) => ({
+    status: 200,
+    body: { data: { issue: { comments: { nodes: [], pageInfo: { hasNextPage: true, endCursor } } } } },
+  });
+  const noCursor = linear(seed);
+  noCursor.world.failNext('SailTicketComments', commentsPage(null));
+  const again = linear(seed);
+  again.world.failNext('SailTicketComments', commentsPage('1'));
+  const list = linear(seed);
+  list.world.failNext('SailDesignated', {
+    status: 200,
+    body: { data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } } } },
+  });
+  const errors = [
+    await rejection(noCursor.adapter.get('ADW-1')),
+    await rejection(again.adapter.get('ADW-1')),
+    await rejection(list.adapter.listDesignated('sail')),
+  ];
+  expect(errors.map(failure)).toEqual([
+    [
+      { port: 'ticketSource', op: 'get', code: 'unavailable' },
+      'ticketSource.get: Linear said another page of the comments of ADW-1 follows, but gave no cursor',
+    ],
+    [
+      { port: 'ticketSource', op: 'get', code: 'unavailable' },
+      'ticketSource.get: Linear said another page of the comments of ADW-1 follows, but gave cursor 1 again',
+    ],
+    [
+      { port: 'ticketSource', op: 'listDesignated', code: 'unavailable' },
+      'ticketSource.listDesignated: Linear said another page of the designated tickets follows, but gave no cursor',
+    ],
+  ]);
+});
+
 /**
  * A document's complexity as Linear scores it (https://linear.app/developers/rate-limiting), from above: a field with a
  * selection is an object of 1 point, a leaf 0.1, and a field's children count `first` times, 50 times for a connection
