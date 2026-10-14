@@ -6,7 +6,7 @@
 // this clone takes the entry: the dashboard shows this clone's runs. A stale entry, whose `.sail/` is gone, is replaced
 // without a word.
 import { existsSync, realpathSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { ProjectConfig } from '../engine/config';
 import { findGitRoot } from '../engine/sail-dir';
 import { cloneRemote, machineDir, readEntry, recordEntry, registryDir } from '../watch/registry';
@@ -23,8 +23,11 @@ export async function registerRepository(
   const env = io.env ?? process.env;
   const dir = registryDir(machineDir(env));
   try {
-    const sailDir = realpathSync(project.sailDir);
-    const clone = findGitRoot(sailDir) ?? dirname(sailDir);
+    // The run writes `.sail-runs/` beside the `.sail/` it was found by, so a `.sail/` that is a symlink is recorded
+    // there, under its directory's real path, and not where the link leads.
+    const parent = realpathSync(dirname(project.sailDir));
+    const sailDir = join(parent, basename(project.sailDir));
+    const clone = findGitRoot(parent) ?? parent;
     const remote = await cloneRemote(clone, env);
     const { name } = project.config;
     const before = readEntry(dir, name);
