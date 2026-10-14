@@ -1,7 +1,8 @@
 // Runs a workflow to its end: open the run, then loop. Each turn replays the workflow against the journal, runs the call
 // the replay stopped at, and journals it, until a replay ends the run and STATUS records how. Start, continue and resume
-// are this one loop: a resume enters it with an existing run directory. Until runs get a workspace of their own,
-// scripts run in the directory that holds `.sail/`.
+// are this one loop: a resume enters it with an existing run directory. Every step runs in the run's workspace, while
+// `.sail/` and everything a run records stay the repository's: paths are recorded relative to the directory that holds
+// `.sail/`.
 //
 // A run runs its intake before the first replay and journals it as `intake#1`, the journal's first line.
 // Every replay is handed that entry beside the stage entries, so a resume reads the input from the journal and never
@@ -9,9 +10,18 @@
 // nothing can route on it.
 //
 // What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
-// that is running. A workspace event carries none. The claim is made before the run directory exists, so a fresh run
-// reports it from its result, right after `run:start` and with no key: `ticket:claimed`, or `ticket:updated` for a
-// forced move, then `ticket:commented`. A resume reports none of it again.
+// that is running. A workspace event carries none, and its path is made relative to the repository root. The lease, the
+// workspace and the claim are made before the run directory holds anything, so a fresh run reports them from what
+// opening it collected, right after `run:start` and with no key: `workspace:leased` and `workspace:created`, then
+// `ticket:claimed`, or `ticket:updated` for a forced move, then `ticket:commented`. A resume reports its renewed
+// lease first, and none of the rest again.
+//
+// A gitDiff binding is resolved just before its call, through the Workspace port's `diff()` on the run's workspace, and
+// handed to the call as a patch. A diff that fails fails the run with `workflow_failed`, before the call is written.
+//
+// A run that completes or fails releases its workspace, then its lease, once STATUS says how it ended and before
+// `run:end`. A workspace that can't be removed doesn't keep the lease: it is left for a sweep, and `run:end` says so. A
+// suspended run keeps both, and so does a crashed one, whose lease goes stale with its pid.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
@@ -32,11 +42,12 @@
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
 // `run:end` ends the stream: a replay an abort abandoned may move on once its workflow stops waiting, since the CLI
 // only sets an exit code, but nothing it reports after that is emitted.
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
+import { PortError } from '../ports/errors';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
@@ -49,7 +60,14 @@ import {
   type NewJournalEntry,
   readJournal,
 } from './journal';
-import { type OpenedRun, type OpenRunOptions, openRun, type ReopenRunOptions, reopenRun } from './open-run';
+import {
+  type OpenedRun,
+  type OpenRunOptions,
+  openRun,
+  type ReopenRunOptions,
+  reopenRun,
+  rootRelative,
+} from './open-run';
 import { type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
 
@@ -202,18 +220,41 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   const replayEmit: Emit = (event) => {
     if (!ended) bus.emit(event);
   };
-  /** Emits what an adapter emitted, under the running call's key. A workspace event has none, nor one between calls. */
+  const root = dirname(sailDir);
+  /**
+   * Emits what an adapter emitted, under the running call's key. A workspace event has none, nor one between calls, and
+   * its path is relative to the repository root.
+   */
   const relayed = (event: ProviderEvent): void => {
     if (ended) return;
-    const keyed = running !== undefined && !event.type.startsWith('workspace:');
-    bus.emit((keyed ? { ...event, key: running } : event) as NewEvent);
+    if (event.type.startsWith('workspace:')) {
+      bus.emit(rootRelative(event, root) as NewEvent);
+      return;
+    }
+    bus.emit((running === undefined ? event : { ...event, key: running }) as NewEvent);
   };
   const detach = opened.relay.attach(relayed);
 
-  /** Records how the run ended in STATUS, then reports it. */
-  const finish = (end: RunEnd): RunEnd => {
+  /**
+   * Records how the run ended in STATUS, releases the workspace and the lease of a run that has ended for good, then
+   * reports it.
+   */
+  const finish = async (end: RunEnd): Promise<RunEnd> => {
     writeStatus(dir, end.status, end.stopReason);
-    const { status, stopReason, message } = end;
+    const { status, stopReason } = end;
+    let { message } = end;
+    if (status !== 'suspended') {
+      const { workspace } = opened;
+      const run = { runId, runDir: dir };
+      try {
+        await opened.adapters.workspace.release(run, false);
+      } catch (error) {
+        if (!(error instanceof PortError)) throw error;
+        const why = `its workspace at ${relative(root, workspace.path)} was not removed: ${error.message}`;
+        message = message === undefined ? why : `${message}; ${why}`;
+      }
+      await opened.adapters.workspace.releaseLease(workspace.remote, workspace.branch, runId);
+    }
     ended = true;
     bus.emit({
       type: 'run:end',
@@ -225,11 +266,11 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     });
     return end;
   };
-  const failed = (stopReason: StopReason, message: string): RunEnd =>
+  const failed = (stopReason: StopReason, message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'failed', stopReason, message });
-  const suspended = (stopReason: 'interrupted' | 'until', message: string): RunEnd =>
+  const suspended = (stopReason: 'interrupted' | 'until', message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'suspended', stopReason, message });
-  const interrupted = (message: string): RunEnd => suspended('interrupted', message);
+  const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
   let reached = false;
@@ -245,18 +286,20 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         adapters: header.adapters,
         ...(header.budget === undefined ? {} : { budget: header.budget }),
       });
-      // What the claim did to the ticket, before this stream existed to hear it. No call was running, so no key.
-      for (const event of opened.claimed) bus.emit(event);
     }
+    // What opening the run did, before this stream existed to hear it: the lease and the workspace, then what the claim
+    // did to the ticket. No call was running, so no key.
+    for (const event of opened.started) bus.emit(event);
+    for (const event of opened.claimed) bus.emit(event);
     // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
     let [intake] = readJournal(dir).entries;
     if (intake === undefined) {
       const body = intakeBody(loaded.intake);
       if (body === undefined) {
         const name = loaded.intake.definition.name;
-        return failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
+        return await failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
       }
-      if (signal?.aborted) return interrupted(`stopped before ${INTAKE_KEY}`);
+      if (signal?.aborted) return await interrupted(`stopped before ${INTAKE_KEY}`);
       running = INTAKE_KEY;
       const { result, paths } = await runIntake({
         runDir: dir,
@@ -270,7 +313,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         emit: bus.emit,
         clock,
       });
-      if (signal?.aborted) return interrupted(`stopped during ${INTAKE_KEY}`);
+      if (signal?.aborted) return await interrupted(`stopped during ${INTAKE_KEY}`);
       intake = appendJournal(dir, entryFrom(dir, result, paths), clock());
       bus.emit({ type: 'journal:append', key: intake.key, line: intake.seq, outcome: intake.outcome });
       running = undefined;
@@ -278,12 +321,12 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     } else if (intake.key !== INTAKE_KEY) {
       const { ticketKey } = header.source;
       const message = `the journal of a run from ticket ${ticketKey} starts with '${intake.key}', not '${INTAKE_KEY}'`;
-      return failed('determinism_violation', message);
+      return await failed('determinism_violation', message);
     }
     // Checked on every start, not only when the intake just ran: a crash between the journal line and STATUS must
     // not replay a workflow that has no input.
     if (intake.outcome !== 'passed') {
-      return failed('stage_error', `${INTAKE_KEY} ended in ${intake.outcome}: ${intake.reason ?? ''}`);
+      return await failed('stage_error', `${INTAKE_KEY} ended in ${intake.outcome}: ${intake.reason ?? ''}`);
     }
     while (true) {
       replays++;
@@ -304,18 +347,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         emit: replayEmit,
       });
       const end = await unlessAborted(replaying, signal);
-      if (end === undefined) return interrupted('stopped during the replay');
-      if (end.kind === 'completed') return finish({ runId, dir, status: 'completed', result: end.result });
-      if (end.kind === 'failed') return failed(end.stopReason, end.message);
+      if (end === undefined) return await interrupted('stopped during the replay');
+      if (end.kind === 'completed') return await finish({ runId, dir, status: 'completed', result: end.result });
+      if (end.kind === 'failed') return await failed(end.stopReason, end.message);
 
       const { call } = end;
       // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it.
-      if (reached) return suspended('until', `stopped after ${last}, as --until asked`);
+      if (reached) return await suspended('until', `stopped after ${last}, as --until asked`);
       running = call.key;
       const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
       const problems = callProblems(call.definition, call.supplied, agent);
-      if (problems.length > 0) return failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
-      if (signal?.aborted) return interrupted(`stopped before ${call.key}`);
+      if (problems.length > 0) return await failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
+      if (signal?.aborted) return await interrupted(`stopped before ${call.key}`);
       const { result, paths } = await runCall({
         runDir: dir,
         runId,
@@ -335,7 +378,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         emit: bus.emit,
         clock,
       });
-      if (signal?.aborted) return interrupted(`stopped during ${call.key}`);
+      if (signal?.aborted) return await interrupted(`stopped during ${call.key}`);
       const journaled = appendJournal(dir, entryFrom(dir, result, paths), clock());
       bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
       running = undefined;

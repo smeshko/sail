@@ -1,6 +1,6 @@
 // A run's directory, `.sail-runs/<ticket key>-<ulid>/` beside `.sail/`, and its STATUS file, which holds the run's
 // status and, for a failed or suspended run, its stop reason. The run id's ticket key comes from the run's source.
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createDir, replaceFile } from './durable';
 
@@ -41,8 +41,13 @@ export function createRunDir(sailDir: string, runId: string): string {
   return dir;
 }
 
-/** Removes the run directory `dir`. Stub for TASK-004 (ADW-93): removes nothing. */
-export function removeRunDir(_dir: string): void {}
+/**
+ * Removes the run directory `dir` and all it holds. Only a refused start does this, to undo the directory it made
+ * before anything was written to it but the workspace, which is released first.
+ */
+export function removeRunDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true });
+}
 
 const STATUSES = ['running', 'suspended', 'completed', 'failed'] as const;
 export type Status = (typeof STATUSES)[number];

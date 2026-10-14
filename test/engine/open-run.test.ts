@@ -319,10 +319,7 @@ test('reopenRun reopens a suspended run with the header on disk, nothing a claim
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('openRun creates an empty events.ndjson beside the journal, and its events start at seq 1', async () => {
+test('openRun creates an empty events.ndjson beside the journal, and its events start at seq 1', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const run = await opened(repo.dir);
@@ -592,10 +589,7 @@ async function adaptersWith<Op extends 'claim' | 'comment'>(
   return adapters;
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('openRun from a ticket claims it once its workspace exists and before run.json is written: run.json holds the source with nothing forced and the claim, and the ticket is In Progress with a comment naming the run', async () => {
+test('openRun from a ticket claims it once its workspace exists and before run.json is written: run.json holds the source with nothing forced and the claim, and the ticket is In Progress with a comment naming the run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runsAtComment: string[][] = [];
@@ -762,10 +756,7 @@ test("a claim whose answer carries more than the state's type and name opens the
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a run directory that cannot be written once the ticket has moved throws, naming the state it is in and the run its comment names', async () => {
+test('a run directory that cannot be written once the ticket has moved throws, naming the state it is in and the run its comment names', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runs = join(repo.dir, '.sail-runs');

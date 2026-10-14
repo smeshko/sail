@@ -370,10 +370,7 @@ test('a type error in the workflow is printed where it is, then refused with exi
 
 // The ticket: claimed as the run starts, forced past its checks, and stopped by --until.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('sail FAKE-1 claims the ticket for its one run: run.json records nothing forced and the claim, the stream reports it, and the ticket is In Progress with a comment naming the run', async () => {
+test('sail FAKE-1 claims the ticket for its one run: run.json records nothing forced and the claim, the stream reports it, and the ticket is In Progress with a comment naming the run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const { code, stderr, runs, runId, header, events, ticket } = await started(repo.dir, ['FAKE-1']);
@@ -443,10 +440,7 @@ test('a second sail FAKE-1 is refused with exit 3 as already claimed, and adds n
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a second sail FAKE-1 --force runs: it moves the ticket through update, records the state check as overridden and the claim as not taken, and comments again', async () => {
+test('a second sail FAKE-1 --force runs: it moves the ticket through update, records the state check as overridden and the claim as not taken, and comments again', async () => {
   await withTempRepo(async (repo) => {
     const first = await afterFirstRun(repo.dir);
     const second = await started(repo.dir, ['FAKE-1', '--force']);
@@ -946,10 +940,7 @@ test('sail FAKE-1 stops an agent stage at its maxTurns: budget_exceeded, the usa
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('sail FAKE-1 --force on a branch a suspended run leases exits 3 naming that run, with no second run directory and the ticket as that run left it', async () => {
+test('sail FAKE-1 --force on a branch a suspended run leases exits 3 naming that run, with no second run directory and the ticket as that run left it', async () => {
   await withTempRepo(async (repo) => {
     await withTempRepo(async (from) => {
       writeStub(from.dir);
@@ -976,10 +967,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("sail FAKE-1 whose workspace can't be made exits 3, with the ticket untouched and no run directory, worktree or lease left", async () => {
+test("sail FAKE-1 whose workspace can't be made exits 3, with the ticket untouched and no run directory, worktree or lease left", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(sail, 'project.yaml', 'workspace: { use: fake }', 'workspace: { use: fake, defaultBranch: missing }');

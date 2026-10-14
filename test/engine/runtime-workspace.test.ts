@@ -82,10 +82,7 @@ const TESTS_BODY = 'pass_at=2';
 
 // The start: lease, run directory and workspace, claim, run.json.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a fresh run leases its branch before its run directory exists and makes its workspace before the claim, and run.json records the branch, the repository and the workspace', async () => {
+test('a fresh run leases its branch before its run directory exists and makes its workspace before the claim, and run.json records the branch, the repository and the workspace', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const adapters = await fakeAdapters(repo.dir);
@@ -131,10 +128,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a completed run reports its lease and workspace right after run:start, each path relative to the repository, and releases both before run:end', async () => {
+test('a completed run reports its lease and workspace right after run:start, each path relative to the repository, and releases both before run:end', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ran(repo.dir);
@@ -193,10 +187,7 @@ async function refusedStart(change: (adapters: ResolvedAdapters, abort: () => vo
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a start refused at a claim lost to another start, or aborted once its workspace exists, leaves no run directory, no worktree and no lease, and the ticket as it was', async () => {
+test('a start refused at a claim lost to another start, or aborted once its workspace exists, leaves no run directory, no worktree and no lease, and the ticket as it was', async () => {
   const lostClaim = await refusedStart((adapters) => {
     adapters.ports.ticketSource.claim = async () => ({
       claimed: false,
@@ -227,10 +218,7 @@ test
 
 // The end: a suspended run keeps both, a run that ended for good releases both.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a suspended run keeps its worktree and its lease, and a failed run releases both', async () => {
+test('a suspended run keeps its worktree and its lease, and a failed run releases both', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const suspended = await ran(repo.dir, { until: 'spec' });
@@ -258,10 +246,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a run whose workspace can't be removed still releases its lease, and its run:end says which workspace it left", async () => {
+test("a run whose workspace can't be removed still releases its lease, and its run:end says which workspace it left", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     // Read-only once publish#1 is journaled: git can't take the worktree's files out of it, and neither can rm.
@@ -295,10 +280,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, 'completed' | 'running']>([
+test.each<[string, 'completed' | 'running']>([
   ['whose run completed', 'completed'],
   ['whose run was running in a process now gone', 'running'],
 ])('a stale lease %s is taken over, and workspace:leased names the run it took from', async (_, status) => {

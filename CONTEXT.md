@@ -243,7 +243,7 @@ The named reason a run ended without completing, such as `workflow_failed`, `sta
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
-A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, or a leased branch. A refusal leaves no run directory.
+A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory.
 _Avoid_: rejection, abort, error (an outcome)
 
 **Suspended**:
