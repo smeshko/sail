@@ -2,7 +2,7 @@
 // request, no CORS, and the REST routes over two registered clones that each hold a copy of the golden run. Every
 // server starts on port 0 and is stopped after its test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, rmSync, symlinkSync, truncateSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { type Dashboard, guard, startDashboard } from '../../src/dashboard/server';
@@ -229,4 +229,13 @@ test('a call log that is a FIFO or a directory gets 404 at once, and a huge one 
   } finally {
     writer.kill();
   }
+});
+
+test('a read that throws answers JSON 500, not an HTML page with a stack (review #1.6)', async () => {
+  const server = start();
+  renameSync(m.registryDir, `${m.registryDir}-moved`);
+  writeFileSync(m.registryDir, 'not a directory\n');
+  const failed = await get(server, '/api/repos');
+  expect([failed.status, failed.type]).toEqual([500, 'application/json;charset=utf-8']);
+  expect(JSON.parse(failed.body)).toEqual({ error: expect.any(String) });
 });
