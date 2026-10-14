@@ -823,10 +823,7 @@ test("problems() reports a derived key two of a step's documents share, naming b
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a valid document is reported produced and then valid, and the result records its checks on the file and the facts in derived, as sail.result.v1 holds them', async () => {
+test('a valid document is reported produced and then valid, and the result records its checks on the file and the facts in derived, as sail.result.v1 holds them', async () => {
   const step = documented();
   const s = documentSetup(step);
   const run = await agentKind.run(
@@ -848,10 +845,7 @@ test
   expect(resultIssues(run)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a document with a placeholder left, or a required section missing, ends the try in error with an invalid_output per problem naming the file and check, beside any output problem, and still records the facts derived', async () => {
+test('a document with a placeholder left, or a required section missing, ends the try in error with an invalid_output per problem naming the file and check, beside any output problem, and still records the facts derived', async () => {
   const step = documented();
   // The session leaves the template as it was.
   const left = documentSetup(step);
@@ -883,10 +877,7 @@ test
   expect(both.record).toMatchObject({ validationFailed: true, derived: { tasks: 2 } });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {
+test('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {
   const step = documented({
     produces: { 'spec.md': specDoc(), 'plan.md': doc('./templates/spec.md', [noPlaceholders()]) },
   });

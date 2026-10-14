@@ -1397,10 +1397,7 @@ function documentStep(repo: TempRepo) {
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a document left as its template is corrected once: try-2 starts from the template afresh, its prompt ends with each validator message, and the call ends done with the facts derived', async () => {
+test('a document left as its template is corrected once: try-2 starts from the template afresh, its prompt ends with each validator message, and the call ends done with the facts derived', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const step = documentStep(repo);
@@ -1440,10 +1437,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a document invalid in both tries ends the call in error on its second, listing the distinct problems of both', async () => {
+test('a document invalid in both tries ends the call in error on its second, listing the distinct problems of both', async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const harness = fake([
