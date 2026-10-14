@@ -156,9 +156,10 @@ export function noPlaceholders(): Validator {
     derives: [],
     validate: ({ text }) => {
       const problems: string[] = [];
-      // The line is counted on from the last tag, so the text is read once however many tags it holds.
+      // The line is counted on from the last tag, and `newline` is the first not yet counted, so each newline is found
+      // once however many tags the text holds.
       let line = 1;
-      let counted = 0;
+      let newline = text.indexOf('\n');
       for (let start = text.indexOf('{{'); start !== -1; ) {
         const close = text.indexOf('}}', start + 2);
         if (close === -1) break;
@@ -166,8 +167,7 @@ export function noPlaceholders(): Validator {
         if (colon !== -1) {
           // An unclosed `{{` runs on into the tag after it: the tag named is the last `{{` before the colon.
           const from = text.lastIndexOf('{{', start + colon);
-          for (let at = text.indexOf('\n', counted); at !== -1 && at < from; at = text.indexOf('\n', at + 1)) line += 1;
-          counted = from;
+          for (; newline !== -1 && newline < from; newline = text.indexOf('\n', newline + 1)) line += 1;
           const body = text.slice(from + 2, close);
           const name = body.slice(0, body.indexOf(':')).trim();
           problems.push(`line ${line} still holds the placeholder {{${name}: …}}`);
