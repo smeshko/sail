@@ -146,6 +146,27 @@ test('parallel tool calls of one turn close it once, and each update is the runn
   });
 });
 
+// Review R1-4: the CLI runs a tool while the model still writes the turn, so a tool's result can come between two
+// messages of one id. The turn is still counted once, with the last usage its id carried.
+test("a tool result between two messages of one turn doesn't count the turn twice: its id keeps its last usage", () => {
+  const { reader: r } = reader();
+  const events = readAll(r, [
+    assistantToolUse('m1', 'a', 'Read', { file_path: 'a.ts' }, { usage: { input: 10, output: 4, cacheRead: 100 } }),
+    toolResult('a'),
+    assistantToolUse('m1', 'b', 'Read', { file_path: 'b.ts' }, { usage: { input: 10, output: 8, cacheRead: 100 } }),
+    toolResult('b'),
+    assistantText('m2', 'Read both.', { usage: { input: 5, output: 6 } }),
+  ]);
+  const settled = r.settle(undefined);
+  const tokens = (input: number, output: number) => ({ input, cacheRead: 100, cacheWrite: 0, output });
+  expect([...updates(events), ...updates(settled)]).toEqual([
+    { type: 'usage:update', turn: 1, tokens: tokens(10, 4), costUsdSoFar: 0 },
+    { type: 'usage:update', turn: 1, tokens: tokens(10, 8), costUsdSoFar: 0 },
+    { type: 'usage:update', turn: 2, tokens: tokens(15, 14), costUsdSoFar: 0 },
+  ]);
+  expect({ turns: r.state().turns, input: r.state().spent.inputTokens }).toEqual({ turns: 2, input: 15 });
+});
+
 test("settling on a result closes the open turn, then gives the result's totals over every model, at its total cost", () => {
   const { reader: r } = reader();
   r.read(assistantText('m1', 'Done.', { usage: { input: 3, output: 7 } }));
