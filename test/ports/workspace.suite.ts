@@ -359,10 +359,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     }).toEqual({ gone: invalid, notAWorktree: invalid, baseLost: invalid });
   });
 
-  // biome-ignore format: TDD-PENDING TASK-006
-  test
-    .skip // TDD-PENDING TASK-006
-    (`${label}: a renewal is refused while its run is alive in another process, and taken once that process is gone`, async () => {
+  test(`${label}: a renewal is refused while its run is alive in another process, and taken once that process is gone`, async () => {
     const { adapter, world } = await start();
     const r1 = await world.run('r1');
     const other = liveProcess();

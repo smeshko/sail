@@ -254,10 +254,7 @@ test('two branches of one remote, and one branch of two remotes, lease apart', (
   ]).toEqual(['r1', 'r2', 'r3']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a renewal is refused while its run is alive in another process, running or with no STATUS yet, and taken once that process is gone or the run is suspended', async () => {
+test('a renewal is refused while its run is alive in another process, running or with no STATUS yet, and taken once that process is gone or the run is suspended', async () => {
   const dir = tempDir();
   const other = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
   try {

@@ -684,10 +684,7 @@ test('a run whose loop exceeds its max ends its stream with loop:exit exceeded, 
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a resume appends to the interrupted run's events, continuing seq with no marker", async () => {
+test("a resume appends to the interrupted run's events, continuing seq with no marker", async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);

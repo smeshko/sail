@@ -110,14 +110,6 @@ export interface OpenedWorkspace {
   remote: string;
 }
 
-/** Stub for TASK-006 (ADW-93): a resume's workspace is the directory that holds `.sail/`, on no branch, with no base. */
-const noWorkspace = (sailDir: string): OpenedWorkspace => ({
-  path: dirname(sailDir),
-  branch: '',
-  baseSha: '',
-  remote: '',
-});
-
 export interface OpenRunOptions {
   /** Where the run starts from: `.sail/` is found from here up to the git root. */
   cwd: string;
@@ -461,6 +453,41 @@ export function changedAdapters(header: RunHeader, entries: Record<Port, Adapter
 }
 
 /**
+ * Renews the run's lease and reopens its workspace, or says why the run can't resume there: it predates workspaces, it
+ * is still alive in another process, another run holds its branch, or its workspace is gone or has lost its base. A
+ * refusal from `reopen()` leaves the lease renewed, since the run still owns it.
+ */
+async function resumeWorkspace(
+  port: WorkspacePort,
+  run: RunRef,
+  header: RunHeader,
+): Promise<OpenedWorkspace | { refused: string }> {
+  const { branch, repository } = header;
+  if (branch === undefined || repository === undefined) {
+    return { refused: `run ${run.runId} started before runs had workspaces: it has no workspace to resume in` };
+  }
+  let leased: Awaited<ReturnType<WorkspacePort['lease']>>;
+  try {
+    leased = await port.lease(repository.url, branch, { runId: run.runId, runDir: run.runDir, pid: process.pid });
+  } catch (error) {
+    return { refused: `the branch ${branch} could not be leased: ${portRefusal(error)}` };
+  }
+  if (!leased.leased) {
+    const { holder } = leased;
+    if (holder.runId === run.runId) {
+      return { refused: `run ${run.runId} is still running, in process ${holder.pid}: stop it before resuming it` };
+    }
+    return { refused: leasedBy(branch, holder) };
+  }
+  try {
+    const reopened = await port.reopen(run, { branch, baseSha: repository.baseSha });
+    return { path: reopened.path, branch, baseSha: repository.baseSha, remote: repository.url };
+  } catch (error) {
+    return { refused: `run ${run.runId}'s workspace can't be reopened: ${portRefusal(error)}` };
+  }
+}
+
+/**
  * Reopens an existing run: every check that can refuse comes first, and only then is STATUS set back to `running`. The
  * workflow is loaded as it reads now, so a stage it has come to name `intake` is refused here as at a start.
  */
@@ -477,6 +504,13 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in loaded) return loaded;
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
+  const { relay } = options.adapters;
+  let started: ProviderEvent[] = [];
+  const workspace = await collecting(relay, dirname(found.dir), (events) => {
+    started = events;
+    return resumeWorkspace(options.adapters.ports.workspace, { runId, runDir: run.dir }, run.header);
+  });
+  if ('refused' in workspace) return workspace;
   // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
   const firstSeq = nextSeq(run.dir);
   if (typeof firstSeq !== 'number') return firstSeq;
@@ -488,11 +522,11 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     header: run.header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
-    relay: options.adapters.relay,
+    relay,
     config: found.config,
     loaded,
-    workspace: noWorkspace(found.dir),
-    started: [],
+    workspace,
+    started,
     claimed: [],
     firstSeq,
   };

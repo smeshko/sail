@@ -528,10 +528,7 @@ const leasesIn = (repo: TempRepo): { runId: string; pid: number; runDir: string 
     : [];
 };
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("sail resume continues in the run's own worktree under a lease renewed with its pid, reports the renewal first, and releases both once it completes", async () => {
+test("sail resume continues in the run's own worktree under a lease renewed with its pid, reports the renewal first, and releases both once it completes", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(
@@ -579,10 +576,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail resume refuses a run still running in another process, naming its pid, and leaves its STATUS and lease as they were', async () => {
+test('sail resume refuses a run still running in another process, naming its pid, and leaves its STATUS and lease as they were', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     setSleepAt(repo.dir, 'implement#1');
@@ -612,10 +606,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail resume refuses a run whose lease another run took over once its process died, naming that run', async () => {
+test('sail resume refuses a run whose lease another run took over once its process died, naming that run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     setSleepAt(repo.dir, 'implement#1');
@@ -641,10 +632,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, (repo: TempRepo, dir: string) => void, string]>([
+test.each<[string, (repo: TempRepo, dir: string) => void, string]>([
   [
     'whose workspace is gone',
     (repo, dir) => {
