@@ -10,10 +10,7 @@ const read = (tool: string, paths: string[]) => call({ tool, kind: 'read', paths
 const unchecked = (kind: string, why: string) => ({ unchecked: why, kind });
 const TILDE = 'a path through ~ is not allowed, name it in full';
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each<[string, string, unknown, unknown, string?]>([
+test.each<[string, string, unknown, unknown, string?]>([
   [
     'Bash runs its command from the cwd',
     'Bash',
@@ -149,10 +146,7 @@ test
   expect(toToolCall(tool, input, CWD, mcpServer[0])).toEqual(expected as ReturnType<typeof toToolCall>);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("a call's cwd is the one the CLI reports, on every kind", () => {
+test("a call's cwd is the one the CLI reports, on every kind", () => {
   const cwds = [
     toToolCall('Bash', { command: 'ls' }, '/w/sub'),
     toToolCall('Read', { file_path: 'a' }, '/w/sub'),
@@ -169,10 +163,7 @@ const SPEC_STAGE: Permissions = {
   commands: ['git log *', 'git diff *'],
 };
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each<[string, Permissions, string[]]>([
+test.each<[string, Permissions, string[]]>([
   ['a read-only step reads, globs and greps', READ_ONLY, ['Read', 'Glob', 'Grep']],
   [
     "the fixture's spec stage also writes, edits and runs commands",
@@ -194,10 +185,7 @@ test
   }).toEqual({ tools, overlap: [], submission: false, together: [...BUILTIN_TOOLS].sort() });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("a read-only step's disallowed tools hold the shell, the writers, the web, subagents and plans", () => {
+test("a read-only step's disallowed tools hold the shell, the writers, the web, subagents and plans", () => {
   const { disallowedTools } = sessionTools(READ_ONLY);
   const risky = ['Bash', 'Write', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'TodoWrite'];
   expect(risky.filter((name) => !disallowedTools.includes(name))).toEqual([]);
