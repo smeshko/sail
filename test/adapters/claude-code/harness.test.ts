@@ -858,10 +858,7 @@ async function groupGone(pgid: number | undefined, ms = 2_000): Promise<boolean>
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an aborted session leaves no process of its group behind when run() resolves', async () => {
+test('an aborted session leaves no process of its group behind when run() resolves', async () => {
   const controller = new AbortController();
   const query = scriptedQuery([[init(), TREE, { act: 'waitForAbort' }]]);
   const result = await createClaudeCodeHarness({ env: {}, query }).run({
@@ -879,10 +876,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a session over its minutes leaves no process of its group behind when run() resolves', async () => {
+test('a session over its minutes leaves no process of its group behind when run() resolves', async () => {
   const { result, query } = await onTheClock([init(), TREE, { act: 'waitForAbort' }], async (clock) => {
     await Bun.sleep(200);
     await clock.advance(60_000);
@@ -895,10 +889,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a session that submits while its tree still runs leaves none of it behind when run() resolves', async () => {
+test('a session that submits while its tree still runs leaves none of it behind when run() resolves', async () => {
   const { query, result } = await play([init(), TREE, ...(SUITE.done ?? []).slice(1)]);
   spawnedPids.push(...query.pids);
   expect({ result: summary(result), spawned: query.pids.length, gone: await groupGone(query.pids[0]) }).toEqual({

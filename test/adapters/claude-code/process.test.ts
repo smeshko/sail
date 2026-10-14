@@ -45,10 +45,7 @@ const pidOf = (spawned: SpawnedProcess): number => {
   return pid ?? -1;
 };
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a spawned tree leads a group of its own, and reap leaves none of it, the background child included', async () => {
+test('a spawned tree leads a group of its own, and reap leaves none of it, the background child included', async () => {
   const spawner = createSpawner();
   const spawned = spawner.spawn({
     command: '/bin/sh',
@@ -64,10 +61,7 @@ test
   expect({ before, after: await settled(pid) }).toEqual({ before: true, after: 'ESRCH' });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a leader that exits by itself is reaped without waiting out the grace, and its child with it', async () => {
+test('a leader that exits by itself is reaped without waiting out the grace, and its child with it', async () => {
   const spawner = createSpawner();
   const spawned = spawner.spawn({
     command: '/bin/sh',
@@ -89,10 +83,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the SDK's signal stops the group when it aborts", async () => {
+test("the SDK's signal stops the group when it aborts", async () => {
   const spawner = createSpawner();
   const controller = new AbortController();
   const pid = pidOf(

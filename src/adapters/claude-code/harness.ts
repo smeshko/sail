@@ -7,6 +7,7 @@
 // Every tool call passes the gate first (7.3 D1): its PreToolUse hook asks the permission engine, and canUseTool denies
 // whatever still reaches it. The session is offered only the tools its step can use (D2). The CLI scrubs the provider's
 // credentials from the Bash tool's environment (D3), and returns that tool to the workspace after each command (D4).
+// The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
 import {
   type Options,
   type SDKMessage,
@@ -19,6 +20,7 @@ import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
 import { type BudgetTimers, createBudgetWatch } from './budget';
 import { createGate } from './gate';
 import { createSessionReader, type SessionReader } from './messages';
+import { createSpawner } from './process';
 import { toHarnessResult } from './result';
 import { SUBMIT_CONTRACT, submissionEnvelope } from './submission';
 import { type Denial, sessionTools } from './tool-call';
@@ -339,10 +341,13 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       });
       const progress: Progress = { said: [], deaf: false, started: false, ended: false };
       let onAbort: (() => void) | undefined;
+      // Each session's process leads a group of its own, gone before run() returns (D7).
+      const spawner = createSpawner();
       try {
-        const sessionAt = sessionOptions(request, options.env, (toolUseId, denial) =>
-          reader.markDenied(toolUseId, denial),
-        );
+        const sessionAt = {
+          ...sessionOptions(request, options.env, (toolUseId, denial) => reader.markDenied(toolUseId, denial)),
+          spawnClaudeCodeProcess: spawner.spawn,
+        };
         onAbort = () => sessionAt.abortController.abort();
         request.signal?.addEventListener('abort', onAbort, { once: true });
         return await session(request, reader, sessionAt, progress);
@@ -351,6 +356,7 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
         return failedOutright(request, reader, progress, error);
       } finally {
         if (onAbort !== undefined) request.signal?.removeEventListener('abort', onAbort);
+        await spawner.reap();
       }
     },
     capabilities: () => ({ ...CAPABILITIES, budgets: [...CAPABILITIES.budgets] }),
