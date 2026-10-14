@@ -161,10 +161,7 @@ if (process.env.SAIL_LIVE_TICKET_SOURCE === '1') ticketSourceSuite('linear (live
 
 // Reads.
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('parseKey takes a ticket key or a linear.app ticket URL, with or without its slug, query and fragment, and a key of another team as written', () => {
+test('parseKey takes a ticket key or a linear.app ticket URL, with or without its slug, query and fragment, and a key of another team as written', () => {
   const { adapter } = linear();
   const refs = [
     'ADW-23',
@@ -194,10 +191,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('get answers the ticket from one SailTicket request by team and number, and emits one ticket:fetched with its counts', async () => {
+test('get answers the ticket from one SailTicket request by team and number, and emits one ticket:fetched with its counts', async () => {
   const { world, adapter, capture } = linear();
   const ticket = await adapter.get('ADW-1');
   expect(parseIssues(Ticket, ticket)).toEqual([]);
@@ -224,10 +218,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('get reads a ticket with more comments than a page holds through one SailTicketComments request per extra page, and answers them all in order', async () => {
+test('get reads a ticket with more comments than a page holds through one SailTicketComments request per extra page, and answers them all in order', async () => {
   const comments = [1, 2, 3, 4, 5].map((n) => ({ body: `Comment ${n}`, createdAt: `2026-10-0${n}T09:00:00.000Z` }));
   const { world, adapter } = linear(
     seedOf(RENAMED_STATES, [{ number: 1, title: 'Talk', state: 'Ready', comments }], 2),
@@ -247,10 +238,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('get of an unknown ticket is not_found and emits nothing, and of a key of another team is invalid, naming both teams, without a request', async () => {
+test('get of an unknown ticket is not_found and emits nothing, and of a key of another team is invalid, naming both teams, without a request', async () => {
   const { world, adapter, capture } = linear();
   const missing = await rejection(adapter.get('ADW-999'));
   const sent = world.requests.length;
@@ -266,10 +254,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('listDesignated answers exactly the designated tickets in triage, backlog and unstarted-type states, by number, across pages, whatever the states are called', async () => {
+test('listDesignated answers exactly the designated tickets in triage, backlog and unstarted-type states, by number, across pages, whatever the states are called', async () => {
   const designated = ['sail'];
   const { world, adapter } = linear(
     seedOf(
@@ -296,10 +281,7 @@ test
   expect(world.operations()).toEqual(['SailDesignated', 'SailDesignated']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a failure Linear answers to SailDesignated or SailTicket rejects with the client’s PortError and Linear’s message', async () => {
+test('a failure Linear answers to SailDesignated or SailTicket rejects with the client’s PortError and Linear’s message', async () => {
   const { world, adapter } = linear();
   world.failNext('SailDesignated', RATE_LIMITED);
   world.failNext('SailTicket', {
