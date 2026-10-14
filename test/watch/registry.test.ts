@@ -123,3 +123,18 @@ test.each([
     expect(withoutUserinfo(url)).toBe(stripped);
   },
 );
+
+test.each([
+  ['a relative sailDir', { sailDir: '.sail' }],
+  ['a relative clone', { clone: 'work/alpha' }],
+])(
+  'an entry with %s is a problem, not an entry: the dashboard would read from its own directory (review #1.8)',
+  (_, fields) => {
+    const dir = registry();
+    put(dir, 'alpha.json', entry('alpha', fields));
+    put(dir, 'beta.json', entry('beta'));
+    const read = readRegistry(dir);
+    expect(read.entries).toEqual([entry('beta')]);
+    expect(read.problems).toEqual([{ file: 'alpha.json', message: expect.any(String) }]);
+  },
+);
