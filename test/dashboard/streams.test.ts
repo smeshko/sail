@@ -3,7 +3,7 @@
 // upgrade, and an upgrade needs this dashboard as its Origin, or the client header. Every wait polls for its condition
 // against a deadline, so a broken stream fails an assertion rather than hanging.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
 import { openRunStream } from '../../src/dashboard/streams';
@@ -230,3 +230,19 @@ test.each([
   },
   15_000,
 );
+
+test('an events.ndjson that links out of the run is refused before the upgrade, and one swapped in mid-follow ends the stream with an error (review #1.1)', async () => {
+  rmSync(join(m.alpha.runDir, 'events.ndjson'));
+  symlinkSync(join(m.beta.runDir, 'events.ndjson'), join(m.alpha.runDir, 'events.ndjson'));
+  const server = start();
+  expect(await upgradeStatus(server, `run=alpha/${GOLDEN_RUN_ID}`, HEADER)).toBe(404);
+  const { dir } = runningRun(40);
+  const socket = connect(server, `run=alpha/${RUNNING_ID}`);
+  expect(await until(() => events(socket).length === 40)).toBe(true);
+  symlinkSync(join(m.beta.runDir, 'events.ndjson'), join(dir, 'events.link'));
+  renameSync(join(dir, 'events.link'), join(dir, 'events.ndjson'));
+  expect(await until(() => socket.closed !== undefined)).toBe(true);
+  expect(events(socket)).toEqual(range(1, 40));
+  expect(socket.messages.at(-1)).toEqual({ kind: 'error', message: expect.stringContaining('events.ndjson') });
+  expect(socket.closed).toBe(1011);
+}, 15_000);
