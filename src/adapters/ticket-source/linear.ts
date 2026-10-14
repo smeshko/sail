@@ -106,8 +106,11 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       number: Number(number),
     });
     const [node] = data.issues.nodes;
-    if (node === undefined)
+    if (node === undefined) {
+      // A team Linear doesn't have answers no ticket too: say which it is.
+      await states(op);
       throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey} in team ${team}`);
+    }
     const comments = [...node.comments.nodes];
     let page = node.comments.pageInfo;
     while (page.hasNextPage) {
@@ -214,6 +217,8 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
         keys.push(...data.issues.nodes.map((node) => node.identifier));
         after = data.issues.pageInfo.hasNextPage ? data.issues.pageInfo.endCursor : null;
       } while (after !== null);
+      // A team Linear doesn't have lists nothing too: an empty list is checked against the team's existence.
+      if (keys.length === 0) await states('listDesignated');
       const tickets: Ticket[] = [];
       for (const key of keys) {
         const { node, comments } = await lookup('listDesignated', key);
