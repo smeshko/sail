@@ -39,17 +39,11 @@ function guard(): { canUseTool: CanUseTool; denied: [string, string][] } {
 const ask = (canUseTool: CanUseTool, tool: string, input: Record<string, unknown>, toolUseID = 'call-1') =>
   canUseTool(tool, input, { signal: new AbortController().signal, toolUseID, requestId: 'r1' });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the session has the five file tools and no other', () => {
+test('the session has the five file tools and no other', () => {
   expect([...FILE_TOOLS]).toEqual(['Read', 'Glob', 'Grep', 'Write', 'Edit']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, string, Record<string, unknown>]>([
+test.each<[string, string, Record<string, unknown>]>([
   ['Read of a file in the workspace, by its absolute path', 'Read', { file_path: join(cwd, 'src', 'a.ts') }],
   ['Read of a file in the workspace, by its real path', 'Read', { file_path: join(real, 'work', 'src', 'a.ts') }],
   ['Edit of a relative path', 'Edit', { file_path: 'src/a.ts' }],
@@ -65,10 +59,7 @@ test
   expect(denied).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, string, string]>([
+test.each<[string, string, string]>([
   ['an absolute path outside every root', 'Read', '/etc/hosts'],
   ['.. out of the workspace', 'Read', '../outside.txt'],
   ['a symlink in the workspace that leads out of it', 'Read', 'link/secret.txt'],
@@ -83,10 +74,7 @@ test
   expect(denied).toEqual([['toolu_9', reason]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('every tool but the file tools and StructuredOutput is denied, without interrupting the session', async () => {
+test('every tool but the file tools and StructuredOutput is denied, without interrupting the session', async () => {
   const { canUseTool, denied } = guard();
   const tools = ['Bash', 'WebFetch', 'WebSearch', 'mcp__x__y', 'Task', 'NotebookEdit', 'Unheard'];
   const answers = [];
@@ -97,10 +85,7 @@ test
   expect(denied).toEqual(tools.map((tool) => [`id-${tool}`, reason(tool)]));
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a file tool whose path is not a string is denied', async () => {
+test('a file tool whose path is not a string is denied', async () => {
   const { canUseTool, denied } = guard();
   const answers = [
     await ask(canUseTool, 'Read', { file_path: 3 }),
