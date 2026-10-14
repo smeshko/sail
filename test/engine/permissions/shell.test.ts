@@ -24,10 +24,7 @@ function nested(word: Word | undefined): string[][][][] {
   );
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   ['a | b', [[['a'], ['b']]]],
   ['a |& b', [[['a'], ['b']]]],
   ['a || b', [[['a']], [['b']]]],
@@ -41,18 +38,12 @@ test
   expect(argv(text)).toEqual(expected);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a pipeline ended by & runs in the background', () => {
+test('a pipeline ended by & runs in the background', () => {
   const parsed = parseCommand('a & b; c');
   expect(parsed.ok ? parsed.list.map((pipeline) => pipeline.background) : parsed.reason).toEqual([true, false, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('quotes and escapes come off, and the words stay literal', () => {
+test('quotes and escapes come off, and the words stay literal', () => {
   const command = only(`echo 'a b' "c d" e\\ f "\\$x \\" \\\\"`);
   expect(command.words.map((word) => [word.text, word.literal])).toEqual([
     ['echo', true],
@@ -63,26 +54,17 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a backslash before a newline joins the lines into one word', () => {
+test('a backslash before a newline joins the lines into one word', () => {
   expect(argv('r\\\nm -rf x')).toEqual([[['rm', '-rf', 'x']]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a # starting a word comments out the rest of the line; inside a word or quotes it is text', () => {
+test('a # starting a word comments out the rest of the line; inside a word or quotes it is text', () => {
   expect(argv('git diff # rm -rf /')).toEqual([[['git', 'diff']]]);
   expect(argv('echo a#b \'#c\' "#d"')).toEqual([[['echo', 'a#b', '#c', '#d']]]);
   expect(argv('# only a comment\nls')).toEqual([[['ls']]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('NAME=value before the command name is an assignment; after it, a word', () => {
+test('NAME=value before the command name is an assignment; after it, a word', () => {
   const command = only('FOO=1 BAR="x y" npm test');
   expect(command.assignments.map((a) => [a.name, a.value.text])).toEqual([
     ['FOO', '1'],
@@ -93,10 +75,7 @@ test
   expect([later.assignments.length, later.words.map((word) => word.text)]).toEqual([0, ['npm', 'FOO=1']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   ['cmd > out', [{ op: '>', target: 'out' }]],
   ['cmd >out', [{ op: '>', target: 'out' }]],
   ['cmd >> out', [{ op: '>>', target: 'out' }]],
@@ -130,10 +109,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a quoted heredoc's body is data, and the command's other redirections stay", () => {
+test("a quoted heredoc's body is data, and the command's other redirections stay", () => {
   const command = only("cat <<'EOF' > out.md\n$(rm -rf /)\nEOF");
   expect(command.words.map((word) => word.text)).toEqual(['cat']);
   expect(command.redirections.map((r) => [r.op, r.target?.text, r.heredoc])).toEqual([
@@ -142,10 +118,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("an unquoted heredoc's substitutions are nested commands, and the list goes on after its delimiter", () => {
+test("an unquoted heredoc's substitutions are nested commands, and the list goes on after its delimiter", () => {
   const parsed = parseCommand('cat <<EOF\nnow $(rm -rf /)\nEOF\nls');
   expect(parsed.ok ? 'parsed' : parsed.reason).toBe('parsed');
   if (!parsed.ok) return;
@@ -157,18 +130,12 @@ test
   expect(argv('cat <<EOF\nnow $(rm -rf /)\nEOF\nls')).toEqual([[['cat']], [['ls']]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('<<- strips the leading tabs of the body and of the delimiter line', () => {
+test('<<- strips the leading tabs of the body and of the delimiter line', () => {
   const command = only('cat <<-EOF\n\tline\n\t\tEOF');
   expect(command.redirections[0]?.heredoc?.body).toBe('line\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   ['echo $(rm -rf /)', 1, [[[['rm', '-rf', '/']]]]],
   ['echo `rm -rf /`', 1, [[[['rm', '-rf', '/']]]]],
   ['echo "$(rm -rf /)"', 1, [[[['rm', '-rf', '/']]]]],
@@ -180,26 +147,17 @@ test
   expect([nested(command.words[index]), command.words[index]?.literal]).toEqual([expected, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a substitution inside a substitution is nested in turn', () => {
+test('a substitution inside a substitution is nested in turn', () => {
   const outer = only('$(a $(b))').words[0];
   expect(nested(outer?.nested[0]?.[0]?.commands[0]?.words[1])).toEqual([[[['b']]]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("'$(x)' in single quotes is literal text", () => {
+test("'$(x)' in single quotes is literal text", () => {
   const word = only("echo '$(x)'").words[1];
   expect([word?.text, word?.literal, nested(word)]).toEqual(['$(x)', true, []]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('variables are recorded, kept as written, and make their words non-literal', () => {
+test('variables are recorded, kept as written, and make their words non-literal', () => {
   // biome-ignore lint/suspicious/noTemplateCurlyInString: shell syntax, not a template
   const words = only('echo $HOME ${STAGE_OUT}/x "$1" plain').words;
   expect(words.map((word) => [word.text, word.vars, word.literal])).toEqual([
@@ -212,10 +170,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an unquoted glob or a leading ~ makes a word non-literal; quoted, it is text', () => {
+test('an unquoted glob or a leading ~ makes a word non-literal; quoted, it is text', () => {
   const words = only("ls *.ts '*.ts' a?c [ab] ~/x '~/x'").words.slice(1);
   expect(words.map((word) => [word.text, word.literal, word.glob])).toEqual([
     ['*.ts', false, true],
@@ -227,10 +182,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a simple command keeps its text as written, for reasons', () => {
+test('a simple command keeps its text as written, for reasons', () => {
   const parsed = parseCommand('git  diff | head -5 && FOO=1 ls >x');
   expect(parsed.ok ? 'parsed' : parsed.reason).toBe('parsed');
   if (!parsed.ok) return;
@@ -241,10 +193,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   ['(cd x; ls)', 'a subshell'],
   ['{ ls; }', 'a brace group'],
   ['for f in *; do rm $f; done', 'a for loop'],
@@ -288,10 +237,7 @@ test
   expect(argv(text)).toEqual({ refused: expect.stringContaining(reason) });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  (`substitutions nest ${MAX_DEPTH} levels deep, and one more is refused`, () => {
+test(`substitutions nest ${MAX_DEPTH} levels deep, and one more is refused`, () => {
   const deep = (levels: number) => `${'echo $('.repeat(levels)}x${')'.repeat(levels)}`;
   const parsed = parseCommand(deep(MAX_DEPTH));
   expect([parsed.ok, argv(deep(MAX_DEPTH + 1))]).toEqual([
@@ -300,10 +246,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('empty and blank input is an empty list, not a refusal', () => {
+test('empty and blank input is an empty list, not a refusal', () => {
   expect([parseCommand(''), parseCommand('  \n\t ')]).toEqual([
     { ok: true, list: [] },
     { ok: true, list: [] },
