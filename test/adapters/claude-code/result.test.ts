@@ -183,6 +183,16 @@ test('an aborted session is error aborted, even when a result came', () => {
   );
 });
 
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a session over its minutes is error budget_exceeded naming maxMinutes, though it was aborted and threw for it', () => {
+  const thrown = { error: new Error('Claude Code process aborted by user') };
+  expect(summary(ending(undefined, [init()], { thrown, aborted: true, overMinutes: true }))).toEqual(
+    failure('budget exceeded: maxMinutes 10', 'max_minutes', 'budget_exceeded'),
+  );
+});
+
 test("the session id is the init's, else the result's, else empty", () => {
   const result = resultSuccess({ structured: done(SPEC), sessionId: 'from-result' });
   expect([

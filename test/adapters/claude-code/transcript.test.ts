@@ -31,7 +31,6 @@ test('thoughts, failed and denied tools, errors and a blocked end each get their
     { type: 'agent:thinking', text: 'First.\nSecond.' },
     { type: 'tool:end', callId: 't2', status: 'failed', durationMs: 3 },
     { type: 'tool:end', callId: 't3', status: 'denied', durationMs: 0 },
-    { type: 'budget:warning', budget: 'turns', limit: 40, used: 32 },
     { type: 'error:harness', message: 'the session failed: overloaded' },
     { type: 'harness:session_end', outcome: 'blocked', turns: 1, toolCalls: 2, denials: 1, usage: { costUsd: 0 } },
   ];
@@ -79,5 +78,44 @@ test('a tool input with a newline or a control character stays on one line, cut 
   expect(text.split('\n')).toEqual([
     'tool Write {"file_path":"a.md","content":"one\\ntwo\\u0007"} [t1]',
     `tool Write ${json.slice(0, 200)}… [t2]`,
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a denial renders between its tool's start and end, with its rule and reason", () => {
+  const text = renderTranscript([
+    { type: 'tool:start', callId: 't1', tool: 'Bash', input: { command: 'tail README.md' } },
+    {
+      type: 'permission:denied',
+      callId: 't1',
+      tool: 'Bash',
+      rule: 'commands',
+      permissions: { commands: ['git status'] },
+      reason: 'tail is not among the allowed commands',
+    },
+    { type: 'tool:end', callId: 't1', status: 'denied', durationMs: 0 },
+  ]);
+  expect(text.split('\n')).toEqual([
+    'tool Bash {"command":"tail README.md"} [t1]',
+    'denied Bash [t1] by commands: tail is not among the allowed commands',
+    'tool t1 denied in 0 ms',
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a budget warning and an overrun each get their line, naming the budget and what was used of it', () => {
+  const text = renderTranscript([
+    { type: 'budget:warning', budget: 'turns', limit: 40, used: 32 },
+    { type: 'budget:warning', budget: 'minutes', limit: 1, used: 0.8 },
+    { type: 'budget:exceeded', budget: 'usd', limit: 0.05, used: 0.051 },
+  ]);
+  expect(text.split('\n')).toEqual([
+    'budget turns at 32 of 40',
+    'budget minutes at 0.8 of 1',
+    'budget usd exceeded: 0.051 of 0.05',
   ]);
 });

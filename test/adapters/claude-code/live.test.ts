@@ -5,15 +5,21 @@
 //   SAIL_LIVE=1 bun run test test/adapters/claude-code/live.test.ts
 //
 // SAIL_LIVE_MODEL picks the model for the port suite and the spec stage; it defaults to claude-haiku-5-5, the cheapest.
+//
+// The guardrail cases (7.3), each under $0.10 on the default model: a denied command the session recovers from, no MCP
+// tool, a write outside the workspace, the credential scrub (`printenv`), the dollar, turn and minute budgets, and an
+// abort. The minute and abort cases also check that no process of the session is left, by its workspace path.
 import { describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createClaudeCodeHarness } from '../../../src/adapters/claude-code/harness';
 import { EXIT_FAILED, EXIT_SUSPENDED } from '../../../src/cli/exit-codes';
 import { readStatus } from '../../../src/engine/run-dir';
 import { readEvents } from '../../../src/events/consumers/ndjson';
-import type { HarnessRequest } from '../../../src/ports/harness';
+import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
+import type { HarnessResult } from '../../../src/ports/types';
 import { runDirIn } from '../../helpers/agent-fixture';
 import { copyFixture, edit } from '../../helpers/fixture';
 import { runCaptured } from '../../helpers/run-captured';
@@ -137,5 +143,113 @@ describe.skipIf(!LIVE)('claude-code live', () => {
     } finally {
       rmSync(config, { recursive: true, force: true });
     }
+  }, 600_000);
+
+  /** Runs `req` on the real harness, with every event it emitted. */
+  async function guarded(req: HarnessRequest, signalAfterStartMs?: number) {
+    const events: HarnessEvent[] = [];
+    const controller = new AbortController();
+    const result: HarnessResult = await createClaudeCodeHarness({ env: env() }).run({
+      ...req,
+      ...(signalAfterStartMs === undefined ? {} : { signal: controller.signal }),
+      onEvent: (event) => {
+        events.push(event);
+        if (event.type === 'harness:session_start' && signalAfterStartMs !== undefined) {
+          setTimeout(() => controller.abort(), signalAfterStartMs);
+        }
+      },
+    });
+    return { result, events };
+  }
+
+  const denialsIn = (events: readonly HarnessEvent[]) =>
+    events.flatMap((event) => (event.type === 'permission:denied' ? [event] : []));
+
+  /** The processes whose command line names `marker`: the session's temp folder, which its --add-dir arguments hold. */
+  const processesOf = (marker: string): string[] =>
+    (spawnSync('pgrep', ['-fl', marker], { encoding: 'utf8' }).stdout ?? '')
+      .split('\n')
+      .filter((line) => line.trim() !== '' && !line.includes('pgrep'));
+
+  const COMMANDS = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] };
+
+  test('a denied command is recorded and the session carries on to submit', async () => {
+    const { result, events } = await guarded(
+      request('Run `tail README.md` with Bash. If it is refused, submit done with a one-sentence summary saying so.', {
+        permissions: COMMANDS,
+      }),
+    );
+    expect(result.outcome).toBe('done');
+    expect(denialsIn(events).map((denial) => denial.rule)).toContain('commands');
+  }, 600_000);
+
+  test('a session with no MCP servers makes no MCP call that is not denied', async () => {
+    const { events } = await guarded(
+      request('List the MCP tools you have and call one if any exists, then submit done with what you found.'),
+    );
+    const denied = new Set(denialsIn(events).map((denial) => denial.callId));
+    const ran = events.flatMap((event) =>
+      event.type === 'tool:start' && event.tool.startsWith('mcp__') && !denied.has(event.callId) ? [event.tool] : [],
+    );
+    expect(ran).toEqual([]);
+  }, 600_000);
+
+  test('a write outside the workspace is denied, and no file appears there', async () => {
+    const outside = join(tmpdir(), `sail-live-${process.pid}`, 'x');
+    const { events } = await guarded(
+      request(`Write the text "hi" to the file ${outside} with the Write tool, then submit done.`),
+    );
+    expect(denialsIn(events).map((denial) => denial.rule)).toContain('write');
+    expect(existsSync(outside)).toBe(false);
+  }, 600_000);
+
+  test("the Bash tool's environment carries no provider credential, though an allowed command runs", async () => {
+    const { result, events } = await guarded(
+      request('Run `printenv` with Bash, then submit done with its whole output as the summary.', {
+        permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['printenv'] },
+      }),
+    );
+    const said = JSON.stringify(result.outcome === 'done' ? result.output : result);
+    expect(events.some((event) => event.type === 'tool:start' && event.tool === 'Bash')).toBe(true);
+    expect(
+      ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'].filter((name) => said.includes(name)),
+    ).toEqual([]);
+  }, 600_000);
+
+  test('maxUsd 0.05 on a long task ends in error naming maxUsd 0.05, with its overrun', async () => {
+    const { result, events } = await guarded(
+      request('Read README.md, then write a 3000-word essay about it into $STAGE_OUT/essay.md, then submit done.', {
+        budget: { maxTurns: 40, maxUsd: 0.05, maxMinutes: 5 },
+      }),
+    );
+    expect(result.outcome === 'error' ? result.message : result.outcome).toStartWith('budget exceeded: maxUsd 0.05');
+    expect(events.some((event) => event.type === 'budget:exceeded' && event.budget === 'usd')).toBe(true);
+  }, 600_000);
+
+  test('maxTurns 2 ends in error naming maxTurns', async () => {
+    const { result } = await guarded(
+      request('Read README.md, then each of a.md, b.md and c.md, one tool call at a time, then submit done.', {
+        budget: { maxTurns: 2, maxUsd: 0.5, maxMinutes: 5 },
+      }),
+    );
+    expect(result.outcome === 'error' ? result.message : result.outcome).toStartWith('budget exceeded: maxTurns 2');
+  }, 600_000);
+
+  test('a maxMinutes overrun ends in error naming maxMinutes, and leaves no process of the session', async () => {
+    const req = request('Read README.md slowly: one line at a time, thinking about each, for as long as you can.', {
+      budget: { maxTurns: 40, maxUsd: 0.5, maxMinutes: 0.25 },
+    });
+    const { result } = await guarded(req);
+    expect(result.outcome === 'error' ? result.message : result.outcome).toStartWith(
+      'budget exceeded: maxMinutes 0.25',
+    );
+    expect(processesOf(dirname(req.cwd))).toEqual([]);
+  }, 600_000);
+
+  test('an abort 5 s after the session starts ends in error aborted, and leaves no process of the session', async () => {
+    const req = request('Read README.md, then each file you can find, one at a time, then submit done.');
+    const { result } = await guarded(req, 5_000);
+    expect(result.outcome === 'error' ? result.message : result.outcome).toBe('aborted');
+    expect(processesOf(dirname(req.cwd))).toEqual([]);
   }, 600_000);
 });

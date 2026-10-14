@@ -1,14 +1,17 @@
 // The claude-code Harness over a scripted query(): the port suite, then the session's options and environment, its
-// events, the guard's denials, aborts, and failures that never reject. No test here starts Claude Code.
-import { afterAll, describe, expect, test } from 'bun:test';
+// events, the gate's denials, the three budgets, the process group, aborts, and failures that never reject. No test here
+// starts Claude Code: the processes some cases spawn stand in for it.
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { createClaudeCodeHarness, type QueryFunction, sessionOptions } from '../../../src/adapters/claude-code/harness';
 import { SUBMIT_CONTRACT, submissionEnvelope } from '../../../src/adapters/claude-code/submission';
+import { BUILTIN_TOOLS } from '../../../src/adapters/claude-code/tool-call';
+import { decide } from '../../../src/engine/permissions';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
-import type { HarnessResult } from '../../../src/ports/types';
+import { HarnessCapabilities, type HarnessResult } from '../../../src/ports/types';
 import {
   assistantText,
   assistantToolUse,
@@ -22,7 +25,8 @@ import {
   scriptedQuery,
   toolResult,
 } from '../../helpers/claude-code';
-import { captureEvents, eventIssues } from '../../helpers/ports';
+import { fakeTimers } from '../../helpers/fake-timers';
+import { captureEvents, eventIssues, parseIssues } from '../../helpers/ports';
 import { harnessSuite } from '../../ports/harness.suite';
 
 const base = mkdtempSync(join(tmpdir(), 'sail-claude-code-'));
@@ -154,21 +158,27 @@ test("the system prompt gives the session its working directory and every preamb
 test("the session's options are the step's model, workspace, envelope and budgets, isolated from the user's settings", () => {
   const req = request();
   const options = sessionOptions(req, {});
-  const { abortController, canUseTool, env: _env, ...rest } = options;
+  // The gate's own options are the next test's.
+  const {
+    abortController,
+    canUseTool: _canUseTool,
+    hooks: _hooks,
+    settings: _settings,
+    tools: _tools,
+    disallowedTools: _disallowed,
+    env: _env,
+    ...rest
+  } = options;
   expect(rest as Record<string, unknown>).toEqual({
     cwd: req.cwd,
     model: 'claude-opus-5-5',
     additionalDirectories: [req.env.STAGE_IN, req.env.STAGE_OUT],
     settingSources: [],
-    // Review R1-3: an ask rule on every file tool comes before the CLI's own read and write allowances, so each call
-    // reaches the guard.
-    settings: { autoMemoryEnabled: false, permissions: { ask: ['Read', 'Glob', 'Grep', 'Write', 'Edit'] } },
     skills: [],
     strictMcpConfig: true,
     mcpServers: {},
     persistSession: false,
     includePartialMessages: false,
-    tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
     permissionMode: 'default',
     outputFormat: { type: 'json_schema', schema: submissionEnvelope(req.outputSchema) },
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appended(req) },
@@ -177,10 +187,37 @@ test("the session's options are the step's model, workspace, envelope and budget
   });
   expect({
     controller: abortController instanceof AbortController && !abortController.signal.aborted,
-    guard: typeof canUseTool,
-    bypass: ['allowedTools', 'allowDangerouslySkipPermissions', 'disallowedTools'].filter((name) => name in options),
+    bypass: ['allowedTools', 'allowDangerouslySkipPermissions'].filter((name) => name in options),
     mode: options.permissionMode === 'bypassPermissions',
-  }).toEqual({ controller: true, guard: 'function', bypass: [], mode: false });
+  }).toEqual({ controller: true, bypass: [], mode: false });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('the session gates every call with one PreToolUse hook and the fallback, is offered only the tools its step can use, and asks no rule', () => {
+  const req = request();
+  const options = sessionOptions(req, {});
+  const matchers = options.hooks?.PreToolUse ?? [];
+  const offered = ['Read', 'Glob', 'Grep', 'Write', 'Edit'];
+  expect({
+    events: Object.keys(options.hooks ?? {}),
+    matchers: matchers.map((matcher) => ({
+      matcher: 'matcher' in matcher,
+      hooks: matcher.hooks.map((hook) => typeof hook),
+    })),
+    canUseTool: typeof options.canUseTool,
+    settings: options.settings,
+    tools: options.tools,
+    disallowedTools: options.disallowedTools,
+  }).toEqual({
+    events: ['PreToolUse'],
+    matchers: [{ matcher: false, hooks: ['function'] }],
+    canUseTool: 'function',
+    settings: { autoMemoryEnabled: false },
+    tools: offered,
+    disallowedTools: BUILTIN_TOOLS.filter((name) => !offered.includes(name)),
+  });
 });
 
 test("a session with no STAGE_IN gets only $STAGE_OUT as an extra directory, and a session's controller is its own", () => {
@@ -223,7 +260,12 @@ test("the session's environment is the allowlisted names of sail's, the client a
     STAGE_OUT: '/not/the/preamble',
     MISSING: undefined,
   };
-  expect(sessionOptions(req, env).env).toEqual({
+  const {
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: _scrub,
+    CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: _cwd,
+    ...picked
+  } = sessionOptions(req, env).env ?? {};
+  expect(picked).toEqual({
     PATH: '/usr/bin',
     HOME: '/home/sail',
     LANG: 'C.UTF-8',
@@ -344,7 +386,10 @@ test('a throw after an error result leaves the result to decide, but an onEvent 
   });
 });
 
-test("a tool the guard denies ends denied, and the session's end counts the denial", async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a call that reaches the fallback is denied and recorded, its tool ends denied, and the session still submits', async () => {
   const { query, result, capture } = await play([
     init(),
     assistantToolUse('m1', 't1', 'Bash', { command: 'cat ~/.ssh/id_rsa' }, { usage: { output: 5 } }),
@@ -352,12 +397,16 @@ test("a tool the guard denies ends denied, and the session's end counts the deni
     toolResult('t1', { isError: true }),
     resultSuccess({ structured: done(SPEC) }),
   ]);
-  expect(query.verdicts).toEqual([
-    {
-      behavior: 'deny',
-      message: 'the claude-code harness allows only file tools until permissions are enforced: Bash is not one',
-    },
-  ]);
+  const message = 'Bash reached the fallback: the gate decides every tool call before it runs';
+  expect(query.verdicts).toEqual([{ behavior: 'deny', message }]);
+  expect(capture.events.find((event) => event.type === 'permission:denied')).toEqual({
+    type: 'permission:denied',
+    callId: 't1',
+    tool: 'Bash',
+    rule: 'commands',
+    permissions: { commands: [] },
+    reason: message,
+  });
   const end = capture.events.at(-1);
   expect({
     toolEnd: capture.events.find((event) => event.type === 'tool:end'),
@@ -517,13 +566,380 @@ test("the transcript renders the session's events and how it ended", async () =>
   );
 });
 
-test('claude-code declares structured output, permissions, usage, abort, and turn and dollar budgets', () => {
-  expect(createClaudeCodeHarness({ env: {} }).capabilities()).toEqual({
-    structuredOutput: true,
-    permissions: true,
-    usage: true,
-    abort: true,
-    budgets: ['turns', 'usd'],
-  });
+test('claude-code declares structured output, permissions, usage and abort', () => {
+  const { budgets: _budgets, ...rest } = createClaudeCodeHarness({ env: {} }).capabilities();
+  expect(rest).toEqual({ structuredOutput: true, permissions: true, usage: true, abort: true });
   expect(createClaudeCodeHarness({ env: {} }).name).toBe('claude-code');
 });
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("the session's environment turns on the credential scrub and the fixed Bash directory, whatever sail's says", () => {
+  const env = sessionOptions(request(), {
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '0',
+    CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '0',
+  }).env;
+  expect([env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR]).toEqual(['1', '1']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a step with commands is told its variables are in its environment too, where one without is told it has no shell', () => {
+  const req = request('Write the spec.', {
+    permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] },
+  });
+  const { systemPrompt } = sessionOptions(req, {});
+  expect(systemPrompt).toEqual({
+    type: 'preset',
+    preset: 'claude_code',
+    append: [
+      '## Where you work',
+      '',
+      `Your working directory is the workspace, ${req.cwd}. Where a prompt names one of these environment`,
+      'variables, it means the value given: the same values are in your environment.',
+      '',
+      `- \`$STAGE_IN\`: ${req.env.STAGE_IN}`,
+      `- \`$STAGE_OUT\`: ${req.env.STAGE_OUT}`,
+      '- `$TRY`: 1',
+      '',
+      'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
+      'directory below it.',
+      '',
+      SUBMIT_CONTRACT,
+    ].join('\n'),
+  });
+});
+
+/** The events of `types` among `events`, each as its type and the fields a test names. */
+const only = (events: readonly HarnessEvent[], ...types: string[]) =>
+  events.filter((event) => types.includes(event.type));
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("commands ['git status']: the gate denies tail README.md through run(), the session records it and carries on to submit", async () => {
+  const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git status'] };
+  const { query, result, capture } = await play(
+    [
+      init({ tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'] }),
+      assistantToolUse('m1', 't1', 'Bash', { command: 'tail README.md' }, { usage: { output: 5 } }),
+      { act: 'preToolUse', tool: 'Bash', input: { command: 'tail README.md' }, toolUseID: 't1' },
+      toolResult('t1', { isError: true }),
+      assistantText('m2', 'That command is not allowed; submitting.', { usage: { output: 7 } }),
+      resultSuccess({ structured: done(SPEC) }),
+    ],
+    { permissions },
+  );
+  const cwd = query.calls[0]?.options.cwd ?? '';
+  const ruled = decide({ tool: 'Bash', kind: 'execute', paths: [], command: 'tail README.md', cwd }, permissions, {
+    worktree: cwd,
+    stageIn: query.calls[0]?.options.env?.STAGE_IN ?? '',
+    stageOut: query.calls[0]?.options.env?.STAGE_OUT ?? '',
+    env: {},
+  });
+  const reason = ruled.allow ? '' : ruled.reason;
+  expect({
+    outcome: summary(result),
+    verdicts: query.verdicts,
+    events: only(capture.events, 'tool:start', 'permission:denied', 'tool:end').map(({ type, ...rest }) =>
+      type === 'tool:end' ? `${type} ${(rest as { status: string }).status}` : type === 'tool:start' ? type : rest,
+    ),
+    denials:
+      capture.events.at(-1)?.type === 'harness:session_end'
+        ? (capture.events.at(-1) as { denials: number }).denials
+        : -1,
+  }).toEqual({
+    outcome: SPEC,
+    verdicts: [
+      {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: reason,
+        },
+      },
+    ],
+    events: [
+      'tool:start',
+      { callId: 't1', tool: 'Bash', rule: 'commands', permissions: { commands: ['git status'] }, reason },
+      'tool:end denied',
+    ],
+    denials: 1,
+  });
+  expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('through run(), an MCP call with no tools and a write outside the workspace are denied and recorded, and a read inside runs', async () => {
+  const outside = join(tmpdir(), 'sail-harness-elsewhere', 'x.md');
+  const { query, result, capture } = await play([
+    init(),
+    assistantToolUse('m1', 't1', 'mcp__linear__get_issue', { id: 'ADW-1' }),
+    { act: 'preToolUse', tool: 'mcp__linear__get_issue', input: { id: 'ADW-1' }, toolUseID: 't1' },
+    toolResult('t1', { isError: true }),
+    assistantToolUse('m2', 't2', 'Write', { file_path: outside, content: 'x' }),
+    { act: 'preToolUse', tool: 'Write', input: { file_path: outside, content: 'x' }, toolUseID: 't2' },
+    toolResult('t2', { isError: true }),
+    assistantToolUse('m3', 't3', 'Read', { file_path: 'README.md' }),
+    { act: 'preToolUse', tool: 'Read', input: { file_path: 'README.md' }, toolUseID: 't3' },
+    toolResult('t3'),
+    resultSuccess({ structured: done(SPEC) }),
+  ]);
+  const decisions = query.verdicts.map(
+    (verdict) =>
+      (verdict as { hookSpecificOutput?: { permissionDecision?: string } }).hookSpecificOutput?.permissionDecision,
+  );
+  expect({
+    outcome: summary(result),
+    decisions,
+    denied: only(capture.events, 'permission:denied').map((event) =>
+      event.type === 'permission:denied' ? [event.callId, event.rule, event.permissions] : [],
+    ),
+    ends: only(capture.events, 'tool:end').map((event) => (event.type === 'tool:end' ? event.status : '')),
+  }).toEqual({
+    outcome: SPEC,
+    decisions: ['deny', 'deny', 'allow'],
+    denied: [
+      ['t1', 'tools', { tools: [] }],
+      ['t2', 'write', { write: ['$STAGE_OUT/**'] }],
+    ],
+    ends: ['denied', 'denied', 'completed'],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('claude-code declares turn, dollar and minute budgets, as the port reads them', () => {
+  const capabilities = createClaudeCodeHarness({ env: {} }).capabilities();
+  expect({ budgets: capabilities.budgets, issues: parseIssues(HarnessCapabilities, capabilities) }).toEqual({
+    budgets: ['turns', 'usd', 'minutes'],
+    issues: [],
+  });
+});
+
+/** The budget events among `events`, then the error and the end, as one line each. */
+const budgetTrail = (events: readonly HarnessEvent[]) =>
+  only(events, 'budget:warning', 'budget:exceeded', 'error:harness', 'harness:session_end').map((event) => {
+    if (event.type === 'budget:warning' || event.type === 'budget:exceeded') {
+      return `${event.type} ${event.budget} ${event.used} of ${event.limit}`;
+    }
+    if (event.type === 'error:harness') return `${event.type} ${event.message}`;
+    return `${event.type} ${event.type === 'harness:session_end' ? event.reason : ''}`;
+  });
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('maxUsd 0.05 over at 0.051 ends in error budget exceeded: maxUsd 0.05, after the dollar warning and overrun', async () => {
+  const { result, capture } = await play(
+    [
+      init(),
+      assistantText('m1', 'Working.', { usage: { output: 10 } }),
+      resultError('error_max_budget_usd', { cost: 0.051, numTurns: 1 }),
+    ],
+    { budget: { maxTurns: 40, maxUsd: 0.05, maxMinutes: 10 } },
+  );
+  expect({ result: summary(result), reason: result.outcome === 'error' ? result.reason : '' }).toEqual({
+    result: 'error: budget exceeded: maxUsd 0.05',
+    reason: 'budget_exceeded',
+  });
+  expect(budgetTrail(capture.events)).toEqual([
+    'budget:warning usd 0.051 of 0.05',
+    'budget:exceeded usd 0.051 of 0.05',
+    'error:harness budget exceeded: maxUsd 0.05',
+    'harness:session_end max_budget_usd',
+  ]);
+  expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('maxTurns 2 with two closed turns ends in error naming maxTurns 2, after one turns warning and one overrun', async () => {
+  const { result, capture } = await play(
+    [
+      init(),
+      assistantToolUse('m1', 't1', 'Read', { file_path: 'a.md' }, { usage: { output: 5 } }),
+      toolResult('t1'),
+      assistantToolUse('m2', 't2', 'Read', { file_path: 'b.md' }, { usage: { output: 5 } }),
+      toolResult('t2'),
+      resultError('error_max_turns', { numTurns: 2 }),
+    ],
+    { budget: { maxTurns: 2, maxUsd: 2, maxMinutes: 10 } },
+  );
+  expect(summary(result)).toBe('error: budget exceeded: maxTurns 2');
+  expect(budgetTrail(capture.events)).toEqual([
+    'budget:warning turns 2 of 2',
+    'budget:exceeded turns 2 of 2',
+    'error:harness budget exceeded: maxTurns 2',
+    'harness:session_end max_turns',
+  ]);
+  expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("a session's last turn, closed only as it ends, still counts toward the turns warning", async () => {
+  const { result, capture } = await play(SUITE.done ?? [], { budget: { maxTurns: 2, maxUsd: 2, maxMinutes: 10 } });
+  expect({ result: summary(result), trail: budgetTrail(capture.events) }).toEqual({
+    result: SPEC,
+    trail: ['budget:warning turns 2 of 2', 'harness:session_end submitted'],
+  });
+});
+
+/**
+ * Runs `stream` on fake timers, with maxMinutes 1: once the session starts, `whileRunning` moves the clock; a run that
+ * hasn't ended a second after is aborted, so a harness without the minute budget fails its assertions, not its timeout.
+ */
+async function onTheClock(stream: Stream, whileRunning: (timers: ReturnType<typeof fakeTimers>) => Promise<void>) {
+  const timers = fakeTimers('2026-10-15T09:00:00.000Z');
+  const query = scriptedQuery([stream]);
+  const harness = createClaudeCodeHarness({ env: {}, query, timers, now: () => timers.now().getTime() });
+  const capture = captureEvents<HarnessEvent>();
+  const controller = new AbortController();
+  let started: () => void = () => undefined;
+  const start = new Promise<void>((done) => {
+    started = done;
+  });
+  const pendingAtStart: { ms: number }[] = [];
+  const running = harness.run({
+    ...request(),
+    budget: { maxTurns: 40, maxUsd: 2, maxMinutes: 1 },
+    signal: controller.signal,
+    onEvent: (event) => {
+      capture.emit(event);
+      if (event.type === 'harness:session_start') {
+        pendingAtStart.push(...timers.pending().map(({ ms }) => ({ ms })));
+        started();
+      }
+    },
+  });
+  await Promise.race([start, running]);
+  await whileRunning(timers);
+  const late = setTimeout(() => controller.abort(), 1_000);
+  const result = await running;
+  clearTimeout(late);
+  return { result, capture, query, timers, pendingAtStart };
+}
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('maxMinutes 1 on the clock: the warning at 48 s, the overrun at 60 s aborts the session, which ends in error naming maxMinutes', async () => {
+  const { result, capture, query, timers } = await onTheClock([init(), { act: 'waitForAbort' }], async (clock) => {
+    await clock.advance(48_000);
+    await clock.advance(12_000);
+  });
+  expect({
+    result: summary(result),
+    reason: result.outcome === 'error' ? result.reason : '',
+    aborted: query.calls[0]?.options.abortController?.signal.aborted,
+    pending: timers.pending(),
+  }).toEqual({ result: 'error: budget exceeded: maxMinutes 1', reason: 'budget_exceeded', aborted: true, pending: [] });
+  expect(budgetTrail(capture.events)).toEqual([
+    'budget:warning minutes 0.8 of 1',
+    'budget:exceeded minutes 1 of 1',
+    'error:harness budget exceeded: maxMinutes 1',
+    'harness:session_end max_minutes',
+  ]);
+  expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a session that ends inside its minutes set both timers at its start, leaves none, and says nothing of minutes', async () => {
+  const { result, capture, timers, pendingAtStart } = await onTheClock(SUITE.done ?? [], async () => undefined);
+  expect({
+    result: summary(result),
+    pendingAtStart,
+    pending: timers.pending(),
+    budget: budgetTrail(capture.events).filter((line) => line.startsWith('budget')),
+  }).toEqual({ result: SPEC, pendingAtStart: [{ ms: 48_000 }, { ms: 60_000 }], pending: [], budget: [] });
+});
+
+// The process group (D7): a stand-in tree spawned through the session's spawner, and gone when run() resolves.
+const TREE = { act: 'spawn', command: '/bin/sh', args: ['-c', 'sleep 30 & sleep 30'] } as const;
+const spawnedPids: number[] = [];
+afterEach(() => {
+  for (const pid of spawnedPids.splice(0)) {
+    for (const target of [-pid, pid]) {
+      try {
+        process.kill(target, 'SIGKILL');
+      } catch {
+        // Gone already.
+      }
+    }
+  }
+});
+
+/** Whether the group `pgid` is gone within `ms`: macOS answers EPERM while its last members exit, ESRCH once gone. */
+async function groupGone(pgid: number | undefined, ms = 2_000): Promise<boolean> {
+  if (pgid === undefined) return false;
+  const deadline = performance.now() + ms;
+  for (;;) {
+    try {
+      process.kill(-pgid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true;
+    }
+    if (performance.now() > deadline) return false;
+    await Bun.sleep(25);
+  }
+}
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('an aborted session leaves no process of its group behind when run() resolves', async () => {
+  const controller = new AbortController();
+  const query = scriptedQuery([[init(), TREE, { act: 'waitForAbort' }]]);
+  const result = await createClaudeCodeHarness({ env: {}, query }).run({
+    ...request(),
+    signal: controller.signal,
+    onEvent: (event) => {
+      if (event.type === 'harness:session_start') setTimeout(() => controller.abort(), 200);
+    },
+  });
+  spawnedPids.push(...query.pids);
+  expect({ result: summary(result), spawned: query.pids.length, gone: await groupGone(query.pids[0]) }).toEqual({
+    result: 'error: aborted',
+    spawned: 1,
+    gone: true,
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('a session over its minutes leaves no process of its group behind when run() resolves', async () => {
+  const { result, query } = await onTheClock([init(), TREE, { act: 'waitForAbort' }], async (clock) => {
+    await Bun.sleep(200);
+    await clock.advance(60_000);
+  });
+  spawnedPids.push(...query.pids);
+  expect({ result: summary(result), spawned: query.pids.length, gone: await groupGone(query.pids[0]) }).toEqual({
+    result: 'error: budget exceeded: maxMinutes 1',
+    spawned: 1,
+    gone: true,
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('a session that submits while its tree still runs leaves none of it behind when run() resolves', async () => {
+  const { query, result } = await play([init(), TREE, ...(SUITE.done ?? []).slice(1)]);
+  spawnedPids.push(...query.pids);
+  expect({ result: summary(result), spawned: query.pids.length, gone: await groupGone(query.pids[0]) }).toEqual({
+    result: SPEC,
+    spawned: 1,
+    gone: true,
+  });
+}, 30_000);
