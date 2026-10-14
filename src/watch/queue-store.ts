@@ -235,15 +235,15 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         return queued;
       });
-      for (const item of added) {
-        stream.emit({
-          type: 'queue:item_added',
+      stream.emitAll(
+        added.map((item) => ({
+          type: 'queue:item_added' as const,
           workflow,
           dedupKey: item.dedupKey,
           source: item.source,
           title: item.title,
-        });
-      }
+        })),
+      );
       return added.length;
     },
     due() {

@@ -21,6 +21,8 @@ export interface QueueStream {
    * and its line is written again before the next event's.
    */
   emit(event: NewQueueEvent): QueueEvent;
+  /** `emit()` for several events at once: all are stamped and kept before any is appended, so none is lost to a throw. */
+  emitAll(events: readonly NewQueueEvent[]): QueueEvent[];
 }
 
 /** Opens the stream in `dir`, creating it, from the `seq` after its last line. A last line it can't read refuses. */
@@ -35,21 +37,19 @@ export function openQueueStream(dir: string, now: () => Date): QueueStream | { r
   let size = sizeOf();
   /** Lines whose append failed, oldest first. */
   const pending: string[] = [];
-  return {
-    emit(event) {
-      const stamped = { seq, ts: now().toISOString(), ...event } as QueueEvent;
-      seq += 1;
-      // Kept before anything that can throw, so its seq always reaches the file. A cut only follows a failed append, and
-      // only ever cuts: truncating a file shorter than `size` would pad it.
-      const recovering = pending.length > 0;
-      pending.push(JSON.stringify(stamped));
-      if (recovering && sizeOf() > size) truncateSync(path, size);
-      for (let line = pending[0]; line !== undefined; line = pending[0]) {
-        appendLine(path, line);
-        size += Buffer.byteLength(line) + 1;
-        pending.shift();
-      }
-      return stamped;
-    },
+  const emitAll = (events: readonly NewQueueEvent[]): QueueEvent[] => {
+    const stamped = events.map((event) => ({ seq: seq++, ts: now().toISOString(), ...event }) as QueueEvent);
+    // Kept before anything that can throw, so each seq always reaches the file. A cut only follows a failed append, and
+    // only ever cuts: truncating a file shorter than `size` would pad it.
+    const recovering = pending.length > 0;
+    pending.push(...stamped.map((event) => JSON.stringify(event)));
+    if (recovering && sizeOf() > size) truncateSync(path, size);
+    for (let line = pending[0]; line !== undefined; line = pending[0]) {
+      appendLine(path, line);
+      size += Buffer.byteLength(line) + 1;
+      pending.shift();
+    }
+    return stamped;
   };
+  return { emit: (event) => emitAll([event])[0] as QueueEvent, emitAll };
 }
