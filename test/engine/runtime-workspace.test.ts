@@ -403,10 +403,7 @@ function stubConsumingDiff(repo: TempRepo, range = 'main...HEAD'): string {
 /** The files a patch writes. */
 const patched = (patch: string) => [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]).sort();
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a stage consuming gitDiff('main...HEAD') finds the run's patch in $STAGE_IN, a tracked edit and a new file, and an optional gitDiff binding is resolved too", async () => {
+test("a stage consuming gitDiff('main...HEAD') finds the run's patch in $STAGE_IN, a tracked edit and a new file, and an optional gitDiff binding is resolved too", async () => {
   await withTempRepo(async (repo) => {
     stubConsumingDiff(repo);
     const end = await ran(repo.dir, { until: 'tests' });
@@ -431,10 +428,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a gitDiff range the workspace refuses fails the run with workflow_failed, naming the binding, and the call is never written', async () => {
+test('a gitDiff range the workspace refuses fails the run with workflow_failed, naming the binding, and the call is never written', async () => {
   await withTempRepo(async (repo) => {
     stubConsumingDiff(repo, 'main..HEAD');
     const end = await ran(repo.dir);
@@ -452,10 +446,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a resumed run takes the diff afresh for its first call that is not journaled', async () => {
+test('a resumed run takes the diff afresh for its first call that is not journaled', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       stubConsumingDiff(from);

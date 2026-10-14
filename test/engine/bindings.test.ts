@@ -212,10 +212,7 @@ test('preparing bindings with a problem throws it, as materialise() does', () =>
   expect(() => prepareBindings(consumes, { ticket: given({ key: 7 }) })).toThrow("'spec' is required");
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the engine's patch for a gitDiff binding is written to $STAGE_IN as <name>.patch, which INPUT_<NAME> names", () => {
+test("the engine's patch for a gitDiff binding is written to $STAGE_IN as <name>.patch, which INPUT_<NAME> names", () => {
   const s = scratch();
   const patch = 'diff --git a/README.md b/README.md\n+an edit\n';
   const consumes: Consumes = { diff: gitDiff('main...HEAD'), since: gitDiff('main').optional() };

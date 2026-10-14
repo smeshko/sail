@@ -48,6 +48,7 @@ import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
+import type { Supplied } from './bindings';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
@@ -68,7 +69,7 @@ import {
   reopenRun,
   rootRelative,
 } from './open-run';
-import { type ReplayEnd, replay } from './replay';
+import { type PendingCall, type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
@@ -184,6 +185,28 @@ function resultOf(result: unknown): { result?: unknown } | { message: string } {
   } catch (error) {
     return { message: `the workflow's result can't be written as JSON: ${messageOf(error)}` };
   }
+}
+
+/**
+ * The patch each gitDiff binding the call consumes stands for, taken from the run's workspace now, or why one can't be
+ * taken. A diff that fails as a port fails names its binding; anything else is a bug in sail, and is thrown on.
+ */
+async function gitDiffs(
+  opened: OpenedRun,
+  call: PendingCall,
+): Promise<{ supplied: Record<string, Supplied> } | { failed: string }> {
+  const supplied: Record<string, Supplied> = {};
+  for (const [key, binding] of Object.entries(call.definition.consumes)) {
+    if (binding.kind !== 'gitDiff') continue;
+    try {
+      const { patch } = await opened.adapters.workspace.diff(opened.workspace.path, binding.range);
+      supplied[key] = { kind: 'gitDiff', patch, from: `gitDiff(${binding.range})` };
+    } catch (error) {
+      if (!(error instanceof PortError)) throw error;
+      return { failed: `'${key}': ${error.message} (${error.code})` };
+    }
+  }
+  return { supplied };
 }
 
 /** Opens a run of the workflow and runs it to its end. A refusal to open passes through, and nothing is written. */
@@ -356,7 +379,10 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       if (reached) return await suspended('until', `stopped after ${last}, as --until asked`);
       running = call.key;
       const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
-      const problems = callProblems(call.definition, call.supplied, agent);
+      const diffs = await gitDiffs(opened, call);
+      if ('failed' in diffs) return await failed('workflow_failed', `${call.key} can't run: ${diffs.failed}`);
+      const supplied = { ...call.supplied, ...diffs.supplied };
+      const problems = callProblems(call.definition, supplied, agent);
       if (problems.length > 0) return await failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
       if (signal?.aborted) return await interrupted(`stopped before ${call.key}`);
       const { result, paths } = await runCall({
@@ -371,7 +397,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         root,
         branch: opened.workspace.branch,
         config: join(sailDir, 'project.yaml'),
-        supplied: call.supplied,
+        supplied,
         ...(signal === undefined ? {} : { signal }),
         ...(agent === undefined ? {} : { agent }),
         emit: bus.emit,

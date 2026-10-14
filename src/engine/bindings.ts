@@ -1,6 +1,7 @@
 // Bindings, from what a caller supplies to what a call reads: each is checked against the step's `consumes`, then
 // materialised into `$STAGE_IN`. A file is copied under its declared name, and a value is written as `<name>.json`, or
-// as `<name>.txt` when it is a string. The script finds each one through its `INPUT_<NAME>` variable.
+// as `<name>.txt` when it is a string. A gitDiff binding is the run's patch, which only the engine supplies, from the
+// run's workspace: it is written as `<name>.patch`. The script finds each one through its `INPUT_<NAME>` variable.
 import { copyFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -9,7 +10,7 @@ import { isPlainName } from './call-dir';
 
 /**
  * What a caller supplies for one binding. `path` is absolute. `from` is where it came from, as `result.json`'s
- * `consumed` records it.
+ * `consumed` records it. A `gitDiff` is the run's patch, which only the engine supplies.
  */
 export type Supplied =
   | { kind: 'file'; path: string; from: string }
@@ -47,6 +48,10 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
   }
   for (const [key, binding] of Object.entries(consumes)) {
     const given = Object.hasOwn(supplied, key) ? supplied[key] : undefined;
+    if (binding.kind === 'gitDiff' && given?.kind === 'gitDiff') {
+      planned.push({ key, name: `${key}.patch`, write: { text: given.patch } });
+      continue;
+    }
     if (binding.kind === 'gitDiff' || binding.kind === 'fromStep') {
       problems.push(`'${key}' is a ${binding.kind} binding, which can't be supplied here`);
       continue;
