@@ -140,3 +140,23 @@ test('a directory, a link or an unreadable file in the inbox is removed and reje
   expect(readdirSync(dir)).toEqual([]);
   expect(existsSync(outside)).toBe(true);
 });
+
+test("an entry that can't be removed is reported, and the drain goes on to the commands after it (review #2.5)", () => {
+  const runs = runsDir();
+  const dir = commandsDir(runs);
+  const locked = join(dir, '1-stray.json', 'locked');
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(locked, 'inside'), '');
+  chmodSync(locked, 0o000);
+  writeFileSync(join(dir, '2-fine.json'), JSON.stringify({ op: 'poll', workflow: 'ticket-to-pr' }));
+  try {
+    const { applied, drained } = drain(runs);
+    expect(applied).toEqual([{ op: 'poll', workflow: 'ticket-to-pr' }]);
+    expect(drained.applied).toBe(1);
+    expect(drained.rejected.map((rejected) => basename(rejected.file))).toEqual(['1-stray.json']);
+    expect(drained.rejected[0]?.reason).toStartWith("1-stray.json is not a file, and it can't be removed: ");
+    expect(readdirSync(dir)).toEqual(['1-stray.json']);
+  } finally {
+    chmodSync(locked, 0o755);
+  }
+});
