@@ -463,6 +463,14 @@ _Avoid_: backlog, inbox, buffer
 A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
 _Avoid_: queue log, daemon log
 
+**Dedup key**:
+The key a queue item is known by, minted from its source: `ticket:<ticket key>`, and `pr:<number>@<sha>` so a new push is a new item. A key already queued, dispatched, waiting to retry or parked is not queued again.
+_Avoid_: item id, queue key
+
+**Parked**:
+A queue item's state once it has failed its last attempt: kept with the reason, never retried, until a person requeues or drops it.
+_Avoid_: dead-lettered, stuck, quarantined
+
 **Dispatch**:
 The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, dispatch begins with the claim.
 _Avoid_: pickup, schedule, spawn

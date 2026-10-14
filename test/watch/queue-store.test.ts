@@ -31,17 +31,11 @@ const keys = (store: QueueStore) => store.snapshot().items.map((item) => `${item
 const typesIn = (runs: string, workflow = 'ticket-to-pr') =>
   queueEvents(queueDir(runs, workflow)).map((event) => event.type);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('dedupKey is ticket:<ticket key>', () => {
+test('dedupKey is ticket:<ticket key>', () => {
   expect(dedupKey({ kind: 'ticket', ticketKey: 'FAKE-12' })).toBe('ticket:FAKE-12');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('add queues each new ticket once, with its event, and a second add of the same tickets adds nothing', () => {
+test('add queues each new ticket once, with its event, and a second add of the same tickets adds nothing', () => {
   const runs = runsDir();
   const store = open(runs);
   expect(store.add([ticket('FAKE-1'), ticket('FAKE-5')])).toBe(2);
@@ -85,10 +79,7 @@ test
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a key that is dispatched, failed or parked is not queued again, and a done one is queued anew with no attempts', () => {
+test('a key that is dispatched, failed or parked is not queued again, and a done one is queued anew with no attempts', () => {
   const runs = runsDir();
   const clock = manualClock(START);
   const store = open(runs, clock);
@@ -117,10 +108,7 @@ test
   expect(typesIn(runs).filter((type) => type === 'queue:item_added')).toHaveLength(5);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a failed attempt retries after its delay, and the last attempt parks the item with its reason, never due again', () => {
+test('a failed attempt retries after its delay, and the last attempt parks the item with its reason, never due again', () => {
   const runs = runsDir();
   const clock = manualClock(START);
   const store = open(runs, clock);
@@ -161,10 +149,7 @@ test
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a done item is never due, and only the last doneKept items to finish are kept', () => {
+test('a done item is never due, and only the last doneKept items to finish are kept', () => {
   const clock = manualClock(START);
   const store = open(runsDir(), clock);
   store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3'), ticket('FAKE-4')]);
@@ -178,10 +163,7 @@ test
   expect(store.due().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-4']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('due holds queued items and failed ones past their retryAt, oldest added first', () => {
+test('due holds queued items and failed ones past their retryAt, oldest added first', () => {
   const clock = manualClock(START);
   const store = open(runsDir(), clock);
   store.add([ticket('FAKE-3')]);
@@ -197,10 +179,7 @@ test
   expect(store.due().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-3', 'ticket:FAKE-1', 'ticket:FAKE-4']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a failed poll counts a failure, a refused one records the pause, and a poll that succeeds clears both', () => {
+test('a failed poll counts a failure, a refused one records the pause, and a poll that succeeds clears both', () => {
   const runs = runsDir();
   const clock = manualClock(START);
   const store = open(runs, clock);
@@ -249,10 +228,7 @@ test
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a store reopened on the same directory reads back the same queue, and continues its events', () => {
+test('a store reopened on the same directory reads back the same queue, and continues its events', () => {
   const runs = runsDir();
   const clock = manualClock(START);
   const store = open(runs, clock);
@@ -266,10 +242,7 @@ test
   expect(queueEvents(queueDir(runs, 'ticket-to-pr')).map((event) => event.seq)).toEqual([1, 2, 3, 4]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("two workflows' stores keep their own queue.json and events.ndjson", () => {
+test("two workflows' stores keep their own queue.json and events.ndjson", () => {
   const runs = runsDir();
   const a = open(runs, manualClock(START), 'a');
   const b = open(runs, manualClock(START), 'b');
@@ -289,10 +262,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a queue.json that is not JSON refuses on open, naming the file', () => {
+test('a queue.json that is not JSON refuses on open, naming the file', () => {
   const runs = runsDir();
   const dir = queueDir(runs, 'ticket-to-pr');
   mkdirSync(dir, { recursive: true });
@@ -302,10 +272,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('queue.json survives a writer killed mid-write: it opens, holds a prefix of what was added, and takes the next write', async () => {
+test('queue.json survives a writer killed mid-write: it opens, holds a prefix of what was added, and takes the next write', async () => {
   const runs = runsDir();
   const child = Bun.spawn([process.execPath, join(import.meta.dir, '..', 'helpers', 'queue-writer.ts'), runs], {
     stdout: 'pipe',
