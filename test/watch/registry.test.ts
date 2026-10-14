@@ -43,19 +43,13 @@ function put(dir: string, file: string, data: unknown): void {
   writeFileSync(join(dir, file), typeof data === 'string' ? data : `${JSON.stringify(data)}\n`);
 }
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('machineDir is SAIL_HOME when it is set and not empty, and ~/.sail otherwise', () => {
+test('machineDir is SAIL_HOME when it is set and not empty, and ~/.sail otherwise', () => {
   expect(machineDir({ SAIL_HOME: '/x' })).toBe('/x');
   expect(machineDir({})).toBe(join(homedir(), '.sail'));
   expect(machineDir({ SAIL_HOME: '' })).toBe(join(homedir(), '.sail'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a recorded entry reads back, a second record of the name replaces it, and no temp file is left', () => {
+test('a recorded entry reads back, a second record of the name replaces it, and no temp file is left', () => {
   const dir = registry();
   recordEntry(dir, entry('alpha'));
   expect(readRegistry(dir)).toEqual({ entries: [entry('alpha')], problems: [] });
@@ -65,10 +59,7 @@ test
   expect(readdirSync(dir)).toEqual(['alpha.json']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('readRegistry keeps the valid entries, sorted by name, and names each file that is not one', () => {
+test('readRegistry keeps the valid entries, sorted by name, and names each file that is not one', () => {
   const dir = registry();
   expect(readRegistry(dir)).toEqual({ entries: [], problems: [] });
   put(dir, 'zeta.json', entry('zeta'));
@@ -95,10 +86,7 @@ test
   expect(readEntry(dir, 'missing')).toBeUndefined();
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a sail.registry.v1 entry is valid with or without a remote, and an updatedAt that is no timestamp is not', () => {
+test('a sail.registry.v1 entry is valid with or without a remote, and an updatedAt that is no timestamp is not', () => {
   expect(validateDocument('sail.registry.v1', entry('alpha'))).toEqual([]);
   expect(validateDocument('sail.registry.v1', entry('alpha', { remote: null }))).toEqual([]);
   expect(validateDocument('sail.registry.v1', entry('alpha', { updatedAt: 'yesterday' }))).toEqual([
@@ -106,20 +94,14 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('cloneRemote is null for a clone with no remote, and for a directory git cannot run in', async () => {
+test('cloneRemote is null for a clone with no remote, and for a directory git cannot run in', async () => {
   await withTempRepo(async (repo) => {
     expect(await cloneRemote(repo.dir, repo.env)).toBeNull();
     expect(await cloneRemote(join(repo.dir, 'no-such-dir'), repo.env)).toBeNull();
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('cloneRemote drops the userinfo of a URL remote, and keeps an scp-style remote as it is', async () => {
+test('cloneRemote drops the userinfo of a URL remote, and keeps an scp-style remote as it is', async () => {
   await withTempRepo(async (repo) => {
     repo.git('remote', 'add', 'origin', 'https://user:tok@example.com/o/r.git');
     expect(await cloneRemote(repo.dir, repo.env)).toBe('https://example.com/o/r.git');

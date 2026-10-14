@@ -440,7 +440,7 @@ The watched workflows a watcher is watching now: exactly those named with `sail 
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:
-The machine-level record of watchers in `~/.sail/watchers/`: the repository's `name`, remote, clone path, pid and the labels each polls. A watcher refuses to start if a live one has the same `name` or holds one of its labels on the same TicketSource. The dashboard reads it to find every repository, including those whose watcher has stopped.
+The machine-level record of repositories in `~/.sail/watchers/` (`$SAIL_HOME/watchers/` when set), one `<name>.json` per repository: its `name`, remote, clone path and `.sail/` path, and later the watcher's pid and the labels it polls. Every `sail <ticket>` and `sail resume` writes its repository's entry before the run opens, so an entry exists before any watcher does. A watcher refuses to start if a live one has the same `name` or holds one of its labels on the same TicketSource. The dashboard reads it to find every repository, including those whose watcher has stopped.
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
 
 **Branch lease**:
