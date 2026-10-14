@@ -126,7 +126,16 @@ export function readDocument(name: string, text: string): DocumentContent {
     sections.push(section);
     open.push(section);
   }
-  return { name, text, headings, sections, items };
+  // Every validator of the document is handed this one reading, so none may change what the next one reads.
+  for (const each of [...headings, ...items]) Object.freeze(each);
+  for (const section of sections) Object.freeze(Object.freeze(section).items);
+  return Object.freeze({
+    name,
+    text,
+    headings: Object.freeze(headings),
+    sections: Object.freeze(sections),
+    items: Object.freeze(items),
+  });
 }
 
 export interface RenderDocumentsOptions {
