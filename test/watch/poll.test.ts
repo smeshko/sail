@@ -90,10 +90,7 @@ const events = (runs: string, workflow: string) =>
 
 const unauthorized = new PortError('ticketSource', 'listDesignated', 'unauthorized', 'key expired');
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a poll queues each designated, unstarted ticket once, and a second poll adds nothing', async () => {
+test('a poll queues each designated, unstarted ticket once, and a second poll adds nothing', async () => {
   const dir = tempDir();
   const clock = manualClock(START);
   const a = target(dir, 'a', 'sail', fakeSource(dir), clock);
@@ -119,10 +116,7 @@ test
   expect(queueEventIssues(queueDir(dir, 'a'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an adapter that over-answers still queues only designated, unstarted tickets, and an answer that is no ticket list fails the poll as invalid', async () => {
+test('an adapter that over-answers still queues only designated, unstarted tickets, and an answer that is no ticket list fails the poll as invalid', async () => {
   const dir = tempDir();
   const clock = manualClock(START);
   const fake = fakeSource(dir);
@@ -148,10 +142,7 @@ test
   expect(queueEventIssues(queueDir(dir, 'a'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('two workflows on one source each queue only their own tickets, in their own queue and events', async () => {
+test('two workflows on one source each queue only their own tickets, in their own queue and events', async () => {
   const dir = tempDir();
   const clock = manualClock(START);
   const source = fakeSource(dir);
@@ -171,10 +162,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a 401 pauses only that workflow's timed polls, and a poll command, once the provider answers, clears the pause", async () => {
+test("a 401 pauses only that workflow's timed polls, and a poll command, once the provider answers, clears the pause", async () => {
   const dir = tempDir();
   const timers = fakeTimers(START);
   const fake = fakeSource(dir);
@@ -226,10 +214,7 @@ test
   expect(queueEventIssues(queueDir(dir, 'b'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a failing poll backs off by the policy, never under every, a success resets it, and a TypeError counts the same', async () => {
+test('a failing poll backs off by the policy, never under every, a success resets it, and a TypeError counts the same', async () => {
   const dir = tempDir();
   const timers = fakeTimers(START);
   const a = counted(fakeSource(dir));
@@ -290,10 +275,7 @@ function onDemand(source: TicketSource) {
   return { control, source: wrapped };
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("pollNow while the workflow's poll is in flight joins it", async () => {
+test("pollNow while the workflow's poll is in flight joins it", async () => {
   const dir = tempDir();
   const timers = fakeTimers(START);
   const { control, source } = onDemand(fakeSource(dir));
@@ -308,10 +290,7 @@ test
   poller.stop();
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('stop clears every timer, and a poll in flight is still recorded but not rescheduled', async () => {
+test('stop clears every timer, and a poll in flight is still recorded but not rescheduled', async () => {
   const dir = tempDir();
   const timers = fakeTimers(START);
   const fake = fakeSource(dir);
@@ -340,10 +319,7 @@ test
   expect(timers.pending()).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('on the system timers, a poller with a 20 ms interval polls at least twice within 500 ms, and stop ends it', async () => {
+test('on the system timers, a poller with a 20 ms interval polls at least twice within 500 ms, and stop ends it', async () => {
   const dir = tempDir();
   const a = counted(fakeSource(dir));
   const poller = createPoller({
@@ -361,10 +337,7 @@ test
   expect(a.calls).toBe(stoppedAt);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("openWatchTarget gives a fixture copy's ticket-to-pr its label, interval and queue, and refuses an unwatched workflow", async () => {
+test("openWatchTarget gives a fixture copy's ticket-to-pr its label, interval and queue, and refuses an unwatched workflow", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     write(

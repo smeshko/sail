@@ -1,9 +1,22 @@
 // Polling: each watched workflow's designated tickets, on a timer of its own, into its queue.
-// Stubbed for queue-store-and-polling: TASK-005 writes it.
+//
+// - A provider that refuses the credentials (401 or 403) pauses that workflow's timed polls instead of retrying them:
+//   retrying would only hammer the provider. A `poll` command or a watcher restart tries again, and a poll that succeeds
+//   clears the pause (DECISIONS D8). Any other failure backs off, never more often than `every`.
+// - The answer is checked and filtered again: a repository's own adapter is untrusted code, so one that over-answers
+//   still can't queue a started or undesignated ticket (D10).
+// - One poll at a time per workflow: a poll asked for while one is in flight joins it (D11).
+// - Only tickets are polled so far. Epic 14.2 adds the CodeHost poll for `pr`.
+import { z } from 'zod';
 import type { ProjectConfig } from '../engine/config';
+import { loadWorkflow } from '../engine/load-workflow';
+import { runsDir } from '../engine/run-dir';
+import { parseEvery, watchLabel, watchProblem } from '../engine/watchable';
+import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
+import { Ticket } from '../ports/types';
 import type { Command } from './inbox';
-import type { QueuePolicy, QueueStore } from './queue-store';
+import { DEFAULT_QUEUE_POLICY, openQueue, type QueuePolicy, type QueueStore } from './queue-store';
 
 /** One watched workflow, ready to poll. */
 export interface WatchTarget {
@@ -25,15 +38,80 @@ export interface OpenWatchTargetOptions {
 }
 
 /** Loads workflow `name` and opens its queue. A workflow that won't load, or isn't watched, refuses. */
-export async function openWatchTarget(_options: OpenWatchTargetOptions): Promise<WatchTarget | { refused: string }> {
-  return { refused: 'not opened yet' };
+export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<WatchTarget | { refused: string }> {
+  const { sailDir, name } = options;
+  const loaded = await loadWorkflow(sailDir, name);
+  if ('refused' in loaded) return loaded;
+  const { workflow } = loaded;
+  if (workflow.watch === undefined) return { refused: `workflow '${name}' isn't watched: it declares no watch` };
+  const everyMs = parseEvery(workflow.watch.every);
+  const problem = watchProblem(workflow);
+  if (problem !== undefined || everyMs === undefined) return { refused: `workflow '${name}' ${problem}` };
+  const label = watchLabel(workflow, options.config);
+  const { now, policy } = options;
+  const store = openQueue({ runsDir: runsDir(sailDir), workflow: name, label, now, ...(policy ? { policy } : {}) });
+  if ('refused' in store) return store;
+  return { workflow: name, label, everyMs, ticketSource: options.ticketSource, store };
 }
 
 export type PollOutcome = 'polled' | 'failed' | 'paused';
 
+const PAUSING: readonly string[] = ['unauthorized', 'forbidden'];
+
+/** The wait before the next poll after `failures` polls in a row failed: the backoff, never shorter than `every`. */
+function retryInMs(target: Pick<WatchTarget, 'everyMs'>, failures: number, policy: QueuePolicy): number {
+  const backoff = policy.pollBackoffMs;
+  return Math.max(target.everyMs, backoff[Math.min(Math.max(0, failures - 1), backoff.length - 1)] ?? 0);
+}
+
+/** The tickets `listDesignated` answered, checked: an answer that isn't a list of tickets is a PortError. */
+async function listDesignated(target: WatchTarget): Promise<Ticket[]> {
+  const answer: unknown = await target.ticketSource.listDesignated(target.label);
+  const parsed = z.array(Ticket).safeParse(answer);
+  if (parsed.success) return parsed.data;
+  const [issue] = parsed.error.issues;
+  const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+  throw new PortError('ticketSource', 'listDesignated', 'invalid', `the answer is not a list of tickets: ${where}`);
+}
+
 /** Polls `target` once into its queue, and says how it went. */
-export async function pollOnce(_target: WatchTarget, _now: () => Date, _policy?: QueuePolicy): Promise<PollOutcome> {
-  return 'failed';
+export async function pollOnce(
+  target: WatchTarget,
+  now: () => Date,
+  policy: QueuePolicy = DEFAULT_QUEUE_POLICY,
+): Promise<PollOutcome> {
+  const started = now().getTime();
+  let answered: Ticket[];
+  try {
+    answered = await listDesignated(target);
+  } catch (error) {
+    const code = error instanceof PortError ? error.code : undefined;
+    const failure = {
+      port: 'ticketSource' as const,
+      adapter: target.ticketSource.name,
+      ...(code === undefined ? {} : { code }),
+      message: error instanceof Error ? error.message : String(error),
+    };
+    if (code !== undefined && PAUSING.includes(code)) {
+      target.store.pollFailed({ ...failure, paused: true });
+      return 'paused';
+    }
+    const failures = target.store.snapshot().polling.failures + 1;
+    target.store.pollFailed({ ...failure, paused: false, retryInMs: retryInMs(target, failures, policy) });
+    return 'failed';
+  }
+  const { ticketSource, label } = target;
+  const tickets = answered.filter(
+    (ticket) => ticketSource.isDesignated(ticket, label) && ticket.state.type === 'unstarted',
+  );
+  const added = target.store.add(tickets);
+  target.store.polled({
+    kind: 'ticket',
+    found: tickets.length,
+    added,
+    durationMs: Math.max(0, now().getTime() - started),
+  });
+  return 'polled';
 }
 
 /** How the poller waits: `setTimeout` for the watcher, a fake in tests. */
@@ -65,11 +143,57 @@ export interface PollerOptions {
   policy?: QueuePolicy;
 }
 
-export function createPoller(_options: PollerOptions): Poller {
-  return {
-    async start() {},
-    stop() {},
-    pollNow: async () => 'failed',
-    apply() {},
+export function createPoller(options: PollerOptions): Poller {
+  const { targets, timers, now } = options;
+  const policy = options.policy ?? DEFAULT_QUEUE_POLICY;
+  const timer = new Map<string, unknown>();
+  const inFlight = new Map<string, Promise<PollOutcome>>();
+  let stopped = false;
+
+  const find = (workflow: string): WatchTarget => {
+    const target = targets.find((each) => each.workflow === workflow);
+    if (target === undefined) throw new Error(`not polling workflow '${workflow}'`);
+    return target;
   };
+  const clear = (target: WatchTarget) => {
+    if (timer.has(target.workflow)) timers.clear(timer.get(target.workflow));
+    timer.delete(target.workflow);
+  };
+  const schedule = (target: WatchTarget, outcome: PollOutcome) => {
+    if (stopped || outcome === 'paused') return;
+    const ms =
+      outcome === 'polled' ? target.everyMs : retryInMs(target, target.store.snapshot().polling.failures, policy);
+    timer.set(
+      target.workflow,
+      timers.set(() => poll(target), ms),
+    );
+  };
+  const poll = (target: WatchTarget): Promise<PollOutcome> => {
+    const running = inFlight.get(target.workflow);
+    if (running !== undefined) return running;
+    clear(target);
+    const polling = pollOnce(target, now, policy).then((outcome) => {
+      inFlight.delete(target.workflow);
+      schedule(target, outcome);
+      return outcome;
+    });
+    inFlight.set(target.workflow, polling);
+    return polling;
+  };
+
+  const poller: Poller = {
+    async start() {
+      stopped = false;
+      await Promise.all(targets.map(poll));
+    },
+    stop() {
+      stopped = true;
+      for (const target of targets) clear(target);
+    },
+    pollNow: (workflow) => poll(find(workflow)),
+    apply(command) {
+      void poller.pollNow(command.workflow);
+    },
+  };
+  return poller;
 }
