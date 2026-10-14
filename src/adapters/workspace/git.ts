@@ -27,15 +27,41 @@ export const LOCAL_TIMEOUT_MS = 30_000;
 export const WORKSPACE_DIR = 'workspace';
 
 /**
- * `env` with every way git could ask for credentials turned off: no terminal prompt, no credential manager dialog,
- * and an ssh that fails rather than asks, unless the caller set an ssh command of its own.
+ * What `git rev-parse --local-env-vars` lists: the variables that tie git to one repository. git exports them to its
+ * hooks, so a sail started from a hook would otherwise point every call at the clone, its index included.
+ */
+const REPOSITORY_VARIABLES = new Set([
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_CONFIG',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_IMPLICIT_WORK_TREE',
+  'GIT_GRAFT_FILE',
+  'GIT_INDEX_FILE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_PREFIX',
+  'GIT_SHALLOW_FILE',
+  'GIT_COMMON_DIR',
+]);
+
+/**
+ * `env` with every way git could ask for credentials turned off, and none of the variables that tie git to a
+ * repository. git tries an askpass program before it looks at `GIT_TERMINAL_PROMPT`, so an empty `GIT_ASKPASS` turns
+ * off `core.askPass` and `SSH_ASKPASS` too, and ssh never uses one. ssh's own prompts need a terminal, which a fetch,
+ * in a session of its own, doesn't have: so the user's ssh command (`GIT_SSH_COMMAND`, `GIT_SSH`, `core.sshCommand`)
+ * is left as it is.
  */
 export function nonInteractive(env: Readonly<Record<string, string>> = {}): Record<string, string> {
   return {
-    ...env,
+    ...Object.fromEntries(Object.entries(env).filter(([name]) => !REPOSITORY_VARIABLES.has(name))),
     GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: '',
+    SSH_ASKPASS_REQUIRE: 'never',
     GCM_INTERACTIVE: 'never',
-    ...(env.GIT_SSH_COMMAND === undefined ? { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } : {}),
   };
 }
 
