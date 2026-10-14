@@ -8,7 +8,7 @@
 // _IN_REVIEW, and LINEAR_API_KEY.
 import { describe, expect, test } from 'bun:test';
 import { createLinearTicketSource, linearTicketSource } from '../../../src/adapters/ticket-source/linear';
-import { LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source/linear-client';
+import { type Fetch, LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source/linear-client';
 import type { ProviderEmit, ProviderEvent } from '../../../src/events/types';
 import type { AdapterContext, Env } from '../../../src/ports/adapter';
 import type { TicketSource } from '../../../src/ports/ticket-source';
@@ -275,7 +275,92 @@ test('listDesignated answers exactly the designated tickets in triage, backlog a
     ['ADW-4', { type: 'unstarted', name: 'Ready' }],
     ['ADW-5', { type: 'unstarted', name: 'Inbox' }],
   ]);
-  expect(world.operations()).toEqual(['SailDesignated', 'SailDesignated']);
+  expect(world.operations()).toEqual(['SailDesignated', 'SailDesignated', 'SailTicket', 'SailTicket', 'SailTicket']);
+});
+
+test('listDesignated reads each listed ticket whole, every comment page included, and leaves out one claimed between the list and its read (review R1-1, R1-8)', async () => {
+  const comments = [1, 2, 3].map((n) => ({ body: `Comment ${n}`, createdAt: `2026-10-0${n}T09:00:00.000Z` }));
+  const world = createLinearWorld(
+    seedOf(
+      RENAMED_STATES,
+      [
+        { number: 1, title: 'Talk', state: 'Ready', labels: ['sail'], comments },
+        { number: 2, title: 'Race', state: 'Ready', labels: ['sail'] },
+      ],
+      2,
+    ),
+  );
+  const fetch: Fetch = async (input, init) => {
+    const answer = await world.fetch(input, init);
+    // Another claimer takes ADW-2 as soon as the list is answered.
+    if (world.operations().at(-1) === 'SailDesignated') world.ticket(2).state = 'Building';
+    return answer;
+  };
+  const adapter = createLinearTicketSource({ team: 'ADW', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch });
+  const listed = await adapter.listDesignated('sail');
+  expect(listed.map((ticket) => [ticket.ticketKey, ticket.comments.map((comment) => comment.body)])).toEqual([
+    ['ADW-1', ['Comment 1', 'Comment 2', 'Comment 3']],
+  ]);
+});
+
+/**
+ * A document's complexity as Linear scores it (https://linear.app/developers/rate-limiting), from above: a field with a
+ * selection is an object of 1 point, a leaf 0.1, and a field's children count `first` times, 50 times for a connection
+ * that gives no `first`. Linear refuses a document over 10,000 points.
+ */
+function complexity(document: string): number {
+  const tokens: string[] = document.replace(/"[^"]*"/g, '""').match(/[A-Za-z_]\w*|\d+|[{}()]/g) ?? [];
+  let at = tokens.indexOf('{') + 1;
+  const selection = (): { points: number; connection: boolean } => {
+    let points = 0;
+    let connection = false;
+    while (at < tokens.length && tokens[at] !== '}') {
+      connection ||= tokens[at] === 'nodes';
+      at++;
+      let first: number | undefined;
+      if (tokens[at] === '(') {
+        let depth = 0;
+        do {
+          if (tokens[at] === '(') depth++;
+          if (tokens[at] === ')') depth--;
+          if (depth === 1 && tokens[at] === 'first') first = Number(tokens[at + 1]);
+          at++;
+        } while (depth > 0);
+      }
+      if (tokens[at] === '{') {
+        at++;
+        const children = selection();
+        at++;
+        points += 1 + (first ?? (children.connection ? 50 : 1)) * children.points;
+      } else points += 0.1;
+    }
+    return { points, connection };
+  };
+  return selection().points;
+}
+
+test('every document the adapter sends stays under Linear’s complexity limit of 10,000 points (review R1-1)', async () => {
+  const comments = [1, 2, 3].map((n) => ({ body: `Comment ${n}`, createdAt: `2026-10-0${n}T09:00:00.000Z` }));
+  const { world, adapter } = linear(
+    seedOf(RENAMED_STATES, [{ number: 1, title: 'Talk', state: 'Ready', labels: ['sail'], comments }], 2),
+    { inReview: 'Code Review' },
+  );
+  await adapter.listDesignated('sail');
+  await adapter.claim('ADW-1');
+  await adapter.update('ADW-1', { state: 'in-review' });
+  await adapter.comment('ADW-1', 'Done.');
+  const sent = world.requests.map((request) => [request.operationName, complexity(request.query)] as const);
+  expect([...new Set(sent.map(([name]) => name))].sort()).toEqual([
+    'SailComment',
+    'SailDesignated',
+    'SailMove',
+    'SailTeam',
+    'SailTicket',
+    'SailTicketComments',
+  ]);
+  expect(sent.filter(([, points]) => points > 10_000)).toEqual([]);
+  // The estimate is no zero: a ticket and its five connections are worth thousands.
+  expect(sent.find(([name]) => name === 'SailTicket')?.[1]).toBeGreaterThan(1_000);
 });
 
 test('a failure Linear answers to SailDesignated or SailTicket rejects with the client’s PortError and Linear’s message', async () => {
