@@ -80,16 +80,22 @@ export function gitInvocation(argv: readonly string[]): GitInvocation {
   return subcommand === undefined ? { globals, args: [] } : { globals, subcommand, args: argv.slice(i + 1) };
 }
 
-/** The options before `--`: long ones whole, short clusters as their letters. */
-function flags(args: readonly string[]): { long: Set<string>; short: Set<string> } {
-  const long = new Set<string>();
+/** The options before `--`: long ones by any prefix they abbreviate, short clusters as their letters. */
+interface Flags {
+  /** Whether a long option given is `name` or a prefix of it: git and GNU getopt take any unambiguous prefix. */
+  readonly long: (name: string) => boolean;
+  readonly short: ReadonlySet<string>;
+}
+
+function flags(args: readonly string[]): Flags {
+  const given: string[] = [];
   const short = new Set<string>();
   for (const arg of args) {
     if (arg === '--') break;
-    if (arg.startsWith('--')) long.add(arg.split('=')[0] as string);
+    if (arg.startsWith('--')) given.push(arg.split('=')[0] as string);
     else if (arg.startsWith('-') && arg.length > 1) for (const letter of arg.slice(1)) short.add(letter);
   }
-  return { long, short };
+  return { long: (name) => given.some((flag) => flag.length > 2 && name.startsWith(flag)), short };
 }
 
 function git(argv: readonly string[], subcommand: string): readonly string[] | undefined {
@@ -109,8 +115,8 @@ export const DENY_SET: readonly CommandEntry[] = [
     matches: (argv) => {
       if (commandName(argv[0] ?? '') !== 'rm') return false;
       const { long, short } = flags(argv.slice(1));
-      const recursive = short.has('r') || short.has('R') || long.has('--recursive');
-      return recursive && (short.has('f') || long.has('--force'));
+      const recursive = short.has('r') || short.has('R') || long('--recursive');
+      return recursive && (short.has('f') || long('--force'));
     },
   },
   {
@@ -125,14 +131,17 @@ export const DENY_SET: readonly CommandEntry[] = [
       const args = git(argv, 'push');
       if (args === undefined) return false;
       const { long, short } = flags(args);
-      const forced = ['--force', '--force-with-lease', '--force-if-includes', '--mirror'].some((f) => long.has(f));
+      const forced = ['--force', '--force-with-lease', '--force-if-includes', '--mirror'].some(long);
       return forced || short.has('f') || args.some((arg) => arg.startsWith('+'));
     },
   },
   {
     name: 'git reset --hard',
     why: 'a hard reset throws away work',
-    matches: (argv) => git(argv, 'reset')?.includes('--hard') ?? false,
+    matches: (argv) => {
+      const args = git(argv, 'reset');
+      return args !== undefined && flags(args).long('--hard');
+    },
   },
   {
     name: 'git clean -f',
@@ -141,7 +150,7 @@ export const DENY_SET: readonly CommandEntry[] = [
       const args = git(argv, 'clean');
       if (args === undefined) return false;
       const { long, short } = flags(args);
-      return short.has('f') || long.has('--force');
+      return short.has('f') || long('--force');
     },
   },
   {
@@ -151,8 +160,8 @@ export const DENY_SET: readonly CommandEntry[] = [
       const args = git(argv, 'branch');
       if (args === undefined) return false;
       const { long, short } = flags(args);
-      const remove = short.has('d') || long.has('--delete');
-      return short.has('D') || (remove && (short.has('f') || long.has('--force')));
+      const remove = short.has('d') || long('--delete');
+      return short.has('D') || (remove && (short.has('f') || long('--force')));
     },
   },
   {
