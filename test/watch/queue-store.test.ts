@@ -1,6 +1,6 @@
 // The queue store: one writer of queue.json per watched workflow, deduplicating by key, counting attempts and parking.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dedupKey, openQueue, type QueuePolicy, type QueueStore, queueDir } from '../../src/watch/queue-store';
@@ -300,3 +300,24 @@ test('queue.json survives a writer killed mid-write: it opens, holds a prefix of
   expect(JSON.parse(readFileSync(join(dir, 'queue.json'), 'utf8')).items).toHaveLength(added.length + 1);
   expect(existsSync(join(dir, 'queue.json.tmp'))).toBe(false);
 }, 30_000);
+
+test('a change whose queue.json write throws leaves the store, the file and the events as they were (review #1.10)', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1')]);
+  const dir = queueDir(runs, 'ticket-to-pr');
+  const before = { queue: store.snapshot(), file: readFileSync(join(dir, 'queue.json'), 'utf8') };
+  chmodSync(dir, 0o555);
+  try {
+    expect(() => store.add([ticket('FAKE-2')])).toThrow('EACCES');
+    expect(() => store.dispatched('ticket:FAKE-1', 'FAKE-1-01')).toThrow('EACCES');
+  } finally {
+    chmodSync(dir, 0o755);
+  }
+  expect(store.snapshot()).toEqual(before.queue);
+  expect(readFileSync(join(dir, 'queue.json'), 'utf8')).toBe(before.file);
+  expect(store.due().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-1']);
+  expect(typesIn(runs)).toEqual(['queue:item_added']);
+  expect(store.add([ticket('FAKE-2')])).toBe(1);
+  expect(keys(store)).toEqual(['ticket:FAKE-1 queued', 'ticket:FAKE-2 queued']);
+});
