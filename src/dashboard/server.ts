@@ -9,16 +9,17 @@
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Server } from 'bun';
+import type { Server, ServerWebSocket } from 'bun';
 import { callFile, findRepo, findRunDir, inside, repos, runItems } from './files';
+import { createIndexFeed, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
   registryDir: string;
   /** 0 picks a free port. */
   port: number;
-  /** How often a run stream polls its events once caught up. 200 ms by default. Read once the streams land. */
+  /** How often a run stream polls its events once caught up. 200 ms by default. */
   followPollMs?: number;
-  /** How often the index stream rereads the registry. 1000 ms by default. Read once the streams land. */
+  /** How often the index stream rereads the registry. 1000 ms by default. */
   indexPollMs?: number;
 }
 
@@ -99,12 +100,18 @@ function segmentsOf(url: URL): string[] | undefined {
   }
 }
 
+type SocketData = { run: string } | { index: true };
+
 /** Starts the dashboard on 127.0.0.1. A port in use is refused. */
 export function startDashboard(options: DashboardOptions): Dashboard | { refused: string } {
   const { registryDir } = options;
-  let server: Server<undefined>;
+  const feed = createIndexFeed(registryDir, options.indexPollMs ?? 1000);
+  const followPollMs = options.followPollMs ?? 200;
+  const sockets = new Set<ServerWebSocket<SocketData>>();
+  const stops = new Map<ServerWebSocket<SocketData>, () => void>();
+  let server: Server<SocketData>;
   try {
-    server = Bun.serve({
+    server = Bun.serve<SocketData>({
       hostname: '127.0.0.1',
       port: options.port,
       fetch(request, self) {
@@ -112,9 +119,32 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         const refused = guard(request, port);
         if (refused !== undefined) return refused;
         const url = new URL(request.url);
+        if (url.pathname === '/ws') {
+          const target = resolveTarget(url, registryDir);
+          if ('status' in target) return error(target.status, target.error);
+          const data: SocketData = 'run' in target ? { run: target.run.runDir } : { index: true };
+          if (self.upgrade(request, { data })) return undefined;
+          return error(400, 'this request is not a WebSocket upgrade');
+        }
         const segments = segmentsOf(url);
         if (segments === undefined) return error(400, 'the path is not percent-encoded properly');
         return route(registryDir, segments, url);
+      },
+      websocket: {
+        open(ws) {
+          sockets.add(ws);
+          if ('run' in ws.data) stops.set(ws, openRunStream(ws, ws.data.run, followPollMs));
+          else feed.add(ws);
+        },
+        close(ws) {
+          sockets.delete(ws);
+          stops.get(ws)?.();
+          stops.delete(ws);
+          feed.remove(ws);
+        },
+        message() {
+          // The streams are one-way: anything a client sends is ignored.
+        },
       },
     });
   } catch (thrown) {
@@ -128,6 +158,11 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
     url: `http://127.0.0.1:${port}/`,
     port,
     async stop() {
+      for (const stop of stops.values()) stop();
+      stops.clear();
+      feed.stop();
+      for (const ws of sockets) ws.close(1001);
+      sockets.clear();
       await server.stop(true);
     },
   };

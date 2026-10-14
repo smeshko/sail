@@ -94,10 +94,7 @@ async function upgradeStatus(server: Dashboard, query: string, headers: Record<s
   return response.status;
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a finished run replays every event in seq order, then end, then a close with 1000, and changes nothing', async () => {
+test('a finished run replays every event in seq order, then end, then a close with 1000, and changes nothing', async () => {
   const server = start();
   const before = treeHash(m.root);
   const socket = connect(server, `run=alpha/${GOLDEN_RUN_ID}`);
@@ -110,10 +107,7 @@ test
   expect(treeHash(m.root)).toBe(before);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a running run replays what it has, then delivers each append in order, then end once it has ended', async () => {
+test('a running run replays what it has, then delivers each append in order, then end once it has ended', async () => {
   const { dir, rest } = runningRun(40);
   const server = start();
   const socket = connect(server, `run=alpha/${RUNNING_ID}`);
@@ -129,10 +123,7 @@ test
   expect(socket.closed).toBe(1000);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a line that cannot be read sends an error naming it, then a close with 1011', async () => {
+test('a line that cannot be read sends an error naming it, then a close with 1011', async () => {
   const lines = eventLines(m.alpha.runDir);
   lines[2] = '{"seq": 3, "type": ';
   writeFileSync(join(m.alpha.runDir, 'events.ndjson'), lines.map((line) => `${line}\n`).join(''));
@@ -143,10 +134,7 @@ test
   expect(socket.closed).toBe(1011);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('the index lists every repository with its runs at once, stays quiet while nothing changes, and resends on a new run', async () => {
+test('the index lists every repository with its runs at once, stays quiet while nothing changes, and resends on a new run', async () => {
   const server = start();
   const socket = connect(server, 'index=1');
   expect(await until(() => socket.messages.length > 0)).toBe(true);
@@ -168,14 +156,15 @@ test
   ]);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('stopping a run stream stops its follow: nothing is sent after it, though the run goes on', async () => {
+test('stopping a run stream stops its follow: nothing is sent after it, though the run goes on', async () => {
   const { dir, rest } = runningRun(10);
   const sent: Received[] = [];
   const closes: (number | undefined)[] = [];
-  const stop = openRunStream({ send: (text) => sent.push(JSON.parse(text)), close: (code) => closes.push(code) }, dir, 20);
+  const stop = openRunStream(
+    { send: (text) => sent.push(JSON.parse(text)), close: (code) => closes.push(code) },
+    dir,
+    20,
+  );
   expect(await until(() => sent.length === 10)).toBe(true);
   stop();
   append(dir, rest.slice(0, 5));
@@ -185,10 +174,7 @@ test
   expect(closes).toEqual([]);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('stop() closes a socket that is still following a running run, and resolves', async () => {
+test('stop() closes a socket that is still following a running run, and resolves', async () => {
   runningRun(10);
   const server = start();
   const socket = connect(server, `run=alpha/${RUNNING_ID}`);
@@ -199,32 +185,30 @@ test
   expect(await until(() => socket.closed !== undefined)).toBe(true);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([
+test.each([
   ['an unregistered repository', 'run=gamma/x', 404],
   ['a run id of ..', 'run=alpha/..', 404],
   ['a run id with a separator', `run=alpha/${GOLDEN_RUN_ID}/00-intake`, 404],
   ['no target', '', 400],
   ['two targets', `run=alpha/${GOLDEN_RUN_ID}&index=1`, 400],
   ['a queue', 'queue=alpha/ticket-to-pr', 404],
-] as const)('a WebSocket on %s is refused before the upgrade, and the golden run opens', async (_, query, status) => {
-  const server = start();
-  const socket = connect(server, `run=beta/${GOLDEN_RUN_ID}`);
-  expect(await until(() => socket.closed !== undefined)).toBe(true);
-  expect(socket.messages.at(-1)).toEqual({ kind: 'end' });
-  const response = await fetch(`http://127.0.0.1:${server.port}/ws?${query}`, { headers: { ...UPGRADE, ...HEADER } });
-  expect(response.status).toBe(status);
-  const body = (await response.json()) as { error: string };
-  expect(body).toEqual({ error: expect.any(String) });
-  if (query.startsWith('queue')) expect(body.error).toContain('Epic 13');
-}, 15_000);
+] as const)(
+  'a WebSocket on %s is refused before the upgrade, and the golden run opens',
+  async (_, query, status) => {
+    const server = start();
+    const socket = connect(server, `run=beta/${GOLDEN_RUN_ID}`);
+    expect(await until(() => socket.closed !== undefined)).toBe(true);
+    expect(socket.messages.at(-1)).toEqual({ kind: 'end' });
+    const response = await fetch(`http://127.0.0.1:${server.port}/ws?${query}`, { headers: { ...UPGRADE, ...HEADER } });
+    expect(response.status).toBe(status);
+    const body = (await response.json()) as { error: string };
+    expect(body).toEqual({ error: expect.any(String) });
+    if (query.startsWith('queue')) expect(body.error).toContain('Epic 13');
+  },
+  15_000,
+);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an upgrade from this dashboard\'s own origin needs no header, by address or as localhost', async () => {
+test("an upgrade from this dashboard's own origin needs no header, by address or as localhost", async () => {
   const server = start();
   for (const host of ['127.0.0.1', 'localhost']) {
     const socket = connect(server, `run=alpha/${GOLDEN_RUN_ID}`, { Origin: `http://${host}:${server.port}` });
@@ -233,15 +217,16 @@ test
   }
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each([
+test.each([
   ['another origin, even with the header', () => ({ ...HEADER, Origin: 'http://evil.example' })],
   ['this host on another port', (port: number) => ({ Origin: `http://127.0.0.1:${port + 1}` })],
   ['neither an origin nor the header', () => ({})],
   ['another Host', (port: number) => ({ ...HEADER, Host: `evil.example:${port}` })],
-] as const)('an upgrade with %s gets 403', async (_, headers) => {
-  const server = start();
-  expect(await upgradeStatus(server, `run=alpha/${GOLDEN_RUN_ID}`, headers(server.port))).toBe(403);
-}, 15_000);
+] as const)(
+  'an upgrade with %s gets 403',
+  async (_, headers) => {
+    const server = start();
+    expect(await upgradeStatus(server, `run=alpha/${GOLDEN_RUN_ID}`, headers(server.port))).toBe(403);
+  },
+  15_000,
+);
