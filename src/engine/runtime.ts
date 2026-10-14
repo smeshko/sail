@@ -21,7 +21,8 @@
 //
 // A run that completes or fails releases its workspace, then its lease, once STATUS says how it ended and before
 // `run:end`. A workspace that can't be removed doesn't keep the lease: it is left for a sweep, and `run:end` says so. A
-// suspended run keeps both, and so does a crashed one, whose lease goes stale with its pid.
+// lease that can't be released doesn't keep `run:end` from the stream either, which says so too. A suspended run keeps
+// both, and so does a crashed one, whose lease goes stale with its pid.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
@@ -276,7 +277,13 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         const why = `its workspace at ${relative(root, workspace.path)} was not removed: ${error.message}`;
         message = message === undefined ? why : `${message}; ${why}`;
       }
-      await opened.adapters.workspace.releaseLease(workspace.remote, workspace.branch, runId);
+      try {
+        await opened.adapters.workspace.releaseLease(workspace.remote, workspace.branch, runId);
+      } catch (error) {
+        if (!(error instanceof PortError)) throw error;
+        const why = `its lease on ${workspace.branch} was not released: ${error.message}`;
+        message = message === undefined ? why : `${message}; ${why}`;
+      }
     }
     ended = true;
     bus.emit({
