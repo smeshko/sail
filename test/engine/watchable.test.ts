@@ -90,3 +90,14 @@ test("watchLabel is the watch's own label, then project.yaml's, then sail's", ()
   expect(watchLabel(plain, { label: 'team' })).toBe('team');
   expect(watchLabel(plain, {})).toBe('sail');
 });
+
+test('parseEvery refuses an every longer than a timer can wait, and watchProblem names that limit (review #1.4)', () => {
+  expect(parseEvery('596h')).toBe(2_145_600_000);
+  expect(parseEvery('35791m')).toBe(2_147_460_000);
+  expect(parseEvery('597h')).toBeUndefined();
+  expect(parseEvery('600h')).toBeUndefined();
+  expect(parseEvery('99999999999999999999h')).toBeUndefined();
+  expect(watchProblem(declared({ watch: { every: '600h' }, maxConcurrentRuns: 2 }))).toBe(
+    'has watch.every "600h", which is longer than 2147483647 ms (about 596h), the longest a timer can wait',
+  );
+});
