@@ -8,7 +8,7 @@
 // - A file that isn't a command, or whose apply throws, is deleted and reported, so it can't wedge the inbox. So is
 //   anything in the inbox that isn't a plain file, as a directory or a link, and a file that can't be read. A file gone
 //   before it is read is passed over: there is nothing left to apply. One that can't be deleted is reported, and the
-//   drain goes on.
+//   drain goes on. A command applied but not deleted isn't applied again by this process, only deleted when it can be.
 import {
   type Dirent,
   existsSync,
@@ -37,6 +37,12 @@ export type Command = z.infer<typeof Command>;
 
 /** Commands this process dropped, so two in one millisecond still sort in the order they were dropped. */
 let dropped = 0;
+
+/**
+ * Command files this process applied and couldn't remove, so a later drain removes them without applying them again. A
+ * restart forgets them, and applies them again, as it does a command a crash left.
+ */
+const kept = new Set<string>();
 
 /**
  * Drops `command` in the inbox, and gives its file: `<UTC time>-<pid>-<count>-<random>.json`, so names sort by when
@@ -104,6 +110,8 @@ export function drainCommands(runsDir: string, apply: (command: Command) => void
     let reason: string | undefined;
     if ('reason' in command) {
       reason = command.reason;
+    } else if (kept.has(file)) {
+      // Applied by an earlier drain that couldn't remove it: only the removal is left to do.
     } else {
       try {
         apply(command);
@@ -114,7 +122,9 @@ export function drainCommands(runsDir: string, apply: (command: Command) => void
     }
     try {
       rmSync(file, { recursive: true, force: true });
+      kept.delete(file);
     } catch (error) {
+      if (reason === undefined) kept.add(file);
       reason = `${reason ?? `${name} was applied`}, and it can't be removed: ${messageOf(error)}`;
     }
     if (reason !== undefined) drained.rejected.push({ file, reason });
