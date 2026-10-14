@@ -5,8 +5,19 @@
 //   is safe to apply twice: a poll, and the set changes and queue edits 13.2 and 13.3 add to `Command`.
 // - A command is written to a dot-prefixed temp file and renamed into place, so a drain never reads half of one: the
 //   drain skips dot-files.
-// - A file that isn't a command, or whose apply throws, is deleted and reported, so it can't wedge the inbox.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+// - A file that isn't a command, or whose apply throws, is deleted and reported, so it can't wedge the inbox. So is
+//   anything in the inbox that isn't a plain file, as a directory or a link, and a file that can't be read. A file gone
+//   before it is read is passed over: there is nothing left to apply.
+import {
+  type Dirent,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 
@@ -53,8 +64,17 @@ export interface Drained {
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** Why the text of the command file `name` is no command, or the command. */
-function parseCommand(name: string, text: string): Command | { reason: string } {
+/** Why the command file `name` is no command, or the command, or undefined when it is already gone. */
+function readCommand(dir: string, entry: Dirent): Command | { reason: string } | undefined {
+  const { name } = entry;
+  if (!entry.isFile()) return { reason: `${name} is not a file` };
+  let text: string;
+  try {
+    text = readFileSync(join(dir, name), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    return { reason: `${name} can't be read: ${messageOf(error)}` };
+  }
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -72,12 +92,14 @@ export function drainCommands(runsDir: string, apply: (command: Command) => void
   const dir = commandsDir(runsDir);
   const drained: Drained = { applied: 0, rejected: [] };
   if (!existsSync(dir)) return drained;
-  const names = readdirSync(dir)
-    .filter((name) => !name.startsWith('.') && name.endsWith('.json'))
-    .sort();
-  for (const name of names) {
+  const entries = readdirSync(dir, { withFileTypes: true })
+    .filter(({ name }) => !name.startsWith('.') && name.endsWith('.json'))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const { name } = entry;
     const file = join(dir, name);
-    const command = parseCommand(name, readFileSync(file, 'utf8'));
+    const command = readCommand(dir, entry);
+    if (command === undefined) continue;
     if ('reason' in command) {
       drained.rejected.push({ file, reason: command.reason });
     } else {
@@ -88,7 +110,7 @@ export function drainCommands(runsDir: string, apply: (command: Command) => void
         drained.rejected.push({ file, reason: `${name} failed: ${messageOf(error)}` });
       }
     }
-    rmSync(file, { force: true });
+    rmSync(file, { recursive: true, force: true });
   }
   return drained;
 }
