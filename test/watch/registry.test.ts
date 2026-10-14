@@ -12,6 +12,7 @@ import {
   readEntry,
   readRegistry,
   recordEntry,
+  withoutUserinfo,
 } from '../../src/watch/registry';
 import { withTempRepo } from '../helpers/temp-repo';
 
@@ -109,3 +110,16 @@ test('cloneRemote drops the userinfo of a URL remote, and keeps an scp-style rem
     expect(await cloneRemote(repo.dir, repo.env)).toBe('git@example.com:o/r.git');
   });
 });
+
+test.each([
+  ['https://alice:secret@part@example.com/org/repo.git', 'https://example.com/org/repo.git'],
+  ['https://user:token@example.com', 'https://example.com'],
+  ['ssh://git@example.com:22/o/r.git', 'ssh://example.com:22/o/r.git'],
+  ['https://example.com/o/r@v2.git', 'https://example.com/o/r@v2.git'],
+  ['git@example.com:o/r.git', 'git@example.com:o/r.git'],
+])(
+  'withoutUserinfo(%s) is %s: the whole userinfo, up to its last @, and nothing past the authority (review #1.3)',
+  (url, stripped) => {
+    expect(withoutUserinfo(url)).toBe(stripped);
+  },
+);
