@@ -112,6 +112,17 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
 
   /** The ticket node and every page of its comments, or a PortError of `op`. Emits nothing. */
   async function lookup(op: string, ticketKey: string): Promise<{ node: Node; comments: unknown[] }> {
+    const found = await read(op, ticketKey);
+    if (found === undefined)
+      throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey} in team ${team}`);
+    return found;
+  }
+
+  /**
+   * As `lookup`, but undefined when the team, which Linear has, holds no such ticket: one deleted, or moved to another
+   * team. A team Linear doesn't have is still a PortError.
+   */
+  async function read(op: string, ticketKey: string): Promise<{ node: Node; comments: unknown[] } | undefined> {
     const [, keyTeam = '', number = ''] = KEY.exec(ticketKey) ?? [];
     if (keyTeam !== team) {
       throw new PortError(
@@ -129,7 +140,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     if (node === undefined) {
       // A team Linear doesn't have answers no ticket too: say which it is.
       await states(op);
-      throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey} in team ${team}`);
+      return undefined;
     }
     const comments = [...node.comments.nodes];
     const seen = new Set<string>();
@@ -240,9 +251,10 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       if (keys.length === 0) await states('listDesignated');
       const tickets: Ticket[] = [];
       for (const key of keys) {
-        const { node, comments } = await lookup('listDesignated', key);
-        const ticket = toTicket(node, comments, 'listDesignated');
-        // Read after the list: a ticket claimed or unlabelled since is no longer one to list.
+        // Read after the list: a ticket deleted, moved to another team, claimed or unlabelled since is not listed.
+        const found = await read('listDesignated', key);
+        if (found === undefined) continue;
+        const ticket = toTicket(found.node, found.comments, 'listDesignated');
         if (ticket.state.type === 'unstarted' && ticket.labels.includes(label)) tickets.push(ticket);
       }
       const number = (ticket: Ticket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
