@@ -17,10 +17,7 @@ function deepFreeze<T>(value: T): T {
 const Task = z.object({ title: z.string() }).meta({ id: 'ClaudeCodeSubmissionTask' });
 const Spec = z.object({ summary: z.string(), first: Task, rest: z.array(Task) });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the envelope is a plain object of outcome, output and reason, with only outcome required, and the step schema as output', () => {
+test('the envelope is a plain object of outcome, output and reason, with only outcome required, and the step schema as output', () => {
   const step = deepFreeze({ type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] });
   expect(submissionEnvelope(step)).toEqual({
     type: 'object',
@@ -34,10 +31,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a step schema's $schema is dropped and its definitions hoisted, so its refs resolve: Ajv takes a done envelope and refuses bad output", () => {
+test("a step schema's $schema is dropped and its definitions hoisted, so its refs resolve: Ajv takes a done envelope and refuses bad output", () => {
   const step = deepFreeze(z.toJSONSchema(Spec, { target: 'draft-07', io: 'input' }) as Record<string, unknown>);
   expect(JSON.stringify(step)).toContain('"$ref":"#/definitions/ClaudeCodeSubmissionTask"');
   const envelope = submissionEnvelope(step);
@@ -57,10 +51,7 @@ test
   expect(verdicts).toEqual([true, false, true, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a $defs map is hoisted too, beside definitions', () => {
+test('a $defs map is hoisted too, beside definitions', () => {
   const step = deepFreeze({
     type: 'object',
     properties: { a: { $ref: '#/$defs/A' }, b: { $ref: '#/definitions/B' } },
@@ -79,10 +70,7 @@ test
   ]).toEqual([true, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, unknown, unknown]>([
+test.each<[string, unknown, unknown]>([
   [
     'done with its output',
     { outcome: 'done', output: { summary: 'x' } },
@@ -107,10 +95,7 @@ test
   expect(readSubmission(structured)).toEqual(expected as ReturnType<typeof readSubmission>);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the submit contract names both envelopes and says to submit exactly once', () => {
+test('the submit contract names both envelopes and says to submit exactly once', () => {
   expect({
     done: SUBMIT_CONTRACT.includes('"outcome": "done"'),
     blocked: SUBMIT_CONTRACT.includes('"outcome": "blocked"'),
