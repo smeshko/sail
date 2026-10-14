@@ -110,7 +110,9 @@ test("the session's options are the step's model, workspace, envelope and budget
     model: 'claude-opus-5-5',
     additionalDirectories: [req.env.STAGE_IN, req.env.STAGE_OUT],
     settingSources: [],
-    settings: { autoMemoryEnabled: false },
+    // Review R1-3: an ask rule on every file tool comes before the CLI's own read and write allowances, so each call
+    // reaches the guard.
+    settings: { autoMemoryEnabled: false, permissions: { ask: ['Read', 'Glob', 'Grep', 'Write', 'Edit'] } },
     skills: [],
     strictMcpConfig: true,
     mcpServers: {},
