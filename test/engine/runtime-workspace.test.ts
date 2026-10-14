@@ -216,6 +216,38 @@ test('a start refused at a claim lost to another start, or aborted once its work
   });
 });
 
+test('a run.json that cannot be written once the ticket has moved throws, and leaves no run directory, no worktree and no lease (review #1.11)', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const { ticketSource } = adapters.ports;
+    const comment = ticketSource.comment.bind(ticketSource);
+    // Once the comment is posted, run.json's name is taken by a directory: writing it fails.
+    ticketSource.comment = async (ticketKey, body) => {
+      const posted = await comment(ticketKey, body);
+      for (const id of runIds(repo.dir)) mkdirSync(join(repo.dir, '.sail-runs', id, RUN_HEADER_FILE));
+      return posted;
+    };
+    let thrown = 'opened';
+    try {
+      await openRun({ cwd: repo.dir, adapters, workflow: 'ticket-to-pr', ticket: 'FAKE-1' });
+    } catch (error) {
+      thrown = (error as Error).message.replace(/: .*$/s, '');
+    }
+    expect({
+      thrown,
+      runs: runIds(repo.dir),
+      worktrees: worktrees(repo),
+      lease: readLease(leasesOf(repo.dir), REMOTE, BRANCH) ?? null,
+    }).toEqual({
+      thrown: expect.stringMatching(/^the ticket is now In Progress and its comment names run FAKE-1-/),
+      runs: [],
+      worktrees: [],
+      lease: null,
+    });
+  });
+});
+
 // The end: a suspended run keeps both, a run that ended for good releases both.
 
 test('a suspended run keeps its worktree and its lease, and a failed run releases both', async () => {
@@ -276,6 +308,33 @@ test("a run whose workspace can't be removed still releases its lease, and its r
       status: 'completed',
       message: `its workspace at .sail-runs/${end.runId}/workspace was not removed`,
       lease: null,
+    });
+  });
+});
+
+test("a run whose lease can't be released still ends with run:end, which says so, and its workspace is gone (review #1.10)", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    // Once publish#1 is journaled, the lease file holds what no lease is.
+    const spoil: Consumer = {
+      name: 'spoil',
+      onEvent: (event) => {
+        if (event.type === 'journal:append' && event.key === 'publish#1') {
+          const dir = leasesOf(repo.dir);
+          for (const name of readdirSync(dir)) writeFileSync(join(dir, name), 'no lease\n');
+        }
+      },
+    };
+    const end = await ran(repo.dir, { consumers: [spoil] });
+    const last = readEvents(end.dir).at(-1);
+    expect({
+      status: end.status,
+      message: last?.type === 'run:end' ? last.message?.replace(/: .*$/s, '') : last?.type,
+      workspace: existsSync(join(end.dir, 'workspace')),
+    }).toEqual({
+      status: 'completed',
+      message: `its lease on ${BRANCH} was not released`,
+      workspace: false,
     });
   });
 });
