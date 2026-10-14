@@ -3,11 +3,11 @@
 // until the turn is over: so a turn's usage is the last one its messages carried, and its `usage:update` is emitted
 // when the turn closes. Cost comes only from the result. No partial message is asked for, and one that comes anyway
 // emits nothing, so no chunk ever reaches the bus.
-//
-// STUB (TASK-003): signatures only, each returning a wrong value.
-import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessEvent } from '../../ports/harness';
 import type { Usage } from '../../ports/types';
+
+type TurnUsage = SDKAssistantMessage['message']['usage'];
 
 /** Token counts as a usage update carries them. */
 interface Tokens {
@@ -50,16 +50,174 @@ export interface SessionReader {
   markDenied(toolUseId: string): void;
 }
 
+const ZERO: Tokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+
+const tokensOf = (usage: TurnUsage): Tokens => ({
+  input: usage.input_tokens ?? 0,
+  cacheRead: usage.cache_read_input_tokens ?? 0,
+  cacheWrite: usage.cache_creation_input_tokens ?? 0,
+  output: usage.output_tokens ?? 0,
+});
+
+const add = (a: Tokens, b: Tokens): Tokens => ({
+  input: a.input + b.input,
+  cacheRead: a.cacheRead + b.cacheRead,
+  cacheWrite: a.cacheWrite + b.cacheWrite,
+  output: a.output + b.output,
+});
+
+const usageOf = (tokens: Tokens, costUsd: number): Usage => ({
+  inputTokens: tokens.input,
+  cacheReadTokens: tokens.cacheRead,
+  cacheWriteTokens: tokens.cacheWrite,
+  outputTokens: tokens.output,
+  costUsd,
+});
+
 /** A result's tokens: `modelUsage` summed over its models, which counts subagents' turns too. */
-export function resultTokens(_result: SDKResultMessage): Tokens {
-  return { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+export function resultTokens(result: SDKResultMessage): Tokens {
+  return Object.values(result.modelUsage).reduce<Tokens>(
+    (sum, model) =>
+      add(sum, {
+        input: model.inputTokens,
+        cacheRead: model.cacheReadInputTokens,
+        cacheWrite: model.cacheCreationInputTokens,
+        output: model.outputTokens,
+      }),
+    ZERO,
+  );
 }
 
-export function createSessionReader(_options: SessionReaderOptions): SessionReader {
+/** The text an assistant message carries, its text blocks joined. */
+const textOf = (message: SDKAssistantMessage): string =>
+  message.message.content
+    .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+    .join('\n')
+    .trim();
+
+export function createSessionReader(options: SessionReaderOptions): SessionReader {
+  const now = () => options.now?.() ?? Date.now();
+  const events: HarnessEvent[] = [];
+  const failures: string[] = [];
+  const open = new Map<string, number>();
+  const denied = new Set<string>();
+  let sessionId: string | undefined;
+  let model: string | undefined;
+  let turns = 0;
+  let toolCalls = 0;
+  let closed: Tokens = ZERO;
+  let spent: Usage = usageOf(ZERO, 0);
+  let turn: { id: string; usage: TurnUsage } | undefined;
+
+  const out = (found: HarnessEvent[]): HarnessEvent[] => {
+    events.push(...found);
+    return found;
+  };
+
+  /** Closes the open turn, giving its usage update. */
+  const closeTurn = (): HarnessEvent[] => {
+    if (turn === undefined) return [];
+    turns++;
+    closed = add(closed, tokensOf(turn.usage));
+    spent = usageOf(closed, 0);
+    turn = undefined;
+    return [{ type: 'usage:update', turn: turns, tokens: { ...closed }, costUsdSoFar: 0 }];
+  };
+
+  const endTool = (callId: string, status: 'completed' | 'failed'): HarnessEvent => {
+    const started = open.get(callId) ?? now();
+    open.delete(callId);
+    return {
+      type: 'tool:end',
+      callId,
+      status: denied.has(callId) ? 'denied' : status,
+      durationMs: Math.max(0, now() - started),
+    };
+  };
+
+  function assistant(message: SDKAssistantMessage): HarnessEvent[] {
+    const found: HarnessEvent[] = [];
+    // A subagent's messages are no turns of this session: their tokens reach it through the result's modelUsage.
+    if (message.parent_tool_use_id === null) {
+      if (turn !== undefined && turn.id !== message.message.id) found.push(...closeTurn());
+      turn = { id: message.message.id, usage: message.message.usage };
+    }
+    if (message.error !== undefined) failures.push(textOf(message) || message.error);
+    for (const block of message.message.content) {
+      switch (block.type) {
+        case 'text':
+          if (block.text !== '') found.push({ type: 'agent:message', text: block.text });
+          break;
+        case 'thinking':
+          found.push({ type: 'agent:thinking', text: block.thinking });
+          break;
+        case 'redacted_thinking':
+          found.push({ type: 'agent:thinking', text: '[redacted]' });
+          break;
+        case 'tool_use':
+          toolCalls++;
+          open.set(block.id, now());
+          found.push({ type: 'tool:start', callId: block.id, tool: block.name, input: block.input });
+          break;
+      }
+    }
+    return found;
+  }
+
+  function user(message: Extract<SDKMessage, { type: 'user' }>): HarnessEvent[] {
+    const { content } = message.message;
+    if (typeof content === 'string') return [];
+    const found: HarnessEvent[] = [];
+    for (const block of content) {
+      if (block.type !== 'tool_result' || !open.has(block.tool_use_id)) continue;
+      if (message.parent_tool_use_id === null) found.push(...closeTurn());
+      found.push(endTool(block.tool_use_id, block.is_error === true ? 'failed' : 'completed'));
+    }
+    return found;
+  }
+
   return {
-    read: () => [],
-    settle: () => [],
-    state: () => ({ turns: 0, toolCalls: 0, denials: 0, spent: { costUsd: 0 }, failures: [], events: [] }),
-    markDenied: () => undefined,
+    read(message) {
+      switch (message.type) {
+        case 'system':
+          if (message.subtype !== 'init' || sessionId !== undefined) return [];
+          sessionId = message.session_id;
+          model = message.model || options.model;
+          return out([{ type: 'harness:session_start', adapter: options.adapter, sessionId, model }]);
+        case 'assistant':
+          return out(assistant(message));
+        case 'user':
+          return out(user(message));
+        case 'auth_status':
+          if (message.error !== undefined) failures.push(message.error);
+          return [];
+        default:
+          return [];
+      }
+    },
+    settle(result) {
+      const found = closeTurn();
+      for (const callId of [...open.keys()]) found.push(endTool(callId, 'failed'));
+      if (result !== undefined) {
+        turns = Math.max(turns, result.num_turns);
+        const tokens = resultTokens(result);
+        spent = usageOf(tokens, result.total_cost_usd);
+        found.push({ type: 'usage:update', turn: Math.max(1, turns), tokens, costUsdSoFar: result.total_cost_usd });
+      }
+      return out(found);
+    },
+    state: () => ({
+      ...(sessionId === undefined ? {} : { sessionId }),
+      ...(model === undefined ? {} : { model }),
+      turns,
+      toolCalls,
+      denials: denied.size,
+      spent,
+      failures: [...failures],
+      events: [...events],
+    }),
+    markDenied(toolUseId) {
+      denied.add(toolUseId);
+    },
   };
 }

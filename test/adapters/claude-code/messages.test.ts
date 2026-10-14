@@ -37,10 +37,7 @@ const readAll = (r: SessionReader, messages: readonly SDKMessage[]): HarnessEven
 
 const updates = (events: readonly HarnessEvent[]) => events.filter((event) => event.type === 'usage:update');
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the init message starts the session once, with its session id and model, or the request model when it reports none', () => {
+test('the init message starts the session once, with its session id and model, or the request model when it reports none', () => {
   const { reader: r } = reader();
   const first = r.read(init());
   const second = r.read(init({ sessionId: 'another', model: 'another-model' }));
@@ -53,10 +50,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('text and thinking blocks become messages and thoughts, an empty text nothing, and redacted thinking [redacted]', () => {
+test('text and thinking blocks become messages and thoughts, an empty text nothing, and redacted thinking [redacted]', () => {
   const { reader: r } = reader();
   const events = readAll(r, [
     assistantText('m1', 'Reading the brief.'),
@@ -73,10 +67,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a tool use starts a tool call, and its result ends it completed, failed or denied, timed by the clock', () => {
+test('a tool use starts a tool call, and its result ends it completed, failed or denied, timed by the clock', () => {
   const { reader: r, at } = reader();
   at(1000);
   const started = readAll(r, [
@@ -105,10 +96,7 @@ test
   expect({ toolCalls: r.state().toolCalls, denials: r.state().denials }).toEqual({ toolCalls: 3, denials: 1 });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the messages of one turn share an id: the turn is counted once, when the next id comes, with the last usage it carried', () => {
+test('the messages of one turn share an id: the turn is counted once, when the next id comes, with the last usage it carried', () => {
   const { reader: r } = reader();
   const usage = (output: number) => ({ usage: { input: 10, output, cacheRead: 300, cacheWrite: 40 } });
   const turnOne = readAll(r, [
@@ -130,10 +118,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('parallel tool calls of one turn close it once, and each update is the running total of the closed turns, at no cost yet', () => {
+test('parallel tool calls of one turn close it once, and each update is the running total of the closed turns, at no cost yet', () => {
   const { reader: r } = reader();
   const events = readAll(r, [
     assistantToolUse('m1', 'a', 'Read', { file_path: 'a.ts' }, { usage: { input: 10, output: 4, cacheRead: 100 } }),
@@ -161,10 +146,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("settling on a result closes the open turn, then gives the result's totals over every model, at its total cost", () => {
+test("settling on a result closes the open turn, then gives the result's totals over every model, at its total cost", () => {
   const { reader: r } = reader();
   r.read(assistantText('m1', 'Done.', { usage: { input: 3, output: 7 } }));
   const result = resultSuccess({
@@ -193,10 +175,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the result's update takes the turns counted when they are more than the result's num_turns", () => {
+test("the result's update takes the turns counted when they are more than the result's num_turns", () => {
   const { reader: r } = reader();
   readAll(r, [assistantText('m1', 'a'), assistantText('m2', 'b'), assistantText('m3', 'c')]);
   const last = r.settle(resultSuccess({ numTurns: 1 })).at(-1);
@@ -206,10 +185,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a subagent's messages are no turns of the session: their tokens count only through the result", () => {
+test("a subagent's messages are no turns of the session: their tokens count only through the result", () => {
   const { reader: r } = reader();
   const events = readAll(r, [
     assistantText('m1', 'Delegating.', { usage: { input: 10, output: 10 } }),
@@ -225,10 +201,7 @@ test
   expect(r.state().turns).toBe(2);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a stream event, a status, an API retry, a hook or a result between the messages of a session emits nothing and changes nothing', () => {
+test('a stream event, a status, an API retry, a hook or a result between the messages of a session emits nothing and changes nothing', () => {
   const quiet: SDKMessage[] = [
     streamEvent(),
     { type: 'system', subtype: 'status', status: 'requesting', uuid: init().uuid, session_id: SESSION_ID },
@@ -272,10 +245,7 @@ test
   expect(noisy.state()).toEqual(plain.state());
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the session's failures are kept in order with the provider's text: an assistant error, an auth status error", () => {
+test("the session's failures are kept in order with the provider's text: an assistant error, an auth status error", () => {
   const { reader: r } = reader();
   readAll(r, [
     assistantText('m1', 'Invalid API key · Fix external API key', { error: 'authentication_failed' }),
@@ -286,10 +256,7 @@ test
   expect(r.state().failures).toEqual(['Invalid API key · Fix external API key', 'token expired', 'billing_error']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('settling with no result closes the open turn and fails every open tool, with no result update', () => {
+test('settling with no result closes the open turn and fails every open tool, with no result update', () => {
   const { reader: r, at } = reader();
   at(100);
   readAll(r, [
@@ -304,10 +271,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('every event of a whole session, stamped with its key, is valid against sail.event.v1, and the state keeps them in order', () => {
+test('every event of a whole session, stamped with its key, is valid against sail.event.v1, and the state keeps them in order', () => {
   const { reader: r } = reader();
   const capture = captureEvents<HarnessEvent>();
   const messages: SDKMessage[] = [
