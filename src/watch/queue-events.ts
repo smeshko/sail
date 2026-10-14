@@ -39,9 +39,11 @@ export function openQueueStream(dir: string, now: () => Date): QueueStream | { r
     emit(event) {
       const stamped = { seq, ts: now().toISOString(), ...event } as QueueEvent;
       seq += 1;
-      // Only ever cut: truncating a file shorter than `size` would pad it.
-      if (pending.length > 0 && sizeOf() > size) truncateSync(path, size);
+      // Kept before anything that can throw, so its seq always reaches the file. A cut only follows a failed append, and
+      // only ever cuts: truncating a file shorter than `size` would pad it.
+      const recovering = pending.length > 0;
       pending.push(JSON.stringify(stamped));
+      if (recovering && sizeOf() > size) truncateSync(path, size);
       for (let line = pending[0]; line !== undefined; line = pending[0]) {
         appendLine(path, line);
         size += Buffer.byteLength(line) + 1;
