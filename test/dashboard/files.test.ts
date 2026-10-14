@@ -13,6 +13,7 @@ import {
   GOLDEN_RUN_ID,
   type Machine,
   machine,
+  SECRET,
   treeHash,
 } from '../helpers/dashboard';
 
@@ -166,3 +167,21 @@ test.each([
   );
   expect(callFile(m.alpha.runDir, key, name)).toEqual({ missing: expect.any(String) });
 });
+
+test.each([
+  ['summary.json', (m: Machine) => join(m.outside, 'creds.json')],
+  ['STATUS', (m: Machine) => join(m.outside, 'secret.txt')],
+  ['run.json', (m: Machine) => join(m.outside, 'secret.txt')],
+  ['summary.json', (m: Machine) => join(m.beta.runDir, 'summary.json')],
+] as const)(
+  'a run whose %s links out of it is listed with a problem and nothing read from it (review #1.2)',
+  (name, target) => {
+    writeFileSync(join(m.outside, 'creds.json'), `${JSON.stringify({ token: SECRET })}\n`);
+    rmSync(join(m.alpha.runDir, name));
+    symlinkSync(target(m), join(m.alpha.runDir, name));
+    const [item] = runItems(entryOf(m.alpha));
+    expect(item).toEqual({ runId: GOLDEN_RUN_ID, summary: null, problem: expect.stringContaining(name) });
+    expect(JSON.stringify(index(m.registryDir))).not.toContain(SECRET.slice(0, 13));
+    expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
+  },
+);
