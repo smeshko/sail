@@ -288,6 +288,83 @@ test('nothing is symlinked or copied into a workspace: the clone has an untracke
   });
 });
 
+/** An executable script at `path` that appends its arguments to `log`, then runs `then`. */
+function logging(path: string, log: string, then: string): string {
+  writeFileSync(path, `#!/bin/sh\necho "$*" >>"${log}"\n${then}\n`, { mode: 0o755 });
+  return path;
+}
+
+test('no askpass runs either: GIT_ASKPASS, SSH_ASKPASS and core.askPass are never asked, by an origin that wants credentials (review #1.2)', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const dir = tempDir();
+    const log = join(dir, 'asked.log');
+    const askpass = logging(join(dir, 'askpass'), log, 'echo guess');
+    repo.git('config', 'core.askPass', askpass);
+    const env = { ...repo.env, GIT_ASKPASS: askpass, SSH_ASKPASS: askpass, SSH_ASKPASS_REQUIRE: 'force' };
+    const unauthorised = () =>
+      new Response('credentials, please', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="sail"' } });
+    const created = await withServer(unauthorised, async (url) => {
+      repo.git('remote', 'set-url', 'origin', url);
+      return settle(adapterOf(repo, w, { env, fetchTimeoutMs: 10_000 }).create(runIn(w.runsDir), { branch: BRANCH }));
+    });
+    expect({ created, asked: existsSync(log) ? readFileSync(log, 'utf8') : '' }).toEqual({
+      created: { rejected: { port: 'workspace', op: 'create', code: 'unavailable' } },
+      asked: '',
+    });
+  });
+}, 15_000);
+
+test("the user's own ssh stays theirs: a fetch over ssh runs core.sshCommand, or GIT_SSH, as a plain git fetch would (review #1.3)", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const dir = tempDir();
+    /** Whether the script that logs to `log` was run for the origin's host. */
+    const ranFor = (log: string) => existsSync(log) && readFileSync(log, 'utf8').includes('sail.invalid');
+    const configuredLog = join(dir, 'configured.log');
+    const wrapperLog = join(dir, 'wrapper.log');
+    repo.git('remote', 'set-url', 'origin', 'ssh://git@sail.invalid/o/r.git');
+    repo.git('config', 'core.sshCommand', logging(join(dir, 'configured'), configuredLog, 'exit 1'));
+    const configured = await settle(adapterOf(repo, w).create(runIn(w.runsDir, 'r1'), { branch: BRANCH }));
+    repo.git('config', '--unset', 'core.sshCommand');
+    const env = { ...repo.env, GIT_SSH: logging(join(dir, 'wrapper'), wrapperLog, 'exit 1') };
+    const wrapped = await settle(adapterOf(repo, w, { env }).create(runIn(w.runsDir, 'r2'), { branch: BRANCH }));
+    const unavailable = { rejected: { port: 'workspace', op: 'create', code: 'unavailable' } };
+    expect({ configured, wrapped, ran: [ranFor(configuredLog), ranFor(wrapperLog)] }).toEqual({
+      configured: unavailable,
+      wrapped: unavailable,
+      ran: [true, true],
+    });
+  });
+});
+
+test("git variables a hook hands down never point git at the clone: GIT_INDEX_FILE set to the clone's index leaves what it stages alone (review #1.6)", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    writeFileSync(join(repo.dir, 'staged.txt'), 'staged\n');
+    repo.git('add', 'staged.txt');
+    const env = {
+      ...repo.env,
+      GIT_INDEX_FILE: join(repo.dir, '.git', 'index'),
+      GIT_DIR: join(repo.dir, '.git'),
+      GIT_WORK_TREE: repo.dir,
+    };
+    const adapter = adapterOf(repo, w, { env });
+    const created = await settle(adapter.create(runIn(w.runsDir), { branch: BRANCH }));
+    const path = 'rejected' in created ? w.runsDir : created.path;
+    writeFileSync(join(path, 'made.txt'), 'made\n');
+    const diff = await settle(adapter.diff(path, 'HEAD'));
+    expect({
+      staged: repo.git('diff', '--cached', '--name-only'),
+      made: 'rejected' in created ? created : gitIn(repo, path, 'rev-parse', 'HEAD').stdout === created.baseSha,
+      diffed: 'rejected' in diff ? diff : [...diff.patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]),
+    }).toEqual({ staged: 'staged.txt', made: true, diffed: ['made.txt'] });
+  });
+});
+
 test('git-worktree is a built-in for the workspace port alone: its options are remote and defaultBranch, and any other is refused by name', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
