@@ -2,7 +2,7 @@
 // request, no CORS, and the REST routes over two registered clones that each hold a copy of the golden run. Every
 // server starts on port 0 and is stopped after its test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, truncateSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { type Dashboard, guard, startDashboard } from '../../src/dashboard/server';
@@ -204,4 +204,29 @@ test('a second dashboard on a port in use is refused, naming the port, and stop(
   const third = start(first.port);
   expect(third.port).toBe(first.port);
   expect((await get(third, '/api/repos')).status).toBe(200);
+});
+
+test('a call log that is a FIFO or a directory gets 404 at once, and a huge one is streamed, not read whole (review #1.5)', async () => {
+  const call = join(m.alpha.runDir, '03-tests/call-1');
+  rmSync(join(call, 'stdout.log'));
+  Bun.spawnSync(['mkfifo', join(call, 'stdout.log')]);
+  // Unblocks a server that opened the FIFO, so a broken check fails an assertion rather than hanging the test.
+  const writer = Bun.spawn(['sh', '-c', `sleep 2; printf leaked > '${join(call, 'stdout.log')}'`]);
+  try {
+    const server = start();
+    const began = Date.now();
+    const fifo = await get(server, `${RUN}/calls/tests%231/log?stream=stdout`);
+    expect([fifo.status, Date.now() - began < 1500]).toEqual([404, true]);
+    expect((await get(server, '/api/repos')).status).toBe(200);
+    rmSync(join(call, 'stderr.log'));
+    mkdirSync(join(call, 'stderr.log'));
+    const directory = await get(server, `${RUN}/calls/tests%231/log?stream=stderr`);
+    expect([directory.status, JSON.parse(directory.body)]).toEqual([404, { error: expect.any(String) }]);
+    truncateSync(join(m.alpha.runDir, 'events.ndjson'), 3 * 1024 ** 3);
+    const huge = await fetch(`http://127.0.0.1:${server.port}${RUN}/events`, { headers: HEADER });
+    expect([huge.status, huge.headers.get('content-length')]).toEqual([200, String(3 * 1024 ** 3)]);
+    await huge.body?.cancel();
+  } finally {
+    writer.kill();
+  }
 });
