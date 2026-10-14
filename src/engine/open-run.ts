@@ -300,7 +300,8 @@ async function startWorkspace(options: {
  * the start aborts before the claim. A claim, a forced move or a comment that fails refuses too, saying where the
  * ticket stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a refusal. Last, it writes the
  * header, the journal and STATUS. A failure there throws too, and its message says where the ticket stands: it has
- * moved, and no run is behind it.
+ * moved, and no run is behind it. So the workspace, the run directory and the lease are undone first, as far as they
+ * still can be.
  *
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
@@ -384,6 +385,11 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     createEventsFile(dir);
     writeStatus(dir, 'running');
   } catch (error) {
+    // No run is behind the claim, so nothing may hold its branch: undone as a refusal would, as far as it still can.
+    const { workspace: port } = options.adapters.ports;
+    await quietly(() => port.release(run, false));
+    await quietly(async () => removeRunDir(dir));
+    await quietly(() => port.releaseLease(made.repository.url, branch, runId));
     const why = error instanceof Error ? error.message : String(error);
     throw new Error(
       `the ticket is now ${took.claim.state.name} and its comment names run ${runId}, but the run directory was not written: ${why}. --force runs the ticket in a new run`,
