@@ -24,6 +24,7 @@ function ruleOf(kind: string): DenialRule {
 
 function listed(call: ToolCall, permissions: Permissions): Decision {
   const tools = permissions.tools ?? [];
+  if (call.tool === '') return deny('tools', `a ${call.kind} call names no tool`);
   if (call.kind === 'mcp') {
     if (call.server === undefined || call.server === '') {
       return deny('tools', `${call.tool}: an MCP call names no server`);
