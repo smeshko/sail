@@ -69,10 +69,13 @@ function retryInMs(target: Pick<WatchTarget, 'everyMs'>, failures: number, polic
   return Math.max(target.everyMs, backoff[Math.min(Math.max(0, failures - 1), backoff.length - 1)] ?? 0);
 }
 
+/** A ticket the queue can hold: one with a key, which its dedup key and queue.json need. */
+const Answer = z.array(Ticket.extend({ ticketKey: z.string().min(1) }));
+
 /** The tickets `listDesignated` answered, checked: an answer that isn't a list of tickets is a PortError. */
 async function listDesignated(target: WatchTarget): Promise<Ticket[]> {
   const answer: unknown = await target.ticketSource.listDesignated(target.label);
-  const parsed = z.array(Ticket).safeParse(answer);
+  const parsed = Answer.safeParse(answer);
   if (parsed.success) return parsed.data;
   const [issue] = parsed.error.issues;
   const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
