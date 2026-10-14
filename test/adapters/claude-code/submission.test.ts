@@ -51,6 +51,58 @@ test("a step schema's $schema is dropped and its definitions hoisted, so its ref
   expect(verdicts).toEqual([true, false, true, false]);
 });
 
+// Review R1-5: Zod writes a recursive output's reference to itself as `#`, which inside the envelope would mean the
+// envelope. Such references are rebased onto the output, and a definition's are too.
+test("a recursive output's references to its own root are rebased onto the output, so a tree validates", () => {
+  const Node: z.ZodType<{ name: string; children?: unknown[] | undefined }> = z.object({
+    name: z.string(),
+    get children() {
+      return z.array(Node).optional();
+    },
+  });
+  const step = deepFreeze(z.toJSONSchema(Node, { target: 'draft-07', io: 'input' }) as Record<string, unknown>);
+  expect(JSON.stringify(step)).toContain('"$ref":"#"');
+  const nested = deepFreeze({
+    type: 'object',
+    properties: {
+      tree: { $ref: '#/definitions/T' },
+      other: { $ref: '#/properties/tree' },
+      default: { $ref: '#' },
+      fixed: { const: { $ref: '#' } },
+    },
+    definitions: { T: { type: 'object', properties: { up: { $ref: '#' } } } },
+  });
+  const tree = { name: 'root', children: [{ name: 'leaf', children: [] }] };
+  const validate = new Ajv({ strict: false }).compile(submissionEnvelope(step));
+  expect({
+    tree: validate({ outcome: 'done', output: tree }),
+    badLeaf: validate({ outcome: 'done', output: { name: 'root', children: [{ name: 3 }] } }),
+    nested: JSON.stringify(submissionEnvelope(nested)),
+  }).toEqual({
+    tree: true,
+    badLeaf: false,
+    nested: JSON.stringify({
+      type: 'object',
+      properties: {
+        outcome: { enum: ['done', 'blocked'] },
+        output: {
+          type: 'object',
+          properties: {
+            tree: { $ref: '#/definitions/T' },
+            other: { $ref: '#/properties/output/properties/tree' },
+            default: { $ref: '#/properties/output' },
+            fixed: { const: { $ref: '#' } },
+          },
+        },
+        reason: { type: 'string' },
+      },
+      required: ['outcome'],
+      additionalProperties: false,
+      definitions: { T: { type: 'object', properties: { up: { $ref: '#/properties/output' } } } },
+    }),
+  });
+});
+
 test('a $defs map is hoisted too, beside definitions', () => {
   const step = deepFreeze({
     type: 'object',
