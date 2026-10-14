@@ -457,3 +457,25 @@ test('a poll command or a start whose poll throws reports it to onError, or to s
   }
   expect(written).toEqual(["sail: polling workflow 'a' failed: ENOSPC: no space left on device, write\n"]);
 });
+
+test('a paused workflow whose poll command fails otherwise is no longer paused, backs off, and a 401 pauses it again (review #1.7)', async () => {
+  const dir = tempDir();
+  const timers = fakeTimers(START);
+  const a = counted(fakeSource(dir));
+  a.failWith = unauthorized;
+  const poller = createPoller({ targets: [target(dir, 'a', 'sail', a.source, timers.now)], timers, now: timers.now });
+  await poller.start();
+  expect(queueFile(dir, 'a').polling.paused).toMatchObject({ code: 'unauthorized' });
+  expect(timers.pending()).toEqual([]);
+
+  a.failWith = new PortError('ticketSource', 'listDesignated', 'unavailable', 'bad gateway');
+  expect(await poller.pollNow('a')).toBe('failed');
+  expect(queueFile(dir, 'a').polling).toEqual({ label: 'sail', failures: 1 });
+  expect(timers.pending().map((timer) => timer.ms)).toEqual([60_000]);
+
+  a.failWith = unauthorized;
+  await timers.advance(60_000);
+  expect(queueFile(dir, 'a').polling.paused).toMatchObject({ code: 'unauthorized' });
+  expect(timers.pending()).toEqual([]);
+  poller.stop();
+});
