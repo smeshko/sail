@@ -45,7 +45,13 @@
       "required": ["name", "version"],
       "additionalProperties": false
     },
+    "branch": {
+      "description": "the run's branch: the one its lease is keyed by and its steps push, named once at the start",
+      "type": "string",
+      "minLength": 1
+    },
     "repository": {
+      "description": "the repository the run's workspace was made from: the remote's URL without credentials, its default branch, and the base the workspace started at",
       "type": "object",
       "properties": {
         "url": { "type": "string" },
@@ -55,7 +61,7 @@
       "required": ["url", "defaultBranch", "baseSha"],
       "additionalProperties": false
     },
-    "workspace": { "type": "string" },
+    "workspace": { "description": "the run's workspace, relative to the run directory", "type": "string" },
     "sail": {
       "type": "object",
       "properties": {

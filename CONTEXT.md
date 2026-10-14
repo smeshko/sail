@@ -258,6 +258,10 @@ _Avoid_: restart, rerun, retry, continue
 The checkout a run works in, on its own branch. How it is made (a branch in the current clone, a git worktree, a container) is up to the workspace adapter.
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
 
+**Base**:
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`.
+_Avoid_: start point, fork point
+
 **Branch**:
 Always the git branch, such as the one a run's workspace sits on. A workflow's routing decision is a route, never a branch.
 _Avoid_: using "branch" for a route or a fork in the workflow

@@ -93,15 +93,20 @@ export interface HeaderFields {
   config: ProjectConfig;
   adapters: Record<Port, AdapterEntry>;
   now: Date;
-  /** The run's workspace, once it exists. Stub for TASK-003 (ADW-93): unread. */
+  /** The run's workspace, once it exists. Left out, the header holds no `branch`, `repository` or `workspace`. */
   workspace?: HeaderWorkspace;
 }
 
-/** The header fields of `workspace`. Stub for TASK-003 (ADW-93): empty values. */
+/** The header fields of `workspace`, in the order `run.json` holds them. */
 export function workspaceFields(
-  _workspace: HeaderWorkspace,
+  workspace: HeaderWorkspace,
 ): Required<Pick<RunHeader, 'branch' | 'repository' | 'workspace'>> {
-  return { branch: '', repository: { url: '', defaultBranch: '', baseSha: '' }, workspace: '' };
+  const { branch, repository, baseSha } = workspace;
+  return {
+    branch,
+    repository: { url: repository.url, defaultBranch: repository.defaultBranch, baseSha },
+    workspace: 'workspace',
+  };
 }
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
@@ -127,6 +132,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
     stages,
     ...(budget !== undefined && Object.keys(budget).length > 0 ? { budget } : {}),
     startedAt: now.toISOString(),
+    ...(fields.workspace === undefined ? {} : workspaceFields(fields.workspace)),
   };
 }
 

@@ -226,10 +226,7 @@ test('an invalid header is a bug in sail: it throws, and nothing is written', as
   expect(existsSync(join(dir, RUN_HEADER_FILE))).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the golden run's run.json reads, and one missing runId or not JSON throws naming the problem", () => {
+test("the golden run's run.json reads, and one missing runId or not JSON throws naming the problem", () => {
   expect(validateRunHeader(JSON.parse(readFileSync(join(GOLDEN, RUN_HEADER_FILE), 'utf8')))).toEqual([]);
   expect(readRunHeader(GOLDEN).runId).toBe(RUN_ID);
 
@@ -277,10 +274,7 @@ test('a header holds the claim it is given and the checks its source lists, as c
   expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'source', 'claim']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a header built with the run's workspace records its branch, repository and base, and validates; one built without it holds none of them", async () => {
+test("a header built with the run's workspace records its branch, repository and base, and validates; one built without it holds none of them", async () => {
   const baseSha = 'a'.repeat(40);
   const workspace: HeaderWorkspace = {
     branch: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
