@@ -196,10 +196,7 @@ const FAILURES: [string, string, Canned, string, string][] = [
   ],
 ];
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a 200 with data resolves to the data, from one POST to the endpoint with the bare key, the query, its variables and its operation name', async () => {
+test('a 200 with data resolves to the data, from one POST to the endpoint with the bare key, the query, its variables and its operation name', async () => {
   const { fetch, sent } = answering({ status: 200, body: { data: { issues: { nodes: [{ id: 'issue-1' }] } } } });
   const data = await clientOf(fetch).request('get', 'SailTicket', QUERY, { team: 'ADW', number: 1 });
   expect(data).toEqual({ issues: { nodes: [{ id: 'issue-1' }] } });
@@ -213,10 +210,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  .each(FAILURES)(
+test.each(FAILURES)(
   'an answer of %s rejects with a PortError of the operation, its code, and Linear’s own words',
   async (_, op, canned, code, message) => {
     const error = await failureOf(op, canned);
@@ -230,10 +224,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a fetch that rejects is unavailable, naming the endpoint’s host and the cause', async () => {
+test('a fetch that rejects is unavailable, naming the endpoint’s host and the cause', async () => {
   const fetch: Fetch = () =>
     Promise.reject(new TypeError('Unable to connect. Is the computer able to access the url?'));
   const error = await rejection(clientOf(fetch).request('get', 'SailTicket', QUERY, {}));
@@ -247,10 +238,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a request Linear never answers is aborted at the timeout, and is unavailable, naming the host and the time', async () => {
+test('a request Linear never answers is aborted at the timeout, and is unavailable, naming the host and the time', async () => {
   const fetch: Fetch = (_, init) =>
     new Promise((_resolve, reject) => {
       init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
@@ -265,10 +253,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('no failure carries the API key, in its message or its raw answer', async () => {
+test('no failure carries the API key, in its message or its raw answer', async () => {
   const errors = await Promise.all(FAILURES.map(([, op, canned]) => failureOf(op, canned)));
   expect(errors.map((error) => error instanceof PortError)).toEqual(FAILURES.map(() => true));
   const carried = errors.filter((error) => JSON.stringify(failureFields(error)).includes(KEY));
