@@ -1,6 +1,6 @@
 // A queue's event stream: numbered without a gap, continued across restarts, and every line a sail.event.v1 event.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openQueueStream, type QueueStream } from '../../src/watch/queue-events';
@@ -71,4 +71,23 @@ test('a last line that is no event refuses, naming its line, and leaves the file
     refused: expect.stringMatching(/^events\.ndjson:2 can't be read, so the events can't continue: ./),
   });
   expect(readFileSync(join(dir, 'events.ndjson'), 'utf8')).toBe(text);
+});
+
+test('the event after a failed append first cuts what that append left, so the stream reopens whole (review #1.6)', () => {
+  const dir = queueDir();
+  const stream = open(dir);
+  stream.emit(polled(1));
+  const path = join(dir, 'events.ndjson');
+  chmodSync(path, 0o444);
+  expect(() => stream.emit(polled(2))).toThrow('EACCES');
+  chmodSync(path, 0o644);
+  // What a write that failed part way leaves behind.
+  appendFileSync(path, '{"seq":2,"ts":"2026-10-14T09:00:00.000Z","type":"queue:po');
+  expect(stream.emit(polled(3))).toMatchObject({ seq: 2, added: 3 });
+  expect(queueEvents(dir).map((event) => [event.seq, event.added])).toEqual([
+    [1, 1],
+    [2, 3],
+  ]);
+  expect(queueEventIssues(dir)).toEqual([]);
+  expect(open(dir).emit(polled(4)).seq).toBe(3);
 });
