@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.event.v1.json",
   "title": "sail event: one line of a run's or a queue's event stream",
   "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. The families later epics emit keep open payloads until they are built. A watched workflow's queue event stream, .sail-runs/queue/<workflow>/events.ndjson, uses the same envelope without runId or key, with the workflow it belongs to.",
-  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash, error:consumer, ticket:*, codehost:* and workspace:*. Open, and closed as their epics emit them (ADR-0012): run:adopted, run:resumed, all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* and error:harness. Of the queue family, which follows error:consumer in the enum and alone may leave out runId, queue:polled, queue:item_added, queue:parked and queue:error are closed, and watch:*, queue:dispatched and queue:skipped_leased are open. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
+  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash, error:consumer, ticket:*, codehost:* and workspace:*. Open, and closed as their epics emit them (ADR-0012): run:adopted, run:resumed, all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* and error:harness. The queue family follows error:consumer in the enum, alone may leave out runId, and is closed: watch:*, queue:polled, queue:item_added, queue:dispatched, queue:skipped_leased, queue:dropped, queue:parked and queue:error. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -68,6 +68,7 @@
         "queue:item_added",
         "queue:dispatched",
         "queue:skipped_leased",
+        "queue:dropped",
         "queue:parked",
         "queue:error"
       ]
@@ -281,6 +282,7 @@
               "queue:item_added",
               "queue:dispatched",
               "queue:skipped_leased",
+              "queue:dropped",
               "queue:parked",
               "queue:error"
             ]
@@ -291,13 +293,12 @@
       "else": { "properties": { "runId": true }, "required": ["runId"] }
     },
     {
-      "if": {
-        "properties": {
-          "type": { "enum": ["watch:added", "watch:removed", "queue:dispatched", "queue:skipped_leased"] }
-        },
-        "required": ["type"]
-      },
-      "then": { "$ref": "#/$defs/queueEnvelope" }
+      "if": { "properties": { "type": { "const": "watch:added" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/watchAdded" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "watch:removed" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/watchRemoved" }
     },
     {
       "if": { "properties": { "type": { "const": "queue:polled" } }, "required": ["type"] },
@@ -306,6 +307,18 @@
     {
       "if": { "properties": { "type": { "const": "queue:item_added" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/queueItemAdded" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:dispatched" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queueDispatched" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:skipped_leased" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queueSkippedLeased" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:dropped" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queueDropped" }
     },
     {
       "if": { "properties": { "type": { "const": "queue:parked" } }, "required": ["type"] },
@@ -1172,6 +1185,27 @@
       "required": ["workflow"]
     },
     "dedupKey": { "type": "string", "pattern": "^ticket:.+$" },
+    "watchAdded": {
+      "description": "the watcher with this pid added the workflow to its watch set: the label it polls, how often, and how many of its runs may run at once",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "pid": { "type": "integer", "minimum": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "everyMs": { "type": "integer", "minimum": 30000 },
+        "maxConcurrentRuns": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["pid", "label", "everyMs", "maxConcurrentRuns"],
+      "unevaluatedProperties": false
+    },
+    "watchRemoved": {
+      "description": "the watcher with this pid took the workflow out of its watch set, or stopped",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": { "pid": { "type": "integer", "minimum": 1 } },
+      "required": ["pid"],
+      "unevaluatedProperties": false
+    },
     "queuePolled": {
       "description": "one poll of a watched workflow's designated sources: how many it found, and how many of them it queued",
       "type": "object",
@@ -1201,6 +1235,42 @@
         "title": { "type": "string" }
       },
       "required": ["dedupKey", "source", "title"],
+      "unevaluatedProperties": false
+    },
+    "queueDispatched": {
+      "description": "a run started for the item: its run id, which dispatch of the item it is, and the pid of its process",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" },
+        "run": { "description": "the id of the run the dispatch started", "type": "string", "minLength": 1 },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "pid": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["dedupKey", "run", "attempt", "pid"],
+      "unevaluatedProperties": false
+    },
+    "queueSkippedLeased": {
+      "description": "a due item left queued because a live run's branch lease holds its branch: it used no slot and counted no attempt",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" },
+        "branch": { "type": "string", "minLength": 1 },
+        "heldBy": { "description": "the run id of the lease's holder", "type": "string", "minLength": 1 }
+      },
+      "required": ["dedupKey", "branch", "heldBy"],
+      "unevaluatedProperties": false
+    },
+    "queueDropped": {
+      "description": "an item taken out of the queue, such as one its re-check found no longer designated or unstarted; a later poll may queue it again",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" },
+        "reason": { "type": "string", "pattern": "\\S" }
+      },
+      "required": ["dedupKey", "reason"],
       "unevaluatedProperties": false
     },
     "queueParked": {

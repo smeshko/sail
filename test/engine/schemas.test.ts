@@ -1327,10 +1327,7 @@ const broken = (sample: NewQueueEvent, change: Record<string, unknown>, without?
   return paths('sail.event.v1', without === undefined ? event : omit(event, without));
 };
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('the watch and dispatch queue events validate closed, without runId, and each refuses an extra field', () => {
+test('the watch and dispatch queue events validate closed, without runId, and each refuses an extra field', () => {
   expect(WATCHED.map((sample) => [sample.type, paths('sail.event.v1', { ...queueEnvelope, ...sample })])).toEqual(
     WATCHED.map((sample) => [sample.type, []]),
   );
@@ -1338,10 +1335,7 @@ test
   expect(WATCHED.map((sample) => broken(sample, { runId: RUN_ID }))).toEqual(WATCHED.map(() => ['/runId']));
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('the watch and dispatch queue events refuse a missing field, a pid or attempt below 1, and an empty reason, label or branch', () => {
+test('the watch and dispatch queue events refuse a missing field, a pid or attempt below 1, and an empty reason, label or branch', () => {
   const [added, removed, dispatched, skipped, dropped] = WATCHED as [NewQueueEvent, ...NewQueueEvent[]];
   expect({
     addedNoLabel: broken(added, {}, 'label'),
