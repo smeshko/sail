@@ -197,20 +197,23 @@ const sameWatcher = (a: WatcherFields, b: WatcherFields) =>
 /**
  * Keeps `me` as the watcher recorded in `entry`'s file, as a live watcher checks on every tick. Two watchers of one
  * name write one file, so the read-back of `claimWatcher()` can't see a second claim that lands after it: the field a
- * live watcher of another pid holds says this one lost, and it is answered, and nothing is written. A field that is
- * missing, dead or not as `me` has it, as a registration that read the entry before the watcher wrote it leaves it, is
- * written again.
+ * live watcher of another pid holds says this one lost, and it is answered (`lost`), and nothing is written. A field
+ * that is missing, dead or not as `me` has it, as a registration that read the entry before the watcher wrote it leaves
+ * it, is written again, unless a live watcher of another repository took one of its labels while it was wrong: that
+ * holder is answered, and nothing is written.
  */
 export function keepWatcher(
   dir: string,
   entry: RegistryEntry,
   me: WatcherFields,
   isAlive: IsAlive = processIsAlive,
-): { kept: true } | { lost: WatcherFields } {
+): { kept: true } | { lost: WatcherFields } | { holder: Holder } {
   const now = readEntry(dir, entry.name);
   const held = now?.watcher;
   if (held !== undefined && held.pid !== me.pid && isAlive(held.pid)) return { lost: held };
   if (held !== undefined && sameWatcher(held, me)) return { kept: true };
+  const holder = findHolder(readRegistry(dir).entries, { name: entry.name, ...me }, isAlive);
+  if (holder !== undefined) return { holder };
   const { watcher: _, ...fields } = now !== undefined && now.sailDir === entry.sailDir ? now : entry;
   recordEntry(dir, { ...fields, watcher: me });
   return { kept: true };

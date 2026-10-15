@@ -169,11 +169,19 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     recorded = fields;
     return undefined;
   };
-  /** Whether another live watcher of this repository holds the registry field now: two started at once, and it won. */
-  const lost = (): WatcherFields | undefined => {
+  /**
+   * Why the watcher must stop, when it no longer holds its registry field alone: another live watcher of this
+   * repository holds the field (two started at once, and it won), or another repository's took one of its labels while
+   * the field was wrong.
+   */
+  const lost = (): string | undefined => {
     if (recorded === undefined) return undefined;
     const kept = keepWatcher(options.registryDir, options.entry, recorded, isAlive);
-    return 'lost' in kept ? kept.lost : undefined;
+    if ('lost' in kept) {
+      return `another watcher of '${options.entry.name}' runs here (pid ${kept.lost.pid}), recorded after this one: this one stops`;
+    }
+    if ('holder' in kept) return `${holderRefusal(kept.holder, options.entry.name)}: this watcher stops`;
+    return undefined;
   };
 
   let stopped = false;
@@ -290,9 +298,8 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     }
     ticking = (async () => {
       try {
-        const winner = lost();
-        if (winner !== undefined) {
-          const why = `another watcher of '${options.entry.name}' runs here (pid ${winner.pid}), recorded after this one: this one stops`;
+        const why = lost();
+        if (why !== undefined) {
           print(errorLine(undefined, why, now()));
           finish();
           return;
