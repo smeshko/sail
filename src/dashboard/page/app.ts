@@ -245,6 +245,12 @@ export function boot(host: PageHost): Page {
     } else if (message?.kind === 'end') {
       open.ended = true;
       mark('main', 'status');
+      // An index saying the run runs again may have come before this end: look again once the index has caught up
+      // (review R2-3).
+      open.retry = host.later(() => {
+        delete open.retry;
+        followAgain(open);
+      }, RECONNECT_MS);
     } else if (message?.kind === 'error') {
       open.error = message.message;
       mark('main');
@@ -269,6 +275,27 @@ export function boot(host: PageHost): Page {
     });
     open.connection = connection;
   };
+
+  /** The open run's status as the index lists it, or undefined. */
+  const listedStatus = (open: OpenRun) => {
+    const item = index?.find((repo) => repo.name === open.repo)?.runs.find((entry) => entry.runId === open.runId);
+    return item === undefined ? undefined : statusOf(item);
+  };
+
+  /**
+   * Follows the open run's stream again, from an empty model, when its stream ended and the index says it runs again,
+   * as `sail resume` makes it (review R1-2). Either order of the end and the index lands here.
+   */
+  function followAgain(open: OpenRun) {
+    if (open !== run || !open.ended || listedStatus(open) !== 'running') return;
+    if (open.retry !== undefined) host.cancel(open.retry);
+    delete open.retry;
+    open.ended = false;
+    open.model = emptyRun();
+    delete open.error;
+    openRunSocket(open);
+    mark('main', 'status', 'inspector');
+  }
 
   const closeRun = () => {
     if (run === undefined) return;
@@ -353,14 +380,7 @@ export function boot(host: PageHost): Page {
       const first = firstRun(index);
       if (first !== undefined) selectRun(first.repo, first.runId);
     }
-    // The open run's stream ended, and the run runs again, as `sail resume` makes it: follow it again (review R1-2).
-    const item = index.find((repo) => repo.name === run?.repo)?.runs.find((entry) => entry.runId === run?.runId);
-    if (run?.ended === true && item !== undefined && statusOf(item) === 'running') {
-      run.ended = false;
-      run.model = emptyRun();
-      delete run.error;
-      openRunSocket(run);
-    }
+    if (run !== undefined) followAgain(run);
     mark('rail', 'attention', 'queues', 'main', 'status');
   };
 
