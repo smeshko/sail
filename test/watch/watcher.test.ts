@@ -295,3 +295,54 @@ test('an unwatch of the whole set followed in the same drain by a watch keeps th
     expect(readEntry(w.registryDir, 'stub')).toEqual(w.entry);
   });
 });
+
+test('a poll still in flight when its workflow is unwatched is recorded before the workflow is watched again, so the new queue keeps its dispatch and the stream its order (review R1-2)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    const real = w.adapters.ports.ticketSource;
+    let calls = 0;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // The provider answers a's second poll at once, and the answer arrives only once the gate opens.
+    const slow: typeof real = Object.assign(Object.create(Object.getPrototypeOf(real)), real, {
+      async listDesignated(label: string) {
+        const answer = await real.listDesignated(label);
+        if (label === 'sail-a' && ++calls === 2) await gate;
+        return answer;
+      },
+    });
+    (w.adapters.ports as { ticketSource: typeof real }).ticketSource = slow;
+    const watcher = await w.start(['a', 'b']);
+    writeTickets(w.sail, tickets({ 'FAKE-1': 'sail-a' }));
+    dropCommand(w.runs, { op: 'poll', workflow: 'a' });
+    dropCommand(w.runs, { op: 'unwatch', workflows: ['a'] });
+    dropCommand(w.runs, { op: 'watch', workflows: ['a'] });
+    setTimeout(release, 100);
+    await w.timers.advance(1000);
+    await Bun.sleep(200);
+    await w.spawner.claims();
+    const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8')).items;
+    const seqs = w.events('a').map((event) => event.seq as number);
+    expect({
+      items: items.map((item: Record<string, unknown>) => [item.dedupKey, item.state, item.pid]),
+      runs: w.order('a'),
+      seqs: seqs.every((seq, index) => index === 0 || seq > (seqs[index - 1] as number)),
+      issues: queueEventIssues(queueDir(w.runs, 'a')),
+    }).toEqual({
+      items: [['ticket:FAKE-1', 'dispatched', w.spawner.run('FAKE-1').pid]],
+      runs: ['FAKE-1'],
+      seqs: true,
+      issues: [],
+    });
+    await watcher.stop();
+  });
+});
