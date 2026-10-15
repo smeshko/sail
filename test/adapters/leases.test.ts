@@ -290,10 +290,7 @@ test('a renewal is refused while its run is alive in another process, whatever i
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("heldLease gives a live run's lease, a suspended run's whatever its pid, and nothing for a free branch or a stale lease, which it leaves in place", async () => {
+test("heldLease gives a live run's lease, a suspended run's whatever its pid, and nothing for a free branch or a stale lease, which it leaves in place", async () => {
   const dir = tempDir();
   const dead = await deadPid();
   const held = (branch: string, holder: LeaseHolder) => {

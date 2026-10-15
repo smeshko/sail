@@ -378,10 +378,7 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     }
   });
 
-  // biome-ignore format: TDD-PENDING TASK-003
-  test
-    .skip // TDD-PENDING TASK-003
-    (`${label}: holder names a live or suspended run's lease, nothing for a free branch or an ended run, and takes nothing`, async () => {
+  test(`${label}: holder names a live or suspended run's lease, nothing for a free branch or an ended run, and takes nothing`, async () => {
     const { adapter, world, capture } = await start();
     const branch = (n: number) => `sail/FAKE-${n}`;
     const live = await world.run('r1');
@@ -394,7 +391,11 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     const runIds = [];
     for (const n of [1, 2, 3, 4, 5]) runIds.push((await adapter.holder(world.remote, branch(n)))?.runId);
     expect(runIds).toEqual(['r1', 'r2', undefined, undefined, undefined]);
-    expect(await adapter.holder(world.remote, branch(1))).toMatchObject({ remote: world.remote, branch: branch(1), pid: live.pid });
+    expect(await adapter.holder(world.remote, branch(1))).toMatchObject({
+      remote: world.remote,
+      branch: branch(1),
+      pid: live.pid,
+    });
     expect(capture.events).toHaveLength(leasedEvents);
     const taken = await adapter.lease(world.remote, branch(4), await world.run('r5'));
     expect(taken.leased ? taken.took : 'refused').toBe('r4');
