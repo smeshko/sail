@@ -290,3 +290,23 @@ test('an unknown type counts on its card, an event that does not fit counts as u
     expect(() => foldRun(mutated)).not.toThrow();
   }
 });
+
+test('event types, loop names and tool call ids that are Object.prototype keys are counted and kept as their own, and a denial names only its own command (review R1-5)', () => {
+  const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
+  const model = foldRun([
+    ...golden().slice(0, 14),
+    { ...at, seq: 901, type: 'constructor' },
+    { ...at, seq: 902, type: 'toString' },
+    { ...at, seq: 903, type: 'loop:iteration', loop: '__proto__', iteration: 1, max: 2 },
+    { ...at, seq: 904, type: 'tool:start', callId: '__proto__', tool: 'Bash', input: { c3: { command: 'git push' } } },
+    { ...at, seq: 905, type: 'permission:denied', callId: 'c3', tool: 'Bash', rule: 'commands', permissions: {} },
+  ]);
+  const card = model.cards.find((entry) => entry.key === 'spec#1');
+  expect(Object.entries(card?.other ?? {})).toEqual([
+    ['constructor', 1],
+    ['toString', 1],
+  ]);
+  expect(Object.entries(model.loops)).toEqual([['__proto__', { iteration: 1, max: 2 }]]);
+  expect(card?.denials.map((denial) => [denial.callId, denial.command])).toEqual([['c3', undefined]]);
+  expect(model.unreadable).toBe(0);
+});
