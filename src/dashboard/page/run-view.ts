@@ -5,9 +5,12 @@
 import type { Summary } from '../../events/summary';
 import { runCommands } from './commands';
 import { cost, duration, percent } from './format';
-import { html, type SafeHtml, safeHref } from './html';
+import { html, type SafeHtml, safeHref, text } from './html';
 import { elapsedMs, type PendingCard, type RunModel, type StageCard } from './run-model';
 import { pillOf, type UiState } from './ui-state';
+
+const fieldsOf = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
@@ -100,7 +103,8 @@ export function renderRun(model: RunModel, summary: Summary | null | undefined, 
   const status = model.end?.status ?? (model.runId === undefined ? summary?.status : 'running');
   const stopReason = model.end?.stopReason ?? summary?.stopReason;
   const ticket = model.ticket ?? summary?.ticket;
-  const pr = model.pr ?? (summary?.result as { pr?: { number?: unknown; url?: unknown } } | undefined)?.pr;
+  // A summary's result is the workflow's own, free-form: its PR is read only when it is an object (review R2-1).
+  const pr = model.pr ?? fieldsOf(fieldsOf(summary?.result)?.pr);
   const loops = Object.entries(model.loops);
   return html`<div class="d-h run-h">${
     ticket === undefined ? '' : html`<span class="d-title">${ticket.ticketKey}</span> ${link(ticket.url, ticket.title)}`
@@ -132,7 +136,7 @@ ${
 ${
   pr === undefined
     ? ''
-    : html`<div class="grp"><div class="grp-t">pull request</div>${link(typeof pr.url === 'string' ? pr.url : undefined, `#${String(pr.number)}`)}</div>`
+    : html`<div class="grp"><div class="grp-t">pull request</div>${link(typeof pr.url === 'string' ? pr.url : undefined, `#${text(pr.number)}`)}</div>`
 }
 ${runId === '' ? '' : html`<div class="grp"><div class="grp-t">commands</div>${commandList(runCommands(runId, status))}</div>`}
 ${

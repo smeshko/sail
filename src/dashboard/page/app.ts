@@ -127,7 +127,16 @@ export function boot(host: PageHost): Page {
     flushTimer = undefined;
     const regions = REGIONS.filter((region) => dirty.has(region));
     dirty.clear();
-    for (const region of regions) host.render(region, draw[region]());
+    for (const region of regions) {
+      // A region that can't be drawn says so, and the others are still drawn (review R2-1).
+      let markup: string;
+      try {
+        markup = draw[region]();
+      } catch {
+        markup = html`<div class="code bad">this part of the page could not be drawn</div>`.value;
+      }
+      host.render(region, markup);
+    }
   };
 
   const mark = (...regions: Region[]) => {
