@@ -4,6 +4,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -132,6 +133,12 @@ test('exports resolve to the SDK entries inside the install', async () => {
     join(installed.root, 'src', 'sdk', 'index.ts'),
     join(installed.root, 'src', 'sdk', 'intakes.ts'),
   ]);
+}, 60_000);
+
+test('the packed tarball includes the dashboard page, which a packaged GET / serves', () => {
+  const page = join(installed.root, 'src', 'dashboard', 'page', 'index.html');
+  expect(existsSync(page)).toBe(true);
+  expect(readFileSync(page, 'utf8')).toContain('<!doctype html>');
 }, 60_000);
 
 test('a project.yaml range the installed version misses is refused with exit 3, and no run starts', async () => {
