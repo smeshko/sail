@@ -152,10 +152,7 @@ async function completed(): Promise<Ran> {
   return ran;
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("sail FAKE-1 on github pushes the run's branch to the origin and opens one labelled pull request into main that names and links the ticket, and open's output is GitHub's number and URL", async () => {
+test("sail FAKE-1 on github pushes the run's branch to the origin and opens one labelled pull request into main that names and links the ticket, and open's output is GitHub's number and URL", async () => {
   const run = await completed();
   const pushed = run.events.find((event) => event.type === 'codehost:pushed');
   const headSha = pushed?.type === 'codehost:pushed' ? pushed.headSha : 'none';
@@ -177,10 +174,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the events hold codehost:pushed, codehost:pr_opened and codehost:labelled under the key open#1, and nothing else of the code host', async () => {
+test('the events hold codehost:pushed, codehost:pr_opened and codehost:labelled under the key open#1, and nothing else of the code host', async () => {
   const run = await completed();
   const hosted = run.events.filter((event) => event.type.startsWith('codehost:'));
   expect(hosted.map((event) => [event.type, 'key' in event ? event.key : undefined])).toEqual([
@@ -190,10 +184,7 @@ test
   ]);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("after the run the marker token is in no run file, nor the clone's git config and logs, nor HOME, though GitHub got it on every request", async () => {
+test("after the run the marker token is in no run file, nor the clone's git config and logs, nor HOME, though GitHub got it on every request", async () => {
   const run = await completed();
   expect({
     found: markerIn(run),
@@ -202,25 +193,24 @@ test
   }).toEqual({ found: NOWHERE, requests: true, matched: true });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("with draft: true in the code host's options, the pull request opens as a draft, and open's output says so", async () => {
+test("with draft: true in the code host's options, the pull request opens as a draft, and open's output says so", async () => {
   await withClone('repository: o/r, draft: true', async (clone) => {
     const ran = await sail(clone, ['FAKE-1']);
     const [runId = ''] = runIds(clone.repo);
     expect({
       code: ran.code,
       drafts: clone.world.pullRequests.map((pr) => pr.draft),
-      output: runId === '' ? null : json(clone.repo.dir, '.sail-runs', runId, '06-open', 'call-1', 'result.json').output,
-    }).toEqual({ code: EXIT_OK, drafts: [true], output: { number: 1, url: 'https://github.com/o/r/pull/1', draft: true } });
+      output:
+        runId === '' ? null : json(clone.repo.dir, '.sail-runs', runId, '06-open', 'call-1', 'result.json').output,
+    }).toEqual({
+      code: EXIT_OK,
+      drafts: [true],
+      output: { number: 1, url: 'https://github.com/o/r/pull/1', draft: true },
+    });
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a run killed after open-pull-request answered resumes to completed with the same pull request: GitHub got one create and holds one pull request from the branch, and the marker is nowhere', async () => {
+test('a run killed after open-pull-request answered resumes to completed with the same pull request: GitHub got one create and holds one pull request from the branch, and the marker is nowhere', async () => {
   await withClone('repository: o/r', async (clone) => {
     const sailDir = join(clone.repo.dir, '.sail');
     holdAfterOpen(sailDir);
@@ -258,10 +248,7 @@ test
   });
 }, 90_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('without SAIL_GITHUB_TOKEN and GITHUB_TOKEN, sail FAKE-1 on github is refused at preflight with exit code 3, naming both, and no run directory', async () => {
+test('without SAIL_GITHUB_TOKEN and GITHUB_TOKEN, sail FAKE-1 on github is refused at preflight with exit code 3, naming both, and no run directory', async () => {
   await withClone(
     'repository: o/r',
     async (clone) => {
