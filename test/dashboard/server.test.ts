@@ -259,10 +259,7 @@ test('a read that throws answers JSON 500, not an HTML page with a stack (review
   expect(JSON.parse(failed.body)).toEqual({ error: expect.any(String) });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('GET / answers the page with no client header, a foreign Host gets 403 and a POST 405, /api still needs the header, and nothing changes on disk', async () => {
+test('GET / answers the page with no client header, a foreign Host gets 403 and a POST 405, /api still needs the header, and nothing changes on disk', async () => {
   const server = start();
   const before = treeHash(m.root);
   const page = await fetch(`http://127.0.0.1:${server.port}/`);

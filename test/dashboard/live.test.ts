@@ -24,10 +24,7 @@ async function until(condition: () => boolean, ms = 10_000): Promise<boolean> {
   return true;
 }
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('a live run shows each card appear and settle in the golden order, the fix loop in iterations 1 and 2, and ends on end', async () => {
+test('a live run shows each card appear and settle in the golden order, the fix loop in iterations 1 and 2, and ends on end', async () => {
   m = seedFixtures();
   const { dir, rest } = runningCopy(m, 1);
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 10, indexPollMs: 1000 });

@@ -10,10 +10,7 @@ const BANNED = [/sunrise/i, /aws-hackaton/i, /\bmaster\b/i, /14:02:11/, /azure/i
 
 const found = (text: string) => BANNED.filter((pattern) => pattern.test(text)).map(String);
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('no file of the page and no built page holds a string the prototype is dropped for', async () => {
+test('no file of the page and no built page holds a string the prototype is dropped for', async () => {
   const files = readdirSync(PAGE);
   expect(files).toEqual(expect.arrayContaining(['index.html', 'app.ts', 'html.ts']));
   expect(

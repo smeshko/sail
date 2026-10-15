@@ -89,10 +89,7 @@ async function bootHeadless(dashboard: Dashboard) {
   return { ids, text, click };
 }
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("the real bundle boots headless: both repositories, the golden run's nine cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
+test("the real bundle boots headless: both repositories, the golden run's nine cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
@@ -110,10 +107,7 @@ test
   expect(page.text('main')).toContain(`<span class="d-agent">${FAKE_2_ID} · ticket-to-pr@1</span>`);
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("once beta's queue/ is gone, the next index empties the queues region", async () => {
+test("once beta's queue/ is gone, the next index empties the queues region", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);

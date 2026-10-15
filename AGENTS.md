@@ -82,7 +82,8 @@ including as examples in this file.
 - `src/events`: the event bus and its consumers: `events.ndjson`, the terminal, `summary.json`.
 - `src/watch`: the per-repository watcher: poll, queue, claim, and dispatch detached runs. `registry.ts` reads and writes
   the registry's repository entries.
-- `src/dashboard`: reads the watcher registry, the branch leases and run files across the machine.
+- `src/dashboard`: reads the watcher registry, the branch leases, the queue files and run files across the machine,
+  and serves the page in `src/dashboard/page/`, bundled in-process on the first `GET /`.
 - `src/cli`: the `sail` command. `src/cli/main.ts` is the bin, `src/cli/commands/` holds one module per subcommand,
   and `src/cli/exit-codes.ts` holds the exit codes every command returns.
 - `bin/sail`: the `sail` a script step finds first on its `PATH`: this checkout's CLI, on the Bun that runs the run.

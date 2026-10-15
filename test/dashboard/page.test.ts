@@ -16,10 +16,7 @@ const built = createPage().response(HOST);
 /** The served document's one inline script, or undefined. */
 const scriptOf = (html: string) => /<script type="module" id="sail-page">([\s\S]*)<\/script>/.exec(html)?.[1];
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('the page builds into one document with exactly one script, inline, holding no import, export, raw </script or <!--', async () => {
+test('the page builds into one document with exactly one script, inline, holding no import, export, raw </script or <!--', async () => {
   const response = await built;
   const html = await response.clone().text();
   expect([response.status, response.headers.get('content-type')]).toEqual([200, 'text/html; charset=utf-8']);
@@ -35,10 +32,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('nothing in the page points outside it: no src, no href, and no @import or url() in its style', async () => {
+test('nothing in the page points outside it: no src, no href, and no @import or url() in its style', async () => {
   const html = await (await built).clone().text();
   const style = /<style>([\s\S]*)<\/style>/.exec(html)?.[1] ?? '';
   expect(style.length).toBeGreaterThan(1000);
@@ -46,10 +40,7 @@ test
   expect(style.match(/@import|url\(/g)).toBeNull();
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("the CSP admits the inlined script by its sha256 and the dashboard's own origins, beside D4's other headers", async () => {
+test("the CSP admits the inlined script by its sha256 and the dashboard's own origins, beside D4's other headers", async () => {
   const response = await built;
   const script = scriptOf(await response.clone().text()) ?? '';
   const hash = new Bun.CryptoHasher('sha256').update(script).digest('base64');
@@ -62,10 +53,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('inlineScript makes </script and <!-- inert where they stand, and leaves the rest of the bundle as it is', () => {
+test('inlineScript makes </script and <!-- inert where they stand, and leaves the rest of the bundle as it is', () => {
   const bundle = 'const a = "</script><!--"; const b = `$$&$1`; /<!--x/u.test(c);';
   expect(inlineScript(bundle)).toBe('const a = "\\x3C/script>\\x3C!--"; const b = `$$&$1`; /\\x3C!--x/u.test(c);');
   // The escape means the same in a string and a unicode regular expression.
@@ -73,10 +61,7 @@ test
   expect(new Function(`return ${inlineScript('/<!--/u')}`)().test('<!--')).toBe(true);
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('a page whose build fails answers 500 naming why, and builds on the next request once it can', async () => {
+test('a page whose build fails answers 500 naming why, and builds on the next request once it can', async () => {
   const dir = join(temp, 'page');
   cpSync(PAGE_DIR, dir, { recursive: true });
   rmSync(join(dir, 'index.html'), { force: true });
