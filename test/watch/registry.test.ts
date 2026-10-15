@@ -10,6 +10,7 @@ import {
   clearWatcher,
   cloneRemote,
   findHolder,
+  keepWatcher,
   machineDir,
   type RegistryEntry,
   readEntry,
@@ -239,5 +240,32 @@ test('an entry with a watcher reads as one, and a watcher with a pid of 0, a rel
       { file: 'unlabelled.json', message: expect.stringContaining('/watcher/labels is required') },
       { file: 'zero.json', message: expect.stringContaining('/watcher/pid') },
     ],
+  });
+});
+
+test('keepWatcher writes its field back when a write dropped it, left it stale or dead, and answers a live watcher of another pid in it, writing nothing (review R1-1)', () => {
+  const dir = registry();
+  const mine = entry('fixture');
+  const kept = (on: RegistryEntry | undefined, isAlive = alive(222)) => {
+    if (on === undefined) rmSync(join(dir, 'fixture.json'), { force: true });
+    else recordEntry(dir, on);
+    return { answer: keepWatcher(dir, mine, ME, isAlive), entry: readEntry(dir, 'fixture') };
+  };
+  const winner = watcher(111, ME.sailDir, ['sail-a']);
+  const registered = entry('fixture', { updatedAt: '2026-10-15T09:30:00.000Z' });
+  expect({
+    gone: kept(undefined),
+    dropped: kept(registered),
+    stale: kept(entry('fixture', { watcher: { ...ME, labels: ['sail-a'] } })),
+    dead: kept(entry('fixture', { watcher: winner })),
+    same: kept(entry('fixture', { watcher: ME })),
+    lost: kept(entry('fixture', { watcher: winner }), alive(111, 222)),
+  }).toEqual({
+    gone: { answer: { kept: true }, entry: entry('fixture', { watcher: ME }) },
+    dropped: { answer: { kept: true }, entry: { ...registered, watcher: ME } },
+    stale: { answer: { kept: true }, entry: entry('fixture', { watcher: ME }) },
+    dead: { answer: { kept: true }, entry: entry('fixture', { watcher: ME }) },
+    same: { answer: { kept: true }, entry: entry('fixture', { watcher: ME }) },
+    lost: { answer: { lost: winner }, entry: entry('fixture', { watcher: winner }) },
   });
 });

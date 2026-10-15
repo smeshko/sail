@@ -8,7 +8,7 @@ import { branchFor } from '../../src/engine/branch';
 import { readConfig } from '../../src/engine/config';
 import { commandsDir, dropCommand } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
-import { type RegistryEntry, readEntry } from '../../src/watch/registry';
+import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/registry';
 import { startWatcher, type Watcher } from '../../src/watch/watcher';
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
@@ -344,5 +344,32 @@ test('a poll still in flight when its workflow is unwatched is recorded before t
       issues: [],
     });
     await watcher.stop();
+  });
+});
+
+test('a watcher whose registry field another live watcher wrote over stops at its next tick, and one whose field a registration dropped writes it back (review R1-1)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    const watcher = await w.start(['a']);
+    const mine = readEntry(w.registryDir, 'stub')?.watcher;
+    if (mine === undefined) throw new Error('the watcher recorded no field');
+    recordEntry(w.registryDir, { ...w.entry, updatedAt: '2026-10-15T09:00:00.500Z' });
+    await w.timers.advance(1000);
+    expect(readEntry(w.registryDir, 'stub')).toEqual({
+      ...w.entry,
+      updatedAt: '2026-10-15T09:00:00.500Z',
+      watcher: mine,
+    });
+    // A second watcher of the repository that started at the same instant, and whose write landed last.
+    const other = { ...mine, pid: process.ppid };
+    recordEntry(w.registryDir, { ...w.entry, watcher: other });
+    await w.timers.advance(1000);
+    expect(await stopped(watcher)).toBe(true);
+    expect(w.out.slice(-2)).toEqual([
+      `09:00:02 error: another watcher of 'stub' runs here (pid ${process.ppid}), recorded after this one: this one stops\n`,
+      '09:00:02 a  unwatched\n',
+    ]);
+    expect(readEntry(w.registryDir, 'stub')?.watcher).toEqual(other);
+    expect(w.events('a').at(-1)).toMatchObject({ type: 'watch:removed', pid: process.pid });
   });
 });

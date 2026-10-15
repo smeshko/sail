@@ -255,3 +255,30 @@ test('a sail watch with no terminal to stop it is refused, and writes nothing', 
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });
+
+test("the set sail watch prints is the live watcher's, whatever a watcher that lost the registry to it wrote last (review R1-1)", async () => {
+  await withTempRepo(async (repo) => {
+    const world = repository(repo);
+    liveEntry(world.registry, 'stub', repo.dir, WATCHER_PID, ['sail-a']);
+    const stream = join(repo.dir, '.sail-runs', 'queue', 'a');
+    mkdirSync(stream, { recursive: true });
+    const events = [
+      { seq: 1, ts: START, type: 'watch:added', workflow: 'a', pid: 4241, label: 'sail-a' },
+      { seq: 2, ts: START, type: 'watch:added', workflow: 'a', pid: WATCHER_PID, label: 'sail-a' },
+      { seq: 3, ts: START, type: 'watch:removed', workflow: 'a', pid: 4241 },
+    ];
+    writeFileSync(join(stream, 'events.ndjson'), events.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    const second = io(repo.dir, world.env);
+    const isAlive = (pid: number) => pid === WATCHER_PID;
+    const code = await watchCommand({ isAlive, pollMs: 5, applyTimeoutMs: 50 })(
+      { values: {}, positionals: ['a'] },
+      second.io,
+    );
+    expect({ code, ...second.printed }).toEqual({
+      code: EXIT_OK,
+      stdout: `sail watch: the watcher of 'stub' (pid ${WATCHER_PID}) watches a\n`,
+      stderr: '',
+    });
+    expect(existsSync(commandsDir(join(repo.dir, '.sail-runs')))).toBe(false);
+  });
+});
