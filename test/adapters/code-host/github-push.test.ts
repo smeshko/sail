@@ -4,7 +4,7 @@
 // logging credential helper, unscoped and scoped to the server, so a helper asked for the token, or to store it, shows.
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { CREDENTIAL_HELPER, gitEnv, pushArgs, pushEnv, pushHead } from '../../../src/adapters/code-host/github-push';
 import { redactor } from '../../../src/engine/redact';
 import { PortError } from '../../../src/ports/errors';
@@ -429,6 +429,19 @@ test("a GITHUB_TOKEN that differs from the token in use reaches no git either: b
       seen: seen(),
       gitEnv: Object.keys(gitEnv(env, TOKEN)).filter((name) => name.includes('GITHUB_TOKEN')),
     }).toEqual({ code: 'unavailable', seen: ['||'], gitEnv: [] });
+  });
+});
+
+test('a remote under ~ is left to git to expand, as before R2-4 (review R3-4)', async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    repo.git('remote', 'add', 'tilde', `~/${relative(repo.home, origin.url)}`);
+    const sha = detachedCommit(repo, 'a.txt');
+    const pushed = await settle(push(repo, 'sail/x', { remote: 'tilde' }));
+    expect({
+      pushed: 'rejected' in pushed ? pushed.rejected : pushed.headSha,
+      landed: refIn(repo, origin.url, 'refs/heads/sail/x'),
+    }).toEqual({ pushed: sha, landed: sha });
   });
 });
 
