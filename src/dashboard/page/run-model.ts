@@ -273,6 +273,9 @@ export function applyEvent(model: RunModel, event: unknown): void {
   const key = str(e.key);
   const card = key === undefined ? undefined : model.cards.find((entry) => entry.key === key.split('/')[0]);
   if (card !== undefined) card.events++;
+  // A run:end with more of the run after it, other than a consumer's report, was a stop the run was resumed from, as
+  // the follow reads it (src/events/follow.ts): the run is live again (review R1-2).
+  if (model.end !== undefined && type !== 'run:end' && type !== 'error:consumer') delete model.end;
   if (!fold(model, e, type, ts, key, card)) model.unreadable++;
   else if (type === 'run:start' || type === 'stage:start') model.pending = pendingOf(model);
 }

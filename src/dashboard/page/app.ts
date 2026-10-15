@@ -19,7 +19,7 @@ import { renderAttention } from './attention-view';
 import type { PageHost, Region } from './host';
 import { REGIONS } from './host';
 import { html } from './html';
-import { newestFirst, queuePanels, railRepos } from './index-model';
+import { newestFirst, queuePanels, railRepos, statusOf } from './index-model';
 import { type Loaded, renderInspector, streamsOf } from './inspector-view';
 import { type QueueStream, queueId, renderQueues } from './queue-view';
 import { renderRail } from './rail-view';
@@ -238,10 +238,11 @@ export function boot(host: PageHost): Page {
   };
 
   const openRunSocket = (open: OpenRun) => {
-    open.connection = host.connect(`run=${enc(`${open.repo}/${open.runId}`)}`, {
+    const connection = host.connect(`run=${enc(`${open.repo}/${open.runId}`)}`, {
       message: (text) => onRunMessage(open, text),
       close: () => {
-        if (stopped || open !== run || open.ended) return;
+        // A socket the run has since replaced closes without a retry.
+        if (stopped || open !== run || open.ended || open.connection !== connection) return;
         open.retry = host.later(() => {
           delete open.retry;
           if (open !== run) return;
@@ -252,6 +253,7 @@ export function boot(host: PageHost): Page {
         }, RECONNECT_MS);
       },
     });
+    open.connection = connection;
   };
 
   const closeRun = () => {
@@ -336,6 +338,14 @@ export function boot(host: PageHost): Page {
     if (!listed) {
       const first = firstRun(index);
       if (first !== undefined) selectRun(first.repo, first.runId);
+    }
+    // The open run's stream ended, and the run runs again, as `sail resume` makes it: follow it again (review R1-2).
+    const item = index.find((repo) => repo.name === run?.repo)?.runs.find((entry) => entry.runId === run?.runId);
+    if (run?.ended === true && item !== undefined && statusOf(item) === 'running') {
+      run.ended = false;
+      run.model = emptyRun();
+      delete run.error;
+      openRunSocket(run);
     }
     mark('rail', 'attention', 'queues', 'main', 'status');
   };
