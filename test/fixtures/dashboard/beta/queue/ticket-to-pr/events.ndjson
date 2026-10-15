@@ -1,0 +1,9 @@
+{"seq":1,"ts":"2026-09-24T10:54:59.000Z","type":"watch:added","workflow":"ticket-to-pr"}
+{"seq":2,"ts":"2026-09-24T10:55:00.000Z","type":"queue:polled","workflow":"ticket-to-pr","kind":"ticket","label":"sail","found":4,"added":4,"durationMs":120}
+{"seq":3,"ts":"2026-09-24T10:55:00.100Z","type":"queue:item_added","workflow":"ticket-to-pr","dedupKey":"ticket:FAKE-5","source":{"kind":"ticket","ticketKey":"FAKE-5"},"title":"Link the changelog from the README"}
+{"seq":4,"ts":"2026-09-24T10:55:00.100Z","type":"queue:item_added","workflow":"ticket-to-pr","dedupKey":"ticket:FAKE-3","source":{"kind":"ticket","ticketKey":"FAKE-3"},"title":"Escape <b>this</b> & \"that\""}
+{"seq":5,"ts":"2026-09-24T10:55:00.100Z","type":"queue:item_added","workflow":"ticket-to-pr","dedupKey":"ticket:FAKE-6","source":{"kind":"ticket","ticketKey":"FAKE-6"},"title":"Greet in French with --lang fr"}
+{"seq":6,"ts":"2026-09-24T10:55:00.100Z","type":"queue:item_added","workflow":"ticket-to-pr","dedupKey":"ticket:FAKE-4","source":{"kind":"ticket","ticketKey":"FAKE-4"},"title":"Add a --whisper flag"}
+{"seq":7,"ts":"2026-09-24T11:00:00.000Z","type":"queue:error","workflow":"ticket-to-pr","port":"ticketSource","adapter":"fake","message":"the ticket source did not answer in 30s","paused":false,"retryInMs":60000}
+{"seq":8,"ts":"2026-09-24T11:01:00.000Z","type":"queue:polled","workflow":"ticket-to-pr","kind":"ticket","label":"sail","found":4,"added":0,"durationMs":95}
+{"seq":9,"ts":"2026-09-24T11:01:05.000Z","type":"queue:parked","workflow":"ticket-to-pr","dedupKey":"ticket:FAKE-6","attempts":2,"reason":"stage_error: implement#1 ended in error: harness: the session ended before it submitted a result"}

@@ -13,7 +13,10 @@ import {
   GOLDEN_RUN_ID,
   type Machine,
   machine,
+  QUEUE_WORKFLOW,
+  queueDirOf,
   SECRET,
+  seedFixtures,
   treeHash,
 } from '../helpers/dashboard';
 
@@ -119,10 +122,29 @@ test("a call's result and logs: the stream asked for, else the session for an ag
   expect(treeHash(m.root)).toBe(before);
 });
 
-test("a repository's queues are an empty list until the watcher", async () => {
-  const server = start();
-  const queues = await get(server, '/api/repos/alpha/queues');
-  expect([queues.status, JSON.parse(queues.body)]).toEqual([200, []]);
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a repository's queues: beta's one view, whose queue is its queue.json, and alpha's none, and reading changes nothing", async () => {
+  const seeded = seedFixtures();
+  try {
+    const started = startDashboard({ registryDir: seeded.registryDir, port: 0 });
+    if ('refused' in started) throw new Error(started.refused);
+    servers.push(started);
+    const before = treeHash(seeded.root);
+    const beta = await get(started, '/api/repos/beta/queues');
+    const file = JSON.parse(readFileSync(join(queueDirOf(seeded), 'queue.json'), 'utf8'));
+    expect([beta.status, beta.type, JSON.parse(beta.body)]).toEqual([
+      200,
+      'application/json;charset=utf-8',
+      [{ workflow: QUEUE_WORKFLOW, queue: file }],
+    ]);
+    const alpha = await get(started, '/api/repos/alpha/queues');
+    expect([alpha.status, JSON.parse(alpha.body)]).toEqual([200, []]);
+    expect(treeHash(seeded.root)).toBe(before);
+  } finally {
+    seeded.remove();
+  }
 });
 
 test.each([
@@ -239,3 +261,27 @@ test('a read that throws answers JSON 500, not an HTML page with a stack (review
   expect([failed.status, failed.type]).toEqual([500, 'application/json;charset=utf-8']);
   expect(JSON.parse(failed.body)).toEqual({ error: expect.any(String) });
 });
+
+// biome-ignore format: TDD-PENDING TASK-009
+test
+  .skip // TDD-PENDING TASK-009
+  ('GET / answers the page with no client header, a foreign Host gets 403 and a POST 405, /api still needs the header, and nothing changes on disk', async () => {
+  const server = start();
+  const before = treeHash(m.root);
+  const page = await fetch(`http://127.0.0.1:${server.port}/`);
+  expect([page.status, page.headers.get('content-type')]).toEqual([200, 'text/html; charset=utf-8']);
+  expect(page.headers.get('content-security-policy')).toContain(
+    `connect-src http://127.0.0.1:${server.port} ws://127.0.0.1:${server.port}`,
+  );
+  expect(await page.text()).toContain('<title>sail dashboard</title>');
+  const local = await fetch(`http://127.0.0.1:${server.port}/`, { headers: { Host: `localhost:${server.port}` } });
+  expect(local.headers.get('content-security-policy')).toContain(
+    `connect-src http://localhost:${server.port} ws://localhost:${server.port}`,
+  );
+  expect((await get(server, '/', { headers: { Host: `evil.example:${server.port}` } })).status).toBe(403);
+  const posted = await fetch(`http://127.0.0.1:${server.port}/`, { method: 'POST' });
+  expect([posted.status, posted.headers.get('allow')]).toEqual([405, 'GET']);
+  expect((await get(server, '/api/repos', { headers: {} })).status).toBe(403);
+  expect((await get(server, '/index.html', { headers: {} })).status).toBe(403);
+  expect(treeHash(m.root)).toBe(before);
+}, 30_000);

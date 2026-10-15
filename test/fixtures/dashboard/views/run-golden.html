@@ -1,0 +1,79 @@
+<div class="d-h run-h"><span class="d-title">FAKE-1</span> <span class="lnk">Add a --shout flag to the greet command</span><span class="pill p-pass">completed</span><span class="d-agent">FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N · ticket-to-pr@1</span></div>
+
+<div class="run-b">
+<div class="stats totals">
+<div class="stat"><b>15.9s</b><span>of 90m</span></div>
+<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>
+<div class="stat"><b>9/9</b><span>calls settled</span></div>
+</div>
+<div class="loops"><span class="loopbadge">fix: 2/3 · break</span></div>
+<div class="routes"><span class="route">spec#1 done → implement#1</span><span class="route">implement#1 done → tests#1</span><span class="route">tests#1 failed → implement#2</span><span class="route">implement#2 done → tests#2</span><span class="route">tests#2 passed → self-review#1</span><span class="route">self-review#1 done → describe#1</span><span class="route">describe#1 done → open#1</span><span class="route">open#1 passed → end</span></div>
+<div class="cgrp"><div class="grid"><div class="card cursor" data-action="select-card" data-key="intake#1">
+<div class="c-top"><span class="c-n">01</span><span class="c-name">intake#1</span><span class="pill p-pass">passed</span></div>
+<div class="c-agent">builtin</div>
+<div class="facts"><div><b>900ms</b><span class="lbl">duration</span></div><div><b>—</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+
+
+<div class="c-foot"><span>2 files</span><span>6 events</span></div>
+</div><div class="card" data-action="select-card" data-key="spec#1">
+<div class="c-top"><span class="c-n">02</span><span class="c-name">spec#1</span><span class="pill p-pass">done</span></div>
+<div class="c-agent">agent <span class="c-model">claude-opus-5-5</span></div>
+<div class="facts"><div><b>1.1s</b><span class="lbl">duration</span></div><div><b>$0.31</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+<div class="c-msg">Spec written: two tasks, greet() and the CLI first, then the tests.</div>
+
+<div class="c-foot"><span>1 file</span><span>13 events</span></div>
+</div></div></div><div class="cgrp"><div class="grp-t">fix · iteration 1 of 3</div><div class="grid"><div class="card" data-action="select-card" data-key="implement#1">
+<div class="c-top"><span class="c-n">03</span><span class="c-name">implement#1</span><span class="pill p-pass">done</span></div>
+<div class="c-agent">agent <span class="c-model">claude-sonnet-5</span></div>
+<div class="facts"><div><b>1.2s</b><span class="lbl">duration</span></div><div><b>$0.48</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+<div class="c-msg">Implemented both tasks in two commits. Pushing is not allowed here, so the branch stays local.</div>
+
+<div class="c-foot"><span>1 file</span><span>14 events</span></div>
+</div><div class="card" data-action="select-card" data-key="tests#1">
+<div class="c-top"><span class="c-n">04</span><span class="c-name">tests#1</span><span class="pill p-fail">failed</span></div>
+<div class="c-agent">script</div>
+<div class="facts"><div><b>700ms</b><span class="lbl">duration</span></div><div><b>—</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+
+
+<div class="c-foot"><span>1 file</span><span>6 events</span></div>
+</div></div></div><div class="cgrp"><div class="grp-t">fix · iteration 2 of 3</div><div class="grid"><div class="card" data-action="select-card" data-key="implement#2">
+<div class="c-top"><span class="c-n">05</span><span class="c-name">implement#2</span><span class="pill p-pass">done</span></div>
+<div class="c-agent">agent <span class="c-model">claude-sonnet-5</span></div>
+<div class="facts"><div><b>1.1s</b><span class="lbl">duration</span></div><div><b>$0.24</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+<div class="c-msg">Fixed: the whole line is upper-cased. Added a test for the help text.</div>
+
+<div class="c-foot"><span>1 file</span><span>14 events</span></div>
+</div><div class="card" data-action="select-card" data-key="tests#2">
+<div class="c-top"><span class="c-n">06</span><span class="c-name">tests#2</span><span class="pill p-pass">passed</span></div>
+<div class="c-agent">script</div>
+<div class="facts"><div><b>700ms</b><span class="lbl">duration</span></div><div><b>—</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+
+
+<div class="c-foot"><span>1 file</span><span>6 events</span></div>
+</div><div class="card" data-action="select-card" data-key="self-review#1">
+<div class="c-top"><span class="c-n">07</span><span class="c-name">self-review#1</span><span class="pill p-pass">done</span></div>
+<div class="c-agent">agent <span class="c-model">claude-opus-5-5</span></div>
+<div class="facts"><div><b>1.1s</b><span class="lbl">duration</span></div><div><b>$0.22</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+<div class="c-msg">Every requirement is met. One low finding and one nit.</div>
+
+<div class="c-foot"><span>1 file</span><span>13 events</span></div>
+</div></div></div><div class="cgrp"><div class="grid"><div class="card" data-action="select-card" data-key="describe#1">
+<div class="c-top"><span class="c-n">08</span><span class="c-name">describe#1</span><span class="pill p-pass">done</span></div>
+<div class="c-agent">agent <span class="c-model">claude-sonnet-5</span></div>
+<div class="facts"><div><b>1.1s</b><span class="lbl">duration</span></div><div><b>$0.10</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+<div class="c-msg">PR description written.</div>
+
+<div class="c-foot"><span>1 file</span><span>14 events</span></div>
+</div><div class="card" data-action="select-card" data-key="open#1">
+<div class="c-top"><span class="c-n">09</span><span class="c-name">open#1</span><span class="pill p-pass">passed</span></div>
+<div class="c-agent">script</div>
+<div class="facts"><div><b>900ms</b><span class="lbl">duration</span></div><div><b>—</b><span class="lbl">cost</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>
+
+
+<div class="c-foot"><span>0 files</span><span>11 events</span></div>
+</div></div></div>
+
+<div class="grp"><div class="grp-t">pull request</div><span class="lnk">#5</span></div>
+<div class="grp"><div class="grp-t">commands</div><div class="cmds"><span class="cmd"><span class="lbl">show</span><code>sail show FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N</code><button class="btn" data-action="copy" data-text="sail show FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N">copy</button></span></div></div>
+
+</div>

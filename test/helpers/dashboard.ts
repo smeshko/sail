@@ -2,9 +2,15 @@
 // with an empty `.sail/` and a copy of the golden run in its `.sail-runs/`, plus a directory outside every clone that
 // holds a secret, for the escapes to aim at. The entries are written by hand, so the setup doesn't lean on the
 // registry module under test.
+//
+// `seedFixtures()` is the same machine with the dashboard's recorded fixtures instead: alpha holds the golden run and
+// FAKE-2 (failed, with a denial), and beta holds FAKE-3 (suspended, with a stage the fixture repository doesn't have)
+// and the queue of its watched `ticket-to-pr`. `test/fixtures/dashboard/<repo>/` holds what each clone's `.sail-runs/`
+// holds.
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
+  cpSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -44,10 +50,15 @@ export interface Machine {
 
 /** Registers a clone named `name` under `root`, with a copy of the golden run, by writing its entry by hand. */
 export function addClone(root: string, registryDir: string, name: string): Clone {
+  return register(root, registryDir, name, copyGoldenRun);
+}
+
+/** Registers a clone named `name` under `root` by writing its entry by hand, after `fill` has put its runs in. */
+function register(root: string, registryDir: string, name: string, fill: (clone: string) => string): Clone {
   const clone = join(root, name);
   const sailDir = join(clone, '.sail');
   mkdirSync(sailDir, { recursive: true });
-  const runDir = copyGoldenRun(clone);
+  const runDir = fill(clone);
   mkdirSync(registryDir, { recursive: true });
   const entry = {
     schema: 'sail.registry.v1',
@@ -61,15 +72,20 @@ export function addClone(root: string, registryDir: string, name: string): Clone
   return { name, clone, sailDir, runDir };
 }
 
-export function machine(): Machine {
+/** A temp root with its SAIL_HOME and the directory outside every clone. */
+function machineRoot(): { root: string; sailHome: string; registryDir: string; outside: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'sail-dashboard-')));
   const sailHome = join(root, 'sail-home');
-  const registryDir = join(sailHome, 'watchers');
   const outside = join(root, 'outside');
   mkdirSync(outside);
   for (const name of ['secret.txt', 'result.json', 'session.log', 'stdout.log']) {
     writeFileSync(join(outside, name), `${SECRET}\n`);
   }
+  return { root, sailHome, registryDir: join(sailHome, 'watchers'), outside };
+}
+
+export function machine(): Machine {
+  const { root, sailHome, registryDir, outside } = machineRoot();
   return {
     root,
     sailHome,
@@ -79,6 +95,68 @@ export function machine(): Machine {
     outside,
     remove: () => rmSync(root, { recursive: true, force: true }),
   };
+}
+
+/** The dashboard's recorded fixtures: what each clone's `.sail-runs/` holds. */
+export const DASHBOARD_FIXTURES = join(import.meta.dir, '..', 'fixtures', 'dashboard');
+export const FAKE_2_ID = 'FAKE-2-01M36VAD801GH3GKJTE239SCP8';
+export const FAKE_3_ID = 'FAKE-3-01M39H4ZW0S46MV303CFX3T4PY';
+/** The watched workflow whose queue beta holds. */
+export const QUEUE_WORKFLOW = 'ticket-to-pr';
+/** The id of the running copy `runningCopy()` makes. */
+export const RUNNING_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD9Z';
+
+/** Copies the recorded `.sail-runs/` of `repo` into `clone`, and gives the run directory of `runId` in it. */
+function copyFixture(repo: 'alpha' | 'beta', runId: string) {
+  return (clone: string): string => {
+    cpSync(join(DASHBOARD_FIXTURES, repo), join(clone, '.sail-runs'), { recursive: true });
+    return join(clone, '.sail-runs', runId);
+  };
+}
+
+/**
+ * A machine whose registry holds alpha, with the golden run and FAKE-2, and beta, with FAKE-3 and its queue. alpha's
+ * `runDir` is its golden run, and beta's is FAKE-3.
+ */
+export function seedFixtures(): Machine {
+  const { root, sailHome, registryDir, outside } = machineRoot();
+  const alpha = register(root, registryDir, 'alpha', (clone) => {
+    copyFixture('alpha', FAKE_2_ID)(clone);
+    return copyGoldenRun(clone);
+  });
+  const beta = register(root, registryDir, 'beta', copyFixture('beta', FAKE_3_ID));
+  return {
+    root,
+    sailHome,
+    registryDir,
+    alpha,
+    beta,
+    outside,
+    remove: () => rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+/** FAKE-2's run directory in a seeded machine. */
+export const fake2Dir = (m: Machine): string => join(m.alpha.clone, '.sail-runs', FAKE_2_ID);
+
+/** beta's queue directory in a seeded machine. */
+export const queueDirOf = (m: Machine): string => join(m.beta.clone, '.sail-runs', 'queue', QUEUE_WORKFLOW);
+
+/**
+ * A copy of the golden run in alpha that is still running: STATUS `running` and the golden run's first `count` events.
+ * `rest` is the lines still to append.
+ */
+export function runningCopy(m: Machine, count: number): { dir: string; rest: string[] } {
+  const dir = copyGoldenRun(m.alpha.clone, { runId: RUNNING_ID, status: 'running\n' });
+  const lines = eventLines(dir);
+  writeFileSync(
+    join(dir, 'events.ndjson'),
+    lines
+      .slice(0, count)
+      .map((line) => `${line}\n`)
+      .join(''),
+  );
+  return { dir, rest: lines.slice(count) };
 }
 
 /** The registry entry `addClone()` wrote for `clone`, as the registry reads it. */

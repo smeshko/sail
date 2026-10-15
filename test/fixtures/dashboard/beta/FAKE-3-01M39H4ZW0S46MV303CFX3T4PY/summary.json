@@ -1,0 +1,105 @@
+{
+  "schema": "sail.summary.v1",
+  "runId": "FAKE-3-01M39H4ZW0S46MV303CFX3T4PY",
+  "workflow": "ticket-to-pr@1",
+  "source": {
+    "kind": "ticket",
+    "ticketKey": "FAKE-3",
+    "via": "cli"
+  },
+  "ticket": {
+    "ticketKey": "FAKE-3",
+    "title": "Escape <b>this</b> & \"that\"",
+    "url": "fake://tickets/FAKE-3"
+  },
+  "status": "suspended",
+  "stopReason": "budget_exceeded",
+  "startedAt": "2026-09-24T11:00:00.700Z",
+  "endedAt": "2026-09-24T11:00:06.900Z",
+  "durationMs": 6200,
+  "calls": [
+    {
+      "key": "intake#1",
+      "kind": "builtin",
+      "outcome": "passed",
+      "durationMs": 900,
+      "files": [
+        "ticket.json",
+        "brief.md"
+      ],
+      "resultPath": "00-intake/call-1/result.json"
+    },
+    {
+      "key": "spec#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 1100,
+      "turns": 4,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.3125,
+      "files": [
+        "spec.md"
+      ],
+      "resultPath": "01-spec/call-1/result.json"
+    },
+    {
+      "key": "lint#1",
+      "kind": "script",
+      "outcome": "passed",
+      "durationMs": 700,
+      "files": [
+        "lint.txt"
+      ],
+      "resultPath": "02-lint/call-1/result.json"
+    },
+    {
+      "key": "implement#1",
+      "kind": "agent",
+      "outcome": "error",
+      "durationMs": 900,
+      "turns": 3,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.75,
+      "resultPath": "03-implement/call-1/result.json"
+    }
+  ],
+  "loops": {
+    "fix": {
+      "iterations": 1,
+      "max": 3
+    }
+  },
+  "routes": [
+    {
+      "at": "spec#1",
+      "value": "done",
+      "took": "lint#1"
+    },
+    {
+      "at": "lint#1",
+      "value": "passed",
+      "took": "implement#1"
+    }
+  ],
+  "totals": {
+    "stageCalls": 4,
+    "steps": 4,
+    "toolCalls": 0,
+    "denials": 0,
+    "replays": 3,
+    "usage": {
+      "inputTokens": 11200,
+      "cacheReadTokens": 48400,
+      "cacheWriteTokens": 7100,
+      "outputTokens": 3850,
+      "costUsd": 1.0625
+    },
+    "budget": {
+      "maxUsd": 1,
+      "usedPct": 106.3
+    }
+  },
+  "version": 1
+}

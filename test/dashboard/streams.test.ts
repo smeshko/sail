@@ -1,13 +1,23 @@
 // The dashboard's WebSockets: `?run=` replays a run's events and follows it until it ends, `?index=1` sends every
-// repository's runs and again when they change, and `?queue=` is reserved. Targets are refused over HTTP before any
-// upgrade, and an upgrade needs this dashboard as its Origin, or the client header. Every wait polls for its condition
+// repository's runs and queues and again when they change, and `?queue=` replays a watched workflow's queue events and
+// follows them until the client closes. Targets are refused over HTTP before any upgrade, and an upgrade needs this
+// dashboard as its Origin, or the client header. Every wait polls for its condition
 // against a deadline, so a broken stream fails an assertion rather than hanging.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { appendFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Dashboard, startDashboard } from '../../src/dashboard/server';
 import { openRunStream } from '../../src/dashboard/streams';
-import { eventLines, GOLDEN_RUN_ID, type Machine, machine, treeHash } from '../helpers/dashboard';
+import {
+  eventLines,
+  GOLDEN_RUN_ID,
+  type Machine,
+  machine,
+  QUEUE_WORKFLOW,
+  queueDirOf,
+  seedFixtures,
+  treeHash,
+} from '../helpers/dashboard';
 import { copyGoldenRun } from '../helpers/golden-run';
 
 let m: Machine;
@@ -30,8 +40,8 @@ const UPGRADE = {
   'Sec-WebSocket-Version': '13',
 };
 
-function start(): Dashboard {
-  const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 30 });
+function start(registryDir = m.registryDir): Dashboard {
+  const started = startDashboard({ registryDir, port: 0, followPollMs: 20, indexPollMs: 30 });
   if ('refused' in started) throw new Error(`the dashboard refused to start: ${started.refused}`);
   servers.push(started);
   return started;
@@ -191,7 +201,6 @@ test.each([
   ['a run id with a separator', `run=alpha/${GOLDEN_RUN_ID}/00-intake`, 404],
   ['no target', '', 400],
   ['two targets', `run=alpha/${GOLDEN_RUN_ID}&index=1`, 400],
-  ['a queue', 'queue=alpha/ticket-to-pr', 404],
 ] as const)(
   'a WebSocket on %s is refused before the upgrade, and the golden run opens',
   async (_, query, status) => {
@@ -203,7 +212,6 @@ test.each([
     expect(response.status).toBe(status);
     const body = (await response.json()) as { error: string };
     expect(body).toEqual({ error: expect.any(String) });
-    if (query.startsWith('queue')) expect(body.error).toContain('Epic 13');
   },
   15_000,
 );
@@ -308,4 +316,103 @@ test('a message the socket drops ends the replay with a close of 1011, never wit
   await Bun.sleep(100);
   expect(closes).toEqual([1011]);
   expect(sent.map((message) => message.kind)).toEqual(['event', 'event']);
+}, 15_000);
+
+/** A seeded machine, removed after the test, and a dashboard over it. */
+function seeded(): { s: Machine; server: Dashboard } {
+  const s = seedFixtures();
+  extra.push(s);
+  return { s, server: start(s.registryDir) };
+}
+const extra: Machine[] = [];
+afterEach(() => {
+  for (const s of extra.splice(0)) s.remove();
+});
+
+const queueEvents = (conversation: Conversation) =>
+  conversation.messages.filter((message) => message.kind === 'queue-event').map((message) => message.event.seq);
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('?queue= replays every queue event in seq order as a queue-event, then follows an appended one, and never ends while the client stays', async () => {
+  const { s, server } = seeded();
+  const socket = connect(server, `queue=beta/${QUEUE_WORKFLOW}`);
+  expect(await until(() => queueEvents(socket).length === 9)).toBe(true);
+  expect(socket.messages[0]).toEqual({
+    kind: 'queue-event',
+    event: { seq: 1, ts: '2026-09-24T10:54:59.000Z', type: 'watch:added', workflow: QUEUE_WORKFLOW },
+  });
+  const polled = { seq: 10, ts: '2026-09-24T11:06:00.000Z', type: 'queue:polled', workflow: QUEUE_WORKFLOW };
+  appendFileSync(
+    join(queueDirOf(s), 'events.ndjson'),
+    `${JSON.stringify({ ...polled, kind: 'ticket', label: 'sail', found: 4, added: 0, durationMs: 90 })}\n`,
+  );
+  expect(await until(() => queueEvents(socket).length === 10)).toBe(true);
+  // Ten poll intervals more: still open, and nothing but queue events.
+  await Bun.sleep(200);
+  expect(queueEvents(socket)).toEqual(range(1, 10));
+  expect(socket.messages.map((message) => message.kind)).toEqual(Array(10).fill('queue-event'));
+  expect(socket.closed).toBeUndefined();
+  socket.close();
+  expect(await until(() => socket.closed !== undefined)).toBe(true);
+}, 15_000);
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a queue stream whose line cannot be read sends an error naming it, then a close with 1011', async () => {
+  const { s, server } = seeded();
+  appendFileSync(join(queueDirOf(s), 'events.ndjson'), '{"seq": 10, "type": \n');
+  const socket = connect(server, `queue=beta/${QUEUE_WORKFLOW}`);
+  expect(await until(() => socket.closed !== undefined)).toBe(true);
+  expect(socket.messages.at(-1)).toEqual({ kind: 'error', message: expect.stringContaining('events.ndjson:10') });
+  expect(socket.closed).toBe(1011);
+}, 15_000);
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  .each([
+  ['an unknown workflow', 'queue=beta/missing', "no queue 'missing' in beta"],
+  ['an unknown repository', `queue=nobody/${QUEUE_WORKFLOW}`, `no repository for 'nobody/${QUEUE_WORKFLOW}'`],
+  ['a workflow of ..', 'queue=beta/..', "no queue '..' in beta"],
+  ['an encoded ..', 'queue=beta/%2e%2e', "no queue '..' in beta"],
+  ['a workflow with a separator', `queue=beta/${QUEUE_WORKFLOW}/..`, `no queue '${QUEUE_WORKFLOW}/..' in beta`],
+  ['a value with no repository', `queue=${QUEUE_WORKFLOW}`, `no repository for '${QUEUE_WORKFLOW}'`],
+  ['a repository with no queue', `queue=alpha/${QUEUE_WORKFLOW}`, `no queue '${QUEUE_WORKFLOW}' in alpha`],
+] as const)(
+  'a queue WebSocket on %s is refused with 404 before the upgrade',
+  async (_, query, error) => {
+    const { server } = seeded();
+    const response = await fetch(`http://127.0.0.1:${server.port}/ws?${query}`, { headers: { ...UPGRADE, ...HEADER } });
+    expect([response.status, await response.json()]).toEqual([404, { error }]);
+  },
+  15_000,
+);
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("the index carries each repository's queues, and an item added to queue.json sends a new index within two polls", async () => {
+  const { s, server } = seeded();
+  const socket = connect(server, 'index=1');
+  expect(await until(() => socket.messages.length > 0)).toBe(true);
+  const file = JSON.parse(readFileSync(join(queueDirOf(s), 'queue.json'), 'utf8'));
+  const queuesOf = (message: Received) => message.repos.map((repo: Received) => [repo.name, repo.queues]);
+  expect(queuesOf(socket.messages[0])).toEqual([
+    ['alpha', []],
+    ['beta', [{ workflow: QUEUE_WORKFLOW, queue: file }]],
+  ]);
+  const item = { ...file.items[0], dedupKey: 'ticket:FAKE-7', source: { kind: 'ticket', ticketKey: 'FAKE-7' } };
+  writeFileSync(join(queueDirOf(s), 'queue.json'), JSON.stringify({ ...file, items: [...file.items, item] }));
+  // Two polls of 30 ms, with room for a loaded machine.
+  expect(await until(() => socket.messages.length > 1, 1000)).toBe(true);
+  expect(socket.messages.at(-1).repos[1].queues[0].queue.items.map((entry: Received) => entry.dedupKey)).toEqual([
+    'ticket:FAKE-5',
+    'ticket:FAKE-3',
+    'ticket:FAKE-6',
+    'ticket:FAKE-4',
+    'ticket:FAKE-7',
+  ]);
 }, 15_000);

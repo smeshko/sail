@@ -42,8 +42,8 @@ test('two registered clones are listed side by side, each with its run, its stat
   expect(runItems(entryOf(m.alpha))).toEqual([goldenItem()]);
   expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
   expect(index(m.registryDir)).toEqual([
-    { ...entryOf(m.alpha), runs: [goldenItem()] },
-    { ...entryOf(m.beta), runs: [goldenItem()] },
+    { ...entryOf(m.alpha), runs: [goldenItem()], queues: [] },
+    { ...entryOf(m.beta), runs: [goldenItem()], queues: [] },
   ]);
   expect(treeHash(m.root)).toBe(before);
 });

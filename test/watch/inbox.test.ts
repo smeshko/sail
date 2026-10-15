@@ -88,7 +88,7 @@ test('a file that is no command, or whose apply throws, is removed and rejected 
   expect(readdirSync(dir)).toEqual([]);
 });
 
-test("draining commands leaves a store's queue.json as it was, and only the store names that file", async () => {
+test("draining commands leaves a store's queue.json as it was, and only the store names that file, beside the dashboard's reader", async () => {
   const runs = runsDir();
   const store = openQueue({
     runsDir: runs,
@@ -112,7 +112,8 @@ test("draining commands leaves a store's queue.json as it was, and only the stor
     const text = await Bun.file(join(import.meta.dir, '..', '..', 'src', file)).text();
     if (text.includes('QUEUE_FILE') || /['"`]queue\.json['"`]/.test(text)) naming.push(file);
   }
-  expect(naming).toEqual(['watch/queue-store.ts']);
+  // The dashboard reads queue.json, through its contained reader, and never writes it.
+  expect(naming.filter((file) => file !== 'dashboard/queues.ts')).toEqual(['watch/queue-store.ts']);
 });
 
 test('a directory, a link or an unreadable file in the inbox is removed and rejected, and the commands around it apply (review #1.5)', () => {
