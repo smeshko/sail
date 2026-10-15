@@ -52,6 +52,23 @@ const QUEUE_LEASE = { remote: 'watcher', branch: 'queue' } as const;
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/**
+ * How long, in real time, adding a workflow waits for its first poll unless told otherwise. A provider that doesn't
+ * answer by then can't hold up the tick a `watch` command is applied in: the poll goes on, and records its answer
+ * when it comes.
+ */
+export const FIRST_POLL_MS = 10_000;
+
+/** Waits for `promise`, for at most `ms` of real time. */
+async function atMost(promise: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waited = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  await Promise.race([promise, waited]);
+  clearTimeout(timer);
+}
+
 /** How often the watcher ticks unless told otherwise. */
 export const TICK_MS = 1000;
 
@@ -71,6 +88,8 @@ export interface WatcherOptions {
   spawn?: (options: SpawnRunOptions) => SpawnedRun;
   isAlive?: IsAlive;
   tickMs?: number;
+  /** How long adding a workflow waits for its first poll: `FIRST_POLL_MS` when left out. */
+  firstPollMs?: number;
   /** Receives each formatted line. */
   write: (text: string) => void;
   lines?: FormatOptions;
@@ -237,7 +256,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       onExit: kick,
     });
     set.set(workflow, { target, poller, dispatcher });
-    await poller.start();
+    await atMost(poller.start(), options.firstPollMs ?? FIRST_POLL_MS);
   };
 
   /**
