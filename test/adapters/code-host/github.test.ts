@@ -381,6 +381,35 @@ test("a push whose remote names another repository on the web host is refused as
   ]);
 }, 30_000);
 
+test('a title, body or comment that holds the token is refused as invalid, and none is sent to GitHub (review R1-10)', async () => {
+  const on = world();
+  const capture = captureEvents();
+  const adapter = host(on, capture.emit);
+  const { cwd, branch } = pushable();
+  await adapter.push(cwd, branch);
+  const sent = on.routes().length;
+  const request = { base: 'main', head: branch, title: 'Add a flag', body: 'The body.' };
+  const basic = Buffer.from(`x-access-token:${TOKEN}`).toString('base64');
+  const errors = [
+    await rejection(adapter.openPullRequest({ ...request, title: `Add ${TOKEN}` })),
+    await rejection(adapter.openPullRequest({ ...request, body: `Authorization: Basic ${basic}` })),
+    await rejection(adapter.comment(7, `token=${encodeURIComponent(TOKEN)}`)),
+  ];
+  expect({
+    failures: errors.map((error) => (error instanceof PortError ? [error.op, error.code, error.message] : error)),
+    requests: on.routes().slice(sent),
+    events: capture.events.filter((event) => event.type !== 'codehost:pushed'),
+  }).toEqual({
+    failures: [
+      ['openPullRequest', 'invalid', "codeHost.openPullRequest: the pull request's title or body holds the token"],
+      ['openPullRequest', 'invalid', "codeHost.openPullRequest: the pull request's title or body holds the token"],
+      ['comment', 'invalid', 'codeHost.comment: the comment holds the token'],
+    ],
+    requests: [],
+    events: [],
+  });
+});
+
 test("listDesignated, checks, merge and removeLabel reject as invalid, saying github doesn't support them yet, with no request and no event", async () => {
   const on = world();
   const capture = captureEvents();
@@ -477,7 +506,8 @@ test('with every request answered 401 echoing the token, no message, raw or even
   const errors = [
     await rejection(adapter.push(cwd, branch)),
     await rejection(
-      adapter.openPullRequest({ base: 'main', head: branch, title: TOKEN, body: TOKEN, labels: ['sail'] }),
+      // A title or body that holds the token is refused before any request (review R1-10): this one is GitHub's echo.
+      adapter.openPullRequest({ base: 'main', head: branch, title: 'Add a flag', body: 'The body.', labels: ['sail'] }),
     ),
     await rejection(adapter.getPullRequest(7)),
     await rejection(adapter.addLabel(7, 'sail')),
