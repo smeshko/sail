@@ -1,0 +1,41 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-3-01M39H4ZW0S46MV303CFX3T4PY",
+  "stage": "lint",
+  "call": 1,
+  "key": "lint#1",
+  "kind": "script",
+  "outcome": "passed",
+  "output": {
+    "ok": true,
+    "problems": 0
+  },
+  "files": {
+    "lint.txt": {
+      "path": "02-lint/call-1/lint.txt",
+      "bytes": 29,
+      "sha256": "41d094b4258c52b3712e89e979cfbc07b8bab3e836f584189f2ae7c2a5f07408"
+    }
+  },
+  "consumed": {},
+  "startedAt": "2026-09-24T11:00:04.300Z",
+  "finishedAt": "2026-09-24T11:00:05.000Z",
+  "durationMs": 700,
+  "exit": {
+    "code": 0,
+    "mapped": "passed"
+  },
+  "command": ".sail/stages/lint/run.sh",
+  "env": {
+    "RUN_ID": "FAKE-3-01M39H4ZW0S46MV303CFX3T4PY",
+    "STAGE": "lint",
+    "CALL": "1",
+    "TRY": "1",
+    "STAGE_IN": ".sail-runs/FAKE-3-01M39H4ZW0S46MV303CFX3T4PY/02-lint/call-1/in",
+    "STAGE_OUT": ".sail-runs/FAKE-3-01M39H4ZW0S46MV303CFX3T4PY/02-lint/call-1",
+    "WORKSPACE": ".sail-runs/FAKE-3-01M39H4ZW0S46MV303CFX3T4PY/workspace",
+    "BRANCH": "sail/FAKE-3-escape-b-this-b-that",
+    "SAIL_CONFIG": ".sail/project.yaml",
+    "SAIL_EVENTS": ".sail-runs/FAKE-3-01M39H4ZW0S46MV303CFX3T4PY/02-lint/call-1/port-events.ndjson"
+  }
+}

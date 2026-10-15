@@ -1,0 +1,44 @@
+{
+  "ticketKey": "FAKE-3",
+  "title": "Escape <b>this</b> & \"that\"",
+  "url": "fake://tickets/FAKE-3",
+  "description": "Add a usage section for `greet` to the README.",
+  "state": {
+    "type": "started",
+    "name": "In Progress"
+  },
+  "labels": [
+    "sail"
+  ],
+  "comments": [
+    {
+      "author": "sail",
+      "body": "sail run FAKE-3-01M39H4ZW0S46MV303CFX3T4PY started",
+      "createdAt": "2026-09-24T11:00:00.600Z"
+    }
+  ],
+  "links": [],
+  "attachments": [],
+  "raw": {
+    "ticketKey": "FAKE-3",
+    "title": "Escape <b>this</b> & \"that\"",
+    "description": "Add a usage section for `greet` to the README.",
+    "state": {
+      "type": "started",
+      "name": "In Progress"
+    },
+    "labels": [
+      "sail"
+    ],
+    "comments": [
+      {
+        "author": "sail",
+        "body": "sail run FAKE-3-01M39H4ZW0S46MV303CFX3T4PY started",
+        "createdAt": "2026-09-24T11:00:00.600Z"
+      }
+    ],
+    "links": [],
+    "attachments": []
+  },
+  "acceptanceCriteria": []
+}

@@ -2,9 +2,10 @@
 // registry entry and checked to stay inside its run directory. Each refusal first finds what it should, so a resolver
 // that refuses everything fails too.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { callFile, findRepo, findRunDir, index, repos, runItems } from '../../src/dashboard/files';
+import { readEvents } from '../../src/events/consumers/ndjson';
 import {
   appendEvent,
   appendStageEnd,
@@ -13,6 +14,7 @@ import {
   GOLDEN_RUN_ID,
   type Machine,
   machine,
+  runningCopy,
   SECRET,
   treeHash,
 } from '../helpers/dashboard';
@@ -42,8 +44,8 @@ test('two registered clones are listed side by side, each with its run, its stat
   expect(runItems(entryOf(m.alpha))).toEqual([goldenItem()]);
   expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
   expect(index(m.registryDir)).toEqual([
-    { ...entryOf(m.alpha), runs: [goldenItem()] },
-    { ...entryOf(m.beta), runs: [goldenItem()] },
+    { ...entryOf(m.alpha), runs: [goldenItem()], queues: [] },
+    { ...entryOf(m.beta), runs: [goldenItem()], queues: [] },
   ]);
   expect(treeHash(m.root)).toBe(before);
 });
@@ -185,3 +187,57 @@ test.each([
     expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
   },
 );
+
+test.each([
+  ['an empty object', '{}'],
+  ['calls that are not a list', JSON.stringify({ ...golden('summary.json'), calls: {} })],
+  ['a source that is null', JSON.stringify({ ...golden('summary.json'), source: null })],
+])(
+  'a run whose summary.json is %s is listed with no summary and a problem naming it, and the other clone is untouched (review R1-1)',
+  (_, text) => {
+    writeFileSync(join(m.alpha.runDir, 'summary.json'), text);
+    const [item] = runItems(entryOf(m.alpha));
+    expect(item?.summary).toBeNull();
+    expect(item?.problem).toContain('summary.json is not a sail.summary.v1');
+    expect({ ...item, summary: undefined, problem: undefined }).toEqual({
+      ...goldenItem(),
+      summary: undefined,
+      problem: undefined,
+    });
+    expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
+  },
+);
+
+test("a running call's log is found in its call directory before its end, a corrective try's in its try directory, and one that links out is refused (review R3-2)", () => {
+  const { dir, rest } = runningCopy(m, 1);
+  const lines = rest.map((line) => JSON.parse(line) as { type: string; key?: string });
+  const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'tests#1');
+  const end = lines.findIndex((event) => event.type === 'stage:end' && event.key === 'tests#1');
+  const append = (from: number, to: number) =>
+    appendFileSync(
+      join(dir, 'events.ndjson'),
+      rest
+        .slice(from, to)
+        .map((line) => `${line}\n`)
+        .join(''),
+    );
+  /** tests#1's stage:start again, as try `n`, after every event so far. */
+  const retry = (n: number) => {
+    const seq = readEvents(dir).length + 1;
+    appendFileSync(join(dir, 'events.ndjson'), `${JSON.stringify({ ...lines[start], seq, try: n })}\n`);
+  };
+  append(0, start + 1);
+  expect(callFile(dir, 'tests#1', 'stdout.log')).toBe(join(dir, '03-tests/call-1/stdout.log'));
+  expect(callFile(dir, 'intake#1', 'stdout.log')).toEqual({ missing: expect.any(String) });
+  append(start + 1, end + 1);
+  expect(callFile(dir, 'tests#1', 'stdout.log')).toBe(join(dir, '03-tests/call-1/stdout.log'));
+  mkdirSync(join(dir, '03-tests/call-1/try-2'));
+  writeFileSync(join(dir, '03-tests/call-1/try-2/stdout.log'), 'try 2\n');
+  retry(2);
+  expect(callFile(dir, 'tests#1', 'stdout.log')).toBe(join(dir, '03-tests/call-1/try-2/stdout.log'));
+  writeFileSync(join(m.outside, 'stdout.log'), `${SECRET}\n`);
+  symlinkSync(m.outside, join(dir, '03-tests/call-1/try-3'));
+  retry(3);
+  expect(callFile(dir, 'tests#1', 'stdout.log')).toEqual({ missing: expect.any(String) });
+  expect(callFile(dir, 'nope#1', 'stdout.log')).toEqual({ missing: expect.any(String) });
+});
