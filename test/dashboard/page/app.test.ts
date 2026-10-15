@@ -577,12 +577,55 @@ test('a resumed open run is followed again when the index saying it runs arrives
   expect(host.sockets.filter((socket) => socket.query.startsWith('run=beta'))).toHaveLength(2);
 });
 
-test('a run that ended while the index still said running is not opened again once the index says it ended', () => {
+test('a run whose stream ended while an older index still said running is not opened again, and is once the index says it ended later (review R3-1, R3-3)', () => {
+  const { dir, rest } = runningCopy(m, 1);
+  page = boot(host);
+  const running = indexMessage();
+  host.push(host.open('index')[0], running);
+  const first = host.open('run=')[0];
+  expect(first?.query).toBe(runQuery('alpha', RUNNING_ID));
+  replay(first, dir, false);
+  for (const line of rest) host.push(first, { kind: 'event', event: JSON.parse(line) });
+  host.push(first, { kind: 'end' });
+  host.drop(first);
+  // The index lags: it still says running half a second after the end, then says completed.
+  host.advance(500);
+  host.push(host.open('index')[0], running);
+  host.advance(500);
+  const ended = indexMessage();
+  for (const repo of ended.repos)
+    for (const run of repo.runs) if (run.runId === RUNNING_ID) run.status = { status: 'completed' };
+  host.push(host.open('index')[0], ended);
+  host.advance(10_000);
+  const opened = () => host.sockets.filter((socket) => socket.query === runQuery('alpha', RUNNING_ID));
+  expect(opened()).toHaveLength(1);
+
+  // A resume that ran and ended between two polls: the index never says running, but it ended later than the stream.
+  const again = indexMessage();
+  for (const repo of again.repos)
+    for (const run of repo.runs)
+      if (run.runId === RUNNING_ID && run.summary !== null) {
+        run.status = { status: 'completed' };
+        run.summary = { ...run.summary, endedAt: '2026-09-25T10:00:00.000Z' };
+      }
+  host.push(host.open('index')[0], again);
+  expect(opened()).toHaveLength(2);
+  expect(host.open('run=')).toHaveLength(1);
+});
+
+test('a suspended open run that is resumed and ends between two polls, as completed, is followed again (review R3-1)', () => {
+  const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
   const first = host.open('run=')[0];
-  replay(first, GOLDEN());
+  replay(first, beta);
   host.drop(first);
-  host.advance(10_000);
-  expect(host.sockets.filter((socket) => socket.query.startsWith('run='))).toHaveLength(1);
+  host.advance(5000);
+  const finished = indexMessage();
+  for (const repo of finished.repos)
+    for (const run of repo.runs) if (run.runId === FAKE_3_ID) run.status = { status: 'completed' };
+  host.push(host.open('index')[0], finished);
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('beta', FAKE_3_ID)]);
+  expect(host.sockets.filter((socket) => socket.query.startsWith('run=beta'))).toHaveLength(2);
 });
