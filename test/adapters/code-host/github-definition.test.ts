@@ -175,3 +175,27 @@ test("without the repository option, a github.com origin names the repository, a
     });
   });
 });
+
+test('a repository name of dots, from the option or the remote, is refused: the API would read it as a path (review R1-9)', async () => {
+  const remotes = [
+    'https://github.com/octo/..',
+    'https://github.com/../hello.git',
+    'git@github.com:octo/.',
+    'ssh://git@github.com/octo/...git',
+  ];
+  await withTempRepo(async (repo) => {
+    const env = { GITHUB_TOKEN };
+    const refused = await Promise.all(
+      ['octo/..', 'octo/.', 'octo/...'].map((repository) => resolve(repo, { use: 'github', repository }, env)),
+    );
+    expect({
+      remotes: remotes.map(githubRepositoryOf),
+      refused: refused.map((result) => ('issues' in result ? result.issues : 'resolved')),
+    }).toEqual({
+      remotes: [undefined, undefined, undefined, undefined],
+      refused: Array(3).fill([
+        '/adapters/codeHost github could not be created: github codeHost: option repository: must be owner/name, such as octo/hello',
+      ]),
+    });
+  });
+});
