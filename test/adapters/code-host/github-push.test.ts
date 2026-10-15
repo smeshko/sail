@@ -77,10 +77,7 @@ async function withServed<T>(password: string, fn: (served: Served) => Promise<T
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a detached commit is pushed to refs/heads/<branch> as a new branch, and pushing it again succeeds as up to date', async () => {
+test('a detached commit is pushed to refs/heads/<branch> as a new branch, and pushing it again succeeds as up to date', async () => {
   await withTempRepo(async (repo) => {
     const origin = withOrigin(repo);
     const sha = detachedCommit(repo, 'a.txt');
@@ -102,10 +99,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a push that is no fast-forward rejects as a conflict, naming the rejection, and the branch stays where it was', async () => {
+test('a push that is no fast-forward rejects as a conflict, naming the rejection, and the branch stays where it was', async () => {
   await withTempRepo(async (repo) => {
     const origin = withOrigin(repo);
     detachedCommit(repo, 'a.txt');
@@ -114,15 +108,15 @@ test
     repo.git('checkout', '-q', '--detach', 'main');
     detachedCommit(repo, 'b.txt');
     const error = await rejection(push(repo, 'sail/x'));
-    expect(failure(error)).toMatchObject({ code: 'conflict', message: expect.stringContaining('[rejected] (non-fast-forward)') });
+    expect(failure(error)).toMatchObject({
+      code: 'conflict',
+      message: expect.stringContaining('[rejected] (non-fast-forward)'),
+    });
     expect(refIn(repo, origin.url, 'refs/heads/sail/x')).toBe(pushed);
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a branch name git refuses, or a cwd outside git, is invalid, and the remote gets nothing', async () => {
+test('a branch name git refuses, or a cwd outside git, is invalid, and the remote gets nothing', async () => {
   await withTempRepo(async (repo) => {
     const origin = withOrigin(repo);
     detachedCommit(repo, 'a.txt');
@@ -137,14 +131,13 @@ test
       ['push', 'invalid'],
       ['push', 'invalid'],
     ]);
-    expect(Bun.spawnSync(['git', 'for-each-ref'], { cwd: origin.url, env: repo.env }).stdout.toString()).toBe(refsBefore);
+    expect(Bun.spawnSync(['git', 'for-each-ref'], { cwd: origin.url, env: repo.env }).stdout.toString()).toBe(
+      refsBefore,
+    );
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("over smart HTTP the server gets the token through sail's helper, and no helper of the user's is asked for it or stores it", async () => {
+test("over smart HTTP the server gets the token through sail's helper, and no helper of the user's is asked for it or stores it", async () => {
   await withServed(TOKEN, async ({ repo, http, log, config }) => {
     const sha = detachedCommit(repo, 'a.txt');
     const pushed = await push(repo, 'sail/x', { remote: 'web', webUrl: http.base });
@@ -155,14 +148,13 @@ test
       credentials: readdirSync(repo.home).filter((name) => name.includes('credential')),
       config: readFileSync(join(repo.home, '.gitconfig'), 'utf8'),
     }).toEqual({ headSha: sha, authorizations: ['matched', 'none'], helperLog: '', credentials: [], config });
-    expect(http.requests.some((request) => request.method === 'POST' && request.authorization === 'matched')).toBe(true);
+    expect(http.requests.some((request) => request.method === 'POST' && request.authorization === 'matched')).toBe(
+      true,
+    );
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('over smart HTTP with the token scoped to github.com, the server is offered no credential at all, and the push is unauthorized', async () => {
+test('over smart HTTP with the token scoped to github.com, the server is offered no credential at all, and the push is unauthorized', async () => {
   await withServed(TOKEN, async ({ repo, http, log }) => {
     detachedCommit(repo, 'a.txt');
     const error = await rejection(push(repo, 'sail/x', { remote: 'web', webUrl: 'https://github.com' }));
@@ -174,10 +166,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a token the host refuses is unauthorized, and with git's tracing asked for, the failure holds the token in no form", async () => {
+test("a token the host refuses is unauthorized, and with git's tracing asked for, the failure holds the token in no form", async () => {
   await withServed('another-password', async ({ repo, http }) => {
     detachedCommit(repo, 'a.txt');
     const env = { ...repo.env, GIT_TRACE: '1', GIT_CURL_VERBOSE: '1', GIT_TRACE_REDACT: '0', GIT_TRACE_CURL: '1' };
@@ -191,10 +180,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
+test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
   expect(pushArgs('origin', 'sail/x', 'https://github.com')).toEqual([
     '-c',
     'credential.helper=',
@@ -211,10 +197,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the push's environment drops git's trace variables and the repository's, keeps redaction on, turns prompts off, and carries the token for the helper alone", () => {
+test("the push's environment drops git's trace variables and the repository's, keeps redaction on, turns prompts off, and carries the token for the helper alone", () => {
   const caller = {
     KEEP: 'kept',
     GIT_TRACE: '1',
@@ -244,10 +227,7 @@ test
 /** The command lines of every process on the machine. */
 const processes = () => Bun.spawnSync(['ps', '-axo', 'command'], { stdin: 'ignore' }).stdout.toString();
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a remote that never answers is unavailable once the timeout passes, naming it, and leaves no git process behind', async () => {
+test('a remote that never answers is unavailable once the timeout passes, naming it, and leaves no git process behind', async () => {
   await withTempRepo(async (repo) => {
     const server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Promise<Response>(() => {}) });
     try {
@@ -256,9 +236,16 @@ test
       detachedCommit(repo, 'a.txt');
       const started = performance.now();
       const error = await rejection(push(repo, 'sail/x', { remote: 'silent', timeoutMs: 1_000 }));
-      expect(failure(error)).toMatchObject({ code: 'unavailable', message: expect.stringContaining('timed out after 1000 ms') });
+      expect(failure(error)).toMatchObject({
+        code: 'unavailable',
+        message: expect.stringContaining('timed out after 1000 ms'),
+      });
       expect(performance.now() - started).toBeLessThan(10_000);
-      expect(processes().split('\n').filter((line) => line.includes(url))).toEqual([]);
+      expect(
+        processes()
+          .split('\n')
+          .filter((line) => line.includes(url)),
+      ).toEqual([]);
     } finally {
       server.stop(true);
     }
