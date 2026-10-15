@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "description": "sail: a software factory. A ticket goes in, a pull request comes out, along a workflow the repository defines.",
   "license": "MIT",
+  "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/smeshko/sail.git"
@@ -27,9 +28,6 @@
       "default": "./src/sdk/intakes.ts"
     },
     "./package.json": "./package.json"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "engines": {
     "bun": ">=1.3.14"
