@@ -9,10 +9,18 @@ import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import type { ProjectConfig } from '../engine/config';
 import { findGitRoot } from '../engine/sail-dir';
-import { cloneRemote, machineDir, readEntry, recordEntry, registryDir } from '../watch/registry';
+import { cloneRemote, machineDir, type RegistryEntry, readEntry, recordEntry, registryDir } from '../watch/registry';
 import type { Io } from './index';
 
 const shown = (remote: string | null) => remote ?? 'no remote';
+
+/** The registry entry of the repository of `sailDir`, as of now, with no watcher. */
+export async function repositoryEntry(
+  _io: Io,
+  project: { sailDir: string; config: ProjectConfig },
+): Promise<RegistryEntry> {
+  return { schema: 'sail.registry.v1', name: project.config.name, remote: null, clone: '', sailDir: '', updatedAt: '' };
+}
 
 /** Records or refreshes the repository of `sailDir` in the registry. Warns on stderr, and never throws. */
 export async function registerRepository(

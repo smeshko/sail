@@ -1,12 +1,32 @@
 // The watcher registry's repository entries: one `<name>.json` per repository under `<machine dir>/watchers/`,
 // versioned `sail.registry.v1`. Any command that opens a run records its repository here, so the dashboard finds
-// every repository before any watcher exists. The watcher adds its pid and labels later.
+// every repository before any watcher exists.
+//
+// A live watcher records itself in its repository's entry, as `watcher`: its pid, the `.sail/` it watches, and the
+// labels it polls on its ticket source. It writes the field as it starts and whenever its labels change, reads the
+// registry again to see whether another watcher wrote meanwhile, and clears the field as it stops. A watcher whose pid
+// is dead is no watcher, so a field a crash left behind holds nothing. Registration carries the field forward, so a
+// run refreshing its repository's entry never erases the watcher that started it.
 //
 // The machine directory is `SAIL_HOME`, or `~/.sail`. Branch leases don't follow `SAIL_HOME` yet.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { isAlive as processIsAlive } from '../adapters/leases';
 import { formatIssue, validateDocument } from '../engine/schemas';
+
+/** A repository's live watcher, as its registry entry records it. */
+export interface WatcherFields {
+  pid: number;
+  /** ISO 8601, UTC. */
+  startedAt: string;
+  /** The `.sail/` it watches, absolute. */
+  sailDir: string;
+  /** The `name` of its ticket source's adapter, such as `linear` or `fake`. */
+  ticketSource: string;
+  /** The labels its watch set polls on that ticket source. */
+  labels: string[];
+}
 
 /** One repository as the registry records it. */
 export interface RegistryEntry {
@@ -21,6 +41,8 @@ export interface RegistryEntry {
   sailDir: string;
   /** ISO 8601, UTC. */
   updatedAt: string;
+  /** The repository's watcher, when one has started. Only a live pid makes it one. */
+  watcher?: WatcherFields;
 }
 
 /** A registry file that can't be read as an entry, and why. `file` is its name in the registry directory. */
@@ -94,6 +116,52 @@ export function recordEntry(dir: string, entry: RegistryEntry): void {
   writeFileSync(temp, `${JSON.stringify(entry, null, 2)}\n`);
   renameSync(temp, path);
 }
+
+/** Whether a pid names a live process. */
+export type IsAlive = (pid: number) => boolean;
+
+/** The entry's watcher, when its pid is alive. */
+export function liveWatcher(_entry: RegistryEntry, _isAlive: IsAlive = processIsAlive): WatcherFields | undefined {
+  return undefined;
+}
+
+/** A watcher looking for what holds its name or its labels: its repository's `name`, and its own fields. */
+export type WatcherClaim = Pick<WatcherFields, 'pid' | 'sailDir' | 'ticketSource' | 'labels'> & { name: string };
+
+/**
+ * A live watcher in the way of `me`: of `me.name` in another `.sail/` (`name`), of `me.name` in `me.sailDir` with
+ * another pid (`here`), or polling a label of `me` on the same ticket source (`label`).
+ */
+export type Holder =
+  | { kind: 'name'; entry: RegistryEntry; watcher: WatcherFields }
+  | { kind: 'here'; entry: RegistryEntry; watcher: WatcherFields }
+  | { kind: 'label'; label: string; entry: RegistryEntry; watcher: WatcherFields };
+
+/** The first live watcher in `entries` that holds `me`'s name or one of its labels, the name first. */
+export function findHolder(
+  _entries: readonly RegistryEntry[],
+  _me: WatcherClaim,
+  _isAlive: IsAlive = processIsAlive,
+): Holder | undefined {
+  return undefined;
+}
+
+/**
+ * Records `me` as the live watcher in `entry`, unless a live watcher holds its name or a label: it reads the registry,
+ * refuses on a holder, writes the entry with its field, and reads again. A holder that wrote meanwhile makes it put
+ * the entry's field back as it was, and refuse.
+ */
+export function claimWatcher(
+  _dir: string,
+  _entry: RegistryEntry,
+  _me: WatcherFields,
+  _isAlive: IsAlive = processIsAlive,
+): { claimed: true } | { holder: Holder } {
+  return { claimed: true };
+}
+
+/** Drops the `watcher` field from `name`'s entry, only while it is `pid`'s. */
+export function clearWatcher(_dir: string, _name: string, _pid: number): void {}
 
 /**
  * `url` without its userinfo: `https://user:token@host/o/r` is `https://host/o/r`. The userinfo runs to the authority's

@@ -2,7 +2,11 @@
 // change by dropping a command file. The watcher stays the only writer of its own state (ADR-0019).
 //
 // - A command is applied, then deleted. A crash between the two applies it again at the next drain, so every command
-//   is safe to apply twice: a poll, and the set changes and queue edits 13.2 and 13.3 add to `Command`.
+//   is safe to apply twice: a poll, a `watch` or `unwatch` of workflows already in or out of the set, and the queue
+//   edits 13.3 adds to `Command`. An apply that returns a promise is awaited before its file is deleted, so a `watch`
+//   has opened its workflows by then.
+// - A watcher empties its inbox as it starts (`clearCommands`): a command a stopped watcher left never changes a watch
+//   set nobody asked for.
 // - A command is written to a dot-prefixed temp file and renamed into place, so a drain never reads half of one: the
 //   drain skips dot-files.
 // - A file that isn't a command, or whose apply throws, is deleted and reported, so it can't wedge the inbox. So is
@@ -29,9 +33,16 @@ export function commandsDir(runsDir: string): string {
   return join(runsDir, COMMANDS_DIR);
 }
 
+/** A workflow's name, as a folder under `.sail/workflows/` takes it. */
+const Workflows = z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/)).min(1);
+
 export const Command = z.discriminatedUnion('op', [
   /** Polls the workflow now, paused or not. */
   z.strictObject({ op: z.literal('poll'), workflow: z.string().min(1) }),
+  /** Adds the workflows to the watch set. */
+  z.strictObject({ op: z.literal('watch'), workflows: Workflows }),
+  /** Takes the workflows out of the watch set. */
+  z.strictObject({ op: z.literal('unwatch'), workflows: Workflows }),
 ]);
 export type Command = z.infer<typeof Command>;
 
@@ -94,8 +105,11 @@ function readCommand(dir: string, entry: Dirent): Command | { reason: string } |
   return { reason: `${name} is not a command: ${[issue?.path.join('.'), issue?.message].filter(Boolean).join(' ')}` };
 }
 
-/** Applies each command in the inbox, oldest first, deleting each once it is applied or rejected. */
-export function drainCommands(runsDir: string, apply: (command: Command) => void): Drained {
+/**
+ * Applies each command in the inbox, oldest first, deleting each once it is applied or rejected. An apply that returns
+ * a promise is awaited first.
+ */
+export async function drainCommands(runsDir: string, apply: (command: Command) => unknown): Promise<Drained> {
   const dir = commandsDir(runsDir);
   const drained: Drained = { applied: 0, rejected: [] };
   if (!existsSync(dir)) return drained;
@@ -130,4 +144,9 @@ export function drainCommands(runsDir: string, apply: (command: Command) => void
     if (reason !== undefined) drained.rejected.push({ file, reason });
   }
   return drained;
+}
+
+/** Deletes every file in the inbox, temp files included, unapplied, and gives how many it deleted. */
+export function clearCommands(_runsDir: string): number {
+  return 0;
 }

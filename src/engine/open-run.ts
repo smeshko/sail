@@ -135,6 +135,8 @@ export interface OpenRunOptions {
   signal?: AbortSignal;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
+  /** A start the watcher dispatched: the run takes the id it minted, and its source is recorded `via: 'watch'`. */
+  dispatch?: { runId: string };
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */

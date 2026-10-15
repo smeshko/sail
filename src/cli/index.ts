@@ -10,6 +10,7 @@ import { runWorkflowCommand } from './commands/run-workflow';
 import { runs } from './commands/runs';
 import { show } from './commands/show';
 import { stageRun } from './commands/stage-run';
+import { unwatch, watch } from './commands/watch';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
 export interface Io {
@@ -179,6 +180,8 @@ const commands = new Map<string, CommandSpec>([
       command: port,
     },
   ],
+  ['watch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: watch }],
+  ['unwatch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: unwatch }],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],
@@ -190,6 +193,8 @@ const TICKET: CommandSpec = {
     workflow: { type: 'string' },
     force: { type: 'boolean' },
     until: { type: 'string' },
+    // The watcher's: the run id it minted for the run it dispatches. Not in USAGE.
+    dispatch: { type: 'string' },
     ...VERBOSITY_OPTIONS,
   },
   positionals: 1,

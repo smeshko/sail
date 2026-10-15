@@ -15,29 +15,45 @@ import type { ProjectConfig } from '../engine/config';
 import { loadWorkflow } from '../engine/load-workflow';
 import { runsDir } from '../engine/run-dir';
 import { parseEvery, watchLabel, watchProblem } from '../engine/watchable';
+import type { QueueEvent } from '../events/types';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import { Ticket } from '../ports/types';
 import type { Command } from './inbox';
 import { DEFAULT_QUEUE_POLICY, openQueue, type QueuePolicy, type QueueStore } from './queue-store';
 
-/** One watched workflow, ready to poll. */
-export interface WatchTarget {
+/** What a watched workflow declares: the label it polls, how often, and how many of its runs may run at once. */
+export interface WatchDeclaration {
   workflow: string;
   label: string;
   everyMs: number;
+  maxConcurrentRuns: number;
+}
+
+/** One watched workflow, ready to poll. */
+export interface WatchTarget extends WatchDeclaration {
   ticketSource: TicketSource;
   store: QueueStore;
 }
 
-export interface OpenWatchTargetOptions {
+export interface ReadWatchOptions {
   sailDir: string;
   config: Pick<ProjectConfig, 'label'>;
   /** The workflow's name. */
   name: string;
+}
+
+/** Loads workflow `name` and reads its watch declaration. A workflow that won't load, or isn't watched, refuses. */
+export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclaration | { refused: string }> {
+  return { workflow: options.name, label: '', everyMs: 0, maxConcurrentRuns: 0 };
+}
+
+export interface OpenWatchTargetOptions extends ReadWatchOptions {
   ticketSource: TicketSource;
   now: () => Date;
   policy?: QueuePolicy;
+  /** Hears each event the workflow's queue emits. */
+  onEvent?: (event: QueueEvent) => void;
 }
 
 /** Loads workflow `name` and opens its queue. A workflow that won't load, or isn't watched, refuses. */
@@ -54,7 +70,7 @@ export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<
   const { now, policy } = options;
   const store = openQueue({ runsDir: runsDir(sailDir), workflow: name, label, now, ...(policy ? { policy } : {}) });
   if ('refused' in store) return store;
-  return { workflow: name, label, everyMs, ticketSource: options.ticketSource, store };
+  return { workflow: name, label, everyMs, maxConcurrentRuns: 0, ticketSource: options.ticketSource, store };
 }
 
 export type PollOutcome = 'polled' | 'failed' | 'paused';
@@ -219,6 +235,7 @@ export function createPoller(options: PollerOptions): Poller {
     },
     pollNow: (workflow) => poll(find(workflow)),
     apply(command) {
+      if (command.op !== 'poll') throw new Error(`a poller applies poll commands, not ${command.op}`);
       void unawaited(find(command.workflow));
     },
   };
