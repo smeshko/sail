@@ -284,3 +284,30 @@ test("keepWatcher repairs no field while another repository's live watcher polls
   expect(keepWatcher(dir, entry('fixture'), ME, alive(222))).toEqual({ kept: true });
   expect(readEntry(dir, 'fixture')).toEqual(entry('fixture', { watcher: ME }));
 });
+
+test("a repository that claims one of a watcher's labels while keepWatcher repairs its field leaves exactly one of the two holding it (review R3-2)", () => {
+  const dir = registry();
+  const stale = entry('fixture', { watcher: { ...ME, labels: ['sail-a'] } });
+  recordEntry(dir, stale);
+  const takerWatcher = watcher(111, '/work/other/.sail', ['sail-b']);
+  const everyone = alive(111, 222);
+  let theirs: ReturnType<typeof claimWatcher> | undefined;
+  // The first liveness check comes after the repair read the registry, and before it writes: the other claims then.
+  const isAlive = (pid: number) => {
+    theirs ??= claimWatcher(dir, entry('other'), takerWatcher, everyone);
+    return everyone(pid);
+  };
+  const mine = keepWatcher(dir, entry('fixture'), ME, isAlive);
+  expect({ theirs, mine, fixture: readEntry(dir, 'fixture') }).toEqual({
+    theirs: { claimed: true },
+    mine: {
+      holder: {
+        kind: 'label',
+        label: 'sail-b',
+        entry: entry('other', { watcher: takerWatcher }),
+        watcher: takerWatcher,
+      },
+    },
+    fixture: stale,
+  });
+});
