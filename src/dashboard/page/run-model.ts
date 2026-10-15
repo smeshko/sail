@@ -129,17 +129,23 @@ export interface RunModel {
   other: Record<string, number>;
 }
 
+/**
+ * A map keyed by run text, with no prototype: a loop, a tool call or an event type named `__proto__` or `constructor`
+ * is its own key, never Object.prototype's (review R1-5).
+ */
+const dict = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
+
 export function emptyRun(): RunModel {
   return {
     cards: [],
     pending: [],
-    loops: {},
+    loops: dict(),
     openLoops: [],
     routes: [],
-    toolInputs: {},
+    toolInputs: dict(),
     lastSeq: 0,
     unreadable: 0,
-    other: {},
+    other: dict(),
   };
 }
 
@@ -201,7 +207,7 @@ function newCard(
     files: [],
     steps: [],
     events: 0,
-    other: {},
+    other: dict(),
     sessions: { costEnded: 0, costLive: 0, turnsEnded: 0, turnLive: 0, toolsEnded: 0, toolsLive: 0, seen: false },
   };
   if (open !== undefined && loop !== undefined)
