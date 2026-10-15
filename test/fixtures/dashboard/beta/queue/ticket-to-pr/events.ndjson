@@ -1,4 +1,4 @@
-{"seq":1,"ts":"2026-09-24T10:54:59.000Z","type":"watch:added","workflow":"ticket-to-pr"}
+{"seq":1,"ts":"2026-09-24T10:54:59.000Z","type":"watch:added","workflow":"ticket-to-pr","pid":4242,"label":"sail","everyMs":300000,"maxConcurrentRuns":2}
 {"seq":2,"ts":"2026-09-24T10:55:00.000Z","type":"queue:polled","workflow":"ticket-to-pr","kind":"ticket","label":"sail","found":4,"added":4,"durationMs":120}
 {"seq":3,"ts":"2026-09-24T10:55:00.100Z","type":"queue:item_added","workflow":"ticket-to-pr","dedupKey":"ticket:FAKE-5","source":{"kind":"ticket","ticketKey":"FAKE-5"},"title":"Link the changelog from the README"}
 {"seq":4,"ts":"2026-09-24T10:55:00.100Z","type":"queue:item_added","workflow":"ticket-to-pr","dedupKey":"ticket:FAKE-3","source":{"kind":"ticket","ticketKey":"FAKE-3"},"title":"Escape <b>this</b> & \"that\""}
