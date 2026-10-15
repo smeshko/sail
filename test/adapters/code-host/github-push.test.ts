@@ -255,22 +255,24 @@ test("the repository's own config can't steer a push: no proxy it names is asked
   });
 });
 
-test("an ssh remote is offered no token: the push's environment holds none, and no user helper is asked (review R1-2)", async () => {
+test("an ssh remote is offered no token: the push's environment holds none, under any name, and no user helper is asked (review R1-2, R2-2)", async () => {
   await withServed(TOKEN, async ({ repo, log }) => {
     detachedCommit(repo, 'a.txt');
     const seen = join(repo.home, 'ssh.log');
     // The user's own ssh program, from the environment: it records what it inherits and fails, as an unreachable host.
     const ssh = join(repo.home, 'ssh.sh');
-    writeFileSync(ssh, `#!/bin/sh\necho "ssh SAIL_GIT_TOKEN=$SAIL_GIT_TOKEN" >>${seen}\nexit 255\n`);
+    writeFileSync(ssh, `#!/bin/sh\necho "ssh $SAIL_GIT_TOKEN|$GITHUB_TOKEN|$SAIL_GITHUB_TOKEN" >>${seen}\nexit 255\n`);
     chmodSync(ssh, 0o755);
     repo.git('remote', 'add', 'ssh', 'ssh://git@example.invalid/o/r.git');
-    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env: { ...repo.env, GIT_SSH: ssh } }));
+    // The operator's own variables hold the token too, as the definition's environment does (review R2-2).
+    const env = { ...repo.env, GIT_SSH: ssh, GITHUB_TOKEN: TOKEN, SAIL_GITHUB_TOKEN: TOKEN };
+    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env }));
     expect({
       code: failure(error).code,
       // git may start the ssh program more than once, to learn which ssh it is: every start counts.
       seen: [...new Set((existsSync(seen) ? readFileSync(seen, 'utf8') : '').split('\n').filter(Boolean))],
       helperLog: existsSync(log) ? readFileSync(log, 'utf8') : '',
-    }).toEqual({ code: 'unavailable', seen: ['ssh SAIL_GIT_TOKEN='], helperLog: '' });
+    }).toEqual({ code: 'unavailable', seen: ['ssh ||'], helperLog: '' });
   });
 });
 
