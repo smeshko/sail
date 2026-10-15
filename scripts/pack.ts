@@ -1,7 +1,7 @@
 // Packs the package from the files git doesn't ignore. The checkout's README.md is ignored because it names internal
 // work, and `bun pm pack` packs a README.md whatever .gitignore and `files` say. So the pack copies git's file set into
 // a temp directory and packs there: an ignored file can't reach the tarball, whichever checkout runs this.
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -28,11 +28,14 @@ export async function packSail(options: { root?: string; outDir: string }): Prom
   // A file deleted from the worktree is still in the index.
   const files = listed.stdout.split('\0').filter((path) => path !== '' && existsSync(join(root, path)));
   // A copy follows a link, so a link, or a tracked path under a directory that became one, would pack its target's
-  // bytes: an ignored file among them. A path must resolve to itself.
-  const real = realpathSync(root);
+  // bytes: an ignored file among them. So no part of a listed path below the root may be a link. (Comparing realpaths
+  // instead would refuse a file whose case on a case-insensitive disk differs from the index's.)
   for (const path of files) {
-    if (realpathSync(join(root, path)) !== join(real, path)) {
-      throw new Error(`${path} is a symbolic link or under one, and the pack never copies a link`);
+    const parts = path.split('/');
+    for (let depth = 1; depth <= parts.length; depth++) {
+      if (lstatSync(join(root, ...parts.slice(0, depth))).isSymbolicLink()) {
+        throw new Error(`${path} is a symbolic link or under one, and the pack never copies a link`);
+      }
     }
   }
 
