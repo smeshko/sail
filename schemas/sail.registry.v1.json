@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.registry.v1.json",
   "title": "sail registry entry: one repository on this machine",
-  "description": "<machine dir>/watchers/<name>.json: written by every command that opens a run, and read by the dashboard to find the repository's runs. Keyed by project.yaml's name. The remote is stripped of any userinfo.",
+  "description": "<machine dir>/watchers/<name>.json: written by every command that opens a run, and read by the dashboard to find the repository's runs. Keyed by project.yaml's name. The remote is stripped of any userinfo. A live watcher adds its own field.",
   "type": "object",
   "properties": {
     "schema": { "const": "sail.registry.v1" },
@@ -14,7 +14,20 @@
       "type": "string",
       "pattern": "^/"
     },
-    "updatedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" }
+    "updatedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+    "watcher": {
+      "description": "the repository's live watcher, written as it starts and cleared as it stops: its pid, when it started, the .sail/ it watches, the ticket source's adapter and the labels it polls there. A watcher whose pid is dead is none",
+      "type": "object",
+      "properties": {
+        "pid": { "type": "integer", "minimum": 1 },
+        "startedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
+        "sailDir": { "type": "string", "pattern": "^/" },
+        "ticketSource": { "type": "string", "minLength": 1 },
+        "labels": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      },
+      "required": ["pid", "startedAt", "sailDir", "ticketSource", "labels"],
+      "additionalProperties": false
+    }
   },
   "required": ["schema", "name", "remote", "clone", "sailDir", "updatedAt"],
   "additionalProperties": false

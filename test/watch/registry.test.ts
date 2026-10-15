@@ -159,10 +159,7 @@ const alive =
     pids.includes(pid);
 const ME = watcher(222, '/work/fixture/.sail', ['sail-a', 'sail-b']);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('claimWatcher answers a live watcher of the name in another .sail/ and writes nothing; with that pid dead it claims, and the entry holds its field', () => {
+test('claimWatcher answers a live watcher of the name in another .sail/ and writes nothing; with that pid dead it claims, and the entry holds its field', () => {
   const dir = registry();
   const other = watcher(111, '/elsewhere/fixture/.sail', ['sail']);
   const theirs = entry('fixture', { clone: '/elsewhere/fixture', sailDir: '/elsewhere/fixture/.sail', watcher: other });
@@ -176,10 +173,7 @@ test
   expect(readEntry(dir, 'fixture')).toEqual(entry('fixture', { watcher: ME }));
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('findHolder names a live watcher polling one of my labels on my ticket source, not on another, a live one of my name here, and ignores dead pids and my own', () => {
+test('findHolder names a live watcher polling one of my labels on my ticket source, not on another, a live one of my name here, and ignores dead pids and my own', () => {
   const claim = { name: 'fixture', ...ME };
   const pollingWatcher = watcher(111, '/work/other/.sail', ['sail-b']);
   const polling = entry('other', { watcher: pollingWatcher });
@@ -202,10 +196,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a holder that writes between the claim and its read-back makes claimWatcher take its field back and answer it', () => {
+test('a holder that writes between the claim and its read-back makes claimWatcher take its field back and answer it', () => {
   const dir = registry();
   recordEntry(dir, entry('fixture', { watcher: watcher(333, ME.sailDir, ['sail-a']) }));
   const racing = watcher(111, '/work/other/.sail', ['sail-a']);
@@ -225,10 +216,7 @@ test
   expect(readEntry(dir, 'fixture')).toEqual(entry('fixture'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("clearWatcher drops the field only while it is its own pid's", () => {
+test("clearWatcher drops the field only while it is its own pid's", () => {
   const dir = registry();
   recordEntry(dir, entry('fixture', { watcher: ME }));
   clearWatcher(dir, 'fixture', 999);
@@ -237,10 +225,7 @@ test
   expect(readEntry(dir, 'fixture')).toEqual(entry('fixture'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an entry with a watcher reads as one, and a watcher with a pid of 0, a relative .sail/ or no labels is a problem', () => {
+test('an entry with a watcher reads as one, and a watcher with a pid of 0, a relative .sail/ or no labels is a problem', () => {
   const dir = registry();
   put(dir, 'fixture.json', entry('fixture', { watcher: ME }));
   put(dir, 'zero.json', entry('zero', { watcher: { ...ME, pid: 0 } }));

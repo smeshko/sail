@@ -156,10 +156,7 @@ test('a .sail/ that is a symlink is recorded where the run writes: beside the li
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("sail FAKE-1 keeps the entry's live watcher as it was, and still refreshes updatedAt", async () => {
+test("sail FAKE-1 keeps the entry's live watcher as it was, and still refreshes updatedAt", async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'sail-home');
     copyFixture(repo.dir);

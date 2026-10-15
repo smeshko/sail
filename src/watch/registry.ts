@@ -121,8 +121,9 @@ export function recordEntry(dir: string, entry: RegistryEntry): void {
 export type IsAlive = (pid: number) => boolean;
 
 /** The entry's watcher, when its pid is alive. */
-export function liveWatcher(_entry: RegistryEntry, _isAlive: IsAlive = processIsAlive): WatcherFields | undefined {
-  return undefined;
+export function liveWatcher(entry: RegistryEntry, isAlive: IsAlive = processIsAlive): WatcherFields | undefined {
+  const { watcher } = entry;
+  return watcher !== undefined && isAlive(watcher.pid) ? watcher : undefined;
 }
 
 /** A watcher looking for what holds its name or its labels: its repository's `name`, and its own fields. */
@@ -139,29 +140,60 @@ export type Holder =
 
 /** The first live watcher in `entries` that holds `me`'s name or one of its labels, the name first. */
 export function findHolder(
-  _entries: readonly RegistryEntry[],
-  _me: WatcherClaim,
-  _isAlive: IsAlive = processIsAlive,
+  entries: readonly RegistryEntry[],
+  me: WatcherClaim,
+  isAlive: IsAlive = processIsAlive,
 ): Holder | undefined {
+  const live = entries.flatMap((entry) => {
+    const watcher = liveWatcher(entry, isAlive);
+    return watcher === undefined || watcher.pid === me.pid ? [] : [{ entry, watcher }];
+  });
+  const named = live.find(({ entry }) => entry.name === me.name);
+  if (named !== undefined) return { kind: named.watcher.sailDir === me.sailDir ? 'here' : 'name', ...named };
+  for (const { entry, watcher } of live) {
+    if (watcher.ticketSource !== me.ticketSource) continue;
+    const label = me.labels.find((each) => watcher.labels.includes(each));
+    if (label !== undefined) return { kind: 'label', label, entry, watcher };
+  }
   return undefined;
 }
 
 /**
  * Records `me` as the live watcher in `entry`, unless a live watcher holds its name or a label: it reads the registry,
  * refuses on a holder, writes the entry with its field, and reads again. A holder that wrote meanwhile makes it put
- * the entry's field back as it was, and refuse.
+ * the entry's field back as it was, and refuse. Two watchers that start at the same instant may then both refuse, and
+ * never both run.
  */
 export function claimWatcher(
-  _dir: string,
-  _entry: RegistryEntry,
-  _me: WatcherFields,
-  _isAlive: IsAlive = processIsAlive,
+  dir: string,
+  entry: RegistryEntry,
+  me: WatcherFields,
+  isAlive: IsAlive = processIsAlive,
 ): { claimed: true } | { holder: Holder } {
-  return { claimed: true };
+  const claim: WatcherClaim = { name: entry.name, ...me };
+  const before = readRegistry(dir).entries;
+  const held = findHolder(before, claim, isAlive);
+  if (held !== undefined) return { holder: held };
+  const previous = before.find((each) => each.name === entry.name)?.watcher;
+  const { watcher: _, ...fields } = entry;
+  recordEntry(dir, { ...fields, watcher: me });
+  const after = findHolder(readRegistry(dir).entries, claim, isAlive);
+  if (after === undefined) return { claimed: true };
+  const now = readEntry(dir, entry.name);
+  if (now?.watcher?.pid === me.pid) {
+    const { watcher: __, ...rest } = now;
+    recordEntry(dir, previous?.pid === me.pid ? { ...rest, watcher: previous } : rest);
+  }
+  return { holder: after };
 }
 
 /** Drops the `watcher` field from `name`'s entry, only while it is `pid`'s. */
-export function clearWatcher(_dir: string, _name: string, _pid: number): void {}
+export function clearWatcher(dir: string, name: string, pid: number): void {
+  const entry = readEntry(dir, name);
+  if (entry?.watcher?.pid !== pid) return;
+  const { watcher: _, ...rest } = entry;
+  recordEntry(dir, rest);
+}
 
 /**
  * `url` without its userinfo: `https://user:token@host/o/r` is `https://host/o/r`. The userinfo runs to the authority's
