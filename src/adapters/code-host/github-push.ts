@@ -35,6 +35,12 @@ const TRACE = /^(GIT_TRACE.*|GIT_CURL_VERBOSE)$/;
  */
 const remoteName = () => `sail-${randomBytes(4).toString('hex')}`;
 
+/**
+ * The variables that hold a GitHub token by name, `requires()`'s: each leaves git's environment whatever its value, so
+ * a broader `GITHUB_TOKEN` beside a narrow `SAIL_GITHUB_TOKEN` reaches no git either (review R3-3).
+ */
+const TOKEN_NAMES: ReadonlySet<string> = new Set(['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN']);
+
 /** The caller's own `-c` config, as variables: git reads it after every file, so it would steer the push. */
 const CALLER_CONFIG = /^GIT_CONFIG_(PARAMETERS|COUNT|KEY_\d+|VALUE_\d+)$/;
 
@@ -94,7 +100,7 @@ const TRACE2_OFF = { GIT_TRACE2: '0', GIT_TRACE2_EVENT: '0', GIT_TRACE2_PERF: '0
  */
 export function gitEnv(env: Readonly<Record<string, string>>, token: string): Record<string, string> {
   const quiet = Object.entries(nonInteractive(withoutToken(env, token))).filter(
-    ([name]) => !TRACE.test(name) && !CALLER_CONFIG.test(name),
+    ([name]) => !TRACE.test(name) && !CALLER_CONFIG.test(name) && !TOKEN_NAMES.has(name),
   );
   return { ...Object.fromEntries(quiet), GIT_TRACE_REDACT: '1', ...TRACE2_OFF };
 }
