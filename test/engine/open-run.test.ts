@@ -559,6 +559,7 @@ interface StubRun {
   force?: boolean;
   until?: string;
   signal?: AbortSignal;
+  dispatch?: { runId: string };
 }
 
 /** Opens a run of the stub from `repoDir`, on the adapters given or its own. */
@@ -925,4 +926,117 @@ test('without random bytes, two runs opened at the same reading get different id
     expect([one.runId.slice(0, 17), two.runId.slice(0, 17)]).toEqual(['FAKE-1-01M3BWNZM0', 'FAKE-1-01M3BWNZM0']);
     expect(one.runId).not.toBe(two.runId);
   });
+});
+
+// A dispatched start (DECISIONS D2-D4): the run the watcher spawned, under the run id it minted.
+
+const DISPATCHED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+
+/** What a refused start left: the runs, the leases the fake holds, and the ticket's state and comments. */
+async function leftBehind(repoDir: string, ticketKey = 'FAKE-1') {
+  const leases = join(repoDir, '.sail-runs', 'fake', 'leases');
+  const ticket = await ticketIn(repoDir, ticketKey);
+  return {
+    runs: runIds(repoDir),
+    leases: existsSync(leases) ? readdirSync(leases) : [],
+    state: ticket.state.name,
+    comments: ticket.comments.length,
+  };
+}
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a dispatched start runs under the run id it is given, records its source via watch, and claims the ticket with a comment naming that id', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1', dispatch: { runId: DISPATCHED } });
+    if ('refused' in run) throw new Error(run.refused);
+    expect([run.runId, run.dir]).toEqual([DISPATCHED, join(repo.dir, '.sail-runs', DISPATCHED)]);
+    const header = readRunHeader(run.dir);
+    expect([header.runId, header.source, header.claim]).toEqual([
+      DISPATCHED,
+      { kind: 'ticket', ticketKey: 'FAKE-1', via: 'watch', forced: [] },
+      { claimed: true, state: IN_PROGRESS },
+    ]);
+    expect(run.claimed.map((event) => event.type)).toEqual(['ticket:claimed', 'ticket:commented']);
+    const ticket = await ticketIn(repo.dir, 'FAKE-1');
+    expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${DISPATCHED} started`]);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  .each<[string, StubRun, string]>([
+  [
+    "another ticket's run id",
+    { ticket: 'FAKE-1', dispatch: { runId: 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N' } },
+    "--dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N' is not one",
+  ],
+  [
+    'a run id that is no ULID',
+    { ticket: 'FAKE-1', dispatch: { runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3' } },
+    "--dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3' is not one",
+  ],
+  [
+    'a run id with a letter Crockford leaves out',
+    { ticket: 'FAKE-1', dispatch: { runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWDIU' } },
+    "--dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWDIU' is not one",
+  ],
+  ['--force with it', { ticket: 'FAKE-1', force: true, dispatch: { runId: DISPATCHED } }, "--dispatch and --force can't be combined"],
+])('a dispatched start with %s is refused, with no run directory, lease or claim', async (_, run, refused) => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    expect(await openStub(repo.dir, run)).toEqual({ refused });
+    expect(await leftBehind(repo.dir)).toEqual({ runs: [], leases: [], state: 'Todo', comments: 1 });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a dispatched start whose run directory exists is refused, and the run directory is left as it was', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', DISPATCHED);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'marker'), 'mine\n');
+    expect(await openStub(repo.dir, { ticket: 'FAKE-1', dispatch: { runId: DISPATCHED } })).toEqual({
+      refused: `--dispatch names run ${DISPATCHED}, which already exists in .sail-runs: a dispatch starts a new run`,
+    });
+    expect(await leftBehind(repo.dir)).toEqual({ runs: [DISPATCHED], leases: [], state: 'Todo', comments: 1 });
+    expect(readdirSync(dir)).toEqual(['marker']);
+  });
+});
+
+/** The stub, watched on `sail-review`, with FAKE-6 carrying that label alone. */
+function watchedOnReview(repoDir: string): void {
+  const sail = writeStub(repoDir);
+  edit(
+    sail,
+    WORKFLOW,
+    "workflow('ticket-to-pr', { intake: ticket, version: 1 }",
+    "workflow('ticket-to-pr', { intake: ticket, version: 1, watch: { every: '30s', label: 'sail-review' }, maxConcurrentRuns: 1 }",
+  );
+  const seed = join(sail, 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(seed, 'utf8'));
+  world.tickets.push({ ...world.tickets[0], ticketKey: 'FAKE-6', labels: ['sail-review'] });
+  writeFileSync(seed, JSON.stringify(world));
+}
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a workflow's own watch.label is the label a start checks: only the repository's label is not designated, and the workflow's is", async () => {
+  const start = (ticket: string) =>
+    withTempRepo(async (repo) => {
+      watchedOnReview(repo.dir);
+      const run = await openStub(repo.dir, { ticket });
+      return 'refused' in run ? run : { runId: run.runId.slice(0, 7), label: run.header.source.ticketKey };
+    });
+  expect([await start('FAKE-1'), await start('FAKE-6')]).toEqual([
+    { refused: "the ticket is not designated: it carries no 'sail-review' label. --force runs it anyway" },
+    { runId: 'FAKE-6-', label: 'FAKE-6' },
+  ]);
 });

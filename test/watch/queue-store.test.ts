@@ -391,3 +391,163 @@ test("when the events of an add can't be appended, every added item's event is w
   );
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
+
+// What dispatch and the watch set add (DECISIONS D7, D8, D12).
+const RUN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+const RUN_2 = 'FAKE-1-01M3BWP0000000000000000000';
+const queueText = (runs: string) => readFileSync(join(queueDir(runs, 'ticket-to-pr'), 'queue.json'), 'utf8');
+const lastEvent = (runs: string) => {
+  const { seq, ts, ...event } = queueEvents(queueDir(runs, 'ticket-to-pr')).at(-1) ?? {};
+  return event;
+};
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('spawned records the pid of a dispatched item and emits queue:dispatched naming its run, attempt and pid, and a queued item throws', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.spawned('ticket:FAKE-1', 4242);
+  expect(store.snapshot().items[0]).toMatchObject({ state: 'dispatched', runId: RUN, attempts: 1, pid: 4242 });
+  expect(open(runs).snapshot().items[0]?.pid).toBe(4242);
+  expect(lastEvent(runs)).toEqual({
+    type: 'queue:dispatched',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-1',
+    run: RUN,
+    attempt: 1,
+    pid: 4242,
+  });
+  expect(() => store.spawned('ticket:FAKE-2', 4243)).toThrow(
+    "ticket-to-pr's item ticket:FAKE-2 is queued, not dispatched",
+  );
+  store.failed('ticket:FAKE-1', 'run failed');
+  store.dispatched('ticket:FAKE-1', RUN_2);
+  const again = store.snapshot().items[0];
+  expect([again?.runId, again?.attempts, again?.pid]).toEqual([RUN_2, 2, undefined]);
+  expect(typesIn(runs).filter((type) => type === 'queue:dispatched')).toHaveLength(1);
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('drop takes the item out with queue:dropped and its reason, a later add queues the ticket again with no attempts, and an unknown key throws', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.drop('ticket:FAKE-1', 'it is In Progress');
+  expect(keys(store)).toEqual(['ticket:FAKE-2 queued']);
+  expect(lastEvent(runs)).toEqual({
+    type: 'queue:dropped',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-1',
+    reason: 'it is In Progress',
+  });
+  expect(store.add([ticket('FAKE-1')])).toBe(1);
+  expect(store.snapshot().items.find((item) => item.dedupKey === 'ticket:FAKE-1')).toMatchObject({
+    state: 'queued',
+    attempts: 0,
+  });
+  expect(() => store.drop('ticket:FAKE-9', 'gone')).toThrow("ticket-to-pr's queue has no item ticket:FAKE-9");
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('skippedLeased, watched and unwatched emit their events and leave queue.json byte-identical', () => {
+  const runs = runsDir();
+  const clock = manualClock(START);
+  const store = open(runs, clock);
+  store.add([ticket('FAKE-3')]);
+  const before = queueText(runs);
+  // A write would stamp a later updatedAt.
+  clock.advance(1000);
+  store.skippedLeased('ticket:FAKE-3', 'sail/FAKE-3-ticket-fake-3', RUN);
+  store.watched({ pid: 4242, everyMs: 30_000, maxConcurrentRuns: 2 });
+  store.unwatched(4242);
+  expect(queueText(runs)).toBe(before);
+  expect(queueEvents(queueDir(runs, 'ticket-to-pr')).slice(1).map(({ seq, ts, ...event }) => event)).toEqual([
+    {
+      type: 'queue:skipped_leased',
+      workflow: 'ticket-to-pr',
+      dedupKey: 'ticket:FAKE-3',
+      branch: 'sail/FAKE-3-ticket-fake-3',
+      heldBy: RUN,
+    },
+    { type: 'watch:added', workflow: 'ticket-to-pr', pid: 4242, label: 'sail', everyMs: 30_000, maxConcurrentRuns: 2 },
+    { type: 'watch:removed', workflow: 'ticket-to-pr', pid: 4242 },
+  ]);
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+/** One of every change the store makes, on `store`. */
+function everyChange(store: QueueStore): void {
+  store.watched({ pid: 4242, everyMs: 30_000, maxConcurrentRuns: 1 });
+  store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3')]);
+  store.polled({ kind: 'ticket', found: 3, added: 3, durationMs: 5 });
+  store.skippedLeased('ticket:FAKE-3', 'sail/FAKE-3-ticket-fake-3', RUN);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.spawned('ticket:FAKE-1', 4243);
+  store.failed('ticket:FAKE-1', 'run failed');
+  store.dispatched('ticket:FAKE-1', RUN_2);
+  store.failed('ticket:FAKE-1', 'run failed again');
+  store.drop('ticket:FAKE-2', 'it is In Progress');
+  store.pollFailed({ port: 'ticketSource', adapter: 'fake', message: 'down', paused: false, retryInMs: 60_000 });
+  store.unwatched(4242);
+}
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('onEvent hears every event the store emits, in seq order, and one that throws leaves queue.json and the events as they would be', () => {
+  const heard = runsDir();
+  const events: { seq: number; type: string }[] = [];
+  const store = openQueue({
+    runsDir: heard,
+    workflow: 'ticket-to-pr',
+    label: 'sail',
+    now: manualClock(START),
+    policy: POLICY,
+    onEvent: (event) => events.push(event),
+  });
+  if ('refused' in store) throw new Error(store.refused);
+  everyChange(store);
+  expect(events).toEqual(queueEvents(queueDir(heard, 'ticket-to-pr')) as typeof events);
+  expect(events.map((event) => event.type)).toEqual([
+    'watch:added',
+    'queue:item_added',
+    'queue:item_added',
+    'queue:item_added',
+    'queue:polled',
+    'queue:skipped_leased',
+    'queue:dispatched',
+    'queue:parked',
+    'queue:dropped',
+    'queue:error',
+    'watch:removed',
+  ]);
+
+  const quiet = runsDir();
+  const throwing = openQueue({
+    runsDir: quiet,
+    workflow: 'ticket-to-pr',
+    label: 'sail',
+    now: manualClock(START),
+    policy: POLICY,
+    onEvent: () => {
+      throw new Error('the terminal is gone');
+    },
+  });
+  if ('refused' in throwing) throw new Error(throwing.refused);
+  everyChange(throwing);
+  expect(queueText(quiet)).toBe(queueText(heard));
+  expect(readFileSync(join(queueDir(quiet, 'ticket-to-pr'), 'events.ndjson'), 'utf8')).toBe(
+    readFileSync(join(queueDir(heard, 'ticket-to-pr'), 'events.ndjson'), 'utf8'),
+  );
+  expect(queueEventIssues(queueDir(heard, 'ticket-to-pr'))).toEqual([]);
+});

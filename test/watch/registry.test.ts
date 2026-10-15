@@ -1,17 +1,21 @@
 // The watcher registry's repository entries: `<machine dir>/watchers/<name>.json`, one `sail.registry.v1` entry per
 // repository name, written atomically and read without ever throwing for a bad file.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateDocument } from '../../src/engine/schemas';
 import {
+  claimWatcher,
+  clearWatcher,
   cloneRemote,
+  findHolder,
   machineDir,
   type RegistryEntry,
   readEntry,
   readRegistry,
   recordEntry,
+  type WatcherFields,
   withoutUserinfo,
 } from '../../src/watch/registry';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -138,3 +142,117 @@ test.each([
     expect(read.problems).toEqual([{ file: 'alpha.json', message: expect.any(String) }]);
   },
 );
+
+// A live watcher in its repository's entry (DECISIONS D11).
+
+const watcher = (pid: number, sailDir: string, labels: string[], ticketSource = 'fake'): WatcherFields => ({
+  pid,
+  startedAt: '2026-10-15T08:00:00.000Z',
+  sailDir,
+  ticketSource,
+  labels,
+});
+/** An isAlive for which exactly `pids` are alive. */
+const alive =
+  (...pids: number[]) =>
+  (pid: number) =>
+    pids.includes(pid);
+const ME = watcher(222, '/work/fixture/.sail', ['sail-a', 'sail-b']);
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("claimWatcher answers a live watcher of the name in another .sail/ and writes nothing; with that pid dead it claims, and the entry holds its field", () => {
+  const dir = registry();
+  const other = watcher(111, '/elsewhere/fixture/.sail', ['sail']);
+  const theirs = entry('fixture', { clone: '/elsewhere/fixture', sailDir: '/elsewhere/fixture/.sail', watcher: other });
+  recordEntry(dir, theirs);
+  const before = readFileSync(join(dir, 'fixture.json'), 'utf8');
+  expect(claimWatcher(dir, entry('fixture'), ME, alive(111, 222))).toEqual({
+    holder: { kind: 'name', entry: theirs, watcher: other },
+  });
+  expect(readFileSync(join(dir, 'fixture.json'), 'utf8')).toBe(before);
+  expect(claimWatcher(dir, entry('fixture'), ME, alive(222))).toEqual({ claimed: true });
+  expect(readEntry(dir, 'fixture')).toEqual(entry('fixture', { watcher: ME }));
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('findHolder names a live watcher polling one of my labels on my ticket source, not on another, a live one of my name here, and ignores dead pids and my own', () => {
+  const claim = { name: 'fixture', ...ME };
+  const pollingWatcher = watcher(111, '/work/other/.sail', ['sail-b']);
+  const polling = entry('other', { watcher: pollingWatcher });
+  const onLinear = entry('linear', { watcher: watcher(333, '/work/linear/.sail', ['sail-a'], 'linear') });
+  const dead = entry('dead', { watcher: watcher(444, '/work/dead/.sail', ['sail-a']) });
+  const mine = entry('fixture', { watcher: ME });
+  const hereWatcher = watcher(555, ME.sailDir, ['sail-c']);
+  const here = entry('fixture', { watcher: hereWatcher });
+  const everyone = alive(111, 222, 333, 555);
+  expect({
+    label: findHolder([onLinear, dead, polling, mine], claim, everyone),
+    linearOnly: findHolder([onLinear, dead, mine], claim, everyone),
+    here: findHolder([polling, here], claim, everyone),
+    deadOnly: findHolder([dead, here], claim, alive(222)),
+  }).toEqual({
+    label: { kind: 'label', label: 'sail-b', entry: polling, watcher: pollingWatcher },
+    linearOnly: undefined,
+    here: { kind: 'here', entry: here, watcher: hereWatcher },
+    deadOnly: undefined,
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a holder that writes between the claim and its read-back makes claimWatcher take its field back and answer it', () => {
+  const dir = registry();
+  recordEntry(dir, entry('fixture', { watcher: watcher(333, ME.sailDir, ['sail-a']) }));
+  const racing = watcher(111, '/work/other/.sail', ['sail-a']);
+  const racer = entry('other', { watcher: racing });
+  let raced = false;
+  // The first liveness check comes after the registry was read, and before the claim is written: the racer writes then.
+  const isAlive = (pid: number) => {
+    if (!raced) {
+      raced = true;
+      recordEntry(dir, racer);
+    }
+    return pid === 111 || pid === 222;
+  };
+  expect(claimWatcher(dir, entry('fixture'), ME, isAlive)).toEqual({
+    holder: { kind: 'label', label: 'sail-a', entry: racer, watcher: racing },
+  });
+  expect(readEntry(dir, 'fixture')).toEqual(entry('fixture'));
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("clearWatcher drops the field only while it is its own pid's", () => {
+  const dir = registry();
+  recordEntry(dir, entry('fixture', { watcher: ME }));
+  clearWatcher(dir, 'fixture', 999);
+  expect(readEntry(dir, 'fixture')?.watcher).toEqual(ME);
+  clearWatcher(dir, 'fixture', 222);
+  expect(readEntry(dir, 'fixture')).toEqual(entry('fixture'));
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('an entry with a watcher reads as one, and a watcher with a pid of 0, a relative .sail/ or no labels is a problem', () => {
+  const dir = registry();
+  put(dir, 'fixture.json', entry('fixture', { watcher: ME }));
+  put(dir, 'zero.json', entry('zero', { watcher: { ...ME, pid: 0 } }));
+  put(dir, 'relative.json', entry('relative', { watcher: { ...ME, sailDir: '.sail' } }));
+  const { labels: _, ...unlabelled } = ME;
+  put(dir, 'unlabelled.json', { ...entry('unlabelled'), watcher: unlabelled });
+  expect(readRegistry(dir)).toEqual({
+    entries: [entry('fixture', { watcher: ME })],
+    problems: [
+      { file: 'relative.json', message: expect.stringContaining('/watcher/sailDir') },
+      { file: 'unlabelled.json', message: expect.stringContaining('/watcher/labels is required') },
+      { file: 'zero.json', message: expect.stringContaining('/watcher/pid') },
+    ],
+  });
+});

@@ -155,3 +155,30 @@ test('a .sail/ that is a symlink is recorded where the run writes: beside the li
     expect(readdirSync(join(clone, '.sail-runs')).length).toBeGreaterThan(0);
   });
 });
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("sail FAKE-1 keeps the entry's live watcher as it was, and still refreshes updatedAt", async () => {
+  await withTempRepo(async (repo) => {
+    const sailHome = join(repo.home, 'sail-home');
+    copyFixture(repo.dir);
+    const clone = realpathSync(repo.dir);
+    const watcher = {
+      pid: process.pid,
+      startedAt: '2026-10-15T08:00:00.000Z',
+      sailDir: join(clone, '.sail'),
+      ticketSource: 'fake',
+      labels: ['sail'],
+    };
+    const old = { schema: 'sail.registry.v1', name: 'fixture', remote: null, clone, sailDir: join(clone, '.sail') };
+    mkdirSync(join(sailHome, 'watchers'), { recursive: true });
+    const updatedAt = '2026-01-01T00:00:00.000Z';
+    writeFileSync(join(sailHome, 'watchers', 'fixture.json'), JSON.stringify({ ...old, updatedAt, watcher }));
+    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '--until', 'spec', '-q']);
+    expect({ code, stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+    const entry = fixtureEntry(sailHome);
+    expect(entry).toEqual({ ...old, updatedAt: expect.any(String), watcher });
+    expect(String(entry.updatedAt) > updatedAt).toBe(true);
+  });
+}, 60_000);

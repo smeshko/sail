@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultLeasesDir, readLease, releaseLease, takeLease } from '../../src/adapters/leases';
+import { defaultLeasesDir, heldLease, readLease, releaseLease, takeLease } from '../../src/adapters/leases';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import { type Lease, type LeaseHolder, LeaseResult, Released } from '../../src/ports/types';
 import { caught, messageOf, parseIssues, portFailure } from '../helpers/ports';
@@ -288,4 +288,36 @@ test('a renewal is refused while its run is alive in another process, whatever i
   } finally {
     other.kill('SIGKILL');
   }
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("heldLease gives a live run's lease, a suspended run's whatever its pid, and nothing for a free branch or a stale lease, which it leaves in place", async () => {
+  const dir = tempDir();
+  const dead = await deadPid();
+  const held = (branch: string, holder: LeaseHolder) => {
+    takeLease(dir, REMOTE, branch, holder, NOW);
+    return heldLease(dir, REMOTE, branch);
+  };
+  const live = run('r-live', process.pid);
+  const suspended = run('r-suspended', dead, 'suspended', 'interrupted');
+  expect({
+    free: heldLease(dir, REMOTE, 'sail/FAKE-9'),
+    live: held('sail/FAKE-1', live),
+    suspended: held('sail/FAKE-2', suspended),
+    deadPid: held('sail/FAKE-3', run('r-dead', dead)),
+    deadRunning: held('sail/FAKE-4', run('r-running', dead, 'running')),
+    completed: held('sail/FAKE-5', run('r-completed', process.pid, 'completed')),
+    failed: held('sail/FAKE-6', run('r-failed', process.pid, 'failed', 'stage_error')),
+  }).toEqual({
+    free: undefined,
+    live: leaseOf(live, NOW, 'sail/FAKE-1'),
+    suspended: leaseOf(suspended, NOW, 'sail/FAKE-2'),
+    deadPid: undefined,
+    deadRunning: undefined,
+    completed: undefined,
+    failed: undefined,
+  });
+  expect(readLease(dir, REMOTE, 'sail/FAKE-5')?.runId).toBe('r-completed');
 });
