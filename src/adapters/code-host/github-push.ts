@@ -169,21 +169,25 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
   const head = gitSync(cwd, ['rev-parse', 'HEAD'], local);
   if (head.code !== 0) throw redact.error(fail('invalid', `${cwd} is not a git checkout: ${head.stderr}`));
   const headSha = head.stdout.trim();
-  const urls = gitSync(cwd, ['remote', 'get-url', '--push', '--all', remote], local);
-  if (urls.code !== 0) throw redact.error(fail('invalid', `${remote} is no remote of ${cwd}: ${urls.stderr}`));
-  const pushUrls = urls.stdout.split('\n').filter((line) => line.trim() !== '');
-  const [url] = pushUrls;
-  if (url === undefined || pushUrls.length !== 1) {
-    throw redact.error(fail('invalid', `${remote} pushes to ${pushUrls.length} URLs: sail pushes to one`));
+  /** The one URL `name` pushes to, as git reads it with `args` before the subcommand. */
+  const pushUrl = (where: string, args: readonly string[], name: string): string => {
+    const urls = gitSync(where, [...args, 'remote', 'get-url', '--push', '--all', name], local);
+    if (urls.code !== 0) throw fail('invalid', `${remote} is no remote of ${cwd}: ${urls.stderr}`);
+    const pushUrls = urls.stdout.split('\n').filter((line) => line.trim() !== '');
+    const [url] = pushUrls;
+    if (url === undefined || pushUrls.length !== 1) {
+      throw fail('invalid', `${remote} pushes to ${pushUrls.length} URLs: sail pushes to one`);
+    }
+    return url;
+  };
+  let url: string;
+  try {
+    url = pushUrl(cwd, [], remote);
+  } catch (error) {
+    throw redact.error(error);
   }
-  const remoteUrl = stripUserinfo(url);
   const at = (path: string) => gitSync(cwd, ['rev-parse', '--path-format=absolute', '--git-path', path], local);
   const format = gitSync(cwd, ['rev-parse', '--show-object-format'], local).stdout.trim() || 'sha1';
-  const named = options.repository === undefined ? undefined : repositoryAt(url, options.webUrl);
-  if (named !== undefined && named.toLowerCase() !== options.repository?.toLowerCase()) {
-    throw redact.error(fail('invalid', `${remote} pushes to ${remoteUrl}, not ${options.repository}`));
-  }
-  const offered = onHost(url, options.webUrl);
 
   const timeoutMs = options.timeoutMs ?? PUSH_TIMEOUT_MS;
   const logs = mkdtempSync(join(tmpdir(), 'sail-push-'));
@@ -204,6 +208,15 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
     const topLevel = gitSync(cwd, ['rev-parse', '--show-toplevel'], local).stdout.trim();
     const target = quoted(fromCheckout(url, topLevel));
     writeFileSync(config, `${readFileSync(config, 'utf8')}[remote "${name}"]\n\turl = ${target}\n`);
+    // What the push will reach, as git reads it here: the global config rewrites the URL once more (review R3-1). The
+    // token and the repository check follow this URL, not the checkout's.
+    const effective = pushUrl(logs, [`--git-dir=${gitDir}`], name);
+    const remoteUrl = stripUserinfo(effective);
+    const named = options.repository === undefined ? undefined : repositoryAt(effective, options.webUrl);
+    if (named !== undefined && named.toLowerCase() !== options.repository?.toLowerCase()) {
+      throw fail('invalid', `${remote} pushes to ${remoteUrl}, not ${options.repository}`);
+    }
+    const offered = onHost(effective, options.webUrl);
 
     const stdout = join(logs, 'stdout');
     const stderr = join(logs, 'stderr');
