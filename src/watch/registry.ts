@@ -187,6 +187,35 @@ export function claimWatcher(
   return { holder: after };
 }
 
+const sameWatcher = (a: WatcherFields, b: WatcherFields) =>
+  a.pid === b.pid &&
+  a.startedAt === b.startedAt &&
+  a.sailDir === b.sailDir &&
+  a.ticketSource === b.ticketSource &&
+  a.labels.join('\n') === b.labels.join('\n');
+
+/**
+ * Keeps `me` as the watcher recorded in `entry`'s file, as a live watcher checks on every tick. Two watchers of one
+ * name write one file, so the read-back of `claimWatcher()` can't see a second claim that lands after it: the field a
+ * live watcher of another pid holds says this one lost, and it is answered, and nothing is written. A field that is
+ * missing, dead or not as `me` has it, as a registration that read the entry before the watcher wrote it leaves it, is
+ * written again.
+ */
+export function keepWatcher(
+  dir: string,
+  entry: RegistryEntry,
+  me: WatcherFields,
+  isAlive: IsAlive = processIsAlive,
+): { kept: true } | { lost: WatcherFields } {
+  const now = readEntry(dir, entry.name);
+  const held = now?.watcher;
+  if (held !== undefined && held.pid !== me.pid && isAlive(held.pid)) return { lost: held };
+  if (held !== undefined && sameWatcher(held, me)) return { kept: true };
+  const { watcher: _, ...fields } = now !== undefined && now.sailDir === entry.sailDir ? now : entry;
+  recordEntry(dir, { ...fields, watcher: me });
+  return { kept: true };
+}
+
 /** Drops the `watcher` field from `name`'s entry, only while it is `pid`'s. */
 export function clearWatcher(dir: string, name: string, pid: number): void {
   const entry = readEntry(dir, name);

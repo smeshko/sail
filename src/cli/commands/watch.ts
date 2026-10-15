@@ -14,8 +14,8 @@
 //
 // A second command waits up to 15 s for the watcher to take its command. One it hasn't taken by then stays in the
 // inbox, which a watcher stopped meanwhile empties at its next start, and the command exits 0 saying so. The set it
-// prints is read back from the queue event streams: each workflow whose last `watch:*` event is `watch:added` with the
-// live watcher's pid.
+// prints is read back from the queue event streams: each workflow whose last `watch:*` event of the live watcher's pid
+// is `watch:added`.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../../adapters/leases';
@@ -80,9 +80,10 @@ function liveSet(sailDir: string, pid: number): Watched[] {
       } catch {
         continue;
       }
-      if (event.type === 'watch:added' || event.type === 'watch:removed') last = event;
+      // The live watcher's own events: one that lost the registry to it may have written after them (keepWatcher).
+      if ((event.type === 'watch:added' || event.type === 'watch:removed') && event.pid === pid) last = event;
     }
-    if (last?.type === 'watch:added' && last.pid === pid) {
+    if (last?.type === 'watch:added') {
       set.push({ workflow, label: String(last.label), seq: Number(last.seq), ts: String(last.ts) });
     }
   }

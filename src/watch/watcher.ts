@@ -31,7 +31,15 @@ import { type Command, clearCommands, drainCommands } from './inbox';
 import { errorLine, type FormatOptions, formatLines, queueLine, setLine, settledLine, type WatchLine } from './lines';
 import { createPoller, openWatchTarget, type Poller, type Timers, type WatchTarget } from './poll';
 import type { QueuePolicy } from './queue-store';
-import { claimWatcher, clearWatcher, type Holder, type IsAlive, type RegistryEntry } from './registry';
+import {
+  claimWatcher,
+  clearWatcher,
+  type Holder,
+  type IsAlive,
+  keepWatcher,
+  type RegistryEntry,
+  type WatcherFields,
+} from './registry';
 import { type SpawnedRun, type SpawnRunOptions, spawnRun } from './spawn';
 
 /** How often the watcher ticks unless told otherwise. */
@@ -141,11 +149,21 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     return targets;
   };
 
+  /** The fields the watcher last recorded itself with. */
+  let recorded: WatcherFields | undefined;
   /** Records the watcher with `labels`, or gives the refusal of what holds one of them. */
   const claim = (labels: string[]): string | undefined => {
     const fields = { pid, startedAt, sailDir: options.entry.sailDir, ticketSource: ticketSource.name, labels };
     const claimed = claimWatcher(options.registryDir, options.entry, fields, isAlive);
-    return 'holder' in claimed ? holderRefusal(claimed.holder, options.entry.name) : undefined;
+    if ('holder' in claimed) return holderRefusal(claimed.holder, options.entry.name);
+    recorded = fields;
+    return undefined;
+  };
+  /** Whether another live watcher of this repository holds the registry field now: two started at once, and it won. */
+  const lost = (): WatcherFields | undefined => {
+    if (recorded === undefined) return undefined;
+    const kept = keepWatcher(options.registryDir, options.entry, recorded, isAlive);
+    return 'lost' in kept ? kept.lost : undefined;
   };
 
   let stopped = false;
@@ -260,6 +278,13 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     }
     ticking = (async () => {
       try {
+        const winner = lost();
+        if (winner !== undefined) {
+          const why = `another watcher of '${options.entry.name}' runs here (pid ${winner.pid}), recorded after this one: this one stops`;
+          print(errorLine(undefined, why, now()));
+          await finish();
+          return;
+        }
         const drained = await drainCommands(runs, apply);
         for (const rejected of drained.rejected) print(errorLine(undefined, rejected.reason, now()));
         if (set.size === 0) {
