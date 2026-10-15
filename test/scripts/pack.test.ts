@@ -10,6 +10,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -189,6 +190,25 @@ for (const [label, make, named] of [
     });
   }, 30_000);
 }
+
+// On a case-insensitive disk (macOS) a rename outside git leaves the index's spelling, which still opens the file; on a
+// case-sensitive one (Linux CI) the indexed name is gone and the new one is untracked. Either way the file is packed.
+test('packs a file whose spelling on disk differs from the index only in case', async () => {
+  await withTempRepo(async (repo) => {
+    repo.git('rm', '-q', 'README.md');
+    mkdirSync(join(repo.dir, 'a'));
+    writeFileSync(join(repo.dir, 'package.json'), JSON.stringify({ name: 'tiny', version: '1.2.3', files: ['a/'] }));
+    writeFileSync(join(repo.dir, 'a', 'Kept.ts'), 'export {};\n');
+    repo.git('add', 'package.json', 'a/Kept.ts');
+    repo.git('commit', '-m', 'tiny');
+    renameSync(join(repo.dir, 'a', 'Kept.ts'), join(repo.dir, 'a', 'kept.ts'));
+
+    const outDir = join(scratch, 'case-out');
+    mkdirSync(outDir);
+    const names = entries(await packSail({ root: repo.dir, outDir }), '-tzf');
+    expect(names.map((path) => path.toLowerCase()).sort()).toEqual(['package/a/kept.ts', 'package/package.json']);
+  });
+}, 30_000);
 
 test('throws git error text outside a git repository', async () => {
   const bare = join(scratch, 'not-a-repo');
