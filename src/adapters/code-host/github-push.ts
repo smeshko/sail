@@ -107,13 +107,13 @@ export function pushEnv(env: Readonly<Record<string, string>>, token: string | u
   return { ...gitEnv(env, token ?? ''), ...(token === undefined ? {} : { SAIL_GIT_TOKEN: token }) };
 }
 
-/** Whether `url` is on the web host: the same scheme, host and port. A URL that doesn't parse, such as a path, isn't. */
+/**
+ * Whether `url` is on the web host: it starts with the web URL and a slash, as written. A URL parser is looser than
+ * git: it reads `https:github.com/o/r` as https, where git reads it as scp-like ssh to a host named `https` (review
+ * R3-2). The one prefix both read alike decides.
+ */
 function onHost(url: string, webUrl: string): boolean {
-  try {
-    return new URL(url).origin === new URL(webUrl).origin;
-  } catch {
-    return false;
-  }
+  return url.startsWith(`${webUrl.replace(/\/+$/, '')}/`);
 }
 
 /**
