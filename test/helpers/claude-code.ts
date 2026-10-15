@@ -347,10 +347,10 @@ export function scriptedQuery(streams: readonly Stream[]): ScriptedQuery {
 }
 
 /** A session that writes `spec.md`, says one thing over two turns, and submits `output`. */
-export function specSession(output: unknown, options: ResultOptions = {}): Stream {
+export function specSession(output: unknown, options: ResultOptions = {}, spec = '# Spec\n'): Stream {
   return [
     init(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-    { act: 'write', file: 'spec.md', text: '# Spec\n' },
+    { act: 'write', file: 'spec.md', text: spec },
     assistantToolUse('m1', 'tool-1', 'Write', { file_path: 'spec.md' }, { usage: { input: 60, output: 120 } }),
     toolResult('tool-1'),
     assistantText('m2', 'Spec written.', { usage: { input: 60, output: 220 } }),

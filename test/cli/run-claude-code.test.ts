@@ -33,6 +33,20 @@ import { withTempRepo } from '../helpers/temp-repo';
 /** What the fixture's spec stage submits. */
 const SPEC = { summary: 'Add a --shout flag to greet.', tasks: [{ title: 'Add the flag', files: ['src/greet.ts'] }] };
 
+/** The spec document the session writes: the fixture's spec template, completed, so its checks pass. */
+const SPEC_DOCUMENT = [
+  '# Spec',
+  '',
+  '## Requirements',
+  '',
+  '- `greet` accepts `--shout` and prints the greeting in upper case.',
+  '',
+  '## Tasks',
+  '',
+  '- Add the flag in `src/greet.ts`.',
+  '',
+].join('\n');
+
 /** Runs `sail FAKE-1 --until spec` in a copy of the fixture whose harness plays `stream`, and reads back the run. */
 async function runSpec(stream: Stream) {
   return withTempRepo(async (repo) => {
@@ -122,7 +136,7 @@ const deniedThenSpec = (): Stream => [
   assistantToolUse('m0', 'tool-0', 'Bash', { command: 'tail README.md' }, { usage: { input: 20, output: 10 } }),
   { act: 'preToolUse', tool: 'Bash', input: { command: 'tail README.md' }, toolUseID: 'tool-0' },
   toolResult('tool-0', { isError: true }),
-  ...specSession(SPEC).slice(1),
+  ...specSession(SPEC, {}, SPEC_DOCUMENT).slice(1),
 ];
 
 test("a call the spec stage's commands deny is recorded in the run, and the session recovers to submit", async () => {
@@ -242,7 +256,7 @@ test('Ctrl-C during the spec session suspends the run interrupted with spec#1 un
     // Bun can't reload a run's modules, so the resume runs from a copy, as a new process would. The resumed spec#1
     // submits; the next agent session, implement's, blocks, which ends the run.
     writeScriptedStreams(repo.dir, [
-      specSession(SPEC),
+      specSession(SPEC, {}, SPEC_DOCUMENT),
       [init(), resultSuccess({ structured: { outcome: 'blocked', reason: 'Not today.' } })],
     ]);
     await withTempRepo(async (copy) => {
