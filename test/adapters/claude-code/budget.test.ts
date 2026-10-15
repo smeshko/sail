@@ -89,3 +89,20 @@ test('a watch stopped before its minutes are up leaves no timer and says nothing
   await timers.advance(60_000);
   expect({ set, pending: timers.pending(), events }).toEqual({ set: 2, pending: [], events: [] });
 });
+
+// Review R1-9: a timer longer than 2^31 - 1 ms fires at once, so a long minute budget is timed in steps no timer
+// overflows, and ends when it is used up, not at the start.
+test('a minute budget past the longest timer sets no timer beyond it, and runs out only when it is used up', async () => {
+  const { watch: w, timers, events, over } = watch({ maxTurns: 10, maxUsd: 1, maxMinutes: 50_000 });
+  w.start();
+  const longest = Math.max(...timers.pending().map((timer) => timer.ms));
+  await timers.advance(49_999 * 60_000);
+  const early = { events: events.map((event) => event.type), over: over() };
+  await timers.advance(60_000);
+  expect({ longest: longest <= 2 ** 31 - 1, early, over: over() }).toEqual({
+    longest: true,
+    early: { events: ['budget:warning'], over: 0 },
+    over: 1,
+  });
+  w.stop();
+});
