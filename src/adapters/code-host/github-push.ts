@@ -148,7 +148,8 @@ function repositoryAt(url: string, webUrl: string): string | undefined {
  * reads it there (review R2-4). URLs, scp-like ones included, and absolute paths are as they are.
  */
 function fromCheckout(url: string, topLevel: string): string {
-  const path = !url.includes('://') && !/^(?:[^@/]+@)?[^:/]+:/.test(url) && !isAbsolute(url);
+  // A path under `~` is git's to expand (review R3-4).
+  const path = !url.includes('://') && !/^(?:[^@/]+@)?[^:/]+:/.test(url) && !isAbsolute(url) && !url.startsWith('~');
   return path && topLevel !== '' ? resolve(topLevel, url) : url;
 }
 
