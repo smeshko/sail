@@ -81,17 +81,20 @@ function withoutToken(env: Readonly<Record<string, string>>, token: string): Rec
 const TRACE2_OFF = { GIT_TRACE2: '0', GIT_TRACE2_EVENT: '0', GIT_TRACE2_PERF: '0' };
 
 /**
+ * The environment for any git the adapter runs: no prompts, no traces, and no variable that holds `token`. Every git
+ * call before the push takes it too, since the caller's trace variables could name the operator's own (review R2-3).
+ */
+export function gitEnv(env: Readonly<Record<string, string>>, token: string): Record<string, string> {
+  const quiet = Object.entries(nonInteractive(withoutToken(env, token))).filter(([name]) => !TRACE.test(name));
+  return { ...Object.fromEntries(quiet), GIT_TRACE_REDACT: '1', ...TRACE2_OFF };
+}
+
+/**
  * The push's environment: no prompts, no traces, and the token for the helper alone, as `SAIL_GIT_TOKEN`. Without a
  * token to offer, the token is in no variable at all.
  */
 export function pushEnv(env: Readonly<Record<string, string>>, token: string | undefined): Record<string, string> {
-  const quiet = Object.entries(nonInteractive(withoutToken(env, token ?? ''))).filter(([name]) => !TRACE.test(name));
-  return {
-    ...Object.fromEntries(quiet),
-    GIT_TRACE_REDACT: '1',
-    ...TRACE2_OFF,
-    ...(token === undefined ? {} : { SAIL_GIT_TOKEN: token }),
-  };
+  return { ...gitEnv(env, token ?? ''), ...(token === undefined ? {} : { SAIL_GIT_TOKEN: token }) };
 }
 
 /** Whether `url` is on the web host: the same scheme, host and port. A URL that doesn't parse, such as a path, isn't. */
@@ -140,7 +143,7 @@ const fail = (code: PortErrorCode, message: string, raw?: unknown) =>
 
 export async function pushHead(options: PushOptions): Promise<Pushed> {
   const { cwd, remote, branch, redact } = options;
-  const local = nonInteractive(withoutToken(options.env, options.token));
+  const local = gitEnv(options.env, options.token);
   if (branch.startsWith('-') || gitSync(cwd, ['check-ref-format', `refs/heads/${branch}`], local).code !== 0) {
     throw redact.error(fail('invalid', `${branch} is not a branch name`));
   }

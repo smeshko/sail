@@ -11,10 +11,10 @@ import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { Labelled, PullRequest } from '../../ports/types';
-import { gitSync, nonInteractive, stripUserinfo } from '../workspace/git';
+import { gitSync, stripUserinfo } from '../workspace/git';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
 import { type GitHubPull, toPullRequest, withTicketMarker } from './github-pull';
-import { pushHead } from './github-push';
+import { gitEnv, pushHead } from './github-push';
 
 export const GITHUB_WEB_URL = 'https://github.com';
 
@@ -252,13 +252,14 @@ export const githubCodeHost: AdapterDefinition<CodeHost> = {
       throw new Error(`github codeHost: option ${option}: ${issue?.message}`);
     }
     const env = defined(context.env);
+    const token = env.SAIL_GITHUB_TOKEN || env.GITHUB_TOKEN || '';
     const remote = parsed.data.remote ?? 'origin';
     let named: { owner: string; repo: string } | undefined;
     if (parsed.data.repository !== undefined) {
       const [owner = '', repo = ''] = parsed.data.repository.split('/');
       named = { owner, repo };
     } else {
-      const url = gitSync(context.root, ['remote', 'get-url', remote], nonInteractive(env));
+      const url = gitSync(context.root, ['remote', 'get-url', remote], gitEnv(env, token));
       const shown = url.code === 0 ? stripUserinfo(url.stdout.trim()) : 'no URL';
       named = url.code === 0 ? githubRepositoryOf(url.stdout.trim()) : undefined;
       if (named === undefined) {
@@ -269,7 +270,7 @@ export const githubCodeHost: AdapterDefinition<CodeHost> = {
     }
     return createGitHubCodeHost({
       ...named,
-      token: env.SAIL_GITHUB_TOKEN || env.GITHUB_TOKEN || '',
+      token,
       apiUrl: env.SAIL_GITHUB_API_URL || GITHUB_API_URL,
       webUrl: GITHUB_WEB_URL,
       remote,
