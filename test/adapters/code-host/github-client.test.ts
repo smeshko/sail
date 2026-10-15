@@ -46,10 +46,7 @@ const json = (status: number, body: unknown, headers: Record<string, string> = {
 const failure = (error: unknown) =>
   error instanceof PortError ? { code: error.code, message: error.message } : { other: String(error) };
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a 201 answers the parsed body, and the request carries the method, the four headers, the JSON body and the encoded path', async () => {
+test('a 201 answers the parsed body, and the request carries the method, the four headers, the JSON body and the encoded path', async () => {
   const { github, sent } = client(() => json(201, { number: 7, html_url: 'https://github.com/o/r/pull/7' }));
   const path = github.repoPath('git', 'refs', 'heads', 'sail/FAKE-1#x');
   const answer = await github.request('openPullRequest', 'POST', path, { title: 'T' });
@@ -72,32 +69,47 @@ test
 
 const RESET = 1_790_000_000;
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, () => Response, string, string]>([
+test.each<[string, () => Response, string, string]>([
   ['401', () => json(401, { message: 'Bad credentials' }), 'unauthorized', 'GitHub 401: Bad credentials'],
   [
     '403 with no requests left',
-    () => json(403, { message: 'API rate limit exceeded' }, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(RESET) }),
+    () =>
+      json(
+        403,
+        { message: 'API rate limit exceeded' },
+        { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(RESET) },
+      ),
     'unavailable',
     `GitHub 403: API rate limit exceeded; the rate limit resets at ${new Date(RESET * 1000).toISOString()}`,
   ],
-  ['a plain 403', () => json(403, { message: 'Resource not accessible by integration' }), 'forbidden', 'GitHub 403: Resource not accessible by integration'],
+  [
+    'a plain 403',
+    () => json(403, { message: 'Resource not accessible by integration' }),
+    'forbidden',
+    'GitHub 403: Resource not accessible by integration',
+  ],
   ['404', () => json(404, { message: 'Not Found' }), 'not_found', 'GitHub 404: Not Found'],
   [
     '422 with errors',
     () =>
       json(422, {
         message: 'Validation Failed',
-        errors: [{ resource: 'PullRequest', code: 'custom', message: 'A pull request already exists for o:sail/x.' }, { resource: 'PullRequest', field: 'head', code: 'invalid' }],
+        errors: [
+          { resource: 'PullRequest', code: 'custom', message: 'A pull request already exists for o:sail/x.' },
+          { resource: 'PullRequest', field: 'head', code: 'invalid' },
+        ],
       }),
     'invalid',
     'GitHub 422: Validation Failed; A pull request already exists for o:sail/x.; head invalid',
   ],
   ['429', () => json(429, { message: 'Too many requests' }), 'unavailable', 'GitHub 429: Too many requests'],
   ['502', () => json(502, { message: 'Server Error' }), 'unavailable', 'GitHub 502: Server Error'],
-  ['a body that is no JSON', () => new Response('<html>bad gateway</html>', { status: 502 }), 'unavailable', 'GitHub 502: <html>bad gateway</html>'],
+  [
+    'a body that is no JSON',
+    () => new Response('<html>bad gateway</html>', { status: 502 }),
+    'unavailable',
+    'GitHub 502: <html>bad gateway</html>',
+  ],
 ])("%s is a PortError %s, with GitHub's message", async (_, answer, code, message) => {
   const { github } = client(answer);
   const error = await rejection(github.request('getPullRequest', 'GET', github.repoPath('pulls', 1)));
@@ -114,10 +126,7 @@ function brokenBody(): Response {
   return new Response(body, { status: 200 });
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a fetch that throws, a body that breaks off and a timeout are unavailable, each saying which', async () => {
+test('a fetch that throws, a body that breaks off and a timeout are unavailable, each saying which', async () => {
   const thrown = client(() => Promise.reject(new TypeError('fetch failed')));
   const broken = client(brokenBody);
   // Like fetch, it rejects with the signal's reason once the signal aborts.
@@ -139,10 +148,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('an answer that echoes the token comes back with it masked, in the message and in raw', async () => {
+test('an answer that echoes the token comes back with it masked, in the message and in raw', async () => {
   const echoed = {
     message: `Bad credentials for ${TOKEN}`,
     errors: [{ message: `token ${TOKEN} was revoked` }],
