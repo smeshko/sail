@@ -81,19 +81,16 @@ const SAMPLES: [QueueEvent, string][] = [
   ],
 ];
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each(SAMPLES.map(([event, text]) => [event.type, event, text] as const))('%s prints its line, and its sample is a valid queue event', (_, event, text) => {
-  expect(validateDocument('sail.event.v1', event)).toEqual([]);
-  const line = queueLine(event);
-  expect(line === undefined ? undefined : utc(line)).toBe(`08:09:10 a  ${text}\n`);
-});
+test.each(SAMPLES.map(([event, text]) => [event.type, event, text] as const))(
+  '%s prints its line, and its sample is a valid queue event',
+  (_, event, text) => {
+    expect(validateDocument('sail.event.v1', event)).toEqual([]);
+    const line = queueLine(event);
+    expect(line === undefined ? undefined : utc(line)).toBe(`08:09:10 a  ${text}\n`);
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a poll that found nothing prints no line, unless it follows a failed poll', () => {
+test('a poll that found nothing prints no line, unless it follows a failed poll', () => {
   const nothing: QueueEvent = {
     ...envelope,
     type: 'queue:polled',
@@ -110,10 +107,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a title holding an escape, a carriage return and a newline prints as one line with no escape', () => {
+test('a title holding an escape, a carriage return and a newline prints as one line with no escape', () => {
   const line = queueLine({
     ...envelope,
     type: 'queue:item_added',
@@ -124,10 +118,7 @@ test
   expect(line === undefined ? undefined : utc(line)).toBe('08:09:10 a  FAKE-1 queued: Red alert over next\n');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('piped, a line has no escape byte; on a terminal the time is dim and an error line red', () => {
+test('piped, a line has no escape byte; on a terminal the time is dim and an error line red', () => {
   const coloured = formatLines({ timeZone: 'UTC', tty: TTY });
   const error = errorLine('a', new Error('the disk is full'), AT);
   const set = setLine(['a', 'b'], AT);
@@ -138,10 +129,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('the time is local unless a time zone is given: the same instant in UTC and in Tokyo', () => {
+test('the time is local unless a time zone is given: the same instant in UTC and in Tokyo', () => {
   const line = setLine([], AT);
   expect([utc(line), formatLines({ timeZone: 'Asia/Tokyo' })(line)]).toEqual([
     '08:09:10 watch set: empty; the watcher stops\n',
@@ -149,10 +137,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a settled item prints done or when it is due again, and a parked one leaves its line to queue:parked', () => {
+test('a settled item prints done or when it is due again, and a parked one leaves its line to queue:parked', () => {
   const base = { dedupKey: 'ticket:FAKE-1', ticketKey: 'FAKE-1', runId: RUN };
   const done = settledLine('a', { ...base, outcome: 'done' }, AT);
   const retry = settledLine(
