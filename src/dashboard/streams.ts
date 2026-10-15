@@ -1,14 +1,16 @@
-// The dashboard's WebSockets, at `/ws`: `?run=<repo>/<id>` replays a run's events and follows it until it ends, and
-// `?index=1` sends every repository's runs, then again whenever they change. `?queue=` is reserved for the watcher's
-// queues (Epic 13). A target that can't be resolved is refused over HTTP, before any upgrade.
+// The dashboard's WebSockets, at `/ws`: `?run=<repo>/<id>` replays a run's events and follows it until it ends,
+// `?index=1` sends every repository's runs and queues, then again whenever they change, and `?queue=<repo>/<workflow>`
+// replays a watched workflow's queue events and follows them until the socket closes, since a queue never ends. A
+// target that can't be resolved is refused over HTTP, before any upgrade.
 //
-// Every message is one JSON object: `{ kind: 'event', event }`, `{ kind: 'end' }` before a close with 1000,
-// `{ kind: 'error', message }` before a close with 1011, or `{ kind: 'index', repos }`.
+// Every message is one JSON object: `{ kind: 'event', event }`, `{ kind: 'queue-event', event }`, `{ kind: 'end' }`
+// before a close with 1000, `{ kind: 'error', message }` before a close with 1011, or `{ kind: 'index', repos }`.
 import { followEvents } from '../events/follow';
 import type { QueueEvent, SailEvent } from '../events/types';
-import { findRepo, findRunDir, followProblem, type IndexRepo, index } from './files';
+import { eventsProblem, findRepo, findRunDir, followProblem, type IndexRepo, index } from './files';
+import { findQueueDir } from './queues';
 
-/** What a socket is opened on: one run's events, or the index. */
+/** What a socket is opened on: one run's events, one queue's events, or the index. */
 export type Target = { run: { runDir: string } } | { queue: { dir: string } } | { index: true };
 
 /** The part of a socket the streams use. */
@@ -35,15 +37,22 @@ const TARGETS = ['run', 'index', 'queue'];
 /** The target `url`'s query names, or the HTTP status and error that refuse it. */
 export function resolveTarget(url: URL, registryDir: string): Target | { status: number; error: string } {
   const given = TARGETS.filter((name) => url.searchParams.has(name));
-  if (given.length !== 1) return { status: 400, error: 'name exactly one of ?run=<repo>/<run>, ?index=1, ?queue=' };
-  if (given[0] === 'queue') return { status: 404, error: 'queues arrive with the watcher (Epic 13)' };
+  if (given.length !== 1) {
+    return { status: 400, error: 'name exactly one of ?run=<repo>/<run>, ?index=1, ?queue=<repo>/<workflow>' };
+  }
   if (given[0] === 'index') {
     return url.searchParams.get('index') === '1' ? { index: true } : { status: 400, error: '?index takes 1' };
   }
-  const value = url.searchParams.get('run') ?? '';
+  const value = url.searchParams.get(given[0] ?? '') ?? '';
   const slash = value.indexOf('/');
   const entry = slash < 1 ? undefined : findRepo(registryDir, value.slice(0, slash));
   if (entry === undefined) return { status: 404, error: `no repository for '${value}'` };
+  if (given[0] === 'queue') {
+    const dir = findQueueDir(entry, value.slice(slash + 1));
+    if (typeof dir !== 'string') return { status: 404, error: dir.missing };
+    const unread = eventsProblem(dir);
+    return unread === undefined ? { queue: { dir } } : { status: 404, error: unread };
+  }
   const runDir = findRunDir(entry, value.slice(slash + 1));
   if (typeof runDir !== 'string') return { status: 404, error: runDir.missing };
   const unread = followProblem(runDir);
@@ -51,10 +60,17 @@ export function resolveTarget(url: URL, registryDir: string): Target | { status:
 }
 
 /**
- * Replays the run's events to `socket` and follows them until the run ends. Returns what stops the follow. An event the
- * socket drops ends the stream with 1011 and no `end`, so a client never takes a replay with a gap for a whole one.
+ * Replays the events in `dir` to `socket`, each as `wrap` makes its message, and follows them until they end or the
+ * returned function stops it. An event the socket drops ends the stream with 1011 and no `end`, so a client never
+ * takes a replay with a gap for a whole one, and a line that can't be read sends an error first.
  */
-export function openRunStream(socket: Socket, runDir: string, pollMs: number): () => void {
+function follow(
+  socket: Socket,
+  dir: string,
+  pollMs: number,
+  wrap: (event: SailEvent) => Message,
+  check: () => string | undefined,
+): () => void {
   const controller = new AbortController();
   let dropped = false;
   const failed = (message: string) => {
@@ -62,16 +78,11 @@ export function openRunStream(socket: Socket, runDir: string, pollMs: number): (
     socket.close(1011);
   };
   const onEvent = (event: SailEvent) => {
-    if (dropped || sendMessage(socket, { kind: 'event', event })) return;
+    if (dropped || sendMessage(socket, wrap(event))) return;
     dropped = true;
     controller.abort();
   };
-  followEvents(runDir, {
-    onEvent,
-    signal: controller.signal,
-    pollMs,
-    check: () => followProblem(runDir),
-  }).then(
+  followEvents(dir, { onEvent, signal: controller.signal, pollMs, check }).then(
     (result) => {
       if (dropped) return socket.close(1011, 'a message was dropped');
       if (result === 'aborted') return;
@@ -87,14 +98,24 @@ export function openRunStream(socket: Socket, runDir: string, pollMs: number): (
   return () => controller.abort();
 }
 
+/** Replays the run's events to `socket` and follows them until the run ends. Returns what stops the follow. */
+export function openRunStream(socket: Socket, runDir: string, pollMs: number): () => void {
+  return follow(
+    socket,
+    runDir,
+    pollMs,
+    (event) => ({ kind: 'event', event }),
+    () => followProblem(runDir),
+  );
+}
+
 /**
  * Replays a queue's events to `socket` and follows them until the returned function stops it: a queue never ends, so
  * no `end` is ever sent. Its events have no `runId`, and go out as `queue-event`s.
- *
- * Stub (TASK-003): sends nothing.
  */
-export function openQueueFollow(_socket: Socket, _dir: string, _pollMs: number): () => void {
-  return () => undefined;
+export function openQueueFollow(socket: Socket, dir: string, pollMs: number): () => void {
+  const wrap = (event: SailEvent): Message => ({ kind: 'queue-event', event: event as unknown as QueueEvent });
+  return follow(socket, dir, pollMs, wrap, () => eventsProblem(dir));
 }
 
 /** The index stream: one poller shared by every index socket, running only while one is open. */

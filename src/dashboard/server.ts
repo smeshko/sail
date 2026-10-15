@@ -10,7 +10,8 @@
 import { join } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
-import { createIndexFeed, openRunStream, resolveTarget } from './streams';
+import { queueViews } from './queues';
+import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
   registryDir: string;
@@ -74,7 +75,7 @@ function route(registryDir: string, segments: string[], url: URL): Response {
   if (name === undefined) return Response.json(repos(registryDir));
   const entry = findRepo(registryDir, name);
   if (entry === undefined) return error(404, `no repository '${name}'`);
-  if (kind === 'queues' && runId === undefined) return Response.json([]);
+  if (kind === 'queues' && runId === undefined) return Response.json(queueViews(entry));
   if (kind !== 'runs') return error(404, 'no such route');
   if (runId === undefined) return Response.json(runItems(entry));
   const runDir = findRunDir(entry, runId);
@@ -107,7 +108,7 @@ function segmentsOf(url: URL): string[] | undefined {
   }
 }
 
-type SocketData = { run: string } | { index: true };
+type SocketData = { run: string } | { queue: string } | { index: true };
 
 /** Starts the dashboard on 127.0.0.1. A port in use is refused. */
 export function startDashboard(options: DashboardOptions): Dashboard | { refused: string } {
@@ -132,7 +133,12 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         if (url.pathname === '/ws') {
           const target = resolveTarget(url, registryDir);
           if ('status' in target) return error(target.status, target.error);
-          const data: SocketData = 'run' in target ? { run: target.run.runDir } : { index: true };
+          const data: SocketData =
+            'run' in target
+              ? { run: target.run.runDir }
+              : 'queue' in target
+                ? { queue: target.queue.dir }
+                : { index: true };
           if (self.upgrade(request, { data })) return undefined;
           return error(400, 'this request is not a WebSocket upgrade');
         }
@@ -144,6 +150,7 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         open(ws) {
           sockets.add(ws);
           if ('run' in ws.data) stops.set(ws, openRunStream(ws, ws.data.run, followPollMs));
+          else if ('queue' in ws.data) stops.set(ws, openQueueFollow(ws, ws.data.queue, followPollMs));
           else feed.add(ws);
         },
         close(ws) {

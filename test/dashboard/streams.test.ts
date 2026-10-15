@@ -332,10 +332,7 @@ afterEach(() => {
 const queueEvents = (conversation: Conversation) =>
   conversation.messages.filter((message) => message.kind === 'queue-event').map((message) => message.event.seq);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('?queue= replays every queue event in seq order as a queue-event, then follows an appended one, and never ends while the client stays', async () => {
+test('?queue= replays every queue event in seq order as a queue-event, then follows an appended one, and never ends while the client stays', async () => {
   const { s, server } = seeded();
   const socket = connect(server, `queue=beta/${QUEUE_WORKFLOW}`);
   expect(await until(() => queueEvents(socket).length === 9)).toBe(true);
@@ -358,10 +355,7 @@ test
   expect(await until(() => socket.closed !== undefined)).toBe(true);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a queue stream whose line cannot be read sends an error naming it, then a close with 1011', async () => {
+test('a queue stream whose line cannot be read sends an error naming it, then a close with 1011', async () => {
   const { s, server } = seeded();
   appendFileSync(join(queueDirOf(s), 'events.ndjson'), '{"seq": 10, "type": \n');
   const socket = connect(server, `queue=beta/${QUEUE_WORKFLOW}`);
@@ -370,10 +364,7 @@ test
   expect(socket.closed).toBe(1011);
 }, 15_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each([
+test.each([
   ['an unknown workflow', 'queue=beta/missing', "no queue 'missing' in beta"],
   ['an unknown repository', `queue=nobody/${QUEUE_WORKFLOW}`, `no repository for 'nobody/${QUEUE_WORKFLOW}'`],
   ['a workflow of ..', 'queue=beta/..', "no queue '..' in beta"],
@@ -391,10 +382,7 @@ test
   15_000,
 );
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the index carries each repository's queues, and an item added to queue.json sends a new index within two polls", async () => {
+test("the index carries each repository's queues, and an item added to queue.json sends a new index within two polls", async () => {
   const { s, server } = seeded();
   const socket = connect(server, 'index=1');
   expect(await until(() => socket.messages.length > 0)).toBe(true);

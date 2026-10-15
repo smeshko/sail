@@ -12,7 +12,7 @@ import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
 import { type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
 import { containedFile, inside } from './contained';
-import type { QueueView } from './queues';
+import { type QueueView, queueViews } from './queues';
 
 export { containedFile, inside };
 
@@ -127,8 +127,7 @@ export function runItems(entry: RegistryEntry): RunItem[] {
 export function index(registryDir: string): IndexRepo[] {
   return repos(registryDir).repos.map((repo) => {
     try {
-      // Stub (TASK-003): no repository's queues are read yet.
-      return { ...repo, runs: runItems(repo), queues: [] };
+      return { ...repo, runs: runItems(repo), queues: queueViews(repo) };
     } catch (error) {
       return { ...repo, runs: [], queues: [], problem: `its runs can't be listed: ${messageOf(error)}` };
     }

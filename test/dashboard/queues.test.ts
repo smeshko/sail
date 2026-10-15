@@ -24,10 +24,7 @@ afterEach(() => m.remove());
 
 const queueFile = () => JSON.parse(readFileSync(join(queueDirOf(m), 'queue.json'), 'utf8'));
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("queueViews gives beta's one queue, equal to its queue.json, and alpha none, and reading changes nothing", () => {
+test("queueViews gives beta's one queue, equal to its queue.json, and alpha none, and reading changes nothing", () => {
   const before = treeHash(m.root);
   expect(queueViews(entryOf(m.beta))).toEqual([{ workflow: QUEUE_WORKFLOW, queue: queueFile() }]);
   expect(queueViews(entryOf(m.alpha))).toEqual([]);
@@ -35,10 +32,7 @@ test
   expect(treeHash(m.root)).toBe(before);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a queue.json that is not JSON or not a queue gives its workflow a problem and no queue, one not written yet gives the workflow alone, and the runs are still listed', () => {
+test('a queue.json that is not JSON or not a queue gives its workflow a problem and no queue, one not written yet gives the workflow alone, and the runs are still listed', () => {
   const queues = join(m.beta.clone, '.sail-runs', 'queue');
   for (const [workflow, text] of [
     ['broken', '{"version": 1,'],
@@ -60,10 +54,7 @@ test
   expect([beta?.runs.length, beta?.problem, beta?.queues.length]).toEqual([1, undefined, 4]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a queue/ linked out of .sail-runs/, a workflow directory linked out, a queue.json linked to a secret, and names that are not plain lead nowhere and read no byte from outside', () => {
+test('a queue/ linked out of .sail-runs/, a workflow directory linked out, a queue.json linked to a secret, and names that are not plain lead nowhere and read no byte from outside', () => {
   // Outside: a queue directory that looks real, for every link to aim at.
   const elsewhere = join(m.outside, 'queue', QUEUE_WORKFLOW);
   mkdirSync(elsewhere, { recursive: true });

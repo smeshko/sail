@@ -122,10 +122,7 @@ test("a call's result and logs: the stream asked for, else the session for an ag
   expect(treeHash(m.root)).toBe(before);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a repository's queues: beta's one view, whose queue is its queue.json, and alpha's none, and reading changes nothing", async () => {
+test("a repository's queues: beta's one view, whose queue is its queue.json, and alpha's none, and reading changes nothing", async () => {
   const seeded = seedFixtures();
   try {
     const started = startDashboard({ registryDir: seeded.registryDir, port: 0 });
