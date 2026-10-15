@@ -261,3 +261,37 @@ test('a command left in the inbox before the watcher starts is deleted unapplied
     await watcher.stop();
   });
 });
+
+test('an unwatch of the whole set followed in the same drain by a watch keeps the watcher running on the new set, ticking and dispatching (review R1-3)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      tickets({ 'FAKE-1': 'sail-b' }),
+    );
+    const watcher = await w.start(['a']);
+    dropCommand(w.runs, { op: 'unwatch', workflows: ['a'] });
+    dropCommand(w.runs, { op: 'watch', workflows: ['b'] });
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    expect({
+      stopped: await Promise.race([watcher.done.then(() => true), Bun.sleep(50).then(() => false)]),
+      watching: watcher.watching(),
+      labels: readEntry(w.registryDir, 'stub')?.watcher?.labels,
+      b: w.order('b'),
+      lines: w.out.filter((line) => line.includes('watch set')),
+    }).toEqual({
+      stopped: false,
+      watching: ['b'],
+      labels: ['sail-b'],
+      b: ['FAKE-1'],
+      lines: ['09:00:00 watch set: a\n', '09:00:01 watch set: b\n'],
+    });
+    await watcher.stop();
+    expect(await stopped(watcher)).toBe(true);
+    expect(readEntry(w.registryDir, 'stub')).toEqual(w.entry);
+  });
+});
