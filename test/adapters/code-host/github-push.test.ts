@@ -339,9 +339,36 @@ test("a remote that is a relative path is read from the checkout's top level, as
   });
 });
 
+test("neither a global remote config nor the caller's -c variables reroute a push that sent the token (review R2-1)", async () => {
+  await withServed(TOKEN, async ({ repo, http, config }) => {
+    const sha = detachedCommit(repo, 'a.txt');
+    const ran = join(repo.home, 'ran.log');
+    const ssh = `sh -c 'echo sshCommand $SAIL_GIT_TOKEN >>${ran}; exit 1'`;
+    const reroute = '[remote "sail"]\n\tpushurl = ssh://git@example.invalid/x.git\n';
+    writeFileSync(join(repo.home, '.gitconfig'), `${config}${reroute}[core]\n\tsshCommand = ${JSON.stringify(ssh)}\n`);
+    // Variables in the caller's environment that say the same as -c would.
+    const overrides = {
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: `url.ssh://git@example.invalid/.pushInsteadOf`,
+      GIT_CONFIG_VALUE_0: `${http.base}/`,
+      GIT_CONFIG_KEY_1: 'core.sshCommand',
+      GIT_CONFIG_VALUE_1: ssh,
+    };
+    const global = await settle(push(repo, 'sail/x', { remote: 'web', webUrl: http.base }));
+    const caller = await settle(
+      push(repo, 'sail/y', { remote: 'web', webUrl: http.base, env: { ...repo.env, ...overrides } }),
+    );
+    expect({
+      global: 'rejected' in global ? global.rejected : global.headSha,
+      caller: 'rejected' in caller ? caller.rejected : caller.headSha,
+      ran: existsSync(ran) ? readFileSync(ran, 'utf8') : '',
+    }).toEqual({ global: sha, caller: sha, ran: '' });
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
-  const pushing = ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', 'sail'];
-  expect([pushArgs('sail/x', 'https://github.com'), pushArgs('sail/x', undefined)]).toEqual([
+  const pushing = ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', 'sail-1f2e'];
+  expect([pushArgs('sail/x', 'https://github.com', 'sail-1f2e'), pushArgs('sail/x', undefined, 'sail-1f2e')]).toEqual([
     [
       '-c',
       'credential.helper=',
