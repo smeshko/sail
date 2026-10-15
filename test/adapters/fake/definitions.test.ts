@@ -158,8 +158,11 @@ test('an emit in the context receives ticket:fetched from the ticket source', as
   });
 });
 
-test('BUILTINS holds the fake for every port, each a definition with create alone, linear for the ticket source, which requires its key, and claude-code', () => {
-  expect(Object.keys(BUILTINS)).toEqual(['fake', 'linear', 'claude-code', 'git-worktree']);
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('BUILTINS holds the fake for every port, each a definition with create alone, linear for the ticket source, which requires its key, claude-code, git-worktree and github', () => {
+  expect(Object.keys(BUILTINS)).toEqual(['fake', 'linear', 'claude-code', 'git-worktree', 'github']);
   const definitions = Object.entries(BUILTINS.fake ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(definitions)).toEqual({
     ticketSource: ['create'],
@@ -169,4 +172,6 @@ test('BUILTINS holds the fake for every port, each a definition with create alon
   });
   const linear = Object.entries(BUILTINS.linear ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(linear)).toEqual({ ticketSource: ['requires', 'create'] });
+  const github = Object.entries(BUILTINS.github ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
+  expect(Object.fromEntries(github)).toEqual({ codeHost: ['requires', 'create'] });
 });

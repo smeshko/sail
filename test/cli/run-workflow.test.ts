@@ -691,14 +691,17 @@ test.each<[string, Record<string, string>]>([
   },
 );
 
-test('an adapter the built-ins do not have is refused with exit 3, naming the port, and no run directory', async () => {
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('an adapter the built-ins do not have is refused with exit 3, naming the port and the built-ins that fill it, and no run directory', async () => {
   const { code, stderr, ranFrom } = await runWith((sail) =>
     edit(sail, 'project.yaml', 'codeHost: { use: fake }', 'codeHost: { use: githb }'),
   );
   expect({ code, stderr, ranFrom }).toEqual({
     code: EXIT_REFUSED,
     stderr:
-      ".sail/project.yaml  /adapters/codeHost no built-in adapter 'githb' fills codeHost: the built-ins that do are fake\n",
+      ".sail/project.yaml  /adapters/codeHost no built-in adapter 'githb' fills codeHost: the built-ins that do are fake, github\n",
     ranFrom: false,
   });
 });

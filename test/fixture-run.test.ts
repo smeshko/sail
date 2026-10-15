@@ -9,13 +9,13 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessScript } from '../src/adapters/fake/harness';
-import { EXIT_FAILED, EXIT_OK, EXIT_SUSPENDED, type ExitCode } from '../src/cli/exit-codes';
+import { EXIT_OK, EXIT_SUSPENDED, type ExitCode } from '../src/cli/exit-codes';
 import { readJournal } from '../src/engine/journal';
 import { validateRunDir } from '../src/engine/schemas';
 import { readEvents } from '../src/events/consumers/ndjson';
 import type { SailEvent } from '../src/events/types';
 import { interruptInSession, journaled, writeHarnessScript } from './helpers/agent-fixture';
-import { copyFixture, FIXTURE_SAIL } from './helpers/fixture';
+import { copyFixture, FIXTURE_SAIL, holdAfterOpen, killWhenHeld } from './helpers/fixture';
 import { fakeInterrupts, runCaptured } from './helpers/run-captured';
 import { copyRun } from './helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from './helpers/temp-repo';
@@ -32,8 +32,8 @@ const JOURNAL = [
   'open#1 passed',
 ];
 const PR = { number: 5, url: 'fake://codehost/fixture/pull/5', draft: false };
-const CONFLICT =
-  'sail port: codeHost.openPullRequest: #5 is already open from sail/FAKE-1-add-a-shout-flag-to-the-greet-command into main (conflict)';
+const BRANCH = 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command';
+const MAIN = join(import.meta.dir, '..', 'src', 'cli', 'main.ts');
 
 /** The run directory of a repository's latest run, or '' when it has none. */
 function latestRun(repoDir: string): string {
@@ -303,24 +303,52 @@ test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that 
   });
 }, 60_000);
 
-test("a second run of FAKE-1, forced, in a copy of a repository whose first run completed fails: its open#1 ends in error on the fake's conflict, and the run is failed with stage_error", async () => {
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a second run of FAKE-1, forced, in a copy of a repository whose first run completed, completes with the same pull request 5, and opens no second one', async () => {
   const first = await completed();
   await withTempRepo(async (other) => {
     copyRun(first.repo.dir, other.dir);
     const second = await runCaptured(['FAKE-1', '--force'], other.dir, { env: other.env });
     const dir = latestRun(other.dir);
     expect(dir).not.toBe(join(other.dir, '.sail-runs', first.runId));
-    expect([second.code, journalOf(dir)]).toEqual([EXIT_FAILED, [...JOURNAL.slice(0, 8), 'open#1 error']]);
-    expect(readFileSync(join(dir, '06-open', 'call-1', 'stderr.log'), 'utf8')).toBe(`${CONFLICT}\n`);
-    expect(json(dir, '06-open', 'call-1', 'result.json')).toMatchObject({
-      outcome: 'error',
-      output: null,
-      errors: [{ reason: 'exit_code', message: 'exit code 1 is not mapped to passed or failed' }],
-    });
-    expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('failed stage_error\n');
-    // The push went through before the refusal, and its event is in the stream. No second pull request was opened.
+    expect([second.code, second.stderr, journalOf(dir)]).toEqual([EXIT_OK, '', JOURNAL]);
+    expect(json(dir, '06-open', 'call-1', 'result.json')).toMatchObject({ outcome: 'passed', output: PR });
+    // The push went through, and the pull request already open from the branch was answered: none was announced.
     const hosted = readEvents(dir).flatMap((event) => (event.type.startsWith('codehost:') ? [event.type] : []));
     expect(hosted).toEqual(['codehost:pushed']);
     expect(fakeState(other.dir, 'prs.json').pullRequests).toHaveLength(5);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a run killed after open-pull-request answered resumes and completes with the same pull request 5, and the fake holds one pull request from the branch', async () => {
+  await withTempRepo(async (repo) => {
+    holdAfterOpen(copyFixture(repo.dir));
+    const held = join(repo.home, 'open.pid');
+    const child = Bun.spawn([process.execPath, MAIN, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: { ...repo.env, HOLD_AFTER_OPEN: held },
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    expect(await killWhenHeld(held, child)).toBe(true);
+    const dir = latestRun(repo.dir);
+    const runId = dir.split('/').at(-1) ?? '';
+    expect(journalOf(dir)).toEqual(JOURNAL.slice(0, 8));
+    const resumed = Bun.spawnSync([process.execPath, MAIN, 'resume', runId], { cwd: repo.dir, env: repo.env });
+    expect([resumed.exitCode, resumed.stderr.toString(), journalOf(dir)]).toEqual([EXIT_OK, '', JOURNAL]);
+    // The open step ran again, as its second try.
+    const open = readJournal(dir).entries.at(-1);
+    expect(open?.resultPath).toBe('06-open/call-1/try-2/result.json');
+    expect(json(dir, open?.resultPath ?? '')).toMatchObject({ outcome: 'passed', output: PR });
+    const fromBranch = fakeState(repo.dir, 'prs.json').pullRequests.filter(
+      (pr: { head: string }) => pr.head === BRANCH,
+    );
+    expect(fromBranch.map((pr: { number: number }) => pr.number)).toEqual([5]);
   });
 }, 60_000);

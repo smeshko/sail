@@ -218,7 +218,7 @@ test("push outside a git checkout exits 1 with the port's message and code", asy
   });
 });
 
-test('open-pull-request from a head that was never pushed exits 1 as invalid, and a second one from the same head into the same base exits 1 as a conflict', async () => {
+test('open-pull-request from a head that was never pushed exits 1 as invalid', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     expect(await codehost(repo, opening('sail/x'), { stdin: 'body' })).toEqual({
@@ -226,13 +226,40 @@ test('open-pull-request from a head that was never pushed exits 1 as invalid, an
       stdout: '',
       stderr: 'sail port: codeHost.openPullRequest: sail/x was never pushed (invalid)\n',
     });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a second open-pull-request from the same head into the same base exits 0 and prints the same pull request, with the label it lacked added', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
     await codehost(repo, ['push', 'sail/x']);
-    expect((await codehost(repo, opening('sail/x'), { stdin: 'body' })).code).toBe(EXIT_OK);
-    expect(await codehost(repo, opening('sail/x'), { stdin: 'body' })).toEqual({
-      code: EXIT_FAILED,
-      stdout: '',
-      stderr: 'sail port: codeHost.openPullRequest: #5 is already open from sail/x into main (conflict)\n',
+    const first = await codehost(repo, opening('sail/x'), { stdin: 'body' });
+    const again = await codehost(repo, opening('sail/x', '--label', 'sail'), { stdin: 'another body' });
+    const { raw: _first, ...opened } = oneLine(first.stdout);
+    const { raw: _again, ...reopened } = oneLine(again.stdout);
+    expect({ codes: [first.code, again.code], stderr: again.stderr, reopened }).toEqual({
+      codes: [EXIT_OK, EXIT_OK],
+      stderr: '',
+      reopened: { ...opened, labels: ['sail'] },
     });
+    expect(world(repo.dir).pullRequests).toHaveLength(5);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('push of the default branch, main, exits 1 as invalid, and the fake records no push', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const pushed = await codehost(repo, ['push', 'main']);
+    expect([pushed, existsSync(join(repo.dir, '.sail-runs', 'fake', 'prs.json'))]).toEqual([
+      { code: EXIT_FAILED, stdout: '', stderr: 'sail port: codeHost.push: main is the default branch (invalid)\n' },
+      false,
+    ]);
   });
 });
 

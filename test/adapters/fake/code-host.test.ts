@@ -115,6 +115,21 @@ test('opening from a head never pushed, or pushing from outside a git checkout, 
   ]);
 });
 
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("a push to the fixture seed's default branch, main, rejects as invalid and leaves the state file byte for byte as it was", async () => {
+  const world = files();
+  const host = createFakeCodeHost({ ...world, env: repo().env });
+  await host.push(repo().dir, 'sail/FAKE-9');
+  const before = readFileSync(world.state, 'utf8');
+  const error = await rejection(host.push(repo().dir, 'main'));
+  expect([portFailure(error), readFileSync(world.state, 'utf8')]).toEqual([
+    { port: 'codeHost', op: 'push', code: 'invalid' },
+    before,
+  ]);
+});
+
 test('a new instance on the same state file carries on where the last left off, and the seed is unchanged', async () => {
   const world = files();
   const seed = readFileSync(world.seed, 'utf8');

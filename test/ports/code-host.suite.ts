@@ -1,6 +1,7 @@
 // The CodeHost port suite: what every CodeHost adapter must do. The fake runs it in test/adapters/fake/code-host.test.ts,
-// and a real adapter's test runs it against its provider on demand (SAIL_LIVE_CODE_HOST=1). Each case starts from a
-// fresh make(), and every event it captures must validate against sail.event.v1, with a call's key and without one.
+// github runs it offline on a scripted GitHub, and against GitHub itself on demand (SAIL_LIVE_CODE_HOST=1). Each case
+// starts from a fresh make(), and every event it captures must validate against sail.event.v1, with a call's key and
+// without one. An operation an adapter doesn't offer yet is named unsupported, and each case that needs it is skipped.
 import { expect, test } from 'bun:test';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
 import type { CodeHost } from '../../src/ports/code-host';
@@ -14,7 +15,15 @@ import {
   PullRequest,
   Pushed,
 } from '../../src/ports/types';
-import { type Captured, captureEvents, eventIssues, parseIssues, portFailure, rejection } from '../helpers/ports';
+import {
+  type Captured,
+  captureEvents,
+  eventIssues,
+  parseIssues,
+  portFailure,
+  rejection,
+  settle,
+} from '../helpers/ports';
 
 /** The pull requests a suite run needs, by number, in the host behind the adapter. */
 export interface CodeHostWorld {
@@ -41,6 +50,9 @@ export interface CodeHostWorld {
 
 export type MakeCodeHost = (emit: ProviderEmit) => Promise<{ adapter: CodeHost; world: CodeHostWorld }>;
 
+/** The operations an adapter may leave out until Epic 14. */
+export type Unsupported = 'listDesignated' | 'checks' | 'merge' | 'removeLabel';
+
 const numbers = (pullRequests: readonly PullRequest[]): number[] => pullRequests.map((pr) => pr.number);
 
 /** A merge result without its raw. */
@@ -57,13 +69,21 @@ function expectValidEvents(capture: Pick<Captured<ProviderEvent>, 'stamped'>): v
 
 /**
  * Runs the suite. A case the world can't arrange is named in `unarranged`, and shows as skipped: a world that leaves
- * one out without naming it fails that case.
+ * one out without naming it fails that case. A case that needs an operation named in `unsupported` shows as skipped,
+ * and its name says which operation it needs.
  */
-export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: readonly 'pendingMerge'[] = []): void {
+export function codeHostSuite(
+  label: string,
+  make: MakeCodeHost,
+  unarranged: readonly 'pendingMerge'[] = [],
+  unsupported: readonly Unsupported[] = [],
+): void {
   const start = async () => {
     const capture = captureEvents();
     return { capture, ...(await make(capture.emit)) };
   };
+  /** Whether a case needing `ops` is skipped. */
+  const lacks = (...ops: Unsupported[]) => ops.some((op) => unsupported.includes(op));
 
   test(`${label}: parseRef gives the number each ref names, and nothing for anything else`, async () => {
     const { adapter, world } = await start();
@@ -81,11 +101,10 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     expectValidEvents(capture);
   });
 
-  test(`${label}: a pull request opened from a pushed branch is open, designated, and announced, then labelled`, async () => {
+  test(`${label}: a pull request opened from a pushed branch is open and announced, then labelled`, async () => {
     const { adapter, world, capture } = await start();
     const { cwd, branch, headSha } = await world.pushable();
     await adapter.push(cwd, branch);
-    const before = numbers(await adapter.listDesignated(world.label));
     const pr = await adapter.openPullRequest({
       base: world.base,
       head: branch,
@@ -105,8 +124,6 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
       labels: [world.label],
       ticketKey: 'FAKE-1',
     });
-    expect(before).not.toContain(pr.number);
-    expect(numbers(await adapter.listDesignated(world.label))).toContain(pr.number);
     expect(capture.events.slice(1)).toEqual([
       {
         type: 'codehost:pr_opened',
@@ -122,100 +139,165 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     expectValidEvents(capture);
   });
 
-  test(`${label}: a second pull request from an open one's head into its base rejects as a conflict`, async () => {
+  test.skipIf(lacks('listDesignated'))(
+    `${label}: a pull request opened from a pushed branch is then listed as designated (needs listDesignated)`,
+    async () => {
+      const { adapter, world } = await start();
+      const { cwd, branch } = await world.pushable();
+      await adapter.push(cwd, branch);
+      const before = numbers(await adapter.listDesignated(world.label));
+      const request = { base: world.base, head: branch, title: 'Listed', body: '', labels: [world.label] };
+      const pr = await adapter.openPullRequest(request);
+      expect(before).not.toContain(pr.number);
+      expect(numbers(await adapter.listDesignated(world.label))).toContain(pr.number);
+    },
+  );
+
+  // biome-ignore format: TDD-PENDING TASK-001
+  test
+    .skip // TDD-PENDING TASK-001
+    (`${label}: opening again from an open pull request's head into its base returns it, adds only the labels it lacks, and emits only those`, async () => {
     const { adapter, world, capture } = await start();
     const { cwd, branch } = await world.pushable();
     await adapter.push(cwd, branch);
-    const request = { base: world.base, head: branch, title: 'Add a --shout flag', body: '' };
+    const request = { base: world.base, head: branch, title: 'Add a --shout flag', body: 'First.' };
     const first = await adapter.openPullRequest(request);
     const opened = capture.events.length;
-    const error = await rejection(adapter.openPullRequest({ ...request, title: 'Again' }));
-    expect(portFailure(error)).toEqual({ port: 'codeHost', op: 'openPullRequest', code: 'conflict' });
-    expect((await adapter.getPullRequest(first.number)).title).toBe('Add a --shout flag');
-    expect(capture.events).toHaveLength(opened);
+    // Settled, so an adapter that refuses the second open fails the assertion below rather than the case.
+    const again = await settle(adapter.openPullRequest({ ...request, title: 'Again', body: 'Second.', labels: [world.label] }));
+    const afterSecond = capture.events.slice(opened);
+    const third = await settle(adapter.openPullRequest({ ...request, labels: [world.label] }));
+    expect({
+      again: 'rejected' in again ? again : [again.number, again.url, again.title, again.labels],
+      third: 'rejected' in third ? third : [third.number, third.labels],
+      read: (await adapter.getPullRequest(first.number)).title,
+      afterSecond,
+      afterThird: capture.events.slice(opened + afterSecond.length),
+    }).toEqual({
+      again: [first.number, first.url, 'Add a --shout flag', [world.label]],
+      third: [first.number, [world.label]],
+      read: 'Add a --shout flag',
+      afterSecond: [{ type: 'codehost:labelled', number: first.number, label: world.label, change: 'added' }],
+      afterThird: [],
+    });
+    expectValidEvents(capture);
   });
 
-  test(`${label}: a draft's merge is refused, and it stays open with nothing emitted`, async () => {
+  // biome-ignore format: TDD-PENDING TASK-001
+  test
+    .skip // TDD-PENDING TASK-001
+    (`${label}: a push to the default branch rejects as invalid, and records nothing`, async () => {
     const { adapter, world, capture } = await start();
-    const result = await adapter.merge(world.draft, 'squash');
-    expect(parseIssues(MergeResult, result)).toEqual([]);
-    expect(result.state).toBe('refused');
-    expect((await adapter.getPullRequest(world.draft)).state).toBe('open');
-    expect(capture.events).toEqual([]);
+    const before = await adapter.getPullRequest(world.designated);
+    const { cwd } = await world.pushable();
+    const error = await rejection(adapter.push(cwd, world.base));
+    const after = await adapter.getPullRequest(world.designated);
+    expect({
+      failure: portFailure(error),
+      message: error instanceof Error ? error.message : String(error),
+      events: capture.events,
+      unchanged: [after.headSha, after.labels, after.state],
+    }).toEqual({
+      failure: { port: 'codeHost', op: 'push', code: 'invalid' },
+      message: `codeHost.push: ${world.base} is the default branch`,
+      events: [],
+      unchanged: [before.headSha, before.labels, before.state],
+    });
   });
 
-  test(`${label}: listDesignated holds the designated pull request, but not the draft`, async () => {
-    const { adapter, world } = await start();
-    const listed = await adapter.listDesignated(world.label);
-    expect(listed.flatMap((pr) => parseIssues(PullRequest, pr))).toEqual([]);
-    expect(numbers(listed)).toContain(world.designated);
-    expect(numbers(listed)).not.toContain(world.draft);
-  });
+  test.skipIf(lacks('merge'))(
+    `${label}: a draft's merge is refused, and it stays open with nothing emitted (needs merge)`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const result = await adapter.merge(world.draft, 'squash');
+      expect(parseIssues(MergeResult, result)).toEqual([]);
+      expect(result.state).toBe('refused');
+      expect((await adapter.getPullRequest(world.draft)).state).toBe('open');
+      expect(capture.events).toEqual([]);
+    },
+  );
 
-  test(`${label}: every operation on an unknown pull request rejects with not_found, naming the operation`, async () => {
+  test.skipIf(lacks('listDesignated'))(
+    `${label}: listDesignated holds the designated pull request, but not the draft (needs listDesignated)`,
+    async () => {
+      const { adapter, world } = await start();
+      const listed = await adapter.listDesignated(world.label);
+      expect(listed.flatMap((pr) => parseIssues(PullRequest, pr))).toEqual([]);
+      expect(numbers(listed)).toContain(world.designated);
+      expect(numbers(listed)).not.toContain(world.draft);
+    },
+  );
+
+  test(`${label}: every operation it offers on an unknown pull request rejects with not_found, naming the operation`, async () => {
     const { adapter, world, capture } = await start();
     const { missing } = world;
-    const failures = [
-      portFailure(await rejection(adapter.getPullRequest(missing))),
-      portFailure(await rejection(adapter.checks(missing))),
-      portFailure(await rejection(adapter.merge(missing, 'squash'))),
-      portFailure(await rejection(adapter.addLabel(missing, world.label))),
-      portFailure(await rejection(adapter.removeLabel(missing, world.label))),
-      portFailure(await rejection(adapter.comment(missing, 'hello'))),
+    const calls: [string, () => Promise<unknown>][] = [
+      ['getPullRequest', () => adapter.getPullRequest(missing)],
+      ['checks', () => adapter.checks(missing)],
+      ['merge', () => adapter.merge(missing, 'squash')],
+      ['addLabel', () => adapter.addLabel(missing, world.label)],
+      ['removeLabel', () => adapter.removeLabel(missing, world.label)],
+      ['comment', () => adapter.comment(missing, 'hello')],
     ];
-    expect(failures).toEqual(
-      ['getPullRequest', 'checks', 'merge', 'addLabel', 'removeLabel', 'comment'].map((op) => ({
-        port: 'codeHost',
-        op,
-        code: 'not_found',
-      })),
-    );
+    const offered = calls.filter(([op]) => !unsupported.includes(op as Unsupported));
+    const failures = [];
+    for (const [, call] of offered) failures.push(portFailure(await rejection(call())));
+    expect(failures).toEqual(offered.map(([op]) => ({ port: 'codeHost', op, code: 'not_found' })));
     expect(capture.events).toEqual([]);
   });
 
-  test(`${label}: checks are read on the pull request's head sha, and emit codehost:checks`, async () => {
-    const { adapter, world, capture } = await start();
-    const pr = await adapter.getPullRequest(world.designated);
-    const checks = await adapter.checks(world.designated);
-    expect(parseIssues(Checks, checks)).toEqual([]);
-    expect({ number: checks.number, headSha: checks.headSha }).toEqual({
-      number: world.designated,
-      headSha: pr.headSha,
-    });
-    expect(capture.events).toEqual([
-      {
-        type: 'codehost:checks',
+  test.skipIf(lacks('checks'))(
+    `${label}: checks are read on the pull request's head sha, and emit codehost:checks (needs checks)`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const pr = await adapter.getPullRequest(world.designated);
+      const checks = await adapter.checks(world.designated);
+      expect(parseIssues(Checks, checks)).toEqual([]);
+      expect({ number: checks.number, headSha: checks.headSha }).toEqual({
         number: world.designated,
         headSha: pr.headSha,
-        checks: checks.checks.map(({ name, status }) => ({ name, status })),
-      },
-    ]);
-    expectValidEvents(capture);
-  });
+      });
+      expect(capture.events).toEqual([
+        {
+          type: 'codehost:checks',
+          number: world.designated,
+          headSha: pr.headSha,
+          checks: checks.checks.map(({ name, status }) => ({ name, status })),
+        },
+      ]);
+      expectValidEvents(capture);
+    },
+  );
 
-  test(`${label}: a merge the host reports reads merged, and merging again gives the same merge with no second event`, async () => {
-    const { adapter, world, capture } = await start();
-    const result = await adapter.merge(world.designated, 'squash');
-    expect(parseIssues(MergeResult, result)).toEqual([]);
-    expect(result.state).toBe('merged');
-    expect((await adapter.getPullRequest(world.designated)).state).toBe('merged');
-    expect(merge(await adapter.merge(world.designated, 'squash'))).toEqual(merge(result));
-    expect(capture.events).toEqual([
-      { type: 'codehost:merged', number: world.designated, method: 'squash', sha: merge(result).sha as string },
-    ]);
-    expectValidEvents(capture);
-  });
+  test.skipIf(lacks('merge'))(
+    `${label}: a merge the host reports reads merged, and merging again gives the same merge with no second event (needs merge)`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const result = await adapter.merge(world.designated, 'squash');
+      expect(parseIssues(MergeResult, result)).toEqual([]);
+      expect(result.state).toBe('merged');
+      expect((await adapter.getPullRequest(world.designated)).state).toBe('merged');
+      expect(merge(await adapter.merge(world.designated, 'squash'))).toEqual(merge(result));
+      expect(capture.events).toEqual([
+        { type: 'codehost:merged', number: world.designated, method: 'squash', sha: merge(result).sha as string },
+      ]);
+      expectValidEvents(capture);
+    },
+  );
 
-  test(`${label}: a merge by a method that isn't one rejects as invalid, merges nothing, and emits nothing`, async () => {
-    const { adapter, world, capture } = await start();
-    const error = await rejection(adapter.merge(world.designated, 'fast-forward' as MergeMethod));
-    expect(portFailure(error)).toEqual({ port: 'codeHost', op: 'merge', code: 'invalid' });
-    expect((await adapter.getPullRequest(world.designated)).state).toBe('open');
-    expect(capture.events).toEqual([]);
-  });
+  test.skipIf(lacks('merge'))(
+    `${label}: a merge by a method that isn't one rejects as invalid, merges nothing, and emits nothing (needs merge)`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const error = await rejection(adapter.merge(world.designated, 'fast-forward' as MergeMethod));
+      expect(portFailure(error)).toEqual({ port: 'codeHost', op: 'merge', code: 'invalid' });
+      expect((await adapter.getPullRequest(world.designated)).state).toBe('open');
+      expect(capture.events).toEqual([]);
+    },
+  );
 
-  test.skipIf(unarranged.includes('pendingMerge'))(
-    `${label}: a pending merge reads open and emits nothing, until a later merge is reported merged`,
+  test.skipIf(unarranged.includes('pendingMerge') || lacks('merge'))(
+    `${label}: a pending merge reads open and emits nothing, until a later merge is reported merged (needs merge)`,
     async () => {
       const { adapter, world, capture } = await start();
       const pending = world.pendingMerge;
@@ -235,24 +317,27 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     },
   );
 
-  test(`${label}: a label added then removed is reflected each time, and only a change emits codehost:labelled`, async () => {
-    const { adapter, world, capture } = await start();
-    const labelsNow = async () => (await adapter.getPullRequest(world.designated)).labels.includes('needs-review');
-    const added = await adapter.addLabel(world.designated, 'needs-review');
-    const readAdded = await labelsNow();
-    const removed = await adapter.removeLabel(world.designated, 'needs-review');
-    const readRemoved = await labelsNow();
-    await adapter.removeLabel(world.designated, 'needs-review');
-    await adapter.addLabel(world.designated, world.label);
-    expect([added, removed].flatMap((result) => parseIssues(Labelled, result))).toEqual([]);
-    expect([added.labels.includes('needs-review'), removed.labels.includes('needs-review')]).toEqual([true, false]);
-    expect([readAdded, readRemoved]).toEqual([true, false]);
-    expect(capture.events).toEqual([
-      { type: 'codehost:labelled', number: world.designated, label: 'needs-review', change: 'added' },
-      { type: 'codehost:labelled', number: world.designated, label: 'needs-review', change: 'removed' },
-    ]);
-    expectValidEvents(capture);
-  });
+  test.skipIf(lacks('removeLabel'))(
+    `${label}: a label added then removed is reflected each time, and only a change emits codehost:labelled (needs removeLabel)`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const labelsNow = async () => (await adapter.getPullRequest(world.designated)).labels.includes('needs-review');
+      const added = await adapter.addLabel(world.designated, 'needs-review');
+      const readAdded = await labelsNow();
+      const removed = await adapter.removeLabel(world.designated, 'needs-review');
+      const readRemoved = await labelsNow();
+      await adapter.removeLabel(world.designated, 'needs-review');
+      await adapter.addLabel(world.designated, world.label);
+      expect([added, removed].flatMap((result) => parseIssues(Labelled, result))).toEqual([]);
+      expect([added.labels.includes('needs-review'), removed.labels.includes('needs-review')]).toEqual([true, false]);
+      expect([readAdded, readRemoved]).toEqual([true, false]);
+      expect(capture.events).toEqual([
+        { type: 'codehost:labelled', number: world.designated, label: 'needs-review', change: 'added' },
+        { type: 'codehost:labelled', number: world.designated, label: 'needs-review', change: 'removed' },
+      ]);
+      expectValidEvents(capture);
+    },
+  );
 
   test(`${label}: a comment is posted, and emits codehost:commented`, async () => {
     const { adapter, world, capture } = await start();
@@ -262,10 +347,10 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     expectValidEvents(capture);
   });
 
-  test(`${label}: capabilities parse, and offer the squash merge the suite uses`, async () => {
+  test(`${label}: capabilities parse, and offer the squash merge the suite uses unless merge is unsupported`, async () => {
     const { adapter } = await start();
     const capabilities = adapter.capabilities();
     expect(parseIssues(CodeHostCapabilities, capabilities)).toEqual([]);
-    expect(capabilities.mergeMethods).toContain('squash');
+    expect(capabilities.mergeMethods.includes('squash')).toBe(!lacks('merge'));
   });
 }
