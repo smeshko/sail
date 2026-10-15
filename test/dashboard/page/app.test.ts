@@ -514,3 +514,75 @@ test("the selected call's result and log are read again when it ends, and a read
   expect(host.regions.inspector).toContain('&quot;the second&quot;');
   expect(host.regions.inspector).not.toContain('this call has no result.json yet');
 });
+
+test("a region whose draw throws shows that it couldn't be drawn, and every other region is still drawn (review R2-1)", () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  // A summary of no shape, as the server never sends one: the rail and needs attention read it, the open run doesn't.
+  const broken = indexMessage();
+  for (const repo of broken.repos)
+    for (const run of repo.runs) if (run.runId === FAKE_3_ID) run.summary = {} as typeof run.summary;
+  host.renders = [];
+  host.push(host.open('index')[0], broken);
+  expect(() => host.advance(100)).not.toThrow();
+  expect(host.renders.sort()).toEqual(['attention', 'main', 'queues', 'rail', 'status']);
+  expect(host.regions.rail).toContain('this part of the page could not be drawn');
+  expect(cards(host.regions.main)).toHaveLength(9);
+});
+
+test("a corrective try's end reads the call's result.json again though the first try's was loaded (review R2-2)", async () => {
+  const { dir, rest } = runningCopy(m, 1);
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  const lines = rest.map((line) => JSON.parse(line));
+  const end = lines.findIndex((event) => event.type === 'stage:end' && event.key === 'tests#1');
+  const result = `/api/repos/alpha/runs/${RUNNING_ID}/calls/tests%231/result`;
+  const answer = (output: string) => host.bodies.set(result, { status: 200, body: JSON.stringify({ output }) });
+  answer('FIRST_TRY');
+  for (const event of lines.slice(0, end + 1)) host.push(socket, { kind: 'event', event });
+  host.click({ action: 'select-card', key: 'tests#1' });
+  await settle();
+  host.advance(100);
+  expect(host.regions.inspector).toContain('FIRST_TRY');
+  const first = lines[end];
+  answer('SECOND_TRY');
+  const start = lines.find((event) => event.type === 'stage:start' && event.key === 'tests#1');
+  host.push(socket, { kind: 'event', event: { ...start, seq: 900, try: 2 } });
+  host.push(socket, { kind: 'event', event: { ...first, seq: 901, try: 2, outcome: 'passed' } });
+  await settle();
+  host.advance(100);
+  expect(host.regions.inspector).toContain('SECOND_TRY');
+});
+
+test('a resumed open run is followed again when the index saying it runs arrives before its old stream ends (review R2-3)', () => {
+  const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
+  const first = host.open('run=')[0];
+  replay(first, beta, false);
+  const resumed = indexMessage();
+  for (const repo of resumed.repos)
+    for (const run of repo.runs) if (run.runId === FAKE_3_ID) run.status = { status: 'running' };
+  host.push(host.open('index')[0], resumed);
+  host.push(first, { kind: 'end' });
+  host.drop(first);
+  host.advance(2000);
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('beta', FAKE_3_ID)]);
+  host.advance(10_000);
+  expect(host.sockets.filter((socket) => socket.query.startsWith('run=beta'))).toHaveLength(2);
+});
+
+test('a run that ended while the index still said running is not opened again once the index says it ended', () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const first = host.open('run=')[0];
+  replay(first, GOLDEN());
+  host.drop(first);
+  host.advance(10_000);
+  expect(host.sockets.filter((socket) => socket.query.startsWith('run='))).toHaveLength(1);
+});

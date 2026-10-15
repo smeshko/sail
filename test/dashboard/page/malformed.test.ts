@@ -126,3 +126,21 @@ test('600 seeded poisonings at any depth of the recorded events and result.json 
     expect(draw).not.toThrow();
   }
 });
+
+test('a schema-valid summary whose free-form result holds a null or unprintable PR, and a run:start whose budget is unprintable, draw the run view (review R2-1, R2-4)', () => {
+  const summary = JSON.parse(readFileSync(join(GOLDEN_RUN, 'summary.json'), 'utf8'));
+  const model = foldRun(readEvents(join(DASHBOARD_FIXTURES, 'alpha', FAKE_2_ID)));
+  for (const result of [{ pr: null }, { pr: { number: unprintable(), url: 7 } }, { pr: 'x' }, null]) {
+    expect(() => renderRun(model, { ...summary, result }, initialUi(0), 0)).not.toThrow();
+  }
+  const budgeted = emptyRun();
+  applyEvent(budgeted, {
+    ...runStart({}),
+    budget: { maxMinutes: unprintable(), maxUsd: unprintable() },
+  });
+  expect([budgeted.unreadable, budgeted.budget]).toEqual([0, {}]);
+  expect(() => renderRun(budgeted, undefined, initialUi(0), 0)).not.toThrow();
+  const fine = emptyRun();
+  applyEvent(fine, { ...runStart({}), budget: { maxMinutes: 30, maxUsd: 2, other: 'kept out' } });
+  expect(fine.budget).toEqual({ maxMinutes: 30, maxUsd: 2 });
+});
