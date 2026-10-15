@@ -119,6 +119,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
           webUrl,
           env: options.env,
           redact,
+          repository: `${owner}/${repo}`,
           ...(options.pushTimeoutMs === undefined ? {} : { timeoutMs: options.pushTimeoutMs }),
         });
         emit({ type: 'codehost:pushed', branch: pushed.branch, headSha: pushed.headSha });

@@ -41,6 +41,11 @@ export interface PushOptions {
   readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs?: number;
   readonly redact: Redactor;
+  /**
+   * The repository the push must reach, `owner/name`: a push URL on the web host's hostname, https or ssh, that names
+   * another is refused, since the default branch was read from this one (review R1-7).
+   */
+  readonly repository?: string;
 }
 
 /**
@@ -98,6 +103,27 @@ function onHost(url: string, webUrl: string): boolean {
   }
 }
 
+/**
+ * The repository a URL names on the web host's hostname, `owner/name` without `.git`, from an https, ssh or scp-like
+ * URL. Undefined for another host or a path.
+ */
+function repositoryAt(url: string, webUrl: string): string | undefined {
+  let at: { host: string; path: string };
+  const scp = url.includes('://') ? null : /^(?:[^@/]+@)?([^:/]+):(.*)$/.exec(url);
+  if (scp !== null) {
+    at = { host: scp[1] ?? '', path: scp[2] ?? '' };
+  } else {
+    try {
+      const parsed = new URL(url);
+      at = { host: parsed.hostname, path: parsed.pathname };
+    } catch {
+      return undefined;
+    }
+  }
+  if (at.host.toLowerCase() !== new URL(webUrl).hostname.toLowerCase()) return undefined;
+  return at.path.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
+}
+
 /** A value for git's config file, quoted. */
 const quoted = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
@@ -131,6 +157,10 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
   const remoteUrl = stripUserinfo(url);
   const at = (path: string) => gitSync(cwd, ['rev-parse', '--path-format=absolute', '--git-path', path], local);
   const format = gitSync(cwd, ['rev-parse', '--show-object-format'], local).stdout.trim() || 'sha1';
+  const named = options.repository === undefined ? undefined : repositoryAt(url, options.webUrl);
+  if (named !== undefined && named.toLowerCase() !== options.repository?.toLowerCase()) {
+    throw redact.error(fail('invalid', `${remote} pushes to ${remoteUrl}, not ${options.repository}`));
+  }
   const offered = onHost(url, options.webUrl);
 
   const timeoutMs = options.timeoutMs ?? PUSH_TIMEOUT_MS;
