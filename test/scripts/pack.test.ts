@@ -2,7 +2,18 @@
 // names internal work, and `bun pm pack` packs a README.md whatever .gitignore and `files` say, so the pack copies git's
 // file set to a temp directory first. These tests pack this checkout and a small temp repository.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { packSail } from '../../scripts/pack';
@@ -140,6 +151,43 @@ test('packs what git does not ignore, skips a deleted file, and leaves out an ig
     expect(plainNames).toContain('package/README.md');
   });
 });
+
+// A link would copy its target's bytes, so a packed path could carry an ignored file: every link is refused, by path.
+for (const [label, make, named] of [
+  ['a link to an ignored file', (dir: string) => symlinkSync('../README.md', join(dir, 'a', 'leak.md')), 'a/leak.md'],
+  [
+    'a tracked path under a directory that became a link',
+    (dir: string) => {
+      rmSync(join(dir, 'a'), { recursive: true });
+      mkdirSync(join(dir, 'private'));
+      writeFileSync(join(dir, 'private', 'kept.ts'), 'internal\n');
+      symlinkSync('private', join(dir, 'a'));
+      // Ignore the link itself, so only the tracked path through it is listed.
+      writeFileSync(join(dir, '.gitignore'), 'README.md\nprivate/\n/a\n');
+    },
+    'a/kept.ts',
+  ],
+  ['a link to a directory outside the packed folders', (dir: string) => symlinkSync('a', join(dir, 'docs')), 'docs'],
+] as const) {
+  test(`refuses ${label}, naming it, and writes no tarball`, async () => {
+    await withTempRepo(async (repo) => {
+      repo.git('rm', '-q', 'README.md');
+      mkdirSync(join(repo.dir, 'a'));
+      writeFileSync(join(repo.dir, 'package.json'), JSON.stringify({ name: 'tiny', version: '1.2.3', files: ['a/'] }));
+      writeFileSync(join(repo.dir, '.gitignore'), 'README.md\nprivate/\n');
+      writeFileSync(join(repo.dir, 'a', 'kept.ts'), 'export {};\n');
+      repo.git('add', 'package.json', '.gitignore', 'a/kept.ts');
+      repo.git('commit', '-m', 'tiny');
+      writeFileSync(join(repo.dir, 'README.md'), 'internal\n');
+      make(repo.dir);
+
+      const outDir = join(scratch, `link-out-${named.replace(/\W/g, '-')}`);
+      mkdirSync(outDir);
+      await expect(packSail({ root: repo.dir, outDir })).rejects.toThrow(`${named} is a symbolic link or under one`);
+      expect(existsSync(outDir) && readdirSync(outDir)).toEqual([]);
+    });
+  });
+}
 
 test('throws git error text outside a git repository', async () => {
   const bare = join(scratch, 'not-a-repo');
