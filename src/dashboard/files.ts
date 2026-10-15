@@ -2,7 +2,7 @@
 // runs, and a call's files. Every path comes from a registry entry, never from a request, and every file is checked by
 // realpath to lie inside its run directory, so a name with `..`, an encoded separator, a symlink a step left, or an
 // edited `events.ndjson` can't lead out. Nothing here writes.
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { isPlainName } from '../engine/call-dir';
 import { runsDir, type Source } from '../engine/run-dir';
@@ -153,6 +153,24 @@ export function findRunDir(entry: RegistryEntry, runId: string): string | { miss
 }
 
 const CALL_ENDS = new Set(['intake:end', 'stage:end', 'step:end']);
+const CALL_STARTS = new Set(['intake:start', 'stage:start']);
+
+/**
+ * File `name` of a call's try that has started and not ended: `NN-<stage>/call-<n>/`, or `try-<t>/` below it for a later
+ * try. No end points at it yet, so the directory is found from the key, by the layout src/engine/call-dir.ts writes.
+ */
+function runningFile(runDir: string, key: string, tryNumber: number, name: string): string | undefined {
+  const match = /^([^#/]+)#([1-9][0-9]*)$/.exec(key);
+  if (match === null) return undefined;
+  const [, stage, call] = match;
+  const stageDir = readdirSync(runDir).find(
+    (entry) => /^[0-9]{2,}-/.test(entry) && entry.replace(/^[0-9]+-/, '') === stage,
+  );
+  if (stageDir === undefined) return undefined;
+  const tries = tryNumber > 1 ? [`try-${tryNumber}`] : [];
+  const file = join(runDir, stageDir, `call-${call}`, ...tries, name);
+  return inside(runDir, file) ? file : undefined;
+}
 
 /** Whether `resultPath` is a run-relative path to a `result.json`, with no way up. */
 function plainResultPath(resultPath: string): boolean {
@@ -162,7 +180,8 @@ function plainResultPath(resultPath: string): boolean {
 
 /**
  * File `name` of the call `key`, found beside the `result.json` the last `intake:end`, `stage:end` or `step:end` with
- * that key points at. It must exist and lie inside the run directory.
+ * that key points at. A call whose last `intake:start` or `stage:start` came after that end is running, and its file is
+ * the running try's (review R3-2). It must exist and lie inside the run directory.
  */
 export function callFile(runDir: string, key: string, name: string): string | { missing: string } {
   const missing = { missing: `no ${name} for '${key}'` };
@@ -170,16 +189,22 @@ export function callFile(runDir: string, key: string, name: string): string | { 
   const unread = eventsProblem(runDir);
   if (unread !== undefined) return { missing: unread };
   let resultPath: string | undefined;
+  let running: number | undefined;
   try {
     for (const event of readEvents(runDir)) {
-      const fields = event as { key?: unknown; resultPath?: unknown };
-      if (CALL_ENDS.has(event.type) && fields.key === key && typeof fields.resultPath === 'string') {
+      const fields = event as { key?: unknown; resultPath?: unknown; try?: unknown };
+      if (fields.key !== key) continue;
+      if (CALL_ENDS.has(event.type) && typeof fields.resultPath === 'string') {
         resultPath = fields.resultPath;
+        running = undefined;
+      } else if (CALL_STARTS.has(event.type)) {
+        running = typeof fields.try === 'number' && Number.isInteger(fields.try) ? fields.try : 1;
       }
     }
   } catch (error) {
     return { missing: `the events of this run can't be read: ${messageOf(error)}` };
   }
+  if (running !== undefined) return runningFile(runDir, key, running, name) ?? missing;
   if (resultPath === undefined || !plainResultPath(resultPath)) return missing;
   const file = join(runDir, dirname(resultPath), name);
   return inside(runDir, file) ? file : missing;
