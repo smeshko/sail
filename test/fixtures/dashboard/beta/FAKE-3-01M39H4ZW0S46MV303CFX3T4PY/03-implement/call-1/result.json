@@ -1,0 +1,57 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-3-01M39H4ZW0S46MV303CFX3T4PY",
+  "stage": "implement",
+  "call": 1,
+  "key": "implement#1",
+  "kind": "agent",
+  "outcome": "error",
+  "errors": [
+    {
+      "reason": "harness",
+      "message": "aborted"
+    }
+  ],
+  "output": null,
+  "files": {},
+  "consumed": {
+    "spec": "01-spec/call-1/spec.md",
+    "feedback": null
+  },
+  "startedAt": "2026-09-24T11:00:05.800Z",
+  "finishedAt": "2026-09-24T11:00:06.700Z",
+  "durationMs": 900,
+  "try": 1,
+  "validationTry": 1,
+  "prompt": {
+    "path": "03-implement/call-1/prompt.md",
+    "untrusted": 0,
+    "fragments": [
+      {
+        "name": "untrusted-input",
+        "origin": "builtin"
+      },
+      {
+        "name": "finish",
+        "origin": "builtin"
+      }
+    ],
+    "conventions": []
+  },
+  "harness": {
+    "adapter": "fake",
+    "model": "claude-sonnet-5",
+    "sessionId": "fake-session-implement-1",
+    "turns": 3,
+    "toolCalls": 0,
+    "denials": 0
+  },
+  "usage": {
+    "inputTokens": 6000,
+    "cacheReadTokens": 30000,
+    "cacheWriteTokens": 4000,
+    "outputTokens": 2400,
+    "costUsd": 0.75
+  },
+  "validationFailed": false
+}

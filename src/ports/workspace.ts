@@ -1,7 +1,9 @@
 // The Workspace port: gives a run its workspace and takes it away again, and keeps runs apart with machine-wide branch
-// leases (ADR-0018). The port is the Workspace port, and a Workspace is the checkout it returns.
+// leases (ADR-0018). The port is the Workspace port, and a Workspace is the checkout it returns. `holder()` lets the
+// watcher see a leased branch without taking it.
 import type {
   Diff,
+  Lease,
   LeaseHolder,
   LeaseResult,
   Released,
@@ -26,6 +28,11 @@ export interface WorkspacePort {
   lease(remote: string, branch: string, holder: LeaseHolder): Promise<LeaseResult>;
   /** Emits `workspace:lease_released` when released. */
   releaseLease(remote: string, branch: string, runId: string): Promise<Released>;
+  /**
+   * The lease of the run that holds `branch` of `remote` now, or undefined when it is free or its lease is stale. A read:
+   * it takes nothing, removes nothing and emits nothing.
+   */
+  holder(remote: string, branch: string): Promise<Lease | undefined>;
   /**
    * A detached checkout of `base`, recording `branch` for the later push. Left out, `base` is the default branch's tip
    * on the remote. `signal` stops whatever the adapter fetches first. Emits `workspace:created`.

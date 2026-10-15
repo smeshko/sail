@@ -81,6 +81,15 @@ export function isStale(lease: Lease): boolean {
   return !isAlive(lease.pid);
 }
 
+/**
+ * The lease that holds `branch` of `remote` now, or undefined when there is none or it is stale. It only reads: a stale
+ * lease is left for the next taker. A file that isn't a lease is `invalid`.
+ */
+export function heldLease(dir: string, remote: string, branch: string): Lease | undefined {
+  const lease = readLease(dir, remote, branch);
+  return lease === undefined || isStale(lease) ? undefined : lease;
+}
+
 /** Whether `lease`'s run is alive in a process other than `pid`: its pid is alive and isn't `pid`. */
 function stillRunning(lease: Lease, pid: number): boolean {
   return lease.pid !== pid && isAlive(lease.pid);

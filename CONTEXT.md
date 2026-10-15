@@ -436,15 +436,15 @@ A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, whi
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. It fetches before every dispatch, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
-The watched workflows a watcher is watching now: exactly those named with `sail watch`, minus those removed with `sail unwatch`. It is never remembered across restarts, and the watcher exits when it becomes empty. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
+The watched workflows a watcher is watching now: exactly those named with `sail watch`, minus those removed with `sail unwatch`. It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:
-The machine-level record of watchers in `~/.sail/watchers/`: the repository's `name`, remote, clone path, pid and the labels each polls. A watcher refuses to start if a live one has the same `name` or holds one of its labels on the same TicketSource. The dashboard reads it to find every repository, including those whose watcher has stopped.
+The machine-level record of repositories in `~/.sail/watchers/` (`$SAIL_HOME/watchers/` when set), one `<name>.json` per repository: its `name`, remote, clone path and `.sail/` path, and later the watcher's pid and the labels it polls. Every `sail <ticket>` and `sail resume` writes its repository's entry before the run opens, so an entry exists before any watcher does. A watcher refuses to start if a live one has the same `name` or holds one of its labels on the same TicketSource. The dashboard reads it to find every repository, including those whose watcher has stopped.
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
 
 **Branch lease**:
@@ -480,9 +480,21 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, dispatch begins with the claim.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run claims the ticket as it starts, after its branch is leased and its workspace made, as a run started by hand does.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:
 The live, read-only view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls nothing; the CLI does (`sail watch`, `sail unwatch`, `sail queue …`, `sail stop`).
 _Avoid_: UI, console, monitor, board
+
+**Stage card**:
+One call's card in the dashboard's run view, with its outcome, tries, duration, cost and denials, or a pending card for a roster stage the run hasn't called yet. Cards come from the run's events and its roster alone, so a new stage shows with no dashboard change.
+_Avoid_: tile, step card, job
+
+**Inspector**:
+The dashboard's panel for one call, with its overview, files, permissions and log tabs. It explains a denial from the run's files alone: the command, the rule, and the step's permissions under it.
+_Avoid_: details pane, drawer
+
+**Needs attention**:
+The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call.
+_Avoid_: alerts, signals, triage

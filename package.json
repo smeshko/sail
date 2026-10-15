@@ -1,10 +1,34 @@
 {
-  "name": "sail",
+  "name": "@smeshko/sail",
   "version": "0.0.0",
+  "description": "sail: a software factory. A ticket goes in, a pull request comes out, along a workflow the repository defines.",
+  "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smeshko/sail.git"
+  },
   "type": "module",
   "bin": {
     "sail": "src/cli/main.ts"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "src/dashboard/page/index.html",
+    "schemas/",
+    "types/"
+  ],
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/sdk/index.ts"
+    },
+    "./intakes": {
+      "types": "./types/intakes.d.ts",
+      "default": "./src/sdk/intakes.ts"
+    },
+    "./package.json": "./package.json"
   },
   "engines": {
     "bun": ">=1.3.14"
@@ -17,7 +41,9 @@
     "types": "bun scripts/types.ts",
     "golden": "bun scripts/golden.ts",
     "verify": "bun run typecheck && bun run lint && bun run test --coverage",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "pack": "bun scripts/pack.ts",
+    "prepublishOnly": "echo 'sail: publish the tarball bun run pack makes: bun publish <tarball>' >&2 && exit 1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

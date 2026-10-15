@@ -378,6 +378,29 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     }
   });
 
+  test(`${label}: holder names a live or suspended run's lease, nothing for a free branch or an ended run, and takes nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const branch = (n: number) => `sail/FAKE-${n}`;
+    const live = await world.run('r1');
+    const suspended = await world.run('r2', 'suspended', false);
+    await adapter.lease(world.remote, branch(1), live);
+    await adapter.lease(world.remote, branch(2), suspended);
+    await adapter.lease(world.remote, branch(3), await world.run('r3', 'completed'));
+    await adapter.lease(world.remote, branch(4), await world.run('r4', 'running', false));
+    const leasedEvents = capture.events.length;
+    const runIds = [];
+    for (const n of [1, 2, 3, 4, 5]) runIds.push((await adapter.holder(world.remote, branch(n)))?.runId);
+    expect(runIds).toEqual(['r1', 'r2', undefined, undefined, undefined]);
+    expect(await adapter.holder(world.remote, branch(1))).toMatchObject({
+      remote: world.remote,
+      branch: branch(1),
+      pid: live.pid,
+    });
+    expect(capture.events).toHaveLength(leasedEvents);
+    const taken = await adapter.lease(world.remote, branch(4), await world.run('r5'));
+    expect(taken.leased ? taken.took : 'refused').toBe('r4');
+  });
+
   test(`${label}: capabilities parse`, async () => {
     const { adapter } = await start();
     expect(parseIssues(WorkspaceCapabilities, adapter.capabilities())).toEqual([]);

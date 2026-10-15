@@ -87,7 +87,7 @@ async function runSpec(stream: Stream) {
 }
 
 test('sail FAKE-1 --until spec on claude-code suspends after spec with spec.md, session.log, its session id, cost and cache tokens', async () => {
-  const run = await runSpec(specSession(SPEC));
+  const run = await runSpec(specSession(SPEC, {}, SPEC_DOCUMENT));
   expect({ code: run.code, stderr: run.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
   expect(run.header.adapters.harness).toEqual({
     use: SCRIPTED_ADAPTER,
@@ -95,7 +95,7 @@ test('sail FAKE-1 --until spec on claude-code suspends after spec with spec.md, 
     versions: { '@anthropic-ai/claude-agent-sdk': '0.3.282' },
   });
   expect({ spec: run.spec, outcome: run.result.outcome, output: run.result.output }).toEqual({
-    spec: '# Spec\n',
+    spec: SPEC_DOCUMENT,
     outcome: 'done',
     output: SPEC,
   });

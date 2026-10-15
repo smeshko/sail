@@ -28,6 +28,14 @@
 // over. It then reopens the workspace, which must still be there and still descend from its base. A run from before
 // workspaces existed has no workspace to resume in, and is refused.
 //
+// A dispatched start (`dispatch`) is the run the watcher started: it runs under the run id the watcher minted and named
+// in its queue, and records `via: 'watch'`. It takes every step above, the claim included, in this order: the watcher
+// only reads before it spawns the run, so everything a start can refuse still comes before the ticket moves. An id
+// that isn't one of this ticket's, or whose run directory exists, is refused, and so is `force` with it.
+//
+// Every start checks designation against the workflow's label: its `watch.label`, then `project.yaml`'s, then sail's,
+// the label its watcher polls.
+//
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail <ticket>`, `sail resume` and the watcher's dispatch each
 // start one run per process.
@@ -43,7 +51,7 @@ import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { branchFor, DEFAULT_BRANCH_PREFIX } from './branch';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
-import { DEFAULT_LABEL, PORTS, type Port, type ProjectConfig, readConfig } from './config';
+import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
 import { createJournal } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
@@ -59,10 +67,11 @@ import {
   workspaceFields,
   writeRunHeader,
 } from './run-header';
-import { newRunId } from './run-id';
+import { isRunIdOf, newRunId } from './run-id';
 import { findSailDir } from './sail-dir';
 import { formatIssue } from './schemas';
 import { type ClaimedSource, claimSource, resolveSource } from './source';
+import { watchLabel } from './watchable';
 
 /** The realpaths of the `.sail/` directories a run has been opened from in this process. */
 const claimed = new Set<string>();
@@ -135,6 +144,8 @@ export interface OpenRunOptions {
   signal?: AbortSignal;
   /** The four adapters, resolved from the config before anything else. */
   adapters: ResolvedAdapters;
+  /** A start the watcher dispatched: the run takes the id it minted, and its source is recorded `via: 'watch'`. */
+  dispatch?: { runId: string };
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */
@@ -177,6 +188,18 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
   }
   if (intakeBody(loaded.intake) === undefined) {
     return `${file}: its intake '${name}' is the repository's own, and only a built-in intake runs`;
+  }
+  return undefined;
+}
+
+/** Why a dispatch can't take `runId`: it isn't an id of a run of `ticketKey`, or that run's directory exists. */
+function dispatchProblem(sailDir: string, ticketKey: string, runId: string): string | undefined {
+  if (!isRunIdOf(ticketKey, runId)) {
+    return `--dispatch takes the id of a new run of ${ticketKey}, ${ticketKey}-<26 Crockford characters>: '${runId}' is not one`;
+  }
+  const runs = runsDir(sailDir);
+  if (existsSync(join(runs, runId))) {
+    return `--dispatch names run ${runId}, which already exists in ${relative(dirname(sailDir), runs)}: a dispatch starts a new run`;
   }
   return undefined;
 }
@@ -307,7 +330,8 @@ async function startWorkspace(options: {
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
  */
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
-  const { cwd, workflow, ticket, force = false } = options;
+  const { cwd, workflow, ticket, force = false, dispatch } = options;
+  if (dispatch !== undefined && force) return { refused: "--dispatch and --force can't be combined" };
   // Read before anything can refuse, so the run id's time is the clock's first reading whatever else reads it later.
   const now = (options.clock ?? systemClock)();
   const found = findConfigured(cwd);
@@ -331,13 +355,23 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     };
   }
   const { ticketSource } = options.adapters.ports;
-  const resolved = await resolveSource({ ref: ticket, ticketSource, label: config.label ?? DEFAULT_LABEL, force });
+  const label = watchLabel(loaded.workflow, config);
+  const resolved = await resolveSource({ ref: ticket, ticketSource, label, force });
   if ('refused' in resolved) return resolved;
   const { ticketKey } = resolved;
-  const runId = newRunId(ticketKey, now.getTime(), options.random);
+  if (dispatch !== undefined) {
+    const refused = dispatchProblem(found.dir, ticketKey, dispatch.runId);
+    if (refused !== undefined) return { refused };
+  }
+  const runId = dispatch?.runId ?? newRunId(ticketKey, now.getTime(), options.random);
   const branch = branchFor(config.branchPrefix ?? DEFAULT_BRANCH_PREFIX, ticketKey, resolved.ticket.title);
   // Built and checked before anything is written, with the state as fetched standing in for the claim's answer.
-  const source: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: resolved.forced };
+  const source: Source = {
+    kind: 'ticket',
+    ticketKey,
+    via: dispatch === undefined ? 'cli' : 'watch',
+    forced: resolved.forced,
+  };
   const unclaimed = buildRunHeader({
     runId,
     source,

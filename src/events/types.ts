@@ -307,9 +307,9 @@ export interface Consumer {
 }
 
 /**
- * Every type a watched workflow's queue event stream carries, after `EVENT_TYPES` in `sail.event.v1`'s enum. Phase
- * 13.1 closes the polls, queued items, parking and errors. 13.2 closes `watch:*`, `queue:dispatched` and
- * `queue:skipped_leased`.
+ * Every type a watched workflow's queue event stream carries, after `EVENT_TYPES` in `sail.event.v1`'s enum. Each has
+ * a closed payload: the watch set's changes, the polls, queued items, dispatches, lease skips, drops, parking and
+ * errors.
  */
 export const QUEUE_EVENT_TYPES = [
   'watch:added',
@@ -318,6 +318,7 @@ export const QUEUE_EVENT_TYPES = [
   'queue:item_added',
   'queue:dispatched',
   'queue:skipped_leased',
+  'queue:dropped',
   'queue:parked',
   'queue:error',
 ] as const;
@@ -331,8 +332,12 @@ export interface QueueEnvelope {
   ts: string;
 }
 
-/** The closed queue payloads. Each names the watched workflow it belongs to. */
+/** The queue payloads, all closed. Each names the watched workflow it belongs to. */
 export interface QueuePayloads {
+  /** The watcher `pid` added the workflow to its watch set, polling `label` every `everyMs`. */
+  'watch:added': { workflow: string; pid: number; label: string; everyMs: number; maxConcurrentRuns: number };
+  /** The watcher `pid` took the workflow out of its watch set, or stopped. */
+  'watch:removed': { workflow: string; pid: number };
   'queue:polled': { workflow: string; kind: 'ticket'; label: string; found: number; added: number; durationMs: number };
   /** The title is the provider's: untrusted text. */
   'queue:item_added': {
@@ -341,6 +346,15 @@ export interface QueuePayloads {
     source: { kind: 'ticket'; ticketKey: string };
     title: string;
   };
+  /**
+   * Run `run` started for the item, as process `pid`: its `attempt`th dispatch. The field isn't `runId`: a queue event
+   * belongs to its workflow, and its envelope has no run.
+   */
+  'queue:dispatched': { workflow: string; dedupKey: string; run: string; attempt: number; pid: number };
+  /** A due item left queued because run `heldBy` holds its branch's lease: it used no slot and counted no attempt. */
+  'queue:skipped_leased': { workflow: string; dedupKey: string; branch: string; heldBy: string };
+  /** An item taken out of the queue: its re-check found it no longer designated or unstarted. */
+  'queue:dropped': { workflow: string; dedupKey: string; reason: string };
   'queue:parked': { workflow: string; dedupKey: string; attempts: number; reason: string };
   /** `retryInMs` is given exactly when the workflow isn't paused. */
   'queue:error': {
@@ -354,13 +368,7 @@ export interface QueuePayloads {
   };
 }
 
-/** A queue type 13.2 closes: any fields beside its workflow. */
-interface OpenQueuePayload {
-  workflow: string;
-  [field: string]: unknown;
-}
-
-type QueuePayloadOf<T extends QueueEventType> = T extends keyof QueuePayloads ? QueuePayloads[T] : OpenQueuePayload;
+type QueuePayloadOf<T extends QueueEventType> = QueuePayloads[T];
 
 /** One line of a queue's event stream. */
 export type QueueEvent = {

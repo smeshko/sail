@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "workflow": "ticket-to-pr",
+  "updatedAt": "2026-09-24T11:05:00.000Z",
+  "polling": {
+    "label": "sail",
+    "failures": 0,
+    "lastPolledAt": "2026-09-24T11:05:00.000Z"
+  },
+  "items": [
+    {
+      "dedupKey": "ticket:FAKE-5",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-5"
+      },
+      "title": "Link the changelog from the README",
+      "url": "fake://tickets/FAKE-5",
+      "state": "queued",
+      "attempts": 0,
+      "addedAt": "2026-09-24T10:55:00.000Z"
+    },
+    {
+      "dedupKey": "ticket:FAKE-3",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-3"
+      },
+      "title": "Escape <b>this</b> & \"that\"",
+      "url": "fake://tickets/FAKE-3",
+      "state": "dispatched",
+      "attempts": 1,
+      "addedAt": "2026-09-24T10:55:00.000Z",
+      "runId": "FAKE-3-01M39H4ZW0S46MV303CFX3T4PY"
+    },
+    {
+      "dedupKey": "ticket:FAKE-6",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-6"
+      },
+      "title": "Greet in French with --lang fr",
+      "url": "fake://tickets/FAKE-6",
+      "state": "parked",
+      "attempts": 2,
+      "addedAt": "2026-09-24T10:55:00.000Z",
+      "reason": "stage_error: implement#1 ended in error: harness: the session ended before it submitted a result",
+      "finishedAt": "2026-09-24T10:59:30.000Z"
+    },
+    {
+      "dedupKey": "ticket:FAKE-4",
+      "source": {
+        "kind": "ticket",
+        "ticketKey": "FAKE-4"
+      },
+      "title": "Add a --whisper flag",
+      "url": "fake://tickets/FAKE-4",
+      "state": "done",
+      "attempts": 1,
+      "addedAt": "2026-09-24T10:55:00.000Z",
+      "finishedAt": "2026-09-24T10:58:10.000Z"
+    }
+  ]
+}
