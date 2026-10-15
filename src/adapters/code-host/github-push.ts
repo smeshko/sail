@@ -9,6 +9,7 @@
 // `core.sshCommand` or `remote.<name>.receivepack`. So the remote's push URL is read from the checkout, and the push
 // goes from a temporary bare repository that borrows the checkout's objects, holds HEAD's commit as its own HEAD, and
 // has no config but that URL. The token is offered only when that URL is on the web host.
+import { randomBytes } from 'node:crypto';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -28,8 +29,14 @@ export const CREDENTIAL_HELPER =
 /** The variables that make git print what it sends, the credential included. */
 const TRACE = /^(GIT_TRACE.*|GIT_CURL_VERBOSE)$/;
 
-/** The remote's name in the push's own git directory. */
-const REMOTE = 'sail';
+/**
+ * The remote's name in the push's own git directory: new for each push, so no `remote.<name>.*` of the user's global
+ * config can name it ahead and reroute the push (review R2-1).
+ */
+const remoteName = () => `sail-${randomBytes(4).toString('hex')}`;
+
+/** The caller's own `-c` config, as variables: git reads it after every file, so it would steer the push. */
+const CALLER_CONFIG = /^GIT_CONFIG_(PARAMETERS|COUNT|KEY_\d+|VALUE_\d+)$/;
 
 export interface PushOptions {
   readonly cwd: string;
@@ -52,7 +59,7 @@ export interface PushOptions {
  * git's arguments for the push, after `--git-dir`. None holds the token. sail's helper is scoped to `webUrl`, and left
  * out without one. No hook runs: `--no-verify` skips only pre-push. No tag or submodule goes with the branch.
  */
-export function pushArgs(branch: string, webUrl: string | undefined): string[] {
+export function pushArgs(branch: string, webUrl: string | undefined, remote: string): string[] {
   return [
     '-c',
     'credential.helper=',
@@ -64,7 +71,7 @@ export function pushArgs(branch: string, webUrl: string | undefined): string[] {
     '--no-verify',
     '--no-follow-tags',
     '--recurse-submodules=no',
-    REMOTE,
+    remote,
     `HEAD:refs/heads/${branch}`,
   ];
 }
@@ -81,11 +88,14 @@ function withoutToken(env: Readonly<Record<string, string>>, token: string): Rec
 const TRACE2_OFF = { GIT_TRACE2: '0', GIT_TRACE2_EVENT: '0', GIT_TRACE2_PERF: '0' };
 
 /**
- * The environment for any git the adapter runs: no prompts, no traces, and no variable that holds `token`. Every git
- * call before the push takes it too, since the caller's trace variables could name the operator's own (review R2-3).
+ * The environment for any git the adapter runs: no prompts, no traces, none of the caller's `-c` config, and no
+ * variable that holds `token`. Every git call before the push takes it too, since the caller's trace variables could
+ * name the operator's own (review R2-3).
  */
 export function gitEnv(env: Readonly<Record<string, string>>, token: string): Record<string, string> {
-  const quiet = Object.entries(nonInteractive(withoutToken(env, token))).filter(([name]) => !TRACE.test(name));
+  const quiet = Object.entries(nonInteractive(withoutToken(env, token))).filter(
+    ([name]) => !TRACE.test(name) && !CALLER_CONFIG.test(name),
+  );
   return { ...Object.fromEntries(quiet), GIT_TRACE_REDACT: '1', ...TRACE2_OFF };
 }
 
@@ -179,6 +189,7 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
   const logs = mkdtempSync(join(tmpdir(), 'sail-push-'));
   try {
     const gitDir = join(logs, 'push.git');
+    const name = remoteName();
     const made = gitSync(
       logs,
       ['init', '--quiet', '--bare', '--template=', `--object-format=${format}`, gitDir],
@@ -192,12 +203,12 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
     const config = join(gitDir, 'config');
     const topLevel = gitSync(cwd, ['rev-parse', '--show-toplevel'], local).stdout.trim();
     const target = quoted(fromCheckout(url, topLevel));
-    writeFileSync(config, `${readFileSync(config, 'utf8')}[remote "${REMOTE}"]\n\turl = ${target}\n`);
+    writeFileSync(config, `${readFileSync(config, 'utf8')}[remote "${name}"]\n\turl = ${target}\n`);
 
     const stdout = join(logs, 'stdout');
     const stderr = join(logs, 'stderr');
     const end = await runProcess({
-      command: ['git', `--git-dir=${gitDir}`, ...pushArgs(branch, offered ? options.webUrl : undefined)],
+      command: ['git', `--git-dir=${gitDir}`, ...pushArgs(branch, offered ? options.webUrl : undefined, name)],
       cwd: logs,
       // The token leaves every variable first, offered or not: the operator's own GITHUB_TOKEN would stay otherwise.
       env: pushEnv(withoutToken(options.env, options.token), offered ? options.token : undefined),
