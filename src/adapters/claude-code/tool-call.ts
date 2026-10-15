@@ -106,6 +106,16 @@ const onePath =
   (kind: ToolKind, name: string, tool: string): Mapping =>
   (input, cwd) => ({ kind, paths: forms(tool, stringIn(tool, input, name) as string, cwd) });
 
+/** The subagent tools: matched by name, unless isolation sends the subagent out of the workspace. */
+const subagent =
+  (tool: string): Mapping =>
+  (input) => {
+    if (input.isolation !== undefined) {
+      throw new Unchecked(`${tool} with isolation ${String(input.isolation)} runs outside the session's workspace`);
+    }
+    return { kind: 'other', paths: [] };
+  };
+
 /**
  * Whether `command` sends a job to the background: an `&` that is not part of `&&`, `&>`, `>&`, `<&` or `|&`. The CLI
  * runs each command's shell in a process group of its own, so such a job outlives its call out of sail's reach. The
@@ -137,10 +147,26 @@ const MAPPINGS: Record<string, Mapping> = {
     const searched = absolute ? folder : folder === '.' ? from : `${from}/${folder}`;
     return { kind: 'read', paths: [...new Set([...forms('Glob', from, cwd), ...forms('Glob', searched, cwd)])] };
   },
+  Agent: subagent('Agent'),
+  Task: subagent('Task'),
   Grep(input, cwd) {
     const path = stringIn('Grep', input, 'path', true) ?? cwd;
     return { kind: 'read', paths: forms('Grep', path, cwd) };
   },
+};
+
+/**
+ * The built-ins never run, whatever the step lists: each runs a command, a script or a prompt where the gate can't see
+ * it, later, or outside the workspace.
+ */
+const REFUSED: Readonly<Record<string, string>> = {
+  Monitor: 'Monitor runs its command in the background, where it can outlive the call',
+  Workflow: "Workflow runs a script the gate can't see into",
+  CronCreate: 'CronCreate runs work later or elsewhere, outside the session',
+  RemoteTrigger: 'RemoteTrigger runs work later or elsewhere, outside the session',
+  ScheduleWakeup: 'ScheduleWakeup runs work later or elsewhere, outside the session',
+  EnterWorktree: 'EnterWorktree moves the session out of its workspace',
+  ExitWorktree: 'ExitWorktree moves the session out of its workspace',
 };
 
 const MCP = 'mcp__';
@@ -156,7 +182,7 @@ function mcpCall(name: string, mcpServer: string | undefined): Omit<ToolCall, 'c
 /** The kind a call of `name` would be, for the rule an unchecked call is denied under. */
 const kindOf = (name: string): ToolKind => {
   if (name.startsWith(MCP)) return 'mcp';
-  if (name === 'Bash') return 'execute';
+  if (name === 'Bash' || name === 'Monitor') return 'execute';
   if (name === 'Read' || name === 'Glob' || name === 'Grep') return 'read';
   if (name === 'Write') return 'write';
   if (name === 'Edit' || name === 'NotebookEdit') return 'edit';
@@ -171,6 +197,10 @@ export function toToolCall(name: string, input: unknown, cwd: string, mcpServer?
   const fields = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
   try {
     if (name.startsWith(MCP)) return { call: { ...mcpCall(name, mcpServer), cwd } };
+    const refused = REFUSED[name];
+    if (refused !== undefined) throw new Unchecked(refused);
+    // A tool the adapter doesn't know may take a path or a command in any field: none is allowed by its name alone.
+    if (!BUILTIN_TOOLS.includes(name)) throw new Unchecked(`${name} is no tool the gate knows`);
     const mapping = MAPPINGS[name];
     if (mapping === undefined) return { call: { tool: name, kind: 'other', paths: [], cwd } };
     return { call: { tool: name, ...mapping(fields, cwd), cwd } };
@@ -180,13 +210,16 @@ export function toToolCall(name: string, input: unknown, cwd: string, mcpServer?
   }
 }
 
-/** The session's tools: the reads always, the writes, Bash and any listed built-in only when the step can use them. */
+/**
+ * The session's tools: the reads always, the writes, Bash and any listed built-in only when the step can use them, and
+ * never one the gate always refuses.
+ */
 export function sessionTools(permissions: Permissions): { tools: string[]; disallowedTools: string[] } {
   const tools = ['Read', 'Glob', 'Grep'];
   if (permissions.write.length > 0) tools.push('Write', 'Edit');
   if (permissions.commands.length > 0) tools.push('Bash');
   for (const name of permissions.tools ?? []) {
-    if (BUILTIN_TOOLS.includes(name) && !tools.includes(name)) tools.push(name);
+    if (BUILTIN_TOOLS.includes(name) && REFUSED[name] === undefined && !tools.includes(name)) tools.push(name);
   }
   return { tools, disallowedTools: BUILTIN_TOOLS.filter((name) => !tools.includes(name)) };
 }
