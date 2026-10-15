@@ -6,7 +6,7 @@
 // SAIL_LIVE_GITHUB_REPOSITORY names, pushing from the clone SAIL_LIVE_GITHUB_CLONE, with SAIL_LIVE_GITHUB_LABEL and the
 // designated pull request SAIL_LIVE_GITHUB_DESIGNATED. The token comes from SAIL_GITHUB_TOKEN or GITHUB_TOKEN. Without
 // the switch the live suite is not registered at all.
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createGitHubCodeHost, type GitHubCodeHostOptions } from '../../../src/adapters/code-host/github';
@@ -134,6 +134,9 @@ function live(): { repository: string; clone: string; label: string; designated:
 }
 
 if (process.env.SAIL_LIVE_CODE_HOST === '1') {
+  // A push to github.com, then a create and a label, takes longer than Bun's default 5 s: live, the open cases timed
+  // out at 5 s with GitHub's answers still on their way.
+  setDefaultTimeout(60_000);
   let pushes = 0;
   codeHostSuite(
     'github (live)',
