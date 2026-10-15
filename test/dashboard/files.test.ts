@@ -185,3 +185,23 @@ test.each([
     expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
   },
 );
+
+test.each([
+  ['an empty object', '{}'],
+  ['calls that are not a list', JSON.stringify({ ...golden('summary.json'), calls: {} })],
+  ['a source that is null', JSON.stringify({ ...golden('summary.json'), source: null })],
+])(
+  'a run whose summary.json is %s is listed with no summary and a problem naming it, and the other clone is untouched (review R1-1)',
+  (_, text) => {
+    writeFileSync(join(m.alpha.runDir, 'summary.json'), text);
+    const [item] = runItems(entryOf(m.alpha));
+    expect(item?.summary).toBeNull();
+    expect(item?.problem).toContain('summary.json is not a sail.summary.v1');
+    expect({ ...item, summary: undefined, problem: undefined }).toEqual({
+      ...goldenItem(),
+      summary: undefined,
+      problem: undefined,
+    });
+    expect(runItems(entryOf(m.beta))).toEqual([goldenItem()]);
+  },
+);
