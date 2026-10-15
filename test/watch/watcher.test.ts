@@ -78,7 +78,7 @@ const stopped = (watcher: Watcher) => Promise.race([watcher.done.then(() => true
 // biome-ignore format: TDD-PENDING TASK-009
 test
   .skip // TDD-PENDING TASK-009
-  ("two workflows at caps 2 and 1 dispatch six tickets once each, in queue order, never over their caps, a leased ticket last and only after its lease is released", async () => {
+  ('two workflows at caps 2 and 1 dispatch six tickets once each, in queue order, never over their caps, a leased ticket last and only after its lease is released', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,

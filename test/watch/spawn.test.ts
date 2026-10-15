@@ -54,7 +54,7 @@ function fakeSail(dir: string): string {
 // biome-ignore format: TDD-PENDING TASK-006
 test
   .skip // TDD-PENDING TASK-006
-  ("a spawned run gets the ticket, its workflow and --dispatch with the run id, runs in the root with the given env in a process group of its own, and logs both streams", async () => {
+  ('a spawned run gets the ticket, its workflow and --dispatch with the run id, runs in the root with the given env in a process group of its own, and logs both streams', async () => {
   const dir = tempDir();
   const root = join(dir, 'repo');
   mkdirSync(root);

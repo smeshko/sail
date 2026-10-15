@@ -162,7 +162,7 @@ const ME = watcher(222, '/work/fixture/.sail', ['sail-a', 'sail-b']);
 // biome-ignore format: TDD-PENDING TASK-005
 test
   .skip // TDD-PENDING TASK-005
-  ("claimWatcher answers a live watcher of the name in another .sail/ and writes nothing; with that pid dead it claims, and the entry holds its field", () => {
+  ('claimWatcher answers a live watcher of the name in another .sail/ and writes nothing; with that pid dead it claims, and the entry holds its field', () => {
   const dir = registry();
   const other = watcher(111, '/elsewhere/fixture/.sail', ['sail']);
   const theirs = entry('fixture', { clone: '/elsewhere/fixture', sailDir: '/elsewhere/fixture/.sail', watcher: other });
