@@ -80,26 +80,125 @@ export interface BrowserWindow {
   Date: { new (): { getTimezoneOffset(): number } };
 }
 
-/**
- * A real window as a `PageHost`.
- *
- * Stub (TASK-008): a host that renders nothing, hears nothing, and reads nothing.
- */
-export function browserHost(_win: BrowserWindow): PageHost {
+const isElement = (value: unknown): value is ElementLike =>
+  typeof value === 'object' && value !== null && 'dataset' in value;
+
+/** The element `target` is, or the nearest one holding it, with a `data-action`. */
+function actionOf(target: unknown): ElementLike | undefined {
+  for (let at = isElement(target) ? target : null; at !== null; at = at.parentElement) {
+    if (at.dataset.action !== undefined) return at;
+  }
+  return undefined;
+}
+
+const INPUTS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
+/** How wide each resizable column may be, and its CSS variable. */
+const COLUMNS: Record<string, { variable: string; min: number; max: number; start: number; sign: number }> = {
+  left: { variable: '--rail-w', min: 160, max: 480, start: 260, sign: 1 },
+  right: { variable: '--ins-w', min: 240, max: 640, start: 360, sign: -1 },
+};
+
+/** Drags the column of a `data-resize` handle, which sets its CSS variable on `#body`. */
+function installResize(win: BrowserWindow): void {
+  const doc = win.document;
+  const widths: Record<string, number> = { left: COLUMNS.left?.start ?? 0, right: COLUMNS.right?.start ?? 0 };
+  doc.addEventListener('mousedown', (down) => {
+    const side = isElement(down.target) ? down.target.dataset.resize : undefined;
+    const column = side === undefined ? undefined : COLUMNS[side];
+    if (side === undefined || column === undefined) return;
+    down.preventDefault?.();
+    const from = down.clientX ?? 0;
+    const start = widths[side] ?? column.start;
+    const move = (event: EventLike) => {
+      const width = Math.max(column.min, Math.min(column.max, start + column.sign * ((event.clientX ?? from) - from)));
+      widths[side] = width;
+      doc.getElementById('body')?.style?.setProperty(column.variable, `${width}px`);
+    };
+    const up = () => {
+      doc.removeEventListener('mousemove', move);
+      doc.removeEventListener('mouseup', up);
+    };
+    doc.addEventListener('mousemove', move);
+    doc.addEventListener('mouseup', up);
+  });
+}
+
+/** A real window as a `PageHost`. */
+export function browserHost(win: BrowserWindow): PageHost {
+  const doc = win.document;
+  installResize(win);
   return {
-    render() {},
-    onAction() {},
-    onKey() {},
-    get: async () => ({ status: 0, body: '' }),
-    connect: () => ({ close() {} }),
-    now: () => 0,
-    later: () => 0,
-    cancel() {},
-    load: () => undefined,
-    save() {},
-    copy: async () => true,
-    setTheme() {},
-    setInspector() {},
-    offset: () => 0,
+    render(region, markup) {
+      const element = doc.getElementById(region);
+      if (element !== null) element.innerHTML = markup;
+    },
+    onAction(handler) {
+      doc.addEventListener('click', (event) => {
+        const element = actionOf(event.target);
+        if (element === undefined) return;
+        const data: Record<string, string> = {};
+        for (const [name, value] of Object.entries(element.dataset)) if (value !== undefined) data[name] = value;
+        handler(data.action ?? '', data);
+      });
+    },
+    onKey(handler) {
+      doc.addEventListener('keydown', (event) => {
+        const tag = isElement(event.target) ? event.target.tagName : undefined;
+        handler(event.key ?? '', tag !== undefined && INPUTS.has(tag));
+      });
+    },
+    async get(path) {
+      try {
+        const response = await win.fetch(path, { headers: { 'X-Sail-Dashboard': '1' } });
+        return { status: response.status, body: await response.text() };
+      } catch {
+        return { status: 0, body: '' };
+      }
+    },
+    connect(query, handlers) {
+      const socket = new win.WebSocket(`ws://${win.location.host}/ws?${query}`);
+      let closed = false;
+      socket.onmessage = (event) => handlers.message(String(event.data));
+      socket.onclose = () => {
+        if (closed) return;
+        closed = true;
+        handlers.close();
+      };
+      return { close: () => socket.close() };
+    },
+    now: () => Date.now(),
+    later: (fn, ms) => win.setTimeout(fn, ms),
+    cancel: (id) => win.clearTimeout(id),
+    load(key) {
+      try {
+        return win.localStorage.getItem(key) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    save(key, value) {
+      try {
+        win.localStorage.setItem(key, value);
+      } catch {
+        // Storage that is full, disabled or private only loses the preference.
+      }
+    },
+    async copy(text) {
+      try {
+        if (win.navigator.clipboard === undefined) return false;
+        await win.navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    setTheme(theme) {
+      doc.documentElement.dataset.theme = theme;
+    },
+    setInspector(open) {
+      doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
+    },
+    offset: () => -new win.Date().getTimezoneOffset(),
   };
 }

@@ -97,10 +97,7 @@ function fakeWindow(options: { storage?: 'throws'; clipboard?: 'rejects' | 'miss
   return { win, elements, fetched, sockets, timers, cleared, root, stored, copied, fire, listeners };
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a click on a child of a data-action element is delegated once, with the element's data; a click outside any is not", () => {
+test("a click on a child of a data-action element is delegated once, with the element's data; a click outside any is not", () => {
   const fake = fakeWindow();
   const host = browserHost(fake.win);
   const got: [string, Record<string, string>][] = [];
@@ -115,20 +112,14 @@ test
   expect(got).toEqual([['open', { action: 'open', repo: 'alpha', run: 'FAKE-2', key: 'implement#1' }]]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('get sends X-Sail-Dashboard: 1 and gives the status and body, or status 0 when the request fails', async () => {
+test('get sends X-Sail-Dashboard: 1 and gives the status and body, or status 0 when the request fails', async () => {
   const fake = fakeWindow();
   expect(await browserHost(fake.win).get('/api/repos')).toEqual({ status: 200, body: 'body of /api/repos' });
   expect(fake.fetched).toEqual([{ url: '/api/repos', headers: { 'X-Sail-Dashboard': '1' } }]);
   expect(await browserHost(fakeWindow({ fetch: 'fails' }).win).get('/api/repos')).toEqual({ status: 0, body: '' });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("connect opens ws://<the page's host>/ws?<query>, passes each message's text, reports a close once, and closes on request", () => {
+test("connect opens ws://<the page's host>/ws?<query>, passes each message's text, reports a close once, and closes on request", () => {
   const fake = fakeWindow();
   const messages: string[] = [];
   let closes = 0;
@@ -145,10 +136,7 @@ test
   expect([messages, closes, socket?.closes]).toEqual([['{"kind":"end"}'], 1, 1]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('load and save survive a throwing localStorage, and copy reports false when the clipboard rejects or is missing', async () => {
+test('load and save survive a throwing localStorage, and copy reports false when the clipboard rejects or is missing', async () => {
   const working = fakeWindow();
   const host = browserHost(working.win);
   host.save('sail-dashboard-theme', 'light');
@@ -162,10 +150,7 @@ test
   expect(await browserHost(fakeWindow({ clipboard: 'missing' }).win).copy('x')).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("render writes a region by id, keys say whether they were typed in an input, the theme and inspector set the root's data, timers and the offset pass through, and a resize handle drags its column within bounds", () => {
+test("render writes a region by id, keys say whether they were typed in an input, the theme and inspector set the root's data, timers and the offset pass through, and a resize handle drags its column within bounds", () => {
   const fake = fakeWindow();
   const host = browserHost(fake.win);
   host.render('rail', '<b>alpha</b>');

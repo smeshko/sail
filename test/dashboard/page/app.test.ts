@@ -184,10 +184,7 @@ const cards = (region: string | undefined) => [...(region ?? '').matchAll(/data-
 const runQuery = (repo: string, runId: string) => `run=${encodeURIComponent(`${repo}/${runId}`)}`;
 const GOLDEN = () => m.alpha.runDir;
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('boot renders the rail with alpha and beta from the first index, opens the newest run, and renders its nine cards, each region once a flush', () => {
+test('boot renders the rail with alpha and beta from the first index, opens the newest run, and renders its nine cards, each region once a flush', () => {
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
@@ -220,10 +217,7 @@ test
   expect(host.regions.attention).toContain('needs attention · 6');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, reads implement#1's result, and renders its permissions tab", async () => {
+test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, reads implement#1's result, and renders its permissions tab", async () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   const golden = host.open('run=')[0];
@@ -245,10 +239,7 @@ test
   expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("live: events pushed one by one show tests#1 running, then settled, and a running call's log is read again at most once a second", async () => {
+test("live: events pushed one by one show tests#1 running, then settled, and a running call's log is read again at most once a second", async () => {
   const { dir, rest } = runningCopy(m, 1);
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
@@ -281,10 +272,7 @@ test
   expect(host.regions.status).toContain('<span>● live</span>');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a run socket closed without end reconnects after 2 s into a fresh model, one closed after end stays closed, and the index socket reconnects', () => {
+test('a run socket closed without end reconnects after 2 s into a fresh model, one closed after end stays closed, and the index socket reconnects', () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   const first = host.open('run=')[0];
@@ -320,10 +308,7 @@ test
   expect(host.regions.queues).toContain('<span class="pill p-skip">unknown</span>');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a run stream's error is shown in the main region, and a message or a result that is no JSON changes nothing", async () => {
+test("a run stream's error is shown in the main region, and a message or a result that is no JSON changes nothing", async () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   const socket = host.open('run=')[0];
@@ -345,10 +330,7 @@ test
   expect(host.regions.main).toContain('data-key="open#1"');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a result that arrives after the selection changed is not rendered', async () => {
+test('a result that arrives after the selection changed is not rendered', async () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN());
@@ -373,10 +355,7 @@ test
   expect(host.regions.inspector).toContain('b4efb0c5de84d87c1455d4504b8b75b095a8e10b');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("with no queue the queues region is empty and no queue socket opens; with beta's, queue=beta/ticket-to-pr renders its recent events and watched", () => {
+test("with no queue the queues region is empty and no queue socket opens; with beta's, queue=beta/ticket-to-pr renders its recent events and watched", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
@@ -400,10 +379,7 @@ test
   expect([sockets[0]?.closed, host.open('queue=')]).toEqual([true, []]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('keys move the cursor, Enter selects, ] and [ step, Escape deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
+test('keys move the cursor, Enter selects, ] and [ step, Escape deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN());
@@ -433,10 +409,7 @@ test
   expect(cursor()).toBe('open#1');
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('the theme cycles and is saved, a section toggles, copy copies, follow toggles, and the stream buttons read that stream', async () => {
+test('the theme cycles and is saved, a section toggles, copy copies, follow toggles, and the stream buttons read that stream', async () => {
   host.storage.set(THEME_KEY, 'light');
   page = boot(host);
   expect(host.theme).toBe('light');
