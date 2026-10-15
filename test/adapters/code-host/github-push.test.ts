@@ -396,6 +396,27 @@ test('a global rewrite that only the rewritten URL matches sends the push to ssh
   });
 });
 
+test('a URL that a URL parser reads as the web host but git reads as scp-like ssh gets no token (review R3-2)', async () => {
+  await withServed(TOKEN, async ({ repo, http }) => {
+    detachedCommit(repo, 'a.txt');
+    const { ssh, seen } = loggingSsh(repo);
+    const loose = [http.url.replace('://', ':'), http.url.replace('://', ':/')];
+    const codes = [];
+    for (const [n, url] of loose.entries()) {
+      repo.git('remote', 'add', `loose${n}`, url);
+      const error = await rejection(
+        push(repo, 'sail/x', { remote: `loose${n}`, webUrl: http.base, env: { ...repo.env, GIT_SSH: ssh } }),
+      );
+      codes.push(failure(error).code);
+    }
+    expect({ codes, seen: seen(), served: http.requests.length }).toEqual({
+      codes: ['unavailable', 'unavailable'],
+      seen: ['||'],
+      served: 0,
+    });
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
   const pushing = ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', 'sail-1f2e'];
   expect([pushArgs('sail/x', 'https://github.com', 'sail-1f2e'), pushArgs('sail/x', undefined, 'sail-1f2e')]).toEqual([
