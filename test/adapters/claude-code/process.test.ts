@@ -100,3 +100,66 @@ test("the SDK's signal stops the group when it aborts", async () => {
   controller.abort();
   expect({ before, after: await settled(pid) }).toEqual({ before: true, after: 'ESRCH' });
 }, 30_000);
+
+// Review R1-2: the CLI starts each Bash command's shell detached, in a group of its own, which the leader's group never
+// holds. The spawner looks up the leader's descendants while it runs, and stops each group it saw them in.
+
+/** A leader that starts a detached shell, as the CLI's Bash tool does, says its pid, then lives `lifeMs`. */
+const LEADER = (lifeMs: number) =>
+  [
+    "const shell = require('node:child_process').spawn('/bin/sh', ['-c', 'sleep 30 & sleep 30'],",
+    "  { detached: true, stdio: 'ignore' });",
+    'console.log(shell.pid);',
+    `setTimeout(() => process.exit(0), ${lifeMs});`,
+  ].join('\n');
+
+/** Spawns `LEADER` through `spawner`, and resolves with the leader's pid and its shell's once the shell has started. */
+async function leaderWithShell(spawner: ReturnType<typeof createSpawner>, lifeMs: number, signal: AbortSignal) {
+  const spawned = spawner.spawn({
+    command: process.execPath,
+    args: ['-e', LEADER(lifeMs)],
+    cwd: process.cwd(),
+    env: ENV,
+    signal,
+  });
+  const pid = pidOf(spawned);
+  const said = await new Promise<string>((done) =>
+    (spawned.stdout as NodeJS.ReadableStream).once('data', (chunk) => done(String(chunk))),
+  );
+  const shell = Number(said.trim());
+  started.push(shell);
+  return { pid, shell };
+}
+
+test("reap stops a detached shell's group the leader started, and the job it left in the background", async () => {
+  const spawner = createSpawner({ trackMs: 50 });
+  const { pid, shell } = await leaderWithShell(spawner, 30_000, new AbortController().signal);
+  await Bun.sleep(300);
+  const before = group(shell);
+  await spawner.reap(500);
+  expect({ before, leader: await settled(pid), shell: await settled(shell) }).toEqual({
+    before: true,
+    leader: 'ESRCH',
+    shell: 'ESRCH',
+  });
+}, 30_000);
+
+test('a detached shell seen while the leader ran is stopped after the leader has exited by itself', async () => {
+  const spawner = createSpawner({ trackMs: 50 });
+  const { pid, shell } = await leaderWithShell(spawner, 400, new AbortController().signal);
+  await settled(pid);
+  const before = group(shell);
+  await spawner.reap(500);
+  expect({ before, shell: await settled(shell) }).toEqual({ before: true, shell: 'ESRCH' });
+}, 30_000);
+
+test("the SDK's abort stops the leader's detached shells with its group", async () => {
+  const spawner = createSpawner({ trackMs: 60_000 });
+  const controller = new AbortController();
+  const { shell } = await leaderWithShell(spawner, 30_000, controller.signal);
+  await Bun.sleep(200);
+  const before = group(shell);
+  controller.abort();
+  expect({ before, shell: await settled(shell) }).toEqual({ before: true, shell: 'ESRCH' });
+  await spawner.reap(500);
+}, 30_000);
