@@ -366,6 +366,36 @@ test("neither a global remote config nor the caller's -c variables reroute a pus
   });
 });
 
+/** An ssh program for GIT_SSH that logs the token's three names as it sees them, then fails as an unreachable host. */
+function loggingSsh(repo: TempRepo): { ssh: string; seen: () => string[] } {
+  const log = join(repo.home, 'ssh-names.log');
+  const ssh = join(repo.home, 'ssh-names.sh');
+  writeFileSync(ssh, `#!/bin/sh\necho "$SAIL_GIT_TOKEN|$GITHUB_TOKEN|$SAIL_GITHUB_TOKEN" >>${log}\nexit 255\n`);
+  chmodSync(ssh, 0o755);
+  return {
+    ssh,
+    seen: () => [...new Set((existsSync(log) ? readFileSync(log, 'utf8') : '').split('\n').filter(Boolean))],
+  };
+}
+
+test('a global rewrite that only the rewritten URL matches sends the push to ssh with no token: the token follows the URL git uses (review R3-1)', async () => {
+  await withServed(TOKEN, async ({ repo, http, config }) => {
+    detachedCommit(repo, 'a.txt');
+    const { ssh, seen } = loggingSsh(repo);
+    const rewrites = `[url "${http.base}/"]\n\tinsteadOf = gh:\n[url "ssh://git@example.invalid/"]\n\tpushInsteadOf = ${http.base}/\n`;
+    writeFileSync(join(repo.home, '.gitconfig'), `${config}${rewrites}`);
+    repo.git('remote', 'add', 'gh', 'gh:origin.git');
+    const error = await rejection(
+      push(repo, 'sail/x', { remote: 'gh', webUrl: http.base, env: { ...repo.env, GIT_SSH: ssh } }),
+    );
+    expect({ code: failure(error).code, seen: seen(), served: http.requests.length }).toEqual({
+      code: 'unavailable',
+      seen: ['||'],
+      served: 0,
+    });
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
   const pushing = ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', 'sail-1f2e'];
   expect([pushArgs('sail/x', 'https://github.com', 'sail-1f2e'), pushArgs('sail/x', undefined, 'sail-1f2e')]).toEqual([
