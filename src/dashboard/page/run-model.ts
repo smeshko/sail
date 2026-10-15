@@ -8,6 +8,7 @@
 // here throws.
 import type { RosterEntry } from '../../engine/roster';
 import type { SailEvent } from '../../events/types';
+import { text } from './html';
 
 export type CardKind = 'agent' | 'script' | 'stage' | 'builtin';
 
@@ -181,8 +182,8 @@ function commandOf(input: unknown): string | undefined {
   if (input === undefined) return undefined;
   const command = str(obj(input)?.command);
   if (command !== undefined) return command;
-  const text = JSON.stringify(input) ?? String(input);
-  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+  const shown = text(input);
+  return shown.length > 200 ? `${shown.slice(0, 200)}…` : shown;
 }
 
 function newCard(
@@ -241,8 +242,10 @@ function pendingOf(model: RunModel): PendingCard[] {
   return Object.entries(model.roster?.stages ?? {})
     .filter(([stage]) => !called.has(stage))
     .map(([stage, entry]) => {
-      const kind = entry.kind ?? 'stage';
-      return entry.model === undefined ? { stage, kind } : { stage, kind, model: entry.model };
+      const given = str(entry.kind);
+      const kind = given !== undefined && STAGE_KINDS.has(given) ? (given as PendingCard['kind']) : 'stage';
+      const stageModel = str(entry.model);
+      return stageModel === undefined ? { stage, kind } : { stage, kind, model: stageModel };
     });
 }
 
@@ -274,7 +277,10 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
     case 'run:start': {
       const workflow = obj(e.workflow);
       const roster = obj(e.roster);
-      if (roster === undefined || obj(roster.stages) === undefined) return false;
+      const stages = obj(roster?.stages);
+      // Every roster entry is read as an object, so a run:start whose entries aren't is unreadable (review R1-4).
+      if (roster === undefined || stages === undefined || obj(roster.intake) === undefined) return false;
+      if (!Object.values(stages).every((entry) => obj(entry) !== undefined)) return false;
       const runId = str(e.runId);
       const name = str(workflow?.name);
       const version = num(workflow?.version);
@@ -379,7 +385,7 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       const at = str(e.at);
       const took = str(e.took);
       if (at === undefined || took === undefined) return false;
-      model.routes.push({ at, value: String(e.value), took });
+      model.routes.push({ at, value: text(e.value), took });
       return true;
     }
     case 'harness:session_start': {

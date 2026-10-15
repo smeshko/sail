@@ -3,7 +3,7 @@
 // it refused; log, its session or its stdout and stderr. Everything comes from the run's own files: the card from its
 // events, the roster from `run:start`, and the call's `result.json` and logs over REST.
 import { clock, cost, duration } from './format';
-import { html, type SafeHtml } from './html';
+import { html, type SafeHtml, text } from './html';
 import type { Roster, StageCard } from './run-model';
 import { pillOf, TABS, type UiState } from './ui-state';
 
@@ -15,7 +15,7 @@ type Fields = Record<string, unknown>;
 const obj = (value: unknown): Fields | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Fields) : undefined;
 const list = (value: unknown): string[] =>
-  Array.isArray(value) ? value.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))) : [];
+  Array.isArray(value) ? value.map((item) => (typeof item === 'string' ? item : text(item))) : [];
 
 /** The log streams a call of `kind` writes. */
 export function streamsOf(kind: string): string[] {
@@ -28,13 +28,13 @@ export function streamsOf(kind: string): string[] {
 const pre = (value: unknown) => html`<pre class="code">${JSON.stringify(value, null, 2)}</pre>`;
 
 function kv(rows: readonly [string, unknown][]): SafeHtml {
-  return html`<dl class="kv">${rows.map(([label, value]) => html`<dt>${label}</dt><dd>${String(value)}</dd>`)}</dl>`;
+  return html`<dl class="kv">${rows.map(([label, value]) => html`<dt>${label}</dt><dd>${text(value)}</dd>`)}</dl>`;
 }
 
 function overview(card: StageCard, result: Fields | undefined): SafeHtml {
   const other = Object.entries(card.other);
   const consumed = Object.entries(obj(result?.consumed) ?? {});
-  const errors = card.errors ?? (Array.isArray(result?.errors) ? (result.errors as Fields[]) : []);
+  const errors = card.errors ?? (Array.isArray(result?.errors) ? result.errors.map((error) => obj(error) ?? {}) : []);
   return html`<div class="grp"><div class="stats">
 <div class="stat"><b>${card.state === 'running' ? 'running' : (card.outcome ?? '—')}</b><span>outcome</span></div>
 <div class="stat"><b>${card.tries}</b><span>tries</span></div>
@@ -52,8 +52,7 @@ ${
   errors.length === 0
     ? ''
     : html`<div class="grp"><div class="grp-t">errors</div>${errors.map(
-        (error) =>
-          html`<div class="code bad"><b>${String(error.reason ?? '')}</b> ${String(error.message ?? '')}</div>`,
+        (error) => html`<div class="code bad"><b>${text(error.reason ?? '')}</b> ${text(error.message ?? '')}</div>`,
       )}</div>`
 }
 ${result === undefined || result.output === undefined ? '' : html`<div class="grp"><div class="grp-t">output</div>${pre(result.output)}</div>`}
@@ -75,10 +74,10 @@ function files(card: StageCard, result: Fields | undefined): SafeHtml {
   const shown = fromResult.length > 0 ? fromResult : card.files;
   if (shown.length === 0) return html`<div class="code">this call produced no files</div>`;
   return html`<div class="grp"><div class="grp-t">files · ${shown.length}</div>${shown.map((file: Fields) => {
-    const name = String(file.name);
+    const name = text(file.name);
     const validated = card.files.find((entry) => entry.name === name);
     const sha = typeof file.sha256 === 'string' ? file.sha256 : undefined;
-    return html`<div class="art"><span class="ic">▤</span><span><b>${name}</b><span class="d">${String(file.path ?? '')}${
+    return html`<div class="art"><span class="ic">▤</span><span><b>${name}</b><span class="d">${text(file.path ?? '')}${
       typeof file.bytes === 'number' ? ` · ${file.bytes} bytes` : ''
     }${sha === undefined ? '' : html` · <span class="sha" title="${sha}">${sha.slice(0, 12)}</span>`}</span></span>${
       validated?.ok === undefined

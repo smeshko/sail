@@ -29,11 +29,24 @@ export function raw(text: string): SafeHtml {
   return new SafeHtml(text);
 }
 
+/**
+ * Any value as text, never throwing: a primitive as `String()` gives it, anything else as its JSON. Run files are parsed
+ * JSON nothing re-validates, and `String()` throws on an object whose `toString` isn't a function (review R1-4).
+ */
+export function text(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return String(value);
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 function render(value: Interpolation): string {
   if (value instanceof SafeHtml) return value.value;
   if (Array.isArray(value)) return value.map(render).join('');
   if (value === null || value === undefined || value === false) return '';
-  return escapeHtml(String(value));
+  return escapeHtml(text(value));
 }
 
 /** The tagged template: each interpolation escaped, a `SafeHtml` as it is, an array flattened. */

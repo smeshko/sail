@@ -37,7 +37,7 @@ const two = (n: number) => String(n).padStart(2, '0');
 
 /** `HH:MM:SS` of `iso` at `offsetMinutes` east of UTC, and `—` for a missing or invalid time. */
 export function clock(iso: string | undefined, offsetMinutes: number): string {
-  const at = iso === undefined ? Number.NaN : Date.parse(iso);
+  const at = typeof iso === 'string' ? Date.parse(iso) : Number.NaN;
   if (Number.isNaN(at)) return DASH;
   const local = new Date(at + offsetMinutes * 60_000);
   return `${two(local.getUTCHours())}:${two(local.getUTCMinutes())}:${two(local.getUTCSeconds())}`;
@@ -45,7 +45,7 @@ export function clock(iso: string | undefined, offsetMinutes: number): string {
 
 /** How long before `now` (ms since the epoch) `iso` was: `12s ago`, `4m ago`, `3h ago`, `2d ago`, or `in 5m`. */
 export function ago(iso: string | undefined, now: number): string {
-  const at = iso === undefined ? Number.NaN : Date.parse(iso);
+  const at = typeof iso === 'string' ? Date.parse(iso) : Number.NaN;
   if (Number.isNaN(at)) return DASH;
   const ms = now - at;
   const span = Math.abs(ms);
