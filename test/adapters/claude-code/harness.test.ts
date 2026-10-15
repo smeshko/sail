@@ -260,6 +260,9 @@ test("the session's environment is the allowlisted names of sail's, the client a
   const {
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: _scrub,
     CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: _cwd,
+    CLAUDE_CODE_SHELL: _shell,
+    SHELL: _bash,
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: _background,
     ...picked
   } = sessionOptions(req, env).env ?? {};
   expect(picked).toEqual({
@@ -572,6 +575,27 @@ test("the session's environment turns on the credential scrub and the fixed Bash
     CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '0',
   }).env;
   expect([env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR]).toEqual(['1', '1']);
+});
+
+// Review R1-1, R1-6, R1-7: the CLI runs the Bash tool under zsh when it finds one, but decide() reads bash, and zsh's
+// `>!` writes where bash's doesn't. Background tasks are off, and no preamble value turns a switch back.
+test("the session's Bash is bash, it has no background tasks, and neither sail's environment nor the preamble undoes a switch", () => {
+  const plain = request();
+  const switches = {
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '0',
+    CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '0',
+    CLAUDE_CODE_SHELL: '/bin/zsh',
+    SHELL: '/bin/zsh',
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '0',
+  };
+  const env = sessionOptions({ ...plain, env: { ...plain.env, ...switches } }, switches).env;
+  expect({
+    scrub: env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB,
+    cwd: env?.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR,
+    shell: env?.CLAUDE_CODE_SHELL,
+    SHELL: env?.SHELL,
+    background: env?.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
+  }).toEqual({ scrub: '1', cwd: '1', shell: '/bin/bash', SHELL: '/bin/bash', background: '1' });
 });
 
 test('a step with commands is told its variables are in its environment too, where one without is told it has no shell', () => {
