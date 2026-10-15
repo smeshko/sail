@@ -48,6 +48,43 @@ test.each<[string, string, unknown, unknown, string?]>([
     { command: 'git status && git log 2>&1 &>/dev/null |& cat' },
     call({ tool: 'Bash', kind: 'execute', command: 'git status && git log 2>&1 &>/dev/null |& cat' }),
   ],
+  // Review R2-1, R2-2, R2-3: read as the parser reads it, at any depth.
+  [
+    'Bash with a substitution runs it as written',
+    'Bash',
+    { command: 'git log $(git rev-parse HEAD) "$(git rev-parse HEAD)"' },
+    call({ tool: 'Bash', kind: 'execute', command: 'git log $(git rev-parse HEAD) "$(git rev-parse HEAD)"' }),
+  ],
+  [
+    'Bash with a background job in a heredoc substitution',
+    'Bash',
+    { command: 'cat <<EOF\n$(sleep 30 &)\nEOF' },
+    unchecked('execute', 'a command run in the background with & can outlive the session'),
+  ],
+  [
+    'Bash with a background job in an assignment',
+    'Bash',
+    { command: 'X=$(sleep 30 &) git log' },
+    unchecked('execute', 'a command run in the background with & can outlive the session'),
+  ],
+  [
+    'Bash with a background job escaped in a -c text',
+    'Bash',
+    { command: 'bash -c sleep\\ 30\\ \\&' },
+    unchecked('execute', 'a command run in the background with & can outlive the session'),
+  ],
+  [
+    'Bash running zsh',
+    'Bash',
+    { command: 'env zsh -c true' },
+    unchecked('execute', 'zsh reads some commands otherwise than bash, which they are checked as: run them under bash'),
+  ],
+  [
+    'Bash with git diff --no-index',
+    'Bash',
+    { command: 'git diff --no-index a /etc/hosts' },
+    unchecked('execute', "git diff's --no-index reads files no read rule checks"),
+  ],
   [
     'Bash with a command that is no string',
     'Bash',

@@ -334,3 +334,32 @@ test.each<[string, Record<string, unknown>, string]>([
     rules: g.denials.map(([, denial]) => denial.rule as string),
   }).toEqual({ decision: 'deny', rules: [rule] });
 });
+
+// Review R2-1, R2-2, R2-3: decide() reads every command as bash, and allowed git diff's --no-index reads any file. A
+// shell other than bash, a background job however it is spelled, and --no-index are refused, at any depth.
+describe("with the fixture spec stage's commands, what decide() can't see is denied by commands", () => {
+  const FIXTURE: Permissions = {
+    read: ['**'],
+    write: ['$STAGE_OUT/**'],
+    commands: ['git log *', 'git diff *', 'sleep *'],
+  };
+  test.each<[string, string, 'allow' | 'deny']>([
+    ['zsh, whose >! writes its next word', "zsh -c 'cd $STAGE_OUT && git log -1 >! /tmp/outside-target'", 'deny'],
+    ['zsh, its name escaped', "z\\sh -c 'git log -1'", 'deny'],
+    ['zsh, by its path inside bash -c', 'bash -c \'/bin/zsh -c "git log -1"\'', 'deny'],
+    ['sh, which is dash on Linux, where &> sends a job to the background', "sh -c 'sleep 30 &>/dev/null'", 'deny'],
+    ['a background & after an escaped >', "bash -c 'sleep 30' \\>&", 'deny'],
+    ['a background & after an escaped &', 'sleep 30 \\&& git log -1', 'deny'],
+    ['a background & in a substitution', 'git log $(sleep 30 &)', 'deny'],
+    ['git diff --no-index', 'git diff --no-index /dev/null /etc/hosts', 'deny'],
+    ['git diff --no-index inside bash -c', "bash -c 'git diff --no-index /dev/null /etc/hosts'", 'deny'],
+    ['allowed commands chained, with a redirection of stderr', 'git log -1 2>&1 && git diff HEAD', 'allow'],
+  ])('%s', async (_, command, expected) => {
+    const g = gate(FIXTURE);
+    const answer = await ask(g, pre('Bash', { command }));
+    expect({
+      decision: answer.hookSpecificOutput?.permissionDecision,
+      rules: g.denials.map(([, denial]) => denial.rule as string),
+    }).toEqual({ decision: expected, rules: expected === 'deny' ? ['commands'] : [] });
+  });
+});
