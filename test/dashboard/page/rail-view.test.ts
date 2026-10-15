@@ -21,10 +21,7 @@ const shown = (markup: string) =>
     ...markup.matchAll(/<button class="run( sel)?" data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)">/g),
   ].map(([, sel, repo, run]) => `${repo} ${run}${sel ? ' *' : ''}`);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the rail shows alpha's FAKE-2, its completed section open on the selected golden run, and beta's FAKE-3 suspended on budget_exceeded with its title escaped", () => {
+test("the rail shows alpha's FAKE-2, its completed section open on the selected golden run, and beta's FAKE-3 suspended on budget_exceeded with its title escaped", () => {
   const markup = rail({ repo: 'alpha', runId: GOLDEN_RUN_ID });
   expect(shown(markup)).toEqual([`alpha ${FAKE_2_ID}`, `alpha ${GOLDEN_RUN_ID} *`, `beta ${FAKE_3_ID}`]);
   expect(markup).toContain('<span class="nm">alpha</span>');
@@ -39,10 +36,7 @@ test
   expect(markup).toContain('<div class="rail-h"><span>repositories</span><span class="c">3 runs</span></div>');
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the completed section stays closed unless it is opened or holds the selection', () => {
+test('the completed section stays closed unless it is opened or holds the selection', () => {
   expect(shown(rail())).toEqual([`alpha ${FAKE_2_ID}`, `beta ${FAKE_3_ID}`]);
   expect(rail()).toContain('<button class="subgrp-h" data-action="toggle-section" data-section="alpha:completed">');
   const states = [

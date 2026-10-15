@@ -23,10 +23,7 @@ const queueEvents = (): QueueEvent[] =>
     .split('\n')
     .map((line) => JSON.parse(line));
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("beta's panel shows its four items with their states, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
+test("beta's panel shows its four items with their states, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
   const events = queueEvents();
   const streams = { [queueId('beta', QUEUE_WORKFLOW)]: { recent: events, watch: watchState(events) } };
   const markup = renderQueues(queuePanels(index(m.registryDir)), streams, initialUi(0), NOW).value;
@@ -54,10 +51,7 @@ test
   expect(renderQueues([], {}, initialUi(0), NOW).value).toBe('');
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('each queue event is one line, and a type with no line of its own shows its type alone', () => {
+test('each queue event is one line, and a type with no line of its own shows its type alone', () => {
   const [added, polled, item, , , , error, , parked] = queueEvents();
   const lines = [added, polled, item, error, parked].map((event) => queueEventLine(event as QueueEvent));
   expect(lines).toEqual([

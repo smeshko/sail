@@ -12,10 +12,7 @@ beforeEach(() => {
 });
 afterEach(() => m.remove());
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("FAKE-2's failure and denial and FAKE-3's suspension are buttons in one list whose data opens the run, the key and the tab", () => {
+test("FAKE-2's failure and denial and FAKE-3's suspension are buttons in one list whose data opens the run, the key and the tab", () => {
   const markup = renderAttention(attention(index(m.registryDir))).value;
   expect(markup).toStartWith('<div class="grp-t">needs attention · 6</div>');
   expect(markup).toContain(
@@ -33,10 +30,7 @@ test
   expect(markup.match(/data-action="open"/g)?.length).toBe(5);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('an empty list says nothing needs attention', () => {
+test('an empty list says nothing needs attention', () => {
   expect(renderAttention([]).value).toBe(
     '<div class="grp-t">needs attention · 0</div>\n<div class="att-empty">nothing needs attention</div>',
   );

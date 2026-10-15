@@ -32,6 +32,24 @@ export function initialUi(tz: number): UiState {
 }
 
 /** The pill class a status or an outcome is drawn with. */
-export function pillOf(_state: string | undefined): string {
-  return '';
+export function pillOf(state: string | undefined): string {
+  switch (state) {
+    case 'completed':
+    case 'passed':
+    case 'done':
+      return 'p-pass';
+    case 'failed':
+    case 'error':
+      return 'p-fail';
+    case 'running':
+      return 'p-run';
+    case 'suspended':
+    case 'blocked':
+      return 'p-warn';
+    case 'pending':
+    case undefined:
+      return 'p-pend';
+    default:
+      return 'p-skip';
+  }
 }

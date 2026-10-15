@@ -108,10 +108,7 @@ afterAll(() => m.remove());
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const ui = initialUi(0);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the rail, needs attention and the queue panel keep their structure under a hostile payload in every untrusted field', async () => {
+test('the rail, needs attention and the queue panel keep their structure under a hostile payload in every untrusted field', async () => {
   const repos = index(m.registryDir).map((repo) => (repo.name === 'beta' ? { ...repo, problem: 'a problem' } : repo));
   const events = readEvents(queueDirOf(m)) as unknown as QueueEvent[];
   const views = (input: typeof repos, queue: QueueEvent[]) => {
