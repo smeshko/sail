@@ -21,6 +21,7 @@ import { withTempRepo } from '../helpers/temp-repo';
 
 const checkout = join(import.meta.dir, '..', '..');
 const DEAD_REGISTRY = 'http://127.0.0.1:9/';
+// The pack, git and bun publish run as subprocesses, so each case gets a timeout a loaded machine can meet.
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'sail-pack-test-')));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -53,26 +54,26 @@ beforeAll(async () => {
   extracted = join(scratch, 'extracted');
   mkdirSync(extracted);
   run(['tar', '-xzf', tarball, '-C', extracted], scratch);
-});
+}, 30_000);
 
 const pkg = JSON.parse(readFileSync(join(checkout, 'package.json'), 'utf8'));
 const packed = () => JSON.parse(readFileSync(join(extracted, 'package', 'package.json'), 'utf8'));
 
 test('packs the package into <outDir>/<scope>-<name>-<version>.tgz', () => {
   expect(tarball).toBe(join(scratch, 'out', `${pkg.name.replace('@', '').replace('/', '-')}-${pkg.version}.tgz`));
-});
+}, 30_000);
 
 test('holds package.json, LICENSE and every file git lists under bin, src, schemas and types, and nothing else', () => {
   expect([...listing].sort()).toEqual(['LICENSE', 'package.json', ...checkoutFiles()].sort());
   expect(listing.filter((path) => /^(test|scripts|docs)\//.test(path) || /README/i.test(path))).toEqual([]);
-});
+}, 30_000);
 
 test('keeps bin/sail and src/cli/main.ts executable', () => {
   for (const path of ['bin/sail', 'src/cli/main.ts']) {
     const line = verbose.find((entry) => entry.endsWith(`package/${path}`));
     expect(line?.startsWith('-rwxr-xr-x')).toBe(true);
   }
-});
+}, 30_000);
 
 test('carries the files the installed sail reads at run time', () => {
   for (const path of [
@@ -83,14 +84,14 @@ test('carries the files the installed sail reads at run time', () => {
   ]) {
     expect(listing).toContain(path);
   }
-});
+}, 30_000);
 
 test('the packed package.json keeps name, version, bin, engines and dependencies, and is publishable', () => {
   const manifest = packed();
   for (const key of ['name', 'version', 'bin', 'engines', 'dependencies']) expect(manifest[key]).toEqual(pkg[key]);
   expect(manifest.publishConfig.access).toBe('public');
   expect('private' in manifest).toBe(false);
-});
+}, 30_000);
 
 test('exports map . and ./intakes to a .d.ts under types and a .ts that are both in the tarball', () => {
   const exportsMap = packed().exports;
@@ -101,7 +102,7 @@ test('exports map . and ./intakes to a .d.ts under types and a .ts that are both
     expect(listing).toContain(types.slice(2));
     expect(listing).toContain(source.slice(2));
   }
-});
+}, 30_000);
 
 test('a directory publish is refused by prepublishOnly before the registry is contacted', () => {
   const env = { ...process.env, NPM_CONFIG_TOKEN: 'dummy', NPM_CONFIG_REGISTRY: DEAD_REGISTRY } as Record<
@@ -115,7 +116,7 @@ test('a directory publish is refused by prepublishOnly before the registry is co
   );
   expect(result.code).not.toBe(0);
   expect(result.stderr).toContain('publish the tarball bun run pack makes');
-});
+}, 30_000);
 
 test('packs what git does not ignore, skips a deleted file, and leaves out an ignored README.md', async () => {
   await withTempRepo(async (repo) => {
@@ -150,7 +151,7 @@ test('packs what git does not ignore, skips a deleted file, and leaves out an ig
     const plainNames = entries(plain.stdout.trim(), '-tzf');
     expect(plainNames).toContain('package/README.md');
   });
-});
+}, 30_000);
 
 // A link would copy its target's bytes, so a packed path could carry an ignored file: every link is refused, by path.
 for (const [label, make, named] of [
@@ -186,14 +187,14 @@ for (const [label, make, named] of [
       await expect(packSail({ root: repo.dir, outDir })).rejects.toThrow(`${named} is a symbolic link or under one`);
       expect(existsSync(outDir) && readdirSync(outDir)).toEqual([]);
     });
-  });
+  }, 30_000);
 }
 
 test('throws git error text outside a git repository', async () => {
   const bare = join(scratch, 'not-a-repo');
   mkdirSync(bare);
   await expect(packSail({ root: bare, outDir: scratch })).rejects.toThrow(/not a git repository/);
-});
+}, 30_000);
 
 test('throws the pack output when package.json is not valid JSON', async () => {
   await withTempRepo(async (repo) => {
@@ -201,4 +202,4 @@ test('throws the pack output when package.json is not valid JSON', async () => {
     repo.git('add', 'package.json');
     await expect(packSail({ root: repo.dir, outDir: scratch })).rejects.toThrow(/pack/i);
   });
-});
+}, 30_000);

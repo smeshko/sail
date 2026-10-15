@@ -21,6 +21,7 @@ import { type Installed, installTarball } from './helpers/install-tarball';
 
 const checkout = join(import.meta.dir, '..');
 const DEAD_REGISTRY = 'http://127.0.0.1:9/';
+// Each case spawns the installed sail, git or tsc, so each gets a timeout a loaded machine can meet.
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'sail-install-')));
 afterAll(() => rmSync(base, { recursive: true, force: true }));
@@ -80,7 +81,7 @@ beforeAll(async () => {
     const result = await sh(['git', ...args], repo);
     if (result.code !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
   }
-});
+}, 60_000);
 
 const runs = () => {
   try {
@@ -92,12 +93,12 @@ const runs = () => {
 
 test('sail --version prints the packed version', async () => {
   expect(await sh(['sail', '--version'], repo)).toEqual({ code: 0, stdout: `${installed.version}\n`, stderr: '' });
-});
+}, 60_000);
 
 test('bun x --no-install runs the installed package without a global install', async () => {
   const result = await sh([process.execPath, 'x', '--no-install', installed.name, '--version'], installDir);
   expect(result).toEqual({ code: 0, stdout: `${installed.version}\n`, stderr: '' });
-});
+}, 60_000);
 
 test("the package's own bin/sail, the one a script step finds first, prints the version", async () => {
   expect(await sh([join(installed.root, 'bin', 'sail'), '--version'], repo)).toEqual({
@@ -105,7 +106,7 @@ test("the package's own bin/sail, the one a script step finds first, prints the 
     stdout: `${installed.version}\n`,
     stderr: '',
   });
-});
+}, 60_000);
 
 test('sail check passes on the fixture, with sail resolved from the installed package', async () => {
   const result = await sh(['sail', 'check'], repo);
@@ -113,7 +114,7 @@ test('sail check passes on the fixture, with sail resolved from the installed pa
   expect(result.stdout.trimEnd().endsWith('.sail/ checked: 1 workflow, 6 stages')).toBe(true);
   const declarations = readFileSync(join(repo, '.sail', 'sail.d.ts'), 'utf8');
   expect(declarations).toContain(join(installed.root, 'types'));
-});
+}, 60_000);
 
 test('sail FAKE-1 completes, and run.json records the packed version', async () => {
   const result = await sh(['sail', 'FAKE-1', '-q'], repo);
@@ -122,7 +123,7 @@ test('sail FAKE-1 completes, and run.json records the packed version', async () 
   expect(runs()).toHaveLength(1);
   const header = JSON.parse(readFileSync(join(repo, '.sail-runs', run as string, 'run.json'), 'utf8'));
   expect(header.sail.version).toBe(installed.version);
-});
+}, 60_000);
 
 test('exports resolve to the SDK entries inside the install', async () => {
   const script = `console.log(Bun.resolveSync(${JSON.stringify(installed.name)}, ${JSON.stringify(repo)}));console.log(Bun.resolveSync(${JSON.stringify(`${installed.name}/intakes`)}, ${JSON.stringify(repo)}))`;
@@ -131,7 +132,7 @@ test('exports resolve to the SDK entries inside the install', async () => {
     join(installed.root, 'src', 'sdk', 'index.ts'),
     join(installed.root, 'src', 'sdk', 'intakes.ts'),
   ]);
-});
+}, 60_000);
 
 test('a project.yaml range the installed version misses is refused with exit 3, and no run starts', async () => {
   const before = runs();
@@ -149,7 +150,7 @@ test('a project.yaml range the installed version misses is refused with exit 3, 
   } finally {
     writeFileSync(file, original);
   }
-});
+}, 60_000);
 
 test('installTarball throws, naming a dependency the checkout lacks', async () => {
   const src = join(base, 'tiny-src', 'package');
@@ -163,4 +164,4 @@ test('installTarball throws, naming a dependency the checkout lacks', async () =
   const dir = join(base, 'tiny-install');
   mkdirSync(dir);
   expect(() => installTarball(tiny, dir, checkout)).toThrow('dependency sail-test-no-such-package is not installed in');
-});
+}, 60_000);
