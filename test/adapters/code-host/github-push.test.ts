@@ -10,7 +10,7 @@ import { redactor } from '../../../src/engine/redact';
 import { PortError } from '../../../src/ports/errors';
 import { type GitHttp, serveGitHttp } from '../../helpers/git-http';
 import { withOrigin } from '../../helpers/origin';
-import { rejection } from '../../helpers/ports';
+import { rejection, settle } from '../../helpers/ports';
 import { type TempRepo, withTempRepo } from '../../helpers/temp-repo';
 
 const TOKEN = 'ghp_MARKER_push_31c9f04d';
@@ -219,19 +219,107 @@ test("a global trace2 config that names the helper's variable records nothing of
   });
 });
 
+test("the repository's own config can't steer a push: no proxy it names is asked, no program it names runs, and both pushes land (review R1-2)", async () => {
+  await withServed(TOKEN, async ({ repo, http }) => {
+    const origin = Bun.spawnSync(['git', 'remote', 'get-url', 'origin'], { cwd: repo.dir, env: repo.env });
+    const bare = origin.stdout.toString().trim();
+    const sha = detachedCommit(repo, 'a.txt');
+    const ran = join(repo.home, 'ran.log');
+    const proxied: string[] = [];
+    const proxy = Bun.serve({
+      port: 0,
+      hostname: '127.0.0.1',
+      fetch: (request) => {
+        proxied.push(`${request.method} ${request.url} ${request.headers.get('authorization') ?? ''}`);
+        return new Response('no', { status: 502 });
+      },
+    });
+    try {
+      repo.git('config', 'http.proxy', `http://127.0.0.1:${proxy.port}`);
+      repo.git('config', 'http.sslVerify', 'false');
+      repo.git('config', 'core.sshCommand', `sh -c 'echo sshCommand $SAIL_GIT_TOKEN >>${ran}; exit 1'`);
+      repo.git('config', 'remote.origin.receivepack', `sh -c 'echo receivepack $SAIL_GIT_TOKEN >>${ran}; exit 1' --`);
+      const web = await settle(push(repo, 'sail/x', { remote: 'web', webUrl: http.base }));
+      const local = await settle(push(repo, 'sail/x', { remote: 'origin', webUrl: http.base }));
+      expect({
+        web: 'rejected' in web ? web.rejected : web.headSha,
+        local: 'rejected' in local ? local.rejected : local.headSha,
+        landed: refIn(repo, bare, 'refs/heads/sail/x'),
+        sent: http.requests.some((request) => request.method === 'POST' && request.authorization === 'matched'),
+        proxied,
+        ran: existsSync(ran) ? readFileSync(ran, 'utf8') : '',
+      }).toEqual({ web: sha, local: sha, landed: sha, sent: true, proxied: [], ran: '' });
+    } finally {
+      proxy.stop(true);
+    }
+  });
+});
+
+test("an ssh remote is offered no token: the push's environment holds none, and no user helper is asked (review R1-2)", async () => {
+  await withServed(TOKEN, async ({ repo, log }) => {
+    detachedCommit(repo, 'a.txt');
+    const seen = join(repo.home, 'ssh.log');
+    // The user's own ssh program, from the environment: it records what it inherits and fails, as an unreachable host.
+    const ssh = join(repo.home, 'ssh.sh');
+    writeFileSync(ssh, `#!/bin/sh\necho "ssh SAIL_GIT_TOKEN=$SAIL_GIT_TOKEN" >>${seen}\nexit 255\n`);
+    chmodSync(ssh, 0o755);
+    repo.git('remote', 'add', 'ssh', 'ssh://git@example.invalid/o/r.git');
+    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env: { ...repo.env, GIT_SSH: ssh } }));
+    expect({
+      code: failure(error).code,
+      // git may start the ssh program more than once, to learn which ssh it is: every start counts.
+      seen: [...new Set((existsSync(seen) ? readFileSync(seen, 'utf8') : '').split('\n').filter(Boolean))],
+      helperLog: existsSync(log) ? readFileSync(log, 'utf8') : '',
+    }).toEqual({ code: 'unavailable', seen: ['ssh SAIL_GIT_TOKEN='], helperLog: '' });
+  });
+});
+
+test("the user's push.followTags pushes no tag: the branch alone reaches the remote (review R1-6)", async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    writeFileSync(join(repo.home, '.gitconfig'), '[push]\n\tfollowTags = true\n');
+    detachedCommit(repo, 'a.txt');
+    repo.git('tag', '-a', 'v9.9.9', '-m', 'a release');
+    const pushed = await push(repo, 'sail/x');
+    expect({
+      porcelain: (pushed.raw as { porcelain: string }).porcelain,
+      tag: refIn(repo, origin.url, 'refs/tags/v9.9.9'),
+    }).toEqual({ porcelain: `To ${origin.url}\n*\tHEAD:refs/heads/sail/x\t[new branch]\nDone`, tag: '' });
+  });
+});
+
+test('a remote that pushes to two URLs is refused as invalid, and neither gets the branch (review R1-2)', async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    const other = withOrigin(repo, 'other');
+    repo.git('remote', 'set-url', '--add', '--push', 'origin', origin.url);
+    repo.git('remote', 'set-url', '--add', '--push', 'origin', other.url);
+    detachedCommit(repo, 'a.txt');
+    const error = await rejection(push(repo, 'sail/x'));
+    expect({
+      failure: failure(error),
+      refs: [refIn(repo, origin.url, 'refs/heads/sail/x'), refIn(repo, other.url, 'refs/heads/sail/x')],
+    }).toEqual({
+      failure: { code: 'invalid', message: 'codeHost.push: origin pushes to 2 URLs: sail pushes to one' },
+      refs: ['', ''],
+    });
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
-  expect(pushArgs('origin', 'sail/x', 'https://github.com')).toEqual([
-    '-c',
-    'credential.helper=',
-    '-c',
-    `credential.https://github.com.helper=${CREDENTIAL_HELPER}`,
-    '-c',
-    'core.hooksPath=/dev/null',
-    'push',
-    '--porcelain',
-    '--no-verify',
-    'origin',
-    'HEAD:refs/heads/sail/x',
+  const pushing = ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', 'sail'];
+  expect([pushArgs('sail/x', 'https://github.com'), pushArgs('sail/x', undefined)]).toEqual([
+    [
+      '-c',
+      'credential.helper=',
+      '-c',
+      `credential.https://github.com.helper=${CREDENTIAL_HELPER}`,
+      '-c',
+      'core.hooksPath=/dev/null',
+      ...pushing,
+      'HEAD:refs/heads/sail/x',
+    ],
+    ['-c', 'credential.helper=', '-c', 'core.hooksPath=/dev/null', ...pushing, 'HEAD:refs/heads/sail/x'],
   ]);
   expect(CREDENTIAL_HELPER).toBe(
     '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$SAIL_GIT_TOKEN"; }; f',
