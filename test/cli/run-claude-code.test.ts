@@ -131,11 +131,13 @@ test("a call the spec stage's commands deny is recorded in the run, and the sess
     code: run.code,
     stderr: run.stderr,
     outcome: run.result.outcome,
+    errors: run.result.errors,
     denials: run.result.harness.denials,
   }).toEqual({
     code: EXIT_SUSPENDED,
     stderr: '',
     outcome: 'done',
+    errors: undefined,
     denials: 1,
   });
   const around = run.events.filter(
@@ -268,14 +270,14 @@ test('Ctrl-C during the spec session suspends the run interrupted with spec#1 un
         status: readStatus(dir) as unknown,
         journal,
         sessions,
-        secondTry: [tried.try, tried.outcome],
+        secondTry: [tried.try, tried.outcome, tried.errors],
       }).toEqual({
         stderr: '',
         code: EXIT_FAILED,
         status: { status: 'failed', stopReason: 'workflow_failed' },
         journal: ['intake#1 passed', 'spec#1 done', 'implement#1 blocked'],
         sessions: ['spec#1', 'spec#1', 'implement#1'],
-        secondTry: [2, 'done'],
+        secondTry: [2, 'done', undefined],
       });
       expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
     });
