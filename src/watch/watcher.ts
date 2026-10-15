@@ -18,8 +18,8 @@
 //
 // Stopping, on an empty set or on Ctrl-C, stops every poller and the tick, emits `watch:removed` for what is left,
 // clears the registry field and resolves `done`. Runs in flight carry on: they are detached.
-import { dirname } from 'node:path';
-import { isAlive as processIsAlive } from '../adapters/leases';
+import { dirname, join } from 'node:path';
+import { isAlive as processIsAlive, releaseLease, takeLease } from '../adapters/leases';
 import { DEFAULT_BRANCH_PREFIX } from '../engine/branch';
 import type { ProjectConfig } from '../engine/config';
 import { runsDir as runsDirOf } from '../engine/run-dir';
@@ -41,6 +41,16 @@ import {
   type WatcherFields,
 } from './registry';
 import { type SpawnedRun, type SpawnRunOptions, spawnRun } from './spawn';
+
+/**
+ * Where a watcher leases its repository's queues, under `.sail-runs/`: the branch leases' file protocol, keyed by
+ * `QUEUE_LEASE`, held while the watcher runs and stale once its pid is dead. It is what keeps two watchers of one
+ * `.sail/` apart when they start at the same instant, which the registry's read-back can't (both write one entry).
+ */
+export const QUEUE_LEASE_DIR = '.watcher';
+const QUEUE_LEASE = { remote: 'watcher', branch: 'queue' } as const;
+
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** How often the watcher ticks unless told otherwise. */
 export const TICK_MS = 1000;
@@ -167,6 +177,8 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   };
 
   let stopped = false;
+  /** Gives back the queues' lease: set once it is taken. */
+  let release: (() => void) | undefined;
   let timer: unknown;
   let ticking: Promise<void> | undefined;
   let again = false;
@@ -238,6 +250,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     if (timer !== undefined) timers.clear(timer);
     for (const workflow of watching()) remove(workflow);
     clearWatcher(options.registryDir, options.entry.name, pid);
+    release?.();
     resolveDone();
   };
 
@@ -310,12 +323,32 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     schedule(soon ? 0 : tickMs);
   };
 
+  // The queues are leased before any of them is opened, so a second watcher here never reads or writes one.
+  const leaseDir = join(runs, QUEUE_LEASE_DIR);
+  const holder = { runId: `watcher-${pid}`, runDir: leaseDir, pid };
+  let leased: ReturnType<typeof takeLease>;
+  try {
+    leased = takeLease(leaseDir, QUEUE_LEASE.remote, QUEUE_LEASE.branch, holder, now());
+  } catch (error) {
+    return { refused: `the watcher's lease in ${leaseDir} can't be taken: ${messageOf(error)}` };
+  }
+  if (!leased.leased) {
+    const { pid: held, takenAt } = leased.holder;
+    return { refused: `a watcher for '${options.entry.name}' already runs here (pid ${held}, since ${takenAt})` };
+  }
+  release = () => {
+    releaseLease(leaseDir, QUEUE_LEASE.remote, QUEUE_LEASE.branch, holder.runId);
+  };
+  const refuse = (refusal: { refused: string }) => {
+    release?.();
+    return refusal;
+  };
   const targets = await open(options.workflows);
-  if ('refused' in targets) return targets;
-  if (targets.length === 0) return { refused: 'name at least one workflow to watch' };
+  if ('refused' in targets) return refuse(targets);
+  if (targets.length === 0) return refuse({ refused: 'name at least one workflow to watch' });
   clearCommands(runs);
   const refused = claim(labelsOf(targets));
-  if (refused !== undefined) return { refused };
+  if (refused !== undefined) return refuse({ refused });
   for (const target of targets) await add(target);
   print(setLine(watching(), now()));
   schedule(tickMs);
