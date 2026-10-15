@@ -373,3 +373,61 @@ test('a watcher whose registry field another live watcher wrote over stops at it
     expect(w.events('a').at(-1)).toMatchObject({ type: 'watch:removed', pid: process.pid });
   });
 });
+
+test('a poll that never answers holds up neither an unwatch of its workflow, the other workflows, nor the stop, and its late answer writes nothing (review R2-3)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    const real = w.adapters.ports.ticketSource;
+    let calls = 0;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const hanging: typeof real = Object.assign(Object.create(Object.getPrototypeOf(real)), real, {
+      async listDesignated(label: string) {
+        const answer = await real.listDesignated(label);
+        if (label === 'sail-a' && ++calls === 2) await gate;
+        return answer;
+      },
+    });
+    (w.adapters.ports as { ticketSource: typeof real }).ticketSource = hanging;
+    const watcher = await w.start(['a', 'b']);
+    writeTickets(w.sail, tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b' }));
+    dropCommand(w.runs, { op: 'poll', workflow: 'a' });
+    dropCommand(w.runs, { op: 'unwatch', workflows: ['a'] });
+    dropCommand(w.runs, { op: 'poll', workflow: 'b' });
+    const within = (done: Promise<unknown>) =>
+      Promise.race([done.then(() => 'done'), Bun.sleep(2000).then(() => 'blocked')]);
+    const ticked = await within(w.timers.advance(1000));
+    const ticked2 = await within(w.timers.advance(1000));
+    const a = () => readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8');
+    const before = { queue: a(), events: w.events('a').length };
+    const stopping = await within(watcher.stop());
+    release();
+    await Bun.sleep(50);
+    expect({
+      ticked,
+      ticked2,
+      stopping,
+      watching: watcher.watching(),
+      b: w.order('b'),
+      a: { queue: a(), events: w.events('a').length },
+      last: w.events('a').at(-1)?.type,
+    }).toEqual({
+      ticked: 'done',
+      ticked2: 'done',
+      stopping: 'done',
+      watching: [],
+      b: ['FAKE-2'],
+      a: before,
+      last: 'watch:removed',
+    });
+  });
+});
