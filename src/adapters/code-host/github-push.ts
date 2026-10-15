@@ -11,7 +11,7 @@
 // has no config but that URL. The token is offered only when that URL is on the web host.
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { runProcess } from '../../engine/process';
 import type { Redactor } from '../../engine/redact';
 import { PortError, type PortErrorCode } from '../../ports/errors';
@@ -127,6 +127,15 @@ function repositoryAt(url: string, webUrl: string): string | undefined {
   return at.path.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
 }
 
+/**
+ * `url` as the push's own git directory must read it: a relative path is the checkout's, from its top level, as git
+ * reads it there (review R2-4). URLs, scp-like ones included, and absolute paths are as they are.
+ */
+function fromCheckout(url: string, topLevel: string): string {
+  const path = !url.includes('://') && !/^(?:[^@/]+@)?[^:/]+:/.test(url) && !isAbsolute(url);
+  return path && topLevel !== '' ? resolve(topLevel, url) : url;
+}
+
 /** A value for git's config file, quoted. */
 const quoted = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
@@ -181,7 +190,9 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
     if (shallow !== '' && existsSync(shallow)) copyFileSync(shallow, join(gitDir, 'shallow'));
     writeFileSync(join(gitDir, 'HEAD'), `${headSha}\n`);
     const config = join(gitDir, 'config');
-    writeFileSync(config, `${readFileSync(config, 'utf8')}[remote "${REMOTE}"]\n\turl = ${quoted(url)}\n`);
+    const topLevel = gitSync(cwd, ['rev-parse', '--show-toplevel'], local).stdout.trim();
+    const target = quoted(fromCheckout(url, topLevel));
+    writeFileSync(config, `${readFileSync(config, 'utf8')}[remote "${REMOTE}"]\n\turl = ${target}\n`);
 
     const stdout = join(logs, 'stdout');
     const stderr = join(logs, 'stderr');
