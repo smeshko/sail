@@ -291,3 +291,30 @@ test('the hook never throws: an input it cannot read and a listener that throws 
     other: {},
   });
 });
+
+// Review R1-4: a Grep of a folder reads every file below it, so a read glob that matches the folder alone, or only some
+// of what is below it, doesn't let it run.
+test.each<[string, string[], Record<string, unknown>, 'allow' | 'deny']>([
+  ['src/* matches src/ itself, not what is below it', ['src/*'], { pattern: 'a', path: 'src' }, 'deny'],
+  ['* matches the workspace by its empty path, not every file in it', ['*'], { pattern: 'a' }, 'deny'],
+  [
+    'src/**/*.ts covers the .ts files below src/, not all of them',
+    ['src/**/*.ts'],
+    { pattern: 'a', path: 'src' },
+    'deny',
+  ],
+  ['src/** does not cover the workspace', ['src/**'], { pattern: 'a' }, 'deny'],
+  ['src/** covers all of src/', ['src/**'], { pattern: 'a', path: 'src' }, 'allow'],
+  ['** covers the workspace', ['**'], { pattern: 'a' }, 'allow'],
+  ['**/* covers a folder in it', ['**/*'], { pattern: 'a', path: 'sub' }, 'allow'],
+  ['sub/**/* covers a folder below sub/', ['sub/**/*'], { pattern: 'a', path: 'sub/dir' }, 'allow'],
+  ['a Grep of one file is one read of it', ['src/*'], { pattern: 'a', path: 'src/a.ts' }, 'allow'],
+  ['$STAGE_IN is open whatever the read globs say', ['src/*'], { pattern: 'a', path: stageIn }, 'allow'],
+])('a Grep with read %s', async (_, read, input, expected) => {
+  const g = gate({ ...STEP, read });
+  const answer = await ask(g, pre('Grep', input));
+  expect({
+    decision: answer.hookSpecificOutput?.permissionDecision,
+    rules: g.denials.map(([, denial]) => denial.rule),
+  }).toEqual({ decision: expected, rules: expected === 'deny' ? ['read'] : [] });
+});
