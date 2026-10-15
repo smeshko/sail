@@ -3,7 +3,7 @@
 // over real smart HTTP, a bare repository behind Basic auth. Each case has a throwaway HOME whose global config sets a
 // logging credential helper, unscoped and scoped to the server, so a helper asked for the token, or to store it, shows.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CREDENTIAL_HELPER, pushArgs, pushEnv, pushHead } from '../../../src/adapters/code-host/github-push';
 import { redactor } from '../../../src/engine/redact';
@@ -180,12 +180,36 @@ test("a token the host refuses is unauthorized, and with git's tracing asked for
   });
 });
 
+test("no hook of the repository's runs during a push that sent the token, reference-transaction included (review R1-1)", async () => {
+  await withServed(TOKEN, async ({ repo, http }) => {
+    detachedCommit(repo, 'a.txt');
+    const ran = join(repo.home, 'hooks.log');
+    const hook = `#!/bin/sh\necho "$(basename "$0") $SAIL_GIT_TOKEN" >>${ran}\n`;
+    const hooks = join(repo.home, 'hooks');
+    mkdirSync(hooks);
+    for (const name of ['reference-transaction', 'pre-push', 'post-update', 'push-to-checkout']) {
+      writeFileSync(join(hooks, name), hook);
+      chmodSync(join(hooks, name), 0o755);
+    }
+    repo.git('config', 'core.hooksPath', hooks);
+    // A remote-tracking ref for the branch is what makes git update a ref locally, and run reference-transaction.
+    repo.git('config', 'remote.web.fetch', '+refs/heads/*:refs/remotes/web/*');
+    await push(repo, 'sail/x', { remote: 'web', webUrl: http.base });
+    expect({
+      sent: http.requests.some((request) => request.method === 'POST' && request.authorization === 'matched'),
+      hooks: existsSync(ran) ? readFileSync(ran, 'utf8') : '',
+    }).toEqual({ sent: true, hooks: '' });
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
   expect(pushArgs('origin', 'sail/x', 'https://github.com')).toEqual([
     '-c',
     'credential.helper=',
     '-c',
     `credential.https://github.com.helper=${CREDENTIAL_HELPER}`,
+    '-c',
+    'core.hooksPath=/dev/null',
     'push',
     '--porcelain',
     '--no-verify',
