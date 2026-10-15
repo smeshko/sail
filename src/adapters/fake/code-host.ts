@@ -90,15 +90,20 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
     if (found === undefined) throw new PortError('codeHost', op, 'not_found', `no pull request #${number}`);
     return found;
   };
+  /** Changes `name` on `pr` when it isn't so already, and says whether it changed. */
+  const relabel = (pr: StoredPullRequest, change: 'added' | 'removed', name: string): boolean => {
+    if (pr.labels.includes(name) === (change === 'added')) return false;
+    pr.labels = change === 'added' ? [...pr.labels, name] : pr.labels.filter((each) => each !== name);
+    return true;
+  };
   const label = (op: 'addLabel' | 'removeLabel', number: number, name: string): Labelled => {
+    const change = op === 'addLabel' ? 'added' : 'removed';
     const { labelled, changed } = store.change((world) => {
       const pr = find(world, op, number);
-      const changed = pr.labels.includes(name) !== (op === 'addLabel');
-      if (changed) pr.labels = op === 'addLabel' ? [...pr.labels, name] : pr.labels.filter((each) => each !== name);
+      const changed = relabel(pr, change, name);
       return { labelled: { number, labels: [...pr.labels], raw: structuredClone(pr) }, changed };
     });
-    if (changed)
-      emit({ type: 'codehost:labelled', number, label: name, change: op === 'addLabel' ? 'added' : 'removed' });
+    if (changed) emit({ type: 'codehost:labelled', number, label: name, change });
     return labelled;
   };
 
@@ -110,6 +115,9 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       return NUMBER.test(digits) ? Number(digits) : undefined;
     },
     async push(cwd, branch) {
+      if (branch === store.read().defaultBranch) {
+        throw new PortError('codeHost', 'push', 'invalid', `${branch} is the default branch`);
+      }
       let headSha: string;
       try {
         const git = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], {
@@ -134,17 +142,18 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       return { branch, headSha, raw: { branch, headSha } };
     },
     async openPullRequest(request) {
-      const pr = store.change((world) => {
+      const opened = store.change((world): { pr: PullRequest; added: string[] | undefined } => {
         const headSha = world.branches[request.head];
         if (headSha === undefined) {
           throw new PortError('codeHost', 'openPullRequest', 'invalid', `${request.head} was never pushed`);
         }
+        // Opening again from an open pull request's head into its base returns it, with the labels it lacks (D2).
         const open = world.pullRequests.find(
           (each) => each.state === 'open' && each.head === request.head && each.base === request.base,
         );
         if (open !== undefined) {
-          const message = `#${open.number} is already open from ${request.head} into ${request.base}`;
-          throw new PortError('codeHost', 'openPullRequest', 'conflict', message);
+          const added = [...new Set(request.labels ?? [])].filter((name) => relabel(open, 'added', name));
+          return { pr: toPullRequest(world, open), added };
         }
         const stored = StoredPullRequest.parse({
           number: Math.max(0, ...world.pullRequests.map((each) => each.number)) + 1,
@@ -159,8 +168,13 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
           ...(request.ticketKey === undefined ? {} : { ticketKey: request.ticketKey }),
         });
         world.pullRequests.push(stored);
-        return toPullRequest(world, stored);
+        return { pr: toPullRequest(world, stored), added: undefined };
       });
+      const { pr, added } = opened;
+      if (added !== undefined) {
+        for (const name of added) emit({ type: 'codehost:labelled', number: pr.number, label: name, change: 'added' });
+        return pr;
+      }
       const { number, url, draft, base, head, ticketKey } = pr;
       emit({
         type: 'codehost:pr_opened',

@@ -418,16 +418,15 @@ test('git-worktree is a built-in for the workspace port alone: its options are r
       refused = messageOf(error);
     }
     expect({
-      builtins: Object.fromEntries(Object.entries(BUILTINS).map(([name, ports]) => [name, Object.keys(ports)])),
+      // The built-ins that fill the workspace, and the ports git-worktree fills: other ports' built-ins come and go.
+      builtins: {
+        workspace: Object.entries(BUILTINS).flatMap(([name, ports]) => ('workspace' in ports ? [name] : [])),
+        'git-worktree': Object.keys(BUILTINS['git-worktree'] ?? {}),
+      },
       resolved: 'issues' in resolved ? resolved.issues : resolved.ports.workspace.name,
       refused: refused.includes('remotes') ? 'names remotes' : refused,
     }).toEqual({
-      builtins: {
-        fake: ['ticketSource', 'codeHost', 'harness', 'workspace'],
-        linear: ['ticketSource'],
-        'claude-code': ['harness'],
-        'git-worktree': ['workspace'],
-      },
+      builtins: { workspace: ['fake', 'git-worktree'], 'git-worktree': ['workspace'] },
       resolved: 'git-worktree',
       refused: 'names remotes',
     });

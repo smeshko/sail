@@ -184,9 +184,9 @@ const OPEN_HARNESS = {
 const broken: Broken[] = [
   {
     label: 'an unknown built-in',
-    port: 'codeHost',
-    use: 'githb',
-    message: "no built-in adapter 'githb' fills codeHost: the built-ins that do are fake",
+    port: 'workspace',
+    use: 'git-worktee',
+    message: "no built-in adapter 'git-worktee' fills workspace: the built-ins that do are fake, git-worktree",
   },
   {
     label: 'a built-in that fills another port',
@@ -402,7 +402,7 @@ test('two ports broken at pass one give two issues in port order, and no definit
   const made: string[] = [];
   const result = await resolve(
     sailDir,
-    { ticketSource: { use: 'nope1' }, codeHost: { use: 'nope2' }, harness: { use: 'counting' } },
+    { ticketSource: { use: 'nope1' }, workspace: { use: 'nope2' }, harness: { use: 'counting' } },
     { builtins: builtin('counting', 'harness', counting('harness', made)) },
   );
   expect(result).toEqual({
@@ -412,8 +412,8 @@ test('two ports broken at pass one give two issues in port order, and no definit
         message: "no built-in adapter 'nope1' fills ticketSource: the built-ins that do are fake, linear",
       },
       {
-        path: '/adapters/codeHost',
-        message: "no built-in adapter 'nope2' fills codeHost: the built-ins that do are fake",
+        path: '/adapters/workspace',
+        message: "no built-in adapter 'nope2' fills workspace: the built-ins that do are fake, git-worktree",
       },
     ],
   });

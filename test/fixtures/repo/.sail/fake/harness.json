@@ -129,7 +129,7 @@
         "bodyFile": "pr-body.md"
       },
       "files": {
-        "pr-body.md": "## Summary\n\nAdds `--shout` to the `greet` command: with it, the whole greeting is printed in upper case.\n\n## Changes\n\n- `greet()` takes `{ shout }` and upper-cases the whole line.\n- The CLI reads `--shout`, and `--help` lists it.\n- Tests cover both, plus the help text.\n\n## Testing\n\n`bun test`: 7 of 7 pass.\n\nTicket: FAKE-1\n"
+        "pr-body.md": "## Summary\n\nAdds `--shout` to the `greet` command: with it, the whole greeting is printed in upper case.\n\n## Changes\n\n- `greet()` takes `{ shout }` and upper-cases the whole line.\n- The CLI reads `--shout`, and `--help` lists it.\n- Tests cover both, plus the help text.\n\n## Testing\n\n`bun test`: 7 of 7 pass.\n\nTicket: [FAKE-1](fake://tickets/FAKE-1)\n"
       },
       "messages": ["PR description written."],
       "turns": 4,

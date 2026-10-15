@@ -12,4 +12,4 @@ Adds `--shout` to the `greet` command: with it, the whole greeting is printed in
 
 `bun test`: 7 of 7 pass.
 
-Ticket: FAKE-1
+Ticket: [FAKE-1](fake://tickets/FAKE-1)
