@@ -45,7 +45,18 @@ export interface ReadWatchOptions {
 
 /** Loads workflow `name` and reads its watch declaration. A workflow that won't load, or isn't watched, refuses. */
 export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclaration | { refused: string }> {
-  return { workflow: options.name, label: '', everyMs: 0, maxConcurrentRuns: 0 };
+  const { sailDir, name } = options;
+  const loaded = await loadWorkflow(sailDir, name);
+  if ('refused' in loaded) return loaded;
+  const { workflow } = loaded;
+  if (workflow.watch === undefined) return { refused: `workflow '${name}' isn't watched: it declares no watch` };
+  const everyMs = parseEvery(workflow.watch.every);
+  const problem = watchProblem(workflow);
+  const { maxConcurrentRuns } = workflow;
+  if (problem !== undefined || everyMs === undefined || maxConcurrentRuns === undefined) {
+    return { refused: `workflow '${name}' ${problem}` };
+  }
+  return { workflow: name, label: watchLabel(workflow, options.config), everyMs, maxConcurrentRuns };
 }
 
 export interface OpenWatchTargetOptions extends ReadWatchOptions {
@@ -58,19 +69,19 @@ export interface OpenWatchTargetOptions extends ReadWatchOptions {
 
 /** Loads workflow `name` and opens its queue. A workflow that won't load, or isn't watched, refuses. */
 export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<WatchTarget | { refused: string }> {
-  const { sailDir, name } = options;
-  const loaded = await loadWorkflow(sailDir, name);
-  if ('refused' in loaded) return loaded;
-  const { workflow } = loaded;
-  if (workflow.watch === undefined) return { refused: `workflow '${name}' isn't watched: it declares no watch` };
-  const everyMs = parseEvery(workflow.watch.every);
-  const problem = watchProblem(workflow);
-  if (problem !== undefined || everyMs === undefined) return { refused: `workflow '${name}' ${problem}` };
-  const label = watchLabel(workflow, options.config);
-  const { now, policy } = options;
-  const store = openQueue({ runsDir: runsDir(sailDir), workflow: name, label, now, ...(policy ? { policy } : {}) });
+  const watch = await readWatch(options);
+  if ('refused' in watch) return watch;
+  const { now, policy, onEvent } = options;
+  const store = openQueue({
+    runsDir: runsDir(options.sailDir),
+    workflow: watch.workflow,
+    label: watch.label,
+    now,
+    ...(policy ? { policy } : {}),
+    ...(onEvent ? { onEvent } : {}),
+  });
   if ('refused' in store) return store;
-  return { workflow: name, label, everyMs, maxConcurrentRuns: 0, ticketSource: options.ticketSource, store };
+  return { ...watch, ticketSource: options.ticketSource, store };
 }
 
 export type PollOutcome = 'polled' | 'failed' | 'paused';

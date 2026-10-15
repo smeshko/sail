@@ -101,10 +101,7 @@ async function leaseByHand(w: World, ticketKey: string) {
   return { branch, holder, release: () => workspace.releaseLease(url, branch, holder.runId) };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a cap of 2 starts the first two due items in queue order, and once one completes the next tick settles it done and starts the third', async () => {
+test('a cap of 2 starts the first two due items in queue order, and once one completes the next tick settles it done and starts the third', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 4, 2);
     const dispatcher = w.dispatcher();
@@ -133,10 +130,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a due item whose branch a live run leases waits with its attempts, says so once across ticks, gives its slot to the next, and starts once released', async () => {
+test('a due item whose branch a live run leases waits with its attempts, says so once across ticks, gives its slot to the next, and starts once released', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 2, 2);
     const byHand = await leaseByHand(w, 'FAKE-1');
@@ -155,10 +149,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a ticket that became In Progress, or lost its label, since it was queued is dropped with its reason and never spawned', async () => {
+test('a ticket that became In Progress, or lost its label, since it was queued is dropped with its reason and never spawned', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 3, 3);
     const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
@@ -178,10 +169,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a re-check the ticket source fails leaves the item failed with no attempt, due again after the first retry delay, and the rest for the next tick', async () => {
+test('a re-check the ticket source fails leaves the item failed with no attempt, due again after the first retry delay, and the rest for the next tick', async () => {
   await withTempRepo(async (repo) => {
     let down = true;
     const w = await world(repo, 2, 2, {
@@ -210,10 +198,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a run that failed fails its item with the stop reason and parks it on the second, and a start refused before its run directory fails it with its log's last line", async () => {
+test("a run that failed fails its item with the stop reason and parks it on the second, and a start refused before its run directory fails it with its log's last line", async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 2, 2, { claiming: false });
     const dispatcher = w.dispatcher();
@@ -249,10 +234,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a run whose process is gone while it reads suspended or running stays dispatched, for 13.3, and frees its slot', async () => {
+test('a run whose process is gone while it reads suspended or running stays dispatched, for 13.3, and frees its slot', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 3, 2);
     const dispatcher = w.dispatcher();
@@ -267,10 +249,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a dispatcher started again over the same queue, with the runs still alive, spawns nothing for them and counts them against the cap', async () => {
+test('a dispatcher started again over the same queue, with the runs still alive, spawns nothing for them and counts them against the cap', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 3, 2);
     await w.dispatcher().tick();
@@ -286,10 +265,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('an item whose title changed since it was queued waits on a lease of the branch its fresh title names', async () => {
+test('an item whose title changed since it was queued waits on a lease of the branch its fresh title names', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 1, 1);
     const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');

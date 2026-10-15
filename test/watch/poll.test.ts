@@ -545,10 +545,7 @@ test('a pause saved to queue.json whose queue:error append throws still stops ti
   poller.stop();
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("readWatch gives a fixture copy's ticket-to-pr its label, interval and cap without opening its queue, and openWatchTarget carries the cap", async () => {
+test("readWatch gives a fixture copy's ticket-to-pr its label, interval and cap without opening its queue, and openWatchTarget carries the cap", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const options = { sailDir: sail, config: { label: 'sail' }, name: 'ticket-to-pr' };
@@ -559,7 +556,10 @@ test
       maxConcurrentRuns: 2,
     });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
-    const source = createFakeTicketSource({ seed: join(sail, 'fake', 'tickets.json'), state: join(repo.dir, 'state.json') });
+    const source = createFakeTicketSource({
+      seed: join(sail, 'fake', 'tickets.json'),
+      state: join(repo.dir, 'state.json'),
+    });
     const opened = await openWatchTarget({ ...options, ticketSource: source, now: manualClock(START) });
     expect('refused' in opened ? opened : opened.maxConcurrentRuns).toBe(2);
   });
