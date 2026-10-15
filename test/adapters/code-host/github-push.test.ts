@@ -323,6 +323,22 @@ test("git's trace variables in the caller's environment trace nothing of the tok
   });
 });
 
+test("a remote that is a relative path is read from the checkout's top level, as git reads it, from a subdirectory too (review R2-4)", async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    repo.git('remote', 'add', 'relative', '../origin.git');
+    const sha = detachedCommit(repo, 'a.txt');
+    mkdirSync(join(repo.dir, 'sub'));
+    const fromTop = await settle(push(repo, 'sail/x', { remote: 'relative' }));
+    const fromSub = await settle(push(repo, 'sail/y', { remote: 'relative', cwd: join(repo.dir, 'sub') }));
+    expect({
+      fromTop: 'rejected' in fromTop ? fromTop.rejected : fromTop.headSha,
+      fromSub: 'rejected' in fromSub ? fromSub.rejected : fromSub.headSha,
+      landed: [refIn(repo, origin.url, 'refs/heads/sail/x'), refIn(repo, origin.url, 'refs/heads/sail/y')],
+    }).toEqual({ fromTop: sha, fromSub: sha, landed: [sha, sha] });
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
   const pushing = ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', 'sail'];
   expect([pushArgs('sail/x', 'https://github.com'), pushArgs('sail/x', undefined)]).toEqual([
