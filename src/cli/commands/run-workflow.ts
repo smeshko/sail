@@ -10,6 +10,9 @@
 // resume it. One that arrives while the run is being opened, before its ticket is claimed, is a refusal: the ticket is
 // as it was, and nothing exists to resume. Earlier still, during the type-check, it ends sail the default way.
 //
+// `--dispatch <run id>` is the watcher's, and not in the usage: the run it dispatches runs under the id it minted, as
+// a start `via` the watcher.
+//
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { join, relative } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
@@ -164,7 +167,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   if (typed !== undefined) return typed;
   await registerRepository(io, command, project);
 
-  const { until } = args.values;
+  const { until, dispatch } = args.values;
   const terminal = terminalFor(io, project.sailDir, verbosity);
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
@@ -174,6 +177,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
       ticket,
       force: args.values.force === true,
       ...(typeof until === 'string' ? { until } : {}),
+      ...(typeof dispatch === 'string' ? { dispatch: { runId: dispatch } } : {}),
       adapters: project.adapters,
       signal,
       consumers: [terminal],

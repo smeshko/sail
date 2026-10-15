@@ -944,10 +944,7 @@ async function leftBehind(repoDir: string, ticketKey = 'FAKE-1') {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a dispatched start runs under the run id it is given, records its source via watch, and claims the ticket with a comment naming that id', async () => {
+test('a dispatched start runs under the run id it is given, records its source via watch, and claims the ticket with a comment naming that id', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const run = await openStub(repo.dir, { ticket: 'FAKE-1', dispatch: { runId: DISPATCHED } });
@@ -965,10 +962,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, StubRun, string]>([
+test.each<[string, StubRun, string]>([
   [
     "another ticket's run id",
     { ticket: 'FAKE-1', dispatch: { runId: 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N' } },
@@ -984,7 +978,11 @@ test
     { ticket: 'FAKE-1', dispatch: { runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWDIU' } },
     "--dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWDIU' is not one",
   ],
-  ['--force with it', { ticket: 'FAKE-1', force: true, dispatch: { runId: DISPATCHED } }, "--dispatch and --force can't be combined"],
+  [
+    '--force with it',
+    { ticket: 'FAKE-1', force: true, dispatch: { runId: DISPATCHED } },
+    "--dispatch and --force can't be combined",
+  ],
 ])('a dispatched start with %s is refused, with no run directory, lease or claim', async (_, run, refused) => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
@@ -993,10 +991,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a dispatched start whose run directory exists is refused, and the run directory is left as it was', async () => {
+test('a dispatched start whose run directory exists is refused, and the run directory is left as it was', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const dir = join(repo.dir, '.sail-runs', DISPATCHED);
@@ -1025,10 +1020,7 @@ function watchedOnReview(repoDir: string): void {
   writeFileSync(seed, JSON.stringify(world));
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a workflow's own watch.label is the label a start checks: only the repository's label is not designated, and the workflow's is", async () => {
+test("a workflow's own watch.label is the label a start checks: only the repository's label is not designated, and the workflow's is", async () => {
   const start = (ticket: string) =>
     withTempRepo(async (repo) => {
       watchedOnReview(repo.dir);

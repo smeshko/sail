@@ -436,7 +436,7 @@ A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, whi
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. It fetches before every dispatch, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
@@ -480,7 +480,7 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, dispatch begins with the claim.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, the dispatched run claims the ticket as it starts, after its branch is leased and its workspace made, as a run started by hand does.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:

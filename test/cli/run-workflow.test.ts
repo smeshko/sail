@@ -994,13 +994,14 @@ test("sail FAKE-1 whose workspace can't be made exits 3, with the ticket untouch
 // `--dispatch <run id>`: the watcher's start of a run it minted the id of (DECISIONS D3).
 const DISPATCHED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, its claim before its intake', async () => {
+test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, its claim before its intake', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
-    const { code, stderr, runs, header, events, ticket } = await started(repo.dir, ['FAKE-1', '--dispatch', DISPATCHED]);
+    const { code, stderr, runs, header, events, ticket } = await started(repo.dir, [
+      'FAKE-1',
+      '--dispatch',
+      DISPATCHED,
+    ]);
     expect({ code, stderr, runs }).toEqual({ code: EXIT_OK, stderr: '', runs: [DISPATCHED] });
     expect([header.runId, header.source]).toEqual([
       DISPATCHED,
@@ -1014,10 +1015,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('sail FAKE-1 --dispatch with a malformed id, or with --force, exits 3 in one line, with no run directory', async () => {
+test('sail FAKE-1 --dispatch with a malformed id, or with --force, exits 3 in one line, with no run directory', async () => {
   const malformed = await sailIn(['FAKE-1', '--dispatch', 'FAKE-1-nope']);
   const forced = await sailIn(['FAKE-1', '--force', '--dispatch', DISPATCHED]);
   expect([malformed, forced].map(({ code, stderr, touched }) => ({ code, stderr, touched }))).toEqual([

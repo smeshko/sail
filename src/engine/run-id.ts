@@ -19,8 +19,9 @@ export function ulid(
 }
 
 /** Whether `runId` is the id of a run of `key`: `<key>-` and 26 Crockford characters, as `newRunId()` makes them. */
-export function isRunIdOf(_key: string, _runId: string): boolean {
-  return false;
+export function isRunIdOf(key: string, runId: string): boolean {
+  if (!runId.startsWith(`${key}-`)) return false;
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(runId.slice(key.length + 1));
 }
 
 /**
