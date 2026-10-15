@@ -51,10 +51,7 @@ function fakeSail(dir: string): string {
   return script;
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a spawned run gets the ticket, its workflow and --dispatch with the run id, runs in the root with the given env in a process group of its own, and logs both streams', async () => {
+test('a spawned run gets the ticket, its workflow and --dispatch with the run id, runs in the root with the given env in a process group of its own, and logs both streams', async () => {
   const dir = tempDir();
   const root = join(dir, 'repo');
   mkdirSync(root);
@@ -91,10 +88,7 @@ test
   expect(pgid).not.toBe(Number(Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(process.pid)]).stdout.toString()));
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('lastLine gives the last line that is not blank, cut to 500 characters, and nothing for an empty or missing log', () => {
+test('lastLine gives the last line that is not blank, cut to 500 characters, and nothing for an empty or missing log', () => {
   const dir = tempDir();
   const log = join(dir, 'run.log');
   writeFileSync(log, `first\n  the refusal  \n\n   \n`);
