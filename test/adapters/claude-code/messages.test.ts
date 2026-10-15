@@ -3,6 +3,7 @@
 import { expect, test } from 'bun:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { createSessionReader, type SessionReader } from '../../../src/adapters/claude-code/messages';
+import type { Denial } from '../../../src/adapters/claude-code/tool-call';
 import type { HarnessEvent } from '../../../src/ports/harness';
 import {
   assistantRedacted,
@@ -327,4 +328,62 @@ test('every event of a whole session, stamped with its key, is valid against sai
   ]);
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
   expect(r.state().events).toEqual(capture.events);
+});
+
+const DENIAL: Denial = {
+  tool: 'Bash',
+  rule: 'commands',
+  permissions: { commands: ['git status'] },
+  reason: 'tail README.md: tail is not among the allowed commands',
+};
+
+test('a denied call emits permission:denied with its denial just before its tool:end denied, and counts once', () => {
+  const { reader: r, at } = reader();
+  const capture = captureEvents<HarnessEvent>();
+  at(100);
+  for (const event of r.read(init())) capture.emit(event);
+  for (const event of r.read(assistantToolUse('m1', 't1', 'Bash', { command: 'tail README.md' }))) capture.emit(event);
+  r.markDenied('t1', DENIAL);
+  at(130);
+  for (const event of r.read(toolResult('t1', { isError: true }))) capture.emit(event);
+  expect(capture.events.slice(1)).toEqual([
+    { type: 'tool:start', callId: 't1', tool: 'Bash', input: { command: 'tail README.md' } },
+    { type: 'usage:update', turn: 1, tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, costUsdSoFar: 0 },
+    { type: 'permission:denied', callId: 't1', ...DENIAL },
+    { type: 'tool:end', callId: 't1', status: 'denied', durationMs: 30 },
+  ]);
+  expect(r.state().denials).toBe(1);
+  expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
+});
+
+test('a denial heard before its tool use arrives still comes out after the tool:start', () => {
+  const { reader: r } = reader();
+  r.markDenied('t1', DENIAL);
+  const events = readAll(r, [
+    assistantToolUse('m1', 't1', 'Bash', { command: 'tail README.md' }),
+    toolResult('t1', { isError: true }),
+  ]);
+  expect(events.map((event) => event.type)).toEqual(['tool:start', 'usage:update', 'permission:denied', 'tool:end']);
+});
+
+test("settling emits a held denial ahead of its call's failed end, and one for a call never started alone", () => {
+  const { reader: r, at } = reader();
+  at(10);
+  readAll(r, [assistantToolUse('m1', 't1', 'Bash', { command: 'tail README.md' })]);
+  r.markDenied('t1', DENIAL);
+  r.markDenied('t9', { ...DENIAL, tool: 'Read', rule: 'read', permissions: { read: ['src/**'] }, reason: 'no' });
+  at(15);
+  expect(r.settle(undefined).slice(1)).toEqual([
+    { type: 'permission:denied', callId: 't1', ...DENIAL },
+    { type: 'tool:end', callId: 't1', status: 'denied', durationMs: 5 },
+    {
+      type: 'permission:denied',
+      callId: 't9',
+      tool: 'Read',
+      rule: 'read',
+      permissions: { read: ['src/**'] },
+      reason: 'no',
+    },
+  ]);
+  expect(r.state().denials).toBe(2);
 });
