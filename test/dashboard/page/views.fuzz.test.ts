@@ -48,6 +48,35 @@ const INDEX_FIELDS = new Set([
 ]);
 /** The fields of an event that hold untrusted text. File names and paths are untrusted too, on file events. */
 const EVENT_FIELDS = new Set(['text', 'title', 'url', 'reason', 'message', 'command']);
+/**
+ * The fields the fold and the views join on, which stay as they are when every other string is poisoned: a call's key
+ * and stage, an event's type and kind, a denial's call id and rule (the key into its permissions), times, and a run's
+ * status, whose value picks which commands are shown (review R1-10).
+ */
+const IDENTITY = new Set([
+  'type',
+  'key',
+  'stage',
+  'kind',
+  'ts',
+  'startedAt',
+  'endedAt',
+  'schema',
+  'status',
+  'callId',
+  'rule',
+]);
+
+/** A copy of `value` with every string poisoned but those under a key in IDENTITY. */
+function poisonAll<T>(value: T, payload: string): T {
+  if (Array.isArray(value)) return value.map((item) => poisonAll(item, payload)) as T;
+  if (typeof value !== 'object' || value === null) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(value)) {
+    out[key] = typeof field === 'string' && !IDENTITY.has(key) ? payload : poisonAll(field, payload);
+  }
+  return out as T;
+}
 
 /** A copy of `value` with every string under a key in `fields` replaced by `payload`. */
 function poison<T>(value: T, fields: ReadonlySet<string>, payload: string, every = false): T {
@@ -136,12 +165,12 @@ test('the run view, its status line and every inspector tab keep their structure
   const summary = index(m.registryDir)[0]?.runs.find((run) => run.runId === FAKE_2_ID)?.summary;
   const result = JSON.parse(readFileSync(join(dir, '02-implement/call-1/result.json'), 'utf8'));
   const log = readFileSync(join(dir, dirname('02-implement/call-1/result.json'), 'session.log'), 'utf8');
-  const views = (input: Record<string, unknown>[], value: unknown, text: string) => {
+  const views = (input: Record<string, unknown>[], value: unknown, text: string, given = summary) => {
     const model = foldRun(input);
     const card = model.cards.find((entry) => entry.key === 'implement#1');
     return [
-      renderRun(model, summary, { ...ui, key: 'implement#1' }, NOW).value,
-      renderStatus(model, summary).value,
+      renderRun(model, given, { ...ui, key: 'implement#1' }, NOW).value,
+      renderStatus(model, given).value,
       ...TABS.map(
         (tab) =>
           renderInspector(
@@ -167,5 +196,14 @@ test('the run view, its status line and every inspector tab keep their structure
       payload,
     );
     for (const [i, view] of benign.entries()) await same(view, hostile[i] ?? '', `view ${i}: ${payload}`);
+    // Every string but the joins, in the events and the summary alike (review R1-10).
+    const everywhere = views(
+      events.map((event) => poisonAll(poisonEvent(event, payload), payload)),
+      poisonAll(withOutput, payload),
+      payload,
+      poisonAll(summary, payload),
+    );
+    for (const [i, view] of benign.entries())
+      await same(view, everywhere[i] ?? '', `view ${i}, everywhere: ${payload}`);
   }
 });
