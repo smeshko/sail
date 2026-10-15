@@ -112,9 +112,20 @@ test("draining commands leaves a store's queue.json as it was, and only the stor
     const text = await Bun.file(join(import.meta.dir, '..', '..', 'src', file)).text();
     if (text.includes('QUEUE_FILE') || /['"`]queue\.json['"`]/.test(text)) naming.push(file);
   }
-  // The dashboard reads queue.json, through its contained reader, and never writes it.
-  expect(naming.filter((file) => file !== 'dashboard/queues.ts')).toEqual(['watch/queue-store.ts']);
+  // The dashboard reads queue.json, through its contained reader, and never writes it: it imports only fs reads, and no
+  // other way to write a file (review R1-7).
+  expect(naming.sort()).toEqual(['dashboard/queues.ts', 'watch/queue-store.ts']);
+  const reader = await Bun.file(join(import.meta.dir, '..', '..', 'src', 'dashboard', 'queues.ts')).text();
+  const fsImports = [...reader.matchAll(/import \{([^}]*)\} from 'node:fs'/g)].flatMap((match) =>
+    (match[1] ?? '').split(',').map((name) => name.trim()),
+  );
+  expect(fsImports.length).toBeGreaterThan(0);
+  expect(fsImports.filter((name) => !READS.has(name))).toEqual([]);
+  expect(reader.match(/node:fs\/promises|['"]fs['"]|Bun\.write|\.writer\(|node:child_process|Bun\.spawn/g)).toBeNull();
 });
+
+/** The fs calls that only read. */
+const READS = new Set(['existsSync', 'lstatSync', 'readdirSync', 'readFileSync', 'realpathSync', 'statSync']);
 
 test('a directory, a link or an unreadable file in the inbox is removed and rejected, and the commands around it apply (review #1.5)', () => {
   const runs = runsDir();
