@@ -2,7 +2,7 @@
 // bash, and the CLI runs the Bash tool under bash (D4 and review R1-1), but a command can start another shell, which
 // reads some commands otherwise (zsh's `>!` writes its next word; dash's `&>` sends a job to the background). A job
 // sent to the background outlives its call, out of the session's process group (D8). And git diff's `--no-index`
-// compares any two files, which no read rule checks.
+// compares any two files, which no read rule checks; an operand outside the worktree turns it on by itself.
 //
 // The command is read as the parser reads it, its substitutions included, and every quoted or escaped word that could
 // hold commands of its own (a `-c` text, an `eval`'s arguments) is read again, unquoted, as a command, at any depth.
@@ -40,7 +40,9 @@ function inList(list: readonly Pipeline[], depth: number): string | undefined {
       ];
       const nested = command.redirections.flatMap((redirection) => redirection.heredoc?.nested ?? []);
       const found =
-        firstOf(words, (word) => inWord(word, depth)) ?? firstOf(nested, (inner) => inList(inner, depth + 1));
+        firstOf(words, (word) => inWord(word, depth)) ??
+        outsideDiffOperand(command.words) ??
+        firstOf(nested, (inner) => inList(inner, depth + 1));
       if (found !== undefined) return found;
     }
   }
@@ -57,6 +59,23 @@ function inWord(word: Word, depth: number): string | undefined {
   if (found !== undefined || word.text === word.raw || !MAY_HOLD_COMMANDS.test(word.text)) return found;
   const parsed = parseCommand(word.text);
   return parsed.ok ? inList(parsed.list, depth + 1) : undefined;
+}
+
+/**
+ * A `git diff` operand that may lie outside the worktree, which turns `--no-index` on by itself: one that is absolute,
+ * climbs with `..`, starts with `~`, is find's `{}`, or isn't known before it runs.
+ */
+function outsideDiffOperand(words: readonly Word[]): string | undefined {
+  const git = words.findIndex((word) => word.literal && basename(word.text) === 'git');
+  const diff = words.findIndex((word, i) => git !== -1 && i > git && word.literal && word.text === 'diff');
+  if (diff === -1) return undefined;
+  const outside = words.slice(diff + 1).find((word) => {
+    if (word.literal && word.text.startsWith('-')) return false;
+    const { text } = word;
+    return !word.literal || /^[/~]/.test(text) || text.split('/').includes('..') || text.includes('{}');
+  });
+  if (outside === undefined) return undefined;
+  return `git diff of ${outside.raw}: an operand outside the worktree turns on --no-index, which reads files no read rule checks; name revisions, and paths inside the worktree as written`;
 }
 
 function firstOf<T>(items: readonly T[], check: (item: T) => string | undefined): string | undefined {
