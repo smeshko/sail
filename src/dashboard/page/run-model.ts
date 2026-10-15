@@ -298,7 +298,15 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       if (runId !== undefined) model.runId = runId;
       if (name !== undefined && version !== undefined) model.workflow = `${name}@${version}`;
       if (source !== undefined) model.source = source as RunModel['source'] & object;
-      if (budget !== undefined) model.budget = budget as RunModel['budget'] & object;
+      if (budget !== undefined) {
+        // Only the limits the view shows, each a finite number (review R2-4).
+        const maxUsd = num(budget.maxUsd);
+        const maxMinutes = num(budget.maxMinutes);
+        model.budget = {
+          ...(maxUsd === undefined ? {} : { maxUsd }),
+          ...(maxMinutes === undefined ? {} : { maxMinutes }),
+        };
+      }
       model.startedAt = ts;
       model.roster = roster as unknown as Roster;
       return true;
