@@ -296,7 +296,7 @@ test('an unwatch of the whole set followed in the same drain by a watch keeps th
   });
 });
 
-test('a poll still in flight when its workflow is unwatched is recorded before the workflow is watched again, so the new queue keeps its dispatch and the stream its order (review R1-2)', async () => {
+test('a poll still in flight when its workflow is unwatched never writes over the queue of the workflow watched again, which keeps its dispatch, and the stream keeps its order (review R1-2)', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -501,5 +501,62 @@ test("a watcher whose field a registration left stale stops, naming the holder, 
       `09:00:01 error: the label 'sail-b' on the fake ticket source is polled by the watcher of 'other' in ${join(repo.home, 'other')} (pid ${process.ppid}): this watcher stops\n`,
     ]);
     expect(readEntry(w.registryDir, 'other')).toEqual(other);
+  });
+});
+
+test("a watch command whose workflow's first poll never answers holds up neither the tick, the other workflows nor the stop (review R3-1)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      tickets({ 'FAKE-1': 'sail-a' }),
+    );
+    const real = w.adapters.ports.ticketSource;
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const hanging: typeof real = Object.assign(Object.create(Object.getPrototypeOf(real)), real, {
+      async listDesignated(label: string) {
+        const answer = await real.listDesignated(label);
+        if (label === 'sail-b') await gate;
+        return answer;
+      },
+    });
+    const config = readConfig(w.sail);
+    if ('issues' in config) throw new Error('the stub config has issues');
+    const watcher = await startWatcher({
+      sailDir: w.sail,
+      config,
+      adapters: { ...w.adapters.ports, ticketSource: hanging },
+      entry: w.entry,
+      registryDir: w.registryDir,
+      workflows: ['a'],
+      env: repo.env,
+      now: w.timers.now,
+      timers: w.timers,
+      spawn: w.spawner.spawn,
+      isAlive: w.spawner.isAlive,
+      write: (text) => w.out.push(text),
+      lines: { timeZone: 'UTC' },
+      firstPollMs: 50,
+    });
+    if ('refused' in watcher) throw new Error(watcher.refused);
+    dropCommand(w.runs, { op: 'watch', workflows: ['b'] });
+    const within = (done: Promise<unknown>) =>
+      Promise.race([done.then(() => 'done'), Bun.sleep(2000).then(() => 'blocked')]);
+    const ticked = await within(w.timers.advance(1000));
+    const watching = watcher.watching();
+    const stopping = await within(watcher.stop());
+    release();
+    expect({ ticked, watching, a: w.order('a'), stopping }).toEqual({
+      ticked: 'done',
+      watching: ['a', 'b'],
+      a: ['FAKE-1'],
+      stopping: 'done',
+    });
   });
 });
