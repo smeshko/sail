@@ -78,12 +78,27 @@ function random(seed: number) {
 
 const HOSTILE = [null, undefined, 7, -1, '', '<b>', [], {}, [null], true, Number.NaN] as const;
 
-/** Sets a random field, at a random depth, of `value` to a hostile value. */
-function poison(value: unknown, next: () => number): void {
+/** Every key in `value`, at any depth. */
+function keysOf(value: unknown, into = new Set<string>()): Set<string> {
+  if (typeof value !== 'object' || value === null) return into;
+  for (const [key, child] of Object.entries(value)) {
+    if (!Array.isArray(value)) into.add(key);
+    keysOf(child, into);
+  }
+  return into;
+}
+
+/**
+ * Sets a random field, at a random depth, of `value` to a hostile value. Now and then the field is one `value` lacks,
+ * named from `vocabulary`, every key the recorded files use, so an optional field a fixture leaves out is tried too
+ * (review R2-4).
+ */
+function poison(value: unknown, next: () => number, vocabulary: readonly string[] = []): void {
   let target = value as Record<string, unknown>;
   for (let depth = 0; depth < 4; depth++) {
     const keys = Object.keys(target);
-    const key = keys[Math.floor(next() * keys.length)];
+    const added = !Array.isArray(target) && vocabulary.length > 0 && next() < 0.3;
+    const key = added ? vocabulary[Math.floor(next() * vocabulary.length)] : keys[Math.floor(next() * keys.length)];
     if (key === undefined) break;
     const child = target[key];
     if (typeof child === 'object' && child !== null && next() < 0.6) {
@@ -96,26 +111,33 @@ function poison(value: unknown, next: () => number): void {
   }
 }
 
-test('600 seeded poisonings at any depth of the recorded events and result.json never throw in the fold or any view', () => {
+const ROUNDS = Number(process.env.SAIL_MALFORMED_ROUNDS ?? 600);
+
+test("seeded poisonings at any depth of the recorded events, result.json and a summary's free-form result never throw in the fold or any view", () => {
   const runs = [GOLDEN_RUN, join(DASHBOARD_FIXTURES, 'alpha', FAKE_2_ID), join(DASHBOARD_FIXTURES, 'beta', FAKE_3_ID)];
   const recorded = runs.map((dir) => {
     const events = readEvents(dir);
     const results = foldRun(events).cards.flatMap((card) =>
       card.resultPath === undefined ? [] : [JSON.parse(readFileSync(join(dir, card.resultPath), 'utf8')) as unknown],
     );
-    return { events, results };
+    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Record<string, unknown>;
+    return { events, results, summary };
   });
+  const vocabulary = [...keysOf(recorded)];
   const next = random(7);
-  for (let round = 0; round < 600; round++) {
-    const { events, results } = recorded[round % recorded.length] ?? { events: [], results: [] };
+  for (let round = 0; round < ROUNDS; round++) {
+    const { events, results, summary } = recorded[round % recorded.length] ?? { events: [], results: [], summary: {} };
     const mutated = structuredClone(events) as unknown[];
     const result = structuredClone(results[Math.floor(next() * results.length)]);
-    for (let n = 0; n < 3; n++) poison(mutated[Math.floor(next() * mutated.length)], next);
-    poison(result, next);
+    for (let n = 0; n < 3; n++) poison(mutated[Math.floor(next() * mutated.length)], next, vocabulary);
+    poison(result, next, vocabulary);
+    // A summary the server passes on is schema-valid, but its result is the workflow's own: poison only that.
+    const given = { ...summary, result: { pr: { number: 5, url: 'https://x' }, notes: 'n' } };
+    poison(given.result, next, vocabulary);
     const draw = () => {
       const model = foldRun(mutated);
-      renderRun(model, undefined, initialUi(0), 0);
-      renderStatus(model, undefined);
+      renderRun(model, given as never, initialUi(0), 0);
+      renderStatus(model, given as never);
       for (const card of model.cards) {
         for (const tab of TABS) {
           const ui = { ...initialUi(0), key: card.key, tab };
@@ -125,7 +147,7 @@ test('600 seeded poisonings at any depth of the recorded events and result.json 
     };
     expect(draw).not.toThrow();
   }
-});
+}, 120_000);
 
 test('a schema-valid summary whose free-form result holds a null or unprintable PR, and a run:start whose budget is unprintable, draw the run view (review R2-1, R2-4)', () => {
   const summary = JSON.parse(readFileSync(join(GOLDEN_RUN, 'summary.json'), 'utf8'));
