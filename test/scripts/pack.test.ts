@@ -87,11 +87,11 @@ test('carries the files the installed sail reads at run time', () => {
   }
 }, 30_000);
 
-test('the packed package.json keeps name, version, bin, engines and dependencies, and is publishable', () => {
+test('the packed package.json keeps name, version, bin, engines and dependencies, and is private', () => {
   const manifest = packed();
   for (const key of ['name', 'version', 'bin', 'engines', 'dependencies']) expect(manifest[key]).toEqual(pkg[key]);
-  expect(manifest.publishConfig.access).toBe('public');
-  expect('private' in manifest).toBe(false);
+  expect(manifest.private).toBe(true);
+  expect('publishConfig' in manifest).toBe(false);
 }, 30_000);
 
 test('exports map . and ./intakes to a .d.ts under types and a .ts that are both in the tarball', () => {
@@ -105,7 +105,7 @@ test('exports map . and ./intakes to a .d.ts under types and a .ts that are both
   }
 }, 30_000);
 
-test('a directory publish is refused by prepublishOnly before the registry is contacted', () => {
+test('a directory publish is refused as a private package before the registry is contacted', () => {
   const env = { ...process.env, NPM_CONFIG_TOKEN: 'dummy', NPM_CONFIG_REGISTRY: DEAD_REGISTRY } as Record<
     string,
     string
@@ -116,7 +116,7 @@ test('a directory publish is refused by prepublishOnly before the registry is co
     env,
   );
   expect(result.code).not.toBe(0);
-  expect(result.stderr).toContain('publish the tarball bun run pack makes');
+  expect(result.stderr).toContain('attempted to publish a private package');
 }, 30_000);
 
 test('packs what git does not ignore, skips a deleted file, and leaves out an ignored README.md', async () => {
