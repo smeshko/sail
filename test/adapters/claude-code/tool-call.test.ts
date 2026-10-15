@@ -29,6 +29,25 @@ test.each<[string, string, unknown, unknown, string?]>([
     { command: 'npm test', run_in_background: true },
     unchecked('execute', 'a background command can outlive the session'),
   ],
+  // Review R1-2: the CLI runs each command's shell in a group of its own, so a job it leaves running is out of reach.
+  [
+    'Bash with a job sent to the background by & is refused',
+    'Bash',
+    { command: 'sleep 30 & echo started' },
+    unchecked('execute', 'a command run in the background with & can outlive the session'),
+  ],
+  [
+    'Bash with & inside a quoted nested shell is refused too',
+    'Bash',
+    { command: "bash -c 'sleep 30 &'" },
+    unchecked('execute', 'a command run in the background with & can outlive the session'),
+  ],
+  [
+    'Bash with &&, &>, >& and |& runs nothing in the background',
+    'Bash',
+    { command: 'git status && git log 2>&1 &>/dev/null |& cat' },
+    call({ tool: 'Bash', kind: 'execute', command: 'git status && git log 2>&1 &>/dev/null |& cat' }),
+  ],
   [
     'Bash with a command that is no string',
     'Bash',
