@@ -195,6 +195,13 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
   };
 }
 
+/**
+ * An owner and a repository name as GitHub allows them. A name of dots alone is refused: the API path would read it as
+ * a path segment, and reach another endpoint (review R1-9).
+ */
+const OWNER = /^[A-Za-z0-9-]+$/;
+const NAME = /^(?!\.+$)[A-Za-z0-9._-]+$/;
+
 /** The owner and repository of a github.com remote URL: https, scp-like ssh or ssh. Undefined for anything else. */
 export function githubRepositoryOf(url: string): { owner: string; repo: string } | undefined {
   const found =
@@ -202,13 +209,15 @@ export function githubRepositoryOf(url: string): { owner: string; repo: string }
     /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/.exec(url) ??
     /^ssh:\/\/git@github\.com(?::22)?\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
   const [, owner, repo] = found ?? [];
-  return owner === undefined || repo === undefined ? undefined : { owner, repo };
+  return owner === undefined || repo === undefined || !OWNER.test(owner) || !NAME.test(repo)
+    ? undefined
+    : { owner, repo };
 }
 
 const GitHubOptions = z.strictObject({
   repository: z
     .string()
-    .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, 'must be owner/name, such as octo/hello')
+    .regex(/^[A-Za-z0-9-]+\/(?!\.+$)[A-Za-z0-9._-]+$/, 'must be owner/name, such as octo/hello')
     .optional(),
   remote: z.string().min(1).optional(),
   draft: z.boolean().optional(),
