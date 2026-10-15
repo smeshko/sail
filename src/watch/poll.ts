@@ -84,7 +84,8 @@ export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<
   return { ...watch, ticketSource: options.ticketSource, store };
 }
 
-export type PollOutcome = 'polled' | 'failed' | 'paused';
+/** How a poll went. `dropped`: its poller was dropped while it waited for the provider, so its answer went unrecorded. */
+export type PollOutcome = 'polled' | 'failed' | 'paused' | 'dropped';
 
 const PAUSING: readonly string[] = ['unauthorized', 'forbidden'];
 
@@ -109,17 +110,22 @@ async function listDesignated(target: WatchTarget): Promise<Ticket[]> {
   throw new PortError('ticketSource', 'listDesignated', 'invalid', `the answer is not a list of tickets: ${where}`);
 }
 
-/** Polls `target` once into its queue, and says how it went. */
+/**
+ * Polls `target` once into its queue, and says how it went. When `dropped` says so once the provider has answered,
+ * nothing is recorded: the queue store is no longer this poll's to write.
+ */
 export async function pollOnce(
   target: WatchTarget,
   now: () => Date,
   policy: QueuePolicy = DEFAULT_QUEUE_POLICY,
+  dropped?: () => boolean,
 ): Promise<PollOutcome> {
   const started = now().getTime();
   let answered: Ticket[];
   try {
     answered = await listDesignated(target);
   } catch (error) {
+    if (dropped?.()) return 'dropped';
     const code = error instanceof PortError ? error.code : undefined;
     const failure = {
       port: 'ticketSource' as const,
@@ -135,6 +141,7 @@ export async function pollOnce(
     target.store.pollFailed({ ...failure, paused: false, retryInMs: retryInMs(target, failures, policy) });
     return 'failed';
   }
+  if (dropped?.()) return 'dropped';
   const { ticketSource, label } = target;
   const tickets = answered.filter(
     (ticket) => ticketSource.isDesignated(ticket, label) && ticket.state.type === 'unstarted',
@@ -165,8 +172,11 @@ export interface Poller {
   start(): Promise<void>;
   /** Clears every timer. A poll in flight is still recorded, and not rescheduled. */
   stop(): void;
-  /** Resolves once no poll is in flight, however each one ended: what they record is on disk by then. */
-  settled(): Promise<void>;
+  /**
+   * Stops for good, and a poll in flight records nothing when its answer comes: for a caller that lets the queue store
+   * go, so that a store opened afresh on the same queue is the only one that writes it.
+   */
+  drop(): void;
   /** Polls the workflow now, paused or not, or joins its poll in flight. A workflow it doesn't poll throws. */
   pollNow(workflow: string): Promise<PollOutcome>;
   /**
@@ -191,6 +201,7 @@ export function createPoller(options: PollerOptions): Poller {
   const timer = new Map<string, unknown>();
   const inFlight = new Map<string, Promise<PollOutcome>>();
   let stopped = false;
+  let dropped = false;
 
   const find = (workflow: string): WatchTarget => {
     const target = targets.find((each) => each.workflow === workflow);
@@ -214,7 +225,7 @@ export function createPoller(options: PollerOptions): Poller {
     const running = inFlight.get(target.workflow);
     if (running !== undefined) return running;
     clear(target);
-    const polling = pollOnce(target, now, policy).then(
+    const polling = pollOnce(target, now, policy, () => dropped).then(
       (outcome) => {
         inFlight.delete(target.workflow);
         schedule(target, outcome);
@@ -246,8 +257,9 @@ export function createPoller(options: PollerOptions): Poller {
       stopped = true;
       for (const target of targets) clear(target);
     },
-    async settled() {
-      await Promise.allSettled([...inFlight.values()]);
+    drop() {
+      dropped = true;
+      poller.stop();
     },
     pollNow: (workflow) => poll(find(workflow)),
     apply(command) {
