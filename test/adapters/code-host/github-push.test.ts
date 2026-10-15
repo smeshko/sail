@@ -202,6 +202,23 @@ test("no hook of the repository's runs during a push that sent the token, refere
   });
 });
 
+test("a global trace2 config that names the helper's variable records nothing of a push that sent the token (review R1-4)", async () => {
+  await withServed(TOKEN, async ({ repo, http, config }) => {
+    detachedCommit(repo, 'a.txt');
+    const traces = ['event', 'normal', 'perf'].map((name) => join(repo.home, `trace2-${name}.log`));
+    const [event, normal, perf] = traces;
+    writeFileSync(
+      join(repo.home, '.gitconfig'),
+      `${config}[trace2]\n\teventTarget = ${event}\n\tnormalTarget = ${normal}\n\tperfTarget = ${perf}\n\tenvVars = SAIL_GIT_TOKEN\n`,
+    );
+    await push(repo, 'sail/x', { remote: 'web', webUrl: http.base });
+    expect({
+      sent: http.requests.some((request) => request.method === 'POST' && request.authorization === 'matched'),
+      traced: traces.filter((file) => existsSync(file) && readFileSync(file, 'utf8').includes(TOKEN)),
+    }).toEqual({ sent: true, traced: [] });
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
   expect(pushArgs('origin', 'sail/x', 'https://github.com')).toEqual([
     '-c',
@@ -244,6 +261,9 @@ test("the push's environment drops git's trace variables and the repository's, k
     SSH_ASKPASS_REQUIRE: 'never',
     GCM_INTERACTIVE: 'never',
     GIT_TRACE_REDACT: '1',
+    GIT_TRACE2: '0',
+    GIT_TRACE2_EVENT: '0',
+    GIT_TRACE2_PERF: '0',
     SAIL_GIT_TOKEN: TOKEN,
   });
 });
