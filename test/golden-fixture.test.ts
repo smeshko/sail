@@ -1,7 +1,7 @@
 // The golden run directory: a complete sail run, validated against every sail.*.v1 schema. It is generated: the run the
 // engine makes of the fixture repository's ticket-to-pr on FAKE-1, written by `bun run golden`, which
 // test/scripts/golden.test.ts holds it equal to. So it shows what a run writes today, its workspace included, and
-// nothing a run can't write yet: no tool call, no validated file and no multi-step call.
+// nothing a run can't write yet: no tool call and no multi-step call.
 import { afterEach, expect, test } from 'bun:test';
 import { accessSync, constants, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -52,7 +52,7 @@ test('the golden run directory is valid against every run-directory schema', () 
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
     'sail.journal.v1': 9,
-    'sail.event.v1': 125,
+    'sail.event.v1': 126,
     'sail.summary.v1': 1,
     'sail.result.v1': 9,
   });
@@ -95,12 +95,10 @@ test("the golden run is the fixture's: its id, its startedAt the clock's first r
   ]);
 });
 
-test('it holds nothing a run cannot write yet: no tool, thinking, validated-file, denial or step event, no ticket:updated, and no publish in its roster; its workspace is in run.json and in the stream', () => {
+test('it holds nothing a run cannot write yet: no tool, thinking, denial or step event, no ticket:updated, and no publish in its roster; its workspace is in run.json and in the stream', () => {
   const types = new Set(lines('events.ndjson').map((event) => String(event.type)));
   const absent = [...types].filter(
-    (type) =>
-      /^(tool|step):/.test(type) ||
-      ['agent:thinking', 'file:validated', 'permission:denied', 'ticket:updated'].includes(type),
+    (type) => /^(tool|step):/.test(type) || ['agent:thinking', 'permission:denied', 'ticket:updated'].includes(type),
   );
   expect(absent).toEqual([]);
   expect([...types].filter((type) => type.startsWith('workspace:')).sort()).toEqual([
@@ -109,7 +107,7 @@ test('it holds nothing a run cannot write yet: no tool, thinking, validated-file
     'workspace:leased',
     'workspace:released',
   ]);
-  expect(types.size).toBe(30);
+  expect(types.size).toBe(31);
   const header = JSON.parse(text('run.json'));
   expect(Object.keys(header)).toEqual([
     'schema',

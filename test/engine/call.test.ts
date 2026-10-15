@@ -25,7 +25,19 @@ import { createEventsFile, EVENTS_FILE, ndjsonConsumer, nextSeq, readEvents } fr
 import { summarize } from '../../src/events/summary';
 import type { Emit, NewEvent, SailEvent } from '../../src/events/types';
 import type { Harness } from '../../src/ports/harness';
-import { agent, file, type StageDefinition, script, stage, value, z } from '../../src/sdk/index';
+import {
+  agent,
+  countItems,
+  doc,
+  file,
+  hasSections,
+  noPlaceholders,
+  type StageDefinition,
+  script,
+  stage,
+  value,
+  z,
+} from '../../src/sdk/index';
 import { scriptedQuery, specSession } from '../helpers/claude-code';
 import { steppingClock } from '../helpers/clock';
 import { runStart } from '../helpers/events';
@@ -1374,5 +1386,100 @@ test("an agent call reads each try's startedAt and finishedAt from its clock: a 
     expect(times).toEqual(iso(clock.readings));
     expect(times).toEqual([0, 100, 200, 300].map((ms) => new Date(Date.parse(CLOCK_START) + ms).toISOString()));
     expect([first?.durationMs, second?.durationMs]).toEqual([100, 100]);
+  });
+});
+
+// Documents: a failed check is invalid output, which the call corrects once.
+
+const SPEC_TEMPLATE =
+  '# Spec\n\n## Requirements\n\n{{requirements: one per criterion}}\n\n## Tasks\n\n{{tasks: one per task}}\n';
+const VALID_SPEC = '# Spec\n\n## Requirements\n\n- greet --shout shouts\n\n## Tasks\n\n1. Add the flag\n2. Test it\n';
+const NO_REQUIREMENTS = '# Spec\n\n## Tasks\n\n1. Add the flag\n';
+const LEFT_AS_TEMPLATE = [
+  'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
+  'spec.md: noPlaceholders: line 9 still holds the placeholder {{tasks: …}}',
+  "spec.md: countItems(Tasks, min 1): 'Tasks' has 0 items, fewer than 1",
+];
+const MISSING_REQUIREMENTS = "spec.md: hasSections(Requirements, Tasks): has no 'Requirements' section";
+
+/** The `spec` step with `spec.md` as a document of the stage's `templates/spec.md`, which this writes. */
+function documentStep(repo: TempRepo) {
+  const stageDir = join(repo.dir, '.sail', 'stages', 'spec');
+  mkdirSync(join(stageDir, 'templates'), { recursive: true });
+  writeFileSync(join(stageDir, 'templates', 'spec.md'), SPEC_TEMPLATE);
+  return agent('spec', {
+    prompt: './prompt.md',
+    consumes: { brief: file('brief.md') },
+    produces: {
+      'spec.md': doc('./templates/spec.md', [
+        hasSections('Requirements', 'Tasks'),
+        noPlaceholders(),
+        countItems('Tasks', { min: 1, as: 'tasks' }),
+      ]),
+    },
+    output: SpecOutput,
+    permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] },
+    budget: { maxTurns: 5, maxUsd: 1, maxMinutes: 5 },
+  });
+}
+
+test('a document left as its template is corrected once: try-2 starts from the template afresh, its prompt ends with each validator message, and the call ends done with the facts derived', async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    const step = documentStep(repo);
+    const started: (string | null)[] = [];
+    const harness = fake(
+      [submits(SPEC, 0.125, { files: {} }), submits(SPEC, 0.25, { files: { 'spec.md': VALID_SPEC } })],
+      {
+        before: (request) => void started.push(textAt(join(request.env.STAGE_OUT ?? '', 'spec.md'))),
+      },
+    );
+    const { paths } = await runCall(s.request(step, harness));
+
+    const first = readBack(join(s.dir(1), 'result.json'));
+    expect(errorsOf(first)).toEqual(LEFT_AS_TEMPLATE.map((message) => ({ reason: 'invalid_output', message })));
+    expect(first.derived).toEqual({ tasks: 0 });
+    expect(started).toEqual([SPEC_TEMPLATE, SPEC_TEMPLATE]);
+    expect(harness.requests[1]?.prompt.trimEnd()).toEndWith(LEFT_AS_TEMPLATE.join('\n\n'));
+    const second = readBack(paths.result);
+    expect([placeOf(first), placeOf(second)]).toEqual([
+      { outcome: 'error', try: 1, validationTry: 1, validationFailed: true },
+      { outcome: 'done', try: 2, validationTry: 2, validationFailed: false },
+    ]);
+    expect([second.derived, second.files]).toEqual([
+      { tasks: 2 },
+      {
+        'spec.md': {
+          path: '01-spec/call-1/try-2/spec.md',
+          bytes: VALID_SPEC.length,
+          sha256: new Bun.CryptoHasher('sha256').update(VALID_SPEC).digest('hex'),
+          validation: {
+            ok: true,
+            checks: ['hasSections(Requirements, Tasks)', 'noPlaceholders', 'countItems(Tasks, min 1)'],
+          },
+        },
+      },
+    ]);
+  });
+});
+
+test('a document invalid in both tries ends the call in error on its second, listing the distinct problems of both', async () => {
+  await withTempRepo(async (repo) => {
+    const s = specStage(repo);
+    const harness = fake([
+      submits(SPEC, 0.125, { files: { 'spec.md': NO_REQUIREMENTS } }),
+      submits(SPEC, 0.25, { files: { 'spec.md': `${NO_REQUIREMENTS}\n{{notes: anything else}}\n` } }),
+    ]);
+    const { paths } = await runCall(s.request(documentStep(repo), harness));
+
+    expect(harness.requests).toHaveLength(2);
+    const final = readBack(paths.result);
+    expect(placeOf(final)).toEqual({ outcome: 'error', try: 2, validationTry: 2, validationFailed: true });
+    expect(errorsOf(final)).toEqual(
+      [MISSING_REQUIREMENTS, 'spec.md: noPlaceholders: line 7 still holds the placeholder {{notes: …}}'].map(
+        (message) => ({ reason: 'invalid_output', message }),
+      ),
+    );
+    expect(existsSync(s.dir(3))).toBe(false);
   });
 });

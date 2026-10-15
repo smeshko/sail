@@ -18,6 +18,8 @@ Bun `>=1.3.14` is the only runtime. No command needs Node.
 - `bun run golden`: regenerates the golden run in `test/fixtures/runs/` and the four views in `test/fixtures/terminal/`
   from a run of the fixture repository, then the dashboard's views in `test/fixtures/dashboard/views/`. Run it after
   changing what a run writes or what the dashboard draws: `verify` fails while they're stale.
+- `bun run pack`: packs the package from the files git doesn't ignore into a tarball. Publish that tarball (ADR-0011),
+  never the checkout.
 - `npm link`, then `sail --version` from any directory: puts this checkout's `sail` bin on the `PATH`. `bun link` does
   the same once `~/.bun/bin` is on the `PATH`.
 
