@@ -470,3 +470,36 @@ test("a second watcher over the same .sail/ is refused while the first runs, eve
     if (!('refused' in third)) await third.stop();
   });
 });
+
+test("a watcher whose field a registration left stale stops, naming the holder, when another repository's watcher took one of its labels meanwhile (review R2-2)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    const watcher = await w.start(['a', 'b']);
+    const mine = readEntry(w.registryDir, 'stub')?.watcher;
+    if (mine === undefined) throw new Error('the watcher recorded no field');
+    recordEntry(w.registryDir, { ...w.entry, watcher: { ...mine, labels: ['sail-a'] } });
+    const other = {
+      schema: 'sail.registry.v1' as const,
+      name: 'other',
+      remote: null,
+      clone: join(repo.home, 'other'),
+      sailDir: join(repo.home, 'other', '.sail'),
+      updatedAt: START,
+      watcher: { ...mine, pid: process.ppid, sailDir: join(repo.home, 'other', '.sail'), labels: ['sail-b'] },
+    };
+    recordEntry(w.registryDir, other);
+    await w.timers.advance(1000);
+    expect(await stopped(watcher)).toBe(true);
+    expect(w.out.filter((line) => line.includes('error'))).toEqual([
+      `09:00:01 error: the label 'sail-b' on the fake ticket source is polled by the watcher of 'other' in ${join(repo.home, 'other')} (pid ${process.ppid}): this watcher stops\n`,
+    ]);
+    expect(readEntry(w.registryDir, 'other')).toEqual(other);
+  });
+});

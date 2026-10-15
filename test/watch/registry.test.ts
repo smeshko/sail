@@ -269,3 +269,18 @@ test('keepWatcher writes its field back when a write dropped it, left it stale o
     lost: { answer: { lost: winner }, entry: entry('fixture', { watcher: winner }) },
   });
 });
+
+test("keepWatcher repairs no field while another repository's live watcher polls one of its labels, and answers that holder (review R2-2)", () => {
+  const dir = registry();
+  const stale = entry('fixture', { watcher: { ...ME, labels: ['sail-a'] } });
+  recordEntry(dir, stale);
+  const takerWatcher = watcher(111, '/work/other/.sail', ['sail-b']);
+  const taker = entry('other', { watcher: takerWatcher });
+  recordEntry(dir, taker);
+  expect(keepWatcher(dir, entry('fixture'), ME, alive(111, 222))).toEqual({
+    holder: { kind: 'label', label: 'sail-b', entry: taker, watcher: takerWatcher },
+  });
+  expect(readEntry(dir, 'fixture')).toEqual(stale);
+  expect(keepWatcher(dir, entry('fixture'), ME, alive(222))).toEqual({ kept: true });
+  expect(readEntry(dir, 'fixture')).toEqual(entry('fixture', { watcher: ME }));
+});
