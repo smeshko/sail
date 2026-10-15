@@ -61,6 +61,13 @@ test('inlineScript makes </script and <!-- inert where they stand, and leaves th
   expect(new Function(`return ${inlineScript('/<!--/u')}`)().test('<!--')).toBe(true);
 });
 
+test('inlineScript is case-insensitive as the HTML tokenizer is: </SCRIPT and </Script are made inert too (review R1-6)', () => {
+  expect(inlineScript('"</SCRIPT ><img src=x onerror=alert(1)></Script</sCrIpT>"')).toBe(
+    '"\\x3C/SCRIPT ><img src=x onerror=alert(1)>\\x3C/Script\\x3C/sCrIpT>"',
+  );
+  expect(new Function(`return ${inlineScript('"</SCRIPT></Script>"')}`)()).toBe('</SCRIPT></Script>');
+});
+
 test('a page whose build fails answers 500 naming why, and builds on the next request once it can', async () => {
   const dir = join(temp, 'page');
   cpSync(PAGE_DIR, dir, { recursive: true });
