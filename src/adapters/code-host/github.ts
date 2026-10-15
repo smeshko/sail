@@ -3,8 +3,7 @@
 // the default branch is never pushed (D3), and the ticket key rides in the body as a hidden marker (D9). Epic 14's
 // operations aren't offered yet (D5). Everything that leaves the adapter, its errors, `raw` values and events, is
 // redacted of the token (D11).
-//
-// The definition is a stub until TASK-005: it requires nothing, and BUILTINS doesn't register it yet.
+import { z } from 'zod';
 import { redactor } from '../../engine/redact';
 import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
@@ -12,7 +11,8 @@ import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { Labelled, PullRequest } from '../../ports/types';
-import { createGitHubClient, type Fetch } from './github-client';
+import { gitSync, nonInteractive, stripUserinfo } from '../workspace/git';
+import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
 import { type GitHubPull, toPullRequest, withTicketMarker } from './github-pull';
 import { pushHead } from './github-push';
 
@@ -195,15 +195,67 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
 }
 
 /** The owner and repository of a github.com remote URL: https, scp-like ssh or ssh. Undefined for anything else. */
-export function githubRepositoryOf(_url: string): { owner: string; repo: string } | undefined {
-  return undefined;
+export function githubRepositoryOf(url: string): { owner: string; repo: string } | undefined {
+  const found =
+    /^https:\/\/(?:[^/@]*@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url) ??
+    /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/.exec(url) ??
+    /^ssh:\/\/git@github\.com(?::22)?\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
+  const [, owner, repo] = found ?? [];
+  return owner === undefined || repo === undefined ? undefined : { owner, repo };
 }
+
+const GitHubOptions = z.strictObject({
+  repository: z
+    .string()
+    .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, 'must be owner/name, such as octo/hello')
+    .optional(),
+  remote: z.string().min(1).optional(),
+  draft: z.boolean().optional(),
+});
+
+/** The environment without its unset variables. */
+const defined = (env: Readonly<Record<string, string | undefined>>): Record<string, string> =>
+  Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
 
 /**
  * `github` in `project.yaml`: `repository`, `remote` and `draft` are optional, the token comes from `SAIL_GITHUB_TOKEN`
  * or else `GITHUB_TOKEN` (D7), and the endpoint from `SAIL_GITHUB_API_URL` (D6).
  */
 export const githubCodeHost: AdapterDefinition<CodeHost> = {
-  requires: () => [],
-  create: () => createGitHubCodeHost({ owner: '', repo: '', token: '', apiUrl: '', env: {} }),
+  requires: () => [['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN']],
+  create(options, context) {
+    const parsed = GitHubOptions.safeParse(options);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const option = issue?.code === 'unrecognized_keys' ? issue.keys.join(', ') : issue?.path.join('.');
+      throw new Error(`github codeHost: option ${option}: ${issue?.message}`);
+    }
+    const env = defined(context.env);
+    const remote = parsed.data.remote ?? 'origin';
+    let named: { owner: string; repo: string } | undefined;
+    if (parsed.data.repository !== undefined) {
+      const [owner = '', repo = ''] = parsed.data.repository.split('/');
+      named = { owner, repo };
+    } else {
+      const url = gitSync(context.root, ['remote', 'get-url', remote], nonInteractive(env));
+      const shown = url.code === 0 ? stripUserinfo(url.stdout.trim()) : 'no URL';
+      named = url.code === 0 ? githubRepositoryOf(url.stdout.trim()) : undefined;
+      if (named === undefined) {
+        throw new Error(
+          `github codeHost: ${remote} is not a github.com remote (${shown}): set the repository option, such as repository: owner/name`,
+        );
+      }
+    }
+    return createGitHubCodeHost({
+      ...named,
+      token: env.SAIL_GITHUB_TOKEN || env.GITHUB_TOKEN || '',
+      apiUrl: env.SAIL_GITHUB_API_URL || GITHUB_API_URL,
+      webUrl: GITHUB_WEB_URL,
+      remote,
+      ...(parsed.data.draft === undefined ? {} : { draft: parsed.data.draft }),
+      env,
+      ...(context.emit === undefined ? {} : { emit: context.emit }),
+      ...(context.now === undefined ? {} : { now: context.now }),
+    });
+  },
 };

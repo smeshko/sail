@@ -81,16 +81,27 @@ const printed = (stdout: string): Record<string, unknown> => {
 
 const BRANCH = 'sail/FAKE-1-shout';
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('push, open-pull-request twice and comment run against GitHub: the branch lands on the origin, one labelled pull request is opened and answered again, and the port events file holds each event, valid', async () => {
+test('push, open-pull-request twice and comment run against GitHub: the branch lands on the origin, one labelled pull request is opened and answered again, and the port events file holds each event, valid', async () => {
   await onGitHub(async ({ repo, world, codehost, originHas }) => {
     writeFileSync(join(repo.dir, 'b.md'), 'Adds the flag.\n');
     writeFileSync(join(repo.dir, 'c.md'), 'Checks passed.\n');
     const events = join(repo.home, 'port-events.ndjson');
     const env = { SAIL_EVENTS: events };
-    const open = ['open-pull-request', '--base', 'main', '--head', BRANCH, '--title', 'T (FAKE-1)', '--body-file', 'b.md', '--ticket', 'FAKE-1', '--label', 'sail'];
+    const open = [
+      'open-pull-request',
+      '--base',
+      'main',
+      '--head',
+      BRANCH,
+      '--title',
+      'T (FAKE-1)',
+      '--body-file',
+      'b.md',
+      '--ticket',
+      'FAKE-1',
+      '--label',
+      'sail',
+    ];
     const pushed = await codehost(['push', BRANCH], env);
     const opened = await codehost(open, env);
     const again = await codehost(open, env);
@@ -115,7 +126,10 @@ test
       creates: 1,
       held: [[1, BRANCH, ['sail'], 'Adds the flag.\n\n\n<!-- sail:ticket FAKE-1 -->']],
     });
-    const lines: ProviderEvent[] = readFileSync(events, 'utf8').trimEnd().split('\n').map((line) => JSON.parse(line));
+    const lines: ProviderEvent[] = readFileSync(events, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => JSON.parse(line));
     const capture = captureEvents();
     for (const event of lines) capture.emit(event);
     expect([lines.map((event) => event.type), eventIssues(capture.stamped('open#1'))]).toEqual([
@@ -125,13 +139,20 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a token GitHub refuses makes open-pull-request exit 1 with GitHub's own message and the code, and stderr holds no token", async () => {
+test("a token GitHub refuses makes open-pull-request exit 1 with GitHub's own message and the code, and stderr holds no token", async () => {
   await onGitHub(async ({ repo, codehost }) => {
     writeFileSync(join(repo.dir, 'b.md'), 'body\n');
-    const refused = await codehost(['open-pull-request', '--base', 'main', '--head', BRANCH, '--title', 'T', '--body-file', 'b.md']);
+    const refused = await codehost([
+      'open-pull-request',
+      '--base',
+      'main',
+      '--head',
+      BRANCH,
+      '--title',
+      'T',
+      '--body-file',
+      'b.md',
+    ]);
     expect([refused.code, refused.stdout, refused.stderr]).toEqual([
       EXIT_FAILED,
       '',
@@ -140,10 +161,7 @@ test
   }, 'ghp_another_token');
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("an operation github doesn't offer yet exits 1, saying so, and asks GitHub nothing", async () => {
+test("an operation github doesn't offer yet exits 1, saying so, and asks GitHub nothing", async () => {
   await onGitHub(async ({ world, codehost, repo }) => {
     const merged = await codehost(['merge', '1', '--method', 'squash']);
     expect([merged.code, merged.stderr, world.requests.length, existsSync(join(repo.dir, '.sail-runs'))]).toEqual([

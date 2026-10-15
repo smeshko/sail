@@ -691,10 +691,7 @@ test.each<[string, Record<string, string>]>([
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an adapter the built-ins do not have is refused with exit 3, naming the port and the built-ins that fill it, and no run directory', async () => {
+test('an adapter the built-ins do not have is refused with exit 3, naming the port and the built-ins that fill it, and no run directory', async () => {
   const { code, stderr, ranFrom } = await runWith((sail) =>
     edit(sail, 'project.yaml', 'codeHost: { use: fake }', 'codeHost: { use: githb }'),
   );

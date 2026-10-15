@@ -16,10 +16,7 @@ import { type TempRepo, withTempRepo } from '../../helpers/temp-repo';
 const SAIL_TOKEN = 'ghp_MARKER_sail_token_6d02';
 const GITHUB_TOKEN = 'ghp_MARKER_github_token_91fa';
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("githubRepositoryOf reads github.com's https, scp-like and ssh remotes, with or without .git, and nothing else", () => {
+test("githubRepositoryOf reads github.com's https, scp-like and ssh remotes, with or without .git, and nothing else", () => {
   const urls = [
     'https://github.com/octo/hello.git',
     'https://github.com/octo/hello',
@@ -35,7 +32,20 @@ test
     'https://github.com.evil/octo/hello',
   ];
   const hello = { owner: 'octo', repo: 'hello' };
-  expect(urls.map(githubRepositoryOf)).toEqual([hello, hello, hello, hello, hello, hello, hello, hello, undefined, undefined, undefined, undefined]);
+  expect(urls.map(githubRepositoryOf)).toEqual([
+    hello,
+    hello,
+    hello,
+    hello,
+    hello,
+    hello,
+    hello,
+    hello,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  ]);
 });
 
 /** The repository's config: the fakes, but the code host's entry. */
@@ -83,17 +93,22 @@ async function withWorld<T>(repo: TempRepo, token: string, fn: (world: GitHubWor
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('github resolves with GITHUB_TOKEN alone or SAIL_GITHUB_TOKEN alone, and with both it sends SAIL_GITHUB_TOKEN, to SAIL_GITHUB_API_URL', async () => {
+test('github resolves with GITHUB_TOKEN alone or SAIL_GITHUB_TOKEN alone, and with both it sends SAIL_GITHUB_TOKEN, to SAIL_GITHUB_API_URL', async () => {
   await withTempRepo(async (repo) => {
     const read = async (token: string, env: Record<string, string>) =>
       withWorld(repo, token, async (world, url) => {
-        const resolved = await resolve(repo, { use: 'github', repository: 'o/r' }, { ...env, SAIL_GITHUB_API_URL: url });
+        const resolved = await resolve(
+          repo,
+          { use: 'github', repository: 'o/r' },
+          { ...env, SAIL_GITHUB_API_URL: url },
+        );
         if (!('host' in resolved)) return resolved;
         const pr = await resolved.host.getPullRequest(7);
-        return { name: resolved.host.name, number: pr.number, matched: world.requests.map((request) => request.tokenMatched) };
+        return {
+          name: resolved.host.name,
+          number: pr.number,
+          matched: world.requests.map((request) => request.tokenMatched),
+        };
       });
     const answered = { name: 'github', number: 7, matched: [true] };
     expect([
@@ -104,10 +119,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('without a token, or with both variables empty, github is refused at preflight, naming both variables', async () => {
+test('without a token, or with both variables empty, github is refused at preflight, naming both variables', async () => {
   await withTempRepo(async (repo) => {
     const refusal = '/adapters/codeHost needs one of SAIL_GITHUB_TOKEN, GITHUB_TOKEN, none of which is set';
     expect([
@@ -117,10 +129,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an option github cannot read is refused, naming the option: a draft that is no boolean, an unknown option, a malformed repository', async () => {
+test('an option github cannot read is refused, naming the option: a draft that is no boolean, an unknown option, a malformed repository', async () => {
   await withTempRepo(async (repo) => {
     const env = { GITHUB_TOKEN };
     const refused = await Promise.all([
@@ -131,15 +140,14 @@ test
     expect(refused.map((result) => ('issues' in result ? result.issues : result))).toEqual([
       [expect.stringContaining('/adapters/codeHost github could not be created: github codeHost: option draft: ')],
       [expect.stringContaining('/adapters/codeHost github could not be created: github codeHost: option apiUrl: ')],
-      ['/adapters/codeHost github could not be created: github codeHost: option repository: must be owner/name, such as octo/hello'],
+      [
+        '/adapters/codeHost github could not be created: github codeHost: option repository: must be owner/name, such as octo/hello',
+      ],
     ]);
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("without the repository option, a github.com origin names the repository, and any other origin is refused, naming the option and none of the URL's credentials", async () => {
+test("without the repository option, a github.com origin names the repository, and any other origin is refused, naming the option and none of the URL's credentials", async () => {
   await withTempRepo(async (repo) => {
     const env = { GITHUB_TOKEN };
     repo.git('remote', 'add', 'origin', '/tmp/origin.git');
