@@ -129,7 +129,8 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
           throw transport(op, error, `GitHub is unreachable at ${host}`);
         }
         try {
-          text = await response.text();
+          // Masked whole, before anything cuts it: a token across the cut would leave a fragment no redactor knows.
+          text = redact.text(await response.text());
         } catch (error) {
           throw transport(op, error, `the answer from GitHub at ${host} broke off`);
         }
