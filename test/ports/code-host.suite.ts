@@ -153,10 +153,7 @@ export function codeHostSuite(
     },
   );
 
-  // biome-ignore format: TDD-PENDING TASK-001
-  test
-    .skip // TDD-PENDING TASK-001
-    (`${label}: opening again from an open pull request's head into its base returns it, adds only the labels it lacks, and emits only those`, async () => {
+  test(`${label}: opening again from an open pull request's head into its base returns it, adds only the labels it lacks, and emits only those`, async () => {
     const { adapter, world, capture } = await start();
     const { cwd, branch } = await world.pushable();
     await adapter.push(cwd, branch);
@@ -164,7 +161,9 @@ export function codeHostSuite(
     const first = await adapter.openPullRequest(request);
     const opened = capture.events.length;
     // Settled, so an adapter that refuses the second open fails the assertion below rather than the case.
-    const again = await settle(adapter.openPullRequest({ ...request, title: 'Again', body: 'Second.', labels: [world.label] }));
+    const again = await settle(
+      adapter.openPullRequest({ ...request, title: 'Again', body: 'Second.', labels: [world.label] }),
+    );
     const afterSecond = capture.events.slice(opened);
     const third = await settle(adapter.openPullRequest({ ...request, labels: [world.label] }));
     expect({
@@ -183,10 +182,7 @@ export function codeHostSuite(
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-001
-  test
-    .skip // TDD-PENDING TASK-001
-    (`${label}: a push to the default branch rejects as invalid, and records nothing`, async () => {
+  test(`${label}: a push to the default branch rejects as invalid, and records nothing`, async () => {
     const { adapter, world, capture } = await start();
     const before = await adapter.getPullRequest(world.designated);
     const { cwd } = await world.pushable();

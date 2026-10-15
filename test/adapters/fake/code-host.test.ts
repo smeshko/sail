@@ -115,10 +115,7 @@ test('opening from a head never pushed, or pushing from outside a git checkout, 
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("a push to the fixture seed's default branch, main, rejects as invalid and leaves the state file byte for byte as it was", async () => {
+test("a push to the fixture seed's default branch, main, rejects as invalid and leaves the state file byte for byte as it was", async () => {
   const world = files();
   const host = createFakeCodeHost({ ...world, env: repo().env });
   await host.push(repo().dir, 'sail/FAKE-9');

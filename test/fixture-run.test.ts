@@ -303,10 +303,7 @@ test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that 
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a second run of FAKE-1, forced, in a copy of a repository whose first run completed, completes with the same pull request 5, and opens no second one', async () => {
+test('a second run of FAKE-1, forced, in a copy of a repository whose first run completed, completes with the same pull request 5, and opens no second one', async () => {
   const first = await completed();
   await withTempRepo(async (other) => {
     copyRun(first.repo.dir, other.dir);
@@ -322,10 +319,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a run killed after open-pull-request answered resumes and completes with the same pull request 5, and the fake holds one pull request from the branch', async () => {
+test('a run killed after open-pull-request answered resumes and completes with the same pull request 5, and the fake holds one pull request from the branch', async () => {
   await withTempRepo(async (repo) => {
     holdAfterOpen(copyFixture(repo.dir));
     const held = join(repo.home, 'open.pid');

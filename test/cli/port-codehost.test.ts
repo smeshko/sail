@@ -229,10 +229,7 @@ test('open-pull-request from a head that was never pushed exits 1 as invalid', a
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a second open-pull-request from the same head into the same base exits 0 and prints the same pull request, with the label it lacked added', async () => {
+test('a second open-pull-request from the same head into the same base exits 0 and prints the same pull request, with the label it lacked added', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     await codehost(repo, ['push', 'sail/x']);
@@ -249,10 +246,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('push of the default branch, main, exits 1 as invalid, and the fake records no push', async () => {
+test('push of the default branch, main, exits 1 as invalid, and the fake records no push', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const pushed = await codehost(repo, ['push', 'main']);
