@@ -104,10 +104,7 @@ const offline: CodeHostWorld = {
   pushable: async () => pushable(),
 };
 
-// biome-ignore format: TDD-PENDING TASK-004
-describe
-  .skip // TDD-PENDING TASK-004
-  ('the port suite, offline', () => {
+describe('the port suite, offline', () => {
   codeHostSuite(
     'github',
     async (emit) => {
@@ -186,10 +183,7 @@ if (process.env.SAIL_LIVE_CODE_HOST === '1') {
 
 const MARKER_LINE = '\n\n<!-- sail:ticket FAKE-1 -->';
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a first open looks the head up, creates the pull request with draft false and the ticket marker, then labels it, and a later read gives the ticket key back', async () => {
+test('a first open looks the head up, creates the pull request with draft false and the ticket marker, then labels it, and a later read gives the ticket key back', async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
@@ -211,11 +205,25 @@ test
     `POST /repos/o/r/issues/${pr.number}/labels`,
   ]);
   expect([sent[1]?.body, sent[2]?.body]).toEqual([
-    { title: 'Add a --shout flag (FAKE-1)', head: branch, base: 'main', body: `Adds the flag.${MARKER_LINE}`, draft: false },
+    {
+      title: 'Add a --shout flag (FAKE-1)',
+      head: branch,
+      base: 'main',
+      body: `Adds the flag.${MARKER_LINE}`,
+      draft: false,
+    },
     { labels: ['sail'] },
   ]);
   expect(capture.events.slice(1)).toEqual([
-    { type: 'codehost:pr_opened', number: pr.number, url: `https://github.com/o/r/pull/${pr.number}`, draft: false, base: 'main', head: branch, ticketKey: 'FAKE-1' },
+    {
+      type: 'codehost:pr_opened',
+      number: pr.number,
+      url: `https://github.com/o/r/pull/${pr.number}`,
+      draft: false,
+      base: 'main',
+      head: branch,
+      ticketKey: 'FAKE-1',
+    },
     { type: 'codehost:labelled', number: pr.number, label: 'sail', change: 'added' },
   ]);
   expect([pr.number, pr.ticketKey, pr.labels, (await adapter.getPullRequest(pr.number)).ticketKey]).toEqual([
@@ -226,10 +234,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('opening again answers the open pull request, asks for only the label it lacks, emits only that, and creates nothing', async () => {
+test('opening again answers the open pull request, asks for only the label it lacks, emits only that, and creates nothing', async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
@@ -237,32 +242,48 @@ test
   await adapter.push(cwd, branch);
   const first = await adapter.openPullRequest({ base: 'main', head: branch, title: 'T', body: '', labels: ['sail'] });
   const [from, emitted] = [on.requests.length, capture.events.length];
-  const again = await adapter.openPullRequest({ base: 'main', head: branch, title: 'T2', body: '', labels: ['sail', 'review'] });
+  const again = await adapter.openPullRequest({
+    base: 'main',
+    head: branch,
+    title: 'T2',
+    body: '',
+    labels: ['sail', 'review'],
+  });
   expect({
     number: again.number,
     labels: again.labels,
-    routes: on.routes().slice(from).map((route) => route.split('?')[0]),
+    routes: on
+      .routes()
+      .slice(from)
+      .map((route) => route.split('?')[0]),
     asked: on.requests.slice(from).flatMap((request) => (request.body === undefined ? [] : [request.body])),
     events: capture.events.slice(emitted),
   }).toEqual({
     number: first.number,
     labels: ['sail', 'review'],
-    routes: ['GET /repos/o/r/pulls', `POST /repos/o/r/issues/${first.number}/labels`, `GET /repos/o/r/pulls/${first.number}`],
+    routes: [
+      'GET /repos/o/r/pulls',
+      `POST /repos/o/r/issues/${first.number}/labels`,
+      `GET /repos/o/r/pulls/${first.number}`,
+    ],
     asked: [{ labels: ['review'] }],
     events: [{ type: 'codehost:labelled', number: first.number, label: 'review', change: 'added' }],
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a create that loses a race to another, 422 "already exists", looks again and answers that pull request, announcing nothing', async () => {
+test('a create that loses a race to another, 422 "already exists", looks again and answers that pull request, announcing nothing', async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
   // Pull request 7 is open from sail/designated: the first lookup is told there is none, as if it opened since.
   on.inject('GET /pulls', { status: 200, body: [] });
-  const pr = await adapter.openPullRequest({ base: 'main', head: 'sail/designated', title: 'T', body: '', labels: ['sail'] });
+  const pr = await adapter.openPullRequest({
+    base: 'main',
+    head: 'sail/designated',
+    title: 'T',
+    body: '',
+    labels: ['sail'],
+  });
   expect({
     number: pr.number,
     routes: on.routes().map((route) => route.split('?')[0]),
@@ -274,10 +295,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the draft option opens a draft unless the request says otherwise, and the answer's draft is GitHub's", async () => {
+test("the draft option opens a draft unless the request says otherwise, and the answer's draft is GitHub's", async () => {
   const on = world();
   const adapter = host(on, undefined, { draft: true });
   const [a, b] = [pushable(), pushable()];
@@ -292,16 +310,19 @@ test
   }).toEqual({ sent: [true, false], answered: [true, false], held: [true, false] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a label GitHub drops is left out of the answer, and no codehost:labelled is emitted for it', async () => {
+test('a label GitHub drops is left out of the answer, and no codehost:labelled is emitted for it', async () => {
   const on = world({ missingLabels: 'drop', repositoryLabels: ['sail'] });
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
   const { cwd, branch } = pushable();
   await adapter.push(cwd, branch);
-  const pr = await adapter.openPullRequest({ base: 'main', head: branch, title: 'T', body: '', labels: ['sail', 'unknown'] });
+  const pr = await adapter.openPullRequest({
+    base: 'main',
+    head: branch,
+    title: 'T',
+    body: '',
+    labels: ['sail', 'unknown'],
+  });
   const labelled = await adapter.addLabel(7, 'unknown');
   expect({
     labels: pr.labels,
@@ -314,16 +335,16 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a push to the default branch is refused as invalid after only the repository read, and the origin is untouched', async () => {
+test('a push to the default branch is refused as invalid after only the repository read, and the origin is untouched', async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
   const repository = repo();
   commit(repository, 'main-attempt');
-  const before = Bun.spawnSync(['git', 'for-each-ref'], { cwd: repository.origin, env: repository.env }).stdout.toString();
+  const before = Bun.spawnSync(['git', 'for-each-ref'], {
+    cwd: repository.origin,
+    env: repository.env,
+  }).stdout.toString();
   const error = await rejection(adapter.push(repository.dir, 'main'));
   expect({
     failure: portFailure(error),
@@ -338,10 +359,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("listDesignated, checks, merge and removeLabel reject as invalid, saying github doesn't support them yet, with no request and no event", async () => {
+test("listDesignated, checks, merge and removeLabel reject as invalid, saying github doesn't support them yet, with no request and no event", async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
@@ -367,10 +385,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("parseRef takes a number, #number or this repository's pull URL, whole, with a trailing slash or anchor, and nothing else", () => {
+test("parseRef takes a number, #number or this repository's pull URL, whole, with a trailing slash or anchor, and nothing else", () => {
   const adapter = host(world());
   const refs = [
     '12',
@@ -384,13 +399,21 @@ test
     '07',
     '12abc',
   ];
-  expect(refs.map((ref) => adapter.parseRef(ref))).toEqual([12, 12, 12, 12, 12, undefined, undefined, undefined, undefined, undefined]);
+  expect(refs.map((ref) => adapter.parseRef(ref))).toEqual([
+    12,
+    12,
+    12,
+    12,
+    12,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('addLabel and comment on a number that is an issue, not a pull request, reject as not_found and change nothing', async () => {
+test('addLabel and comment on a number that is an issue, not a pull request, reject as not_found and change nothing', async () => {
   const on = world();
   const adapter = host(on);
   const errors = [await rejection(adapter.addLabel(9, 'sail')), await rejection(adapter.comment(9, 'hello'))];
@@ -406,10 +429,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a ticket key that could close the marker, holding --> or a space, is refused as invalid before any request', async () => {
+test('a ticket key that could close the marker, holding --> or a space, is refused as invalid before any request', async () => {
   const on = world();
   const adapter = host(on);
   const request = { base: 'main', head: 'sail/designated', title: 'T', body: '' };
@@ -426,10 +446,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('with every request answered 401 echoing the token, no message, raw or event of any operation holds it', async () => {
+test('with every request answered 401 echoing the token, no message, raw or event of any operation holds it', async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
@@ -437,7 +454,9 @@ test
   const { cwd, branch } = pushable();
   const errors = [
     await rejection(adapter.push(cwd, branch)),
-    await rejection(adapter.openPullRequest({ base: 'main', head: branch, title: TOKEN, body: TOKEN, labels: ['sail'] })),
+    await rejection(
+      adapter.openPullRequest({ base: 'main', head: branch, title: TOKEN, body: TOKEN, labels: ['sail'] }),
+    ),
     await rejection(adapter.getPullRequest(7)),
     await rejection(adapter.addLabel(7, 'sail')),
     await rejection(adapter.comment(7, 'hello')),
