@@ -8,8 +8,9 @@
 //
 // The guardrail cases (7.3), each under $0.10 on the default model: a denied command the session recovers from, no MCP
 // tool, a write outside the workspace, the credential scrub (`printenv`), the dollar, turn and minute budgets, and an
-// abort. The minute and abort cases also check that no process of the session is left, by its workspace path.
-import { describe, expect, test } from 'bun:test';
+// abort, before a tool call and during one. The minute and abort cases also check that no process of the session is
+// left, by its workspace path, and those that run a command check that its shell is gone too.
+import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +30,11 @@ import { harnessSuite } from '../../ports/harness.suite';
 const LIVE = process.env.SAIL_LIVE === '1';
 const MODEL = process.env.SAIL_LIVE_MODEL ?? 'claude-haiku-5-5';
 const SENTINEL = 'SENTINEL-7Q';
+/** The command the minute and abort cases leave running in the Bash tool, so a surviving shell would show. */
+const SLEEP = 'sleep 47';
+
+// A real session takes seconds: the port suite's cases, which set no timeout of their own, get the live cases' one.
+if (LIVE) setDefaultTimeout(600_000);
 
 /** A request in a fresh workspace and call directory, prompted `prompt`. */
 function request(prompt: string, extra: Partial<HarnessRequest> = {}): HarnessRequest {
@@ -145,17 +151,23 @@ describe.skipIf(!LIVE)('claude-code live', () => {
     }
   }, 600_000);
 
-  /** Runs `req` on the real harness, with every event it emitted. */
-  async function guarded(req: HarnessRequest, signalAfterStartMs?: number) {
+  /** Runs `req` on the real harness, with every event it emitted, aborting it `abortAfterMs` after `abortOn` first holds. */
+  async function guarded(
+    req: HarnessRequest,
+    abortAfterMs?: number,
+    abortOn: (event: HarnessEvent) => boolean = (event) => event.type === 'harness:session_start',
+  ) {
     const events: HarnessEvent[] = [];
     const controller = new AbortController();
+    let armed = false;
     const result: HarnessResult = await createClaudeCodeHarness({ env: env() }).run({
       ...req,
-      ...(signalAfterStartMs === undefined ? {} : { signal: controller.signal }),
+      ...(abortAfterMs === undefined ? {} : { signal: controller.signal }),
       onEvent: (event) => {
         events.push(event);
-        if (event.type === 'harness:session_start' && signalAfterStartMs !== undefined) {
-          setTimeout(() => controller.abort(), signalAfterStartMs);
+        if (abortAfterMs !== undefined && !armed && abortOn(event)) {
+          armed = true;
+          setTimeout(() => controller.abort(), abortAfterMs);
         }
       },
     });
@@ -235,15 +247,27 @@ describe.skipIf(!LIVE)('claude-code live', () => {
     expect(result.outcome === 'error' ? result.message : result.outcome).toStartWith('budget exceeded: maxTurns 2');
   }, 600_000);
 
-  test('a maxMinutes overrun ends in error naming maxMinutes, and leaves no process of the session', async () => {
-    const req = request('Read README.md slowly: one line at a time, thinking about each, for as long as you can.', {
+  // A session that only reads finishes inside 15 s, so the overrun comes from a command that outlasts the budget.
+  test('a maxMinutes overrun ends in error naming maxMinutes, and leaves no process of the session or its shell', async () => {
+    const req = request(`Run \`${SLEEP}\` with Bash, in the foreground, then submit done.`, {
+      permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: [SLEEP] },
       budget: { maxTurns: 40, maxUsd: 0.5, maxMinutes: 0.25 },
     });
-    const { result } = await guarded(req);
+    const { result, events } = await guarded(req);
     expect(result.outcome === 'error' ? result.message : result.outcome).toStartWith(
       'budget exceeded: maxMinutes 0.25',
     );
-    expect(processesOf(dirname(req.cwd))).toEqual([]);
+    expect(events.some((event) => event.type === 'tool:start' && event.tool === 'Bash')).toBe(true);
+    expect([...processesOf(dirname(req.cwd)), ...processesOf(SLEEP)]).toEqual([]);
+  }, 600_000);
+
+  test('an abort while a Bash command runs leaves no process of the session or its shell', async () => {
+    const req = request(`Run \`${SLEEP}\` with Bash, in the foreground, then submit done.`, {
+      permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: [SLEEP] },
+    });
+    const { result } = await guarded(req, 3_000, (event) => event.type === 'tool:start' && event.tool === 'Bash');
+    expect(result.outcome === 'error' ? result.message : result.outcome).toBe('aborted');
+    expect([...processesOf(dirname(req.cwd)), ...processesOf(SLEEP)]).toEqual([]);
   }, 600_000);
 
   test('an abort 5 s after the session starts ends in error aborted, and leaves no process of the session', async () => {
