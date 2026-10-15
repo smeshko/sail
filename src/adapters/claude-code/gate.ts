@@ -2,8 +2,11 @@
 // maps it to sail's ToolCall and answers with decide()'s verdict: allow, or deny with the reason, which the model
 // reads. `canUseTool` is the fail-closed fallback: whatever reaches it the gate never decided, so it is denied, unless
 // it is the submission. Each denial is reported with its rule, the step's permissions under it and the reason (D9, D11).
+// A Grep of a folder reads every file below it, so it also needs a read glob that covers them all.
+import { statSync } from 'node:fs';
 import type { CanUseTool, HookCallback, HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import { type DecideContext, type DenialRule, decide, type ToolKind } from '../../engine/permissions';
+import { type DecideContext, type DenialRule, decide, type ToolCall, type ToolKind } from '../../engine/permissions';
+import { place, resolvePhysical, roots } from '../../engine/permissions/paths';
 import type { Permissions } from '../../engine/permissions/types';
 import { type Denial, SUBMIT_TOOL, toToolCall } from './tool-call';
 
@@ -28,6 +31,48 @@ function ruleOf(kind: ToolKind): DenialRule {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/**
+ * The folder below which a read glob matches every path: `` for `**` and `**\/*`, `src` for `src/**` and `src/**\/*`;
+ * undefined for any other glob, or one whose folder holds a wildcard.
+ */
+function subtreeOf(glob: string): string | undefined {
+  const match = /^(?:(.*)\/)?\*\*(?:\/\*)?$/.exec(glob);
+  if (match === null) return undefined;
+  const folder = match[1] ?? '';
+  return /[*?[\]{}]/.test(folder) || folder.startsWith('$') || folder.startsWith('/') ? undefined : folder;
+}
+
+/**
+ * Why a Grep of `call`'s folders can't run, though decide() allowed each folder: it reads every file below a folder in
+ * the workspace, and a read glob that matches the folder alone doesn't cover them. A folder runs only below a glob
+ * that matches all of it; a file, or a folder in `$STAGE_IN` or `$STAGE_OUT`, is decide()'s alone.
+ */
+function uncoveredSearch(call: ToolCall, permissions: Permissions, ctx: DecideContext): string | undefined {
+  const at = roots(ctx);
+  const from = resolvePhysical(call.cwd ?? ctx.worktree, '/');
+  if (!from.ok) return `${call.tool}: ${from.reason}`;
+  const folders = permissions.read.map(subtreeOf).filter((folder): folder is string => folder !== undefined);
+  for (const path of call.paths) {
+    const found = resolvePhysical(path, from.path);
+    if (!found.ok || place(found.path, at) !== 'worktree' || !isFolder(found.path)) continue;
+    const rel = found.path === at.worktree ? '' : found.path.slice(at.worktree.length + 1);
+    if (folders.some((folder) => folder === '' || rel === folder || rel.startsWith(`${folder}/`))) continue;
+    return (
+      `${call.tool} of ${path} reads every file below ${found.path}, and no read glob covers them all: ` +
+      'search a file, or a folder a "<folder>/**" glob covers'
+    );
+  }
+  return undefined;
+}
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 const decision = (permissionDecision: 'allow' | 'deny', reason?: string): HookJSONOutput => ({
   hookSpecificOutput: {
@@ -64,7 +109,9 @@ export function createGate(options: GateOptions): Gate {
         };
       }
       const decided = decide(mapped.call, permissions, ctx);
-      return decided.allow ? undefined : { rule: decided.rule, reason: decided.reason };
+      if (!decided.allow) return { rule: decided.rule, reason: decided.reason };
+      const uncovered = tool === 'Grep' ? uncoveredSearch(mapped.call, permissions, ctx) : undefined;
+      return uncovered === undefined ? undefined : { rule: 'read' as const, reason: uncovered };
     } catch (error) {
       return { rule: 'tools' as const, reason: `${tool}: can't be decided: ${messageOf(error)}` };
     }
