@@ -3,10 +3,7 @@
 import { expect, test } from 'bun:test';
 import { ago, clock, cost, duration, percent, tokens } from '../../../src/dashboard/page/format';
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('duration gives ms, tenths of a second, minutes and seconds, then hours and minutes, at each edge', () => {
+test('duration gives ms, tenths of a second, minutes and seconds, then hours and minutes, at each edge', () => {
   const at = [0, 999, 1000, 1250, 59_999, 60_000, 184_000, 3_599_999, 3_600_000, 7_500_000];
   expect(at.map(duration)).toEqual([
     '0ms',
@@ -23,19 +20,13 @@ test
   expect([undefined, -1, Number.NaN].map(duration)).toEqual(['—', '—', '—']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('tokens gives counts, one-decimal and whole thousands, then millions, a k count that rounds to 1000k in millions', () => {
+test('tokens gives counts, one-decimal and whole thousands, then millions, a k count that rounds to 1000k in millions', () => {
   const at = [0, 999, 1000, 9999, 10_000, 999_499, 999_999, 1_000_000, 9_940_000, 12_345_678];
   expect(at.map(tokens)).toEqual(['0', '999', '1.0k', '10.0k', '10k', '999k', '1.0m', '1.0m', '9.9m', '12m']);
   expect(tokens(undefined)).toBe('?');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('cost, clock, ago and percent', () => {
+test('cost, clock, ago and percent', () => {
   expect([0.31, 1.346, 0.004, 0, 25, undefined].map(cost)).toEqual([
     '$0.31',
     '$1.35',

@@ -486,3 +486,15 @@ _Avoid_: pickup, schedule, spawn
 **Dashboard**:
 The live, read-only view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls nothing; the CLI does (`sail watch`, `sail unwatch`, `sail queue …`, `sail stop`).
 _Avoid_: UI, console, monitor, board
+
+**Stage card**:
+One call's card in the dashboard's run view, with its outcome, tries, duration, cost and denials, or a pending card for a roster stage the run hasn't called yet. Cards come from the run's events and its roster alone, so a new stage shows with no dashboard change.
+_Avoid_: tile, step card, job
+
+**Inspector**:
+The dashboard's panel for one call, with its overview, files, permissions and log tabs. It explains a denial from the run's files alone: the command, the rule, and the step's permissions under it.
+_Avoid_: details pane, drawer
+
+**Needs attention**:
+The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call.
+_Avoid_: alerts, signals, triage

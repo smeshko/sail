@@ -5,10 +5,7 @@ import { parkedCommands, runCommands } from '../../../src/dashboard/page/command
 
 const RUN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('runCommands gives sail show always, --follow while the run runs, and sail resume once it is suspended', () => {
+test('runCommands gives sail show always, --follow while the run runs, and sail resume once it is suspended', () => {
   const commands = (status: string) => runCommands(RUN, status).map(({ label, command }) => `${label}: ${command}`);
   expect(commands('running')).toEqual([`show: sail show ${RUN}`, `follow: sail show ${RUN} --follow`]);
   expect(commands('suspended')).toEqual([`show: sail show ${RUN}`, `resume: sail resume ${RUN}`]);
@@ -16,10 +13,7 @@ test
   expect(commands('failed')).toEqual([`show: sail show ${RUN}`]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('parkedCommands gives requeue and drop, and a word that is not plain is single-quoted for the shell', () => {
+test('parkedCommands gives requeue and drop, and a word that is not plain is single-quoted for the shell', () => {
   expect(parkedCommands('ticket-to-pr', 'ticket:FAKE-6')).toEqual([
     { label: 'requeue', command: 'sail queue requeue ticket-to-pr ticket:FAKE-6' },
     { label: 'drop', command: 'sail queue drop ticket-to-pr ticket:FAKE-6' },

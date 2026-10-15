@@ -4,10 +4,7 @@
 import { expect, test } from 'bun:test';
 import { escapeHtml, html, join, raw, SafeHtml, safeHref } from '../../../src/dashboard/page/html';
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('html escapes every interpolation, as element text and inside either quote of an attribute', () => {
+test('html escapes every interpolation, as element text and inside either quote of an attribute', () => {
   expect(html`<p>${'<img src=x onerror=alert(1)>'}</p>`.value).toBe('<p>&lt;img src=x onerror=alert(1)&gt;</p>');
   expect(html`<a title="${`"'`}">`.value).toBe('<a title="&quot;&#39;">');
   expect(html`<a title='${"' onmouseover='x"}'>`.value).toBe("<a title='&#39; onmouseover=&#39;x'>");
@@ -19,10 +16,7 @@ test
   expect(escapeHtml(`<>&"'`)).toBe('&lt;&gt;&amp;&quot;&#39;');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a nested html, an array of them, null, undefined and false interpolate as D5 says, and raw() is the only other way in', () => {
+test('a nested html, an array of them, null, undefined and false interpolate as D5 says, and raw() is the only other way in', () => {
   const items = ['a<', 'b'].map((item) => html`<li>${item}</li>`);
   const rendered = html`<ul>${items}</ul>${null}${undefined}${false}${0}${raw('<i>✓</i>')}${'<i>'}`;
   expect(rendered).toBeInstanceOf(SafeHtml);
@@ -31,10 +25,7 @@ test
   expect(join([html`<i>1</i>`, '<2>', null], html`<br>`).value).toBe('<i>1</i><br>&lt;2&gt;<br>');
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('safeHref takes http and https URLs as given, and refuses every other scheme, a scheme-relative URL and a non-URL', () => {
+test('safeHref takes http and https URLs as given, and refuses every other scheme, a scheme-relative URL and a non-URL', () => {
   for (const url of ['https://example.com/x', 'http://127.0.0.1:3400/', 'HTTPS://example.com/a?b=1#c']) {
     expect(safeHref(url)).toBe(url);
   }
