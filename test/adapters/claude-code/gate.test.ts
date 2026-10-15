@@ -341,7 +341,7 @@ describe("with the fixture spec stage's commands, what decide() can't see is den
   const FIXTURE: Permissions = {
     read: ['**'],
     write: ['$STAGE_OUT/**'],
-    commands: ['git log *', 'git diff *', 'sleep *'],
+    commands: ['git log *', 'git diff *', 'sleep *', 'find *'],
   };
   test.each<[string, string, 'allow' | 'deny']>([
     ['zsh, whose >! writes its next word', "zsh -c 'cd $STAGE_OUT && git log -1 >! /tmp/outside-target'", 'deny'],
@@ -353,6 +353,11 @@ describe("with the fixture spec stage's commands, what decide() can't see is den
     ['a background & in a substitution', 'git log $(sleep 30 &)', 'deny'],
     ['git diff --no-index', 'git diff --no-index /dev/null /etc/hosts', 'deny'],
     ['git diff --no-index inside bash -c', "bash -c 'git diff --no-index /dev/null /etc/hosts'", 'deny'],
+    // git diff turns --no-index on by itself when an operand lies outside the worktree.
+    ['git diff of an absolute path outside', 'git diff /dev/null /etc/hosts', 'deny'],
+    ['git diff of a path that climbs out', 'git diff README.md ../../outside.txt', 'deny'],
+    ['git diff of what find hands it', 'find src -name a.ts -exec git diff README.md {} \\;', 'deny'],
+    ['git diff of revisions and a path inside', 'git diff HEAD~1..HEAD -- src/a.ts', 'allow'],
     ['allowed commands chained, with a redirection of stderr', 'git log -1 2>&1 && git diff HEAD', 'allow'],
   ])('%s', async (_, command, expected) => {
     const g = gate(FIXTURE);
