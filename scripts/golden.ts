@@ -135,6 +135,19 @@ export function renderView(events: readonly SailEvent[], verbosity: Verbosity, r
   return out;
 }
 
+/** The time the dashboard's views are rendered at, and the clock offset their times are shown at. */
+export const VIEWS_NOW = Date.parse('2026-10-01T12:00:00.000Z');
+
+/**
+ * Renders every view of the dashboard's recorded fixtures into `outDir`, as fragments, and gives the files written. The
+ * machine is seeded afresh, and nothing absolute of it is ever rendered, so the views are the same on every machine.
+ *
+ * Stub (TASK-007): renders nothing.
+ */
+export function renderDashboardViews(_outDir: string): string[] {
+  return [];
+}
+
 if (import.meta.main) {
   const dir = join(RUNS, GOLDEN_RUN_ID);
   await generateGoldenRun(dir);

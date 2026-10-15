@@ -2,8 +2,8 @@
 // runs, and a call's files. Every path comes from a registry entry, never from a request, and every file is checked by
 // realpath to lie inside its run directory, so a name with `..`, an encoded separator, a symlink a step left, or an
 // edited `events.ndjson` can't lead out. Nothing here writes.
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, sep } from 'node:path';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { dirname, isAbsolute, join } from 'node:path';
 import { isPlainName } from '../engine/call-dir';
 import { runsDir, type Source } from '../engine/run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
@@ -11,6 +11,10 @@ import { listRuns, type RunListing } from '../engine/runs';
 import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
 import { type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
+import { containedFile, inside } from './contained';
+import type { QueueView } from './queues';
+
+export { containedFile, inside };
 
 /** A registered repository, with `problem` when its `.sail/` is gone. */
 export type Repo = RegistryEntry & { problem?: string };
@@ -18,38 +22,14 @@ export type Repo = RegistryEntry & { problem?: string };
 /** One run as the dashboard lists it: `sail runs`' listing, its source, and its summary or null. */
 export type RunItem = Omit<RunListing, 'dir'> & { source?: Source; summary: Summary | null };
 
-/** A repository with its runs: what the index stream sends. */
-export type IndexRepo = Repo & { runs: RunItem[] };
+/** A repository with its runs and its queues: what the index stream sends. */
+export type IndexRepo = Repo & { runs: RunItem[]; queues: QueueView[] };
 
 /** The files of a call the dashboard serves. */
 export const CALL_FILES = ['result.json', 'session.log', 'stdout.log', 'stderr.log'] as const;
 export type CallFileName = (typeof CALL_FILES)[number];
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
-
-/** Whether `path` lies inside `dir`, both resolved through every symlink. A path that doesn't exist doesn't. */
-export function inside(dir: string, path: string): boolean {
-  try {
-    const root = realpathSync(dir);
-    const real = realpathSync(path);
-    return real.startsWith(`${root}${sep}`);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The real path of `path` when it is a regular file inside `dir`, both resolved through every symlink, or undefined. A
- * FIFO, a device or a directory a step left isn't one, so reading it can't block or fail.
- */
-export function containedFile(dir: string, path: string): string | undefined {
-  try {
-    const real = realpathSync(path);
-    return real.startsWith(`${realpathSync(dir)}${sep}`) && statSync(real).isFile() ? real : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /** Why the run's file `name` isn't a regular file of its own, or undefined. One not written yet is fine. */
 function ownFileProblem(runDir: string, name: string): string | undefined {
@@ -140,13 +120,17 @@ export function runItems(entry: RegistryEntry): RunItem[] {
   });
 }
 
-/** Every repository with its runs. A repository whose runs can't be listed has none, and a problem that says why. */
+/**
+ * Every repository with its runs and its queues. A repository whose runs can't be listed has none, nor any queue, and
+ * a problem that says why.
+ */
 export function index(registryDir: string): IndexRepo[] {
   return repos(registryDir).repos.map((repo) => {
     try {
-      return { ...repo, runs: runItems(repo) };
+      // Stub (TASK-003): no repository's queues are read yet.
+      return { ...repo, runs: runItems(repo), queues: [] };
     } catch (error) {
-      return { ...repo, runs: [], problem: `its runs can't be listed: ${messageOf(error)}` };
+      return { ...repo, runs: [], queues: [], problem: `its runs can't be listed: ${messageOf(error)}` };
     }
   });
 }

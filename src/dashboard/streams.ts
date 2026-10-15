@@ -5,11 +5,11 @@
 // Every message is one JSON object: `{ kind: 'event', event }`, `{ kind: 'end' }` before a close with 1000,
 // `{ kind: 'error', message }` before a close with 1011, or `{ kind: 'index', repos }`.
 import { followEvents } from '../events/follow';
-import type { SailEvent } from '../events/types';
+import type { QueueEvent, SailEvent } from '../events/types';
 import { findRepo, findRunDir, followProblem, type IndexRepo, index } from './files';
 
 /** What a socket is opened on: one run's events, or the index. */
-export type Target = { run: { runDir: string } } | { index: true };
+export type Target = { run: { runDir: string } } | { queue: { dir: string } } | { index: true };
 
 /** The part of a socket the streams use. */
 export interface Socket {
@@ -20,6 +20,7 @@ export interface Socket {
 
 export type Message =
   | { kind: 'event'; event: SailEvent }
+  | { kind: 'queue-event'; event: QueueEvent }
   | { kind: 'end' }
   | { kind: 'error'; message: string }
   | { kind: 'index'; repos: IndexRepo[] };
@@ -84,6 +85,16 @@ export function openRunStream(socket: Socket, runDir: string, pollMs: number): (
     (error: unknown) => failed(error instanceof Error ? error.message : String(error)),
   );
   return () => controller.abort();
+}
+
+/**
+ * Replays a queue's events to `socket` and follows them until the returned function stops it: a queue never ends, so
+ * no `end` is ever sent. Its events have no `runId`, and go out as `queue-event`s.
+ *
+ * Stub (TASK-003): sends nothing.
+ */
+export function openQueueFollow(_socket: Socket, _dir: string, _pollMs: number): () => void {
+  return () => undefined;
 }
 
 /** The index stream: one poller shared by every index socket, running only while one is open. */
