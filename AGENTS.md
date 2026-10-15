@@ -81,12 +81,13 @@ including as examples in this file.
 - `src/adapters`: one per port (linear, github, claude-code, git-worktree), plus a fake of each.
 - `src/kinds`: step kinds, agent and script. `StepKind` is the extension point.
 - `src/events`: the event bus and its consumers: `events.ndjson`, the terminal, `summary.json`.
-- `src/watch`: the per-repository watcher: poll, queue, claim, and dispatch detached runs.
+- `src/watch`: the per-repository watcher: poll, queue, claim, and dispatch detached runs. `registry.ts` reads and writes
+  the registry's repository entries.
 - `src/dashboard`: reads the watcher registry, the branch leases and run files across the machine.
 - `src/cli`: the `sail` command. `src/cli/main.ts` is the bin, `src/cli/commands/` holds one module per subcommand,
   and `src/cli/exit-codes.ts` holds the exit codes every command returns.
 - `bin/sail`: the `sail` a script step finds first on its `PATH`: this checkout's CLI, on the Bun that runs the run.
-- `schemas/`: the JSON Schemas for a run directory and `project.yaml`, `sail.*.v1`.
+- `schemas/`: the JSON Schemas for a run directory, `project.yaml` and a registry entry, `sail.*.v1`.
 - `types/`: generated from `src/sdk` by `bun run types`. `sail check` type-checks a repository against it.
 - `test/fixtures/`: `repo/` is the fixture repository, `runs/` the golden run directory, `terminal/` the golden
   terminal views, one per verbosity, and `render/` the templates and their expected renders. `runs/` and `terminal/` are

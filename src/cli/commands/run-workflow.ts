@@ -26,6 +26,7 @@ import type { ProviderEmit, SailEvent } from '../../events/types';
 import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
+import { registerRepository } from '../registration';
 
 /** Every path a command prints goes through here, relative to where the user ran it. */
 export function at(io: Io, path: string): string {
@@ -161,6 +162,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
   const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
+  await registerRepository(io, command, project);
 
   const { until } = args.values;
   const terminal = terminalFor(io, project.sailDir, verbosity);

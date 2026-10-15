@@ -158,3 +158,17 @@ function parseKey(key: string): [string, string | undefined] {
   const [call = '', step] = key.split('/');
   return [call.split('#')[0] ?? '', step];
 }
+
+test('no prompt asks the model for a count: a count a validator can derive is derived, never asked for', () => {
+  const prompts = [...new Bun.Glob('**/prompt.md').scanSync({ cwd: sail, dot: true })].sort();
+  expect(prompts).toEqual([
+    'stages/implement/prompt.md',
+    'workflows/ticket-to-pr/stages/describe/prompt.md',
+    'workflows/ticket-to-pr/stages/self-review/prompt.md',
+    'workflows/ticket-to-pr/stages/spec/prompt.md',
+  ]);
+  const asking = prompts.filter((path) =>
+    /\b(how many|count|number of)\b/i.test(readFileSync(join(sail, path), 'utf8')),
+  );
+  expect(asking).toEqual([]);
+});
