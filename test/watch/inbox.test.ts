@@ -183,10 +183,7 @@ test('a command applied but not removable is applied once, and removed by a late
   expect(readdirSync(dir)).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('an apply that returns a promise is awaited before its command file is removed, and watch and unwatch commands drain', async () => {
+test('an apply that returns a promise is awaited before its command file is removed, and watch and unwatch commands drain', async () => {
   const runs = runsDir();
   const file = dropCommand(runs, { op: 'watch', workflows: ['a', 'b'] });
   dropCommand(runs, { op: 'unwatch', workflows: ['a'] });

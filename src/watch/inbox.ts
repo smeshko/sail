@@ -128,7 +128,7 @@ export async function drainCommands(runsDir: string, apply: (command: Command) =
       // Applied by an earlier drain that couldn't remove it: only the removal is left to do.
     } else {
       try {
-        apply(command);
+        await apply(command);
         drained.applied += 1;
       } catch (error) {
         reason = `${name} failed: ${messageOf(error)}`;
@@ -147,6 +147,10 @@ export async function drainCommands(runsDir: string, apply: (command: Command) =
 }
 
 /** Deletes every file in the inbox, temp files included, unapplied, and gives how many it deleted. */
-export function clearCommands(_runsDir: string): number {
-  return 0;
+export function clearCommands(runsDir: string): number {
+  const dir = commandsDir(runsDir);
+  if (!existsSync(dir)) return 0;
+  const names = readdirSync(dir);
+  for (const name of names) rmSync(join(dir, name), { recursive: true, force: true });
+  return names.length;
 }

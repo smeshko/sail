@@ -75,10 +75,7 @@ const tickets = (labels: Record<string, string>): SeedTicket[] =>
 /** Whether `watcher` stopped within a second of real time. */
 const stopped = (watcher: Watcher) => Promise.race([watcher.done.then(() => true), Bun.sleep(1000).then(() => false)]);
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('two workflows at caps 2 and 1 dispatch six tickets once each, in queue order, never over their caps, a leased ticket last and only after its lease is released', async () => {
+test('two workflows at caps 2 and 1 dispatch six tickets once each, in queue order, never over their caps, a leased ticket last and only after its lease is released', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -86,7 +83,14 @@ test
         { name: 'a', label: 'sail-a', cap: 2 },
         { name: 'b', label: 'sail-b', cap: 1 },
       ],
-      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a', 'FAKE-3': 'sail-a', 'FAKE-4': 'sail-a', 'FAKE-5': 'sail-b', 'FAKE-6': 'sail-b' }),
+      tickets({
+        'FAKE-1': 'sail-a',
+        'FAKE-2': 'sail-a',
+        'FAKE-3': 'sail-a',
+        'FAKE-4': 'sail-a',
+        'FAKE-5': 'sail-b',
+        'FAKE-6': 'sail-b',
+      }),
     );
     const { workspace, ticketSource } = w.adapters.ports;
     const { url } = await workspace.repository();
@@ -139,10 +143,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('a watcher started again over the same runs, while they are alive, spawns nothing for them, and the next slot goes to the next ticket', async () => {
+test('a watcher started again over the same runs, while they are alive, spawns nothing for them, and the next slot goes to the next ticket', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -164,10 +165,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("a watch command adds a workflow to the live set, with its watch:added and a watch set line, and leaves the others' runs and queues as they were", async () => {
+test("a watch command adds a workflow to the live set, with its watch:added and a watch set line, and leaves the others' runs and queues as they were", async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -198,10 +196,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("a watch command for a workflow on a watched workflow's label is rejected with its reason, and the set stays as it was", async () => {
+test("a watch command for a workflow on a watched workflow's label is rejected with its reason, and the set stays as it was", async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -223,10 +218,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('unwatching every workflow stops the watcher: each stream ends with its watch:removed, and the registry entry loses its watcher', async () => {
+test('unwatching every workflow stops the watcher: each stream ends with its watch:removed, and the registry entry loses its watcher', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -257,10 +249,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ('a command left in the inbox before the watcher starts is deleted unapplied', async () => {
+test('a command left in the inbox before the watcher starts is deleted unapplied', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
     dropCommand(w.runs, { op: 'unwatch', workflows: ['a'] });

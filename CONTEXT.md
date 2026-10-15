@@ -440,7 +440,7 @@ The resident process that automates one repository's watch set: it polls and it 
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
-The watched workflows a watcher is watching now: exactly those named with `sail watch`, minus those removed with `sail unwatch`. It is never remembered across restarts, and the watcher exits when it becomes empty. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
+The watched workflows a watcher is watching now: exactly those named with `sail watch`, minus those removed with `sail unwatch`. It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:
@@ -480,7 +480,7 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. For a ticket, the dispatched run claims the ticket as it starts, after its branch is leased and its workspace made, as a run started by hand does.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run claims the ticket as it starts, after its branch is leased and its workspace made, as a run started by hand does.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:
