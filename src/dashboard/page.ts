@@ -30,11 +30,12 @@ interface Built {
 }
 
 /**
- * The bundle made safe inside a script element: neither `</script` nor `<!--` may appear. Each `<` of them becomes
- * `\x3C`, which means the same in a string, a template and a regular expression, and nothing in a comment.
+ * The bundle made safe inside a script element: neither `</script`, in any case, nor `<!--` may appear. Each `<` of them
+ * becomes `\x3C`, which means the same in a string, a template and a regular expression, and nothing in a comment. The
+ * HTML tokenizer ends a script at `</SCRIPT` too, so the match ignores case (review R1-6).
  */
 export function inlineScript(bundle: string): string {
-  return bundle.replaceAll('</script', '\\x3C/script').replaceAll('<!--', '\\x3C!--');
+  return bundle.replace(/<(\/script|!--)/gi, (_, rest: string) => `\\x3C${rest}`);
 }
 
 async function build(dir: string): Promise<Built> {
