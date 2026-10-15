@@ -27,6 +27,14 @@ export async function packSail(options: { root?: string; outDir: string }): Prom
   if (listed.code !== 0) throw new Error(`git ls-files exited ${listed.code} in ${root}: ${listed.stderr.trim()}`);
   // A file deleted from the worktree is still in the index.
   const files = listed.stdout.split('\0').filter((path) => path !== '' && existsSync(join(root, path)));
+  // A copy follows a link, so a link, or a tracked path under a directory that became one, would pack its target's
+  // bytes: an ignored file among them. A path must resolve to itself.
+  const real = realpathSync(root);
+  for (const path of files) {
+    if (realpathSync(join(root, path)) !== join(real, path)) {
+      throw new Error(`${path} is a symbolic link or under one, and the pack never copies a link`);
+    }
+  }
 
   const staging = realpathSync(mkdtempSync(join(tmpdir(), 'sail-pack-')));
   try {
