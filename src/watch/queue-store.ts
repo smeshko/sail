@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { replaceFile } from '../engine/durable';
-import type { QueueEvent } from '../events/types';
+import type { NewQueueEvent, QueueEvent } from '../events/types';
 import { PORT_ERROR_CODES, type PortErrorCode } from '../ports/errors';
 import type { Ticket } from '../ports/types';
 import { openQueueStream } from './queue-events';
@@ -194,7 +194,18 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
   }
   const opened = openQueueStream(dir, now);
   if ('refused' in opened) return opened;
-  const stream = opened;
+  const { onEvent } = options;
+  /** Appends the events, then hands each to `onEvent`. */
+  const emitAll = (events: readonly NewQueueEvent[]): void => {
+    for (const event of opened.emitAll(events)) {
+      try {
+        onEvent?.(event);
+      } catch {
+        // The terminal's trouble: the event is in the stream all the same.
+      }
+    }
+  };
+  const stream = { emit: (event: NewQueueEvent) => emitAll([event]), emitAll };
 
   /** Set when a write threw and queue.json couldn't be read back: what it holds is unknown until it can be. */
   let unsure = false;
@@ -281,13 +292,41 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.attempts += 1;
         item.runId = runId;
         delete item.retryAt;
+        delete item.pid;
       });
     },
-    spawned(_key, _pid) {},
-    drop(_key, _reason) {},
-    skippedLeased(_key, _branch, _heldBy) {},
-    watched(_watch) {},
-    unwatched(_pid) {},
+    spawned(key, pid) {
+      const item = change((next) => {
+        const spawning = find(next, key);
+        if (spawning.state !== 'dispatched')
+          throw new Error(`${workflow}'s item ${key} is ${spawning.state}, not dispatched`);
+        spawning.pid = pid;
+        return { ...spawning };
+      });
+      stream.emit({
+        type: 'queue:dispatched',
+        workflow,
+        dedupKey: key,
+        run: item.runId ?? '',
+        attempt: item.attempts,
+        pid,
+      });
+    },
+    drop(key, reason) {
+      change((next) => {
+        next.items.splice(next.items.indexOf(find(next, key)), 1);
+      });
+      stream.emit({ type: 'queue:dropped', workflow, dedupKey: key, reason });
+    },
+    skippedLeased(key, branch, heldBy) {
+      stream.emit({ type: 'queue:skipped_leased', workflow, dedupKey: key, branch, heldBy });
+    },
+    watched({ pid, everyMs, maxConcurrentRuns }) {
+      stream.emit({ type: 'watch:added', workflow, pid, label: queue.polling.label, everyMs, maxConcurrentRuns });
+    },
+    unwatched(pid) {
+      stream.emit({ type: 'watch:removed', workflow, pid });
+    },
     done(key) {
       change((next) => {
         const item = find(next, key);

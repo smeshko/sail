@@ -401,10 +401,7 @@ const lastEvent = (runs: string) => {
   return event;
 };
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('spawned records the pid of a dispatched item and emits queue:dispatched naming its run, attempt and pid, and a queued item throws', () => {
+test('spawned records the pid of a dispatched item and emits queue:dispatched naming its run, attempt and pid, and a queued item throws', () => {
   const runs = runsDir();
   const store = open(runs);
   store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
@@ -431,10 +428,7 @@ test
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('drop takes the item out with queue:dropped and its reason, a later add queues the ticket again with no attempts, and an unknown key throws', () => {
+test('drop takes the item out with queue:dropped and its reason, a later add queues the ticket again with no attempts, and an unknown key throws', () => {
   const runs = runsDir();
   const store = open(runs);
   store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
@@ -456,10 +450,7 @@ test
   expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('skippedLeased, watched and unwatched emit their events and leave queue.json byte-identical', () => {
+test('skippedLeased, watched and unwatched emit their events and leave queue.json byte-identical', () => {
   const runs = runsDir();
   const clock = manualClock(START);
   const store = open(runs, clock);
@@ -471,7 +462,11 @@ test
   store.watched({ pid: 4242, everyMs: 30_000, maxConcurrentRuns: 2 });
   store.unwatched(4242);
   expect(queueText(runs)).toBe(before);
-  expect(queueEvents(queueDir(runs, 'ticket-to-pr')).slice(1).map(({ seq, ts, ...event }) => event)).toEqual([
+  expect(
+    queueEvents(queueDir(runs, 'ticket-to-pr'))
+      .slice(1)
+      .map(({ seq, ts, ...event }) => event),
+  ).toEqual([
     {
       type: 'queue:skipped_leased',
       workflow: 'ticket-to-pr',
@@ -501,10 +496,7 @@ function everyChange(store: QueueStore): void {
   store.unwatched(4242);
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('onEvent hears every event the store emits, in seq order, and one that throws leaves queue.json and the events as they would be', () => {
+test('onEvent hears every event the store emits, in seq order, and one that throws leaves queue.json and the events as they would be', () => {
   const heard = runsDir();
   const events: { seq: number; type: string }[] = [];
   const store = openQueue({
