@@ -312,6 +312,7 @@ test('a second run of FAKE-1, forced, in a copy of a repository whose first run 
     expect(dir).not.toBe(join(other.dir, '.sail-runs', first.runId));
     expect([second.code, second.stderr, journalOf(dir)]).toEqual([EXIT_OK, '', JOURNAL]);
     expect(json(dir, '06-open', 'call-1', 'result.json')).toMatchObject({ outcome: 'passed', output: PR });
+    expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('completed\n');
     // The push went through, and the pull request already open from the branch was answered: none was announced.
     const hosted = readEvents(dir).flatMap((event) => (event.type.startsWith('codehost:') ? [event.type] : []));
     expect(hosted).toEqual(['codehost:pushed']);
