@@ -9,7 +9,7 @@ import { readConfig } from '../../src/engine/config';
 import { commandsDir, dropCommand } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
 import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/registry';
-import { startWatcher, type Watcher } from '../../src/watch/watcher';
+import { startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
 import { queueEventIssues, queueEvents } from '../helpers/queue';
@@ -429,5 +429,44 @@ test('a poll that never answers holds up neither an unwatch of its workflow, the
       a: before,
       last: 'watch:removed',
     });
+  });
+});
+
+test("a second watcher over the same .sail/ is refused while the first runs, even when it can't see the first in the registry, and starts once the first stops (review R2-1)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+    const first = await w.start(['a']);
+    const queue = () => readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8');
+    const before = queue();
+    const config = readConfig(w.sail);
+    if ('issues' in config) throw new Error('the stub config has issues');
+    // Started at the same instant: its registry read came before the first watcher's write, as a registry of its own
+    // stands in for here, so only the queue's lease is left to keep the two apart.
+    const options: WatcherOptions = {
+      sailDir: w.sail,
+      config,
+      adapters: w.adapters.ports,
+      entry: w.entry,
+      registryDir: join(repo.home, 'other-sail-home', 'watchers'),
+      workflows: ['a'],
+      env: repo.env,
+      now: w.timers.now,
+      timers: w.timers,
+      spawn: w.spawner.spawn,
+      isAlive: w.spawner.isAlive,
+      write: (text) => w.out.push(text),
+      lines: { timeZone: 'UTC' },
+      pid: process.ppid,
+    };
+    const second = await startWatcher(options);
+    expect(second).toEqual({
+      refused: `a watcher for 'stub' already runs here (pid ${process.pid}, since 2026-10-15T09:00:00.000Z)`,
+    });
+    expect(queue()).toBe(before);
+    expect(w.events('a').filter((event) => event.type === 'watch:added')).toHaveLength(1);
+    await first.stop();
+    const third = await startWatcher(options);
+    expect('refused' in third ? third : third.watching()).toEqual(['a']);
+    if (!('refused' in third)) await third.stop();
   });
 });
