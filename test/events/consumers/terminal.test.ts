@@ -928,7 +928,7 @@ test('verbose shows the tail of a script that passed, and none for an agent call
 // TASK-005: the whole run on resume.
 
 /** The `seq` of the golden run's `journal:append` for tests#1: the last event of the process a resume takes over from. */
-const RESUMED_AFTER = 51;
+const RESUMED_AFTER = 52;
 
 test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then opens with the resume line and ends with the whole run', () => {
   const events = fake1();
@@ -947,7 +947,7 @@ test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then o
   for (const event of events.filter((each) => each.seq > RESUMED_AFTER)) terminal.onEvent(event);
   const normal = golden('normal').split('\n');
   const resumedAt = normal.findIndex((line) => line.endsWith('↻ iteration 2/3 · feedback from tests#1'));
-  expect(resumedAt).toBe(21);
+  expect(resumedAt).toBe(22);
   expect(out).toBe(
     [
       `sail · ticket-to-pr v1 · ${FAKE_1} · resumed after 4 calls, last tests#1 failed`,

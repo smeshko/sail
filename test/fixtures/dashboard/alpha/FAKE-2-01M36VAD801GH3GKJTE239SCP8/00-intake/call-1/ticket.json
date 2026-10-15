@@ -1,0 +1,44 @@
+{
+  "ticketKey": "FAKE-2",
+  "title": "Print the version with --version",
+  "url": "fake://tickets/FAKE-2",
+  "description": "`greet --version` prints the package version and exits.",
+  "state": {
+    "type": "started",
+    "name": "In Progress"
+  },
+  "labels": [
+    "sail"
+  ],
+  "comments": [
+    {
+      "author": "sail",
+      "body": "sail run FAKE-2-01M36VAD801GH3GKJTE239SCP8 started",
+      "createdAt": "2026-09-23T10:00:00.600Z"
+    }
+  ],
+  "links": [],
+  "attachments": [],
+  "raw": {
+    "ticketKey": "FAKE-2",
+    "title": "Print the version with --version",
+    "description": "`greet --version` prints the package version and exits.",
+    "state": {
+      "type": "started",
+      "name": "In Progress"
+    },
+    "labels": [
+      "sail"
+    ],
+    "comments": [
+      {
+        "author": "sail",
+        "body": "sail run FAKE-2-01M36VAD801GH3GKJTE239SCP8 started",
+        "createdAt": "2026-09-23T10:00:00.600Z"
+      }
+    ],
+    "links": [],
+    "attachments": []
+  },
+  "acceptanceCriteria": []
+}

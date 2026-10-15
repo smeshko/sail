@@ -22,11 +22,11 @@ const text = (...lines: string[]) => lines.map((line) => `${line}\n`).join('');
 
 /** What `sail show` prints for the golden run. */
 const GOLDEN = text(
-  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 15.9s`,
+  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 16.0s`,
   '',
   'key            kind     outcome  duration  cost   next',
   'intake#1       builtin  passed   900ms',
-  'spec#1         agent    done     1.1s      $0.31  implement#1',
+  'spec#1         agent    done     1.2s      $0.31  implement#1',
   'implement#1    agent    done     1.2s      $0.48  tests#1',
   'tests#1        script   failed   700ms            implement#2',
   'implement#2    agent    done     1.1s      $0.24  tests#2',
@@ -328,7 +328,7 @@ const goldenView = (verbosity: string): string =>
 const goldenLines = (): string[] => readFileSync(join(GOLDEN_RUN, 'events.ndjson'), 'utf8').split(/(?<=\n)/);
 
 /** How many of the golden run's events come before implement#2's session: up to its `stage:start`. */
-const RUNNING = 54;
+const RUNNING = 55;
 
 /** A copy of the golden run as it was while running: its events up to implement#2's start, and STATUS running. */
 function runningRun(repoDir: string): string {

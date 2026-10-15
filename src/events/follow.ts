@@ -17,6 +17,8 @@ export interface FollowOptions {
   signal?: AbortSignal;
   /** How long to wait between reads once caught up. 200 ms by default. */
   pollMs?: number;
+  /** Asked before every read: a reason refuses the follow, as a line that can't be read does. */
+  check?(): string | undefined;
 }
 
 /** Whether the run may still append: a STATUS that is missing or can't be read counts as running. */
@@ -45,12 +47,14 @@ function wait(ms: number, signal: AbortSignal | undefined): Promise<boolean> {
 /** `'ended'` once the run has ended, `'aborted'` when `signal` aborts, or a line of the file that can't be read. */
 export async function followEvents(
   runDir: string,
-  { onEvent, signal, pollMs = 200 }: FollowOptions,
+  { onEvent, signal, pollMs = 200, check }: FollowOptions,
 ): Promise<'ended' | 'aborted' | { refused: string }> {
   let cursor = START;
   let lastWasEnd = false;
   while (true) {
     if (signal?.aborted) return 'aborted';
+    const problem = check?.();
+    if (problem !== undefined) return { refused: problem };
     const read = readEventsFrom(runDir, cursor);
     if ('refused' in read) return read;
     for (const event of read.events) {

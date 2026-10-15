@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!test/fixtures/runs", "!types"]
+    "includes": ["**", "!test/fixtures/runs", "!test/fixtures/dashboard", "!types"]
   },
   "formatter": {
     "enabled": true,

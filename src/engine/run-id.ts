@@ -18,6 +18,12 @@ export function ulid(
   return time + randomPart;
 }
 
+/** Whether `runId` is the id of a run of `key`: `<key>-` and 26 Crockford characters, as `newRunId()` makes them. */
+export function isRunIdOf(key: string, runId: string): boolean {
+  if (!runId.startsWith(`${key}-`)) return false;
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(runId.slice(key.length + 1));
+}
+
 /**
  * `<key>-<ulid>`. The key is a ticket key such as `FAKE-1`, or a stage name for an isolated stage run. `random` fills
  * the ULID's random part, for a run that must be reproduced.

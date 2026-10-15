@@ -1,6 +1,7 @@
 // Synthetic Claude Code sessions (D12): builders typed as the Agent SDK's own messages, so a field the SDK renames fails
 // `typecheck`, and scriptedQuery(), a stand-in for `query()` that plays one scripted stream per session. No test spawns
-// Claude Code or reaches the network. writeScriptedClaudeCode() gives a copy of the fixture repository a harness
+// Claude Code or reaches the network: a scripted stream asks the session's own gate, as the CLI does, and may spawn a
+// stand-in process through the session's own spawner. writeScriptedClaudeCode() gives a copy of the fixture repository a harness
 // adapter that is the built-in claude-code on such a query, so `sail` runs it offline.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -8,6 +9,7 @@ import type {
   ModelUsage,
   NonNullableUsage,
   Options,
+  PreToolUseHookInput,
   SDKAssistantMessage,
   SDKAssistantMessageError,
   SDKAuthStatusMessage,
@@ -55,14 +57,14 @@ export function turnUsage(tokens: Tokens = {}): TurnUsage {
   };
 }
 
-export function init(options: { sessionId?: string; model?: string } = {}): SDKSystemMessage {
+export function init(options: { sessionId?: string; model?: string; tools?: string[] } = {}): SDKSystemMessage {
   return {
     type: 'system',
     subtype: 'init',
     apiKeySource: 'ANTHROPIC_API_KEY',
     claude_code_version: '2.1.282',
     cwd: '/work',
-    tools: ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
+    tools: options.tools ?? ['Read', 'Glob', 'Grep', 'Write', 'Edit'],
     mcp_servers: [],
     model: options.model ?? MODEL,
     permissionMode: 'default',
@@ -237,6 +239,19 @@ export type Act =
       readonly input: Record<string, unknown>;
       readonly toolUseID: string;
     }
+  /** Asks the session's PreToolUse hooks about a tool call, as the CLI does before it runs one. */
+  | {
+      readonly act: 'preToolUse';
+      readonly tool: string;
+      readonly input: unknown;
+      readonly toolUseID: string;
+      /** The working directory the CLI reports: the session's when left out. */
+      readonly cwd?: string;
+      /** The MCP server the CLI says the tool belongs to. */
+      readonly mcpServer?: string;
+    }
+  /** Starts a process through the session's spawnClaudeCodeProcess, as the SDK starts Claude Code. */
+  | { readonly act: 'spawn'; readonly command: string; readonly args: readonly string[] }
   /** Waits until the session's controller aborts, then throws as the SDK does. */
   | { readonly act: 'waitForAbort' }
   /** Throws, as a broken stream does. */
@@ -248,8 +263,10 @@ export type Stream = readonly Step[];
 export interface ScriptedQuery extends QueryFunction {
   /** Each session's prompt and options, in order. */
   readonly calls: { prompt: string; options: Options }[];
-  /** What each `canUseTool` asked answered, in order. */
+  /** What each `canUseTool` and each PreToolUse hook asked answered, in order. */
   readonly verdicts: unknown[];
+  /** The pid of each process a `spawn` act started. */
+  readonly pids: number[];
 }
 
 const isAct = (step: Step): step is Act => 'act' in step;
@@ -258,6 +275,7 @@ const isAct = (step: Step): step is Act => 'act' in step;
 export function scriptedQuery(streams: readonly Stream[]): ScriptedQuery {
   const calls: { prompt: string; options: Options }[] = [];
   const verdicts: unknown[] = [];
+  const pids: number[] = [];
   const play = async function* (stream: Stream, options: Options): AsyncGenerator<SDKMessage, void> {
     for (const step of stream) {
       if (!isAct(step)) {
@@ -278,6 +296,36 @@ export function scriptedQuery(streams: readonly Stream[]): ScriptedQuery {
           );
           break;
         }
+        case 'preToolUse': {
+          const signal = options.abortController?.signal ?? new AbortController().signal;
+          const input: PreToolUseHookInput = {
+            hook_event_name: 'PreToolUse',
+            session_id: SESSION_ID,
+            transcript_path: '',
+            cwd: step.cwd ?? options.cwd ?? '',
+            tool_name: step.tool,
+            tool_input: step.input,
+            tool_use_id: step.toolUseID,
+            ...(step.mcpServer === undefined ? {} : { mcp_server: { name: step.mcpServer, source: 'user' } }),
+          };
+          for (const matcher of options.hooks?.PreToolUse ?? []) {
+            for (const hook of matcher.hooks) verdicts.push(await hook(input, step.toolUseID, { signal }));
+          }
+          break;
+        }
+        case 'spawn': {
+          const signal = options.abortController?.signal ?? new AbortController().signal;
+          const spawned = options.spawnClaudeCodeProcess?.({
+            command: step.command,
+            args: [...step.args],
+            ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+            env: options.env ?? {},
+            signal,
+          });
+          const pid = (spawned as { pid?: number } | undefined)?.pid;
+          if (pid !== undefined) pids.push(pid);
+          break;
+        }
         case 'waitForAbort': {
           const signal = options.abortController?.signal;
           if (signal !== undefined && !signal.aborted) {
@@ -295,14 +343,14 @@ export function scriptedQuery(streams: readonly Stream[]): ScriptedQuery {
     const stream = streams[Math.min(calls.length, streams.length) - 1] ?? [];
     return play(stream, params.options);
   };
-  return Object.assign(query, { calls, verdicts });
+  return Object.assign(query, { calls, verdicts, pids });
 }
 
 /** A session that writes `spec.md`, says one thing over two turns, and submits `output`. */
-export function specSession(output: unknown, options: ResultOptions = {}): Stream {
+export function specSession(output: unknown, options: ResultOptions = {}, spec = '# Spec\n'): Stream {
   return [
     init(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
-    { act: 'write', file: 'spec.md', text: '# Spec\n' },
+    { act: 'write', file: 'spec.md', text: spec },
     assistantToolUse('m1', 'tool-1', 'Write', { file_path: 'spec.md' }, { usage: { input: 60, output: 120 } }),
     toolResult('tool-1'),
     assistantText('m2', 'Spec written.', { usage: { input: 60, output: 220 } }),
@@ -330,25 +378,31 @@ const HELPER = resolve(import.meta.dir, 'claude-code.ts');
 const ADAPTER = resolve(import.meta.dir, '..', '..', 'src', 'adapters', 'claude-code', 'index.ts');
 export const SCRIPTED_ADAPTER = './adapters/claude-code-scripted.ts';
 
+/** Sets the streams the scripted claude-code of `repoDir` plays from its next harness on, as a resumed run's. */
+export function writeScriptedStreams(repoDir: string, streams: readonly Stream[]): void {
+  writeFileSync(join(repoDir, '.sail', 'claude-code-streams.json'), `${JSON.stringify(streams)}\n`);
+}
+
 /**
  * Gives the repository at `repoDir` a harness adapter that is the built-in claude-code, with its `requires` and
- * `versions`, on a query that plays `streams`, and points `project.yaml`'s harness at it.
+ * `versions`, on a query that plays `streams`, and points `project.yaml`'s harness at it. Each harness it creates reads
+ * the streams afresh, so writeScriptedStreams() can give a later run of the same process others.
  */
 export function writeScriptedClaudeCode(repoDir: string, streams: readonly Stream[]): void {
   const sail = join(repoDir, '.sail');
-  writeFileSync(join(sail, 'claude-code-streams.json'), `${JSON.stringify(streams)}\n`);
+  writeScriptedStreams(repoDir, streams);
   const source = `// The built-in claude-code harness on a scripted query(): a test's, written by writeScriptedClaudeCode().
 import { readFileSync } from 'node:fs';
 import { claudeCodeAdapters, createClaudeCodeHarness } from ${JSON.stringify(ADAPTER)};
 import { scriptedQuery } from ${JSON.stringify(HELPER)};
 
-const streams = JSON.parse(readFileSync(${JSON.stringify(join(sail, 'claude-code-streams.json'))}, 'utf8'));
+const streams = () => JSON.parse(readFileSync(${JSON.stringify(join(sail, 'claude-code-streams.json'))}, 'utf8'));
 const builtin = claudeCodeAdapters.harness;
 
 export default {
   requires: builtin.requires,
   versions: builtin.versions,
-  create: (_options, context) => createClaudeCodeHarness({ env: context.env, query: scriptedQuery(streams) }),
+  create: (_options, context) => createClaudeCodeHarness({ env: context.env, query: scriptedQuery(streams()) }),
 };
 `;
   mkdirSync(join(sail, 'adapters'), { recursive: true });

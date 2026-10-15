@@ -15,33 +15,36 @@ import type { ProjectConfig } from '../engine/config';
 import { loadWorkflow } from '../engine/load-workflow';
 import { runsDir } from '../engine/run-dir';
 import { parseEvery, watchLabel, watchProblem } from '../engine/watchable';
+import type { QueueEvent } from '../events/types';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import { Ticket } from '../ports/types';
 import type { Command } from './inbox';
 import { DEFAULT_QUEUE_POLICY, openQueue, type QueuePolicy, type QueueStore } from './queue-store';
 
-/** One watched workflow, ready to poll. */
-export interface WatchTarget {
+/** What a watched workflow declares: the label it polls, how often, and how many of its runs may run at once. */
+export interface WatchDeclaration {
   workflow: string;
   label: string;
   everyMs: number;
+  maxConcurrentRuns: number;
+}
+
+/** One watched workflow, ready to poll. */
+export interface WatchTarget extends WatchDeclaration {
   ticketSource: TicketSource;
   store: QueueStore;
 }
 
-export interface OpenWatchTargetOptions {
+export interface ReadWatchOptions {
   sailDir: string;
   config: Pick<ProjectConfig, 'label'>;
   /** The workflow's name. */
   name: string;
-  ticketSource: TicketSource;
-  now: () => Date;
-  policy?: QueuePolicy;
 }
 
-/** Loads workflow `name` and opens its queue. A workflow that won't load, or isn't watched, refuses. */
-export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<WatchTarget | { refused: string }> {
+/** Loads workflow `name` and reads its watch declaration. A workflow that won't load, or isn't watched, refuses. */
+export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclaration | { refused: string }> {
   const { sailDir, name } = options;
   const loaded = await loadWorkflow(sailDir, name);
   if ('refused' in loaded) return loaded;
@@ -49,15 +52,40 @@ export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<
   if (workflow.watch === undefined) return { refused: `workflow '${name}' isn't watched: it declares no watch` };
   const everyMs = parseEvery(workflow.watch.every);
   const problem = watchProblem(workflow);
-  if (problem !== undefined || everyMs === undefined) return { refused: `workflow '${name}' ${problem}` };
-  const label = watchLabel(workflow, options.config);
-  const { now, policy } = options;
-  const store = openQueue({ runsDir: runsDir(sailDir), workflow: name, label, now, ...(policy ? { policy } : {}) });
-  if ('refused' in store) return store;
-  return { workflow: name, label, everyMs, ticketSource: options.ticketSource, store };
+  const { maxConcurrentRuns } = workflow;
+  if (problem !== undefined || everyMs === undefined || maxConcurrentRuns === undefined) {
+    return { refused: `workflow '${name}' ${problem}` };
+  }
+  return { workflow: name, label: watchLabel(workflow, options.config), everyMs, maxConcurrentRuns };
 }
 
-export type PollOutcome = 'polled' | 'failed' | 'paused';
+export interface OpenWatchTargetOptions extends ReadWatchOptions {
+  ticketSource: TicketSource;
+  now: () => Date;
+  policy?: QueuePolicy;
+  /** Hears each event the workflow's queue emits. */
+  onEvent?: (event: QueueEvent) => void;
+}
+
+/** Loads workflow `name` and opens its queue. A workflow that won't load, or isn't watched, refuses. */
+export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<WatchTarget | { refused: string }> {
+  const watch = await readWatch(options);
+  if ('refused' in watch) return watch;
+  const { now, policy, onEvent } = options;
+  const store = openQueue({
+    runsDir: runsDir(options.sailDir),
+    workflow: watch.workflow,
+    label: watch.label,
+    now,
+    ...(policy ? { policy } : {}),
+    ...(onEvent ? { onEvent } : {}),
+  });
+  if ('refused' in store) return store;
+  return { ...watch, ticketSource: options.ticketSource, store };
+}
+
+/** How a poll went. `dropped`: its poller was dropped while it waited for the provider, so its answer went unrecorded. */
+export type PollOutcome = 'polled' | 'failed' | 'paused' | 'dropped';
 
 const PAUSING: readonly string[] = ['unauthorized', 'forbidden'];
 
@@ -82,17 +110,22 @@ async function listDesignated(target: WatchTarget): Promise<Ticket[]> {
   throw new PortError('ticketSource', 'listDesignated', 'invalid', `the answer is not a list of tickets: ${where}`);
 }
 
-/** Polls `target` once into its queue, and says how it went. */
+/**
+ * Polls `target` once into its queue, and says how it went. When `dropped` says so once the provider has answered,
+ * nothing is recorded: the queue store is no longer this poll's to write.
+ */
 export async function pollOnce(
   target: WatchTarget,
   now: () => Date,
   policy: QueuePolicy = DEFAULT_QUEUE_POLICY,
+  dropped?: () => boolean,
 ): Promise<PollOutcome> {
   const started = now().getTime();
   let answered: Ticket[];
   try {
     answered = await listDesignated(target);
   } catch (error) {
+    if (dropped?.()) return 'dropped';
     const code = error instanceof PortError ? error.code : undefined;
     const failure = {
       port: 'ticketSource' as const,
@@ -108,6 +141,7 @@ export async function pollOnce(
     target.store.pollFailed({ ...failure, paused: false, retryInMs: retryInMs(target, failures, policy) });
     return 'failed';
   }
+  if (dropped?.()) return 'dropped';
   const { ticketSource, label } = target;
   const tickets = answered.filter(
     (ticket) => ticketSource.isDesignated(ticket, label) && ticket.state.type === 'unstarted',
@@ -138,6 +172,11 @@ export interface Poller {
   start(): Promise<void>;
   /** Clears every timer. A poll in flight is still recorded, and not rescheduled. */
   stop(): void;
+  /**
+   * Stops for good, and a poll in flight records nothing when its answer comes: for a caller that lets the queue store
+   * go, so that a store opened afresh on the same queue is the only one that writes it.
+   */
+  drop(): void;
   /** Polls the workflow now, paused or not, or joins its poll in flight. A workflow it doesn't poll throws. */
   pollNow(workflow: string): Promise<PollOutcome>;
   /**
@@ -162,6 +201,7 @@ export function createPoller(options: PollerOptions): Poller {
   const timer = new Map<string, unknown>();
   const inFlight = new Map<string, Promise<PollOutcome>>();
   let stopped = false;
+  let dropped = false;
 
   const find = (workflow: string): WatchTarget => {
     const target = targets.find((each) => each.workflow === workflow);
@@ -185,7 +225,7 @@ export function createPoller(options: PollerOptions): Poller {
     const running = inFlight.get(target.workflow);
     if (running !== undefined) return running;
     clear(target);
-    const polling = pollOnce(target, now, policy).then(
+    const polling = pollOnce(target, now, policy, () => dropped).then(
       (outcome) => {
         inFlight.delete(target.workflow);
         schedule(target, outcome);
@@ -217,8 +257,13 @@ export function createPoller(options: PollerOptions): Poller {
       stopped = true;
       for (const target of targets) clear(target);
     },
+    drop() {
+      dropped = true;
+      poller.stop();
+    },
     pollNow: (workflow) => poll(find(workflow)),
     apply(command) {
+      if (command.op !== 'poll') throw new Error(`a poller applies poll commands, not ${command.op}`);
       void unawaited(find(command.workflow));
     },
   };

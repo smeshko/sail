@@ -87,6 +87,7 @@ export const PORT_OPERATIONS = {
     'repository',
     'lease',
     'releaseLease',
+    'holder',
     'create',
     'reopen',
     'diff',

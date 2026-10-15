@@ -3,7 +3,6 @@
 import { closeSync, lstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import type { Produces } from '../sdk/steps';
 import { isPlainName, isTryName, RESERVED_NAMES, runRelative } from './call-dir';
 
 /** Why an outcome is `error`, as `sail.result.v1` names the reasons. */
@@ -27,6 +26,8 @@ export interface FileEntry {
   path: string;
   bytes: number;
   sha256: string;
+  /** A document's checks: whether they all passed, and the label of each that ran, in order. */
+  validation?: { ok: boolean; checks: string[] };
 }
 
 /** Parses `value` with `schema`. The data is Zod's, with defaults and transforms applied, and the message is Zod's. */
@@ -58,7 +59,7 @@ function sha256(path: string): string {
  * What is wrong with a step's `produces`, found before it runs. Later calls consume a file by its name, so each name is
  * a plain file name in `$STAGE_OUT`, and none is one the engine writes there, or a later try's directory.
  */
-export function producesProblems(produces: Produces): string[] {
+export function producesProblems(produces: Readonly<Record<string, unknown>>): string[] {
   const found: string[] = [];
   for (const name of Object.keys(produces)) {
     if (!isPlainName(name)) found.push(`'${name}' can't be produced: it is not a plain file name`);
@@ -73,7 +74,7 @@ export function producesProblems(produces: Produces): string[] {
  * is a symlink: it points at something the call didn't produce. Callers check `producesProblems` first.
  */
 export function recordFiles(
-  produces: Produces,
+  produces: Readonly<Record<string, unknown>>,
   outDir: string,
   runDir: string,
 ): { files: Record<string, FileEntry>; errors: ContractError[] } {

@@ -3,13 +3,13 @@
 // `git-worktree` (src/adapters/workspace/git.ts) and differs from it in three things: it fetches nothing, its remote is
 // a constant (`fake://origin` unless set), and its definition keeps leases beside the repository's runs rather than
 // machine-wide. The branch is never checked out: a workspace records it for the later push of `HEAD:<branch>`, so only
-// the lease keeps two runs of one branch apart (ADR-0018).
+// the lease keeps two runs of one branch apart (ADR-0018). `holder()` reads the same leases.
 import { join } from 'node:path';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { WorkspacePort } from '../../ports/workspace';
-import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
+import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
   addDetached,
   diffWorkingTree,
@@ -59,6 +59,9 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
       const result = releaseLease(leasesDir(), remote, branch, runId);
       if (result.released) emit({ type: 'workspace:lease_released', remote, branch });
       return result;
+    },
+    async holder(remote, branch) {
+      return heldLease(leasesDir(), remote, branch);
     },
     async create(run, { base = defaultBranch, branch }) {
       const started = now().getTime();

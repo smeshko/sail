@@ -6,6 +6,7 @@
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessEvent } from '../../ports/harness';
 import type { Usage } from '../../ports/types';
+import type { Denial } from './tool-call';
 
 type TurnUsage = SDKAssistantMessage['message']['usage'];
 
@@ -46,8 +47,11 @@ export interface SessionReader {
   /** Closes the last turn, fails each tool still open, and gives the result's own usage update when there is one. */
   settle(result: SDKResultMessage | undefined): HarnessEvent[];
   state(): ReaderState;
-  /** Marks a tool call as denied, so its end says so and the session counts it. */
-  markDenied(toolUseId: string): void;
+  /**
+   * Marks a tool call as denied, so its end says so and the session counts it. A denial given is held until the call's
+   * result, and emitted as `permission:denied` just before its end, so it never precedes the call's start (D5).
+   */
+  markDenied(toolUseId: string, denial?: Denial): void;
 }
 
 const ZERO: Tokens = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
@@ -101,6 +105,8 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
   const failures: string[] = [];
   const open = new Map<string, number>();
   const denied = new Set<string>();
+  /** The denials not yet emitted, by call id. */
+  const held = new Map<string, Denial>();
   let sessionId: string | undefined;
   let model: string | undefined;
   let turns = 0;
@@ -127,15 +133,26 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     return [{ type: 'usage:update', turn: turns, tokens: closed, costUsdSoFar: 0 }];
   };
 
-  const endTool = (callId: string, status: 'completed' | 'failed'): HarnessEvent => {
+  /** The held denial of `callId`, as its event, once. */
+  const denialOf = (callId: string): HarnessEvent[] => {
+    const denial = held.get(callId);
+    if (denial === undefined) return [];
+    held.delete(callId);
+    return [{ type: 'permission:denied', callId, ...denial }];
+  };
+
+  const endTool = (callId: string, status: 'completed' | 'failed'): HarnessEvent[] => {
     const started = open.get(callId) ?? now();
     open.delete(callId);
-    return {
-      type: 'tool:end',
-      callId,
-      status: denied.has(callId) ? 'denied' : status,
-      durationMs: Math.max(0, now() - started),
-    };
+    return [
+      ...denialOf(callId),
+      {
+        type: 'tool:end',
+        callId,
+        status: denied.has(callId) ? 'denied' : status,
+        durationMs: Math.max(0, now() - started),
+      },
+    ];
   };
 
   function assistant(message: SDKAssistantMessage): HarnessEvent[] {
@@ -175,7 +192,7 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     for (const block of content) {
       if (block.type !== 'tool_result' || !open.has(block.tool_use_id)) continue;
       if (message.parent_tool_use_id === null) found.push(...closeTurn());
-      found.push(endTool(block.tool_use_id, block.is_error === true ? 'failed' : 'completed'));
+      found.push(...endTool(block.tool_use_id, block.is_error === true ? 'failed' : 'completed'));
     }
     return found;
   }
@@ -201,7 +218,8 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     },
     settle(result) {
       const found = closeTurn();
-      for (const callId of [...open.keys()]) found.push(endTool(callId, 'failed'));
+      for (const callId of [...open.keys()]) found.push(...endTool(callId, 'failed'));
+      for (const callId of [...held.keys()]) found.push(...denialOf(callId));
       if (result !== undefined) {
         turns = Math.max(turns, result.num_turns);
         const tokens = resultTokens(result);
@@ -220,8 +238,9 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
       failures: [...failures],
       events: [...events],
     }),
-    markDenied(toolUseId) {
+    markDenied(toolUseId, denial) {
       denied.add(toolUseId);
+      if (denial !== undefined) held.set(toolUseId, denial);
     },
   };
 }
