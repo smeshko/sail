@@ -106,11 +106,19 @@ const onePath =
   (kind: ToolKind, name: string, tool: string): Mapping =>
   (input, cwd) => ({ kind, paths: forms(tool, stringIn(tool, input, name) as string, cwd) });
 
+/**
+ * Whether `command` sends a job to the background: an `&` that is not part of `&&`, `&>`, `>&`, `<&` or `|&`. The CLI
+ * runs each command's shell in a process group of its own, so such a job outlives its call out of sail's reach. The
+ * text is read whole, quotes and nested shells included, so a quoted `&` is refused too: that fails closed.
+ */
+const backgrounds = (command: string): boolean => command.replace(/&&|&>|>&|<&|\|&/g, '').includes('&');
+
 /** Each built-in the mapping reads, by name. */
 const MAPPINGS: Record<string, Mapping> = {
   Bash(input) {
     const command = stringIn('Bash', input, 'command') as string;
     if (input.run_in_background === true) throw new Unchecked('a background command can outlive the session');
+    if (backgrounds(command)) throw new Unchecked('a command run in the background with & can outlive the session');
     return { kind: 'execute', paths: [], command };
   },
   Read: onePath('read', 'file_path', 'Read'),
