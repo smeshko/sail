@@ -43,10 +43,7 @@ const named = (file: string) => {
   return NAMES.filter((name) => new RegExp(`['"\`]${name}(['"\`#/:])`).test(source));
 };
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('railRepos lists alpha then beta, each run newest first with its status, stop reason, duration and cost, and neither model names a fixture', () => {
+test('railRepos lists alpha then beta, each run newest first with its status, stop reason, duration and cost, and neither model names a fixture', () => {
   const repos = railRepos(index(m.registryDir), NOW);
   expect(repos.map((repo) => [repo.name, repo.remote, repo.live, repo.problem])).toEqual([
     ['alpha', 'https://example.com/alpha.git', false, undefined],
@@ -76,10 +73,7 @@ test
   expect([...named('index-model.ts'), ...named('attention.ts')]).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a running copy is live, listed first, and its duration is the time since it started', () => {
+test('a running copy is live, listed first, and its duration is the time since it started', () => {
   runningCopy(m, 20);
   const started = Date.parse('2026-09-25T09:00:00.000Z');
   const [alpha] = railRepos(index(m.registryDir), started + 5000);
@@ -93,10 +87,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("queuePanels gives beta's queue with its counts and its items by state, and nothing once beta's queue/ is gone", () => {
+test("queuePanels gives beta's queue with its counts and its items by state, and nothing once beta's queue/ is gone", () => {
   const [panel, ...others] = queuePanels(index(m.registryDir));
   expect(others).toEqual([]);
   expect([panel?.repo, panel?.workflow, panel?.problem, panel?.queue?.polling.label]).toEqual([
@@ -116,10 +107,7 @@ test
   expect(queuePanels(index(m.registryDir))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('watchState is watched after watch:added, not watched after a later watch:removed, and unknown with no watch event', () => {
+test('watchState is watched after watch:added, not watched after a later watch:removed, and unknown with no watch event', () => {
   const events = readFileSync(join(queueDirOf(m), 'events.ndjson'), 'utf8')
     .trimEnd()
     .split('\n')
@@ -133,10 +121,7 @@ test
   ]).toEqual(['watched', 'not watched', 'watched', 'unknown']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a repository whose .sail/ is gone shows in the rail with its problem and no runs', () => {
+test('a repository whose .sail/ is gone shows in the rail with its problem and no runs', () => {
   rmSync(m.alpha.sailDir, { recursive: true });
   const repos = railRepos(index(m.registryDir), NOW);
   expect(repos.map((repo) => [repo.name, repo.runs.length, typeof repo.problem])).toEqual([
