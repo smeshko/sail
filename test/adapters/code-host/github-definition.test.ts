@@ -3,7 +3,7 @@
 // (DECISIONS D7), its endpoint from SAIL_GITHUB_API_URL (D6), and its repository from the option or else the remote's
 // github.com URL (D8). Each case resolves against a scripted GitHub of its own, served on 127.0.0.1.
 import { expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { githubRepositoryOf } from '../../../src/adapters/code-host/github';
 import { BUILTINS } from '../../../src/adapters/index';
@@ -197,5 +197,18 @@ test('a repository name of dots, from the option or the remote, is refused: the 
         '/adapters/codeHost github could not be created: github codeHost: option repository: must be owner/name, such as octo/hello',
       ]),
     });
+  });
+});
+
+test("reading the repository from the remote traces nothing of the token, whatever git's trace variables ask (review R2-3)", async () => {
+  await withTempRepo(async (repo) => {
+    repo.git('remote', 'add', 'origin', 'https://github.com/o/r.git');
+    const trace = join(repo.home, 'trace2.json');
+    const env = { GITHUB_TOKEN, GIT_TRACE2_EVENT: trace, GIT_TRACE2_ENV_VARS: 'GITHUB_TOKEN,SAIL_GIT_TOKEN' };
+    const resolved = await resolve(repo, { use: 'github' }, env);
+    expect({
+      resolved: 'host' in resolved,
+      traced: existsSync(trace) && readFileSync(trace, 'utf8').includes(GITHUB_TOKEN),
+    }).toEqual({ resolved: true, traced: false });
   });
 });

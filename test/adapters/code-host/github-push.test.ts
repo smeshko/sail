@@ -308,6 +308,21 @@ test('a remote that pushes to two URLs is refused as invalid, and neither gets t
   });
 });
 
+test("git's trace variables in the caller's environment trace nothing of the token, before the push or in it (review R2-3)", async () => {
+  await withServed(TOKEN, async ({ repo, http }) => {
+    detachedCommit(repo, 'a.txt');
+    const trace = join(repo.home, 'trace2.json');
+    const env = {
+      ...repo.env,
+      GITHUB_TOKEN: TOKEN,
+      GIT_TRACE2_EVENT: trace,
+      GIT_TRACE2_ENV_VARS: 'GITHUB_TOKEN,SAIL_GIT_TOKEN',
+    };
+    await push(repo, 'sail/x', { remote: 'web', webUrl: http.base, env });
+    expect(existsSync(trace) && readFileSync(trace, 'utf8').includes(TOKEN)).toBe(false);
+  });
+});
+
 test("the push's arguments reset the user's helpers, scope sail's to the web host, and push HEAD unforced and without hooks: none holds the token", () => {
   const pushing = ['push', '--porcelain', '--no-verify', '--no-follow-tags', '--recurse-submodules=no', 'sail'];
   expect([pushArgs('sail/x', 'https://github.com'), pushArgs('sail/x', undefined)]).toEqual([
