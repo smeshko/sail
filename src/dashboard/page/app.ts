@@ -39,6 +39,8 @@ interface OpenRun {
   runId: string;
   model: RunModel;
   ended: boolean;
+  /** When its stream's `end` arrived, by the host's clock. */
+  endSeen?: number;
   error?: string;
   connection?: { close(): void };
   retry?: number;
@@ -245,6 +247,7 @@ export function boot(host: PageHost): Page {
       }
     } else if (message?.kind === 'end') {
       open.ended = true;
+      open.endSeen = host.now();
       mark('main', 'status');
       // An index saying the run runs again may have come before this end: look again once the index has caught up
       // (review R2-3).
@@ -277,18 +280,27 @@ export function boot(host: PageHost): Page {
     open.connection = connection;
   };
 
-  /** The open run's status as the index lists it, or undefined. */
-  const listedStatus = (open: OpenRun) => {
+  /**
+   * Whether the index lists the ended run otherwise than its stream ended it: running again, as `sail resume` makes it,
+   * or ended with another status or at another time, by a resume that ran between two polls (review R3-1).
+   */
+  const movedOn = (open: OpenRun) => {
     const item = index?.find((repo) => repo.name === open.repo)?.runs.find((entry) => entry.runId === open.runId);
-    return item === undefined ? undefined : statusOf(item);
+    if (item === undefined) return false;
+    const { end, endedAt } = open.model;
+    if (statusOf(item) !== (end?.status ?? 'running')) return true;
+    const listed = item.summary?.endedAt;
+    return listed !== undefined && endedAt !== undefined && listed !== endedAt;
   };
 
   /**
-   * Follows the open run's stream again, from an empty model, when its stream ended and the index says it runs again,
-   * as `sail resume` makes it (review R1-2). Either order of the end and the index lands here.
+   * Follows the open run's stream again, from an empty model, when its stream ended and the index has since moved on
+   * (review R1-2). Either order of the end and the index lands here. For the reconnect delay after the end, an index
+   * may still be one read before it, so only the check the end set up then decides (review R3-3).
    */
-  function followAgain(open: OpenRun) {
-    if (open !== run || !open.ended || listedStatus(open) !== 'running') return;
+  function followAgain(open: OpenRun, fromIndex = false) {
+    if (open !== run || !open.ended || !movedOn(open)) return;
+    if (fromIndex && host.now() - (open.endSeen ?? 0) < RECONNECT_MS) return;
     if (open.retry !== undefined) host.cancel(open.retry);
     delete open.retry;
     open.ended = false;
@@ -381,7 +393,7 @@ export function boot(host: PageHost): Page {
       const first = firstRun(index);
       if (first !== undefined) selectRun(first.repo, first.runId);
     }
-    if (run !== undefined) followAgain(run);
+    if (run !== undefined) followAgain(run, true);
     mark('rail', 'attention', 'queues', 'main', 'status');
   };
 

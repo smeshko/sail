@@ -117,6 +117,8 @@ export interface RunModel {
   openLoops: string[];
   routes: { at: string; value: string; took: string }[];
   end?: { status: string; stopReason?: string; message?: string };
+  /** The `ts` of the `run:end` in `end`. */
+  endedAt?: string;
   pr?: { number: number; url: string };
   /** The intake's key, once its call started. */
   intakeKey?: string;
@@ -275,7 +277,10 @@ export function applyEvent(model: RunModel, event: unknown): void {
   if (card !== undefined) card.events++;
   // A run:end with more of the run after it, other than a consumer's report, was a stop the run was resumed from, as
   // the follow reads it (src/events/follow.ts): the run is live again (review R1-2).
-  if (model.end !== undefined && type !== 'run:end' && type !== 'error:consumer') delete model.end;
+  if (model.end !== undefined && type !== 'run:end' && type !== 'error:consumer') {
+    delete model.end;
+    delete model.endedAt;
+  }
   if (!fold(model, e, type, ts, key, card)) model.unreadable++;
   else if (type === 'run:start' || type === 'stage:start') model.pending = pendingOf(model);
 }
@@ -315,6 +320,7 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       const status = str(e.status);
       if (status === undefined) return false;
       model.end = { status };
+      model.endedAt = ts;
       const stopReason = str(e.stopReason);
       const message = str(e.message);
       if (stopReason !== undefined) model.end.stopReason = stopReason;
