@@ -248,6 +248,15 @@ test("the push's environment drops git's trace variables and the repository's, k
   });
 });
 
+test("the push's environment holds the token only as SAIL_GIT_TOKEN: the caller's variables that hold it are dropped (review R1-3)", () => {
+  const caller = { KEEP: 'kept', SAIL_GITHUB_TOKEN: TOKEN, GITHUB_TOKEN: TOKEN, GH_AUTH: `Bearer ${TOKEN}` };
+  const env = pushEnv(caller, TOKEN);
+  expect({
+    holding: Object.entries(env).flatMap(([name, value]) => (value.includes(TOKEN) ? [name] : [])),
+    kept: env.KEEP,
+  }).toEqual({ holding: ['SAIL_GIT_TOKEN'], kept: 'kept' });
+});
+
 /** The command lines of every process on the machine. */
 const processes = () => Bun.spawnSync(['ps', '-axo', 'command'], { stdin: 'ignore' }).stdout.toString();
 
