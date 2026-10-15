@@ -8,6 +8,7 @@ import { isPlainName } from '../engine/call-dir';
 import { runsDir, type Source } from '../engine/run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from '../engine/run-header';
 import { listRuns, type RunListing } from '../engine/runs';
+import { validateDocument } from '../engine/schemas';
 import { EVENTS_FILE, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
 import { type RegistryEntry, type RegistryProblem, readRegistry } from '../watch/registry';
@@ -110,7 +111,14 @@ export function runItems(entry: RegistryEntry): RunItem[] {
     const summary = join(dir, 'summary.json');
     if (existsSync(summary)) {
       try {
-        item.summary = JSON.parse(readFileSync(summary, 'utf8')) as Summary;
+        const data: unknown = JSON.parse(readFileSync(summary, 'utf8'));
+        // The page reads a summary by its shape, so one that isn't a `sail.summary.v1` is not passed on (review R1-1).
+        const issues = validateDocument('sail.summary.v1', data);
+        if (issues.length === 0) item.summary = data as Summary;
+        else {
+          const first = issues[0];
+          problems.push(`summary.json is not a sail.summary.v1: ${first?.path ?? ''} ${first?.message ?? ''}`.trim());
+        }
       } catch (error) {
         problems.push(`${summary} can't be read: ${messageOf(error)}`);
       }
