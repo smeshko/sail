@@ -58,7 +58,7 @@ test('the golden run view shows its loop, its eight routes, $1.35 of its $25.00 
     'open#1 passed → end',
   ]);
   expect(markup).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
-  expect(markup).toContain('<div class="stat"><b>15.9s</b><span>of 90m</span></div>');
+  expect(markup).toContain('<div class="stat"><b>16.0s</b><span>of 90m</span></div>');
   expect(markup).toContain('<div class="stat"><b>9/9</b><span>calls settled</span></div>');
   expect(markup).toContain(
     `<code>sail show ${GOLDEN_RUN_ID}</code><button class="btn" data-action="copy" data-text="sail show ${GOLDEN_RUN_ID}">copy</button>`,
