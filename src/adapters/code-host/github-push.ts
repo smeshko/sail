@@ -34,13 +34,18 @@ export interface PushOptions {
   readonly redact: Redactor;
 }
 
-/** git's arguments for the push. None holds the token. */
+/**
+ * git's arguments for the push. None holds the token. No hook runs: `--no-verify` skips only pre-push, and the
+ * remote-tracking ref the push updates would run reference-transaction with the token in its environment.
+ */
 export function pushArgs(remote: string, branch: string, webUrl: string): string[] {
   return [
     '-c',
     'credential.helper=',
     '-c',
     `credential.${webUrl}.helper=${CREDENTIAL_HELPER}`,
+    '-c',
+    'core.hooksPath=/dev/null',
     'push',
     '--porcelain',
     '--no-verify',
