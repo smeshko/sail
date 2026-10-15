@@ -185,7 +185,8 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
     const end = await runProcess({
       command: ['git', `--git-dir=${gitDir}`, ...pushArgs(branch, offered ? options.webUrl : undefined)],
       cwd: logs,
-      env: pushEnv(options.env, offered ? options.token : undefined),
+      // The token leaves every variable first, offered or not: the operator's own GITHUB_TOKEN would stay otherwise.
+      env: pushEnv(withoutToken(options.env, options.token), offered ? options.token : undefined),
       stdout,
       stderr,
       timeoutMs,
