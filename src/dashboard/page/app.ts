@@ -237,9 +237,10 @@ export function boot(host: PageHost): Page {
       if (key !== undefined && key === ui.key) {
         mark('inspector');
         const card = open.model.cards.find((entry) => entry.key === key);
-        // The call's end: its result.json is written now, and its log has its last lines (review R1-3).
+        // The call's end: its result.json is written now, and its log has its last lines (review R1-3). Each try ends,
+        // and a corrective try writes its own result.json, so even a loaded one is read again (review R2-2).
         const ended = (event.type === 'stage:end' || event.type === 'intake:end') && event.key === key;
-        if (ended && result?.state !== 'loaded') readResult();
+        if (ended) readResult();
         if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog();
       }
     } else if (message?.kind === 'end') {
