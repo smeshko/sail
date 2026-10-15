@@ -10,6 +10,7 @@ import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/p
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
   FAKE_2_ID,
+  FAKE_3_ID,
   fake2Dir,
   GOLDEN_RUN_ID,
   type Machine,
@@ -442,4 +443,74 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
   host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
   expect(page.ui.key).toBeUndefined();
+});
+
+test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {
+  const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'select-run', repo: 'beta', run: FAKE_3_ID });
+  const first = host.open('run=')[0];
+  expect(first?.query).toBe(runQuery('beta', FAKE_3_ID));
+  replay(first, beta);
+  host.drop(first);
+  host.advance(5000);
+  expect(host.regions.status).toContain('<span>ended suspended</span>');
+  expect(host.open('run=')).toEqual([]);
+
+  // `sail resume` sets STATUS back to running, and the next index says so.
+  const resumed = indexMessage();
+  for (const repo of resumed.repos)
+    for (const run of repo.runs) if (run.runId === FAKE_3_ID) run.status = { status: 'running' };
+  host.push(host.open('index')[0], resumed);
+  const second = host.open('run=');
+  expect(second.map((socket) => socket.query)).toEqual([runQuery('beta', FAKE_3_ID)]);
+  replay(second[0], beta, false);
+  const after = { seq: 50, ts: '2026-09-24T11:05:00.000Z', type: 'workspace:leased', runId: FAKE_3_ID };
+  host.push(second[0], { kind: 'event', event: after });
+  host.advance(100);
+  expect(host.regions.status).toContain('<span>● live</span>');
+  host.advance(5000);
+  expect(host.open('run=')).toHaveLength(1);
+  expect(host.sockets.filter((socket) => socket.query.startsWith('run=beta'))).toHaveLength(2);
+});
+
+test("the selected call's result and log are read again when it ends, and a read answered late never overwrites a newer one (review R1-3)", async () => {
+  const { dir, rest } = runningCopy(m, 1);
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  const lines = rest.map((line) => JSON.parse(line));
+  const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'tests#1');
+  const end = lines.findIndex((event) => event.type === 'stage:end' && event.key === 'tests#1');
+  for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
+  const result = `/api/repos/alpha/runs/${RUNNING_ID}/calls/tests%231/result`;
+  host.bodies.set(result, { status: 404, body: '' });
+  host.hold = true;
+  host.click({ action: 'select-card', key: 'tests#1' });
+  host.click({ action: 'tab', tab: 'log' });
+  const reads = (part: string) => host.reads.filter((read) => read.path.includes(part));
+  const counts = () => [reads('/result').length, reads('/log?').length];
+  expect(counts()).toEqual([1, 1]);
+  for (const event of lines.slice(start + 1, end)) host.push(socket, { kind: 'event', event });
+  host.advance(2000);
+  const [results = 0, logs = 0] = counts();
+  expect(results).toBe(1);
+  // Its end, a second after the last read: its result.json and its whole log are read once more.
+  host.push(socket, { kind: 'event', event: lines[end] });
+  host.advance(1000);
+  expect(counts()).toEqual([results + 1, logs + 1]);
+  // The call's result.json now exists: the second read finds it, and the first, answered after it, is dropped.
+  host.bodies.set(result, { status: 200, body: JSON.stringify({ outcome: 'failed', output: { read: 'the second' } }) });
+  reads('/result')[1]?.resolve();
+  await settle();
+  host.bodies.set(result, { status: 404, body: '' });
+  reads('/result')[0]?.resolve();
+  for (const read of reads('/log?')) read.resolve();
+  await settle();
+  host.click({ action: 'tab', tab: 'overview' });
+  host.advance(100);
+  expect(host.regions.inspector).toContain('&quot;the second&quot;');
+  expect(host.regions.inspector).not.toContain('this call has no result.json yet');
 });
