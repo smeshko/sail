@@ -59,10 +59,16 @@ function withoutToken(env: Readonly<Record<string, string>>, token: string): Rec
   return Object.fromEntries(Object.entries(env).filter(([, value]) => token === '' || !value.includes(token)));
 }
 
+/**
+ * Trace2 off, whatever the user's global config sets: its `trace2.envVars` can name the helper's variable, and its
+ * targets write to files. These variables win over that config.
+ */
+const TRACE2_OFF = { GIT_TRACE2: '0', GIT_TRACE2_EVENT: '0', GIT_TRACE2_PERF: '0' };
+
 /** The push's environment: no prompts, no traces, the token for the helper alone. */
 export function pushEnv(env: Readonly<Record<string, string>>, token: string): Record<string, string> {
   const quiet = Object.entries(nonInteractive(withoutToken(env, token))).filter(([name]) => !TRACE.test(name));
-  return { ...Object.fromEntries(quiet), GIT_TRACE_REDACT: '1', SAIL_GIT_TOKEN: token };
+  return { ...Object.fromEntries(quiet), GIT_TRACE_REDACT: '1', ...TRACE2_OFF, SAIL_GIT_TOKEN: token };
 }
 
 /** The code a failed push is, from what git said. */
