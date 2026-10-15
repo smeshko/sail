@@ -54,9 +54,14 @@ export function pushArgs(remote: string, branch: string, webUrl: string): string
   ];
 }
 
+/** `env` without a variable that holds `token`, such as the operator's own `GITHUB_TOKEN`: git's children inherit it. */
+function withoutToken(env: Readonly<Record<string, string>>, token: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => token === '' || !value.includes(token)));
+}
+
 /** The push's environment: no prompts, no traces, the token for the helper alone. */
 export function pushEnv(env: Readonly<Record<string, string>>, token: string): Record<string, string> {
-  const quiet = Object.entries(nonInteractive(env)).filter(([name]) => !TRACE.test(name));
+  const quiet = Object.entries(nonInteractive(withoutToken(env, token))).filter(([name]) => !TRACE.test(name));
   return { ...Object.fromEntries(quiet), GIT_TRACE_REDACT: '1', SAIL_GIT_TOKEN: token };
 }
 
@@ -73,7 +78,7 @@ const fail = (code: PortErrorCode, message: string, raw?: unknown) =>
 
 export async function pushHead(options: PushOptions): Promise<Pushed> {
   const { cwd, remote, branch, redact } = options;
-  const local = nonInteractive(options.env);
+  const local = nonInteractive(withoutToken(options.env, options.token));
   if (branch.startsWith('-') || gitSync(cwd, ['check-ref-format', `refs/heads/${branch}`], local).code !== 0) {
     throw redact.error(fail('invalid', `${branch} is not a branch name`));
   }
