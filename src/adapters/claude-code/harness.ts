@@ -6,8 +6,8 @@
 //
 // Every tool call passes the gate first (7.3 D1): its PreToolUse hook asks the permission engine, and canUseTool denies
 // whatever still reaches it. The session is offered only the tools its step can use (D2). The CLI scrubs the provider's
-// credentials from the Bash tool's environment (D3), and returns that tool to the workspace after each command (D4).
-// The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
+// credentials from the Bash tool's environment (D3), returns that tool to the workspace after each command (D4), and
+// runs it under bash, the shell decide() reads. The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
 import {
   type Options,
   type SDKMessage,
@@ -73,7 +73,20 @@ export const ENV_ALLOWLIST: readonly string[] = [
 const allowed = (name: string): boolean =>
   ENV_ALLOWLIST.some((entry) => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry));
 
-/** The session's environment: the allowlisted names of `env`, then the call's preamble, which wins a clash. */
+/**
+ * The switches every session runs with, which nothing else in its environment overrides. The CLI runs the Bash tool
+ * under zsh when it finds one, but decide() reads commands as bash, and the two differ (zsh's `>!` writes its next
+ * word), so the shell is bash. Background tasks are off, as a background command is denied anyway (D8).
+ */
+const SWITCHES: Readonly<Record<string, string>> = {
+  CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+  CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
+  CLAUDE_CODE_SHELL: '/bin/bash',
+  SHELL: '/bin/bash',
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+};
+
+/** The session's environment: the allowlisted names of `env`, the preamble, which wins a clash, then the switches. */
 export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env): Record<string, string> {
   const picked = Object.entries(env).filter(
     (entry): entry is [string, string] => entry[1] !== undefined && allowed(entry[0]),
@@ -81,9 +94,8 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
   return {
     ...Object.fromEntries(picked),
     CLAUDE_AGENT_SDK_CLIENT_APP: 'sail',
-    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
-    CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: '1',
     ...preamble,
+    ...SWITCHES,
   };
 }
 
