@@ -83,7 +83,8 @@ export function boot(host: PageHost): Page {
   let log: Loaded<string> | undefined;
   /** Bumped on every change of the selected call: a read made for an older one is dropped. */
   let selection = 0;
-  /** Bumped on every log read asked for: only the latest is shown. */
+  /** Bumped on every result and log read asked for: only the latest of each is shown. */
+  let resultRead = 0;
   let logRead = 0;
   let lastLogRead = Number.NEGATIVE_INFINITY;
   /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
@@ -141,10 +142,11 @@ export function boot(host: PageHost): Page {
     const open = run;
     const key = ui.key;
     if (open === undefined || key === undefined) return;
-    const asked = selection;
+    const asked = ++resultRead;
+    const forSelection = selection;
     result = { state: 'loading' };
     void host.get(`${callPath(open, key)}/result`).then((answer) => {
-      if (asked !== selection) return;
+      if (asked !== resultRead || forSelection !== selection) return;
       if (answer.status === 200) {
         try {
           result = { state: 'loaded', value: JSON.parse(answer.body) as unknown };
@@ -226,7 +228,10 @@ export function boot(host: PageHost): Page {
       if (key !== undefined && key === ui.key) {
         mark('inspector');
         const card = open.model.cards.find((entry) => entry.key === key);
-        if (ui.tab === 'log' && card?.state === 'running') refreshLog();
+        // The call's end: its result.json is written now, and its log has its last lines (review R1-3).
+        const ended = (event.type === 'stage:end' || event.type === 'intake:end') && event.key === key;
+        if (ended && result?.state !== 'loaded') readResult();
+        if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog();
       }
     } else if (message?.kind === 'end') {
       open.ended = true;
