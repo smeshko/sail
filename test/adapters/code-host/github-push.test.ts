@@ -5,7 +5,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CREDENTIAL_HELPER, pushArgs, pushEnv, pushHead } from '../../../src/adapters/code-host/github-push';
+import { CREDENTIAL_HELPER, gitEnv, pushArgs, pushEnv, pushHead } from '../../../src/adapters/code-host/github-push';
 import { redactor } from '../../../src/engine/redact';
 import { PortError } from '../../../src/ports/errors';
 import { type GitHttp, serveGitHttp } from '../../helpers/git-http';
@@ -414,6 +414,21 @@ test('a URL that a URL parser reads as the web host but git reads as scp-like ss
       seen: ['||'],
       served: 0,
     });
+  });
+});
+
+test("a GITHUB_TOKEN that differs from the token in use reaches no git either: both names leave every git's environment (review R3-3)", async () => {
+  await withServed(TOKEN, async ({ repo }) => {
+    detachedCommit(repo, 'a.txt');
+    const { ssh, seen } = loggingSsh(repo);
+    repo.git('remote', 'add', 'ssh', 'ssh://git@example.invalid/o/r.git');
+    const env = { ...repo.env, GIT_SSH: ssh, GITHUB_TOKEN: 'ghp_MARKER_other_77aa', SAIL_GITHUB_TOKEN: TOKEN };
+    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env }));
+    expect({
+      code: failure(error).code,
+      seen: seen(),
+      gitEnv: Object.keys(gitEnv(env, TOKEN)).filter((name) => name.includes('GITHUB_TOKEN')),
+    }).toEqual({ code: 'unavailable', seen: ['||'], gitEnv: [] });
   });
 });
 
