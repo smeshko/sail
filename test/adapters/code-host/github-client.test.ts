@@ -167,3 +167,17 @@ test('an answer that echoes the token comes back with it masked, in the message 
   ]);
   expect(JSON.stringify([String(error), (error as PortError).raw])).not.toContain('MARKER');
 });
+
+test('a text answer that holds the token across the cut at 200 characters leaves no part of it (review R1-5)', async () => {
+  const cut = (form: string) => `${'x'.repeat(200 - form.length + 1)}${form}`;
+  const answers = [cut(TOKEN), cut(encodeURIComponent(TOKEN)), cut(Buffer.from(TOKEN).toString('base64'))];
+  const messages = [];
+  for (const text of answers) {
+    const { github } = client(() => new Response(text, { status: 502 }));
+    const error = await rejection(github.request('getPullRequest', 'GET', github.repoPath('pulls', 1)));
+    messages.push(failure(error).message ?? '');
+  }
+  // The token's first 12 characters, `ghp_MARKER_c`, are long enough to be a fragment of it and of nothing else.
+  expect(messages.map((message) => message.includes(TOKEN.slice(0, 12)))).toEqual([false, false, false]);
+  expect(messages.map((message) => message.endsWith('[redacted]'))).toEqual([true, true, true]);
+});
