@@ -9,7 +9,14 @@ import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { Ticket } from '../../src/ports/types';
 import { drainCommands, dropCommand } from '../../src/watch/inbox';
-import { createPoller, openWatchTarget, pollOnce, systemTimers, type WatchTarget } from '../../src/watch/poll';
+import {
+  createPoller,
+  openWatchTarget,
+  pollOnce,
+  readWatch,
+  systemTimers,
+  type WatchTarget,
+} from '../../src/watch/poll';
 import { openQueue, type QueueFile, queueDir } from '../../src/watch/queue-store';
 import { fakeTimers } from '../helpers/fake-timers';
 import { copyFixture, write } from '../helpers/fixture';
@@ -75,7 +82,7 @@ function target(
 ) {
   const store = openQueue({ runsDir: runs, workflow, label, now });
   if ('refused' in store) throw new Error(store.refused);
-  return { workflow, label, everyMs, ticketSource: source, store } satisfies WatchTarget;
+  return { workflow, label, everyMs, maxConcurrentRuns: 1, ticketSource: source, store } satisfies WatchTarget;
 }
 
 /** The workflow's queue.json, which must exist. */
@@ -199,7 +206,7 @@ test("a 401 pauses only that workflow's timed polls, and a poll command, once th
 
   a.failWith = undefined;
   dropCommand(dir, { op: 'poll', workflow: 'a' });
-  expect(drainCommands(dir, poller.apply)).toEqual({ applied: 1, rejected: [] });
+  expect(await drainCommands(dir, poller.apply)).toEqual({ applied: 1, rejected: [] });
   expect(a.calls).toBe(2);
   expect(await poller.pollNow('a')).toBe('polled');
   expect(a.calls).toBe(2);
@@ -437,7 +444,7 @@ test('a poll command or a start whose poll throws reports it to onError, or to s
   });
   await poller.start();
   dropCommand(dir, { op: 'poll', workflow: 'a' });
-  expect(drainCommands(dir, poller.apply)).toEqual({ applied: 1, rejected: [] });
+  expect(await drainCommands(dir, poller.apply)).toEqual({ applied: 1, rejected: [] });
   await Bun.sleep(0);
   expect(heard).toEqual(['a: ENOSPC: no space left on device, write', 'a: ENOSPC: no space left on device, write']);
   poller.stop();
@@ -536,4 +543,24 @@ test('a pause saved to queue.json whose queue:error append throws still stops ti
   await timers.advance(60 * 60_000);
   expect(a.calls).toBe(1);
   poller.stop();
+});
+
+test("readWatch gives a fixture copy's ticket-to-pr its label, interval and cap without opening its queue, and openWatchTarget carries the cap", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const options = { sailDir: sail, config: { label: 'sail' }, name: 'ticket-to-pr' };
+    expect(await readWatch(options)).toEqual({
+      workflow: 'ticket-to-pr',
+      label: 'sail',
+      everyMs: 300_000,
+      maxConcurrentRuns: 2,
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+    const source = createFakeTicketSource({
+      seed: join(sail, 'fake', 'tickets.json'),
+      state: join(repo.dir, 'state.json'),
+    });
+    const opened = await openWatchTarget({ ...options, ticketSource: source, now: manualClock(START) });
+    expect('refused' in opened ? opened : opened.maxConcurrentRuns).toBe(2);
+  });
 });

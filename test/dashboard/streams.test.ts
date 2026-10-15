@@ -338,7 +338,16 @@ test('?queue= replays every queue event in seq order as a queue-event, then foll
   expect(await until(() => queueEvents(socket).length === 9)).toBe(true);
   expect(socket.messages[0]).toEqual({
     kind: 'queue-event',
-    event: { seq: 1, ts: '2026-09-24T10:54:59.000Z', type: 'watch:added', workflow: QUEUE_WORKFLOW },
+    event: {
+      seq: 1,
+      ts: '2026-09-24T10:54:59.000Z',
+      type: 'watch:added',
+      workflow: QUEUE_WORKFLOW,
+      pid: 4242,
+      label: 'sail',
+      everyMs: 300_000,
+      maxConcurrentRuns: 2,
+    },
   });
   const polled = { seq: 10, ts: '2026-09-24T11:06:00.000Z', type: 'queue:polled', workflow: QUEUE_WORKFLOW };
   appendFileSync(

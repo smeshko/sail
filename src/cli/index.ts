@@ -10,6 +10,7 @@ import { runWorkflowCommand } from './commands/run-workflow';
 import { runs } from './commands/runs';
 import { show } from './commands/show';
 import { stageRun } from './commands/stage-run';
+import { unwatch, watch } from './commands/watch';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
 export interface Io {
@@ -39,6 +40,8 @@ Usage:
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
   sail dashboard [--port <n>]                                Serve every repository's runs read-only on localhost
+  sail watch <workflow>...                                   Watch these workflows: start this repository's watcher, or add them to it
+  sail unwatch <workflow>...                                 Stop watching them. The watcher exits when it watches none
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
@@ -179,6 +182,8 @@ const commands = new Map<string, CommandSpec>([
       command: port,
     },
   ],
+  ['watch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: watch }],
+  ['unwatch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: unwatch }],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],
@@ -190,6 +195,8 @@ const TICKET: CommandSpec = {
     workflow: { type: 'string' },
     force: { type: 'boolean' },
     until: { type: 'string' },
+    // The watcher's: the run id it minted for the run it dispatches. Not in USAGE.
+    dispatch: { type: 'string' },
     ...VERBOSITY_OPTIONS,
   },
   positionals: 1,

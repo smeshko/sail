@@ -1288,7 +1288,7 @@ test.each(QUEUED.map((sample) => [sample.type, sample] as const))(
   },
 );
 
-test('a queue event refuses a runId, needs its workflow, and keeps retryInMs, dedupKey and an open payload to their rules', () => {
+test('a queue event refuses a runId, needs its workflow, and keeps retryInMs and dedupKey to their rules', () => {
   const [polled, added, , error] = QUEUED.map((sample) => ({ ...queueEnvelope, ...sample }));
   expect(paths('sail.event.v1', { ...polled, runId: RUN_ID })).toEqual(['/runId']);
   expect(paths('sail.event.v1', omit(polled as Record<string, unknown>, 'workflow'))).toEqual(['/workflow']);
@@ -1296,7 +1296,76 @@ test('a queue event refuses a runId, needs its workflow, and keeps retryInMs, de
   expect(paths('sail.event.v1', { ...error, paused: false })).toEqual(['/retryInMs']);
   expect(paths('sail.event.v1', { ...error, paused: false, retryInMs: 60_000 })).toEqual([]);
   expect(paths('sail.event.v1', { ...added, dedupKey: 'FAKE-1' })).toEqual(['/dedupKey']);
-  const dispatched = { ...queueEnvelope, type: 'queue:dispatched', workflow: 'ticket-to-pr', anything: [1, 2] };
-  expect(paths('sail.event.v1', dispatched)).toEqual([]);
-  expect(paths('sail.event.v1', omit(dispatched, 'workflow'))).toEqual(['/workflow']);
+});
+
+// The watch set's changes and the dispatch's events, closed in 13.2 (DECISIONS D7, D8, D12).
+const RUN_OF_FAKE_1 = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+const WATCHED: NewQueueEvent[] = [
+  { type: 'watch:added', workflow: 'ticket-to-pr', pid: 4242, label: 'sail', everyMs: 30_000, maxConcurrentRuns: 2 },
+  { type: 'watch:removed', workflow: 'ticket-to-pr', pid: 4242 },
+  {
+    type: 'queue:dispatched',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-1',
+    run: RUN_OF_FAKE_1,
+    attempt: 1,
+    pid: 4243,
+  },
+  {
+    type: 'queue:skipped_leased',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-3',
+    branch: 'sail/FAKE-3-document-the-greet-command',
+    heldBy: RUN_OF_FAKE_1,
+  },
+  { type: 'queue:dropped', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-4', reason: 'it is In Progress' },
+];
+
+/** Each way a sample breaks sail.event.v1, as the paths of its issues. */
+const broken = (sample: NewQueueEvent, change: Record<string, unknown>, without?: string) => {
+  const event: Record<string, unknown> = { ...queueEnvelope, ...sample, ...change };
+  return paths('sail.event.v1', without === undefined ? event : omit(event, without));
+};
+
+test('the watch and dispatch queue events validate closed, without runId, and each refuses an extra field', () => {
+  expect(WATCHED.map((sample) => [sample.type, paths('sail.event.v1', { ...queueEnvelope, ...sample })])).toEqual(
+    WATCHED.map((sample) => [sample.type, []]),
+  );
+  expect(WATCHED.map((sample) => broken(sample, { surprise: 1 }))).toEqual(WATCHED.map(() => ['/surprise']));
+  expect(WATCHED.map((sample) => broken(sample, { runId: RUN_ID }))).toEqual(WATCHED.map(() => ['/runId']));
+});
+
+test('the watch and dispatch queue events refuse a missing field, a pid or attempt below 1, and an empty reason, label or branch', () => {
+  const [added, removed, dispatched, skipped, dropped] = WATCHED as [NewQueueEvent, ...NewQueueEvent[]];
+  expect({
+    addedNoLabel: broken(added, {}, 'label'),
+    addedEmptyLabel: broken(added, { label: '' }),
+    addedPid: broken(added, { pid: 0 }),
+    addedEvery: broken(added, { everyMs: 29_999 }),
+    addedCap: broken(added, { maxConcurrentRuns: 0 }),
+    removedNoPid: broken(removed as NewQueueEvent, {}, 'pid'),
+    dispatchedNoRun: broken(dispatched as NewQueueEvent, {}, 'run'),
+    dispatchedAttempt: broken(dispatched as NewQueueEvent, { attempt: 0 }),
+    dispatchedPid: broken(dispatched as NewQueueEvent, { pid: 0 }),
+    dispatchedKey: broken(dispatched as NewQueueEvent, { dedupKey: 'FAKE-1' }),
+    skippedBranch: broken(skipped as NewQueueEvent, { branch: '' }),
+    skippedNoHolder: broken(skipped as NewQueueEvent, {}, 'heldBy'),
+    droppedReason: broken(dropped as NewQueueEvent, { reason: ' ' }),
+    droppedNoWorkflow: broken(dropped as NewQueueEvent, {}, 'workflow'),
+  }).toEqual({
+    addedNoLabel: ['/label'],
+    addedEmptyLabel: ['/label'],
+    addedPid: ['/pid'],
+    addedEvery: ['/everyMs'],
+    addedCap: ['/maxConcurrentRuns'],
+    removedNoPid: ['/pid'],
+    dispatchedNoRun: ['/run'],
+    dispatchedAttempt: ['/attempt'],
+    dispatchedPid: ['/pid'],
+    dispatchedKey: ['/dedupKey'],
+    skippedBranch: ['/branch'],
+    skippedNoHolder: ['/heldBy'],
+    droppedReason: ['/reason'],
+    droppedNoWorkflow: ['/workflow'],
+  });
 });

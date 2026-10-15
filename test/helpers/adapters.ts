@@ -44,7 +44,18 @@ export const OPERATIONS: Record<Port, string[]> = {
     'removeLabel',
   ],
   harness: ['capabilities', 'run'],
-  workspace: ['capabilities', 'create', 'diff', 'lease', 'release', 'releaseLease', 'reopen', 'repository', 'sweep'],
+  workspace: [
+    'capabilities',
+    'create',
+    'diff',
+    'holder',
+    'lease',
+    'release',
+    'releaseLease',
+    'reopen',
+    'repository',
+    'sweep',
+  ],
 };
 
 /** Capabilities each port's schema accepts. */

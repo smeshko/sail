@@ -13,7 +13,7 @@ import type { AdapterDefinition, Env } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { WorkspacePort } from '../../ports/workspace';
-import { defaultLeasesDir, releaseLease, takeLease } from '../leases';
+import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
   addDetached,
   diffWorkingTree,
@@ -87,6 +87,9 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       const result = releaseLease(leasesDir(), leased, branch, runId);
       if (result.released) emit({ type: 'workspace:lease_released', remote: leased, branch });
       return result;
+    },
+    async holder(leased, branch) {
+      return heldLease(leasesDir(), leased, branch);
     },
     async create(run, { branch, base, signal }) {
       const started = now().getTime();

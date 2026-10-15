@@ -990,3 +990,41 @@ test("sail FAKE-1 whose workspace can't be made exits 3, with the ticket untouch
     });
   });
 });
+
+// `--dispatch <run id>`: the watcher's start of a run it minted the id of (DECISIONS D3).
+const DISPATCHED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+
+test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, its claim before its intake', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const { code, stderr, runs, header, events, ticket } = await started(repo.dir, [
+      'FAKE-1',
+      '--dispatch',
+      DISPATCHED,
+    ]);
+    expect({ code, stderr, runs }).toEqual({ code: EXIT_OK, stderr: '', runs: [DISPATCHED] });
+    expect([header.runId, header.source]).toEqual([
+      DISPATCHED,
+      { kind: 'ticket', ticketKey: 'FAKE-1', via: 'watch', forced: [] },
+    ]);
+    const types = events.map((event) => event.type);
+    expect(types.indexOf('ticket:claimed')).toBeGreaterThan(-1);
+    expect(types.indexOf('ticket:claimed')).toBeLessThan(types.indexOf('intake:start'));
+    expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${DISPATCHED} started`]);
+    expect(readStatus(join(repo.dir, '.sail-runs', DISPATCHED))).toEqual({ status: 'completed' });
+  });
+});
+
+test('sail FAKE-1 --dispatch with a malformed id, or with --force, exits 3 in one line, with no run directory', async () => {
+  const malformed = await sailIn(['FAKE-1', '--dispatch', 'FAKE-1-nope']);
+  const forced = await sailIn(['FAKE-1', '--force', '--dispatch', DISPATCHED]);
+  expect([malformed, forced].map(({ code, stderr, touched }) => ({ code, stderr, touched }))).toEqual([
+    {
+      code: EXIT_REFUSED,
+      stderr:
+        "sail FAKE-1: --dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-nope' is not one\n",
+      touched: false,
+    },
+    { code: EXIT_REFUSED, stderr: "sail FAKE-1: --dispatch and --force can't be combined\n", touched: false },
+  ]);
+});

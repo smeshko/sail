@@ -62,9 +62,19 @@ test('each queue event is one line, and a type with no line of its own shows its
     'ticket:FAKE-6 after 2 attempts: stage_error: implement#1 ended in error: harness: the session ended before it submitted a result',
   ]);
   const at = { seq: 20, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
-  expect(queueEventLine({ ...at, type: 'watch:removed' })).toBe('removed from the watch set');
-  expect(queueEventLine({ ...at, type: 'queue:dispatched', dedupKey: 'ticket:FAKE-5' })).toBe('');
-  expect(queueEventLine({ ...error, paused: true, retryInMs: undefined } as QueueEvent)).toBe(
+  expect(queueEventLine({ ...at, type: 'watch:removed', pid: 1 } as QueueEvent)).toBe('removed from the watch set');
+  expect(
+    queueEventLine({
+      ...at,
+      type: 'queue:dispatched',
+      dedupKey: 'ticket:FAKE-5',
+      run: 'r',
+      attempt: 1,
+      pid: 1,
+    } as QueueEvent),
+  ).toBe('');
+  const { retryInMs: _retryInMs, ...queueError } = error as Extract<QueueEvent, { type: 'queue:error' }>;
+  expect(queueEventLine({ ...queueError, paused: true } as QueueEvent)).toBe(
     'ticketSource fake: the ticket source did not answer in 30s (paused)',
   );
 });

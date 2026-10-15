@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { type Command, commandsDir, drainCommands, dropCommand } from '../../src/watch/inbox';
+import { type Command, commandsDir, type Drained, drainCommands, dropCommand } from '../../src/watch/inbox';
 import { openQueue, QUEUE_FILE, queueDir } from '../../src/watch/queue-store';
 import { manualClock, ticket } from '../helpers/queue';
 
@@ -30,35 +30,35 @@ function runsDir(): string {
 }
 
 /** Drains the inbox into a list. */
-function drain(runs: string): { applied: Command[]; drained: ReturnType<typeof drainCommands> } {
+async function drain(runs: string): Promise<{ applied: Command[]; drained: Drained }> {
   const applied: Command[] = [];
-  const drained = drainCommands(runs, (command) => applied.push(command));
+  const drained = await drainCommands(runs, (command) => applied.push(command));
   return { applied, drained };
 }
 
-test('a dropped poll command is applied exactly once, then removed, and a .tmp beside it is left alone', () => {
+test('a dropped poll command is applied exactly once, then removed, and a .tmp beside it is left alone', async () => {
   const runs = runsDir();
   const file = dropCommand(runs, { op: 'poll', workflow: 'ticket-to-pr' });
   expect(file.startsWith(`${commandsDir(runs)}/`)).toBe(true);
   expect(basename(file)).toMatch(/^\d{8}T\d{9}-\d+-\d+-[0-9a-f]+\.json$/);
   writeFileSync(join(commandsDir(runs), '.x.tmp'), '{"op":');
-  expect(drain(runs)).toEqual({
+  expect(await drain(runs)).toEqual({
     applied: [{ op: 'poll', workflow: 'ticket-to-pr' }],
     drained: { applied: 1, rejected: [] },
   });
   expect(readdirSync(commandsDir(runs))).toEqual(['.x.tmp']);
-  expect(drain(runs)).toEqual({ applied: [], drained: { applied: 0, rejected: [] } });
+  expect(await drain(runs)).toEqual({ applied: [], drained: { applied: 0, rejected: [] } });
 });
 
-test('commands dropped in order, many within one millisecond, are applied in that order', () => {
+test('commands dropped in order, many within one millisecond, are applied in that order', async () => {
   const runs = runsDir();
   const order = ['c', 'a', 'b', 'q', 'e', 'z', 'm', 'd', 'x', 'f', 'k', 'g', 'w', 'h', 'r', 'i', 'y', 'j', 'n', 'l'];
   for (const workflow of order) dropCommand(runs, { op: 'poll', workflow });
-  expect(drain(runs).applied.map((command) => command.op === 'poll' && command.workflow)).toEqual(order);
+  expect((await drain(runs)).applied.map((command) => command.op === 'poll' && command.workflow)).toEqual(order);
   expect(readdirSync(commandsDir(runs))).toEqual([]);
 });
 
-test('a file that is no command, or whose apply throws, is removed and rejected naming the file, and the drain goes on', () => {
+test('a file that is no command, or whose apply throws, is removed and rejected naming the file, and the drain goes on', async () => {
   const runs = runsDir();
   const dir = commandsDir(runs);
   mkdirSync(dir, { recursive: true });
@@ -68,8 +68,8 @@ test('a file that is no command, or whose apply throws, is removed and rejected 
   writeFileSync(join(dir, '4-throws.json'), JSON.stringify({ op: 'poll', workflow: 'gone' }));
   writeFileSync(join(dir, '5-fine.json'), JSON.stringify({ op: 'poll', workflow: 'ticket-to-pr' }));
   const applied: string[] = [];
-  const drained = drainCommands(runs, (command) => {
-    if (command.workflow === 'gone') throw new Error("not polling workflow 'gone'");
+  const drained = await drainCommands(runs, (command) => {
+    if (command.op !== 'poll' || command.workflow === 'gone') throw new Error("not polling workflow 'gone'");
     applied.push(command.workflow);
   });
   expect(applied).toEqual(['ticket-to-pr']);
@@ -103,7 +103,7 @@ test("draining commands leaves a store's queue.json as it was, and only the stor
   const before = { text: readFileSync(path, 'utf8'), mtimeMs: statSync(path).mtimeMs };
   dropCommand(runs, { op: 'poll', workflow: 'ticket-to-pr' });
   dropCommand(runs, { op: 'poll', workflow: 'other' });
-  expect(drain(runs).drained).toEqual({ applied: 2, rejected: [] });
+  expect((await drain(runs)).drained).toEqual({ applied: 2, rejected: [] });
   expect({ text: readFileSync(path, 'utf8'), mtimeMs: statSync(path).mtimeMs }).toEqual(before);
 
   expect(QUEUE_FILE).toBe('queue.json');
@@ -127,7 +127,7 @@ test("draining commands leaves a store's queue.json as it was, and only the stor
 /** The fs calls that only read. */
 const READS = new Set(['existsSync', 'lstatSync', 'readdirSync', 'readFileSync', 'realpathSync', 'statSync']);
 
-test('a directory, a link or an unreadable file in the inbox is removed and rejected, and the commands around it apply (review #1.5)', () => {
+test('a directory, a link or an unreadable file in the inbox is removed and rejected, and the commands around it apply (review #1.5)', async () => {
   const runs = runsDir();
   const dir = commandsDir(runs);
   mkdirSync(join(dir, '1-stray.json', 'inside'), { recursive: true });
@@ -137,7 +137,7 @@ test('a directory, a link or an unreadable file in the inbox is removed and reje
   writeFileSync(outside, JSON.stringify({ op: 'poll', workflow: 'linked' }));
   symlinkSync(outside, join(dir, '3-link.json'));
   writeFileSync(join(dir, '4-fine.json'), JSON.stringify({ op: 'poll', workflow: 'ticket-to-pr' }));
-  const { applied, drained } = drain(runs);
+  const { applied, drained } = await drain(runs);
   expect(applied).toEqual([{ op: 'poll', workflow: 'ticket-to-pr' }]);
   expect(drained.applied).toBe(1);
   expect(drained.rejected.map((rejected) => basename(rejected.file))).toEqual([
@@ -153,7 +153,7 @@ test('a directory, a link or an unreadable file in the inbox is removed and reje
   expect(existsSync(outside)).toBe(true);
 });
 
-test("an entry that can't be removed is reported, and the drain goes on to the commands after it (review #2.5)", () => {
+test("an entry that can't be removed is reported, and the drain goes on to the commands after it (review #2.5)", async () => {
   const runs = runsDir();
   const dir = commandsDir(runs);
   const locked = join(dir, '1-stray.json', 'locked');
@@ -162,7 +162,7 @@ test("an entry that can't be removed is reported, and the drain goes on to the c
   chmodSync(locked, 0o000);
   writeFileSync(join(dir, '2-fine.json'), JSON.stringify({ op: 'poll', workflow: 'ticket-to-pr' }));
   try {
-    const { applied, drained } = drain(runs);
+    const { applied, drained } = await drain(runs);
     expect(applied).toEqual([{ op: 'poll', workflow: 'ticket-to-pr' }]);
     expect(drained.applied).toBe(1);
     expect(drained.rejected.map((rejected) => basename(rejected.file))).toEqual(['1-stray.json']);
@@ -173,24 +173,37 @@ test("an entry that can't be removed is reported, and the drain goes on to the c
   }
 });
 
-test('a command applied but not removable is applied once, and removed by a later drain that can (review #3.3)', () => {
+test('a command applied but not removable is applied once, and removed by a later drain that can (review #3.3)', async () => {
   const runs = runsDir();
   const file = dropCommand(runs, { op: 'poll', workflow: 'ticket-to-pr' });
   const dir = commandsDir(runs);
   chmodSync(dir, 0o555);
   try {
-    const first = drain(runs);
+    const first = await drain(runs);
     expect(first.applied).toEqual([{ op: 'poll', workflow: 'ticket-to-pr' }]);
     expect(first.drained.applied).toBe(1);
     expect(first.drained.rejected.map((rejected) => rejected.file)).toEqual([file]);
     expect(first.drained.rejected[0]?.reason).toStartWith(`${basename(file)} was applied, and it can't be removed: `);
-    const second = drain(runs);
+    const second = await drain(runs);
     expect(second.applied).toEqual([]);
     expect(second.drained.applied).toBe(0);
     expect(second.drained.rejected.map((rejected) => rejected.file)).toEqual([file]);
   } finally {
     chmodSync(dir, 0o755);
   }
-  expect(drain(runs)).toEqual({ applied: [], drained: { applied: 0, rejected: [] } });
+  expect(await drain(runs)).toEqual({ applied: [], drained: { applied: 0, rejected: [] } });
   expect(readdirSync(dir)).toEqual([]);
+});
+
+test('an apply that returns a promise is awaited before its command file is removed, and watch and unwatch commands drain', async () => {
+  const runs = runsDir();
+  const file = dropCommand(runs, { op: 'watch', workflows: ['a', 'b'] });
+  dropCommand(runs, { op: 'unwatch', workflows: ['a'] });
+  const seen: string[] = [];
+  const drained = await drainCommands(runs, async (command) => {
+    await Bun.sleep(20);
+    seen.push(`${command.op} ${existsSync(file)}`);
+  });
+  expect([seen, drained]).toEqual([['watch true', 'unwatch false'], { applied: 2, rejected: [] }]);
+  expect(readdirSync(commandsDir(runs))).toEqual([]);
 });

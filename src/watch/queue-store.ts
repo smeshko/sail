@@ -10,10 +10,17 @@
 //   of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
 //   requeues or drops it (13.3).
+// - A dispatch is two steps: `dispatched()` counts the attempt and names the run before any process exists, and
+//   `spawned()` adds the process's pid once it does, emitting `queue:dispatched`. An item a re-check finds ineligible
+//   is dropped: it leaves `items`, and a later poll may queue it again.
+// - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
+// - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
+//   hook that throws is ignored, so the terminal never breaks the queue.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { replaceFile } from '../engine/durable';
+import type { NewQueueEvent, QueueEvent } from '../events/types';
 import { PORT_ERROR_CODES, type PortErrorCode } from '../ports/errors';
 import type { Ticket } from '../ports/types';
 import { openQueueStream } from './queue-events';
@@ -45,6 +52,8 @@ export const QueueItem = z.strictObject({
   retryAt: z.string().optional(),
   /** The run its last dispatch started. */
   runId: z.string().optional(),
+  /** The process of that run, once it was spawned. */
+  pid: z.number().int().positive().optional(),
   /** Why it last failed. */
   reason: z.string().optional(),
   finishedAt: z.string().optional(),
@@ -122,6 +131,16 @@ export interface QueueStore {
   due(): QueueItem[];
   /** Records a dispatch of the item, which counts an attempt. */
   dispatched(key: string, runId: string): void;
+  /** Records the pid of the dispatched item's process, and emits `queue:dispatched`. An item not dispatched throws. */
+  spawned(key: string, pid: number): void;
+  /** Takes the item out of the queue, and emits `queue:dropped` with the reason. An unknown key throws. */
+  drop(key: string, reason: string): void;
+  /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
+  skippedLeased(key: string, branch: string, heldBy: string): void;
+  /** Emits `watch:added`: watcher `pid` watches the workflow now. The queue is unchanged. */
+  watched(watch: { pid: number; everyMs: number; maxConcurrentRuns: number }): void;
+  /** Emits `watch:removed`: watcher `pid` no longer watches the workflow. The queue is unchanged. */
+  unwatched(pid: number): void;
   done(key: string): void;
   /** Records a failed attempt: the item retries later, or is parked once it has had `maxAttempts`. */
   failed(key: string, reason: string): 'retry' | 'parked';
@@ -138,6 +157,8 @@ export interface OpenQueueOptions {
   label: string;
   now: () => Date;
   policy?: QueuePolicy;
+  /** Hears each event the store emits, once it is appended. One that throws is ignored. */
+  onEvent?: (event: QueueEvent) => void;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -171,8 +192,20 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
   } else {
     queue = { version: 1, workflow, updatedAt: now().toISOString(), polling: { label, failures: 0 }, items: [] };
   }
-  const stream = openQueueStream(dir, now);
-  if ('refused' in stream) return stream;
+  const opened = openQueueStream(dir, now);
+  if ('refused' in opened) return opened;
+  const { onEvent } = options;
+  /** Appends the events, then hands each to `onEvent`. */
+  const emitAll = (events: readonly NewQueueEvent[]): void => {
+    for (const event of opened.emitAll(events)) {
+      try {
+        onEvent?.(event);
+      } catch {
+        // The terminal's trouble: the event is in the stream all the same.
+      }
+    }
+  };
+  const stream = { emit: (event: NewQueueEvent) => emitAll([event]), emitAll };
 
   /** Set when a write threw and queue.json couldn't be read back: what it holds is unknown until it can be. */
   let unsure = false;
@@ -259,7 +292,40 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.attempts += 1;
         item.runId = runId;
         delete item.retryAt;
+        delete item.pid;
       });
+    },
+    spawned(key, pid) {
+      const item = change((next) => {
+        const spawning = find(next, key);
+        if (spawning.state !== 'dispatched')
+          throw new Error(`${workflow}'s item ${key} is ${spawning.state}, not dispatched`);
+        spawning.pid = pid;
+        return { ...spawning };
+      });
+      stream.emit({
+        type: 'queue:dispatched',
+        workflow,
+        dedupKey: key,
+        run: item.runId ?? '',
+        attempt: item.attempts,
+        pid,
+      });
+    },
+    drop(key, reason) {
+      change((next) => {
+        next.items.splice(next.items.indexOf(find(next, key)), 1);
+      });
+      stream.emit({ type: 'queue:dropped', workflow, dedupKey: key, reason });
+    },
+    skippedLeased(key, branch, heldBy) {
+      stream.emit({ type: 'queue:skipped_leased', workflow, dedupKey: key, branch, heldBy });
+    },
+    watched({ pid, everyMs, maxConcurrentRuns }) {
+      stream.emit({ type: 'watch:added', workflow, pid, label: queue.polling.label, everyMs, maxConcurrentRuns });
+    },
+    unwatched(pid) {
+      stream.emit({ type: 'watch:removed', workflow, pid });
     },
     done(key) {
       change((next) => {
