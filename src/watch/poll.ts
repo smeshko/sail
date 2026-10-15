@@ -165,6 +165,8 @@ export interface Poller {
   start(): Promise<void>;
   /** Clears every timer. A poll in flight is still recorded, and not rescheduled. */
   stop(): void;
+  /** Resolves once no poll is in flight, however each one ended: what they record is on disk by then. */
+  settled(): Promise<void>;
   /** Polls the workflow now, paused or not, or joins its poll in flight. A workflow it doesn't poll throws. */
   pollNow(workflow: string): Promise<PollOutcome>;
   /**
@@ -243,6 +245,9 @@ export function createPoller(options: PollerOptions): Poller {
     stop() {
       stopped = true;
       for (const target of targets) clear(target);
+    },
+    async settled() {
+      await Promise.allSettled([...inFlight.values()]);
     },
     pollNow: (workflow) => poll(find(workflow)),
     apply(command) {

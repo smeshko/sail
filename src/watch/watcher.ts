@@ -202,19 +202,24 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     await poller.start();
   };
 
-  const remove = (workflow: string) => {
+  /**
+   * Takes `workflow` out of the set once its poll in flight, if any, is recorded: that poll writes through this
+   * workflow's queue store, which a later `watch` of the same workflow, or the next watcher, opens afresh.
+   */
+  const remove = async (workflow: string) => {
     const watched = set.get(workflow);
     if (watched === undefined) return;
-    watched.poller.stop();
-    watched.target.store.unwatched(pid);
     set.delete(workflow);
+    watched.poller.stop();
+    await watched.poller.settled();
+    watched.target.store.unwatched(pid);
   };
 
-  const finish = () => {
+  const finish = async () => {
     if (stopped) return;
     stopped = true;
     if (timer !== undefined) timers.clear(timer);
-    for (const workflow of watching()) remove(workflow);
+    for (const workflow of watching()) await remove(workflow);
     clearWatcher(options.registryDir, options.entry.name, pid);
     resolveDone();
   };
@@ -239,7 +244,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     }
     const leaving = command.workflows.filter((workflow) => set.has(workflow));
     if (leaving.length === 0) return;
-    for (const workflow of leaving) remove(workflow);
+    for (const workflow of leaving) await remove(workflow);
     // An empty set stops the watcher once the whole drain is applied, so a `watch` dropped after this command still
     // counts: the set it leaves is the one that decides.
     if (set.size === 0) return;
@@ -259,7 +264,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
         for (const rejected of drained.rejected) print(errorLine(undefined, rejected.reason, now()));
         if (set.size === 0) {
           print(setLine([], now()));
-          finish();
+          await finish();
           return;
         }
         for (const [workflow, watched] of [...set]) {
@@ -295,7 +300,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     done,
     async stop() {
       if (ticking !== undefined) await ticking;
-      finish();
+      await finish();
     },
     watching,
   };
