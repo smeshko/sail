@@ -3,7 +3,13 @@
 // inline credential helper scoped to the web host, and the user's own helpers are reset for the push (D1): no other
 // host is offered the token, and no helper can store it. The helper's text names `$SAIL_GIT_TOKEN`, never the token,
 // which travels only in the git child's environment, with git's trace variables taken out of it.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+//
+// The push runs from a git directory of its own, not the checkout's (review R1-2). The checkout's config is the
+// repository's to write, an agent's file edits included, and git obeys it: a proxy, `http.sslVerify`, a program such as
+// `core.sshCommand` or `remote.<name>.receivepack`. So the remote's push URL is read from the checkout, and the push
+// goes from a temporary bare repository that borrows the checkout's objects, holds HEAD's commit as its own HEAD, and
+// has no config but that URL. The token is offered only when that URL is on the web host.
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runProcess } from '../../engine/process';
@@ -22,6 +28,9 @@ export const CREDENTIAL_HELPER =
 /** The variables that make git print what it sends, the credential included. */
 const TRACE = /^(GIT_TRACE.*|GIT_CURL_VERBOSE)$/;
 
+/** The remote's name in the push's own git directory. */
+const REMOTE = 'sail';
+
 export interface PushOptions {
   readonly cwd: string;
   readonly remote: string;
@@ -35,21 +44,22 @@ export interface PushOptions {
 }
 
 /**
- * git's arguments for the push. None holds the token. No hook runs: `--no-verify` skips only pre-push, and the
- * remote-tracking ref the push updates would run reference-transaction with the token in its environment.
+ * git's arguments for the push, after `--git-dir`. None holds the token. sail's helper is scoped to `webUrl`, and left
+ * out without one. No hook runs: `--no-verify` skips only pre-push. No tag or submodule goes with the branch.
  */
-export function pushArgs(remote: string, branch: string, webUrl: string): string[] {
+export function pushArgs(branch: string, webUrl: string | undefined): string[] {
   return [
     '-c',
     'credential.helper=',
-    '-c',
-    `credential.${webUrl}.helper=${CREDENTIAL_HELPER}`,
+    ...(webUrl === undefined ? [] : ['-c', `credential.${webUrl}.helper=${CREDENTIAL_HELPER}`]),
     '-c',
     'core.hooksPath=/dev/null',
     'push',
     '--porcelain',
     '--no-verify',
-    remote,
+    '--no-follow-tags',
+    '--recurse-submodules=no',
+    REMOTE,
     `HEAD:refs/heads/${branch}`,
   ];
 }
@@ -65,11 +75,31 @@ function withoutToken(env: Readonly<Record<string, string>>, token: string): Rec
  */
 const TRACE2_OFF = { GIT_TRACE2: '0', GIT_TRACE2_EVENT: '0', GIT_TRACE2_PERF: '0' };
 
-/** The push's environment: no prompts, no traces, the token for the helper alone. */
-export function pushEnv(env: Readonly<Record<string, string>>, token: string): Record<string, string> {
-  const quiet = Object.entries(nonInteractive(withoutToken(env, token))).filter(([name]) => !TRACE.test(name));
-  return { ...Object.fromEntries(quiet), GIT_TRACE_REDACT: '1', ...TRACE2_OFF, SAIL_GIT_TOKEN: token };
+/**
+ * The push's environment: no prompts, no traces, and the token for the helper alone, as `SAIL_GIT_TOKEN`. Without a
+ * token to offer, the token is in no variable at all.
+ */
+export function pushEnv(env: Readonly<Record<string, string>>, token: string | undefined): Record<string, string> {
+  const quiet = Object.entries(nonInteractive(withoutToken(env, token ?? ''))).filter(([name]) => !TRACE.test(name));
+  return {
+    ...Object.fromEntries(quiet),
+    GIT_TRACE_REDACT: '1',
+    ...TRACE2_OFF,
+    ...(token === undefined ? {} : { SAIL_GIT_TOKEN: token }),
+  };
 }
+
+/** Whether `url` is on the web host: the same scheme, host and port. A URL that doesn't parse, such as a path, isn't. */
+function onHost(url: string, webUrl: string): boolean {
+  try {
+    return new URL(url).origin === new URL(webUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+/** A value for git's config file, quoted. */
+const quoted = (value: string) => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 /** The code a failed push is, from what git said. */
 function codeOf(said: string): PortErrorCode {
@@ -91,18 +121,41 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
   const head = gitSync(cwd, ['rev-parse', 'HEAD'], local);
   if (head.code !== 0) throw redact.error(fail('invalid', `${cwd} is not a git checkout: ${head.stderr}`));
   const headSha = head.stdout.trim();
-  const url = gitSync(cwd, ['remote', 'get-url', remote], local);
-  const remoteUrl = stripUserinfo(url.code === 0 ? url.stdout.trim() : remote);
+  const urls = gitSync(cwd, ['remote', 'get-url', '--push', '--all', remote], local);
+  if (urls.code !== 0) throw redact.error(fail('invalid', `${remote} is no remote of ${cwd}: ${urls.stderr}`));
+  const pushUrls = urls.stdout.split('\n').filter((line) => line.trim() !== '');
+  const [url] = pushUrls;
+  if (url === undefined || pushUrls.length !== 1) {
+    throw redact.error(fail('invalid', `${remote} pushes to ${pushUrls.length} URLs: sail pushes to one`));
+  }
+  const remoteUrl = stripUserinfo(url);
+  const at = (path: string) => gitSync(cwd, ['rev-parse', '--path-format=absolute', '--git-path', path], local);
+  const format = gitSync(cwd, ['rev-parse', '--show-object-format'], local).stdout.trim() || 'sha1';
+  const offered = onHost(url, options.webUrl);
 
   const timeoutMs = options.timeoutMs ?? PUSH_TIMEOUT_MS;
   const logs = mkdtempSync(join(tmpdir(), 'sail-push-'));
   try {
+    const gitDir = join(logs, 'push.git');
+    const made = gitSync(
+      logs,
+      ['init', '--quiet', '--bare', '--template=', `--object-format=${format}`, gitDir],
+      local,
+    );
+    if (made.code !== 0) throw fail('unavailable', `could not make the push's git directory: ${made.stderr}`);
+    writeFileSync(join(gitDir, 'objects', 'info', 'alternates'), `${at('objects').stdout.trim()}\n`);
+    const shallow = at('shallow').stdout.trim();
+    if (shallow !== '' && existsSync(shallow)) copyFileSync(shallow, join(gitDir, 'shallow'));
+    writeFileSync(join(gitDir, 'HEAD'), `${headSha}\n`);
+    const config = join(gitDir, 'config');
+    writeFileSync(config, `${readFileSync(config, 'utf8')}[remote "${REMOTE}"]\n\turl = ${quoted(url)}\n`);
+
     const stdout = join(logs, 'stdout');
     const stderr = join(logs, 'stderr');
     const end = await runProcess({
-      command: ['git', ...pushArgs(remote, branch, options.webUrl)],
-      cwd,
-      env: pushEnv(options.env, options.token),
+      command: ['git', `--git-dir=${gitDir}`, ...pushArgs(branch, offered ? options.webUrl : undefined)],
+      cwd: logs,
+      env: pushEnv(options.env, offered ? options.token : undefined),
       stdout,
       stderr,
       timeoutMs,
@@ -118,12 +171,12 @@ export async function pushHead(options: PushOptions): Promise<Pushed> {
     const how = !end.started ? end.message : end.timedOut ? `git push timed out after ${timeoutMs} ms` : '';
     const message = [how, ...status, ...said].filter((line) => line !== '').join('\n');
     const code = end.started && end.timedOut ? 'unavailable' : codeOf(message);
-    throw redact.error(
-      fail(code, message || `git push exited ${end.started ? (end.code ?? end.signal) : ''}`, {
-        remote: remoteUrl,
-        porcelain,
-      }),
-    );
+    throw fail(code, message || `git push exited ${end.started ? (end.code ?? end.signal) : ''}`, {
+      remote: remoteUrl,
+      porcelain,
+    });
+  } catch (error) {
+    throw redact.error(error);
   } finally {
     rmSync(logs, { recursive: true, force: true });
   }
