@@ -359,6 +359,28 @@ test('a push to the default branch is refused as invalid after only the reposito
   });
 });
 
+test("a push whose remote names another repository on the web host is refused as invalid, ssh or https, and one naming this repository isn't (review R1-7)", async () => {
+  const on = world();
+  const repository = repo();
+  const { branch } = pushable();
+  const pushTo = async (name: string, url: string) => {
+    repository.git('remote', 'add', name, url);
+    const adapter = host(on, undefined, { webUrl: 'https://github.invalid', remote: name, pushTimeoutMs: 10_000 });
+    const error = await rejection(adapter.push(repository.dir, branch));
+    return error instanceof PortError ? [error.code, error.message.includes('not o/r')] : String(error);
+  };
+  expect([
+    await pushTo('r17-https', 'https://github.invalid/other/r.git'),
+    await pushTo('r17-ssh', 'git@github.invalid:o/other.git'),
+    // The right repository, as GitHub reads it, whatever the case: refused only because the host never answers.
+    await pushTo('r17-same', 'https://github.invalid/O/R.git'),
+  ]).toEqual([
+    ['invalid', true],
+    ['invalid', true],
+    ['unavailable', false],
+  ]);
+}, 30_000);
+
 test("listDesignated, checks, merge and removeLabel reject as invalid, saying github doesn't support them yet, with no request and no event", async () => {
   const on = world();
   const capture = captureEvents();
