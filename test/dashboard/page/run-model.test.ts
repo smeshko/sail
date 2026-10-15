@@ -25,10 +25,7 @@ const GOLDEN_KEYS = [
 ];
 const STAGE_NAMES = ['spec', 'implement', 'tests', 'self-review', 'describe', 'open', 'lint', 'intake', 'ticket'];
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the golden run folds into nine settled cards with its summary's outcomes, durations and costs, its routes, its PR and no pending card", () => {
+test("the golden run folds into nine settled cards with its summary's outcomes, durations and costs, its routes, its PR and no pending card", () => {
   const model = foldRun(golden());
   const summary = JSON.parse(readFileSync(join(GOLDEN_RUN, 'summary.json'), 'utf8')) as Summary;
   expect(model.cards.map((card) => card.key)).toEqual(GOLDEN_KEYS);
@@ -67,20 +64,14 @@ test
   expect([model.unreadable, model.loops]).toEqual([0, { fix: { iteration: 2, max: 3, exited: 'break' } }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("each card records the loop iteration open when its call started: fix 1 of 3 for implement#1 and tests#1, and 2 for the second pass's three", () => {
+test("each card records the loop iteration open when its call started: fix 1 of 3 for implement#1 and tests#1, and 2 for the second pass's three", () => {
   const iterations = foldRun(golden()).cards.map((card) =>
     card.iteration === undefined ? '-' : `${card.iteration.loop} ${card.iteration.iteration}/${card.iteration.max}`,
   );
   expect(iterations).toEqual(['-', '-', 'fix 1/3', 'fix 1/3', 'fix 2/3', 'fix 2/3', 'fix 2/3', '-', '-']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('folded event by event, tests#1 runs from its stage:start with no card after it, and settles failed at its stage:end', () => {
+test('folded event by event, tests#1 runs from its stage:start with no card after it, and settles failed at its stage:end', () => {
   const events = golden();
   const model = emptyRun();
   const start = events.findIndex((event) => event.type === 'stage:start' && event.key === 'tests#1');
@@ -109,10 +100,7 @@ test
   expect(model.lastSeq).toBe(events[end]?.seq ?? -1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("FAKE-2's implement#1 has one denial, of Bash's git push --force origin HEAD under the step's commands, and ended in error from the harness", () => {
+test("FAKE-2's implement#1 has one denial, of Bash's git push --force origin HEAD under the step's commands, and ended in error from the harness", () => {
   const events = fake2();
   const model = foldRun(events);
   const card = model.cards.find((entry) => entry.key === 'implement#1');
@@ -145,10 +133,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("FAKE-3 has a lint#1 card, the stages never called pending in the roster's order, ends suspended, and counts its run budget's budget:exceeded on the run", () => {
+test("FAKE-3 has a lint#1 card, the stages never called pending in the roster's order, ends suspended, and counts its run budget's budget:exceeded on the run", () => {
   const model = foldRun(fake3());
   expect(model.cards.map((card) => [card.key, card.kind, card.outcome])).toEqual([
     ['intake#1', 'builtin', 'passed'],
@@ -167,10 +152,7 @@ test
   expect(model.ticket?.title).toBe('Escape <b>this</b> & "that"');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a roster stage the page has never seen shows as a pending card, and run-model.ts names no stage', () => {
+test('a roster stage the page has never seen shows as a pending card, and run-model.ts names no stage', () => {
   const [start] = golden();
   const roster = {
     intake: { name: 'ticket', origin: 'builtin' },
@@ -186,10 +168,7 @@ test
   expect(named).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a corrective try reuses its call's card, whose tries is the highest try, and a step adds itself to its call", () => {
+test("a corrective try reuses its call's card, whose tries is the highest try, and a step adds itself to its call", () => {
   const events = golden();
   const start = events.find((event) => event.type === 'stage:start' && event.key === 'spec#1');
   const tests = events.find((event) => event.type === 'stage:start' && event.key === 'tests#1');
@@ -209,10 +188,7 @@ test
   expect(model.cards[1]?.steps).toEqual([{ step: 'lint', index: 1, of: 2, kind: 'script', outcome: 'passed' }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("live cost: a session's usage updates, then a second session's, sum to what each last said before any session end", () => {
+test("live cost: a session's usage updates, then a second session's, sum to what each last said before any session end", () => {
   const events = golden();
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
   const usage = (seq: number, costUsdSoFar: number) => ({
@@ -245,10 +221,7 @@ test
   expect(model.cards[0]?.state).toBe('running');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a file's validation joins its card's file, and a denied tool call with no command shows its input as JSON", () => {
+test("a file's validation joins its card's file, and a denied tool call with no command shows its input as JSON", () => {
   const events = golden();
   const at = { seq: 900, ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
   const model = foldRun([
@@ -289,10 +262,7 @@ function random(seed: number): () => number {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an unknown type counts on its card, an event that does not fit counts as unreadable and changes no card, and 200 random mutations never throw', () => {
+test('an unknown type counts on its card, an event that does not fit counts as unreadable and changes no card, and 200 random mutations never throw', () => {
   const events = golden();
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x' };
   const model = foldRun([
