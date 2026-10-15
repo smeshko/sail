@@ -58,6 +58,15 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
   const emit = (event: ProviderEvent) => options.emit?.(redact.value(event));
   const pullUrl = new RegExp(`^${literal(`${webUrl}/${owner}/${repo}/pull/`)}([1-9]\\d*)(?:/|#.*)?$`);
   let defaultBranch: string | undefined;
+  /**
+   * Refuses text bound for GitHub that holds the token in any form the redactor knows: GitHub would publish it, while
+   * the run's own records show it masked (review R1-10).
+   */
+  const unsent = (op: string, what: string, ...texts: string[]) => {
+    if (texts.some((text) => redact.text(text) !== text)) {
+      throw new PortError('codeHost', op, 'invalid', `${what} holds the token`);
+    }
+  };
 
   /** `fn`, with whatever it throws redacted. */
   const guarded = async <T>(fn: () => Promise<T>): Promise<T> => {
@@ -127,6 +136,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
       }),
     openPullRequest: (request) =>
       guarded(async () => {
+        unsent('openPullRequest', "the pull request's title or body", request.title, request.body);
         const body = withTicketMarker(request.body, request.ticketKey);
         const reopen = async (open: GitHubPull): Promise<PullRequest> => {
           const current = (open.labels ?? []).map((label) => label.name);
@@ -181,6 +191,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
     removeLabel: unsupported('removeLabel'),
     comment: (number, text) =>
       guarded(async () => {
+        unsent('comment', 'the comment', text);
         await read('comment', number);
         const posted = await client.request<{ id: number; html_url: string }>(
           'comment',
