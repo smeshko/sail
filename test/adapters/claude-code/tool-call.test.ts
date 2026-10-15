@@ -145,7 +145,49 @@ test.each<[string, string, unknown, unknown, string?]>([
     { url: 'https://example.com', prompt: 'x' },
     call({ tool: 'WebFetch', kind: 'other' }),
   ],
-  ['a tool no one knows', 'Frobnicate', { file_path: '/etc/hosts' }, call({ tool: 'Frobnicate', kind: 'other' })],
+  // Review R1-5: a tool whose input the gate doesn't read is no tool it allows, listed or not.
+  [
+    'a tool no one knows',
+    'Frobnicate',
+    { file_path: '/etc/hosts' },
+    unchecked('other', 'Frobnicate is no tool the gate knows'),
+  ],
+  [
+    'Monitor runs its command in the background',
+    'Monitor',
+    { command: 'tail -f /etc/hosts', description: 'x', timeout_ms: 1000 },
+    unchecked('execute', 'Monitor runs its command in the background, where it can outlive the call'),
+  ],
+  [
+    'a Workflow runs a script',
+    'Workflow',
+    { script: 'x' },
+    unchecked('other', "Workflow runs a script the gate can't see into"),
+  ],
+  [
+    'CronCreate runs a prompt later',
+    'CronCreate',
+    { cron: '* * * * *', prompt: 'x' },
+    unchecked('other', 'CronCreate runs work later or elsewhere, outside the session'),
+  ],
+  [
+    'EnterWorktree leaves the workspace',
+    'EnterWorktree',
+    { name: 'x' },
+    unchecked('other', 'EnterWorktree moves the session out of its workspace'),
+  ],
+  [
+    'a subagent with isolation',
+    'Agent',
+    { prompt: 'x', description: 'x', isolation: 'remote' },
+    unchecked('other', "Agent with isolation remote runs outside the session's workspace"),
+  ],
+  [
+    'a subagent without isolation is matched by its name',
+    'Agent',
+    { prompt: 'x', description: 'x' },
+    call({ tool: 'Agent', kind: 'other' }),
+  ],
   ['Read of a ~ path', 'Read', { file_path: '~/x' }, unchecked('read', `Read of ~/x: ${TILDE}`)],
   ['Read of a ~ path behind a space', 'Read', { file_path: ' ~/x' }, unchecked('read', `Read of  ~/x: ${TILDE}`)],
   [
@@ -193,6 +235,11 @@ test.each<[string, Permissions, string[]]>([
     'a listed built-in joins the set, a server tool does not',
     { ...READ_ONLY, tools: ['WebFetch', 'linear:get_issue'] },
     ['Read', 'Glob', 'Grep', 'WebFetch'],
+  ],
+  [
+    'a listed built-in the gate always refuses stays disallowed',
+    { ...READ_ONLY, tools: ['Monitor', 'Workflow', 'TodoWrite'] },
+    ['Read', 'Glob', 'Grep', 'TodoWrite'],
   ],
 ])('%s, and every other built-in is disallowed, never the submission', (_, permissions, tools) => {
   const set = sessionTools(permissions);

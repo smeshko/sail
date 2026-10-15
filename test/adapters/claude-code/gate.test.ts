@@ -318,3 +318,19 @@ test.each<[string, string[], Record<string, unknown>, 'allow' | 'deny']>([
     rules: g.denials.map(([, denial]) => denial.rule),
   }).toEqual({ decision: expected, rules: expected === 'deny' ? ['read'] : [] });
 });
+
+// Review R1-5: a step that lists a tool which runs commands, or work later or elsewhere, still can't have it run.
+test.each<[string, Record<string, unknown>, string]>([
+  ['Monitor', { command: 'cat /etc/hosts', description: 'x', timeout_ms: 1000 }, 'commands'],
+  ['Workflow', { script: 'x' }, 'tools'],
+  ['RemoteTrigger', { action: 'run' }, 'tools'],
+  ['ScheduleWakeup', { prompt: 'x' }, 'tools'],
+  ['Agent', { prompt: 'x', description: 'x', isolation: 'remote' }, 'tools'],
+])('a listed %s is denied', async (tool, input, rule) => {
+  const g = gate({ ...STEP, tools: [tool] });
+  const answer = await ask(g, pre(tool, input));
+  expect({
+    decision: answer.hookSpecificOutput?.permissionDecision,
+    rules: g.denials.map(([, denial]) => denial.rule as string),
+  }).toEqual({ decision: 'deny', rules: [rule] });
+});
