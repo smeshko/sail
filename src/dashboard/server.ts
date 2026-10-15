@@ -4,13 +4,17 @@
 // 2. Only GET: anything else is 405, OPTIONS included, so a cross-origin preflight fails.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
-// 4. Any other request needs `X-Sail-Dashboard: 1`, which a cross-origin page can't send without a preflight.
+// 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
+//    shows comes over `/api` and `/ws`, under the checks above and below.
+// 5. Any other request needs `X-Sail-Dashboard: 1`, which a cross-origin page can't send without a preflight.
 //
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
 import { join } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
-import { createIndexFeed, openRunStream, resolveTarget } from './streams';
+import { createPage } from './page';
+import { queueViews } from './queues';
+import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
   registryDir: string;
@@ -50,6 +54,7 @@ export function guard(request: Request, port: number): Response | undefined {
     const ok = origin === null ? client : allowed.some((host) => origin === `http://${host}`);
     return ok ? undefined : error(403, 'a WebSocket needs this dashboard as its origin');
   }
+  if (new URL(request.url).pathname === '/') return undefined;
   return client ? undefined : error(403, `send ${CLIENT_HEADER}: 1`);
 }
 
@@ -74,7 +79,7 @@ function route(registryDir: string, segments: string[], url: URL): Response {
   if (name === undefined) return Response.json(repos(registryDir));
   const entry = findRepo(registryDir, name);
   if (entry === undefined) return error(404, `no repository '${name}'`);
-  if (kind === 'queues' && runId === undefined) return Response.json([]);
+  if (kind === 'queues' && runId === undefined) return Response.json(queueViews(entry));
   if (kind !== 'runs') return error(404, 'no such route');
   if (runId === undefined) return Response.json(runItems(entry));
   const runDir = findRunDir(entry, runId);
@@ -107,12 +112,13 @@ function segmentsOf(url: URL): string[] | undefined {
   }
 }
 
-type SocketData = { run: string } | { index: true };
+type SocketData = { run: string } | { queue: string } | { index: true };
 
 /** Starts the dashboard on 127.0.0.1. A port in use is refused. */
 export function startDashboard(options: DashboardOptions): Dashboard | { refused: string } {
   const { registryDir } = options;
   const feed = createIndexFeed(registryDir, options.indexPollMs ?? 1000);
+  const page = createPage();
   const followPollMs = options.followPollMs ?? 200;
   const sockets = new Set<ServerWebSocket<SocketData>>();
   const stops = new Map<ServerWebSocket<SocketData>, () => void>();
@@ -129,10 +135,16 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         const refused = guard(request, port);
         if (refused !== undefined) return refused;
         const url = new URL(request.url);
+        if (url.pathname === '/') return page.response(request.headers.get('host') ?? '');
         if (url.pathname === '/ws') {
           const target = resolveTarget(url, registryDir);
           if ('status' in target) return error(target.status, target.error);
-          const data: SocketData = 'run' in target ? { run: target.run.runDir } : { index: true };
+          const data: SocketData =
+            'run' in target
+              ? { run: target.run.runDir }
+              : 'queue' in target
+                ? { queue: target.queue.dir }
+                : { index: true };
           if (self.upgrade(request, { data })) return undefined;
           return error(400, 'this request is not a WebSocket upgrade');
         }
@@ -144,6 +156,7 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         open(ws) {
           sockets.add(ws);
           if ('run' in ws.data) stops.set(ws, openRunStream(ws, ws.data.run, followPollMs));
+          else if ('queue' in ws.data) stops.set(ws, openQueueFollow(ws, ws.data.queue, followPollMs));
           else feed.add(ws);
         },
         close(ws) {

@@ -8,9 +8,10 @@
 import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
-import { prepareAgentPrompt } from '../engine/agent-prompt';
+import { bindingValues, prepareAgentPrompt } from '../engine/agent-prompt';
 import { runRelative, writeOwnFile } from '../engine/call-dir';
-import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
+import { type ContractError, type FileEntry, producesProblems, recordFiles, validateOutput } from '../engine/contract';
+import { documentProblems, renderDocuments, validateDocuments } from '../engine/documents';
 import { preamble } from '../engine/preamble';
 import type { CallEmit } from '../events/types';
 import type { Harness, HarnessEvent, HarnessRequest } from '../ports/harness';
@@ -32,7 +33,7 @@ function submissionSchema(step: AgentStep): { schema: Record<string, unknown> } 
 }
 
 function problems(step: AgentStep): string[] {
-  const found = [...producesProblems(step.produces)];
+  const found = [...producesProblems(step.produces), ...documentProblems(step.produces)];
   const { maxTurns, maxUsd, maxMinutes } = step.budget;
   if (!(Number.isInteger(maxTurns) && maxTurns >= 1)) {
     found.push(`budget.maxTurns must be a whole number of 1 or more: ${maxTurns}`);
@@ -221,16 +222,25 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     ...(agent.conventions === undefined ? {} : { conventions: agent.conventions }),
     ...(agent.feedback === undefined ? {} : { feedback: agent.feedback }),
   });
-  if (!prompt.ok) {
-    // No session started, so there is nothing to say of one: an empty transcript, and nothing spent.
+  /** A try that never reached a session: there is nothing to say of one, so an empty transcript and nothing spent. */
+  const unstarted = (message: string): StepRun => {
     writeFileSync(sessionLog, '');
-    return ended([{ reason: 'not_started', message: prompt.message }], {
+    return ended([{ reason: 'not_started', message }], {
       ...place,
       validationFailed: false,
       harness: { ...on, turns: 0, toolCalls: 0, denials: 0 },
       usage: { costUsd: 0 },
     });
-  }
+  };
+  if (!prompt.ok) return unstarted(prompt.message);
+  // Each document starts the session as its template, rendered fresh into this try's own directory.
+  const templates = renderDocuments({
+    produces: step.produces,
+    stageDir: context.stageDir,
+    values: bindingValues(agent.bindings, context.inputs),
+    outDir: context.paths.dir,
+  });
+  if (!templates.ok) return unstarted(templates.message);
   const promptPath = join(context.paths.dir, 'prompt.md');
   writeFileSync(promptPath, prompt.text);
   const rendered = {
@@ -316,19 +326,37 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     emit({ type: 'output:invalid', message: output.message });
     errors.push({ reason: 'invalid_output', message: output.message });
   }
+  const { files, derived } = checkFiles(step, context, emit, errors);
+  const checked = { ...record, ...(Object.keys(derived).length > 0 ? { derived } : {}) };
+  if (errors.length > 0 || !output.ok) return ended(errors, { ...checked, validationFailed: true }, files);
+  return { outcome: 'done', output: output.data, files, errors: [], record: { ...checked, validationFailed: false } };
+}
+
+/**
+ * Records each declared file and validates each document among them, reporting each file as produced and then, for a
+ * document, its verdict. Every problem goes into `errors`.
+ */
+function checkFiles(
+  step: AgentStep,
+  context: StepContext,
+  emit: CallEmit,
+  errors: ContractError[],
+): { files: Record<string, FileEntry>; derived: Record<string, unknown> } {
   const produced = recordFiles(step.produces, context.paths.dir, context.runDir);
-  for (const [name, { path, bytes, sha256 }] of Object.entries(produced.files)) {
-    emit({ type: 'file:produced', name, path, bytes, sha256 });
+  const checked = validateDocuments({ produces: step.produces, files: produced.files, outDir: context.paths.dir });
+  const files: [string, FileEntry][] = [];
+  for (const [name, entry] of Object.entries(produced.files)) {
+    emit({ type: 'file:produced', name, path: entry.path, bytes: entry.bytes, sha256: entry.sha256 });
+    const validation = Object.hasOwn(checked.validations, name) ? checked.validations[name] : undefined;
+    if (validation === undefined) {
+      files.push([name, entry]);
+      continue;
+    }
+    emit({ type: 'file:validated', name, ok: validation.ok, checks: validation.checks });
+    files.push([name, { ...entry, validation }]);
   }
-  errors.push(...produced.errors);
-  if (errors.length > 0 || !output.ok) return ended(errors, { ...record, validationFailed: true }, produced.files);
-  return {
-    outcome: 'done',
-    output: output.data,
-    files: produced.files,
-    errors: [],
-    record: { ...record, validationFailed: false },
-  };
+  errors.push(...produced.errors, ...checked.errors);
+  return { files: Object.fromEntries(files), derived: checked.derived };
 }
 
 export const agentKind: StepKind<AgentStep> = { kind: 'agent', problems, run };

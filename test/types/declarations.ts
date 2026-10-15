@@ -92,3 +92,43 @@ declare const outcome: OutcomeOf<typeof publish>;
 export const settled: ScriptOutcome = outcome;
 // @ts-expect-error TS2367: a stage that ends in a script step can't end done
 export const done = outcome === 'done';
+
+// Documents: only an agent step completes one, from its template, checked by validators a repository may write.
+import { countItems, doc, hasSections, noPlaceholders, type Validator } from 'sail';
+
+const words: Validator = {
+  check: 'words',
+  derives: ['words'],
+  validate: (document) => ({ problems: [], derived: { words: document.text.split(/\s+/).length } }),
+};
+agent('documented', {
+  prompt: './prompt.md',
+  produces: {
+    'spec.md': doc('./templates/spec.md', [hasSections('Tasks'), noPlaceholders(), countItems('Tasks'), words]),
+    'notes.md': 'file',
+  },
+  output: Output,
+  permissions,
+  budget,
+});
+
+script('documented-script', {
+  run: './run.sh',
+  // @ts-expect-error TS2322: a script step produces files, not documents
+  produces: { 'report.md': doc('./templates/report.md') },
+  output: Output,
+});
+
+intake('documented-intake', {
+  accepts: ['ticket'],
+  output: Output,
+  // @ts-expect-error TS2322: an intake produces files, not documents
+  produces: { 'brief.md': doc('./templates/brief.md') },
+  steps: [script('fetch', { run: './fetch.sh', output: Output })],
+});
+
+// @ts-expect-error TS2741: a validator must say how it validates
+doc('./templates/spec.md', [{ check: 'empty', derives: [] }]);
+
+// @ts-expect-error TS2554: countItems counts the items of a section it names
+countItems();

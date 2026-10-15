@@ -16,10 +16,28 @@ export {
   type ValueBinding,
   value,
 } from './bindings';
+export {
+  type Bounds,
+  type CountOptions,
+  checklist,
+  countItems,
+  type DerivedValue,
+  type Document,
+  type DocumentContent,
+  type DocumentHeading,
+  type DocumentItem,
+  type DocumentSection,
+  doc,
+  hasSections,
+  noPlaceholders,
+  type Validator,
+  type Verdict,
+} from './documents';
 export { type Intake, type IntakeOptions, intake, type SourceKind } from './intake';
 export {
   type AgentOptions,
   type AgentOutcome,
+  type AgentProduces,
   type AgentStep,
   agent,
   type Budget,

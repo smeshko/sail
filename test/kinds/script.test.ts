@@ -16,7 +16,7 @@ import { callPaths, createCallDir } from '../../src/engine/call-dir';
 import type { CallEvent } from '../../src/events/types';
 import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
 import { BIN_DIR, DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
-import { type ExitCodes, type ScriptStep, script, z } from '../../src/sdk/index';
+import { doc, type ExitCodes, noPlaceholders, type ScriptStep, script, z } from '../../src/sdk/index';
 import { steppingClock } from '../helpers/clock';
 
 const dirs: string[] = [];
@@ -501,6 +501,15 @@ test('problems() refuses a script that would produce prompt.md or session.log: t
     "'prompt.md' can't be produced: the engine writes it in $STAGE_OUT",
     "'session.log' can't be produced: the engine writes it in $STAGE_OUT",
   ]);
+});
+
+test('problems() refuses a document in produces, which a script step can declare only by getting past the types: only an agent step completes one', () => {
+  const documented = script('tests', {
+    run: './run.sh',
+    produces: { 'junit.xml': 'file', 'report.md': doc('./templates/report.md', [noPlaceholders()]) as never },
+    output: TestReport,
+  });
+  expect(scriptKind.problems(documented)).toEqual(["'report.md' is a document: only an agent step completes one"]);
 });
 
 const HOUR_MS = 3_600_000;
