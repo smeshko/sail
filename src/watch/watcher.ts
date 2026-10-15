@@ -220,6 +220,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   };
 
   const apply = async (command: Command) => {
+    if (stopped) throw new Error('the watcher is stopping');
     if (command.op === 'poll') {
       const watched = set.get(command.workflow);
       if (watched === undefined) throw new Error(`not watching workflow '${command.workflow}'`);
@@ -239,9 +240,11 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     const leaving = command.workflows.filter((workflow) => set.has(workflow));
     if (leaving.length === 0) return;
     for (const workflow of leaving) remove(workflow);
+    // An empty set stops the watcher once the whole drain is applied, so a `watch` dropped after this command still
+    // counts: the set it leaves is the one that decides.
+    if (set.size === 0) return;
     print(setLine(watching(), now()));
-    if (set.size === 0) finish();
-    else claim(labelsOf(watchedTargets()));
+    claim(labelsOf(watchedTargets()));
   };
 
   const tick = async (): Promise<void> => {
@@ -254,6 +257,11 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       try {
         const drained = await drainCommands(runs, apply);
         for (const rejected of drained.rejected) print(errorLine(undefined, rejected.reason, now()));
+        if (set.size === 0) {
+          print(setLine([], now()));
+          finish();
+          return;
+        }
         for (const [workflow, watched] of [...set]) {
           if (stopped) break;
           try {
