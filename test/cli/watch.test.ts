@@ -108,10 +108,7 @@ async function running(repo: TempRepo, names: string[]) {
   return { ...world, timers, spawner, interrupts, watcher, exited, second, recorded };
 }
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('sail watch outside a git repository, without .sail/, with no names, naming no workflow or an unwatched one, exits 3 saying which', async () => {
+test('sail watch outside a git repository, without .sail/, with no names, naming no workflow or an unwatched one, exits 3 saying which', async () => {
   await withTempRepo(async (repo) => {
     const outside = await runCaptured(['watch', 'a'], repo.home);
     const noSail = await runCaptured(['watch', 'a'], repo.dir);
@@ -134,10 +131,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('sail watch a d, where both poll one label, exits 3 naming both and the label', async () => {
+test('sail watch a d, where both poll one label, exits 3 naming both and the label', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo, (sail) => writeWatched(sail, 'd', { label: 'sail-a', cap: 1 }));
     const { code, stderr } = await runCaptured(['watch', 'a', 'd'], repo.dir, {
@@ -151,10 +145,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("sail watch is refused by a live watcher of this name in another clone, or of another name on one of its labels, and starts once that watcher's pid is dead", async () => {
+test("sail watch is refused by a live watcher of this name in another clone, or of another name on one of its labels, and starts once that watcher's pid is dead", async () => {
   await withTempRepo(async (repo) => {
     const world = repository(repo);
     const elsewhere = join(repo.home, 'elsewhere', 'stub');
@@ -181,17 +172,15 @@ test
       },
       {
         code: EXIT_REFUSED,
-        stderr: "sail watch: the label 'sail-a' on the fake ticket source is polled by the watcher of 'other' in /work/other (pid 6161)\n",
+        stderr:
+          "sail watch: the label 'sail-a' on the fake ticket source is polled by the watcher of 'other' in /work/other (pid 6161)\n",
       },
       { code: EXIT_OK, stderr: '', ran: true },
     ]);
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('with a watcher running, sail watch c exits 0 printing the set with c, and the watcher prints its watch set line', async () => {
+test('with a watcher running, sail watch c exits 0 printing the set with c, and the watcher prints its watch set line', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, ['a', 'b']);
     expect(w.recorded).toBe(true);
@@ -203,7 +192,10 @@ test
     });
     expect(w.watcher.printed.stdout).toContain(' watch set: a, b, c\n');
     const again = io(repo.dir, w.env);
-    const watching = await watchCommand({ isAlive: (pid) => pid === WATCHER_PID })({ values: {}, positionals: ['a'] }, again.io);
+    const watching = await watchCommand({ isAlive: (pid) => pid === WATCHER_PID })(
+      { values: {}, positionals: ['a'] },
+      again.io,
+    );
     expect({ code: watching, ...again.printed }).toEqual({
       code: EXIT_OK,
       stdout: `sail watch: the watcher of 'stub' (pid ${WATCHER_PID}) watches a, b, c\n`,
@@ -214,10 +206,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('sail unwatch with no watcher exits 3, and sail unwatch a b with one makes it exit 0 and prints that it stops', async () => {
+test('sail unwatch with no watcher exits 3, and sail unwatch a b with one makes it exit 0 and prints that it stops', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo);
     const none = await runCaptured(['unwatch', 'a'], repo.dir, { env });
@@ -240,10 +229,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('Ctrl-C ends the watcher with exit 0 and clears its registry field, and its runs are left running', async () => {
+test('Ctrl-C ends the watcher with exit 0 and clears its registry field, and its runs are left running', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, ['a']);
     expect(w.recorded).toBe(true);
@@ -258,14 +244,14 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ('a sail watch with no terminal to stop it is refused, and writes nothing', async () => {
+test('a sail watch with no terminal to stop it is refused, and writes nothing', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo);
     const { code, stderr } = await runCaptured(['watch', 'a'], repo.dir, { env });
-    expect({ code, stderr }).toEqual({ code: EXIT_REFUSED, stderr: 'sail watch: nothing can stop it here: run it from a terminal\n' });
+    expect({ code, stderr }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: 'sail watch: nothing can stop it here: run it from a terminal\n',
+    });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
 });

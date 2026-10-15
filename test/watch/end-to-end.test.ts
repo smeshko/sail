@@ -66,10 +66,7 @@ async function until(what: string, ready: () => boolean): Promise<string> {
   return what;
 }
 
-// biome-ignore format: TDD-PENDING TASK-010
-test
-  .skip // TDD-PENDING TASK-010
-  ("sail watch a runs a's tickets one at a time as dispatched runs, a second sail watch b adds b, and sail unwatch a b ends the watcher with 0", async () => {
+test("sail watch a runs a's tickets one at a time as dispatched runs, a second sail watch b adds b, and sail unwatch a b ends the watcher with 0", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir, { testsPassAt: 1 });
     writeWatched(sail, 'a', { label: 'sail-a', cap: 1 });
@@ -83,7 +80,13 @@ test
     const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
     const runs = join(repo.dir, '.sail-runs');
     const sailProcess = (argv: string[]) =>
-      Bun.spawn([process.execPath, MAIN, ...argv], { cwd: repo.dir, env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+      Bun.spawn([process.execPath, MAIN, ...argv], {
+        cwd: repo.dir,
+        env,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
     const completed = (workflow: string) =>
       runsIn(runs).filter((run) => run.workflow === workflow && run.status === 'completed').length;
 
@@ -120,7 +123,11 @@ test
     ]);
     for (const run of all) {
       const types = run.events.map((event) => event.type);
-      expect([run.runId, types.indexOf('ticket:claimed') >= 0, types.indexOf('ticket:claimed') < types.indexOf('intake:start')]).toEqual([run.runId, true, true]);
+      expect([
+        run.runId,
+        types.indexOf('ticket:claimed') >= 0,
+        types.indexOf('ticket:claimed') < types.indexOf('intake:start'),
+      ]).toEqual([run.runId, true, true]);
     }
     const [first, next] = all.filter((run) => run.workflow === 'a');
     const firstEnd = first?.events.find((event) => event.type === 'run:end')?.ts ?? '';
