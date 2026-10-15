@@ -32,10 +32,7 @@ function groups(markup: string): string[] {
     });
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the golden run's nine cards are grouped: intake and spec, then fix's iteration 1 and iteration 2, then describe and open", () => {
+test("the golden run's nine cards are grouped: intake and spec, then fix's iteration 1 and iteration 2, then describe and open", () => {
   const markup = renderRun(foldRun(readEvents(GOLDEN_RUN)), summaryOf(GOLDEN_RUN), initialUi(0), NOW).value;
   expect(groups(markup)).toEqual([
     '-: intake#1 spec#1',
@@ -47,10 +44,7 @@ test
   expect(markup.match(/data-action="select-card"/g)?.length).toBe(9);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the golden run view shows its loop, its eight routes, $1.35 of its $25.00 budget, its PR and sail show', () => {
+test('the golden run view shows its loop, its eight routes, $1.35 of its $25.00 budget, its PR and sail show', () => {
   const markup = renderRun(foldRun(readEvents(GOLDEN_RUN)), summaryOf(GOLDEN_RUN), initialUi(0), NOW).value;
   expect(markup).toContain('<span class="loopbadge">fix: 2/3 · break</span>');
   expect([...markup.matchAll(/<span class="route">([^<]+)<\/span>/g)].map(([, route]) => route)).toEqual([
@@ -73,10 +67,7 @@ test
   expect(markup).not.toContain('sail resume');
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("FAKE-3's view has a lint#1 card and a not called yet group of describe, open, self-review and tests, its resume command, and no page module names lint", () => {
+test("FAKE-3's view has a lint#1 card and a not called yet group of describe, open, self-review and tests, its resume command, and no page module names lint", () => {
   const markup = renderRun(foldRun(readEvents(FAKE_3)), summaryOf(FAKE_3), initialUi(0), NOW).value;
   expect(groups(markup)).toEqual([
     '-: intake#1 spec#1 lint#1',
@@ -93,10 +84,7 @@ test
   expect(naming).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a running card shows running and its time so far, a PR link is drawn only for an http(s) URL, and the status line says live until the run ends', () => {
+test('a running card shows running and its time so far, a PR link is drawn only for an http(s) URL, and the status line says live until the run ends', () => {
   const events = readEvents(GOLDEN_RUN);
   const until = events.findIndex((event) => event.type === 'stage:start' && event.key === 'tests#1');
   const model = foldRun(events.slice(0, until + 1));

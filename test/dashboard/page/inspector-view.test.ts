@@ -25,10 +25,7 @@ function inspect(dir: string, key: string, tab: InspectorTab, log?: string) {
   return renderInspector(card, model.roster, { state: 'loaded', value }, text, { ...initialUi(0), key, tab }).value;
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the permissions tab explains FAKE-2's denial from its events, roster and result alone: the command, the rule, the step's commands and the reason", () => {
+test("the permissions tab explains FAKE-2's denial from its events, roster and result alone: the command, the rule, the step's commands and the reason", () => {
   const markup = inspect(FAKE_2, 'implement#1', 'permissions');
   expect(markup).toContain(
     '<div class="grp"><div class="grp-t">commands</div><ul class="polylist"><li>bun test*</li><li>git add *</li><li>git commit *</li><li>git diff *</li></ul></div>',
@@ -51,10 +48,7 @@ test
   expect(quiet).toContain('<div class="grp-t">denials · 0</div><div class="code">No denials</div>');
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the files tab lists the golden implement#2's diff.patch with its bytes and a sha256 prefix, the whole hash in its title", () => {
+test("the files tab lists the golden implement#2's diff.patch with its bytes and a sha256 prefix, the whole hash in its title", () => {
   expect(inspect(GOLDEN_RUN, 'implement#2', 'files')).toContain(
     '<div class="grp-t">files · 1</div><div class="art"><span class="ic">▤</span><span><b>diff.patch</b><span class="d">02-implement/call-2/diff.patch · 613 bytes · <span class="sha" title="2a10783a63a95398d9ab4bace6f0919d15d15ab03637579579b192693547ea25">2a10783a63a9</span></span></span></div>',
   );
@@ -79,10 +73,7 @@ test
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the log tab shows tests#1's stdout escaped, with stdout and stderr to choose, and says loading, or no log, when there is none", () => {
+test("the log tab shows tests#1's stdout escaped, with stdout and stderr to choose, and says loading, or no log, when there is none", () => {
   const markup = inspect(GOLDEN_RUN, 'tests#1', 'log', 'stdout.log');
   expect(markup).toContain(
     '<div class="logbar"><button class="tog on" data-action="stream" data-stream="stdout">stdout</button><button class="tog" data-action="stream" data-stream="stderr">stderr</button></div><pre class="code log">bun test v1.3.14\n5 pass\n1 fail\n(fail) greet --shout › uppercases the name\n{&quot;ok&quot;:false,',
@@ -102,10 +93,7 @@ test
   expect(intake).toContain('<div class="ins-b"><div class="code">no log for this call</div></div>');
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("the overview shows the call's facts, output, consumed bindings, errors and other event types, a result not read yet says so, and no card asks for one", () => {
+test("the overview shows the call's facts, output, consumed bindings, errors and other event types, a result not read yet says so, and no card asks for one", () => {
   const markup = inspect(GOLDEN_RUN, 'implement#2', 'overview');
   expect(markup).toContain(
     '<div class="stat"><b>done</b><span>outcome</span></div>\n<div class="stat"><b>1</b><span>tries</span></div>\n<div class="stat"><b>1.1s</b><span>duration</span></div>',

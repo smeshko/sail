@@ -130,10 +130,7 @@ test('the rail, needs attention and the queue panel keep their structure under a
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the run view, its status line and every inspector tab keep their structure under a hostile payload in every untrusted field', async () => {
+test('the run view, its status line and every inspector tab keep their structure under a hostile payload in every untrusted field', async () => {
   const dir = fake2Dir(m);
   const events = readEvents(dir) as unknown as Record<string, unknown>[];
   const summary = index(m.registryDir)[0]?.runs.find((run) => run.runId === FAKE_2_ID)?.summary;
