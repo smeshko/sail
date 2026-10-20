@@ -51,6 +51,7 @@ Usage:
 Starting a run from a ticket:
   --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
+  --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
 
 Output of a run and a resume:
   -q, --quiet    Only the run's start, its errors and the final block
@@ -195,6 +196,7 @@ const TICKET: CommandSpec = {
     workflow: { type: 'string' },
     force: { type: 'boolean' },
     until: { type: 'string' },
+    'dry-run': { type: 'boolean' },
     // The watcher's: the run id it minted for the run it dispatches. Not in USAGE.
     dispatch: { type: 'string' },
     ...VERBOSITY_OPTIONS,

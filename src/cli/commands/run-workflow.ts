@@ -30,6 +30,7 @@ import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
 import { registerRepository } from '../registration';
+import { dryRunTicket } from './dry-run';
 
 /** Every path a command prints goes through here, relative to where the user ran it. */
 export function at(io: Io, path: string): string {
@@ -163,11 +164,22 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   if (workflow === undefined) return refuse('no --workflow given, and .sail/project.yaml sets no defaultWorkflow');
   const workflowFile = findWorkflowFile(project.sailDir, workflow);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
+  const { until, dispatch } = args.values;
+  const dry = args.values['dry-run'] === true;
+  if (dry && dispatch !== undefined) return refuse("--dry-run and --dispatch can't be combined");
   const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
+  if (dry) {
+    const force = args.values.force === true;
+    return dryRunTicket(io, command, project, {
+      workflow,
+      ticket,
+      force,
+      ...(typeof until === 'string' ? { until } : {}),
+    });
+  }
   await registerRepository(io, command, project);
 
-  const { until, dispatch } = args.values;
   const terminal = terminalFor(io, project.sailDir, verbosity);
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>

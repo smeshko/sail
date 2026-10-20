@@ -98,20 +98,14 @@ async function leaseBranch(repo: TempRepo): Promise<void> {
   if (!taken.leased) throw new Error('the branch was already leased');
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('sail FAKE-1 --dry-run prints the roster the run would freeze and exits 0, and leaves the files, worktrees, git status and registry as they were', async () => {
+test('sail FAKE-1 --dry-run prints the roster the run would freeze and exits 0, and leaves the files, worktrees, git status and registry as they were', async () => {
   const { code, stdout, stderr, before, after } = await dryIn(['FAKE-1', '--dry-run']);
   expect({ code, stdout, stderr }).toEqual({ code: EXIT_OK, stdout: ROSTER, stderr: '' });
   expect(after).toEqual(before);
   expect([after.files.some((file) => file.startsWith('.sail-runs/')), after.registry]).toEqual([false, false]);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, string, (repo: TempRepo) => Promise<void> | void, string]>([
+test.each<[string, string, (repo: TempRepo) => Promise<void> | void, string]>([
   [
     'a ticket that is not designated',
     'FAKE-3',
@@ -140,10 +134,7 @@ test
   60_000,
 );
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('--dry-run on a workflow with a type error prints it where it is, then exits 3 with the refusal of a start, and writes nothing', async () => {
+test('--dry-run on a workflow with a type error prints it where it is, then exits 3 with the refusal of a start, and writes nothing', async () => {
   const { code, stdout, stderr, before, after } = await dryIn(['FAKE-1', '--dry-run'], (repo) => {
     edit(
       join(repo.dir, '.sail'),
@@ -163,10 +154,7 @@ test
   expect(after).toEqual(before);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('--dry-run --force on a ticket that is not designated exits 0 and lists designation as forced', async () => {
+test('--dry-run --force on a ticket that is not designated exits 0 and lists designation as forced', async () => {
   const { code, stdout, stderr, after } = await dryIn(['FAKE-3', '--dry-run', '--force']);
   expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
   expect(stdout.split('\n').slice(0, 5)).toEqual([
@@ -179,10 +167,7 @@ test
   expect(after.files.some((file) => file.startsWith('.sail-runs/'))).toBe(false);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('--dry-run --until spec exits 0 with the roster, and --until naming no stage exits 3 with the refusal of a start', async () => {
+test('--dry-run --until spec exits 0 with the roster, and --until naming no stage exits 3 with the refusal of a start', async () => {
   const fits = await dryIn(['FAKE-1', '--dry-run', '--until', 'spec']);
   expect({ code: fits.code, stdout: fits.stdout, stderr: fits.stderr }).toEqual({
     code: EXIT_OK,
@@ -199,10 +184,7 @@ test
   expect(unfit.after).toEqual(unfit.before);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('--dry-run with --dispatch is refused with exit 3, and writes nothing', async () => {
+test('--dry-run with --dispatch is refused with exit 3, and writes nothing', async () => {
   const { code, stdout, stderr, before, after } = await dryIn([
     'FAKE-1',
     '--dry-run',
@@ -217,10 +199,7 @@ test
   expect(after).toEqual(before);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('--dry-run prints a stage of several steps as its steps, each with what it declares', async () => {
+test('--dry-run prints a stage of several steps as its steps, each with what it declares', async () => {
   const { code, stdout } = await dryIn(['FAKE-1', '--dry-run'], (repo) => writePublish(join(repo.dir, '.sail')));
   const lines = stdout.split('\n');
   const from = lines.indexOf('stage publish  steps  repo:.sail/workflows/ticket-to-pr/stages/publish');
@@ -241,10 +220,7 @@ test
   ]);
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('the usage lists --dry-run among the options of a start from a ticket', async () => {
+test('the usage lists --dry-run among the options of a start from a ticket', async () => {
   const { stdout } = await runCaptured(['--help']);
   const block = stdout.split('\n\n').find((part) => part.startsWith('Starting a run from a ticket:')) ?? '';
   expect(block).toMatch(
