@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
 import { type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
-import { readStatus } from '../../src/engine/run-dir';
+import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
@@ -1387,6 +1387,31 @@ test('a stop asked during the call --until names goes ahead of the until suspens
       leases: [],
       control: false,
       issues: [],
+    });
+  });
+});
+
+test('a resume that takes the lease after a sail stop ended the run meanwhile is refused as final: STATUS stays failed stopped and the lease is given back (review R2-2)', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await stoppedCopy(repo.dir);
+    const end = { runId, dir: join(repo.dir, '.sail-runs', runId) };
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const lease = workspace.lease.bind(workspace);
+    // A stop that ran to its end while the resume loaded the workflow: STATUS final, the lease released.
+    workspace.lease = (...args) => {
+      writeStatus(end.dir, 'failed', 'stopped');
+      return lease(...args);
+    };
+    const resumed = await resumeWorkflow({ cwd: repo.dir, adapters, runId: end.runId });
+    expect({
+      resumed,
+      status: readFileSync(join(end.dir, 'STATUS'), 'utf8'),
+      leases: leaseFiles(repo.dir),
+    }).toEqual({
+      resumed: { refused: `run ${end.runId} failed (stopped): a failed run is final` },
+      status: 'failed stopped\n',
+      leases: [],
     });
   });
 });
