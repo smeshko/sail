@@ -13,7 +13,7 @@ import { fakeAdapters } from '../helpers/adapters';
 import { manualClock, queueEventIssues, queueEvents } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
-import { type FakeSpawner, fakeSpawner, writeTickets } from '../helpers/watched';
+import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helpers/watched';
 
 const START = '2026-10-15T09:00:00.000Z';
 const FIVE_MINUTES = 5 * 60_000;
@@ -72,6 +72,7 @@ async function world(
       env: repo.env,
       now: clock,
       spawn: spawner.spawn,
+      resume: spawner.resume,
       isAlive: spawner.isAlive,
       onSettled: (each) => settled.push(each),
     });
@@ -234,7 +235,10 @@ test("a run that failed fails its item with the stop reason and parks it on the 
   });
 });
 
-test('a run whose process is gone while it reads suspended or running stays dispatched, for 13.3, and frees its slot', async () => {
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a run whose process is gone while it reads suspended interrupted or running is resumed once, with run:resumed saying where it was, and its resume holds the slot', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 3, 2);
     const dispatcher = w.dispatcher();
@@ -243,9 +247,41 @@ test('a run whose process is gone while it reads suspended or running stays disp
     await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
     await w.spawner.end('FAKE-2', { status: 'running' });
     await dispatcher.tick();
-    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
-    expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 dispatched 1', 'FAKE-3 dispatched 1']);
-    expect([dispatcher.inFlight(), w.settled]).toEqual([1, []]);
+    await dispatcher.tick();
+    const run1 = w.spawner.run('FAKE-1').runId;
+    const run2 = w.spawner.run('FAKE-2').runId;
+    expect({
+      spawned: spawnedKeys(w.spawner),
+      resumes: w.spawner.resumes.map(({ runId, pid }) => [runId, pid]),
+      items: w.store.snapshot().items.map((item) => [item.source.ticketKey, item.state, item.attempts, item.pid]),
+      inFlight: dispatcher.inFlight(),
+      resumed: eventsOf(w.runs, 'run:resumed'),
+      settled: w.settled,
+      issues: queueEventIssues(queueDir(w.runs, 'a')),
+    }).toEqual({
+      spawned: ['FAKE-1', 'FAKE-2'],
+      resumes: [
+        [run1, FAKE_PID + 2],
+        [run2, FAKE_PID + 3],
+      ],
+      items: [
+        ['FAKE-1', 'dispatched', 1, FAKE_PID + 2],
+        ['FAKE-2', 'dispatched', 1, FAKE_PID + 3],
+        ['FAKE-3', 'queued', 0, undefined],
+      ],
+      inFlight: 2,
+      resumed: [
+        {
+          dedupKey: 'ticket:FAKE-1',
+          run: run1,
+          pid: FAKE_PID + 2,
+          from: { status: 'suspended', stopReason: 'interrupted' },
+        },
+        { dedupKey: 'ticket:FAKE-2', run: run2, pid: FAKE_PID + 3, from: { status: 'running' } },
+      ],
+      settled: [],
+      issues: [],
+    });
   });
 });
 
