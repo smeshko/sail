@@ -1236,10 +1236,7 @@ const leaseFiles = (repoDir: string): string[] => {
   return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.json')) : [];
 };
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a CONTROL that says unwatched before a call suspends the run with unwatched: the call never runs, its workspace and lease stay, and a resume completes it without running a journaled call again', async () => {
+test('a CONTROL that says unwatched before a call suspends the run with unwatched: the call never runs, its workspace and lease stay, and a resume completes it without running a journaled call again', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ran(repo.dir, {
@@ -1285,10 +1282,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a CONTROL that says stopped before a call fails the run with stopped, releasing its workspace and lease, and a resume is refused as final', async () => {
+test('a CONTROL that says stopped before a call fails the run with stopped, releasing its workspace and lease, and a resume is refused as final', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const end = await ran(repo.dir, {
@@ -1324,10 +1318,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a CONTROL written as the run starts stops it before intake#1', async () => {
+test('a CONTROL written as the run starts stops it before intake#1', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const control: Consumer = {
@@ -1350,10 +1341,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('an abort seen at the same boundary as a CONTROL goes first, suspending the run interrupted, and the request waits for the resume, which it suspends before spec#1', async () => {
+test('an abort seen at the same boundary as a CONTROL goes first, suspending the run interrupted, and the request waits for the resume, which it suspends before spec#1', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const controller = new AbortController();

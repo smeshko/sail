@@ -21,10 +21,7 @@ function runDir(): string {
 /** What the run directory holds: each file, with its text. */
 const held = (dir: string) => readdirSync(dir).map((name) => `${name}: ${readFileSync(join(dir, name), 'utf8')}`);
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('an unwatch request is written only where none is, and a stop replaces any request, never the other way round', () => {
+test('an unwatch request is written only where none is, and a stop replaces any request, never the other way round', () => {
   const dir = runDir();
   const steps = [
     requestUnwatch(dir),
@@ -48,10 +45,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a take returns the request once and leaves nothing behind, and a file holding anything else is removed and ignored', () => {
+test('a take returns the request once and leaves nothing behind, and a file holding anything else is removed and ignored', () => {
   const dir = runDir();
   requestStop(dir);
   const stop = [takeControl(dir), takeControl(dir), held(dir)];
@@ -72,10 +66,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('cancelling an unwatch removes an unwatched and keeps a stopped', () => {
+test('cancelling an unwatch removes an unwatched and keeps a stopped', () => {
   const dir = runDir();
   requestUnwatch(dir);
   cancelUnwatch(dir);
