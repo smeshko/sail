@@ -10,8 +10,8 @@
 // and a request written after the take is a new file the next boundary sees. A file holding anything else is removed
 // and ignored: a request that can't be read stops nothing.
 //
-// The watcher takes back an `unwatched` a run never reached when it adopts the run while its workflow is watched again
-// (`cancelUnwatch()`). What it took is put back when it was a stop, so no stop is lost to the take.
+// The watcher takes back an `unwatched` a run never reached when it adopts the run while its workflow is watched
+// again (`cancelUnwatch()`). It takes only a file that reads `unwatched`, so a stop stays in place.
 import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { replaceFile } from './durable';
@@ -64,7 +64,19 @@ export function takeControl(runDir: string): ControlRequest | undefined {
   }
 }
 
-/** Takes back an `unwatched` the run never reached, and leaves a `stopped` where it is. */
+/**
+ * Takes back an `unwatched` the run never reached, and leaves a `stopped` where it is: the file is read first and taken
+ * only when it asks to suspend, so a stop never leaves it, not even for a boundary the run passes meanwhile. A stop
+ * written between the read and the take is taken with it, and written back.
+ */
 export function cancelUnwatch(runDir: string): void {
+  let text: string;
+  try {
+    text = readFileSync(join(runDir, CONTROL_FILE), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (text !== 'unwatched\n') return;
   if (takeControl(runDir) === 'stopped') requestStop(runDir);
 }
