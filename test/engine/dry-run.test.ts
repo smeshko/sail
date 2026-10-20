@@ -49,10 +49,7 @@ async function leaseBranch(repo: TempRepo): Promise<void> {
   if (!taken.leased) throw new Error('the branch was already leased');
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('dryRun on a designated, unstarted ticket answers with the header a start then freezes, its branch and the ticket as fetched, and writes nothing', async () => {
+test('dryRun on a designated, unstarted ticket answers with the header a start then freezes, its branch and the ticket as fetched, and writes nothing', async () => {
   const opened = await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const run = await openRun({
@@ -88,10 +85,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each<[string, DryOptions, (repo: TempRepo) => Promise<void> | void, string]>([
+test.each<[string, DryOptions, (repo: TempRepo) => Promise<void> | void, string]>([
   [
     'a ticket that is not designated',
     { ticket: 'FAKE-3' },
@@ -135,10 +129,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('dryRun refuses a workspace whose lease cannot be read, naming the port failure', async () => {
+test('dryRun refuses a workspace whose lease cannot be read, naming the port failure', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const adapters = await fakeAdapters(repo.dir);
@@ -152,10 +143,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('dryRun with force on a ticket that is not designated answers with designation among the forced checks', async () => {
+test('dryRun with force on a ticket that is not designated answers with designation among the forced checks', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const result = await dry(repo, { ticket: 'FAKE-3', force: true });
