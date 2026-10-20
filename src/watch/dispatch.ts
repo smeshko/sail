@@ -3,13 +3,14 @@
 //
 // - **In flight** is an item `dispatched` whose pid is alive. Only those count against the cap. Each tick hands every
 //   dispatched item to `reconcile.ts`, which answers by its run directory, its dispatch log and its lease: a live run is
-//   in flight, and adopted with `run:adopted` on this dispatcher's first tick, after any `unwatched` it never reached is
-//   taken back; `completed` is done; `failed stopped` parks the item at once; any other `failed` is a failed attempt,
-//   retried later or parked; a dead `running`, or a `suspended interrupted` or `unwatched` run, is resumed once as a
-//   detached `sail resume`, with `run:resumed`, after the same take-back, and counts while its resume lives, unless a
-//   live process holds its lease, which is adopted instead, or the cap is reached, when it waits for a slot; a resume
-//   that leaves the run unended parks the item with why; no `run.json` is a start that was refused, whose reason is the
-//   last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding no slot.
+//   in flight, and adopted with `run:adopted` on this dispatcher's first tick, its control file left to it;
+//   `completed` is done; `failed stopped` parks the item at once; any other `failed` is a failed attempt, retried later
+//   or parked; a dead `running`, or a `suspended interrupted` or `unwatched` run, is resumed once as a detached `sail
+//   resume`, with `run:resumed`, after any `unwatched` it never took is taken back, and counts while its resume lives,
+//   unless a live process holds its lease, which is adopted instead, or the cap is reached, when it waits for a slot;
+//   a resume that leaves the run unended parks the item with why; no `run.json` is a start that was refused, whose
+//   reason is the last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding
+//   no slot.
 // - **A due item**, in queue order: first the lease on its branch, named from its queued title, then the re-check of
 //   its ticket through the TicketSource, then the lease on the branch its fresh title names when that differs. The
 //   lease comes first because a leased item is skipped on every tick for as long as the lease lasts, and checking it
@@ -158,13 +159,11 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       });
       switch (answer.kind) {
         case 'in-flight':
-          if (answer.adopt && item.pid !== undefined) {
-            cancelUnwatch(runDir);
-            store.adopted(item.dedupKey, item.pid);
-          }
+          // A live run's control file is left to the run: taking an `unwatched` back from under it could take a stop
+          // that replaced it meanwhile. One it never reached suspends it, and the next tick resumes it.
+          if (answer.adopt && item.pid !== undefined) store.adopted(item.dedupKey, item.pid);
           break;
         case 'adopt':
-          cancelUnwatch(runDir);
           store.adopted(item.dedupKey, answer.pid);
           break;
         case 'done':
@@ -180,7 +179,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         case 'resume':
           // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
           if (inFlight() >= options.maxConcurrentRuns) break;
-          // Watched again, as for an adoption: an `unwatched` the run never took would suspend its resume at once.
+          // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
+          // to a dead run's control file: `sail stop` ends a run it finds dead itself.
           cancelUnwatch(runDir);
           resume(item, runId, answer.from);
           break;
