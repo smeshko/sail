@@ -359,7 +359,7 @@ test("a resume whose process ends with its run still suspended parks the item wi
   });
 });
 
-test("a new dispatcher's first tick adopts each live run once with run:adopted, takes back an unwatched its run never reached and keeps a stopped one, adopts a dead pid whose lease a live process holds under that pid, and starts nothing over the cap", async () => {
+test("a new dispatcher's first tick adopts each live run once with run:adopted, leaves a live run's control file to the run, an unwatched as a stopped one, adopts a dead pid whose lease a live process holds under that pid, and starts nothing over the cap", async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 4, 3);
     await w.dispatcher().tick();
@@ -396,7 +396,7 @@ test("a new dispatcher's first tick adopts each live run once with run:adopted, 
         { dedupKey: 'ticket:FAKE-2', run: run2, pid: FAKE_PID + 1 },
         { dedupKey: 'ticket:FAKE-3', run: run3, pid: process.pid },
       ],
-      control: ['none', 'stopped\n'],
+      control: ['unwatched\n', 'stopped\n'],
       spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
       resumes: 0,
       inFlight: 3,
