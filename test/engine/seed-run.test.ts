@@ -252,6 +252,28 @@ test.each<[string, (dir: string) => void, Partial<SeededRunOptions>, (runId: str
     (runId) => `run ${runId}'s 00-intake/call-1/brief.md is not a regular file: a seed copies only what the run wrote`,
   ],
   [
+    'a reused call directory that is a symlink',
+    (dir) => {
+      const moved = join(dir, '..', '..', 'moved-call');
+      renameSync(join(dir, '00-intake', 'call-1'), moved);
+      symlinkSync(moved, join(dir, '00-intake', 'call-1'));
+    },
+    {},
+    (runId) => `run ${runId}'s 00-intake/call-1 is a symlink: a seed copies only what the run wrote`,
+  ],
+  [
+    'a reused result.json that is a symlink',
+    (dir) => linkOut(dir, '00-intake/call-1/result.json'),
+    {},
+    (runId) => `run ${runId}'s 00-intake/call-1/result.json is a symlink: a seed copies only what the run wrote`,
+  ],
+  [
+    'a file a reused call consumed that is a symlink',
+    (dir) => linkOut(dir, '01-spec/call-1/in/brief.md'),
+    { stage: 'implement' },
+    (runId) => `run ${runId}'s 01-spec/call-1/in/brief.md is a symlink: a seed copies only what the run wrote`,
+  ],
+  [
     'a source run directory that is a symlink',
     (dir) => {
       const moved = join(dir, '..', '..', 'moved-run');
