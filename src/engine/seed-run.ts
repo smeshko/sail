@@ -25,7 +25,7 @@
 //
 // The workspace starts at the source's base: the source's code changes are not carried. A reused call's commits are not
 // in the seeded workspace, so a later stage that consumes a gitDiff sees only what the seeded run changed.
-import { cpSync, existsSync, lstatSync, readdirSync, type Stats } from 'node:fs';
+import { cpSync, existsSync, lstatSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
@@ -111,55 +111,47 @@ function callDirOf(path: string): string | undefined {
   return CALL_DIR.test(dir) ? dir : undefined;
 }
 
-/** What `stat` is, when it is no directory or regular file. */
-function strayKind(stat: Stats | undefined): string {
-  if (stat === undefined) return 'missing';
-  return stat.isSymbolicLink() ? 'a symlink' : 'not a regular file';
-}
-
 /**
- * The first path at or below the run-relative `path` that is neither a directory nor a regular file, with what it is,
- * or undefined. Only the path itself is checked when `deep` is false.
+ * The first step of the run-relative `path` that isn't what a run wrote there, with what it is instead, or undefined:
+ * each directory on the way must be a directory, and the path itself a regular file, none of them a link.
  */
-function strayAt(sourceDir: string, path: string, deep: boolean): { path: string; is: string } | undefined {
-  const stat = lstatSync(join(sourceDir, path), { throwIfNoEntry: false });
-  if (stat?.isFile()) return undefined;
-  if (!stat?.isDirectory()) return { path, is: strayKind(stat) };
-  if (!deep) return undefined;
-  for (const name of readdirSync(join(sourceDir, path)).sort()) {
-    const stray = strayAt(sourceDir, `${path}/${name}`, true);
-    if (stray !== undefined) return stray;
+function strayOn(sourceDir: string, path: string): { path: string; is: string } | undefined {
+  const segments = path.split('/');
+  for (let at = 1; at <= segments.length; at++) {
+    const step = segments.slice(0, at).join('/');
+    const stat = lstatSync(join(sourceDir, step), { throwIfNoEntry: false });
+    const leaf = at === segments.length;
+    if (leaf ? stat?.isFile() : stat?.isDirectory()) continue;
+    if (stat === undefined) return { path: step, is: 'missing' };
+    return { path: step, is: stat.isSymbolicLink() ? 'a symlink' : `not a ${leaf ? 'regular file' : 'directory'}` };
   }
   return undefined;
 }
 
 /**
  * The call directories of `entries`, each once, in order, or why the seed can't trust them. Each entry's result and
- * files must lie in its own call directory, `NN-<stage>/call-N`, which holds every try. Everything the copy takes, the
- * stage's directory, the call's and all below it, must be a directory or a regular file: a step can't produce a link,
- * so a link there was put in after the run, and could lead anywhere.
+ * files must lie in its own call directory, `NN-<stage>/call-N`, which holds every try, and be a regular file reached
+ * through directories alone: they are what the new run reads, and a step can't produce a link, so one there was put in
+ * after the run and could lead anywhere. Anything else in a call directory is copied as it is, a link as a link: an
+ * agent's rejected try may have left one, and nothing reads it again.
  */
 function callDirs(sourceDir: string, runId: string, entries: readonly JournalEntry[]): string[] | { refused: string } {
   const dirs = new Set<string>();
   for (const entry of entries) {
     const dir = callDirOf(entry.resultPath);
-    for (const path of [entry.resultPath, ...Object.values(entry.files)]) {
+    const paths = [entry.resultPath, ...Object.values(entry.files)];
+    for (const path of paths) {
       if (dir === undefined || callDirOf(path) !== dir) {
         return { refused: `run ${runId}'s journal line ${entry.seq} points at '${path}', outside a call directory` };
       }
     }
-    for (const path of Object.values(entry.files)) {
-      if (!lstatSync(join(sourceDir, path), { throwIfNoEntry: false })?.isFile()) {
-        return { refused: `run ${runId}'s ${path} is not a regular file: a seed copies only what the run wrote` };
+    for (const path of paths) {
+      const stray = strayOn(sourceDir, path);
+      if (stray !== undefined) {
+        return { refused: `run ${runId}'s ${stray.path} is ${stray.is}: a seed copies only what the run wrote` };
       }
     }
     dirs.add(dir as string);
-  }
-  for (const dir of dirs) {
-    const stray = strayAt(sourceDir, dirname(dir), false) ?? strayAt(sourceDir, dir, true);
-    if (stray !== undefined) {
-      return { refused: `run ${runId}'s ${stray.path} is ${stray.is}: a seed copies only what the run wrote` };
-    }
   }
   return [...dirs];
 }
