@@ -610,6 +610,37 @@ test("unwatching b asks each live run of b, and none of a's, to suspend through 
   });
 });
 
+test('unwatching b while a run of b is still starting, with no run directory yet, says it was not asked and names sail stop, and still asks the run that has one (review R1-5)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 2 },
+      ],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b', 'FAKE-3': 'sail-b' }),
+    );
+    const watcher = await w.start(['a', 'b']);
+    await w.timers.advance(1000);
+    expect(w.order('b')).toEqual(['FAKE-2', 'FAKE-3']);
+    const [started, starting] = ['FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
+    mkdirSync(join(w.runs, started ?? ''), { recursive: true });
+    dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
+    await w.timers.advance(1000);
+    await watcher.stop();
+    expect({
+      control: readFileSync(join(w.runs, started ?? '', 'CONTROL'), 'utf8'),
+      lines: w.out.filter((line) => line.includes('suspend')),
+    }).toEqual({
+      control: 'unwatched\n',
+      lines: [
+        `09:00:02 b  FAKE-2 suspends at its next call boundary: run ${started}\n`,
+        `09:00:02 b  error: run ${starting} is still starting and was not asked to suspend: sail stop ${starting} stops it\n`,
+      ],
+    });
+  });
+});
+
 test('a watcher starting over completed, failed, running, suspended interrupted and suspended unwatched runs, each with a worktree, sweeps the first two worktrees, keeps the other three and says so', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
