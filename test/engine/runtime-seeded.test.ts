@@ -2,7 +2,7 @@
 // `sail FAKE-1` run to its end once in a repository of its own, and each case seeds from a copy of it: a process opens
 // one run per `.sail/`, so a resume runs in a copy of the seeded run's repository.
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../../src/engine/journal';
 import { type RunEnd, resumeWorkflow, runSeededWorkflow } from '../../src/engine/runtime';
@@ -134,6 +134,30 @@ test('a workflow edited so the reused calls no longer fit fails the seeded run w
     expect([await workspace.holder('fake://origin', branch), existsSync(join(dir, 'workspace'))]).toEqual([
       undefined,
       false,
+    ]);
+  });
+}, 60_000);
+
+// Review round 3: the repository is registered once the run's start and reused calls are in its events file, so a
+// crash while registering leaves a run its events describe.
+test('onOpened runs once the run start and the reused calls are in the events file', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const seen: string[] = [];
+    const end = await runSeededWorkflow({
+      cwd: repo.dir,
+      fromRun: from.runId,
+      stage: 'spec',
+      adapters: await fakeAdapters(repo.dir),
+      onOpened: async () => {
+        const runId = readdirSync(join(repo.dir, '.sail-runs')).find((id) => id !== from.runId && id !== 'fake');
+        const events = readEvents(join(repo.dir, '.sail-runs', runId ?? ''));
+        seen.push(...events.map((event) => ('fromRun' in event ? `${event.type} ${event.fromRun}` : event.type)));
+      },
+    });
+    expect([endOf(end), seen.filter((type) => type !== 'workspace:leased' && type !== 'workspace:created')]).toEqual([
+      { status: 'suspended', stopReason: 'until' },
+      [`run:start ${from.runId}`, `journal:append ${from.runId}`],
     ]);
   });
 }, 60_000);
