@@ -10,7 +10,7 @@
 import { afterAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../src/events/types';
@@ -291,6 +291,58 @@ test('neither marker key is in any run file, the clone’s git config and logs, 
   }
   expect(run.github.requests.length).toBeGreaterThan(0);
   expect(run.github.requests.every((request) => request.tokenMatched)).toBe(true);
+}, 90_000);
+
+/** Linear's answer to a request it fails: a 500 with a GraphQL error. */
+const DOWN = { status: 500, body: { errors: [{ message: 'Linear is down' }] } };
+
+/** The SailComment requests Linear got: the claim's, then each try of the link comment. */
+const comments = (linear: LinearWorld) => linear.operations().filter((operation) => operation === 'SailComment');
+
+test('a link comment Linear fails once is tried again: the run ends completed, and ADW-1 holds the one link comment', async () => {
+  await withClone(
+    async (clone) => {
+      const ran = await sail(clone, ['ADW-1']);
+      const [runId = ''] = runIds(clone.repo);
+      const status = runId === '' ? '' : readFileSync(join(clone.repo.dir, '.sail-runs', runId, 'STATUS'), 'utf8');
+      expect({
+        ran: [ran.code, ran.stderr, status],
+        pulls: clone.github.pullRequests.length,
+        requests: comments(clone.linear).length,
+        bodies: clone.linear.ticket(1).comments?.map((comment) => comment.body),
+      }).toEqual({
+        ran: [EXIT_OK, '', 'completed\n'],
+        pulls: 1,
+        requests: 3,
+        bodies: ['Keep the exclamation mark.', `sail run ${runId} started`, `sail run ${runId} opened ${PR_URL}`],
+      });
+    },
+    (linear) => linear.failNext('SailComment', DOWN, { after: 'SailComment' }),
+  );
+}, 90_000);
+
+test('a link comment Linear fails three times fails open after its third try, and ADW-1 holds no link comment', async () => {
+  await withClone(
+    async (clone) => {
+      const ran = await sail(clone, ['ADW-1']);
+      const [runId = ''] = runIds(clone.repo);
+      const status = runId === '' ? '' : readFileSync(join(clone.repo.dir, '.sail-runs', runId, 'STATUS'), 'utf8');
+      expect({
+        ran: [ran.code, status],
+        pulls: clone.github.pullRequests.length,
+        requests: comments(clone.linear).length,
+        bodies: clone.linear.ticket(1).comments?.map((comment) => comment.body),
+      }).toEqual({
+        ran: [EXIT_FAILED, 'failed stage_error\n'],
+        pulls: 1,
+        requests: 4,
+        bodies: ['Keep the exclamation mark.', `sail run ${runId} started`],
+      });
+    },
+    (linear) => {
+      for (let time = 0; time < 3; time++) linear.failNext('SailComment', DOWN, { after: 'SailComment' });
+    },
+  );
 }, 90_000);
 
 test('a claim whose move Linear fails exits 3 and leaves no run directory, no worktree and no lease, and the ticket as it was', async () => {
