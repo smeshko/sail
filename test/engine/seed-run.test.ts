@@ -2,7 +2,16 @@
 // source is `sail FAKE-1` run to its end once in a repository of its own, and each case seeds from a copy of it: a
 // process opens one run per `.sail/`.
 import { afterAll, expect, test } from 'bun:test';
-import { chmodSync, existsSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { type JournalEntry, readJournal } from '../../src/engine/journal';
 import type { OpenedRun } from '../../src/engine/open-run';
@@ -249,7 +258,7 @@ test.each<[string, (dir: string) => void, Partial<SeededRunOptions>, (runId: str
     'a reused file that is a symlink',
     (dir) => linkOut(dir, '00-intake/call-1/brief.md'),
     {},
-    (runId) => `run ${runId}'s 00-intake/call-1/brief.md is not a regular file: a seed copies only what the run wrote`,
+    (runId) => `run ${runId}'s 00-intake/call-1/brief.md is a symlink: a seed copies only what the run wrote`,
   ],
   [
     'a reused call directory that is a symlink',
@@ -266,12 +275,6 @@ test.each<[string, (dir: string) => void, Partial<SeededRunOptions>, (runId: str
     (dir) => linkOut(dir, '00-intake/call-1/result.json'),
     {},
     (runId) => `run ${runId}'s 00-intake/call-1/result.json is a symlink: a seed copies only what the run wrote`,
-  ],
-  [
-    'a file a reused call consumed that is a symlink',
-    (dir) => linkOut(dir, '01-spec/call-1/in/brief.md'),
-    { stage: 'implement' },
-    (runId) => `run ${runId}'s 01-spec/call-1/in/brief.md is a symlink: a seed copies only what the run wrote`,
   ],
   [
     'a source run directory that is a symlink',
@@ -328,3 +331,15 @@ test.each<[string, (dir: string) => void, Partial<SeededRunOptions>, (runId: str
   },
   60_000,
 );
+
+// Review round 3: a link no reused call points at, such as one an agent's rejected try left in its directory, is copied
+// as the link it is: nothing reads it again, and a source that holds one can still seed a run.
+test('a link a reused call does not point at is copied as a link, and seeding opens', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    linkOut(from.dir, '01-spec/call-1/in/brief.md');
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId, stage: 'implement' }));
+    const copied = join(opened.dir, '01-spec', 'call-1', 'in', 'brief.md');
+    expect(lstatSync(copied).isSymbolicLink()).toBe(true);
+  });
+}, 60_000);
