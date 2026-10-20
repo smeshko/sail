@@ -296,7 +296,11 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     watched.target.store.unwatched(pid);
   };
 
-  /** Asks each live run of `workflow` to suspend at its next call boundary, saying so for each request written. */
+  /**
+   * Asks each live run of `workflow` to suspend at its next call boundary, saying so for each request written. A run
+   * still starting has no directory to take a request from, and nothing asks it again once the workflow leaves the set:
+   * that is said as an alert naming `sail stop`, so the person knows it runs on.
+   */
   const suspendRuns = (workflow: string) => {
     const watched = set.get(workflow);
     if (watched === undefined) return;
@@ -307,9 +311,10 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       try {
         written = requestUnwatch(join(runs, item.runId));
       } catch (error) {
-        // A run so new it has no directory yet: there is nothing it could take a request from.
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
-        throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        const why = `run ${item.runId} is still starting and was not asked to suspend: sail stop ${item.runId} stops it`;
+        print(errorLine(workflow, why, now()));
+        continue;
       }
       if (written) print(suspendLine(workflow, item.dedupKey, item.runId, now()));
     }
