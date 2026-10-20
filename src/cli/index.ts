@@ -43,6 +43,8 @@ Usage:
   sail watch <workflow>...                                   Watch these workflows: start this repository's watcher, or add them to it
   sail unwatch <workflow>...                                 Stop watching them. The watcher exits when it watches none
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
+  sail port ticket-source comment <ticket> [--body-file <path>]
+                                                             Comment on a ticket, the body from the file or stdin
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version
