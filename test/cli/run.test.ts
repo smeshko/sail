@@ -109,9 +109,9 @@ test('an argument after the ticket that sail <ticket> does not take is refused b
   expect(await runCaptured(['--force', 'FAKE-1'])).toEqual(refused('--force'));
 });
 
-test('the usage names neither sail run nor --input: a run starts from a ticket, and a resume takes a run and how much to print', async () => {
+test('the usage names no --input: a run starts from a ticket, and a resume takes a run and how much to print', async () => {
   const { stdout } = await runCaptured(['--help']);
-  expect([stdout.includes('sail run '), stdout.includes('--input')]).toEqual([false, false]);
+  expect(stdout.includes('--input')).toBe(false);
   expect(stdout).toMatch(/^ {2}sail resume <run> \[-q\|-v\|-vv\] {2,}Resume a suspended or crashed run$/m);
   expect(stdout).toContain('\nOutput of a run and a resume:\n');
 });

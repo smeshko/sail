@@ -1,0 +1,236 @@
+// `sail run --from-run <run> --stage <stage> [--continue]`, in process through run(), on copies of the fixture
+// repository. The source is `sail FAKE-1` run to its end once in a repository of its own, and each case copies it into
+// its own: a process opens one run per `.sail/`. The fake harness answers by call key, not by prompt, so a changed
+// answer in `.sail/fake/harness.json` stands in for the different output an edited prompt would get (DECISIONS D10).
+import { afterAll, expect, test } from 'bun:test';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import { readJournal } from '../../src/engine/journal';
+import { readStatus } from '../../src/engine/run-dir';
+import { readEvents } from '../../src/events/consumers/ndjson';
+import { edit } from '../helpers/fixture';
+import { type CaptureOptions, fakeInterrupts, runCaptured } from '../helpers/run-captured';
+import { cutJournal, runIds, sharedSource } from '../helpers/seeded';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+
+const source = sharedSource();
+afterAll(() => source.release());
+
+const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
+const PROMPT = 'workflows/ticket-to-pr/stages/spec/prompt.md';
+const EDIT = 'Keep the spec to one page.';
+const SUMMARY = 'Add --shout to greet() and the CLI, upper-casing the whole line.';
+const USAGE = 'sail run: usage: sail run --from-run <run> --stage <stage> [--continue]\n';
+const STAGES = 'describe, implement, open, self-review, spec, tests';
+
+const sha256 = (path: string) => new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
+const json = (...path: string[]) => JSON.parse(readFileSync(join(...path), 'utf8'));
+
+/** Changes the first scripted answer of `spec` in the repository's fake harness script. */
+function answerSpec(repoDir: string, change: (answer: Record<string, unknown>) => Record<string, unknown>): void {
+  const path = join(repoDir, '.sail', 'fake', 'harness.json');
+  const script = JSON.parse(readFileSync(path, 'utf8'));
+  script.spec = [change(script.spec[0]), ...script.spec.slice(1)];
+  writeFileSync(path, `${JSON.stringify(script, null, 2)}\n`);
+}
+
+/** `sail run <args>` in `repo`, with the new run it left, if any: every run but the source. */
+async function sailRun(repo: TempRepo, sourceId: string, args: string[], capture: CaptureOptions = {}) {
+  const captured = await runCaptured(['run', ...args], repo.dir, { env: repo.env, ...capture });
+  const [runId = ''] = runIds(repo.dir).filter((id) => id !== sourceId);
+  return { ...captured, runId, dir: join(repo.dir, '.sail-runs', runId) };
+}
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('sail run --from-run --stage spec, after an edit of the spec prompt, reruns spec alone on the reused brief and stops suspended: its prompt carries the edit and its output is its own', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    edit(
+      join(repo.dir, '.sail'),
+      PROMPT,
+      'Submit a one-sentence summary and the tasks.',
+      `Submit a one-sentence summary and the tasks. ${EDIT}`,
+    );
+    answerSpec(repo.dir, (answer) => ({ ...answer, output: { ...(answer.output as object), summary: SUMMARY } }));
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec']);
+    expect({ code: ran.code, stderr: ran.stderr, end: ran.stdout.split('\n').at(-2) }).toEqual({
+      code: EXIT_SUSPENDED,
+      stderr: '',
+      end: `resume it with: sail resume ${ran.runId}`,
+    });
+    const before = json(from.dir, '01-spec', 'call-1', 'result.json');
+    const after = json(ran.dir, '01-spec', 'call-1', 'result.json');
+    const consumed = Object.values(after.consumed as Record<string, string>);
+    const prompt = (dir: string) => readFileSync(join(dir, '01-spec', 'call-1', 'prompt.md'), 'utf8');
+    expect({
+      fromRun: json(ran.dir, 'run.json').fromRun,
+      consumed: after.consumed,
+      hashes: consumed.map((path) => sha256(join(ran.dir, path))),
+      promptChanged: prompt(ran.dir) !== prompt(from.dir),
+      promptEdited: prompt(ran.dir).includes(EDIT),
+      summary: [after.output.summary, before.output.summary === SUMMARY, after.runId],
+      journal: readJournal(ran.dir).entries.map((entry) => entry.key),
+    }).toEqual({
+      fromRun: from.runId,
+      consumed: before.consumed,
+      hashes: consumed.map((path) => sha256(join(from.dir, path))),
+      promptChanged: true,
+      promptEdited: true,
+      summary: [SUMMARY, false, ran.runId],
+      journal: ['intake#1', 'spec#1'],
+    });
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('sail run --from-run --stage spec --continue runs the seeded run to its end and exits 0', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec', '--continue']);
+    expect([ran.code, ran.stderr, ran.runId === '' ? undefined : readStatus(ran.dir)]).toEqual([
+      EXIT_OK,
+      '',
+      { status: 'completed' },
+    ]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  .each<[string, (runId: string) => string[], (dir: string) => void, (runId: string) => string]>([
+  ['neither --from-run nor --stage', () => [], () => {}, () => USAGE],
+  ['no --stage', (runId) => ['--from-run', runId], () => {}, () => USAGE],
+  ['no --from-run', () => ['--stage', 'spec'], () => {}, () => USAGE],
+  [
+    'a run that does not exist',
+    () => ['--from-run', 'FAKE-1-NOPE', '--stage', 'spec'],
+    () => {},
+    () => "sail run: no run 'FAKE-1-NOPE' in .sail-runs\n",
+  ],
+  [
+    'a stage the workflow does not have',
+    (runId) => ['--from-run', runId, '--stage', 'nope'],
+    () => {},
+    () => `sail run: --stage names 'nope', which is no stage of workflow 'ticket-to-pr': its stages are ${STAGES}\n`,
+  ],
+  [
+    'a stage the source never ran',
+    (runId) => ['--from-run', runId, '--stage', 'describe'],
+    (dir) => cutJournal(dir, 2),
+    (runId) => `sail run: run ${runId} never ran 'describe': sail resume ${runId} continues it\n`,
+  ],
+])(
+  'sail run with %s is refused with exit 3, and starts no run',
+  async (_, args, prepare, refusal) => {
+    await withTempRepo(async (repo) => {
+      const from = await source.copyInto(repo.dir);
+      prepare(from.dir);
+      const ran = await sailRun(repo, from.runId, args(from.runId));
+      expect([ran.code, ran.stdout, ran.stderr, runIds(repo.dir)]).toEqual([
+        EXIT_REFUSED,
+        '',
+        refusal(from.runId),
+        [from.runId],
+      ]);
+    });
+  },
+  60_000,
+);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('sail run on a workflow with a type error prints it where it is, then is refused with exit 3, and starts no run', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    edit(
+      join(repo.dir, '.sail'),
+      WORKFLOW,
+      "import { workflow } from 'sail';",
+      "import { workflow } from 'sail';\nconst bad: number = 'x';\nexport const unused = bad;",
+    );
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec']);
+    const [diagnostic, refusal, ...rest] = ran.stderr.split('\n');
+    expect([ran.code, ran.stdout, refusal, rest, runIds(repo.dir)]).toEqual([
+      EXIT_REFUSED,
+      '',
+      'sail run: 1 type error in .sail/workflows/ticket-to-pr/workflow.ts',
+      [''],
+      [from.runId],
+    ]);
+    expect(diagnostic).toMatch(/^\.sail\/workflows\/ticket-to-pr\/workflow\.ts:\d+:\d+ {2}TS2322 {2}/);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('Ctrl-C before the seeded run opens is a refusal that starts no run', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    // Interrupted as soon as the command listens: before the run is opened.
+    const onInterrupt: CaptureOptions['onInterrupt'] = (handler) => {
+      handler();
+      return () => {};
+    };
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec'], { onInterrupt });
+    expect([ran.code, ran.stderr, runIds(repo.dir)]).toEqual([
+      EXIT_REFUSED,
+      'sail run: stopped before the run was opened\n',
+      [from.runId],
+    ]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('Ctrl-C during the spec session suspends the seeded run with interrupted, and says how to resume it', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    answerSpec(repo.dir, (answer) => ({ ...answer, delayMs: 30_000 }));
+    const interrupts = fakeInterrupts();
+    const running = sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec'], interrupts);
+    let settled = false;
+    void running.then(() => {
+      settled = true;
+    });
+    const deadline = performance.now() + 30_000;
+    while (!settled && performance.now() < deadline) {
+      const [runId] = runIds(repo.dir).filter((id) => id !== from.runId);
+      const dir = join(repo.dir, '.sail-runs', runId ?? '');
+      if (runId !== undefined && existsSync(join(dir, 'events.ndjson'))) {
+        if (readEvents(dir).some((event) => event.type === 'harness:session_start')) break;
+      }
+      await Bun.sleep(20);
+    }
+    interrupts.interrupt();
+    const ran = await running;
+    expect([ran.code, ran.stdout.split('\n').at(-2), ran.runId === '' ? undefined : readStatus(ran.dir)]).toEqual([
+      EXIT_SUSPENDED,
+      `resume it with: sail resume ${ran.runId}`,
+      { status: 'suspended', stopReason: 'interrupted' },
+    ]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('the usage lists sail run --from-run and what --continue does, and still lists sail <ticket> first', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
+  expect(commands[0]).toBe('  sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]');
+  expect(stdout).toMatch(
+    /^ {2}sail run --from-run <run> --stage <stage> \[--continue\] {2,}Rerun one stage on another run's earlier calls: a seeded run$/m,
+  );
+  expect(stdout).toMatch(
+    /^A seeded run:\n {2}--continue {2,}Runs the rest of the workflow after the stage, not just the stage$/m,
+  );
+});

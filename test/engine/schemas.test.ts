@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -1145,6 +1145,61 @@ test('run: claim holds whether the claim took and the state the provider reporte
 test('run: a header with no claim is refused, naming claim', () => {
   expect(validateDocument('sail.run.v1', omit(run, 'claim'))).toEqual([
     { schema: 'sail.run.v1', path: '/claim', message: 'is required' },
+  ]);
+});
+
+// A seeded run (D5): its header names the run it reused calls from, and records no claim.
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('run: a seeded header names its fromRun and has no claim; one with a claim beside fromRun, or an empty fromRun, is refused', () => {
+  const seeded = { ...omit(run, 'claim'), fromRun: RUN_ID };
+  expect(validateDocument('sail.run.v1', seeded)).toEqual([]);
+  expect(validateDocument('sail.run.v1', { ...run, fromRun: RUN_ID })).toEqual([
+    { schema: 'sail.run.v1', path: '/claim', message: 'is not allowed' },
+  ]);
+  expect(paths('sail.run.v1', { ...seeded, fromRun: '' })).toEqual(['/fromRun']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('event: run:start and journal:append take a fromRun naming a run, and refuse an empty one', () => {
+  const append = { ...envelope, type: 'journal:append', key: 'intake#1', line: 1, outcome: 'passed' };
+  expect([
+    paths('sail.event.v1', { ...event, fromRun: RUN_ID }),
+    paths('sail.event.v1', { ...append, fromRun: RUN_ID }),
+    paths('sail.event.v1', { ...event, fromRun: '' }),
+    paths('sail.event.v1', { ...append, fromRun: '' }),
+  ]).toEqual([[], [], ['/fromRun'], ['/fromRun']]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a seeded run directory may hold results that name the run it came from, but only as the first lines of its journal', () => {
+  const dir = tempDir({});
+  const golden = join(root, 'test', 'fixtures', 'runs', RUN_ID);
+  cpSync(golden, dir, { recursive: true });
+  const seededId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P';
+  const header = JSON.parse(readFileSync(join(golden, 'run.json'), 'utf8'));
+  chmodSync(join(dir, 'run.json'), 0o644);
+  writeFileSync(join(dir, 'run.json'), json({ ...omit(header, 'claim'), runId: seededId, fromRun: RUN_ID }));
+  const before = validateRunDir(dir).issues.map(formatIssue);
+  const implement = join(dir, '02-implement', 'call-1', 'result.json');
+  writeFileSync(implement, json({ ...JSON.parse(readFileSync(implement, 'utf8')), runId: seededId }));
+  const lines = validateRunDir(dir).issues.map((issue) => [issue.line, issue.message.endsWith(`not "${seededId}")`)]);
+  expect([before, lines]).toEqual([
+    [],
+    [
+      [4, true],
+      [5, true],
+      [6, true],
+      [7, true],
+      [8, true],
+      [9, true],
+    ],
   ]);
 });
 
