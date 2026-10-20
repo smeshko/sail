@@ -29,10 +29,7 @@ test("EVENT_TYPES holds a run's 50 types, error:consumer and prompt:rendered inc
   expect(EVENT_TYPES.indexOf('prompt:rendered')).toBe(EVENT_TYPES.indexOf('input:materialised') + 1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("sail.event.v1's type enum is EVENT_TYPES, then the 12 QUEUE_EVENT_TYPES from error:consumer on, queue:dropped after queue:skipped_leased, and run:adopted, run:resumed and queue:requeued last", async () => {
+test("sail.event.v1's type enum is EVENT_TYPES, then the 12 QUEUE_EVENT_TYPES from error:consumer on, queue:dropped after queue:skipped_leased, and run:adopted, run:resumed and queue:requeued last", async () => {
   const schema = await Bun.file(join(import.meta.dir, '..', '..', 'schemas', 'sail.event.v1.json')).json();
   const types = typeEnum(schema) as string[];
   expect(types).toEqual([...EVENT_TYPES, ...QUEUE_EVENT_TYPES]);

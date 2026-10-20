@@ -1392,10 +1392,7 @@ const RECONCILED: NewQueueEvent[] = [
   { type: 'queue:requeued', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-2', reason: 'requeued by hand' },
 ];
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('run:adopted, run:resumed and queue:requeued validate closed in a queue stream, without runId, and each refuses an extra field and a runId', () => {
+test('run:adopted, run:resumed and queue:requeued validate closed in a queue stream, without runId, and each refuses an extra field and a runId', () => {
   expect({
     valid: RECONCILED.map((sample) => paths('sail.event.v1', { ...queueEnvelope, ...sample })),
     surprise: RECONCILED.map((sample) => broken(sample, { surprise: 1 })),
@@ -1407,10 +1404,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a run:resumed from suspended needs interrupted or unwatched, one from running takes no stop reason, a run:adopted needs its run and pid, and a requeue its reason', () => {
+test('a run:resumed from suspended needs interrupted or unwatched, one from running takes no stop reason, a run:adopted needs its run and pid, and a requeue its reason', () => {
   const [adopted, running, suspended, requeued] = RECONCILED as [NewQueueEvent, ...NewQueueEvent[]];
   expect({
     suspendedNoReason: broken(suspended as NewQueueEvent, { from: { status: 'suspended' } }),

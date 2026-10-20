@@ -559,10 +559,7 @@ const eventsAfter = (runs: string, skip: number) =>
     .slice(skip)
     .map(({ seq, ts, ...event }) => event);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('adopted and resumed record the pid a dispatched run is alive as, with run:adopted and run:resumed naming the run and where it was, and an item not dispatched throws', () => {
+test('adopted and resumed record the pid a dispatched run is alive as, with run:adopted and run:resumed naming the run and where it was, and an item not dispatched throws', () => {
   const runs = runsDir();
   const store = open(runs);
   store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
@@ -601,10 +598,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('parked parks an item on its first attempt, with queue:parked and the reason, and it is never due again', () => {
+test('parked parks an item on its first attempt, with queue:parked and the reason, and it is never due again', () => {
   const runs = runsDir();
   const store = open(runs);
   store.add([ticket('FAKE-1')]);
@@ -642,10 +636,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('requeue puts a parked or a failed item back queued with no attempts and nothing of its last run, with queue:requeued, and a queued, dispatched or done item throws naming its state and changes nothing', () => {
+test('requeue puts a parked or a failed item back queued with no attempts and nothing of its last run, with queue:requeued, and a queued, dispatched or done item throws naming its state and changes nothing', () => {
   const runs = runsDir();
   const store = open(runs);
   store.add(['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4', 'FAKE-5'].map((key) => ticket(key)));
@@ -711,10 +702,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a forced add marks its items forced, and a queue.json written before the field existed still reads', () => {
+test('a forced add marks its items forced, and a queue.json written before the field existed still reads', () => {
   const runs = runsDir();
   const store = open(runs);
   store.add([ticket('FAKE-1')], { forced: true });

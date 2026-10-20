@@ -9,10 +9,14 @@
 // - Items are known by their dedup key. A key whose item is done may be queued again: the ticket system is the memory
 //   of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
-//   requeues or drops it (13.3).
+//   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
+//   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
+// - A forced item, added with `--force`, says so in `forced`: its dispatch skips the re-check of designation and state.
 // - A dispatch is two steps: `dispatched()` counts the attempt and names the run before any process exists, and
 //   `spawned()` adds the process's pid once it does, emitting `queue:dispatched`. An item a re-check finds ineligible
 //   is dropped: it leaves `items`, and a later poll may queue it again.
+// - A dispatched item whose run the watcher found alive is `adopted()`, and one whose run it resumed is `resumed()`: each
+//   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
 //   hook that throws is ignored, so the terminal never breaks the queue.
@@ -254,12 +258,20 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
     if (item === undefined) throw new Error(`${workflow}'s queue has no item ${key}`);
     return item;
   };
+  /** Records `pid` on the dispatched item `key`, and gives the item. One not dispatched throws. */
+  const dispatchedWith = (key: string, pid: number): QueueItem =>
+    change((next) => {
+      const item = find(next, key);
+      if (item.state !== 'dispatched') throw new Error(`${workflow}'s item ${key} is ${item.state}, not dispatched`);
+      item.pid = pid;
+      return { ...item };
+    });
   const isDue = (item: QueueItem, at: number) =>
     item.state === 'queued' || (item.state === 'failed' && Date.parse(item.retryAt ?? '') <= at);
 
   return {
     snapshot: () => structuredClone(queue),
-    add(tickets) {
+    add(tickets, options = {}) {
       const added = change((next) => {
         const queued: QueueItem[] = [];
         for (const ticket of tickets) {
@@ -275,6 +287,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
             state: 'queued',
             attempts: 0,
             addedAt: now().toISOString(),
+            ...(options.forced === true ? { forced: true as const } : {}),
           };
           next.items.push(item);
           queued.push(item);
@@ -292,10 +305,6 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       );
       return added.length;
     },
-    adopted() {},
-    resumed() {},
-    parked() {},
-    requeue() {},
     due() {
       const at = now().getTime();
       return structuredClone(queue.items.filter((item) => isDue(item, at))).sort(
@@ -328,6 +337,37 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         attempt: item.attempts,
         pid,
       });
+    },
+    adopted(key, pid) {
+      const item = dispatchedWith(key, pid);
+      stream.emit({ type: 'run:adopted', workflow, dedupKey: key, run: item.runId ?? '', pid });
+    },
+    resumed(key, pid, from) {
+      const item = dispatchedWith(key, pid);
+      stream.emit({ type: 'run:resumed', workflow, dedupKey: key, run: item.runId ?? '', pid, from });
+    },
+    parked(key, reason) {
+      const item = change((next) => {
+        const parking = find(next, key);
+        parking.state = 'parked';
+        parking.reason = reason;
+        parking.finishedAt = now().toISOString();
+        delete parking.retryAt;
+        return { ...parking };
+      });
+      stream.emit({ type: 'queue:parked', workflow, dedupKey: key, attempts: item.attempts, reason });
+    },
+    requeue(key, reason) {
+      change((next) => {
+        const item = find(next, key);
+        if (item.state !== 'parked' && item.state !== 'failed') {
+          throw new Error(`${workflow}'s item ${key} is ${item.state}: only a parked or failed item is requeued`);
+        }
+        item.state = 'queued';
+        item.attempts = 0;
+        for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid'] as const) delete item[field];
+      });
+      stream.emit({ type: 'queue:requeued', workflow, dedupKey: key, reason });
     },
     drop(key, reason) {
       change((next) => {

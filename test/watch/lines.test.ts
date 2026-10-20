@@ -90,10 +90,7 @@ test.each(SAMPLES.map(([event, text]) => [event.type, event, text] as const))(
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('run:adopted, run:resumed from running and from suspended, and queue:requeued each print their line', () => {
+test('run:adopted, run:resumed from running and from suspended, and queue:requeued each print their line', () => {
   const events: QueueEvent[] = [
     { ...envelope, type: 'run:adopted', dedupKey: 'ticket:FAKE-1', run: RUN, pid: 4243 },
     { ...envelope, type: 'run:resumed', dedupKey: 'ticket:FAKE-1', run: RUN, pid: 4244, from: { status: 'running' } },

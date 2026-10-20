@@ -58,9 +58,14 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
       return { text: `error: ${event.adapter}${code}: ${event.message}; ${next}`, alert: true };
     }
     case 'run:adopted':
-    case 'run:resumed':
+      return { text: `${keyOf(event.dedupKey)} adopted: run ${event.run}, pid ${event.pid}` };
+    case 'run:resumed': {
+      const { from } = event;
+      const was = from.status === 'suspended' ? `suspended ${from.stopReason}` : from.status;
+      return { text: `${keyOf(event.dedupKey)} resumed: run ${event.run} (was ${was}), pid ${event.pid}` };
+    }
     case 'queue:requeued':
-      return undefined;
+      return { text: `${keyOf(event.dedupKey)} requeued: ${event.reason}` };
     default: {
       const unknown: never = event;
       return unknown;
