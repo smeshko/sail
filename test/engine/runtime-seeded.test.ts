@@ -35,10 +35,7 @@ const endOf = (end: RunEnd | { refused: string }) =>
 /** The run's directory once a test has asserted how it ended. */
 const dirOf = (end: RunEnd | { refused: string }) => ('refused' in end ? '' : end.dir);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('seeding spec runs spec#1 alone after the reused intake, reports the intake as a reused call, and stops suspended with until', async () => {
+test('seeding spec runs spec#1 alone after the reused intake, reports the intake as a reused call, and stops suspended with until', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     const end = await seeded(repo, from.runId, 'spec');
@@ -81,10 +78,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('with continue, a run seeded for spec runs to its end with the calls of the source, and opens its pull request from its own branch', async () => {
+test('with continue, a run seeded for spec runs to its end with the calls of the source, and opens its pull request from its own branch', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     const end = await seeded(repo, from.runId, 'spec', { continue: true });
@@ -102,10 +96,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a resume takes a run seeded for spec to its end, in the workspace it was seeded with', async () => {
+test('a resume takes a run seeded for spec to its end, in the workspace it was seeded with', async () => {
   await withTempRepo(async (first) => {
     const from = await source.copyInto(first.dir);
     const stopped = await seeded(first, from.runId, 'spec');
@@ -126,10 +117,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a workflow edited so the reused calls no longer fit fails the seeded run with determinism_violation, and releases its lease and workspace', async () => {
+test('a workflow edited so the reused calls no longer fit fails the seeded run with determinism_violation, and releases its lease and workspace', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     edit(

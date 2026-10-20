@@ -29,6 +29,11 @@
 // Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
 // ticket is claimed, refuses the start instead: nothing was written, so there is no run to suspend.
 //
+// A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
+// and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
+// reported once, right after what opening the run did, as a `journal:append` with `fromRun`. Unless `--continue`, it
+// stops after the stage it was seeded for, as `until` stops a run.
+//
 // `until` names a stage to stop after. Once that stage's first call is journaled the next replay still runs: if it
 // ends the run, the run ends that way, and if it asks for another call the run is suspended with `until` instead, where
 // an abort seen before a call suspends it. A resume takes none and runs to the end.
@@ -72,7 +77,7 @@ import {
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
-import type { SeededRunOptions } from './seed-run';
+import { openSeededRun, type SeededRunOptions } from './seed-run';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
 interface EventOptions {
@@ -323,12 +328,19 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         roster: { intake: header.intake, stages: header.stages },
         adapters: header.adapters,
         ...(header.budget === undefined ? {} : { budget: header.budget }),
+        ...(header.fromRun === undefined ? {} : { fromRun: header.fromRun }),
       });
     }
     // What opening the run did, before this stream existed to hear it: the lease and the workspace, then what the claim
     // did to the ticket. No call was running, so no key.
     for (const event of opened.started) bus.emit(event);
     for (const event of opened.claimed) bus.emit(event);
+    // A seeded run's reused calls, each once: they were journaled as the run opened, with no stream to hear them.
+    if (opened.seeded !== undefined) {
+      const { fromRun, entries } = opened.seeded;
+      for (const { key, seq, outcome } of entries)
+        bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun });
+    }
     // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
     let [intake] = readJournal(dir).entries;
     if (intake === undefined) {
@@ -437,8 +449,10 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
  * Opens a run seeded with another run's calls before a stage and runs it, to the end of that stage's first call or,
  * with `continue`, to its end. A refusal to open passes through, and nothing is written.
  */
-export async function runSeededWorkflow(_options: SeededWorkflowOptions): Promise<RunEnd | { refused: string }> {
-  return { refused: 'TDD stub (TASK-006): runSeededWorkflow() is not written yet' };
+export async function runSeededWorkflow(options: SeededWorkflowOptions): Promise<RunEnd | { refused: string }> {
+  const opened = await openSeededRun(options);
+  if ('refused' in opened) return opened;
+  return drive(opened, options, { start: true });
 }
 
 /** Reopens a suspended or crashed run and runs it to its end from its journal. A refusal passes through. */
