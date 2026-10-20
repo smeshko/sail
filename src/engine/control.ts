@@ -10,8 +10,8 @@
 // and a request written after the take is a new file the next boundary sees. A file holding anything else is removed
 // and ignored: a request that can't be read stops nothing.
 //
-// The watcher takes back an `unwatched` a run never reached when it adopts the run while its workflow is watched
-// again (`cancelUnwatch()`). It takes only a file that reads `unwatched`, so a stop stays in place.
+// The watcher takes back an `unwatched` a run never reached when it adopts or resumes the run while its workflow is
+// watched again (`cancelUnwatch()`). It takes only a file that reads `unwatched`, so a stop stays in place.
 import { linkSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { replaceFile } from './durable';

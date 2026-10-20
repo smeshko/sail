@@ -6,10 +6,10 @@
 //   in flight, and adopted with `run:adopted` on this dispatcher's first tick, after any `unwatched` it never reached is
 //   taken back; `completed` is done; `failed stopped` parks the item at once; any other `failed` is a failed attempt,
 //   retried later or parked; a dead `running`, or a `suspended interrupted` or `unwatched` run, is resumed once as a
-//   detached `sail resume`, with `run:resumed`, and counts while its resume lives, unless a live process holds its
-//   lease, which is adopted instead; a resume that leaves the run unended parks the item with why; no `run.json` is a
-//   start that was refused, whose reason is the last line of its dispatch log. Anything else, such as `suspended
-//   until`, waits for a person, holding no slot.
+//   detached `sail resume`, with `run:resumed`, after the same take-back, and counts while its resume lives, unless a
+//   live process holds its lease, which is adopted instead; a resume that leaves the run unended parks the item with
+//   why; no `run.json` is a start that was refused, whose reason is the last line of its dispatch log. Anything else,
+//   such as `suspended until`, waits for a person, holding no slot.
 // - **A due item**, in queue order: first the lease on its branch, named from its queued title, then the re-check of
 //   its ticket through the TicketSource, then the lease on the branch its fresh title names when that differs. The
 //   lease comes first because a leased item is skipped on every tick for as long as the lease lasts, and checking it
@@ -178,6 +178,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
           park(item, runId, answer.reason);
           break;
         case 'resume':
+          // Watched again, as for an adoption: an `unwatched` the run never took would suspend its resume at once.
+          cancelUnwatch(runDir);
           resume(item, runId, answer.from);
           break;
         case 'wait':
