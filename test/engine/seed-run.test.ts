@@ -2,7 +2,7 @@
 // source is `sail FAKE-1` run to its end once in a repository of its own, and each case seeds from a copy of it: a
 // process opens one run per `.sail/`.
 import { afterAll, expect, test } from 'bun:test';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type JournalEntry, readJournal } from '../../src/engine/journal';
 import type { OpenedRun } from '../../src/engine/open-run';
@@ -208,3 +208,101 @@ test('two seeded runs from one source both open, each on a branch of its own, an
     });
   });
 }, 60_000);
+
+// Review round 1: a source the seed can't trust is refused before anything is written, never copied or thrown on.
+
+/** Rewrites the journal line of `key` in the run in `dir`. */
+function rewriteLine(dir: string, key: string, change: (line: Record<string, unknown>) => Record<string, unknown>) {
+  const path = join(dir, 'journal.ndjson');
+  const lines = readFileSync(path, 'utf8').split('\n');
+  const at = lines.findIndex((text) => text !== '' && JSON.parse(text).key === key);
+  lines[at] = JSON.stringify(change(JSON.parse(lines[at] as string)));
+  writeFileSync(path, lines.join('\n'));
+}
+
+/** Replaces `file` in the run in `dir` with a symlink to a file outside the run. */
+function linkOut(dir: string, file: string): void {
+  const outside = join(dir, '..', '..', 'outside.md');
+  writeFileSync(outside, 'not from the source run\n');
+  rmSync(join(dir, file));
+  symlinkSync(outside, join(dir, file));
+}
+
+test.each<[string, (dir: string) => void, Partial<SeededRunOptions>, (runId: string) => string]>([
+  [
+    'a reused line whose result lies outside its call directory',
+    (dir) => rewriteLine(dir, 'intake#1', (line) => ({ ...line, resultPath: '00-intake/../result.json' })),
+    {},
+    (runId) => `run ${runId}'s journal line 1 points at '00-intake/../result.json', outside a call directory`,
+  ],
+  [
+    'a reused line whose file lies outside its call directory',
+    (dir) =>
+      rewriteLine(dir, 'intake#1', (line) => ({
+        ...line,
+        files: { ...(line.files as object), 'brief.md': '01-spec/call-1/spec.md' },
+      })),
+    {},
+    (runId) => `run ${runId}'s journal line 1 points at '01-spec/call-1/spec.md', outside a call directory`,
+  ],
+  [
+    'a reused file that is a symlink',
+    (dir) => linkOut(dir, '00-intake/call-1/brief.md'),
+    {},
+    (runId) => `run ${runId}'s 00-intake/call-1/brief.md is not a regular file: a seed copies only what the run wrote`,
+  ],
+  [
+    'a source run directory that is a symlink',
+    (dir) => {
+      const moved = join(dir, '..', '..', 'moved-run');
+      renameSync(dir, moved);
+      symlinkSync(moved, dir);
+    },
+    {},
+    (runId) => `run ${runId} is a symlink in .sail-runs, not a run directory: it can't seed a run`,
+  ],
+  [
+    'a source whose run.json is broken',
+    (dir) => {
+      chmodSync(join(dir, 'run.json'), 0o644);
+      writeFileSync(join(dir, 'run.json'), '{');
+    },
+    {},
+    (runId) => `run ${runId}'s run.json can't be read: `,
+  ],
+  [
+    'a source with no journal',
+    (dir) => rmSync(join(dir, 'journal.ndjson')),
+    {},
+    (runId) => `run ${runId}'s journal can't be read: `,
+  ],
+  [
+    'a source whose journal has a broken line',
+    (dir) => {
+      const path = join(dir, 'journal.ndjson');
+      const [first = '', ...rest] = readFileSync(path, 'utf8').split('\n');
+      writeFileSync(path, ['{"seq":', first, ...rest].join('\n'));
+    },
+    {},
+    (runId) => `run ${runId}'s journal can't be read: `,
+  ],
+])(
+  'seeding is refused for %s, and writes nothing',
+  async (_, prepare, options, refused) => {
+    await withTempRepo(async (repo) => {
+      const from = await source.copyInto(repo.dir);
+      prepare(from.dir);
+      const worktrees = repo.git('worktree', 'list', '--porcelain');
+      const result = await seed(repo, { fromRun: from.runId, ...options });
+      // A refusal that passes on a reader's own words is matched up to them: they differ between Bun versions.
+      const message = 'refused' in result ? result.refused : 'opened';
+      const expected = refused(from.runId);
+      expect([
+        message.startsWith(expected) ? expected : message,
+        runIds(repo.dir),
+        repo.git('worktree', 'list', '--porcelain'),
+      ]).toEqual([expected, [from.runId], worktrees]);
+    });
+  },
+  60_000,
+);

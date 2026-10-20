@@ -3,7 +3,7 @@
 // its own: a process opens one run per `.sail/`. The fake harness answers by call key, not by prompt, so a changed
 // answer in `.sail/fake/harness.json` stands in for the different output an edited prompt would get (DECISIONS D10).
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
@@ -213,3 +213,20 @@ test('the usage lists sail run --from-run and what --continue does, and still li
     /^A seeded run:\n {2}--continue {2,}Runs the rest of the workflow after the stage, not just the stage$/m,
   );
 });
+
+// Review round 1: a source whose run.json can't be read is refused in the engine's words, not thrown on.
+test('sail run from a source whose run.json is broken is refused with exit 3, and starts no run', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    chmodSync(join(from.dir, 'run.json'), 0o644);
+    writeFileSync(join(from.dir, 'run.json'), '{');
+    const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec']);
+    const refusal = `sail run: run ${from.runId}'s run.json can't be read: `;
+    expect([ran.code, ran.stdout, ran.stderr.startsWith(refusal) ? refusal : ran.stderr, runIds(repo.dir)]).toEqual([
+      EXIT_REFUSED,
+      '',
+      refusal,
+      [from.runId],
+    ]);
+  });
+}, 60_000);
