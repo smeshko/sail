@@ -72,6 +72,7 @@ import {
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
+import type { SeededRunOptions } from './seed-run';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
 interface EventOptions {
@@ -98,6 +99,13 @@ export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
    * Stops the running call when it aborts, and suspends the run. Aborted before the ticket is claimed, it refuses the
    * start.
    */
+  signal?: AbortSignal;
+  /** Called after each call is journaled. */
+  onCall?(entry: JournalEntry): void;
+}
+
+export interface SeededWorkflowOptions extends SeededRunOptions, EventOptions {
+  /** Stops the running call when it aborts, and suspends the run. Aborted before the run opens, it refuses it. */
   signal?: AbortSignal;
   /** Called after each call is journaled. */
   onCall?(entry: JournalEntry): void;
@@ -423,6 +431,14 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   } finally {
     detach();
   }
+}
+
+/**
+ * Opens a run seeded with another run's calls before a stage and runs it, to the end of that stage's first call or,
+ * with `continue`, to its end. A refusal to open passes through, and nothing is written.
+ */
+export async function runSeededWorkflow(_options: SeededWorkflowOptions): Promise<RunEnd | { refused: string }> {
+  return { refused: 'TDD stub (TASK-006): runSeededWorkflow() is not written yet' };
 }
 
 /** Reopens a suspended or crashed run and runs it to its end from its journal. A refusal passes through. */

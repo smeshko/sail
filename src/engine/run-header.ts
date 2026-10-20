@@ -32,7 +32,10 @@ export interface RunHeader {
   schema: 'sail.run.v1';
   runId: string;
   source: Source;
-  claim: ClaimRecord;
+  /** The run a seeded run reused calls from. */
+  fromRun?: string;
+  /** What the start did to the ticket. A seeded run makes no claim, and has none. */
+  claim?: ClaimRecord;
   workflow: { name: string; version: number; origin: string; sha256: string };
   sail: { version: string; runtime: string };
   adapters: Record<Port, AdapterEntry>;
@@ -87,7 +90,10 @@ export function workflowHash(sailDir: string, loaded: LoadedWorkflow): string {
 export interface HeaderFields {
   runId: string;
   source: Source;
-  claim: ClaimRecord;
+  /** Left out for a seeded run, which claims nothing. */
+  claim?: ClaimRecord;
+  /** The run a seeded run reused calls from. */
+  fromRun?: string;
   sailDir: string;
   loaded: LoadedWorkflow;
   config: ProjectConfig;
@@ -119,7 +125,8 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
     schema: 'sail.run.v1',
     runId,
     source: { ...source, forced: [...source.forced] },
-    claim: { claimed: claim.claimed, state: { ...claim.state } },
+    // TDD stub (TASK-004): fromRun is not written yet.
+    ...(claim === undefined ? {} : { claim: { claimed: claim.claimed, state: { ...claim.state } } }),
     workflow: {
       name: loaded.name,
       version: loaded.workflow.version ?? 1,

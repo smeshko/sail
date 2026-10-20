@@ -53,7 +53,7 @@ import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
-import { createJournal } from './journal';
+import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { modelProblems } from './roster';
 import { createRunDir, type RunStatus, readStatus, removeRunDir, runsDir, type Source, writeStatus } from './run-dir';
@@ -107,6 +107,8 @@ export interface OpenedRun {
   until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
+  /** A seeded run's reused calls, as its journal holds them, and the run they were taken from. */
+  seeded?: { fromRun: string; entries: readonly JournalEntry[] };
 }
 
 /** Where a run works, and what holds it there. */

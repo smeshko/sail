@@ -46,6 +46,8 @@ export interface CallEntry {
   summary?: string;
   resultPath?: string;
   steps?: StepEntry[];
+  /** The run a reused call was taken from. TDD stub (TASK-004): never set yet. */
+  fromRun?: string;
 }
 
 /** Tokens and dollars. */
