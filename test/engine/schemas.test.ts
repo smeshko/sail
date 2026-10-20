@@ -1169,7 +1169,11 @@ test('event: run:start and journal:append take a fromRun naming a run, and refus
   ]).toEqual([[], [], ['/fromRun'], ['/fromRun']]);
 });
 
-test('a seeded run directory may hold results that name the run it came from, but only as the first lines of its journal', () => {
+/**
+ * The golden run as a seeded run would hold it: a header with `fromRun` and no claim, the journal's first `reused` lines
+ * reported as reused calls (`journal:append` with `fromRun`), and every other result naming the seeded run.
+ */
+function seededRunDir(reused: number, fromRun = RUN_ID): { dir: string; seededId: string } {
   const dir = tempDir({});
   const golden = join(root, 'test', 'fixtures', 'runs', RUN_ID);
   cpSync(golden, dir, { recursive: true });
@@ -1177,20 +1181,81 @@ test('a seeded run directory may hold results that name the run it came from, bu
   const header = JSON.parse(readFileSync(join(golden, 'run.json'), 'utf8'));
   chmodSync(join(dir, 'run.json'), 0o644);
   writeFileSync(join(dir, 'run.json'), json({ ...omit(header, 'claim'), runId: seededId, fromRun: RUN_ID }));
-  const before = validateRunDir(dir).issues.map(formatIssue);
-  const implement = join(dir, '02-implement', 'call-1', 'result.json');
-  writeFileSync(implement, json({ ...JSON.parse(readFileSync(implement, 'utf8')), runId: seededId }));
-  const lines = validateRunDir(dir).issues.map((issue) => [issue.line, issue.message.endsWith(`not "${seededId}")`)]);
-  expect([before, lines]).toEqual([
+  const lines = readFileSync(join(dir, 'events.ndjson'), 'utf8')
+    .split('\n')
+    .filter((text) => text !== '');
+  const events = lines.map((text) => JSON.parse(text));
+  writeFileSync(
+    join(dir, 'events.ndjson'),
+    ndjson(...events.map((e) => (e.type === 'journal:append' && e.line <= reused ? { ...e, fromRun } : e))),
+  );
+  const journal = readFileSync(join(dir, 'journal.ndjson'), 'utf8')
+    .split('\n')
+    .filter((text) => text !== '');
+  for (const entry of journal.map((text) => JSON.parse(text)).slice(reused)) setRunId(dir, entry.resultPath, seededId);
+  return { dir, seededId };
+}
+
+function setRunId(dir: string, resultPath: string, runId: string): void {
+  const path = join(dir, resultPath);
+  writeFileSync(path, json({ ...JSON.parse(readFileSync(path, 'utf8')), runId }));
+}
+
+/** Each issue as its file and line, and whether it says the result names another run than `seededId`. */
+const issuesOf = (dir: string, seededId: string) =>
+  validateRunDir(dir).issues.map((issue) => [
+    issue.file,
+    issue.line,
+    issue.message.endsWith(`not "${seededId}")`) ? 'names another run' : issue.message,
+  ]);
+
+test('a seeded run directory may hold results that name the run it came from, only on the journal lines its events report as reused', () => {
+  const valid = seededRunDir(3);
+  // A fresh line whose result names another run is no reused call (review R1-2).
+  const fresh = seededRunDir(3);
+  setRunId(fresh.dir, '03-tests/call-1/result.json', RUN_ID);
+  // Reused lines its events don't report: here, all of them.
+  const unreported = seededRunDir(0);
+  for (const resultPath of ['00-intake/call-1/result.json', '01-spec/call-1/result.json'])
+    setRunId(unreported.dir, resultPath, RUN_ID);
+  expect([
+    issuesOf(valid.dir, valid.seededId),
+    issuesOf(fresh.dir, fresh.seededId),
+    issuesOf(unreported.dir, unreported.seededId),
+  ]).toEqual([
     [],
+    [['journal.ndjson', 4, 'names another run']],
     [
-      [4, true],
-      [5, true],
-      [6, true],
-      [7, true],
-      [8, true],
-      [9, true],
+      ['journal.ndjson', 1, 'names another run'],
+      ['journal.ndjson', 2, 'names another run'],
     ],
+  ]);
+});
+
+test('a reused call reported for another run than the header names, or after a call of the run, is an issue of the events file', () => {
+  const other = seededRunDir(2, 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3Q');
+  const gap = seededRunDir(3);
+  const path = join(gap.dir, 'events.ndjson');
+  const events = readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((text) => text !== '')
+    .map((text) => JSON.parse(text));
+  // Line 2 reported as this run's own call, so the reused line 3 comes after it.
+  writeFileSync(
+    path,
+    ndjson(...events.map((e) => (e.type === 'journal:append' && e.line === 2 ? omit(e, 'fromRun') : e))),
+  );
+  setRunId(gap.dir, '01-spec/call-1/result.json', gap.seededId);
+  const messages = (dir: string) =>
+    validateRunDir(dir)
+      .issues.filter((issue) => issue.file === 'events.ndjson')
+      .map((issue) => issue.message);
+  expect([messages(other.dir), messages(gap.dir)]).toEqual([
+    [
+      `reports a reused call from run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3Q, but run.json's fromRun is ${RUN_ID}`,
+      `reports a reused call from run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3Q, but run.json's fromRun is ${RUN_ID}`,
+    ],
+    ["reports journal line 3 as a reused call after a call of the run: reused calls are the journal's first lines"],
   ]);
 });
 
