@@ -2,7 +2,8 @@
 // run from. It reuses the calls the source run made before the stage, runs the stage, and stops after its first call,
 // suspended, so `sail resume` takes it on. With `--continue` it runs the rest of the workflow too. It takes `sail
 // resume`'s steps: the source's workflow is type-checked first, and every refusal is one `sail run: <message>` line with
-// exit 3, before anything is written. It asks nothing of the ticket and claims nothing.
+// exit 3, before anything is written, the machine registry included: the repository is registered once the run is
+// open. It asks nothing of the ticket and claims nothing.
 //
 // Ctrl-C or SIGTERM stops the running call and suspends the run, as during `sail <ticket>`. One seen before the run is
 // opened is a refusal: nothing was written.
@@ -58,7 +59,6 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
     if ('refused' in workflowFile) return refuse(workflowFile.refused);
     const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);
     if (typed !== undefined) return typed;
-    await registerRepository(io, COMMAND, project);
   }
 
   const terminal = terminalFor(io, project.sailDir, verbosity);
@@ -72,6 +72,8 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
       adapters: project.adapters,
       signal,
       consumers: [terminal],
+      // Registered once the run is open, so a refusal writes nothing, the registry included.
+      onOpened: () => registerRepository(io, COMMAND, project),
     }).finally(() => terminal.close()),
   );
   if ('refused' in end) return refuse(end.refused);

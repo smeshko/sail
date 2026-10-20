@@ -114,6 +114,8 @@ export interface SeededWorkflowOptions extends SeededRunOptions, EventOptions {
   signal?: AbortSignal;
   /** Called after each call is journaled. */
   onCall?(entry: JournalEntry): void;
+  /** Called once the run is opened, before it runs: what a refusal to open must not do waits for it. */
+  onOpened?(): Promise<void>;
 }
 
 export interface ResumeWorkflowOptions extends ReopenRunOptions, EventOptions {
@@ -452,6 +454,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
 export async function runSeededWorkflow(options: SeededWorkflowOptions): Promise<RunEnd | { refused: string }> {
   const opened = await openSeededRun(options);
   if ('refused' in opened) return opened;
+  await options.onOpened?.();
   return drive(opened, options, { start: true });
 }
 
