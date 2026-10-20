@@ -2,7 +2,7 @@
 // inbox's watch, unwatch and poll commands, its registry field and its stop. On the stub's file-backed fakes in a temp
 // repository, fake timers, a temporary registry, and a fake spawner whose runs claim their tickets as they start.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { readConfig } from '../../src/engine/config';
@@ -638,6 +638,34 @@ test('unwatching b while a run of b is still starting, with no run directory yet
         `09:00:02 b  error: run ${starting} is still starting and was not asked to suspend: sail stop ${starting} stops it\n`,
       ],
     });
+  });
+});
+
+test('unwatching b asks a run of b that a resume by hand keeps alive, its dispatched pid gone, to suspend (review R3-2)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b' }),
+    );
+    const watcher = await w.start(['a', 'b']);
+    await w.timers.advance(1000);
+    const { runId } = w.spawner.run('FAKE-2');
+    const dir = join(w.runs, runId);
+    await w.spawner.end('FAKE-2', { status: 'running' });
+    // `sail resume` by hand: this process holds the run's lease.
+    const { workspace } = w.adapters.ports;
+    const { url } = await workspace.repository();
+    const branch = branchFor('sail/', 'FAKE-2', 'Ticket FAKE-2');
+    writeFileSync(join(dir, 'run.json'), `${JSON.stringify({ branch, repository: { url } })}\n`);
+    expect((await workspace.lease(url, branch, { runId, runDir: dir, pid: process.pid })).leased).toBe(true);
+    dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
+    await w.timers.advance(1000);
+    await watcher.stop();
+    expect(existsSync(join(dir, 'CONTROL')) ? readFileSync(join(dir, 'CONTROL'), 'utf8') : 'none').toBe('unwatched\n');
   });
 });
 
