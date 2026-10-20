@@ -107,8 +107,8 @@ export interface OpenedRun {
   until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
-  /** A seeded run's reused calls, as its journal holds them, and the run they were taken from. */
-  seeded?: { fromRun: string; entries: readonly JournalEntry[] };
+  /** A seeded run's reused calls, as its journal holds them, the run they were taken from, and the stage it runs. */
+  seeded?: { fromRun: string; stage: string; entries: readonly JournalEntry[] };
 }
 
 /** Where a run works, and what holds it there. */

@@ -324,6 +324,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
   let reached = false;
+  /** A seeded run's source and stage, until its first replay has asked for a call of its own. */
+  let seededFor = opened.seeded;
 
   try {
     if (start) {
@@ -406,6 +408,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       });
       const end = await unlessAborted(replaying, signal);
       if (end === undefined) return await interrupted('stopped during the replay');
+      // A seeded run's first call of its own is the stage it was seeded for: an edited workflow that asks for another
+      // first, or ends, would run what nobody asked for.
+      if (seededFor !== undefined) {
+        const { fromRun, stage } = seededFor;
+        seededFor = undefined;
+        const expected = `${stage}#1`;
+        if (end.kind !== 'failed' && (end.kind !== 'call' || end.call.key !== expected)) {
+          const asked = end.kind === 'call' ? `asks for ${end.call.key}` : 'ends';
+          const message = `the workflow ${asked} after the calls reused from run ${fromRun}, not ${expected}: it changed since that run`;
+          return await failed('determinism_violation', message);
+        }
+      }
       if (end.kind === 'completed') return await finish({ runId, dir, status: 'completed', result: end.result });
       if (end.kind === 'failed') return await failed(end.stopReason, end.message);
 

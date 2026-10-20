@@ -275,6 +275,6 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     claimed: [],
     ...(options.continue === true ? {} : { until: stage }),
     firstSeq: 1,
-    seeded: { fromRun, entries: journaled },
+    seeded: { fromRun, stage, entries: journaled },
   };
 }
