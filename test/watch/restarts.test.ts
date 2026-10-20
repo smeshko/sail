@@ -67,10 +67,7 @@ function issues(runs: string, workflows: string[]): string[] {
   ];
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each(['SIGTERM', 'SIGKILL'] as const)(
+test.each(['SIGTERM', 'SIGKILL'] as const)(
   'a watcher killed with %s while two runs are held in flight leaves both running; a new sail watch a adopts both, starts the third ticket only once one has completed, and all three complete with one run each',
   async (signal) => {
     await withTempRepo(async (repo) => {
@@ -126,10 +123,7 @@ test
   TIMEOUT_MS,
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  (
+test(
   'a run whose process was killed with SIGKILL, and one killed with SIGTERM, are resumed by sail watch a from their journals: run:resumed says where each was, both complete, and only the interrupted call ran twice',
   async () => {
     await withTempRepo(async (repo) => {
@@ -187,10 +181,7 @@ test
   TIMEOUT_MS,
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  (
+test(
   "an interrupted run of b stays suspended while sail watch a runs, with no run:resumed in b's stream, until sail watch b adds b and resumes it",
   async () => {
     await withTempRepo(async (repo) => {
@@ -235,10 +226,7 @@ test
   TIMEOUT_MS,
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  (
+test(
   "sail unwatch b suspends b's held run at its next call boundary with unwatched and keeps b's queue; sail watch b resumes the run to its end, then dispatches b's next ticket",
   async () => {
     await withTempRepo(async (repo) => {

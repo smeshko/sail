@@ -568,10 +568,7 @@ test("a watch command whose workflow's first poll never answers holds up neither
 // 13.3 (DECISIONS D2, D10, D11): an unwatch asks the workflow's runs to suspend, the watcher's own stop asks nothing,
 // and a starting watcher sweeps the worktrees of ended runs.
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("unwatching b asks each live run of b, and none of a's, to suspend through its control file, keeps b's queue.json byte for byte and says so per run, and the watcher's own stop asks nothing", async () => {
+test("unwatching b asks each live run of b, and none of a's, to suspend through its control file, keeps b's queue.json byte for byte and says so per run, and the watcher's own stop asks nothing", async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -613,10 +610,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a watcher starting over completed, failed, running, suspended interrupted and suspended unwatched runs, each with a worktree, sweeps the first two worktrees, keeps the other three and says so', async () => {
+test('a watcher starting over completed, failed, running, suspended interrupted and suspended unwatched runs, each with a worktree, sweeps the first two worktrees, keeps the other three and says so', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
     const { workspace } = w.adapters.ports;

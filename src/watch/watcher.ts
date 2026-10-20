@@ -11,24 +11,41 @@
 // formed. A run's process ending asks for a tick at once. The commands:
 // - `watch`: opens the workflows not watched yet, refuses a label the set or another watcher already polls, records
 //   the new labels, and adds them. Watched already, it changes nothing.
-// - `unwatch`: stops a workflow's poller and dispatch, emits its `watch:removed`, and leaves its runs running. An
-//   empty set stops the watcher.
+// - `unwatch`: asks each live run of the workflow to suspend at its next call boundary, through its control file, then
+//   stops the workflow's poller and dispatch and emits its `watch:removed`. Its queue is kept, and a later `watch` of it
+//   resumes those runs, then dispatches from the queue. An empty set stops the watcher.
 // - `poll`: polls a watched workflow now. One outside the set is rejected.
 // A rejected command prints its reason, and the set stays as it was.
 //
 // Stopping, on an empty set or on Ctrl-C, stops every poller and the tick, emits `watch:removed` for what is left,
-// clears the registry field and resolves `done`. Runs in flight carry on: they are detached.
+// clears the registry field and resolves `done`. Runs in flight carry on: they are detached, and the watcher's own
+// stop asks nothing of them. Only an `unwatch` command does.
+//
+// Once its first workflows are added, a starting watcher sweeps the worktrees of ended runs (`workspace.sweep()`): a
+// completed or failed run whose worktree was left behind, as when its release failed. Runs that are running,
+// suspended or interrupted keep theirs. It is the one slow git step in the watcher's own process, and rare.
 import { dirname, join } from 'node:path';
 import { isAlive as processIsAlive, releaseLease, takeLease } from '../adapters/leases';
 import { DEFAULT_BRANCH_PREFIX } from '../engine/branch';
 import type { ProjectConfig } from '../engine/config';
+import { requestUnwatch } from '../engine/control';
 import { runsDir as runsDirOf } from '../engine/run-dir';
 import type { QueueEvent } from '../events/types';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
 import { createDispatcher, type Dispatcher } from './dispatch';
 import { type Command, clearCommands, drainCommands } from './inbox';
-import { errorLine, type FormatOptions, formatLines, queueLine, setLine, settledLine, type WatchLine } from './lines';
+import {
+  errorLine,
+  type FormatOptions,
+  formatLines,
+  queueLine,
+  setLine,
+  settledLine,
+  suspendLine,
+  sweptLine,
+  type WatchLine,
+} from './lines';
 import { createPoller, openWatchTarget, type Poller, type Timers, type WatchTarget } from './poll';
 import type { QueuePolicy } from './queue-store';
 import {
@@ -274,6 +291,25 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     watched.target.store.unwatched(pid);
   };
 
+  /** Asks each live run of `workflow` to suspend at its next call boundary, saying so for each request written. */
+  const suspendRuns = (workflow: string) => {
+    const watched = set.get(workflow);
+    if (watched === undefined) return;
+    for (const item of watched.target.store.snapshot().items) {
+      if (item.state !== 'dispatched' || item.pid === undefined || !isAlive(item.pid) || item.runId === undefined)
+        continue;
+      let written: boolean;
+      try {
+        written = requestUnwatch(join(runs, item.runId));
+      } catch (error) {
+        // A run so new it has no directory yet: there is nothing it could take a request from.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      if (written) print(suspendLine(workflow, item.dedupKey, item.runId, now()));
+    }
+  };
+
   const finish = () => {
     if (stopped) return;
     stopped = true;
@@ -305,7 +341,10 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     if (command.op !== 'unwatch') throw new Error(`the watcher can't ${command.op} yet`);
     const leaving = command.workflows.filter((workflow) => set.has(workflow));
     if (leaving.length === 0) return;
-    for (const workflow of leaving) remove(workflow);
+    for (const workflow of leaving) {
+      suspendRuns(workflow);
+      remove(workflow);
+    }
     // An empty set stops the watcher once the whole drain is applied, so a `watch` dropped after this command still
     // counts: the set it leaves is the one that decides.
     if (set.size === 0) return;
@@ -381,6 +420,12 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   if (refused !== undefined) return refuse({ refused });
   for (const target of targets) await add(target);
   print(setLine(watching(), now()));
+  try {
+    const swept = await workspace.sweep(runs);
+    if (swept.paths.length > 0) print(sweptLine(swept.paths.length, now()));
+  } catch (error) {
+    print(errorLine(undefined, `the worktrees of ended runs were not swept: ${messageOf(error)}`, now()));
+  }
   schedule(tickMs);
 
   return {
