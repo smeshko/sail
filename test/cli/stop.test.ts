@@ -19,10 +19,7 @@ const COMPLETED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const FAILED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P';
 const UNKNOWN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3Q';
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('sail stop with no run says its usage, and a run that is unknown, completed or failed exits 3 naming why, writing nothing', async () => {
+test('sail stop with no run says its usage, and a run that is unknown, completed or failed exits 3 naming why, writing nothing', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runs = join(repo.dir, '.sail-runs');
@@ -58,10 +55,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('sail stop ends a suspended run with no watcher running, and asks for no ticket source credentials', async () => {
+test('sail stop ends a suspended run with no watcher running, and asks for no ticket source credentials', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeStub(repo.dir);
     const end = await runWorkflow({
@@ -84,10 +78,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a manual run held in a call is asked to stop by sail stop from another process, which exits 0 at once, and the run ends failed stopped at its next call boundary, its lease released', async () => {
+test('a manual run held in a call is asked to stop by sail stop from another process, which exits 0 at once, and the run ends failed stopped at its next call boundary, its lease released', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     setHoldAt(repo.dir, 'implement#1');

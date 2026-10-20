@@ -62,10 +62,7 @@ const STOPPED = {
   issues: [],
 };
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a suspended run stopped ends failed stopped: STATUS, run:end last with the next seq, summary.json final, its worktree and lease gone, and a resume refused', async () => {
+test('a suspended run stopped ends failed stopped: STATUS, run:end last with the next seq, summary.json final, its worktree and lease gone, and a resume refused', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
     const before = events(end.dir);
@@ -104,10 +101,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a run left running by a process that is gone is stopped the same way, its torn last event cut first', async () => {
+test('a run left running by a process that is gone is stopped the same way, its torn last event cut first', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
     writeFileSync(join(end.dir, 'STATUS'), 'running\n');
@@ -127,10 +121,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a run whose lease another run took over is stopped with no lease to release, and the other run keeps its lease', async () => {
+test('a run whose lease another run took over is stopped with no lease to release, and the other run keeps its lease', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);
     const [file] = leaseFiles(repo);

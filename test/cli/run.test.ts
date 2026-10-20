@@ -136,10 +136,7 @@ test('the usage lists sail port render', async () => {
   expect(stdout).toContain('\n  sail port render --untrusted --source <text> [--inline]  ');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('the usage lists sail stop, saying when a run stops', async () => {
+test('the usage lists sail stop, saying when a run stops', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(
     /^ {2}sail stop <run> {2,}Stop a run: at its next call boundary while it runs, at once when it is suspended$/m,

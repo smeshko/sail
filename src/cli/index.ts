@@ -38,6 +38,7 @@ Usage:
   sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
+  sail stop <run>                                            Stop a run: at its next call boundary while it runs, at once when it is suspended
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
