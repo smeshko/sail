@@ -138,6 +138,25 @@ test('a workflow edited so the reused calls no longer fit fails the seeded run w
   });
 }, 60_000);
 
+// Review round 3: a seeded run runs the stage it was seeded for next, and nothing else first.
+test('a seeded run whose edited workflow asks for another call before the stage fails with determinism_violation, and runs neither', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    edit(
+      join(repo.dir, '.sail'),
+      WORKFLOW,
+      '    const d = await run.stage(describe',
+      '    await run.stage(tests);\n    const d = await run.stage(describe',
+    );
+    const end = await seeded(repo, from.runId, 'describe', { continue: true });
+    expect([endOf(end), 'refused' in end ? '' : end.message, journaled(dirOf(end)).at(-1)]).toEqual([
+      { status: 'failed', stopReason: 'determinism_violation' },
+      `the workflow asks for tests#3 after the calls reused from run ${from.runId}, not describe#1: it changed since that run`,
+      'self-review#1 done',
+    ]);
+  });
+}, 60_000);
+
 // Review round 3: the repository is registered once the run's start and reused calls are in its events file, so a
 // crash while registering leaves a run its events describe.
 test('onOpened runs once the run start and the reused calls are in the events file', async () => {
