@@ -27,7 +27,7 @@
 // A request from outside the run's process comes through its control file (`control.ts`), taken before the intake and
 // before each call, right after the abort check: `unwatched` suspends the run with that stop reason, keeping its
 // workspace and lease, and `stopped` fails it with that stop reason, releasing both. An abort seen at the same boundary
-// goes first, and leaves the request for the next boundary that runs.
+// goes first, and leaves the request for the next boundary that runs. A request goes ahead of `until`'s suspension.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
@@ -397,8 +397,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       if (end.kind === 'failed') return await failed(end.stopReason, end.message);
 
       const { call } = end;
-      // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it.
-      if (reached) return await suspended('until', `stopped after ${last}, as --until asked`);
+      // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it. A
+      // control request goes first: a stop asked during the call `--until` names ends the run, not waits with it.
+      if (reached) return await (controlled(call.key) ?? suspended('until', `stopped after ${last}, as --until asked`));
       running = call.key;
       const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
       const diffs = await gitDiffs(opened, call);
