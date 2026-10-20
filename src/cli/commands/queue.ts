@@ -9,17 +9,21 @@
 //   queued; `requeue` an item that is parked or failed and whose last run has ended; `drop` an item that isn't
 //   dispatched. Then it drops the command, waits up to 15 s for the watcher to take it, and prints the item as
 //   its queue file holds it then. A command not taken in time waits in the inbox, and the command exits 0 saying so, as
-//   `sail watch` does. One the watcher took but didn't apply exits 3: its terminal says why.
+//   `sail watch` does. One the watcher took but didn't apply exits 3: its terminal says why. What it applied is read
+//   from the events it emitted for the item since, so an add or a requeue its dispatch then dropped, as a ticket left
+//   In Progress is, exits 3 saying both, with the reason.
 //
 // An item is named by its dedup key (`ticket:FAKE-1`, as the dashboard's commands print it) or its ticket key. Every
 // refusal is exit code 3.
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../../adapters/leases';
 import { readStatus, runsDir as runsDirOf } from '../../engine/run-dir';
 import { resolveSource } from '../../engine/source';
+import { EVENTS_FILE } from '../../events/consumers/ndjson';
 import { clean } from '../../events/consumers/screen';
 import { dropCommand, type Command as QueueCommand } from '../../watch/inbox';
-import { dedupKey, type QueueFile, type QueueItem, readQueue } from '../../watch/queue-store';
+import { dedupKey, type QueueFile, type QueueItem, queueDir, readQueue } from '../../watch/queue-store';
 import { holderRefusal } from '../../watch/watcher';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Command, Io } from '../index';
@@ -79,6 +83,26 @@ function list(io: Io, runs: string, workflow: string): ExitCode {
   for (const item of queue.items) io.stdout(`${itemLine(item)}\n`);
   return EXIT_OK;
 }
+
+/** The lines of `workflow`'s queue event stream, each parsed, or undefined for a line that isn't JSON. */
+function streamLines(runs: string, workflow: string): (Record<string, unknown> | undefined)[] {
+  const file = join(queueDir(runs, workflow), EVENTS_FILE);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return undefined;
+      }
+    });
+}
+
+/** The event each change emits when the watcher applies it. */
+const APPLIED_AS = { add: 'queue:item_added', requeue: 'queue:requeued', drop: 'queue:dropped' } as const;
+const DONE_AS = { add: 'added', requeue: 'requeued', drop: 'dropped' } as const;
 
 /** How the run `runId` stands, `<status>[ <stop reason>]`, when it has not ended; undefined when it has, or has none. */
 function unended(runs: string, runId: string | undefined): string | undefined {
@@ -159,6 +183,10 @@ export function queueCommand(deps: WatchDeps = {}): Command {
       command = { op, workflow, dedupKey: key };
     }
 
+    // What the watcher did is read from the events it emits for the item after the command is dropped, not from the
+    // queue file alone: a dispatch may drop an item the watcher has just queued again, in the same tick.
+    const seqOf = (event: Record<string, unknown> | undefined) => (typeof event?.seq === 'number' ? event.seq : 0);
+    const mark = Math.max(0, ...streamLines(runs, workflow).map(seqOf));
     const file = dropCommand(runs, command);
     if (!(await taken(file, deps))) {
       io.stdout(`${COMMAND}: ${watcher} has not taken the command yet: it waits in ${at(io, file)}\n`);
@@ -168,14 +196,15 @@ export function queueCommand(deps: WatchDeps = {}): Command {
       io.stdout(`${COMMAND}: ${watcher} polls ${workflow} now\n`);
       return EXIT_OK;
     }
+    const since = streamLines(runs, workflow).filter((event) => seqOf(event) > mark && event?.dedupKey === key);
+    if (!since.some((event) => event?.type === APPLIED_AS[op])) {
+      return refuse(`the watcher did not ${op} ${key}: its terminal says why`);
+    }
     const after = itemOf(queueOf(runs, workflow), key ?? '');
-    const applied =
-      op === 'drop'
-        ? after === undefined
-        : op === 'requeue'
-          ? after !== undefined && after.state !== 'parked' && after.state !== 'failed'
-          : after !== undefined && after.state !== 'done';
-    if (!applied) return refuse(`the watcher did not ${op} ${key}: its terminal says why`);
+    if (after === undefined && op !== 'drop') {
+      const dropped = since.findLast((event) => event?.type === 'queue:dropped');
+      return refuse(`the watcher ${DONE_AS[op]} ${key}, then dropped it: ${clean(String(dropped?.reason ?? ''))}`);
+    }
     io.stdout(`${COMMAND}: ${after === undefined ? `${key} dropped` : itemLine(after)}\n`);
     return EXIT_OK;
   };
