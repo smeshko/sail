@@ -40,7 +40,7 @@ import {
   type RegistryEntry,
   type WatcherFields,
 } from './registry';
-import { type SpawnedRun, type SpawnRunOptions, spawnRun } from './spawn';
+import { type SpawnedRun, type SpawnResumeOptions, type SpawnRunOptions, spawnResume, spawnRun } from './spawn';
 
 /**
  * Where a watcher leases its repository's queues, under `.sail-runs/`: the branch leases' file protocol, keyed by
@@ -86,6 +86,8 @@ export interface WatcherOptions {
   now: () => Date;
   timers: Timers;
   spawn?: (options: SpawnRunOptions) => SpawnedRun;
+  /** Starts `sail resume <run>`: `spawnResume` when left out. */
+  resume?: (options: SpawnResumeOptions) => SpawnedRun;
   isAlive?: IsAlive;
   tickMs?: number;
   /** How long adding a workflow waits for its first poll: `FIRST_POLL_MS` when left out. */
@@ -251,6 +253,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       env: options.env,
       now,
       spawn: options.spawn ?? spawnRun,
+      resume: options.resume ?? spawnResume,
       isAlive,
       onSettled: (settled) => print(settledLine(workflow, settled, now())),
       onExit: kick,
@@ -299,6 +302,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       print(setLine(watching(), now()));
       return;
     }
+    if (command.op !== 'unwatch') throw new Error(`the watcher can't ${command.op} yet`);
     const leaving = command.workflows.filter((workflow) => set.has(workflow));
     if (leaving.length === 0) return;
     for (const workflow of leaving) remove(workflow);

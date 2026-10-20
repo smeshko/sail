@@ -26,7 +26,7 @@ import { PortError } from '../ports/errors';
 import { getTicket, type TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
 import type { QueueItem, QueueStore } from './queue-store';
-import { dispatchLog, lastLine, type SpawnedRun, type SpawnRunOptions } from './spawn';
+import { dispatchLog, lastLine, type SpawnedRun, type SpawnResumeOptions, type SpawnRunOptions } from './spawn';
 
 /** An item whose run has ended, as the dispatch settled it. */
 export interface Settled {
@@ -56,6 +56,8 @@ export interface DispatcherOptions {
   env: Readonly<Record<string, string>>;
   now: () => Date;
   spawn: (options: SpawnRunOptions) => SpawnedRun;
+  /** Starts `sail resume <run>` for a run whose process is gone. */
+  resume: (options: SpawnResumeOptions) => SpawnedRun;
   isAlive: (pid: number) => boolean;
   /** Hears each item the dispatch settled, or failed before its run started. */
   onSettled?: (settled: Settled) => void;

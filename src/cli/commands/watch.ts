@@ -31,7 +31,7 @@ import {
   readRegistry,
   registryDir as registryDirOf,
 } from '../../watch/registry';
-import type { SpawnedRun, SpawnRunOptions } from '../../watch/spawn';
+import type { SpawnedRun, SpawnResumeOptions, SpawnRunOptions } from '../../watch/spawn';
 import { holderRefusal, startWatcher } from '../../watch/watcher';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Command, Io, Parsed } from '../index';
@@ -43,6 +43,7 @@ export interface WatchDeps {
   timers?: Timers;
   now?: () => Date;
   spawn?: (options: SpawnRunOptions) => SpawnedRun;
+  resume?: (options: SpawnResumeOptions) => SpawnedRun;
   isAlive?: IsAlive;
   tickMs?: number;
   /** How long a second command waits for the watcher to take its command. */
@@ -191,6 +192,7 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       now: deps.now ?? (() => new Date()),
       timers: deps.timers ?? systemTimers,
       ...(deps.spawn === undefined ? {} : { spawn: deps.spawn }),
+      ...(deps.resume === undefined ? {} : { resume: deps.resume }),
       isAlive,
       ...(deps.tickMs === undefined ? {} : { tickMs: deps.tickMs }),
       ...(deps.pid === undefined ? {} : { pid: deps.pid }),

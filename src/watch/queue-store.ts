@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { replaceFile } from '../engine/durable';
-import type { NewQueueEvent, QueueEvent } from '../events/types';
+import type { NewQueueEvent, QueueEvent, ResumedFrom } from '../events/types';
 import { PORT_ERROR_CODES, type PortErrorCode } from '../ports/errors';
 import type { Ticket } from '../ports/types';
 import { openQueueStream } from './queue-events';
@@ -57,6 +57,8 @@ export const QueueItem = z.strictObject({
   /** Why it last failed. */
   reason: z.string().optional(),
   finishedAt: z.string().optional(),
+  /** Added with `--force`: dispatched without the re-check of designation and state, and started with `--force`. */
+  forced: z.literal(true).optional(),
 });
 export type QueueItem = z.infer<typeof QueueItem>;
 
@@ -125,14 +127,25 @@ export interface PollFailure {
 export interface QueueStore {
   /** A copy of the queue as `queue.json` holds it. */
   snapshot(): QueueFile;
-  /** Queues each ticket whose key isn't taken, and gives how many it queued. */
-  add(tickets: readonly Ticket[]): number;
+  /** Queues each ticket whose key isn't taken, and gives how many it queued. A forced add marks each item forced. */
+  add(tickets: readonly Ticket[], options?: { forced?: boolean }): number;
   /** The items a dispatch may start: queued ones, and failed ones past their `retryAt`, oldest first. */
   due(): QueueItem[];
   /** Records a dispatch of the item, which counts an attempt. */
   dispatched(key: string, runId: string): void;
   /** Records the pid of the dispatched item's process, and emits `queue:dispatched`. An item not dispatched throws. */
   spawned(key: string, pid: number): void;
+  /** Records the pid the dispatched item's run is alive as, and emits `run:adopted`. An item not dispatched throws. */
+  adopted(key: string, pid: number): void;
+  /** Records the pid of the resume started for the item's run, and emits `run:resumed`. Not dispatched: throws. */
+  resumed(key: string, pid: number, from: ResumedFrom): void;
+  /** Parks the item whatever its attempts, and emits `queue:parked` with the reason. */
+  parked(key: string, reason: string): void;
+  /**
+   * Puts a parked or failed item back as queued with no attempts, and emits `queue:requeued`. Any other state throws,
+   * naming it.
+   */
+  requeue(key: string, reason: string): void;
   /** Takes the item out of the queue, and emits `queue:dropped` with the reason. An unknown key throws. */
   drop(key: string, reason: string): void;
   /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
@@ -279,6 +292,10 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       );
       return added.length;
     },
+    adopted() {},
+    resumed() {},
+    parked() {},
+    requeue() {},
     due() {
       const at = now().getTime();
       return structuredClone(queue.items.filter((item) => isDue(item, at))).sort(

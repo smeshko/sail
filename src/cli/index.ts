@@ -5,11 +5,13 @@ import { check } from './commands/check';
 import { dashboard } from './commands/dashboard';
 import { init } from './commands/init';
 import { port } from './commands/port';
+import { queue } from './commands/queue';
 import { resume } from './commands/resume';
 import { runWorkflowCommand } from './commands/run-workflow';
 import { runs } from './commands/runs';
 import { show } from './commands/show';
 import { stageRun } from './commands/stage-run';
+import { stop } from './commands/stop';
 import { unwatch, watch } from './commands/watch';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
@@ -184,6 +186,8 @@ const commands = new Map<string, CommandSpec>([
   ],
   ['watch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: watch }],
   ['unwatch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: unwatch }],
+  ['queue', { options: { force: { type: 'boolean' } }, positionals: 3, command: queue }],
+  ['stop', { options: {}, positionals: 1, command: stop }],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],

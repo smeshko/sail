@@ -57,6 +57,10 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
       const next = event.paused ? 'polling paused' : `next poll in ${formatDuration(event.retryInMs ?? 0)}`;
       return { text: `error: ${event.adapter}${code}: ${event.message}; ${next}`, alert: true };
     }
+    case 'run:adopted':
+    case 'run:resumed':
+    case 'queue:requeued':
+      return undefined;
     default: {
       const unknown: never = event;
       return unknown;

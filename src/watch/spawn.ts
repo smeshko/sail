@@ -28,6 +28,20 @@ export interface SpawnRunOptions {
   env: Readonly<Record<string, string>>;
   /** The command the arguments follow: this checkout's `sail` when left out. */
   cli?: readonly string[];
+  /** Starts the run with `--force`: a forced queue item. */
+  force?: boolean;
+}
+
+export interface SpawnResumeOptions {
+  /** The directory that holds `.sail/`: the child's cwd. */
+  root: string;
+  runsDir: string;
+  workflow: string;
+  runId: string;
+  /** The child's whole environment. */
+  env: Readonly<Record<string, string>>;
+  /** The command the arguments follow: this checkout's `sail` when left out. */
+  cli?: readonly string[];
 }
 
 export interface SpawnedRun {
@@ -57,6 +71,11 @@ export function spawnRun(options: SpawnRunOptions): SpawnedRun {
     // The child holds its own copy of the descriptor.
     closeSync(fd);
   }
+}
+
+/** Starts `sail resume <run>`, detached. Stub: starts nothing. */
+export function spawnResume(_options: SpawnResumeOptions): SpawnedRun {
+  return { pid: 0, exited: Promise.resolve(null) };
 }
 
 /** The longest reason a log's last line gives. */

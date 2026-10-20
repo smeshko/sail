@@ -36,15 +36,33 @@ export function commandsDir(runsDir: string): string {
 /** A workflow's name, as a folder under `.sail/workflows/` takes it. */
 const Workflows = z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/)).min(1);
 
-export const Command = z.discriminatedUnion('op', [
+const Final = z.discriminatedUnion('op', [
   /** Polls the workflow now, paused or not. */
   z.strictObject({ op: z.literal('poll'), workflow: z.string().min(1) }),
   /** Adds the workflows to the watch set. */
   z.strictObject({ op: z.literal('watch'), workflows: Workflows }),
   /** Takes the workflows out of the watch set. */
   z.strictObject({ op: z.literal('unwatch'), workflows: Workflows }),
+  /** Queues a ticket in a watched workflow's queue, forced or not. */
+  z.strictObject({
+    op: z.literal('add'),
+    workflow: z.string().min(1),
+    ticketKey: z.string().min(1),
+    force: z.literal(true).optional(),
+  }),
+  /** Puts a parked or failed item back in the queue. */
+  z.strictObject({ op: z.literal('requeue'), workflow: z.string().min(1), dedupKey: z.string().min(1) }),
+  /** Takes an item out of the queue. */
+  z.strictObject({ op: z.literal('drop'), workflow: z.string().min(1), dedupKey: z.string().min(1) }),
 ]);
-export type Command = z.infer<typeof Command>;
+
+// Stub: the final type, the old parse.
+export const Command = z.discriminatedUnion('op', [
+  z.strictObject({ op: z.literal('poll'), workflow: z.string().min(1) }),
+  z.strictObject({ op: z.literal('watch'), workflows: Workflows }),
+  z.strictObject({ op: z.literal('unwatch'), workflows: Workflows }),
+]) as unknown as typeof Final;
+export type Command = z.infer<typeof Final>;
 
 /** Commands this process dropped, so two in one millisecond still sort in the order they were dropped. */
 let dropped = 0;
