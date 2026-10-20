@@ -435,6 +435,27 @@ test('a stopped run parks its item at once with the run named, and it is never r
   });
 });
 
+test('a dead run that never took the unwatched it was sent is resumed with the request taken back, and one sent a stop keeps it (review R1-3)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const [run1, run2] = ['FAKE-1', 'FAKE-2'].map((key) => w.spawner.run(key).runId);
+    const dirOf = (runId = '') => join(w.runs, runId);
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    await w.spawner.end('FAKE-2', { status: 'running' });
+    requestUnwatch(dirOf(run1));
+    requestStop(dirOf(run2));
+    await dispatcher.tick();
+    const control = (runId = '') =>
+      existsSync(join(dirOf(runId), 'CONTROL')) ? readFileSync(join(dirOf(runId), 'CONTROL'), 'utf8') : 'none';
+    expect({
+      resumes: w.spawner.resumes.map((resume) => resume.runId),
+      control: [control(run1), control(run2)],
+    }).toEqual({ resumes: [run1 ?? '', run2 ?? ''], control: ['none', 'stopped\n'] });
+  });
+});
+
 // Forced items (DECISIONS D9): dispatched without the re-check, and started with --force; the lease still holds them.
 
 test('a forced item whose ticket lost its label, or is In Progress, is started with --force, an unforced one is still dropped, and a forced one whose branch is leased still waits', async () => {
