@@ -42,10 +42,7 @@ async function sailRun(repo: TempRepo, sourceId: string, args: string[], capture
   return { ...captured, runId, dir: join(repo.dir, '.sail-runs', runId) };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail run --from-run --stage spec, after an edit of the spec prompt, reruns spec alone on the reused brief and stops suspended: its prompt carries the edit and its output is its own', async () => {
+test('sail run --from-run --stage spec, after an edit of the spec prompt, reruns spec alone on the reused brief and stops suspended: its prompt carries the edit and its output is its own', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     edit(
@@ -85,10 +82,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail run --from-run --stage spec --continue runs the seeded run to its end and exits 0', async () => {
+test('sail run --from-run --stage spec --continue runs the seeded run to its end and exits 0', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec', '--continue']);
@@ -100,10 +94,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  .each<[string, (runId: string) => string[], (dir: string) => void, (runId: string) => string]>([
+test.each<[string, (runId: string) => string[], (dir: string) => void, (runId: string) => string]>([
   ['neither --from-run nor --stage', () => [], () => {}, () => USAGE],
   ['no --stage', (runId) => ['--from-run', runId], () => {}, () => USAGE],
   ['no --from-run', () => ['--stage', 'spec'], () => {}, () => USAGE],
@@ -143,10 +134,7 @@ test
   60_000,
 );
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('sail run on a workflow with a type error prints it where it is, then is refused with exit 3, and starts no run', async () => {
+test('sail run on a workflow with a type error prints it where it is, then is refused with exit 3, and starts no run', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     edit(
@@ -168,10 +156,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('Ctrl-C before the seeded run opens is a refusal that starts no run', async () => {
+test('Ctrl-C before the seeded run opens is a refusal that starts no run', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     // Interrupted as soon as the command listens: before the run is opened.
@@ -188,10 +173,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('Ctrl-C during the spec session suspends the seeded run with interrupted, and says how to resume it', async () => {
+test('Ctrl-C during the spec session suspends the seeded run with interrupted, and says how to resume it', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     answerSpec(repo.dir, (answer) => ({ ...answer, delayMs: 30_000 }));
@@ -220,10 +202,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('the usage lists sail run --from-run and what --continue does, and still lists sail <ticket> first', async () => {
+test('the usage lists sail run --from-run and what --continue does, and still lists sail <ticket> first', async () => {
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect(commands[0]).toBe('  sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]');

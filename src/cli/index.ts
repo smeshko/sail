@@ -3,6 +3,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
 import { dashboard } from './commands/dashboard';
+import { fromRun } from './commands/from-run';
 import { init } from './commands/init';
 import { port } from './commands/port';
 import { resume } from './commands/resume';
@@ -36,6 +37,7 @@ Usage:
   sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
+  sail run --from-run <run> --stage <stage> [--continue]     Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
@@ -52,6 +54,9 @@ Starting a run from a ticket:
   --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
   --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
+
+A seeded run:
+  --continue  Runs the rest of the workflow after the stage, not just the stage
 
 Output of a run and a resume:
   -q, --quiet    Only the run's start, its errors and the final block
@@ -148,6 +153,19 @@ const commands = new Map<string, CommandSpec>([
   ['dashboard', { options: { port: { type: 'string' } }, positionals: 0, command: dashboard }],
   ['init', bare(init)],
   ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
+  [
+    'run',
+    {
+      options: {
+        'from-run': { type: 'string' },
+        stage: { type: 'string' },
+        continue: { type: 'boolean' },
+        ...VERBOSITY_OPTIONS,
+      },
+      positionals: 0,
+      command: fromRun,
+    },
+  ],
   ['runs', bare(runs)],
   [
     'show',
