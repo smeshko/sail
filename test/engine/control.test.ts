@@ -1,7 +1,7 @@
 // A run's control file (DECISIONS D2): a stop replaces any request, an unwatch only creates one, and the engine's take
 // returns each request once and leaves nothing behind.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CONTROL_FILE, cancelUnwatch, requestStop, requestUnwatch, takeControl } from '../../src/engine/control';
@@ -74,4 +74,12 @@ test('cancelling an unwatch removes an unwatched and keeps a stopped', () => {
   requestStop(dir);
   cancelUnwatch(dir);
   expect([afterUnwatch, held(dir)]).toEqual([[], ['CONTROL: stopped\n']]);
+});
+
+test('cancelling an unwatch never takes a stop out of the file, even for a moment: the stop stays the same file (review R1-4)', () => {
+  const dir = runDir();
+  requestStop(dir);
+  const before = statSync(join(dir, CONTROL_FILE)).ino;
+  cancelUnwatch(dir);
+  expect([statSync(join(dir, CONTROL_FILE)).ino, held(dir)]).toEqual([before, ['CONTROL: stopped\n']]);
 });
