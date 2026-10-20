@@ -1150,10 +1150,7 @@ test('run: a header with no claim is refused, naming claim', () => {
 
 // A seeded run (D5): its header names the run it reused calls from, and records no claim.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('run: a seeded header names its fromRun and has no claim; one with a claim beside fromRun, or an empty fromRun, is refused', () => {
+test('run: a seeded header names its fromRun and has no claim; one with a claim beside fromRun, or an empty fromRun, is refused', () => {
   const seeded = { ...omit(run, 'claim'), fromRun: RUN_ID };
   expect(validateDocument('sail.run.v1', seeded)).toEqual([]);
   expect(validateDocument('sail.run.v1', { ...run, fromRun: RUN_ID })).toEqual([
@@ -1162,10 +1159,7 @@ test
   expect(paths('sail.run.v1', { ...seeded, fromRun: '' })).toEqual(['/fromRun']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('event: run:start and journal:append take a fromRun naming a run, and refuse an empty one', () => {
+test('event: run:start and journal:append take a fromRun naming a run, and refuse an empty one', () => {
   const append = { ...envelope, type: 'journal:append', key: 'intake#1', line: 1, outcome: 'passed' };
   expect([
     paths('sail.event.v1', { ...event, fromRun: RUN_ID }),
@@ -1175,10 +1169,7 @@ test
   ]).toEqual([[], [], ['/fromRun'], ['/fromRun']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a seeded run directory may hold results that name the run it came from, but only as the first lines of its journal', () => {
+test('a seeded run directory may hold results that name the run it came from, but only as the first lines of its journal', () => {
   const dir = tempDir({});
   const golden = join(root, 'test', 'fixtures', 'runs', RUN_ID);
   cpSync(golden, dir, { recursive: true });

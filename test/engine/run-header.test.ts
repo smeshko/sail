@@ -301,10 +301,7 @@ test("a header built with the run's workspace records its branch, repository and
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('the header of a seeded run records its fromRun after the source and no claim, and validates', async () => {
+test('the header of a seeded run records its fromRun after the source and no claim, and validates', async () => {
   const fromRun = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
   const header = await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);

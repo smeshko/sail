@@ -182,7 +182,7 @@ const RESULT_FILES = new Bun.Glob('[0-9][0-9]*-*/**/result.json');
 /**
  * Validates run.json, every journal and event line, summary.json and every call's result.json in `dir`. Checks that
  * the journal's and the events file's `seq` values run 1, 2, 3… without a gap, and that every journal line and
- * multi-step call points at a result that agrees with it.
+ * multi-step call points at a result that agrees with it: the run's own, but for a seeded run's reused calls.
  */
 export function validateRunDir(dir: string): RunDirReport {
   const report: RunDirReport = { counts: {}, issues: [] };
@@ -233,6 +233,9 @@ export function validateRunDir(dir: string): RunDirReport {
     if (checked) results.set(file, checked);
   }
 
+  // A seeded run's journal starts with its reused calls, whose results name the run each one ran in. Only that prefix
+  // may name another run: from the first line whose result names this run on, every result must.
+  let reusing = header?.valid === true && header.data.fromRun !== undefined;
   for (const { line, data } of journal) {
     const at: SchemaIssue = {
       file: 'journal.ndjson',
@@ -241,8 +244,10 @@ export function validateRunDir(dir: string): RunDirReport {
       path: '/resultPath',
       message: '',
     };
+    const linked = results.get(String(data.resultPath));
+    reusing &&= linked?.valid === true && linked.data.runId !== runId;
     const { key, stage, call, step, outcome, output, files } = data;
-    const expected = { runId, key, stage, call, step, outcome, output, files };
+    const expected = { runId: reusing ? undefined : runId, key, stage, call, step, outcome, output, files };
     checkLink(report, at, results, String(data.resultPath), expected, asJournaled);
   }
   for (const [file, { data, valid }] of results) {

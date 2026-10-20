@@ -141,7 +141,8 @@
         "files": { "type": "array", "items": { "type": "string" } },
         "summary": { "type": "string" },
         "resultPath": { "type": "string" },
-        "steps": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/stepEntry" } }
+        "steps": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/stepEntry" } },
+        "fromRun": { "description": "the run a reused call was taken from", "type": "string", "minLength": 1 }
       },
       "required": ["key", "outcome", "durationMs"],
       "additionalProperties": false

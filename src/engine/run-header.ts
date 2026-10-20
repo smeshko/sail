@@ -117,7 +117,7 @@ export function workspaceFields(
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
 export function buildRunHeader(fields: HeaderFields): RunHeader {
-  const { runId, source, claim, sailDir, loaded, config, adapters, now } = fields;
+  const { runId, source, claim, fromRun, sailDir, loaded, config, adapters, now } = fields;
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
   const budget = config.budgets.run;
@@ -125,7 +125,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
     schema: 'sail.run.v1',
     runId,
     source: { ...source, forced: [...source.forced] },
-    // TDD stub (TASK-004): fromRun is not written yet.
+    ...(fromRun === undefined ? {} : { fromRun }),
     ...(claim === undefined ? {} : { claim: { claimed: claim.claimed, state: { ...claim.state } } }),
     workflow: {
       name: loaded.name,

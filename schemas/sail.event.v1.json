@@ -521,7 +521,8 @@
           "required": ["ticketSource", "codeHost", "harness", "workspace"],
           "additionalProperties": false
         },
-        "budget": { "$ref": "#/$defs/runBudget" }
+        "budget": { "$ref": "#/$defs/runBudget" },
+        "fromRun": { "description": "the run a seeded run reused calls from", "type": "string", "minLength": 1 }
       },
       "required": ["source", "workflow", "roster", "adapters"],
       "unevaluatedProperties": false
@@ -696,7 +697,8 @@
       "$ref": "#/$defs/callEnvelope",
       "properties": {
         "line": { "type": "integer", "minimum": 1 },
-        "outcome": { "$ref": "#/$defs/outcome" }
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "fromRun": { "description": "the run a reused call was taken from", "type": "string", "minLength": 1 }
       },
       "required": ["line", "outcome"],
       "unevaluatedProperties": false

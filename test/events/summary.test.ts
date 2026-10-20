@@ -539,10 +539,7 @@ test("a ticket:fetched with no key, or under a step's key alone, sets no ticket:
   expect(folded(stamp([0, runStart()], [100, fetched('intake#1', 'Named')]))?.ticket?.title).toBe('Named');
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a reused call is listed where its journal:append comes, with its fromRun and no duration, and counts in no total', () => {
+test('a reused call is listed where its journal:append comes, with its fromRun and no duration, and counts in no total', () => {
   const source = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
   const summary = folded(
     stamp(
