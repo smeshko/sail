@@ -22,7 +22,7 @@ const text = (...lines: string[]) => lines.map((line) => `${line}\n`).join('');
 
 /** What `sail show` prints for the golden run. */
 const GOLDEN = text(
-  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 16.0s`,
+  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 16.1s`,
   '',
   'key            kind     outcome  duration  cost   next',
   'intake#1       builtin  passed   900ms',
@@ -33,7 +33,7 @@ const GOLDEN = text(
   'tests#2        script   passed   700ms            self-review#1',
   'self-review#1  agent    done     1.1s      $0.22  describe#1',
   'describe#1     agent    done     1.1s      $0.10  open#1',
-  'open#1         script   passed   900ms            end',
+  'open#1         script   passed   1.0s             end',
   '',
   'loops   fix 2/3',
   'totals  9 calls · 9 steps · 0 tool calls · 0 denials · 9 replays',
