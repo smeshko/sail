@@ -114,7 +114,10 @@ export interface SeededWorkflowOptions extends SeededRunOptions, EventOptions {
   signal?: AbortSignal;
   /** Called after each call is journaled. */
   onCall?(entry: JournalEntry): void;
-  /** Called once the run is opened, before it runs: what a refusal to open must not do waits for it. */
+  /**
+   * Called once the run is open and its start and reused calls are in its events file, before any call runs: what a
+   * refusal to open must not do waits for it.
+   */
   onOpened?(): Promise<void>;
 }
 
@@ -131,6 +134,8 @@ interface DriveOptions extends EventOptions {
   clock?: Clock;
   signal?: AbortSignal;
   onCall?(entry: JournalEntry): void;
+  /** Called once the run's start, and a seeded run's reused calls, are in its events file. */
+  onOpened?(): Promise<void>;
 }
 
 /** Why a call ended as it did, for the workflow: an error's problems, each with its reason, or a blocked agent's own. */
@@ -343,6 +348,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       for (const { key, seq, outcome } of entries)
         bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun });
     }
+    await options.onOpened?.();
     // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
     let [intake] = readJournal(dir).entries;
     if (intake === undefined) {
@@ -454,7 +460,6 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
 export async function runSeededWorkflow(options: SeededWorkflowOptions): Promise<RunEnd | { refused: string }> {
   const opened = await openSeededRun(options);
   if ('refused' in opened) return opened;
-  await options.onOpened?.();
   return drive(opened, options, { start: true });
 }
 
