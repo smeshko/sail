@@ -437,10 +437,7 @@ test('a stopped run parks its item at once with the run named, and it is never r
 
 // Forced items (DECISIONS D9): dispatched without the re-check, and started with --force; the lease still holds them.
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a forced item whose ticket lost its label, or is In Progress, is started with --force, an unforced one is still dropped, and a forced one whose branch is leased still waits', async () => {
+test('a forced item whose ticket lost its label, or is In Progress, is started with --force, an unforced one is still dropped, and a forced one whose branch is leased still waits', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 4, 4, { claiming: false });
     const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');

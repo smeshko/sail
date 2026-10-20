@@ -986,10 +986,7 @@ test.each<[string, StubRun, string]>([
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a forced dispatched start opens an undesignated ticket under the dispatched id, via watch with designation overridden, and claims it', async () => {
+test('a forced dispatched start opens an undesignated ticket under the dispatched id, via watch with designation overridden, and claims it', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runId = 'FAKE-3-01M3BWNZM08Q4T6V2XRJ5KWD3N';

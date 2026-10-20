@@ -88,10 +88,7 @@ test('a spawned run gets the ticket, its workflow and --dispatch with the run id
   expect(pgid).not.toBe(Number(Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(process.pid)]).stdout.toString()));
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a forced dispatched run gets --force last on its command line', async () => {
+test('a forced dispatched run gets --force last on its command line', async () => {
   const dir = tempDir();
   const root = join(dir, 'repo');
   mkdirSync(root);

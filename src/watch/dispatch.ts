@@ -14,7 +14,8 @@
 //   its ticket through the TicketSource, then the lease on the branch its fresh title names when that differs. The
 //   lease comes first because a leased item is skipped on every tick for as long as the lease lasts, and checking it
 //   costs no provider call (D6). A leased item stays queued, uses no slot and counts no attempt, and says so with one
-//   `queue:skipped_leased` per holder. An item no longer designated or unstarted is dropped.
+//   `queue:skipped_leased` per holder. An item no longer designated or unstarted is dropped. A forced item, added with
+//   `--force`, skips the re-check: only the lease holds it back, and its run starts with `--force`.
 // - **The start** is recorded before the process exists (`dispatched`, which counts the attempt and names the run),
 //   and its pid after (`spawned`, which emits `queue:dispatched`). The run claims its own ticket as it starts (D2): the
 //   dispatch only reads the ticket.
@@ -205,6 +206,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const { ticketKey } = item.source;
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
     if (await leased(item, remote, branch)) return false;
+    if (item.forced === true) return true;
     const ticket = await getTicket(ticketSource, ticketKey);
     if (!ticketSource.isDesignated(ticket, label)) {
       store.drop(item.dedupKey, `it is not designated: it carries no '${label}' label`);
@@ -231,6 +233,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         ticketKey,
         runId,
         env: options.env,
+        ...(item.forced === true ? { force: true } : {}),
       });
     } catch (error) {
       fail(item, runId, `its run could not be started: ${messageOf(error)}`);
