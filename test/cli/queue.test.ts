@@ -282,6 +282,35 @@ test('with a watcher watching a, sail queue requeue a ticket:FAKE-1 queues the p
   });
 }, 30_000);
 
+test('a requeue the watcher applies and its dispatch then drops, as for a ticket left In Progress, says both, with the reason, and exits 3 (review R1-1)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
+    await parkTwo(w);
+    await w.spawner.end('FAKE-3');
+    await w.timers.advance(1000);
+    writeTickets(w.sail, [
+      { key: 'FAKE-1', labels: ['sail-a'], state: { type: 'started', name: 'In Progress' } },
+      ...designated('FAKE-2', 'FAKE-3'),
+    ]);
+    const requeued = await w.applied(['requeue', 'a', 'ticket:FAKE-1']);
+    expect({
+      requeued,
+      events: queueEvents(queueDir(w.runs, 'a'))
+        .filter((event) => event.dedupKey === 'ticket:FAKE-1')
+        .map((event) => event.type)
+        .slice(-2),
+    }).toEqual({
+      requeued: {
+        code: EXIT_REFUSED,
+        stdout: '',
+        stderr: 'sail queue: the watcher requeued ticket:FAKE-1, then dropped it: it is In Progress\n',
+      },
+      events: ['queue:requeued', 'queue:dropped'],
+    });
+    await w.stop();
+  });
+}, 30_000);
+
 test('sail queue drop a FAKE-1 drops a parked item, and a dispatched one is refused before any command is dropped', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
