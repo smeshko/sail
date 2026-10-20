@@ -28,6 +28,16 @@ import {
 
 const COMMAND = 'sail run';
 
+/** The workflow the source run in `dir` ran, when its header can be read. */
+function workflowOf(dir: string, source: string): string | undefined {
+  if (!isPlainName(source) || !existsSync(join(dir, RUN_HEADER_FILE))) return undefined;
+  try {
+    return readRunHeader(dir).workflow.name;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
   const refuse = refuseAs(io, COMMAND);
   const source = args.values['from-run'];
@@ -40,10 +50,9 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
   const project = await findProject(io, COMMAND);
   if (typeof project === 'number') return project;
 
-  // The source's workflow is the one to type-check. The engine refuses the run's other problems in its own words.
-  const dir = join(runsDir(project.sailDir), source);
-  const named =
-    isPlainName(source) && existsSync(join(dir, RUN_HEADER_FILE)) ? readRunHeader(dir).workflow.name : undefined;
+  // The source's workflow is the one to type-check. The engine refuses the run's other problems in its own words, a
+  // run.json that can't be read among them.
+  const named = workflowOf(join(runsDir(project.sailDir), source), source);
   if (named !== undefined) {
     const workflowFile = findWorkflowFile(project.sailDir, named);
     if ('refused' in workflowFile) return refuse(workflowFile.refused);

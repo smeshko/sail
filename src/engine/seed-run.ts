@@ -5,12 +5,14 @@
 //
 // In order, every refusal before anything is written:
 //   1. `.sail/` and its config, then the claim of `.sail/` for the process;
-//   2. the source run: a plain name, with a `run.json`, from a run that had a workspace. Any STATUS is accepted, a
-//      crashed `running` one included, since only its journal's complete lines are read;
+//   2. the source run: a plain name, a directory and no link, with a `run.json` that reads, from a run that had a
+//      workspace. Any STATUS is accepted, a crashed `running` one included, since only its journal's complete lines
+//      are read;
 //   3. the workflow as it reads now, its model aliases, and no stage named `intake`;
 //   4. the stage, which must be a stage of that workflow;
-//   5. the source's journal: an `intake#1` that passed, and a call of the stage. The seed is every entry before the
-//      stage's first call.
+//   5. the source's journal, which must read: an `intake#1` that passed, and a call of the stage. The seed is every
+//      entry before the stage's first call, and each of its entries must point inside its own call directory, at
+//      regular files, since that is what a run writes and all the copy takes.
 // Then the run id is minted and the header built and checked, with `fromRun` and no claim: a seeded run reads no
 // ticket and claims nothing. An abort seen by then refuses. Then, as a start does, the branch is leased and the run
 // directory and the workspace made, each undone on a refusal. The branch is the source's, suffixed
@@ -23,7 +25,7 @@
 //
 // The workspace starts at the source's base: the source's code changes are not carried. A reused call's commits are not
 // in the seeded workspace, so a later stage that consumes a gitDiff sees only what the seeded run changed.
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
@@ -75,6 +77,9 @@ export interface SeededRunOptions {
   signal?: AbortSignal;
 }
 
+/** Why `error`, thrown by a reader of the source run, happened: its message. */
+const why = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 /** The source run's directory and header, or why it can't seed a run. */
 function findSource(sailDir: string, runId: string): { dir: string; header: RunHeader } | { refused: string } {
   if (!isPlainName(runId)) return { refused: `'${runId}' is not a run id` };
@@ -83,12 +88,51 @@ function findSource(sailDir: string, runId: string): { dir: string; header: RunH
   if (!existsSync(join(dir, RUN_HEADER_FILE))) {
     return { refused: `no run '${runId}' in ${relative(dirname(sailDir), runs)}` };
   }
-  return { dir, header: readRunHeader(dir) };
+  // A run directory sail made is a directory: a link would copy from wherever it leads.
+  if (lstatSync(dir).isSymbolicLink()) {
+    return {
+      refused: `run ${runId} is a symlink in ${relative(dirname(sailDir), runs)}, not a run directory: it can't seed a run`,
+    };
+  }
+  try {
+    return { dir, header: readRunHeader(dir) };
+  } catch (error) {
+    return { refused: `run ${runId}'s run.json can't be read: ${why(error)}` };
+  }
 }
 
-/** The call directories of `entries`, each once, in order: `NN-<stage>/call-N`, which holds every try. */
-function callDirs(entries: readonly JournalEntry[]): string[] {
-  return [...new Set(entries.map((entry) => entry.resultPath.split('/').slice(0, 2).join('/')))];
+const CALL_DIR = /^\d{2,}-[^/]+\/call-\d+$/;
+
+/** The call directory of a run-relative path, `NN-<stage>/call-N`, when the path lies inside one. */
+function callDirOf(path: string): string | undefined {
+  const segments = path.split('/');
+  if (segments.length < 3 || !segments.every(isPlainName)) return undefined;
+  const dir = segments.slice(0, 2).join('/');
+  return CALL_DIR.test(dir) ? dir : undefined;
+}
+
+/**
+ * The call directories of `entries`, each once, in order, or why the seed can't trust them. Each entry's result and
+ * files must lie in its own call directory, `NN-<stage>/call-N`, which holds every try, and each file must be a regular
+ * file: a step can't produce a link, so a link there was put in after the run, and could lead anywhere.
+ */
+function callDirs(sourceDir: string, runId: string, entries: readonly JournalEntry[]): string[] | { refused: string } {
+  const dirs = new Set<string>();
+  for (const entry of entries) {
+    const dir = callDirOf(entry.resultPath);
+    for (const path of [entry.resultPath, ...Object.values(entry.files)]) {
+      if (dir === undefined || callDirOf(path) !== dir) {
+        return { refused: `run ${runId}'s journal line ${entry.seq} points at '${path}', outside a call directory` };
+      }
+    }
+    for (const path of Object.values(entry.files)) {
+      if (!lstatSync(join(sourceDir, path), { throwIfNoEntry: false })?.isFile()) {
+        return { refused: `run ${runId}'s ${path} is not a regular file: a seed copies only what the run wrote` };
+      }
+    }
+    dirs.add(dir as string);
+  }
+  return [...dirs];
 }
 
 /**
@@ -121,7 +165,12 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
       refused: `--stage names '${stage}', which is no stage of workflow '${loaded.name}': its stages are ${known}`,
     };
   }
-  const { entries } = readJournal(source.dir);
+  let entries: JournalEntry[];
+  try {
+    ({ entries } = readJournal(source.dir));
+  } catch (error) {
+    return { refused: `run ${fromRun}'s journal can't be read: ${why(error)}` };
+  }
   const [intake] = entries;
   if (intake?.key !== INTAKE_KEY || intake.outcome !== 'passed') {
     return { refused: `run ${fromRun}'s intake didn't pass: there is nothing to reuse` };
@@ -129,6 +178,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   const at = entries.findIndex((entry) => entry.stage === stage);
   if (at === -1) return { refused: `run ${fromRun} never ran '${stage}': sail resume ${fromRun} continues it` };
   const seed = entries.slice(0, at);
+  const copied = callDirs(source.dir, fromRun, seed);
+  if ('refused' in copied) return copied;
 
   const { ticketKey } = source.header.source;
   const runId = newRunId(ticketKey, now.getTime(), options.random);
@@ -172,8 +223,13 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   const dir = run.runDir;
   let journaled: JournalEntry[];
   try {
-    for (const path of callDirs(seed)) {
-      cpSync(join(source.dir, path), join(dir, path), { recursive: true, verbatimSymlinks: true, errorOnExist: true });
+    for (const path of copied) {
+      cpSync(join(source.dir, path), join(dir, path), {
+        recursive: true,
+        verbatimSymlinks: true,
+        force: false,
+        errorOnExist: true,
+      });
     }
     writeRunHeader(dir, header);
     createJournal(dir);
