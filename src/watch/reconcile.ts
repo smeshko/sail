@@ -79,6 +79,21 @@ function leaseOf(runDir: string): { remote: string; branch: string } | undefined
   }
 }
 
+/**
+ * The pid of a live process that holds run `runId`'s lease, as a resume started by hand or by an earlier watcher does,
+ * or undefined when none does.
+ */
+export async function liveHolder(
+  runDir: string,
+  runId: string,
+  context: Pick<ReconcileContext, 'isAlive' | 'workspace'>,
+): Promise<number | undefined> {
+  const lease = leaseOf(runDir);
+  if (lease === undefined) return undefined;
+  const holder = await context.workspace.holder(lease.remote, lease.branch);
+  return holder?.runId === runId && context.isAlive(holder.pid) ? holder.pid : undefined;
+}
+
 /** Why the process the dispatcher started for the item ended without its work: its log's last line, or its exit. */
 function why(context: ReconcileContext, runId: string, what: string): string | undefined {
   const line = lastLine(dispatchLog(context.runsDir, context.workflow, runId));
@@ -105,11 +120,8 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   }
   const from = resumable(status);
   if (from === undefined) return { kind: 'wait' };
-  const lease = leaseOf(runDir);
-  if (lease !== undefined) {
-    const holder = await context.workspace.holder(lease.remote, lease.branch);
-    if (holder?.runId === runId && context.isAlive(holder.pid)) return { kind: 'adopt', pid: holder.pid };
-  }
+  const holder = await liveHolder(runDir, runId, context);
+  if (holder !== undefined) return { kind: 'adopt', pid: holder };
   if (context.resumed) {
     const reason = why(context, runId, 'its resume failed') ?? 'its resume failed';
     return { kind: 'park', reason };

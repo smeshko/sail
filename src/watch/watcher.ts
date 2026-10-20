@@ -53,6 +53,7 @@ import {
 } from './lines';
 import { createPoller, openWatchTarget, type Poller, type Timers, type WatchTarget } from './poll';
 import { dedupKey, type QueueItem, type QueuePolicy } from './queue-store';
+import { liveHolder } from './reconcile';
 import {
   claimWatcher,
   clearWatcher,
@@ -301,12 +302,17 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
    * still starting has no directory to take a request from, and nothing asks it again once the workflow leaves the set:
    * that is said as an alert naming `sail stop`, so the person knows it runs on.
    */
-  const suspendRuns = (workflow: string) => {
+  const suspendRuns = async (workflow: string) => {
     const watched = set.get(workflow);
     if (watched === undefined) return;
     for (const item of watched.target.store.snapshot().items) {
-      if (item.state !== 'dispatched' || item.pid === undefined || !isAlive(item.pid) || item.runId === undefined)
-        continue;
+      if (item.state !== 'dispatched' || item.runId === undefined) continue;
+      // Alive as the process the item records, or as a live holder of its lease, such as a resume started by hand
+      // since: commands are applied before the tick that would adopt it.
+      const alive =
+        (item.pid !== undefined && isAlive(item.pid)) ||
+        (await liveHolder(join(runs, item.runId), item.runId, { workspace, isAlive })) !== undefined;
+      if (!alive) continue;
       let written: boolean;
       try {
         written = requestUnwatch(join(runs, item.runId));
@@ -405,7 +411,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     const leaving = command.workflows.filter((workflow) => set.has(workflow));
     if (leaving.length === 0) return;
     for (const workflow of leaving) {
-      suspendRuns(workflow);
+      await suspendRuns(workflow);
       remove(workflow);
     }
     // An empty set stops the watcher once the whole drain is applied, so a `watch` dropped after this command still
