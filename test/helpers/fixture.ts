@@ -42,8 +42,11 @@ export function holdAfterOpen(sail: string): string {
   const text = readFileSync(file, 'utf8');
   if (text.split(OPENED).length !== 2) throw new Error(`${OPEN_SCRIPT} has no single open-pull-request answer`);
   // Spliced in with a function, not through edit(): a replacement string would read the shell's `$$` as one `$`.
-  const hold = 'if [ -n "${HOLD_AFTER_OPEN:-}" ]; then echo "$$" >"$HOLD_AFTER_OPEN"; exec sleep 60; fi\n';
-  writeFileSync(file, text.replace(OPENED, () => `${OPENED}${hold}`));
+  const hold = `if [ -n "\${HOLD_AFTER_OPEN:-}" ]; then echo "$$" >"$HOLD_AFTER_OPEN"; exec sleep 60; fi\n`;
+  writeFileSync(
+    file,
+    text.replace(OPENED, () => `${OPENED}${hold}`),
+  );
   return file;
 }
 
