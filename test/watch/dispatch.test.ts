@@ -456,6 +456,42 @@ test('a dead run that never took the unwatched it was sent is resumed with the r
   });
 });
 
+test('a dispatcher whose cap was lowered resumes dead runs within it: one at a time, the next once the first has ended (review R3-4)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2);
+    await w.dispatcher().tick();
+    const [run1, run2] = ['FAKE-1', 'FAKE-2'].map((key) => w.spawner.run(key).runId);
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    await w.spawner.end('FAKE-2', { status: 'suspended', stopReason: 'interrupted' });
+    const reopened = openQueue({ runsDir: w.runs, workflow: 'a', label: 'sail', now: w.clock });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    const lowered = createDispatcher({
+      workflow: 'a',
+      label: 'sail',
+      maxConcurrentRuns: 1,
+      branchPrefix: 'sail/',
+      runsDir: w.runs,
+      root: repo.dir,
+      store: reopened,
+      ticketSource: w.ticketSource,
+      workspace: w.adapters.ports.workspace,
+      env: repo.env,
+      now: w.clock,
+      spawn: w.spawner.spawn,
+      resume: w.spawner.resume,
+      isAlive: w.spawner.isAlive,
+    });
+    await lowered.tick();
+    const first = { resumes: w.spawner.resumes.map((resume) => resume.runId), inFlight: lowered.inFlight() };
+    w.spawner.endResume(run1 ?? '');
+    await lowered.tick();
+    expect({ first, after: w.spawner.resumes.map((resume) => resume.runId) }).toEqual({
+      first: { resumes: [run1 ?? ''], inFlight: 1 },
+      after: [run1 ?? '', run2 ?? ''],
+    });
+  });
+});
+
 // Forced items (DECISIONS D9): dispatched without the re-check, and started with --force; the lease still holds them.
 
 test('a forced item whose ticket lost its label, or is In Progress, is started with --force, an unforced one is still dropped, and a forced one whose branch is leased still waits', async () => {
