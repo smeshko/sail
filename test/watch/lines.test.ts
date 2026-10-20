@@ -90,6 +90,36 @@ test.each(SAMPLES.map(([event, text]) => [event.type, event, text] as const))(
   },
 );
 
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('run:adopted, run:resumed from running and from suspended, and queue:requeued each print their line', () => {
+  const events: QueueEvent[] = [
+    { ...envelope, type: 'run:adopted', dedupKey: 'ticket:FAKE-1', run: RUN, pid: 4243 },
+    { ...envelope, type: 'run:resumed', dedupKey: 'ticket:FAKE-1', run: RUN, pid: 4244, from: { status: 'running' } },
+    {
+      ...envelope,
+      type: 'run:resumed',
+      dedupKey: 'ticket:FAKE-1',
+      run: RUN,
+      pid: 4245,
+      from: { status: 'suspended', stopReason: 'unwatched' },
+    },
+    { ...envelope, type: 'queue:requeued', dedupKey: 'ticket:FAKE-2', reason: 'requeued by hand' },
+  ];
+  expect(
+    events.map((event) => {
+      const line = queueLine(event);
+      return line === undefined ? undefined : utc(line);
+    }),
+  ).toEqual([
+    `08:09:10 a  FAKE-1 adopted: run ${RUN}, pid 4243\n`,
+    `08:09:10 a  FAKE-1 resumed: run ${RUN} (was running), pid 4244\n`,
+    `08:09:10 a  FAKE-1 resumed: run ${RUN} (was suspended unwatched), pid 4245\n`,
+    '08:09:10 a  FAKE-2 requeued: requeued by hand\n',
+  ]);
+});
+
 test('a poll that found nothing prints no line, unless it follows a failed poll', () => {
   const nothing: QueueEvent = {
     ...envelope,

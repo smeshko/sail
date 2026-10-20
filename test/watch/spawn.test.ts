@@ -1,5 +1,5 @@
-// Spawning a dispatched run (DECISIONS D10): a process in a session of its own, run where `.sail/` is, in the
-// environment it is given, writing both its streams to its dispatch log. Each child exits on its own: nothing here
+// Spawning a dispatched run (DECISIONS D10), and a resume of one (13.3's D5): a process in a session of its own, run
+// where `.sail/` is, in the environment it is given, writing both its streams to its dispatch log. Each child exits on its own: nothing here
 // signals a process.
 import { afterEach, expect, test } from 'bun:test';
 import {
@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { dispatchLog, lastLine, spawnRun } from '../../src/watch/spawn';
+import { dispatchLog, lastLine, spawnResume, spawnRun } from '../../src/watch/spawn';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -88,6 +88,31 @@ test('a spawned run gets the ticket, its workflow and --dispatch with the run id
   expect(pgid).not.toBe(Number(Bun.spawnSync(['ps', '-o', 'pgid=', '-p', String(process.pid)]).stdout.toString()));
 });
 
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('a forced dispatched run gets --force last on its command line', async () => {
+  const dir = tempDir();
+  const root = join(dir, 'repo');
+  mkdirSync(root);
+  const runs = join(root, '.sail-runs');
+  const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: join(dir, 'home'), SAIL_SPAWN_MARK: 'forced' };
+  const spawned = spawnRun({
+    root,
+    runsDir: runs,
+    workflow: 'a',
+    ticketKey: 'FAKE-3',
+    runId: RUN,
+    env,
+    cli: ['/bin/sh', fakeSail(dir)],
+    force: true,
+  });
+  expect(await spawned.exited).toBe(3);
+  expect(readFileSync(dispatchLog(runs, 'a', RUN), 'utf8').split('\n')[0]).toBe(
+    `argv: FAKE-3 --workflow a --dispatch ${RUN} --force`,
+  );
+});
+
 test('lastLine gives the last line that is not blank, cut to 500 characters, and nothing for an empty or missing log', () => {
   const dir = tempDir();
   const log = join(dir, 'run.log');
@@ -102,4 +127,32 @@ test('lastLine gives the last line that is not blank, cut to 500 characters, and
     undefined,
     undefined,
   ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a spawned resume gets resume and the run id, runs in the root in a process group of its own, and appends to the run's dispatch log", async () => {
+  const dir = tempDir();
+  const root = join(dir, 'repo');
+  mkdirSync(root);
+  const runs = join(root, '.sail-runs');
+  const log = dispatchLog(runs, 'a', RUN);
+  mkdirSync(join(runs, 'queue', 'a', 'dispatch'), { recursive: true });
+  writeFileSync(log, 'what the dispatched run printed\n');
+  const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: join(dir, 'home'), SAIL_SPAWN_MARK: 'resumed' };
+  const spawned = spawnResume({ root, runsDir: runs, workflow: 'a', runId: RUN, env, cli: ['/bin/sh', fakeSail(dir)] });
+  expect(await spawned.exited).toBe(3);
+  const lines = readFileSync(log, 'utf8').split('\n');
+  expect(lines.filter((line) => !line.startsWith('pgid') && !line.startsWith('pid'))).toEqual([
+    'what the dispatched run printed',
+    `argv: resume ${RUN}`,
+    `cwd: ${root}`,
+    `mark: resumed home: ${join(dir, 'home')}`,
+    'to stderr',
+    '',
+    '',
+  ]);
+  const pgid = Number(lines.find((line) => line.startsWith('pgid: '))?.slice('pgid: '.length));
+  expect([pgid, spawned.pid > 0]).toEqual([spawned.pid, true]);
 });

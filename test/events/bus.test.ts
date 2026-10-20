@@ -239,13 +239,11 @@ test('emit never throws: not on a thrown value String() rejects, nor when unrepo
 test("the bus owns the envelope: an open payload's seq, ts and runId don't replace it", () => {
   const bus = createBus({ runId: RUN_ID, firstSeq: 1, consumers: [], now });
   const emitted = bus.emit({
-    type: 'run:adopted',
+    type: 'all:start',
     seq: 99,
     ts: 'yesterday',
     runId: 'someone-else',
     state: 'green',
   });
-  expect(JSON.stringify(emitted)).toBe(
-    `{"seq":1,"ts":"${TS}","type":"run:adopted","runId":"${RUN_ID}","state":"green"}`,
-  );
+  expect(JSON.stringify(emitted)).toBe(`{"seq":1,"ts":"${TS}","type":"all:start","runId":"${RUN_ID}","state":"green"}`);
 });

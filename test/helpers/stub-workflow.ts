@@ -11,6 +11,11 @@
 // script writes its own pid and its `sleep`'s to `.stub/sleeping`, so a test can interrupt it there and check that
 // neither process survives.
 //
+// `setHoldAt()` names a call that holds at a gate, in every run of the repository, until `releaseHeld()` opens it. A held
+// script writes its pid to `.stub/held/<run id>.<try>`, so a test knows which runs are in flight and where, and waits
+// at most 60 s, then fails. Once the gate is open, no call holds. Unlike a sleep, the hold outlives a run's process
+// killed alone: the script is in a process group of its own.
+//
 // The scripts keep `.stub/` in the repository root, two directories above `$SAIL_CONFIG`, not in `$WORKSPACE`: a
 // run's steps run in a worktree of their own, and a test reads `<repo>/.stub/` whichever workspace the run had.
 //
@@ -107,6 +112,17 @@ if [ -f "$STUB/sleep-at" ] && [ "$(cat "$STUB/sleep-at")" = "$STAGE#$CALL" ]; th
   echo "$$ $!" >"$STUB/sleeping.tmp"
   mv "$STUB/sleeping.tmp" "$STUB/sleeping"
   wait
+fi
+if [ -f "$STUB/hold-at" ] && [ "$(cat "$STUB/hold-at")" = "$STAGE#$CALL" ] && [ ! -f "$STUB/release" ]; then
+  mkdir -p "$STUB/held"
+  echo "$$" >"$STUB/held/.$RUN_ID.$TRY.tmp"
+  mv "$STUB/held/.$RUN_ID.$TRY.tmp" "$STUB/held/$RUN_ID.$TRY"
+  waited=0
+  while [ ! -f "$STUB/release" ]; do
+    if [ "$waited" -ge 600 ]; then exit 1; fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
 fi
 ${body}`;
 
@@ -438,6 +454,45 @@ export function copyRun(from: string, to: string): void {
     .filter((path) => existsSync(join(path, '.git')));
   const repaired = Bun.spawnSync(['git', 'worktree', 'repair', ...workspaces], { cwd: to, stdin: 'ignore' });
   if (repaired.exitCode !== 0) throw new Error(`git worktree repair: ${repaired.stderr.toString().trim()}`);
+}
+
+/** Makes the call `key` hold at the gate in every run, and closes the gate: `.stub/release` and `.stub/held/` go. */
+export function setHoldAt(repoDir: string, key: string): void {
+  const stub = join(repoDir, '.stub');
+  mkdirSync(stub, { recursive: true });
+  rmSync(join(stub, 'release'), { force: true });
+  rmSync(join(stub, 'held'), { recursive: true, force: true });
+  writeFileSync(join(stub, 'hold-at'), `${key}\n`);
+}
+
+/** Opens the gate: every held call goes on, and no call holds from now on. */
+export function releaseHeld(repoDir: string): void {
+  mkdirSync(join(repoDir, '.stub'), { recursive: true });
+  writeFileSync(join(repoDir, '.stub', 'release'), '');
+}
+
+/** A call held at the gate: its run, its try and the pid of its script. */
+export interface Held {
+  runId: string;
+  try: number;
+  pid: number;
+}
+
+/** The calls that have reached the gate, held or since released, by run id and try. */
+export function heldRuns(repoDir: string): Held[] {
+  const dir = join(repoDir, '.stub', 'held');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => !name.startsWith('.'))
+    .sort()
+    .map((name) => {
+      const at = name.lastIndexOf('.');
+      return {
+        runId: name.slice(0, at),
+        try: Number(name.slice(at + 1)),
+        pid: Number(readFileSync(join(dir, name), 'utf8').trim()),
+      };
+    });
 }
 
 /** What the stub's scripts actually ran, one `<stage>#<call>` per line: `<repo>/.stub/executions.log`. */

@@ -550,10 +550,7 @@ test.each<[string, NewEvent | undefined]>([
   ['close()', undefined],
 ])('in a terminal, %s leaves no live line and no timer', (_, ending) => {
   const t = inTerminal();
-  const [start, last] = stream([stageStart('implement#2'), ending ?? { type: 'run:resumed' }]) as [
-    SailEvent,
-    SailEvent,
-  ];
+  const [start, last] = stream([stageStart('implement#2'), ending ?? { type: 'all:start' }]) as [SailEvent, SailEvent];
   t.terminal.onEvent(start);
   expect(visibleLive(t.out)).toBe('implement#2 running · 0s');
   if (ending === undefined) t.terminal.close();
@@ -596,8 +593,6 @@ test('at trace, an event of every type prints a line of its own', () => {
   const w = 18;
   const cases: [NewEvent, string][] = [
     [rosterStart(), 'sail · ticket-to-pr v1 · RUN-1'],
-    [{ type: 'run:adopted', by: 'watch' }, head('', '· run:adopted {"by":"watch"}', w)],
-    [{ type: 'run:resumed' }, head('', '· run:resumed {}', w)],
     [
       { type: 'intake:start', key: 'intake#1', intake: 'ticket', kind: 'script', origin: 'builtin', consumed: {} },
       head('intake#1', '▶ intake ticket · script', w),

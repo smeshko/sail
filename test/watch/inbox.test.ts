@@ -207,3 +207,37 @@ test('an apply that returns a promise is awaited before its command file is remo
   expect([seen, drained]).toEqual([['watch true', 'unwatch false'], { applied: 2, rejected: [] }]);
   expect(readdirSync(commandsDir(runs))).toEqual([]);
 });
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('add, requeue and drop commands drain and apply as written, and one missing its item, forcing with anything but true, or with a field it does not take is rejected', async () => {
+  const runs = runsDir();
+  const commands: Command[] = [
+    { op: 'add', workflow: 'a', ticketKey: 'FAKE-9' },
+    { op: 'add', workflow: 'a', ticketKey: 'FAKE-3', force: true },
+    { op: 'requeue', workflow: 'a', dedupKey: 'ticket:FAKE-1' },
+    { op: 'drop', workflow: 'a', dedupKey: 'ticket:FAKE-2' },
+  ];
+  for (const command of commands) dropCommand(runs, command);
+  const dir = commandsDir(runs);
+  writeFileSync(join(dir, 'x1-no-item.json'), JSON.stringify({ op: 'requeue', workflow: 'a' }));
+  writeFileSync(
+    join(dir, 'x2-force.json'),
+    JSON.stringify({ op: 'add', workflow: 'a', ticketKey: 'FAKE-3', force: false }),
+  );
+  writeFileSync(
+    join(dir, 'x3-extra.json'),
+    JSON.stringify({ op: 'drop', workflow: 'a', dedupKey: 'ticket:FAKE-2', why: 1 }),
+  );
+  const { applied, drained } = await drain(runs);
+  expect({ applied, rejected: drained.rejected.map((rejected) => rejected.reason) }).toEqual({
+    applied: commands,
+    rejected: [
+      expect.stringMatching(/^x1-no-item\.json is not a command: dedupKey /),
+      expect.stringMatching(/^x2-force\.json is not a command: force /),
+      expect.stringMatching(/^x3-extra\.json is not a command: Unrecognized key/),
+    ],
+  });
+  expect(readdirSync(dir)).toEqual([]);
+});

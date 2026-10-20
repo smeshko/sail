@@ -2,10 +2,11 @@
 // inbox's watch, unwatch and poll commands, its registry field and its stop. On the stub's file-backed fakes in a temp
 // repository, fake timers, a temporary registry, and a fake spawner whose runs claim their tickets as they start.
 import { expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { readConfig } from '../../src/engine/config';
+import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import { commandsDir, dropCommand } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
 import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/registry';
@@ -56,6 +57,7 @@ async function watched(
       now: timers.now,
       timers,
       spawn: spawner.spawn,
+      resume: spawner.resume,
       isAlive: spawner.isAlive,
       write: (text) => out.push(text),
       lines: { timeZone: 'UTC' },
@@ -453,6 +455,7 @@ test("a second watcher over the same .sail/ is refused while the first runs, eve
       now: w.timers.now,
       timers: w.timers,
       spawn: w.spawner.spawn,
+      resume: w.spawner.resume,
       isAlive: w.spawner.isAlive,
       write: (text) => w.out.push(text),
       lines: { timeZone: 'UTC' },
@@ -539,6 +542,7 @@ test("a watch command whose workflow's first poll never answers holds up neither
       now: w.timers.now,
       timers: w.timers,
       spawn: w.spawner.spawn,
+      resume: w.spawner.resume,
       isAlive: w.spawner.isAlive,
       write: (text) => w.out.push(text),
       lines: { timeZone: 'UTC' },
@@ -558,5 +562,269 @@ test("a watch command whose workflow's first poll never answers holds up neither
       a: ['FAKE-1'],
       stopping: 'done',
     });
+  });
+});
+
+// 13.3 (DECISIONS D2, D10, D11): an unwatch asks the workflow's runs to suspend, the watcher's own stop asks nothing,
+// and a starting watcher sweeps the worktrees of ended runs.
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("unwatching b asks each live run of b, and none of a's, to suspend through its control file, keeps b's queue.json byte for byte and says so per run, and the watcher's own stop asks nothing", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 2 },
+      ],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b', 'FAKE-3': 'sail-b', 'FAKE-4': 'sail-b' }),
+    );
+    const watcher = await w.start(['a', 'b']);
+    await w.timers.advance(1000);
+    expect([w.order('a'), w.order('b')]).toEqual([['FAKE-1'], ['FAKE-2', 'FAKE-3']]);
+    const [run1, run2, run3] = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => join(w.runs, w.spawner.run(key).runId));
+    for (const dir of [run1, run2, run3]) mkdirSync(dir ?? '', { recursive: true });
+    const queueOfB = () => readFileSync(join(queueDir(w.runs, 'b'), 'queue.json'), 'utf8');
+    const before = queueOfB();
+    dropCommand(w.runs, { op: 'unwatch', workflows: ['b'] });
+    await w.timers.advance(1000);
+    const control = (dir = '') =>
+      existsSync(join(dir, 'CONTROL')) ? readFileSync(join(dir, 'CONTROL'), 'utf8') : 'none';
+    const afterUnwatch = [control(run1), control(run2), control(run3)];
+    await watcher.stop();
+    expect({
+      afterUnwatch,
+      afterStop: control(run1),
+      queue: queueOfB() === before,
+      lines: w.out.filter((line) => line.includes('suspends')),
+      watching: watcher.watching(),
+    }).toEqual({
+      afterUnwatch: ['none', 'unwatched\n', 'unwatched\n'],
+      afterStop: 'none',
+      queue: true,
+      lines: [
+        `09:00:02 b  FAKE-2 suspends at its next call boundary: run ${w.spawner.run('FAKE-2').runId}\n`,
+        `09:00:02 b  FAKE-3 suspends at its next call boundary: run ${w.spawner.run('FAKE-3').runId}\n`,
+      ],
+      watching: [],
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a watcher starting over completed, failed, running, suspended interrupted and suspended unwatched runs, each with a worktree, sweeps the first two worktrees, keeps the other three and says so', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    const { workspace } = w.adapters.ports;
+    const ends: [Status, StopReason?][] = [
+      ['completed'],
+      ['failed', 'stage_error'],
+      ['running'],
+      ['suspended', 'interrupted'],
+      ['suspended', 'unwatched'],
+    ];
+    const worktrees: string[] = [];
+    for (const [index, [status, stopReason]] of ends.entries()) {
+      const runId = `FAKE-${index + 1}-01M3BWNZM08Q4T6V2XRJ5KWD3N`;
+      const runDir = join(w.runs, runId);
+      mkdirSync(runDir, { recursive: true });
+      const made = await workspace.create({ runId, runDir }, { branch: `sail/FAKE-${index + 1}` });
+      worktrees.push(made.path);
+      writeStatus(runDir, status, stopReason);
+    }
+    const watcher = await w.start(['a']);
+    expect({
+      kept: worktrees.map((path) => existsSync(path)),
+      lines: w.out.filter((line) => line.includes('swept')),
+    }).toEqual({
+      kept: [false, false, true, true, true],
+      lines: ['09:00:00 swept 2 worktrees of ended runs\n'],
+    });
+    await watcher.stop();
+  });
+});
+
+// Queue commands by hand (DECISIONS D8, D9): add, requeue and drop, each safe to apply twice, for a watched workflow.
+
+/** The reasons the watcher printed for the commands it rejected, in order. */
+const rejections = (out: string[]) =>
+  out.filter((line) => line.includes(' error: ')).map((line) => line.replace(/^.* error: [^ ]+\.json failed: /, ''));
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('an add command queues a designated, unstarted ticket once, even applied twice; an undesignated or a started one is rejected with its reason and queues nothing, unless forced, which queues it forced', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    const watcher = await w.start(['a']);
+    writeTickets(w.sail, [
+      { key: 'FAKE-1', labels: ['sail-a'] },
+      { key: 'FAKE-2', labels: [] },
+      { key: 'FAKE-3', labels: ['sail-a'], state: { type: 'started', name: 'In Progress' } },
+      { key: 'FAKE-4', labels: [] },
+    ]);
+    for (const ticketKey of ['FAKE-1', 'FAKE-1', 'FAKE-2', 'FAKE-3']) {
+      dropCommand(w.runs, { op: 'add', workflow: 'a', ticketKey });
+    }
+    dropCommand(w.runs, { op: 'add', workflow: 'a', ticketKey: 'FAKE-4', force: true });
+    await w.timers.advance(1000);
+    const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8')).items;
+    expect({
+      added: w
+        .events('a')
+        .filter((event) => event.type === 'queue:item_added')
+        .map((event) => event.dedupKey),
+      items: items.map((item: Record<string, unknown>) => [item.dedupKey, item.forced]),
+      rejected: rejections(w.out),
+    }).toEqual({
+      added: ['ticket:FAKE-1', 'ticket:FAKE-4'],
+      items: [
+        ['ticket:FAKE-1', undefined],
+        ['ticket:FAKE-4', true],
+      ],
+      rejected: [
+        "the ticket is not designated: it carries no 'sail-a' label. --force runs it anyway\n",
+        'the ticket is already claimed: it is In Progress. --force runs it anyway\n',
+      ],
+    });
+    await watcher.stop();
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('a requeue command makes a parked item queued with no attempts and queue:requeued, once even applied twice, and one of a done, a dispatched or a missing item, or of a parked one whose run is still suspended, is rejected naming why', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 2 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a', 'FAKE-3': 'sail-a', 'FAKE-4': 'sail-a', 'FAKE-5': 'sail-a' }),
+    );
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stopped' });
+    await w.spawner.end('FAKE-2');
+    await w.timers.advance(1000);
+    await w.spawner.end('FAKE-4', { status: 'suspended', stopReason: 'interrupted' });
+    await w.timers.advance(1000);
+    const run4 = w.spawner.run('FAKE-4').runId;
+    expect(w.spawner.resumes.map((resume) => resume.runId)).toEqual([run4]);
+    w.spawner.endResume(run4, { status: 'suspended', stopReason: 'interrupted', log: 'sail resume: it failed' });
+    await w.timers.advance(1000);
+    const queue = () => JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8'));
+    const before = queue().items.map((item: Record<string, unknown>) => `${item.dedupKey} ${item.state}`);
+    for (const key of ['FAKE-1', 'FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-9', 'FAKE-4']) {
+      dropCommand(w.runs, { op: 'requeue', workflow: 'a', dedupKey: `ticket:${key}` });
+    }
+    await w.timers.advance(1000);
+    const first = queue().items.find((item: Record<string, unknown>) => item.dedupKey === 'ticket:FAKE-1');
+    expect({
+      before,
+      first,
+      requeued: w.events('a').filter((event) => event.type === 'queue:requeued'),
+      rejected: rejections(w.out),
+    }).toEqual({
+      before: [
+        'ticket:FAKE-1 parked',
+        'ticket:FAKE-2 done',
+        'ticket:FAKE-3 dispatched',
+        'ticket:FAKE-4 parked',
+        'ticket:FAKE-5 dispatched',
+      ],
+      first: {
+        dedupKey: 'ticket:FAKE-1',
+        source: { kind: 'ticket', ticketKey: 'FAKE-1' },
+        title: 'Ticket FAKE-1',
+        url: expect.any(String),
+        state: 'queued',
+        attempts: 0,
+        addedAt: START,
+      },
+      requeued: [
+        expect.objectContaining({ type: 'queue:requeued', dedupKey: 'ticket:FAKE-1', reason: 'requeued by hand' }),
+      ],
+      rejected: [
+        "a's item ticket:FAKE-2 is done: only a parked or failed item is requeued\n",
+        "a's item ticket:FAKE-3 is dispatched: only a parked or failed item is requeued\n",
+        "a's queue has no item ticket:FAKE-9\n",
+        `ticket:FAKE-4 can't be requeued: its run ${run4} is suspended interrupted, and holds its branch: sail resume ${run4} or sail stop ${run4} first\n`,
+      ],
+    });
+    await watcher.stop();
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('a drop command takes a parked item out with queue:dropped, dropped by hand, does nothing applied twice, and one of a dispatched item is rejected naming its run', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a' }),
+    );
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stopped' });
+    await w.timers.advance(1000);
+    for (const key of ['FAKE-1', 'FAKE-1', 'FAKE-2']) {
+      dropCommand(w.runs, { op: 'drop', workflow: 'a', dedupKey: `ticket:${key}` });
+    }
+    await w.timers.advance(1000);
+    const run2 = w.spawner.run('FAKE-2').runId;
+    const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8')).items;
+    expect({
+      items: items.map((item: Record<string, unknown>) => `${item.dedupKey} ${item.state}`),
+      dropped: w
+        .events('a')
+        .filter((event) => event.type === 'queue:dropped')
+        .map(({ dedupKey, reason }) => ({ dedupKey, reason })),
+      rejected: rejections(w.out),
+    }).toEqual({
+      items: ['ticket:FAKE-2 dispatched'],
+      dropped: [{ dedupKey: 'ticket:FAKE-1', reason: 'dropped by hand' }],
+      rejected: [`ticket:FAKE-2 can't be dropped: its run ${run2} has not ended: sail stop ${run2} first\n`],
+    });
+    await watcher.stop();
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('an add, a requeue and a drop for a workflow outside the set are each rejected, and change no queue', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b' }),
+    );
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    const queueOfA = () => readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8');
+    const before = queueOfA();
+    dropCommand(w.runs, { op: 'add', workflow: 'b', ticketKey: 'FAKE-2' });
+    dropCommand(w.runs, { op: 'requeue', workflow: 'b', dedupKey: 'ticket:FAKE-2' });
+    dropCommand(w.runs, { op: 'drop', workflow: 'b', dedupKey: 'ticket:FAKE-2' });
+    await w.timers.advance(1000);
+    expect({
+      rejected: rejections(w.out),
+      a: queueOfA() === before,
+      b: existsSync(join(queueDir(w.runs, 'b'), 'queue.json')),
+    }).toEqual({
+      rejected: Array(3).fill("not watching workflow 'b'\n"),
+      a: true,
+      b: false,
+    });
+    await watcher.stop();
   });
 });

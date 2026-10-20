@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { readConfig } from '../../src/engine/config';
+import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
 import { type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
 import { readStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
@@ -1225,6 +1226,155 @@ test('an abort seen together with the stop loses: once the named call is journal
     expect(readStatus(end.dir)).toEqual({ status: 'suspended', stopReason: 'until' });
   });
 });
+
+// The control file (DECISIONS D2): taken before the intake and before each call, written here as the call before it
+// is journaled, or as the run starts.
+
+/** The lease files the fake workspace keeps under `.sail-runs/fake/leases/`. */
+const leaseFiles = (repoDir: string): string[] => {
+  const dir = join(repoDir, '.sail-runs', 'fake', 'leases');
+  return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.json')) : [];
+};
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a CONTROL that says unwatched before a call suspends the run with unwatched: the call never runs, its workspace and lease stay, and a resume completes it without running a journaled call again', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    const end = await ran(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key === 'implement#1') requestUnwatch(onlyRun(repo.dir));
+      },
+    });
+    expect(end).toMatchObject({
+      status: 'suspended',
+      stopReason: 'unwatched',
+      message: 'its workflow was unwatched: stopped before tests#1',
+    });
+    const last = events(end.dir).at(-1);
+    expect({
+      status: readFileSync(join(end.dir, 'STATUS'), 'utf8'),
+      journaled: keys(end.dir),
+      ran: stubExecutions(repo.dir),
+      end: [last?.type, last?.type === 'run:end' ? last.stopReason : undefined],
+      workspace: existsSync(join(end.dir, 'workspace')),
+      leases: leaseFiles(repo.dir).length,
+      control: existsSync(join(end.dir, CONTROL_FILE)),
+      summary: summaryOf(end.dir)?.stopReason,
+      issues: validateRunDir(end.dir).issues,
+    }).toEqual({
+      status: 'suspended unwatched\n',
+      journaled: ['intake#1', 'spec#1', 'implement#1'],
+      ran: ['spec#1', 'implement#1'],
+      end: ['run:end', 'unwatched'],
+      workspace: true,
+      leases: 1,
+      control: false,
+      summary: 'unwatched',
+      issues: [],
+    });
+    await withTempRepo(async (copy) => {
+      copyRun(repo.dir, copy.dir);
+      const resumed = await resumeWorkflow({ cwd: copy.dir, adapters: await fakeAdapters(copy.dir), runId: end.runId });
+      expect([resumed, stubExecutions(copy.dir)]).toMatchObject([
+        { status: 'completed' },
+        ['spec#1', 'implement#1', 'tests#1', 'self-review#1', 'publish#1'],
+      ]);
+    });
+  });
+}, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a CONTROL that says stopped before a call fails the run with stopped, releasing its workspace and lease, and a resume is refused as final', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await ran(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key === 'spec#1') requestStop(onlyRun(repo.dir));
+      },
+    });
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'stopped',
+      message: 'stopped by sail stop before implement#1',
+    });
+    const resumed = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: end.runId });
+    expect({
+      status: readFileSync(join(end.dir, 'STATUS'), 'utf8'),
+      journaled: keys(end.dir),
+      ran: stubExecutions(repo.dir),
+      workspace: existsSync(join(end.dir, 'workspace')),
+      leases: leaseFiles(repo.dir),
+      summary: summaryOf(end.dir)?.stopReason,
+      issues: validateRunDir(end.dir).issues,
+      resumed,
+    }).toEqual({
+      status: 'failed stopped\n',
+      journaled: ['intake#1', 'spec#1'],
+      ran: ['spec#1'],
+      workspace: false,
+      leases: [],
+      summary: 'stopped',
+      issues: [],
+      resumed: { refused: `run ${end.runId} failed (stopped): a failed run is final` },
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('a CONTROL written as the run starts stops it before intake#1', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const control: Consumer = {
+      name: 'control',
+      onEvent: (event) => {
+        if (event.type === 'run:start') requestStop(onlyRun(repo.dir));
+      },
+    };
+    const end = await ran(repo.dir, { consumers: [control] });
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'stopped',
+      message: 'stopped by sail stop before intake#1',
+    });
+    expect([keys(end.dir), existsSync(join(end.dir, '00-intake')), validateRunDir(end.dir).issues]).toEqual([
+      [],
+      false,
+      [],
+    ]);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('an abort seen at the same boundary as a CONTROL goes first, suspending the run interrupted, and the request waits for the resume, which it suspends before spec#1', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const controller = new AbortController();
+    const end = await ran(repo.dir, {
+      signal: controller.signal,
+      onCall: () => {
+        requestUnwatch(onlyRun(repo.dir));
+        controller.abort();
+      },
+    });
+    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped before spec#1' });
+    await withTempRepo(async (copy) => {
+      copyRun(repo.dir, copy.dir);
+      const resumed = await resumeWorkflow({ cwd: copy.dir, adapters: await fakeAdapters(copy.dir), runId: end.runId });
+      expect([resumed, stubExecutions(copy.dir)]).toMatchObject([
+        { status: 'suspended', stopReason: 'unwatched', message: 'its workflow was unwatched: stopped before spec#1' },
+        [],
+      ]);
+    });
+  });
+}, 30_000);
 
 // Agent calls in a run: brief-to-spec on the fake harness, whose script says what each try of spec#1 does.
 

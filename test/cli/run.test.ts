@@ -136,6 +136,26 @@ test('the usage lists sail port render', async () => {
   expect(stdout).toContain('\n  sail port render --untrusted --source <text> [--inline]  ');
 });
 
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('the usage lists sail stop, saying when a run stops', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toMatch(
+    /^ {2}sail stop <run> {2,}Stop a run: at its next call boundary while it runs, at once when it is suspended$/m,
+  );
+});
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('the usage lists sail queue: ls and poll, add with --force, requeue and drop', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toMatch(/^ {2}sail queue ls\|poll <workflow> {2,}\S/m);
+  expect(stdout).toMatch(/^ {2}sail queue add <workflow> <ticket> \[--force\] {2,}\S/m);
+  expect(stdout).toMatch(/^ {2}sail queue requeue\|drop <workflow> <item> {2,}\S/m);
+});
+
 test("the usage lists sail watch and sail unwatch, and not --dispatch, which is the watcher's", async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(

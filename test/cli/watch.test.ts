@@ -84,7 +84,14 @@ async function running(repo: TempRepo, names: string[]) {
   const timers = fakeTimers(START);
   const spawner = fakeSpawner(join(repo.dir, '.sail-runs'));
   const isAlive = (pid: number) => pid === WATCHER_PID || spawner.isAlive(pid);
-  const deps: WatchDeps = { timers, now: timers.now, spawn: spawner.spawn, isAlive, pid: WATCHER_PID };
+  const deps: WatchDeps = {
+    timers,
+    now: timers.now,
+    spawn: spawner.spawn,
+    resume: spawner.resume,
+    isAlive,
+    pid: WATCHER_PID,
+  };
   const interrupts = fakeInterrupts();
   const watcher = io(repo.dir, world.env, interrupts.onInterrupt);
   let ended = false;

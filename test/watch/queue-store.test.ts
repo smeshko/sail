@@ -3,7 +3,14 @@ import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { dedupKey, openQueue, type QueuePolicy, type QueueStore, queueDir } from '../../src/watch/queue-store';
+import {
+  dedupKey,
+  openQueue,
+  type QueueItem,
+  type QueuePolicy,
+  type QueueStore,
+  queueDir,
+} from '../../src/watch/queue-store';
 import { manualClock, queueEventIssues, queueEvents, ticket } from '../helpers/queue';
 
 const dirs: string[] = [];
@@ -542,4 +549,193 @@ test('onEvent hears every event the store emits, in seq order, and one that thro
     readFileSync(join(queueDir(heard, 'ticket-to-pr'), 'events.ndjson'), 'utf8'),
   );
   expect(queueEventIssues(queueDir(heard, 'ticket-to-pr'))).toEqual([]);
+});
+
+// What 13.3 adds (DECISIONS D3, D6, D8, D9): adoption and resume, parking at once, a requeue by hand, and forced items.
+
+/** Every event of the queue after the first `skip`, without its envelope. */
+const eventsAfter = (runs: string, skip: number) =>
+  queueEvents(queueDir(runs, 'ticket-to-pr'))
+    .slice(skip)
+    .map(({ seq, ts, ...event }) => event);
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('adopted and resumed record the pid a dispatched run is alive as, with run:adopted and run:resumed naming the run and where it was, and an item not dispatched throws', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2')]);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.spawned('ticket:FAKE-1', 4243);
+  const before = queueEvents(queueDir(runs, 'ticket-to-pr')).length;
+  store.adopted('ticket:FAKE-1', 4300);
+  const adopted = open(runs).snapshot().items[0]?.pid;
+  store.resumed('ticket:FAKE-1', 4301, { status: 'suspended', stopReason: 'interrupted' });
+  const notDispatched = "ticket-to-pr's item ticket:FAKE-2 is queued, not dispatched";
+  expect(() => store.adopted('ticket:FAKE-2', 4302)).toThrow(notDispatched);
+  expect(() => store.resumed('ticket:FAKE-2', 4302, { status: 'running' })).toThrow(notDispatched);
+  const [first, second] = open(runs).snapshot().items;
+  expect({
+    adopted,
+    first: [first?.state, first?.attempts, first?.runId, first?.pid],
+    second: [second?.state, second?.pid],
+    events: eventsAfter(runs, before),
+    issues: queueEventIssues(queueDir(runs, 'ticket-to-pr')),
+  }).toEqual({
+    adopted: 4300,
+    first: ['dispatched', 1, RUN, 4301],
+    second: ['queued', undefined],
+    events: [
+      { type: 'run:adopted', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-1', run: RUN, pid: 4300 },
+      {
+        type: 'run:resumed',
+        workflow: 'ticket-to-pr',
+        dedupKey: 'ticket:FAKE-1',
+        run: RUN,
+        pid: 4301,
+        from: { status: 'suspended', stopReason: 'interrupted' },
+      },
+    ],
+    issues: [],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('parked parks an item on its first attempt, with queue:parked and the reason, and it is never due again', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1')]);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.spawned('ticket:FAKE-1', 4243);
+  store.parked('ticket:FAKE-1', `run ${RUN} was stopped`);
+  expect({
+    item: open(runs).snapshot().items[0],
+    event: lastEvent(runs),
+    due: store.due(),
+    issues: queueEventIssues(queueDir(runs, 'ticket-to-pr')),
+  }).toEqual({
+    item: {
+      dedupKey: 'ticket:FAKE-1',
+      source: { kind: 'ticket', ticketKey: 'FAKE-1' },
+      title: 'Ticket FAKE-1',
+      url: 'fake://tickets/FAKE-1',
+      state: 'parked',
+      attempts: 1,
+      addedAt: START,
+      runId: RUN,
+      pid: 4243,
+      reason: `run ${RUN} was stopped`,
+      finishedAt: START,
+    },
+    event: {
+      type: 'queue:parked',
+      workflow: 'ticket-to-pr',
+      dedupKey: 'ticket:FAKE-1',
+      attempts: 1,
+      reason: `run ${RUN} was stopped`,
+    },
+    due: [],
+    issues: [],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('requeue puts a parked or a failed item back queued with no attempts and nothing of its last run, with queue:requeued, and a queued, dispatched or done item throws naming its state and changes nothing', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add(['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4', 'FAKE-5'].map((key) => ticket(key)));
+  for (const attempt of [RUN, RUN_2]) {
+    store.dispatched('ticket:FAKE-1', attempt);
+    store.spawned('ticket:FAKE-1', 4243);
+    store.failed('ticket:FAKE-1', 'spec blocked');
+  }
+  store.dispatched('ticket:FAKE-2', 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N');
+  store.failed('ticket:FAKE-2', 'run failed');
+  store.dispatched('ticket:FAKE-4', 'FAKE-4-01M3BWNZM08Q4T6V2XRJ5KWD3N');
+  store.dispatched('ticket:FAKE-5', 'FAKE-5-01M3BWNZM08Q4T6V2XRJ5KWD3N');
+  store.done('ticket:FAKE-5');
+  const before = queueEvents(queueDir(runs, 'ticket-to-pr')).length;
+  const states = keys(store);
+  store.requeue('ticket:FAKE-1', 'requeued by hand');
+  store.requeue('ticket:FAKE-2', 'requeued by hand');
+  const requeued = queueText(runs);
+  const refusals = ['FAKE-3', 'FAKE-4', 'FAKE-5'].map((key) => {
+    try {
+      store.requeue(`ticket:${key}`, 'requeued by hand');
+      return 'requeued';
+    } catch (error) {
+      return (error as Error).message;
+    }
+  });
+  const fresh = (key: string): QueueItem => ({
+    dedupKey: `ticket:${key}`,
+    source: { kind: 'ticket', ticketKey: key },
+    title: `Ticket ${key}`,
+    url: `fake://tickets/${key}`,
+    state: 'queued',
+    attempts: 0,
+    addedAt: START,
+  });
+  expect({
+    states,
+    items: open(runs).snapshot().items.slice(0, 2),
+    refusals,
+    unchanged: queueText(runs) === requeued,
+    events: eventsAfter(runs, before),
+    issues: queueEventIssues(queueDir(runs, 'ticket-to-pr')),
+  }).toEqual({
+    states: [
+      'ticket:FAKE-1 parked',
+      'ticket:FAKE-2 failed',
+      'ticket:FAKE-3 queued',
+      'ticket:FAKE-4 dispatched',
+      'ticket:FAKE-5 done',
+    ],
+    items: [fresh('FAKE-1'), fresh('FAKE-2')],
+    refusals: [
+      "ticket-to-pr's item ticket:FAKE-3 is queued: only a parked or failed item is requeued",
+      "ticket-to-pr's item ticket:FAKE-4 is dispatched: only a parked or failed item is requeued",
+      "ticket-to-pr's item ticket:FAKE-5 is done: only a parked or failed item is requeued",
+    ],
+    unchanged: true,
+    events: [
+      { type: 'queue:requeued', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-1', reason: 'requeued by hand' },
+      { type: 'queue:requeued', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-2', reason: 'requeued by hand' },
+    ],
+    issues: [],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a forced add marks its items forced, and a queue.json written before the field existed still reads', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1')], { forced: true });
+  store.add([ticket('FAKE-2')]);
+  const forced = open(runs)
+    .snapshot()
+    .items.map((item) => [item.dedupKey, item.forced]);
+  const path = join(queueDir(runs, 'ticket-to-pr'), 'queue.json');
+  const older = JSON.parse(readFileSync(path, 'utf8'));
+  for (const item of older.items) delete item.forced;
+  writeFileSync(path, JSON.stringify(older));
+  expect([
+    forced,
+    open(runs)
+      .snapshot()
+      .items.map((item) => item.dedupKey),
+  ]).toEqual([
+    [
+      ['ticket:FAKE-1', true],
+      ['ticket:FAKE-2', undefined],
+    ],
+    ['ticket:FAKE-1', 'ticket:FAKE-2'],
+  ]);
 });

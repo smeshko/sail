@@ -986,6 +986,34 @@ test.each<[string, StubRun, string]>([
   });
 });
 
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('a forced dispatched start opens an undesignated ticket under the dispatched id, via watch with designation overridden, and claims it', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const runId = 'FAKE-3-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const run = await openStub(repo.dir, { ticket: 'FAKE-3', force: true, dispatch: { runId } });
+    expect('refused' in run ? run.refused : 'opened').toBe('opened');
+    if ('refused' in run) return;
+    const header = readRunHeader(run.dir);
+    const ticket = await ticketIn(repo.dir, 'FAKE-3');
+    expect({
+      runId: run.runId,
+      dir: run.dir,
+      source: header.source,
+      claim: header.claim,
+      ticket: [ticket.state, ticket.comments.at(-1)?.body],
+    }).toEqual({
+      runId,
+      dir: join(repo.dir, '.sail-runs', runId),
+      source: { kind: 'ticket', ticketKey: 'FAKE-3', via: 'watch', forced: ['designation'] },
+      claim: { claimed: true, state: IN_PROGRESS },
+      ticket: [IN_PROGRESS, `sail run ${runId} started`],
+    });
+  });
+});
+
 test('a dispatched start whose run directory exists is refused, and the run directory is left as it was', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);

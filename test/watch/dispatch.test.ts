@@ -2,9 +2,10 @@
 // cap, skipping a leased branch without a slot or an attempt, and dropping an item no longer eligible. On the stub's
 // file-backed fakes in a temp repository, a hand-moved clock and a fake spawner.
 import { expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
+import { requestStop, requestUnwatch } from '../../src/engine/control';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
@@ -319,5 +320,167 @@ test('an item whose title changed since it was queued waits on a lease of the br
     expect(eventsOf(w.runs, 'queue:skipped_leased')).toEqual([
       { dedupKey: 'ticket:FAKE-1', branch: fresh, heldBy: holder.runId },
     ]);
+  });
+});
+
+// Reconcile (DECISIONS D4-D6): what a dispatcher does with a dispatched run it finds alive, dead, stopped, or resumed.
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a resume whose process ends with its run still suspended parks the item with its log's last line and resumes nothing more, while a new dispatcher over the same queue resumes it once", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const first = w.dispatcher();
+    await first.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    await first.tick();
+    const { runId } = w.spawner.run('FAKE-1');
+    expect(w.spawner.resumes.map((resume) => resume.runId)).toEqual([runId]);
+    const gone = `sail resume: run ${runId}'s workspace can't be reopened: the workspace is gone (invalid)`;
+    w.spawner.endResume(runId, { status: 'suspended', stopReason: 'interrupted', log: gone });
+    const reopened = openQueue({ runsDir: w.runs, workflow: 'a', label: 'sail', now: w.clock });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    const again = w.dispatcher(reopened);
+    await again.tick();
+    const resumedAgain = w.spawner.resumes.length;
+    w.spawner.endResume(runId, { status: 'suspended', stopReason: 'interrupted', log: 'sail resume: it failed again' });
+    await again.tick();
+    await again.tick();
+    expect({
+      resumedAgain,
+      resumes: w.spawner.resumes.length,
+      item: reopened.snapshot().items.map(({ state, attempts, reason }) => ({ state, attempts, reason })),
+      parked: eventsOf(w.runs, 'queue:parked'),
+      spawned: spawnedKeys(w.spawner),
+      issues: queueEventIssues(queueDir(w.runs, 'a')),
+    }).toEqual({
+      resumedAgain: 2,
+      resumes: 2,
+      item: [{ state: 'parked', attempts: 1, reason: 'its resume failed: sail resume: it failed again' }],
+      parked: [{ dedupKey: 'ticket:FAKE-1', attempts: 1, reason: 'its resume failed: sail resume: it failed again' }],
+      spawned: ['FAKE-1'],
+      issues: [],
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ("a new dispatcher's first tick adopts each live run once with run:adopted, takes back an unwatched its run never reached and keeps a stopped one, adopts a dead pid whose lease a live process holds under that pid, and starts nothing over the cap", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 4, 3);
+    await w.dispatcher().tick();
+    const [run1, run2, run3] = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
+    const dirOf = (runId = '') => join(w.runs, runId);
+    for (const runId of [run1, run2]) mkdirSync(dirOf(runId), { recursive: true });
+    requestUnwatch(dirOf(run1));
+    requestStop(dirOf(run2));
+    // FAKE-3's process is gone, and a resume another process started holds its lease.
+    await w.spawner.end('FAKE-3', { status: 'running' });
+    const { url } = await w.adapters.ports.workspace.repository();
+    const branch = branchFor('sail/', 'FAKE-3', 'Ticket FAKE-3');
+    writeFileSync(join(dirOf(run3), 'run.json'), `${JSON.stringify({ branch, repository: { url } })}\n`);
+    const holder = { runId: run3 ?? '', runDir: dirOf(run3), pid: process.pid };
+    expect((await w.adapters.ports.workspace.lease(url, branch, holder)).leased).toBe(true);
+
+    const reopened = openQueue({ runsDir: w.runs, workflow: 'a', label: 'sail', now: w.clock });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    const again = w.dispatcher(reopened);
+    await again.tick();
+    await again.tick();
+    const control = (runId = '') =>
+      existsSync(join(dirOf(runId), 'CONTROL')) ? readFileSync(join(dirOf(runId), 'CONTROL'), 'utf8') : 'none';
+    expect({
+      adopted: eventsOf(w.runs, 'run:adopted'),
+      control: [control(run1), control(run2)],
+      spawned: spawnedKeys(w.spawner),
+      resumes: w.spawner.resumes.length,
+      inFlight: again.inFlight(),
+      pid: reopened.snapshot().items[2]?.pid,
+    }).toEqual({
+      adopted: [
+        { dedupKey: 'ticket:FAKE-1', run: run1, pid: FAKE_PID },
+        { dedupKey: 'ticket:FAKE-2', run: run2, pid: FAKE_PID + 1 },
+        { dedupKey: 'ticket:FAKE-3', run: run3, pid: process.pid },
+      ],
+      control: ['none', 'stopped\n'],
+      spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
+      resumes: 0,
+      inFlight: 3,
+      pid: process.pid,
+    });
+    await w.spawner.end('FAKE-1');
+    await again.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4']);
+    expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a stopped run parks its item at once with the run named, and it is never retried', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const { runId } = w.spawner.run('FAKE-1');
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stopped' });
+    await dispatcher.tick();
+    w.clock.advance(60 * 60_000);
+    await dispatcher.tick();
+    expect({
+      items: states(w.store),
+      reason: w.store.snapshot().items[0]?.reason,
+      parked: eventsOf(w.runs, 'queue:parked'),
+      spawned: spawnedKeys(w.spawner),
+      settled: w.settled.map(({ ticketKey, outcome }) => `${ticketKey} ${outcome}`),
+    }).toEqual({
+      items: ['FAKE-1 parked 1'],
+      reason: `run ${runId} was stopped`,
+      parked: [{ dedupKey: 'ticket:FAKE-1', attempts: 1, reason: `run ${runId} was stopped` }],
+      spawned: ['FAKE-1'],
+      settled: ['FAKE-1 parked'],
+    });
+  });
+});
+
+// Forced items (DECISIONS D9): dispatched without the re-check, and started with --force; the lease still holds them.
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('a forced item whose ticket lost its label, or is In Progress, is started with --force, an unforced one is still dropped, and a forced one whose branch is leased still waits', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 4, 4, { claiming: false });
+    const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+    const seed = JSON.parse(readFileSync(join(repo.dir, '.sail', 'fake', 'tickets.json'), 'utf8'));
+    seed.tickets[0].labels = [];
+    seed.tickets[2].labels = [];
+    mkdirSync(join(repo.dir, '.sail-runs', 'fake'), { recursive: true });
+    writeFileSync(state, JSON.stringify(seed));
+    expect((await w.ticketSource.claim('FAKE-2')).claimed).toBe(true);
+    const byHand = await leaseByHand(w, 'FAKE-4');
+    for (const key of ['FAKE-1', 'FAKE-2', 'FAKE-4']) {
+      w.store.drop(`ticket:${key}`, 'to be added again, forced');
+      w.store.add([await w.ticketSource.get(key)], { forced: true });
+    }
+    await w.dispatcher().tick();
+    expect({
+      started: w.spawner.runs.map((run) => [run.ticketKey, run.force]),
+      items: states(w.store),
+      dropped: eventsOf(w.runs, 'queue:dropped').filter((event) => event.reason !== 'to be added again, forced'),
+      skipped: eventsOf(w.runs, 'queue:skipped_leased'),
+    }).toEqual({
+      started: [
+        ['FAKE-1', true],
+        ['FAKE-2', true],
+      ],
+      items: ['FAKE-1 dispatched 1', 'FAKE-2 dispatched 1', 'FAKE-4 queued 0'],
+      dropped: [{ dedupKey: 'ticket:FAKE-3', reason: "it is not designated: it carries no 'sail' label" }],
+      skipped: [{ dedupKey: 'ticket:FAKE-4', branch: byHand.branch, heldBy: byHand.holder.runId }],
+    });
   });
 });

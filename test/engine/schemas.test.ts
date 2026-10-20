@@ -63,7 +63,7 @@ const runStart: Payload<'run:start'> = {
 const event = { ...envelope, type: 'run:start', ...runStart };
 const runEnd = { ...envelope, seq: 2, type: 'run:end', status: 'completed', result: 'done', replays: 1 };
 /** An event of a family a later epic closes. */
-const later = { ...envelope, type: 'run:adopted' };
+const later = { ...envelope, type: 'all:start' };
 const summary = {
   schema: 'sail.summary.v1',
   runId: RUN_ID,
@@ -1367,5 +1367,66 @@ test('the watch and dispatch queue events refuse a missing field, a pid or attem
     skippedNoHolder: ['/heldBy'],
     droppedReason: ['/reason'],
     droppedNoWorkflow: ['/workflow'],
+  });
+});
+
+// What the watcher did with a dispatched run, and a requeue by hand, closed in 13.3 (DECISIONS D3, D8).
+const RECONCILED: NewQueueEvent[] = [
+  { type: 'run:adopted', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-1', run: RUN_OF_FAKE_1, pid: 4243 },
+  {
+    type: 'run:resumed',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-1',
+    run: RUN_OF_FAKE_1,
+    pid: 4244,
+    from: { status: 'running' },
+  },
+  {
+    type: 'run:resumed',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-1',
+    run: RUN_OF_FAKE_1,
+    pid: 4245,
+    from: { status: 'suspended', stopReason: 'unwatched' },
+  },
+  { type: 'queue:requeued', workflow: 'ticket-to-pr', dedupKey: 'ticket:FAKE-2', reason: 'requeued by hand' },
+];
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('run:adopted, run:resumed and queue:requeued validate closed in a queue stream, without runId, and each refuses an extra field and a runId', () => {
+  expect({
+    valid: RECONCILED.map((sample) => paths('sail.event.v1', { ...queueEnvelope, ...sample })),
+    surprise: RECONCILED.map((sample) => broken(sample, { surprise: 1 })),
+    runId: RECONCILED.map((sample) => broken(sample, { runId: RUN_ID })),
+  }).toEqual({
+    valid: RECONCILED.map(() => []),
+    surprise: RECONCILED.map(() => ['/surprise']),
+    runId: RECONCILED.map(() => ['/runId']),
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('a run:resumed from suspended needs interrupted or unwatched, one from running takes no stop reason, a run:adopted needs its run and pid, and a requeue its reason', () => {
+  const [adopted, running, suspended, requeued] = RECONCILED as [NewQueueEvent, ...NewQueueEvent[]];
+  expect({
+    suspendedNoReason: broken(suspended as NewQueueEvent, { from: { status: 'suspended' } }),
+    suspendedUntil: broken(suspended as NewQueueEvent, { from: { status: 'suspended', stopReason: 'until' } }),
+    runningWithReason: broken(running as NewQueueEvent, { from: { status: 'running', stopReason: 'interrupted' } }),
+    completed: broken(running as NewQueueEvent, { from: { status: 'completed' } }),
+    adoptedNoRun: broken(adopted, {}, 'run'),
+    adoptedPid: broken(adopted, { pid: 0 }),
+    requeuedReason: broken(requeued as NewQueueEvent, { reason: '' }),
+  }).toEqual({
+    suspendedNoReason: ['/from/stopReason'],
+    suspendedUntil: ['/from/stopReason'],
+    runningWithReason: ['/from/stopReason'],
+    completed: ['/from/status'],
+    adoptedNoRun: ['/run'],
+    adoptedPid: ['/pid'],
+    requeuedReason: ['/reason'],
   });
 });
