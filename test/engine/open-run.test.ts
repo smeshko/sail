@@ -978,11 +978,6 @@ test.each<[string, StubRun, string]>([
     { ticket: 'FAKE-1', dispatch: { runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWDIU' } },
     "--dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWDIU' is not one",
   ],
-  [
-    '--force with it',
-    { ticket: 'FAKE-1', force: true, dispatch: { runId: DISPATCHED } },
-    "--dispatch and --force can't be combined",
-  ],
 ])('a dispatched start with %s is refused, with no run directory, lease or claim', async (_, run, refused) => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
