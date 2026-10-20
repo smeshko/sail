@@ -194,6 +194,15 @@ function readQueueFile(path: string): QueueFile | { refused: string } {
   return { refused: `${path} is not a queue: ${[issue?.path.join('.'), issue?.message].filter(Boolean).join(' ')}` };
 }
 
+/**
+ * `workflow`'s queue as its `queue.json` holds it now, undefined when it has none, or why it can't be read. It only
+ * reads: `sail queue` shows a queue with it, and changes one through the watcher.
+ */
+export function readQueue(runsDir: string, workflow: string): QueueFile | undefined | { refused: string } {
+  const path = join(queueDir(runsDir, workflow), QUEUE_FILE);
+  return existsSync(path) ? readQueueFile(path) : undefined;
+}
+
 /** Opens `workflow`'s queue, an empty one when it has no `queue.json` yet. One that can't be read refuses. */
 export function openQueue(options: OpenQueueOptions): QueueStore | { refused: string } {
   const { workflow, label, now } = options;

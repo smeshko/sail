@@ -171,10 +171,7 @@ function writeQueue(runs: string): string {
   return path;
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('sail queue with no operation, an unknown one, no workflow, a workflow that is no name, no item or ticket, an extra argument, or --force on anything but add exits 3 saying which', async () => {
+test('sail queue with no operation, an unknown one, no workflow, a workflow that is no name, no item or ticket, an extra argument, or --force on anything but add exits 3 saying which', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo, []);
     const cases: string[][] = [
@@ -204,10 +201,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("sail queue ls a with no watcher prints the queue's polling, then each item with what applies to it, and a workflow with no queue exits 3", async () => {
+test("sail queue ls a with no watcher prints the queue's polling, then each item with what applies to it, and a workflow with no queue exits 3", async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo, []);
     writeQueue(join(repo.dir, '.sail-runs'));
@@ -235,10 +229,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('with no watcher running, requeue, drop, add and poll exit 3 naming sail watch, drop no command, and leave queue.json byte for byte', async () => {
+test('with no watcher running, requeue, drop, add and poll exit 3 naming sail watch, drop no command, and leave queue.json byte for byte', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo, designated('FAKE-9'));
     const runs = join(repo.dir, '.sail-runs');
@@ -269,10 +260,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('with a watcher watching a, sail queue requeue a ticket:FAKE-1 queues the parked item again, so does FAKE-2 by its ticket key, and each prints the item', async () => {
+test('with a watcher watching a, sail queue requeue a ticket:FAKE-1 queues the parked item again, so does FAKE-2 by its ticket key, and each prints the item', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
     await parkTwo(w);
@@ -294,10 +282,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('sail queue drop a FAKE-1 drops a parked item, and a dispatched one is refused before any command is dropped', async () => {
+test('sail queue drop a FAKE-1 drops a parked item, and a dispatched one is refused before any command is dropped', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
     await parkTwo(w);
@@ -324,10 +309,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('sail queue add a FAKE-9 queues a designated, unstarted ticket; an undesignated one exits 3 naming the label, and with --force it is queued forced', async () => {
+test('sail queue add a FAKE-9 queues a designated, unstarted ticket; an undesignated one exits 3 naming the label, and with --force it is queued forced', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1'));
     await w.timers.advance(1000);
@@ -349,10 +331,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('sail queue poll a makes the watcher poll a now', async () => {
+test('sail queue poll a makes the watcher poll a now', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, []);
     await w.timers.advance(1000);
@@ -373,10 +352,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("the dashboard's commands for a parked item run as printed: its requeue queues it again, and its drop then drops it", async () => {
+test("the dashboard's commands for a parked item run as printed: its requeue queues it again, and its drop then drops it", async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
     await parkTwo(w);

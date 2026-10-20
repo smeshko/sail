@@ -16,9 +16,13 @@
 // inbox, which a watcher stopped meanwhile empties at its next start, and the command exits 0 saying so. The set it
 // prints is read back from the queue event streams: each workflow whose last `watch:*` event of the live watcher's pid
 // is `watch:added`.
+//
+// `sail queue` shares the live watcher's lookup, the set read back from the queue streams, and the wait for a command
+// to be taken: `findWatcher()`, `liveSet()` and `taken()`.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../../adapters/leases';
+import type { ProjectConfig } from '../../engine/config';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { dropCommand } from '../../watch/inbox';
 import { readWatch, systemTimers, type Timers } from '../../watch/poll';
@@ -28,6 +32,7 @@ import {
   type Holder,
   type IsAlive,
   machineDir,
+  type RegistryEntry,
   readRegistry,
   registryDir as registryDirOf,
 } from '../../watch/registry';
@@ -58,7 +63,7 @@ const APPLY_TIMEOUT_MS = 15_000;
 const POLL_MS = 100;
 
 /** A workflow in the live watcher's set: its name, its label and when it was added. */
-interface Watched {
+export interface Watched {
   workflow: string;
   label: string;
   seq: number;
@@ -66,7 +71,7 @@ interface Watched {
 }
 
 /** The live watcher's set, read from the queue event streams beside `sailDir`, in the order it was formed. */
-function liveSet(sailDir: string, pid: number): Watched[] {
+export function liveSet(sailDir: string, pid: number): Watched[] {
   const dir = join(runsDirOf(sailDir), QUEUE_DIR);
   if (!existsSync(dir)) return [];
   const set: Watched[] = [];
@@ -105,6 +110,27 @@ interface Located {
   live: Holder | undefined;
 }
 
+/**
+ * This repository's registry entry, and the live watcher recorded for its name, with where it runs: here, or in
+ * another clone. Undefined when none is alive.
+ */
+export async function findWatcher(
+  io: Io,
+  project: { sailDir: string; config: ProjectConfig },
+  isAlive: IsAlive,
+): Promise<{ entry: RegistryEntry; registryDir: string; holder: Holder | undefined }> {
+  const entry = await repositoryEntry(io, project);
+  const registryDir = registryDirOf(machineDir(io.env ?? process.env));
+  const me = {
+    name: entry.name,
+    sailDir: entry.sailDir,
+    ticketSource: project.config.adapters.ticketSource.use,
+    labels: [],
+    pid: process.pid,
+  };
+  return { entry, registryDir, holder: findHolder(readRegistry(registryDir).entries, me, isAlive) };
+}
+
 /** `.sail/`, the names, and the live watcher, or a refusal: no names, or a watcher of this name in another clone. */
 async function locate(io: Io, command: string, args: Parsed, isAlive: IsAlive): Promise<Located | ExitCode> {
   const refuse = refuseAs(io, command);
@@ -113,22 +139,13 @@ async function locate(io: Io, command: string, args: Parsed, isAlive: IsAlive): 
   const names = [...new Set(args.positionals)];
   if (names.length === 0)
     return refuse(`name at least one workflow to ${command === 'sail watch' ? 'watch' : 'unwatch'}`);
-  const entry = await repositoryEntry(io, project);
-  const registryDir = registryDirOf(machineDir(io.env ?? process.env));
-  const me = {
-    name: entry.name,
-    sailDir: entry.sailDir,
-    ticketSource: project.adapters.ports.ticketSource.name,
-    labels: [],
-    pid: process.pid,
-  };
-  const holder = findHolder(readRegistry(registryDir).entries, me, isAlive);
+  const { entry, registryDir, holder } = await findWatcher(io, project, isAlive);
   if (holder?.kind === 'name') return refuse(holderRefusal(holder, entry.name));
   return { project, names, registryDir, entry, live: holder?.kind === 'here' ? holder : undefined };
 }
 
 /** Waits for the watcher to take the command in `file`: true once the file is gone, false after the timeout. */
-async function taken(file: string, deps: WatchDeps): Promise<boolean> {
+export async function taken(file: string, deps: WatchDeps): Promise<boolean> {
   const deadline = performance.now() + (deps.applyTimeoutMs ?? APPLY_TIMEOUT_MS);
   while (existsSync(file)) {
     if (performance.now() > deadline) return false;

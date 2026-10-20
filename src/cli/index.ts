@@ -45,6 +45,9 @@ Usage:
   sail dashboard [--port <n>]                                Serve every repository's runs read-only on localhost
   sail watch <workflow>...                                   Watch these workflows: start this repository's watcher, or add them to it
   sail unwatch <workflow>...                                 Stop watching them. The watcher exits when it watches none
+  sail queue ls|poll <workflow>                              List a watched workflow's queue, or have its watcher poll it now
+  sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
+  sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input

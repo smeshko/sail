@@ -143,10 +143,7 @@ test('the usage lists sail stop, saying when a run stops', async () => {
   );
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('the usage lists sail queue: ls and poll, add with --force, requeue and drop', async () => {
+test('the usage lists sail queue: ls and poll, add with --force, requeue and drop', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(/^ {2}sail queue ls\|poll <workflow> {2,}\S/m);
   expect(stdout).toMatch(/^ {2}sail queue add <workflow> <ticket> \[--force\] {2,}\S/m);
