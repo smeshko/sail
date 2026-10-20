@@ -473,11 +473,16 @@ export function findRun(
     return { refused: `no run '${runId}' in ${relative(dirname(sailDir), runs)}` };
   }
   const status = readStatus(dir);
-  if (status.status === 'completed') return { refused: `run ${runId} has completed: there is nothing to resume` };
-  if (status.status === 'failed') {
-    return { refused: `run ${runId} failed (${status.stopReason}): a failed run is final` };
-  }
+  const ended = endedRefusal(runId, status);
+  if (ended !== undefined) return { refused: ended };
   return { dir, header: readRunHeader(dir), status };
+}
+
+/** Why run `runId` can't be resumed because it has ended, or undefined while it hasn't. */
+function endedRefusal(runId: string, status: RunStatus): string | undefined {
+  if (status.status === 'completed') return `run ${runId} has completed: there is nothing to resume`;
+  if (status.status === 'failed') return `run ${runId} failed (${status.stopReason}): a failed run is final`;
+  return undefined;
 }
 
 /** One line per port whose adapter, by `use` or `origin`, differs from the one the run started with. */
@@ -518,6 +523,16 @@ async function resumeWorkspace(
       return { refused: `run ${run.runId} is still running, in process ${holder.pid}: stop it before resuming it` };
     }
     return { refused: leasedBy(branch, holder) };
+  }
+  // A run that ended while this resume loaded its workflow, as a `sail stop` ends one, stays ended: the lease goes back.
+  const ended = endedRefusal(run.runId, readStatus(run.runDir));
+  if (ended !== undefined) {
+    try {
+      await port.releaseLease(repository.url, branch, run.runId);
+    } catch (error) {
+      return { refused: `${ended}, and its lease on ${branch} was not released: ${portRefusal(error)}` };
+    }
+    return { refused: ended };
   }
   try {
     const reopened = await port.reopen(run, { branch, baseSha: repository.baseSha });
