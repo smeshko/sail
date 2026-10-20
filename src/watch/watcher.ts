@@ -15,6 +15,10 @@
 //   stops the workflow's poller and dispatch and emits its `watch:removed`. Its queue is kept, and a later `watch` of it
 //   resumes those runs, then dispatches from the queue. An empty set stops the watcher.
 // - `poll`: polls a watched workflow now. One outside the set is rejected.
+// - `add`, `requeue` and `drop`: a change to a watched workflow's queue by hand, each safe to apply twice. `add` checks
+//   the ticket as a start does, designated and unstarted unless forced, and queues it, forced when it was. `requeue`
+//   puts a parked or failed item back as queued, unless its last run has not ended: that run still holds the branch.
+//   `drop` takes out any item but a dispatched one, whose run has not been settled. One outside the set is rejected.
 // A rejected command prints its reason, and the set stays as it was.
 //
 // Stopping, on an empty set or on Ctrl-C, stops every poller and the tick, emits `watch:removed` for what is left,
@@ -29,7 +33,8 @@ import { isAlive as processIsAlive, releaseLease, takeLease } from '../adapters/
 import { DEFAULT_BRANCH_PREFIX } from '../engine/branch';
 import type { ProjectConfig } from '../engine/config';
 import { requestUnwatch } from '../engine/control';
-import { runsDir as runsDirOf } from '../engine/run-dir';
+import { readStatus, runsDir as runsDirOf } from '../engine/run-dir';
+import { resolveSource } from '../engine/source';
 import type { QueueEvent } from '../events/types';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
@@ -47,7 +52,7 @@ import {
   type WatchLine,
 } from './lines';
 import { createPoller, openWatchTarget, type Poller, type Timers, type WatchTarget } from './poll';
-import type { QueuePolicy } from './queue-store';
+import { dedupKey, type QueueItem, type QueuePolicy } from './queue-store';
 import {
   claimWatcher,
   clearWatcher,
@@ -320,6 +325,54 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     resolveDone();
   };
 
+  /** The status of the run `runId`, `<status>[ <stop reason>]`, or undefined when it has none. */
+  const runStatus = (runId: string): { status: string; said: string } | undefined => {
+    try {
+      const { status, stopReason } = readStatus(join(runs, runId));
+      return { status, said: stopReason === undefined ? status : `${status} ${stopReason}` };
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** Applies a queue command to the watched workflow `target`'s queue, or throws why it can't. */
+  const edit = async (target: WatchTarget, command: Extract<Command, { op: 'add' | 'requeue' | 'drop' }>) => {
+    const { store } = target;
+    const itemOf = (key: string): QueueItem | undefined => store.snapshot().items.find((item) => item.dedupKey === key);
+    if (command.op === 'add') {
+      const force = command.force === true;
+      const resolved = await resolveSource({ ref: command.ticketKey, ticketSource, label: target.label, force });
+      if ('refused' in resolved) throw new Error(resolved.refused);
+      const taken = itemOf(dedupKey({ kind: 'ticket', ticketKey: resolved.ticketKey }));
+      if (taken !== undefined && taken.state !== 'done') return;
+      store.add([resolved.ticket], { forced: force });
+      return;
+    }
+    const item = itemOf(command.dedupKey);
+    if (command.op === 'drop') {
+      if (item === undefined) return;
+      if (item.state === 'dispatched') {
+        const runId = item.runId ?? '';
+        throw new Error(`${item.dedupKey} can't be dropped: its run ${runId} has not ended: sail stop ${runId} first`);
+      }
+      store.drop(item.dedupKey, 'dropped by hand');
+      return;
+    }
+    if (item === undefined) throw new Error(`${target.workflow}'s queue has no item ${command.dedupKey}`);
+    if (item.state === 'queued') return;
+    const run = item.runId === undefined ? undefined : runStatus(item.runId);
+    if (
+      (item.state === 'parked' || item.state === 'failed') &&
+      (run?.status === 'suspended' || run?.status === 'running')
+    ) {
+      const runId = item.runId ?? '';
+      throw new Error(
+        `${item.dedupKey} can't be requeued: its run ${runId} is ${run.said}, and holds its branch: sail resume ${runId} or sail stop ${runId} first`,
+      );
+    }
+    store.requeue(item.dedupKey, 'requeued by hand');
+  };
+
   const apply = async (command: Command) => {
     if (stopped) throw new Error('the watcher is stopping');
     if (command.op === 'poll') {
@@ -338,7 +391,12 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       print(setLine(watching(), now()));
       return;
     }
-    if (command.op !== 'unwatch') throw new Error(`the watcher can't ${command.op} yet`);
+    if (command.op === 'add' || command.op === 'requeue' || command.op === 'drop') {
+      const watched = set.get(command.workflow);
+      if (watched === undefined) throw new Error(`not watching workflow '${command.workflow}'`);
+      await edit(watched.target, command);
+      return;
+    }
     const leaving = command.workflows.filter((workflow) => set.has(workflow));
     if (leaving.length === 0) return;
     for (const workflow of leaving) {

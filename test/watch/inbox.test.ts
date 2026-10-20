@@ -208,10 +208,7 @@ test('an apply that returns a promise is awaited before its command file is remo
   expect(readdirSync(commandsDir(runs))).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('add, requeue and drop commands drain and apply as written, and one missing its item, forcing with anything but true, or with a field it does not take is rejected', async () => {
+test('add, requeue and drop commands drain and apply as written, and one missing its item, forcing with anything but true, or with a field it does not take is rejected', async () => {
   const runs = runsDir();
   const commands: Command[] = [
     { op: 'add', workflow: 'a', ticketKey: 'FAKE-9' },

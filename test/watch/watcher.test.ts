@@ -648,10 +648,7 @@ test('a watcher starting over completed, failed, running, suspended interrupted 
 const rejections = (out: string[]) =>
   out.filter((line) => line.includes(' error: ')).map((line) => line.replace(/^.* error: [^ ]+\.json failed: /, ''));
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('an add command queues a designated, unstarted ticket once, even applied twice; an undesignated or a started one is rejected with its reason and queues nothing, unless forced, which queues it forced', async () => {
+test('an add command queues a designated, unstarted ticket once, even applied twice; an undesignated or a started one is rejected with its reason and queues nothing, unless forced, which queues it forced', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
     const watcher = await w.start(['a']);
@@ -689,10 +686,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a requeue command makes a parked item queued with no attempts and queue:requeued, once even applied twice, and one of a done, a dispatched or a missing item, or of a parked one whose run is still suspended, is rejected naming why', async () => {
+test('a requeue command makes a parked item queued with no attempts and queue:requeued, once even applied twice, and one of a done, a dispatched or a missing item, or of a parked one whose run is still suspended, is rejected naming why', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -753,10 +747,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a drop command takes a parked item out with queue:dropped, dropped by hand, does nothing applied twice, and one of a dispatched item is rejected naming its run', async () => {
+test('a drop command takes a parked item out with queue:dropped, dropped by hand, does nothing applied twice, and one of a dispatched item is rejected naming its run', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -789,10 +780,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('an add, a requeue and a drop for a workflow outside the set are each rejected, and change no queue', async () => {
+test('an add, a requeue and a drop for a workflow outside the set are each rejected, and change no queue', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,

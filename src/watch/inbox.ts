@@ -2,8 +2,8 @@
 // change by dropping a command file. The watcher stays the only writer of its own state (ADR-0019).
 //
 // - A command is applied, then deleted. A crash between the two applies it again at the next drain, so every command
-//   is safe to apply twice: a poll, a `watch` or `unwatch` of workflows already in or out of the set, and the queue
-//   edits 13.3 adds to `Command`. An apply that returns a promise is awaited before its file is deleted, so a `watch`
+//   is safe to apply twice: a poll, a `watch` or `unwatch` of workflows already in or out of the set, an `add` of a
+//   ticket already queued, a `requeue` of an item already queued, and a `drop` of an item already gone. An apply that returns a promise is awaited before its file is deleted, so a `watch`
 //   has opened its workflows by then.
 // - A watcher empties its inbox as it starts (`clearCommands`): a command a stopped watcher left never changes a watch
 //   set nobody asked for.
@@ -36,7 +36,7 @@ export function commandsDir(runsDir: string): string {
 /** A workflow's name, as a folder under `.sail/workflows/` takes it. */
 const Workflows = z.array(z.string().regex(/^[a-z0-9][a-z0-9-]*$/)).min(1);
 
-const Final = z.discriminatedUnion('op', [
+export const Command = z.discriminatedUnion('op', [
   /** Polls the workflow now, paused or not. */
   z.strictObject({ op: z.literal('poll'), workflow: z.string().min(1) }),
   /** Adds the workflows to the watch set. */
@@ -55,14 +55,7 @@ const Final = z.discriminatedUnion('op', [
   /** Takes an item out of the queue. */
   z.strictObject({ op: z.literal('drop'), workflow: z.string().min(1), dedupKey: z.string().min(1) }),
 ]);
-
-// Stub: the final type, the old parse.
-export const Command = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('poll'), workflow: z.string().min(1) }),
-  z.strictObject({ op: z.literal('watch'), workflows: Workflows }),
-  z.strictObject({ op: z.literal('unwatch'), workflows: Workflows }),
-]) as unknown as typeof Final;
-export type Command = z.infer<typeof Final>;
+export type Command = z.infer<typeof Command>;
 
 /** Commands this process dropped, so two in one millisecond still sort in the order they were dropped. */
 let dropped = 0;
