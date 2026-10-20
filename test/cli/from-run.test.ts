@@ -230,3 +230,23 @@ test('sail run from a source whose run.json is broken is refused with exit 3, an
     ]);
   });
 }, 60_000);
+
+// Review round 2: the repository is registered once the seeded run opens, so a refusal writes nothing.
+test('a refused sail run leaves the machine registry unwritten, and a seeded run that opens registers the repository', async () => {
+  /** `sail run` with `args` in a copy of the source, and whether the machine registry exists afterwards. */
+  const registered = (args: (runId: string) => string[]) =>
+    withTempRepo(async (repo) => {
+      const from = await source.copyInto(repo.dir);
+      const registry = join(repo.home, '.sail');
+      const env = { ...repo.env, SAIL_HOME: registry };
+      const ran = await sailRun(repo, from.runId, args(from.runId), { env });
+      return [ran.code, existsSync(registry)];
+    });
+  expect([
+    await registered((runId) => ['--from-run', runId, '--stage', 'nope']),
+    await registered((runId) => ['--from-run', runId, '--stage', 'spec']),
+  ]).toEqual([
+    [EXIT_REFUSED, false],
+    [EXIT_SUSPENDED, true],
+  ]);
+}, 60_000);
