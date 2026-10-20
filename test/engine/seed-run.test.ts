@@ -44,10 +44,7 @@ function openedFrom(result: OpenedRun | { refused: string }): OpenedRun {
   return result as OpenedRun;
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('seeding spec copies the intake call byte for byte, journals intake#1 alone, and records fromRun, no claim, a branch of its own and the base of the source', async () => {
+test('seeding spec copies the intake call byte for byte, journals intake#1 alone, and records fromRun, no claim, a branch of its own and the base of the source', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     const sourceHeader = readRunHeader(from.dir);
@@ -82,10 +79,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('seeding self-review journals every call of the source before self-review#1, and copies their call directories with every try', async () => {
+test('seeding self-review journals every call of the source before self-review#1, and copies their call directories with every try', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     const opened = openedFrom(await seed(repo, { fromRun: from.runId, stage: 'self-review' }));
@@ -134,10 +128,7 @@ const aborted = () => {
   return controller.signal;
 };
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, (dir: string) => void, (runId: string) => Partial<SeededRunOptions>, (runId: string) => string]>([
+test.each<[string, (dir: string) => void, (runId: string) => Partial<SeededRunOptions>, (runId: string) => string]>([
   ['an id that names no run', () => {}, () => ({ fromRun: 'FAKE-1-NOPE' }), () => "no run 'FAKE-1-NOPE' in .sail-runs"],
   ['an id that is not a plain name', () => {}, () => ({ fromRun: '../x' }), () => "'../x' is not a run id"],
   [
@@ -183,10 +174,7 @@ test
   60_000,
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a seeded run reads no ticket and claims nothing: the fake ticket state is as it was, and nothing it reports is about the ticket', async () => {
+test('a seeded run reads no ticket and claims nothing: the fake ticket state is as it was, and nothing it reports is about the ticket', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     const tickets = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
@@ -200,10 +188,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('two seeded runs from one source both open, each on a branch of its own, and the branch of the source stays free', async () => {
+test('two seeded runs from one source both open, each on a branch of its own, and the branch of the source stays free', async () => {
   await withTempRepo(async (first) => {
     const from = await source.copyInto(first.dir);
     const one = openedFrom(await seed(first, { fromRun: from.runId }));
