@@ -236,10 +236,7 @@ test("a run that failed fails its item with the stop reason and parks it on the 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a run whose process is gone while it reads suspended interrupted or running is resumed once, with run:resumed saying where it was, and its resume holds the slot', async () => {
+test('a run whose process is gone while it reads suspended interrupted or running is resumed once, with run:resumed saying where it was, and its resume holds the slot', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 3, 2);
     const dispatcher = w.dispatcher();
@@ -325,10 +322,7 @@ test('an item whose title changed since it was queued waits on a lease of the br
 
 // Reconcile (DECISIONS D4-D6): what a dispatcher does with a dispatched run it finds alive, dead, stopped, or resumed.
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a resume whose process ends with its run still suspended parks the item with its log's last line and resumes nothing more, while a new dispatcher over the same queue resumes it once", async () => {
+test("a resume whose process ends with its run still suspended parks the item with its log's last line and resumes nothing more, while a new dispatcher over the same queue resumes it once", async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 1, 1);
     const first = w.dispatcher();
@@ -365,10 +359,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a new dispatcher's first tick adopts each live run once with run:adopted, takes back an unwatched its run never reached and keeps a stopped one, adopts a dead pid whose lease a live process holds under that pid, and starts nothing over the cap", async () => {
+test("a new dispatcher's first tick adopts each live run once with run:adopted, takes back an unwatched its run never reached and keeps a stopped one, adopts a dead pid whose lease a live process holds under that pid, and starts nothing over the cap", async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 4, 3);
     await w.dispatcher().tick();
@@ -418,10 +409,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a stopped run parks its item at once with the run named, and it is never retried', async () => {
+test('a stopped run parks its item at once with the run named, and it is never retried', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 1, 1);
     const dispatcher = w.dispatcher();

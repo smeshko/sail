@@ -1,10 +1,12 @@
-// Spawning a dispatched run: `sail <ticket> --workflow <name> --dispatch <run id>` as a process of its own.
+// Spawning a dispatched run, `sail <ticket> --workflow <name> --dispatch <run id>`, and a resume of one,
+// `sail resume <run id>`, each as a process of its own.
 //
 // - The child is detached: a session and a process group of its own, stdin ignored and unreferenced, so a run outlives
 //   its watcher (ADR-0018), and neither a Ctrl-C at the watcher's terminal nor the watcher's exit reaches it.
 // - Its stdout and stderr go to `.sail-runs/queue/<workflow>/dispatch/<run id>.log`, not to the run directory: the
 //   child makes that itself, and a start refuses one that exists. A start refused before its run directory exists
-//   leaves only this log, whose last line says why.
+//   leaves only this log, whose last line says why. A resume appends to its run's log, so the log's last line is why
+//   the resume failed when it did.
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { queueDir } from './queue-store';
@@ -50,14 +52,18 @@ export interface SpawnedRun {
   exited: Promise<number | null>;
 }
 
-/** Starts the dispatched run, detached, its output appended to its dispatch log. */
-export function spawnRun(options: SpawnRunOptions): SpawnedRun {
-  const { root, runsDir, workflow, ticketKey, runId, env } = options;
-  const log = dispatchLog(runsDir, workflow, runId);
+/** Starts `sail <args>` in `root`, detached, its output appended to `log`. */
+function spawnSail(
+  root: string,
+  log: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string>>,
+  cli: readonly string[] | undefined,
+): SpawnedRun {
   mkdirSync(dirname(log), { recursive: true });
   const fd = openSync(log, 'a');
   try {
-    const child = Bun.spawn([...(options.cli ?? SAIL_CLI), ticketKey, '--workflow', workflow, '--dispatch', runId], {
+    const child = Bun.spawn([...(cli ?? SAIL_CLI), ...args], {
       cwd: root,
       env: { ...env },
       detached: true,
@@ -73,9 +79,17 @@ export function spawnRun(options: SpawnRunOptions): SpawnedRun {
   }
 }
 
-/** Starts `sail resume <run>`, detached. Stub: starts nothing. */
-export function spawnResume(_options: SpawnResumeOptions): SpawnedRun {
-  return { pid: 0, exited: Promise.resolve(null) };
+/** Starts the dispatched run, detached, its output appended to its dispatch log. */
+export function spawnRun(options: SpawnRunOptions): SpawnedRun {
+  const { root, runsDir, workflow, ticketKey, runId, env } = options;
+  const args = [ticketKey, '--workflow', workflow, '--dispatch', runId];
+  return spawnSail(root, dispatchLog(runsDir, workflow, runId), args, env, options.cli);
+}
+
+/** Starts `sail resume <run>`, detached, its output appended to the run's dispatch log. */
+export function spawnResume(options: SpawnResumeOptions): SpawnedRun {
+  const { root, runsDir, workflow, runId, env } = options;
+  return spawnSail(root, dispatchLog(runsDir, workflow, runId), ['resume', runId], env, options.cli);
 }
 
 /** The longest reason a log's last line gives. */

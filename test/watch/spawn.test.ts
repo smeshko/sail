@@ -129,10 +129,7 @@ test('lastLine gives the last line that is not blank, cut to 500 characters, and
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a spawned resume gets resume and the run id, runs in the root in a process group of its own, and appends to the run's dispatch log", async () => {
+test("a spawned resume gets resume and the run id, runs in the root in a process group of its own, and appends to the run's dispatch log", async () => {
   const dir = tempDir();
   const root = join(dir, 'repo');
   mkdirSync(root);

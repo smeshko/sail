@@ -456,7 +456,7 @@ A run's exclusive hold on its git branch, from workspace creation to release, ke
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:
-A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once.
+A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A stopped run's item is parked too.
 _Avoid_: reattach, recovery, takeover
 
 **Poll**:

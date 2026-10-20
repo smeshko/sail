@@ -73,10 +73,7 @@ function logLine(runsDir: string, n: number, line: string): void {
   writeFileSync(log, `the run's output\n${line}\n`);
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a live pid is in flight and adopted only on a first settle, completed is done, failed stopped parks at once, any other failure is a failed attempt, and no run.json is a refused start with its log's last line or its exit", async () => {
+test("a live pid is in flight and adopted only on a first settle, completed is done, failed stopped parks at once, any other failure is a failed attempt, and no run.json is a refused start with its log's last line or its exit", async () => {
   const w = world();
   runDir(w.runsDir, 2, 'completed');
   runDir(w.runsDir, 3, 'failed', 'stopped');
@@ -103,10 +100,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('suspended until and budget_exceeded wait; a dead running, a suspended interrupted and a suspended unwatched run are resumed from where they were, and parked with why once this dispatcher has resumed them', async () => {
+test('suspended until and budget_exceeded wait; a dead running, a suspended interrupted and a suspended unwatched run are resumed from where they were, and parked with why once this dispatcher has resumed them', async () => {
   const w = world();
   runDir(w.runsDir, 1, 'suspended', 'until');
   runDir(w.runsDir, 2, 'suspended', 'budget_exceeded');
@@ -140,10 +134,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a dead pid whose run's lease a live process holds is adopted under that process's pid, and a lease whose pid is dead is no reason not to resume", async () => {
+test("a dead pid whose run's lease a live process holds is adopted under that process's pid, and a lease whose pid is dead is no reason not to resume", async () => {
   const w = world();
   runDir(w.runsDir, 1, 'running');
   runDir(w.runsDir, 2, 'suspended', 'interrupted');
