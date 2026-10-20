@@ -196,6 +196,7 @@ export function validateRunDir(dir: string): RunDirReport {
   const runId = header?.valid ? header.data.runId : undefined;
 
   const journal: { line: number; data: Doc }[] = [];
+  const events: { line: number; data: Doc }[] = [];
   const journaled = new Set<unknown>(); // every parsed line's resultPath, valid or not
   for (const [file, schema, place] of [
     ['journal.ndjson', 'sail.journal.v1', 'the journal'],
@@ -210,7 +211,7 @@ export function validateRunDir(dir: string): RunDirReport {
       if (checked === undefined) return;
       if (schema === 'sail.journal.v1') journaled.add(checked.data.resultPath);
       if (!checked.valid) return;
-      if (schema === 'sail.journal.v1') journal.push({ line: i + 1, data: checked.data });
+      (schema === 'sail.journal.v1' ? journal : events).push({ line: i + 1, data: checked.data });
       if (checked.data.seq !== position) {
         report.issues.push({
           file,
@@ -233,9 +234,7 @@ export function validateRunDir(dir: string): RunDirReport {
     if (checked) results.set(file, checked);
   }
 
-  // A seeded run's journal starts with its reused calls, whose results name the run each one ran in. Only that prefix
-  // may name another run: from the first line whose result names this run on, every result must.
-  let reusing = header?.valid === true && header.data.fromRun !== undefined;
+  const reused = reusedLines(report, header?.valid === true ? header.data.fromRun : undefined, events);
   for (const { line, data } of journal) {
     const at: SchemaIssue = {
       file: 'journal.ndjson',
@@ -244,10 +243,17 @@ export function validateRunDir(dir: string): RunDirReport {
       path: '/resultPath',
       message: '',
     };
-    const linked = results.get(String(data.resultPath));
-    reusing &&= linked?.valid === true && linked.data.runId !== runId;
     const { key, stage, call, step, outcome, output, files } = data;
-    const expected = { runId: reusing ? undefined : runId, key, stage, call, step, outcome, output, files };
+    const expected = {
+      runId: reused.has(data.seq) ? undefined : runId,
+      key,
+      stage,
+      call,
+      step,
+      outcome,
+      output,
+      files,
+    };
     checkLink(report, at, results, String(data.resultPath), expected, asJournaled);
   }
   for (const [file, { data, valid }] of results) {
@@ -289,6 +295,38 @@ export function validateRunDir(dir: string): RunDirReport {
     }
   }
   return report;
+}
+
+/**
+ * The journal lines of a seeded run's reused calls, whose results name the run each one ran in: the lines its events
+ * report with a `journal:append` carrying `fromRun`, as the run opened. Each must name the header's `fromRun`, and
+ * together they must be the journal's first lines. Every other line's result names this run.
+ */
+function reusedLines(report: RunDirReport, fromRun: unknown, events: { line: number; data: Doc }[]): Set<unknown> {
+  const reported = events.filter(({ data }) => data.type === 'journal:append' && data.fromRun !== undefined);
+  for (const { line, data } of reported) {
+    if (data.fromRun === fromRun) continue;
+    const header = fromRun === undefined ? 'run.json names no fromRun' : `run.json's fromRun is ${fromRun}`;
+    report.issues.push({
+      file: 'events.ndjson',
+      line,
+      schema: 'sail.event.v1',
+      path: '/fromRun',
+      message: `reports a reused call from run ${data.fromRun}, but ${header}`,
+    });
+  }
+  const lines = new Set(reported.map(({ data }) => data.line));
+  for (const { line, data } of reported) {
+    if (Number(data.line) <= lines.size) continue;
+    report.issues.push({
+      file: 'events.ndjson',
+      line,
+      schema: 'sail.event.v1',
+      path: '/line',
+      message: `reports journal line ${data.line} as a reused call after a call of the run: reused calls are the journal's first lines`,
+    });
+  }
+  return lines;
 }
 
 /** `NN-<stage>/call-N`: the first two segments of a run-relative result path, the call every try of it belongs to. */
