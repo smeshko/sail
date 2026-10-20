@@ -25,7 +25,7 @@
 //
 // The workspace starts at the source's base: the source's code changes are not carried. A reused call's commits are not
 // in the seeded workspace, so a later stage that consumes a gitDiff sees only what the seeded run changed.
-import { cpSync, existsSync, lstatSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, readdirSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
@@ -111,10 +111,33 @@ function callDirOf(path: string): string | undefined {
   return CALL_DIR.test(dir) ? dir : undefined;
 }
 
+/** What `stat` is, when it is no directory or regular file. */
+function strayKind(stat: Stats | undefined): string {
+  if (stat === undefined) return 'missing';
+  return stat.isSymbolicLink() ? 'a symlink' : 'not a regular file';
+}
+
+/**
+ * The first path at or below the run-relative `path` that is neither a directory nor a regular file, with what it is,
+ * or undefined. Only the path itself is checked when `deep` is false.
+ */
+function strayAt(sourceDir: string, path: string, deep: boolean): { path: string; is: string } | undefined {
+  const stat = lstatSync(join(sourceDir, path), { throwIfNoEntry: false });
+  if (stat?.isFile()) return undefined;
+  if (!stat?.isDirectory()) return { path, is: strayKind(stat) };
+  if (!deep) return undefined;
+  for (const name of readdirSync(join(sourceDir, path)).sort()) {
+    const stray = strayAt(sourceDir, `${path}/${name}`, true);
+    if (stray !== undefined) return stray;
+  }
+  return undefined;
+}
+
 /**
  * The call directories of `entries`, each once, in order, or why the seed can't trust them. Each entry's result and
- * files must lie in its own call directory, `NN-<stage>/call-N`, which holds every try, and each file must be a regular
- * file: a step can't produce a link, so a link there was put in after the run, and could lead anywhere.
+ * files must lie in its own call directory, `NN-<stage>/call-N`, which holds every try. Everything the copy takes, the
+ * stage's directory, the call's and all below it, must be a directory or a regular file: a step can't produce a link,
+ * so a link there was put in after the run, and could lead anywhere.
  */
 function callDirs(sourceDir: string, runId: string, entries: readonly JournalEntry[]): string[] | { refused: string } {
   const dirs = new Set<string>();
@@ -131,6 +154,12 @@ function callDirs(sourceDir: string, runId: string, entries: readonly JournalEnt
       }
     }
     dirs.add(dir as string);
+  }
+  for (const dir of dirs) {
+    const stray = strayAt(sourceDir, dirname(dir), false) ?? strayAt(sourceDir, dir, true);
+    if (stray !== undefined) {
+      return { refused: `run ${runId}'s ${stray.path} is ${stray.is}: a seed copies only what the run wrote` };
+    }
   }
   return [...dirs];
 }
