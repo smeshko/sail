@@ -1364,6 +1364,33 @@ test('an abort seen at the same boundary as a CONTROL goes first, suspending the
   });
 }, 30_000);
 
+test('a stop asked during the call --until names goes ahead of the until suspension: the run fails stopped and releases its workspace and lease (review R1-6)', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await ran(repo.dir, {
+      until: 'spec',
+      onCall: (entry) => {
+        if (entry.key === 'spec#1') requestStop(onlyRun(repo.dir));
+      },
+    });
+    expect({
+      end: [end.status, end.stopReason],
+      journaled: keys(end.dir),
+      workspace: existsSync(join(end.dir, 'workspace')),
+      leases: leaseFiles(repo.dir),
+      control: existsSync(join(end.dir, CONTROL_FILE)),
+      issues: validateRunDir(end.dir).issues,
+    }).toEqual({
+      end: ['failed', 'stopped'],
+      journaled: ['intake#1', 'spec#1'],
+      workspace: false,
+      leases: [],
+      control: false,
+      issues: [],
+    });
+  });
+});
+
 // Agent calls in a run: brief-to-spec on the fake harness, whose script says what each try of spec#1 does.
 
 /** Runs brief-to-spec from `cwd` on the fixture's `FAKE-1`, which must not be refused. */
