@@ -5,6 +5,9 @@
 // A resume writes no marker, so the fold infers the run's status from its last `run:end`, keeps each call's latest
 // try, takes each loop's highest iteration, and drops a route the resume reported again.
 //
+// A seeded run's reused calls arrive as `journal:append` events carrying `fromRun`. Each is listed among the calls, in
+// event order, with that `fromRun` and no duration, and counts in no total: the totals are this run's own work.
+//
 // The run's ticket is the one its intake fetched: the first `ticket:fetched` under the intake's key. A script step's
 // `sail port ticket-source get` emits one too, under its own key, and names another fetch, not the run's ticket.
 import { INTAKE_KEY } from '../engine/intake';
@@ -46,6 +49,8 @@ export interface CallEntry {
   summary?: string;
   resultPath?: string;
   steps?: StepEntry[];
+  /** The run a reused call was taken from. */
+  fromRun?: string;
 }
 
 /** Tokens and dollars. */
@@ -116,7 +121,9 @@ interface CallState {
   key: string;
   kind: 'agent' | 'script' | 'stage' | 'builtin';
   startedAt: string;
-  end?: Ended & { resultPath: string };
+  end?: Ended & { resultPath?: string };
+  /** The run a reused call was taken from: it ran there, not in this run. */
+  fromRun?: string;
   facts: Facts;
   /** The latest loop feedback pointer, when this try consumed it. */
   feedback?: string;
@@ -233,6 +240,7 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
       break;
     case 'journal:append':
       state.journaledSinceRoute = true;
+      if (event.fromRun !== undefined) reuseCall(state, event, event.fromRun);
   }
 }
 
@@ -290,6 +298,20 @@ function endCall(state: SummaryState, event: EventOf<'intake:end'> | EventOf<'st
   const durationMs = event.type === 'stage:end' ? event.durationMs : elapsed(call.startedAt, event.ts);
   call.end = { outcome: event.outcome, durationMs, resultPath: event.resultPath };
   state.results.set(event.resultPath, event.key);
+}
+
+/** A reused call: listed as it ended in the run it came from, with no duration of this run's. */
+function reuseCall(state: SummaryState, event: EventOf<'journal:append'>, fromRun: string): void {
+  state.calls.set(event.key, {
+    key: event.key,
+    kind: 'builtin',
+    startedAt: event.ts,
+    end: { outcome: event.outcome, durationMs: 0 },
+    fromRun,
+    facts: {},
+    files: [],
+    steps: new Map(),
+  });
 }
 
 function startStep(state: SummaryState, event: EventOf<'step:start'>): void {
@@ -355,6 +377,7 @@ export function toSummary(state: SummaryState): Summary | undefined {
   const { run, ending, totals } = state;
   if (run === undefined) return undefined;
   const ended = [...state.calls.values()].filter((call) => call.end !== undefined);
+  const own = ended.filter((call) => call.fromRun === undefined);
   const costUsd = round(totals.costUsd);
   return defined<Summary>({
     schema: 'sail.summary.v1',
@@ -372,8 +395,8 @@ export function toSummary(state: SummaryState): Summary | undefined {
     loops: Object.fromEntries([...state.loops].map(([name, loop]) => [name, { ...loop }])),
     routes: state.routes.map((route) => ({ ...route })),
     totals: defined<Summary['totals']>({
-      stageCalls: ended.length,
-      steps: ended.reduce((sum, call) => sum + (call.kind === 'stage' ? endedSteps(call).length : 1), 0),
+      stageCalls: own.length,
+      steps: own.reduce((sum, call) => sum + (call.kind === 'stage' ? endedSteps(call).length : 1), 0),
       toolCalls: totals.toolCalls,
       denials: totals.denials,
       replays: totals.replays,
@@ -405,6 +428,9 @@ function stepsCost(call: CallState): number | undefined {
 
 function callEntry(state: SummaryState, call: CallState): CallEntry {
   const end = call.end as NonNullable<CallState['end']>;
+  if (call.fromRun !== undefined) {
+    return { key: call.key, outcome: end.outcome, durationMs: end.durationMs, fromRun: call.fromRun };
+  }
   const steps = endedSteps(call);
   const facts: Facts = call.kind === 'stage' ? { costUsd: stepsCost(call) } : call.facts;
   const pointer = call.feedback;

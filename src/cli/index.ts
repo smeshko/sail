@@ -3,6 +3,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
 import { dashboard } from './commands/dashboard';
+import { fromRun } from './commands/from-run';
 import { init } from './commands/init';
 import { port } from './commands/port';
 import { queue } from './commands/queue';
@@ -39,6 +40,7 @@ Usage:
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail stop <run>                                            Stop a run: at its next call boundary while it runs, at once when it is suspended
+  sail run --from-run <run> --stage <stage> [--continue]     Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
@@ -49,6 +51,8 @@ Usage:
   sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
   sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
+  sail port ticket-source comment <ticket> [--body-file <path>]
+                                                             Comment on a ticket, the body from the file or stdin
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version
@@ -57,6 +61,10 @@ Usage:
 Starting a run from a ticket:
   --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
+  --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
+
+A seeded run:
+  --continue  Runs the rest of the workflow after the stage, not just the stage
 
 Output of a run and a resume:
   -q, --quiet    Only the run's start, its errors and the final block
@@ -153,6 +161,19 @@ const commands = new Map<string, CommandSpec>([
   ['dashboard', { options: { port: { type: 'string' } }, positionals: 0, command: dashboard }],
   ['init', bare(init)],
   ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
+  [
+    'run',
+    {
+      options: {
+        'from-run': { type: 'string' },
+        stage: { type: 'string' },
+        continue: { type: 'boolean' },
+        ...VERBOSITY_OPTIONS,
+      },
+      positionals: 0,
+      command: fromRun,
+    },
+  ],
   ['runs', bare(runs)],
   [
     'show',
@@ -203,6 +224,7 @@ const TICKET: CommandSpec = {
     workflow: { type: 'string' },
     force: { type: 'boolean' },
     until: { type: 'string' },
+    'dry-run': { type: 'boolean' },
     // The watcher's: the run id it minted for the run it dispatches. Not in USAGE.
     dispatch: { type: 'string' },
     ...VERBOSITY_OPTIONS,

@@ -24,8 +24,9 @@
       "required": ["kind", "ticketKey", "via", "forced"],
       "additionalProperties": false
     },
+    "fromRun": { "description": "the run a seeded run reused calls from", "type": "string", "minLength": 1 },
     "claim": {
-      "description": "what the run's start did to its ticket: whether the claim took, and the state the provider reported after sail's move",
+      "description": "what the run's start did to its ticket: whether the claim took, and the state the provider reported after sail's move. A seeded run makes none",
       "type": "object",
       "properties": {
         "claimed": { "type": "boolean" },
@@ -97,8 +98,16 @@
     "startedAt": { "$ref": "#/$defs/ts" },
     "note": { "type": "string" }
   },
-  "required": ["schema", "runId", "source", "claim", "workflow", "sail", "adapters", "intake", "stages", "startedAt"],
+  "required": ["schema", "runId", "source", "workflow", "sail", "adapters", "intake", "stages", "startedAt"],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "a seeded run claims nothing: claim is required unless fromRun is present, and refused when it is",
+      "if": { "properties": { "fromRun": true }, "required": ["fromRun"] },
+      "then": { "properties": { "claim": false } },
+      "else": { "properties": { "claim": true }, "required": ["claim"] }
+    }
+  ],
   "$defs": {
     "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
     "origin": { "type": "string", "pattern": "^(builtin|repo:.+)$" },

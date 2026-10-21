@@ -18,7 +18,7 @@
     "name": "ticket-to-pr",
     "version": 1,
     "origin": "repo:.sail/workflows/ticket-to-pr",
-    "sha256": "6847c7c7f4273a6a9d340cd019d64ddc35890b9749973b0672009540695dce05"
+    "sha256": "f94d30a42e726ec2271de2f0b28f759a04ea9c90dc2ca1ccc68c83c564c50edc"
   },
   "sail": {
     "version": "0.0.0",

@@ -1,6 +1,6 @@
 // Registration: `sail <ticket>` and `sail resume` record their repository in the watcher registry just before the run
-// opens, so the dashboard finds it before any watcher exists. The dashboard is optional, so nothing here fails a run:
-// a registry that can't be written is a warning.
+// opens, and `sail run --from-run` once it has opened, so the dashboard finds it before any watcher exists. The
+// dashboard is optional, so nothing here fails a run: a registry that can't be written is a warning.
 //
 // Another clone may hold the same `name`. When that clone still exists and has another remote, the command warns, and
 // this clone takes the entry: the dashboard shows this clone's runs. A stale entry, whose `.sail/` is gone, is replaced

@@ -91,6 +91,8 @@ interface Payloads {
     roster: { intake: IntakeEntry; stages: Record<string, RosterEntry> };
     adapters: RunHeader['adapters'];
     budget?: RunHeader['budget'];
+    /** The run a seeded run reused calls from. */
+    fromRun?: string;
   };
   'run:end': {
     status: 'completed' | 'failed' | 'suspended';
@@ -178,7 +180,8 @@ interface Payloads {
   'output:invalid': { key: string; message: string };
   'file:produced': { key: string; name: string; path: string; bytes: number; sha256: string };
   'file:validated': { key: string; name: string; ok: boolean; checks: string[] };
-  'journal:append': { key: string; line: number; outcome: Outcome };
+  /** `fromRun` marks a reused call: the run it was taken from. */
+  'journal:append': { key: string; line: number; outcome: Outcome; fromRun?: string };
   'loop:iteration': {
     loop: string;
     iteration: number;

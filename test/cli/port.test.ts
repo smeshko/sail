@@ -18,7 +18,7 @@ import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { wrapUntrusted } from '../../src/engine/render';
-import { Ticket } from '../../src/ports/types';
+import { Posted, Ticket } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -336,6 +336,132 @@ export default {
     const { code, stdout, stderr } = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-5'], repo.dir);
     expect({ code, stdout }).toEqual({ code: EXIT_FAILED, stdout: '' });
     expect(stderr).toStartWith('sail port: ticketSource.get: ');
+    expect(stderr).toEndWith(' (invalid)\n');
+  });
+});
+
+// `sail port ticket-source comment`: the body from --body-file or stdin, the port's Posted as one line.
+
+/** What the fake ticket source holds now: its state file. */
+const fakeWorld = (repoDir: string) =>
+  JSON.parse(readFileSync(join(repoDir, '.sail-runs', 'fake', 'tickets.json'), 'utf8'));
+
+test("comment posts the body of --body-file, or of stdin without it, and prints the port's Posted with an id and a URL", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureWithLinked(repo.dir);
+    const seed = readFileSync(join(sail, 'fake', 'tickets.json'), 'utf8');
+    writeFileSync(join(repo.dir, 'note.md'), 'From the file.\n');
+    const fromFile = await runCaptured(
+      ['port', 'ticket-source', 'comment', 'FAKE-5', '--body-file', 'note.md'],
+      repo.dir,
+    );
+    expect({ code: fromFile.code, stderr: fromFile.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const first = Posted.parse(oneLine(fromFile.stdout));
+    expect(first).toMatchObject({ id: 'comment-2', url: 'fake://tickets/FAKE-5#comment-2' });
+
+    const fromStdin = await runCaptured(['port', 'ticket-source', 'comment', 'fake://tickets/FAKE-5'], repo.dir, {
+      stdin: 'From stdin.\n',
+    });
+    expect({ code: fromStdin.code, stderr: fromStdin.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(Posted.parse(oneLine(fromStdin.stdout)).id).toBe('comment-3');
+
+    const comments = fakeWorld(repo.dir).tickets.find(
+      (ticket: { ticketKey: string }) => ticket.ticketKey === 'FAKE-5',
+    ).comments;
+    expect(comments.map((comment: { body: string }) => comment.body)).toEqual([
+      'The one on the wiki.',
+      'From the file.\n',
+      'From stdin.\n',
+    ]);
+    // The committed seed is the fake's input, and stays as it was.
+    expect(readFileSync(join(sail, 'fake', 'tickets.json'), 'utf8')).toBe(seed);
+  });
+});
+
+test.each<[string, string[], string | undefined, string]>([
+  ['an empty --body-file', ['--body-file', 'empty.md'], undefined, '--body-file empty.md'],
+  ['a blank stdin', [], ' \n\n', 'stdin'],
+  ['an empty stdin', [], '', 'stdin'],
+])('comment with %s exits 3 before the port is called, and posts nothing', async (_, flags, stdin, where) => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    writeFileSync(join(repo.dir, 'empty.md'), '\n');
+    const refused = await runCaptured(['port', 'ticket-source', 'comment', 'FAKE-5', ...flags], repo.dir, {
+      ...(stdin === undefined ? {} : { stdin }),
+    });
+    expect(refused).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `sail port: ticket-source comment needs a body, and ${where} is empty\n`,
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+  });
+});
+
+test('with SAIL_EVENTS set, a comment appends one ticket:commented with the ticket key and the body and no envelope, and without it no file is written', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const file = join(repo.dir, 'out', 'port-events.ndjson');
+    mkdirSync(join(repo.dir, 'out'));
+    const comment = ['port', 'ticket-source', 'comment', 'FAKE-5'];
+    const posted = await runCaptured(comment, repo.dir, {
+      env: { SAIL_EVENTS: file },
+      stdin: 'sail run r1 opened u\n',
+    });
+    expect(posted.code).toBe(EXIT_OK);
+    await runCaptured(comment, repo.dir, { stdin: 'No events file.\n' });
+
+    const lines = readFileSync(file, 'utf8').split('\n').slice(0, -1);
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      { type: 'ticket:commented', ticketKey: 'FAKE-5', body: 'sail run r1 opened u\n' },
+    ]);
+    expect(readdirSync(join(repo.dir, 'out'))).toEqual(['port-events.ndjson']);
+  });
+});
+
+test("comment on a ref parseKey refuses exits 3 naming it with no port call, and on a ticket the source lacks exits 1 with the port's message", async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const refused = await runCaptured(['port', 'ticket-source', 'comment', 'ADW-7'], repo.dir, { stdin: 'Hello\n' });
+    expect({ code: refused.code, stdout: refused.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(refused.stderr).toStartWith("sail port: 'ADW-7' is not a ticket of the fake ticket source");
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+
+    expect(await runCaptured(['port', 'ticket-source', 'comment', 'FAKE-9'], repo.dir, { stdin: 'Hello\n' })).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.comment: no ticket FAKE-9 (not_found)\n',
+    });
+  });
+});
+
+test("an answer that is no Posted, from a repository's own adapter, exits 1 naming the port and the operation", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureWithLinked(repo.dir);
+    const fake = join(import.meta.dir, '..', '..', 'src', 'adapters', 'fake', 'ticket-source');
+    write(
+      sail,
+      'adapters/odd-tickets.ts',
+      `import { createFakeTicketSource } from '${fake}';
+export default {
+  create(_options, context) {
+    const fake = createFakeTicketSource({ seed: \`\${context.sailDir}/fake/tickets.json\`, state: \`\${context.runsDir}/fake/tickets.json\` });
+    return { ...fake, name: 'odd', comment: async () => ({ id: 7 }) };
+  },
+};
+`,
+    );
+    edit(
+      sail,
+      'project.yaml',
+      'ticketSource: { use: fake, seed: ./fake/tickets.json }',
+      'ticketSource: { use: ./adapters/odd-tickets.ts }',
+    );
+    const { code, stdout, stderr } = await runCaptured(['port', 'ticket-source', 'comment', 'FAKE-5'], repo.dir, {
+      stdin: 'Hello\n',
+    });
+    expect({ code, stdout }).toEqual({ code: EXIT_FAILED, stdout: '' });
+    expect(stderr).toStartWith('sail port: ticketSource.comment: its answer is not a Posted: id ');
     expect(stderr).toEndWith(' (invalid)\n');
   });
 });

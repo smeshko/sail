@@ -507,17 +507,7 @@ test('sail FAKE-1 --until spec stops after spec#1 with exit 2: the final block n
   });
 });
 
-// What is gone: `sail run` and `--input`. A run starts from a ticket and from nothing else.
-
-test('sail run starts nothing: run reads as a ticket the ticket source does not know, and is refused with exit 3', async () => {
-  const { code, stdout, stderr, touched } = await sailIn(['run']);
-  expect({ code, stdout, stderr, touched }).toEqual({
-    code: EXIT_REFUSED,
-    stdout: '',
-    stderr: "sail run: 'run' is not a ticket of the fake ticket source: a ticket key, or a URL it owns\n",
-    touched: false,
-  });
-});
+// What is gone: `--input`. A run starts from a ticket and from nothing else.
 
 test('sail FAKE-1 --input is refused as an unknown argument with exit 3, and nothing starts', async () => {
   const { code, stdout, stderr, touched } = await sailIn(['FAKE-1', '--input', '{}']);

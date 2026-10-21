@@ -61,7 +61,7 @@ test('railRepos lists alpha then beta, each run newest first with its status, st
     ]),
   );
   expect(rows).toEqual([
-    ['alpha', GOLDEN_RUN_ID, 'FAKE-1', 'completed', undefined, 16_000, 1.35],
+    ['alpha', GOLDEN_RUN_ID, 'FAKE-1', 'completed', undefined, 16_100, 1.35],
     ['alpha', FAKE_2_ID, 'FAKE-2', 'failed', 'stage_error', 4900, 0.3625],
     ['beta', FAKE_3_ID, 'FAKE-3', 'suspended', 'budget_exceeded', 6200, 1.0625],
   ]);
@@ -81,7 +81,7 @@ test('a running copy is live, listed first, and its duration is the time since i
     true,
     [
       [RUNNING_ID, 'running', 5000],
-      [GOLDEN_RUN_ID, 'completed', 16_000],
+      [GOLDEN_RUN_ID, 'completed', 16_100],
       [FAKE_2_ID, 'failed', 4900],
     ],
   ]);

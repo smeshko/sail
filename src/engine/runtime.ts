@@ -34,6 +34,11 @@
 // Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
 // ticket is claimed, refuses the start instead: nothing was written, so there is no run to suspend.
 //
+// A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
+// and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
+// reported once, right after what opening the run did, as a `journal:append` with `fromRun`. Unless `--continue`, it
+// stops after the stage it was seeded for, as `until` stops a run.
+//
 // `until` names a stage to stop after. Once that stage's first call is journaled the next replay still runs: if it
 // ends the run, the run ends that way, and if it asks for another call the run is suspended with `until` instead, where
 // an abort seen before a call suspends it. A resume takes none and runs to the end.
@@ -78,6 +83,7 @@ import {
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
 import { type StopReason, writeStatus } from './run-dir';
+import { openSeededRun, type SeededRunOptions } from './seed-run';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
 interface EventOptions {
@@ -109,6 +115,18 @@ export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
   onCall?(entry: JournalEntry): void;
 }
 
+export interface SeededWorkflowOptions extends SeededRunOptions, EventOptions {
+  /** Stops the running call when it aborts, and suspends the run. Aborted before the run opens, it refuses it. */
+  signal?: AbortSignal;
+  /** Called after each call is journaled. */
+  onCall?(entry: JournalEntry): void;
+  /**
+   * Called once the run is open and its start and reused calls are in its events file, before any call runs: what a
+   * refusal to open must not do waits for it.
+   */
+  onOpened?(): Promise<void>;
+}
+
 export interface ResumeWorkflowOptions extends ReopenRunOptions, EventOptions {
   /** Stops the running call when it aborts, and suspends the run again. */
   signal?: AbortSignal;
@@ -122,6 +140,8 @@ interface DriveOptions extends EventOptions {
   clock?: Clock;
   signal?: AbortSignal;
   onCall?(entry: JournalEntry): void;
+  /** Called once the run's start, and a seeded run's reused calls, are in its events file. */
+  onOpened?(): Promise<void>;
 }
 
 /** Why a call ended as it did, for the workflow: an error's problems, each with its reason, or a blocked agent's own. */
@@ -317,6 +337,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
   let reached = false;
+  /** A seeded run's source and stage, until its first replay has asked for a call of its own. */
+  let seededFor = opened.seeded;
 
   try {
     if (start) {
@@ -328,12 +350,20 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         roster: { intake: header.intake, stages: header.stages },
         adapters: header.adapters,
         ...(header.budget === undefined ? {} : { budget: header.budget }),
+        ...(header.fromRun === undefined ? {} : { fromRun: header.fromRun }),
       });
     }
     // What opening the run did, before this stream existed to hear it: the lease and the workspace, then what the claim
     // did to the ticket. No call was running, so no key.
     for (const event of opened.started) bus.emit(event);
     for (const event of opened.claimed) bus.emit(event);
+    // A seeded run's reused calls, each once: they were journaled as the run opened, with no stream to hear them.
+    if (opened.seeded !== undefined) {
+      const { fromRun, entries } = opened.seeded;
+      for (const { key, seq, outcome } of entries)
+        bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun });
+    }
+    await options.onOpened?.();
     // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
     let [intake] = readJournal(dir).entries;
     if (intake === undefined) {
@@ -393,6 +423,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       });
       const end = await unlessAborted(replaying, signal);
       if (end === undefined) return await interrupted('stopped during the replay');
+      // A seeded run's first call of its own is the stage it was seeded for: an edited workflow that asks for another
+      // first, or ends, would run what nobody asked for.
+      if (seededFor !== undefined) {
+        const { fromRun, stage } = seededFor;
+        seededFor = undefined;
+        const expected = `${stage}#1`;
+        if (end.kind !== 'failed' && (end.kind !== 'call' || end.call.key !== expected)) {
+          const asked = end.kind === 'call' ? `asks for ${end.call.key}` : 'ends';
+          const message = `the workflow ${asked} after the calls reused from run ${fromRun}, not ${expected}: it changed since that run`;
+          return await failed('determinism_violation', message);
+        }
+      }
       if (end.kind === 'completed') return await finish({ runId, dir, status: 'completed', result: end.result });
       if (end.kind === 'failed') return await failed(end.stopReason, end.message);
 
@@ -441,6 +483,16 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   } finally {
     detach();
   }
+}
+
+/**
+ * Opens a run seeded with another run's calls before a stage and runs it, to the end of that stage's first call or,
+ * with `continue`, to its end. A refusal to open passes through, and nothing is written.
+ */
+export async function runSeededWorkflow(options: SeededWorkflowOptions): Promise<RunEnd | { refused: string }> {
+  const opened = await openSeededRun(options);
+  if ('refused' in opened) return opened;
+  return drive(opened, options, { start: true });
 }
 
 /** Reopens a suspended or crashed run and runs it to its end from its journal. A refusal passes through. */

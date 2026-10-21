@@ -30,7 +30,7 @@ export function edit(sail: string, path: string, from: string, to: string): stri
 }
 
 const OPEN_SCRIPT = 'workflows/ticket-to-pr/stages/open/run.sh';
-const OPENED = '--body-file "$INPUT_BODY" --ticket "$ticket" --label sail\n';
+const OPENED = '--body-file "$INPUT_BODY" --ticket "$ticket" --label sail)\n';
 
 /**
  * Makes a copy's `open` step hold once `open-pull-request` has answered, in a run whose environment sets
@@ -40,11 +40,12 @@ const OPENED = '--body-file "$INPUT_BODY" --ticket "$ticket" --label sail\n';
 export function holdAfterOpen(sail: string): string {
   const file = join(sail, OPEN_SCRIPT);
   const text = readFileSync(file, 'utf8');
-  if (!text.endsWith(OPENED)) throw new Error(`${OPEN_SCRIPT} doesn't end with open-pull-request`);
-  // Appended, not through edit(): a replacement string would read the shell's `$$` as one `$`.
+  if (text.split(OPENED).length !== 2) throw new Error(`${OPEN_SCRIPT} has no single open-pull-request answer`);
+  // Spliced in with a function, not through edit(): a replacement string would read the shell's `$$` as one `$`.
+  const hold = `if [ -n "\${HOLD_AFTER_OPEN:-}" ]; then echo "$$" >"$HOLD_AFTER_OPEN"; exec sleep 60; fi\n`;
   writeFileSync(
     file,
-    `${text}if [ -n "\${HOLD_AFTER_OPEN:-}" ]; then echo "$$" >"$HOLD_AFTER_OPEN"; exec sleep 60; fi\n`,
+    text.replace(OPENED, () => `${OPENED}${hold}`),
   );
   return file;
 }

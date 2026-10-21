@@ -246,6 +246,10 @@ _Avoid_: error message, cause, exit reason
 A command's end before a run starts, with exit code 3: an invalid config, missing credentials, type errors, no workflow, a source the intake doesn't accept, a source that isn't designated or is already claimed, a leased branch, or a workspace that can't be made. A refusal leaves no run directory.
 _Avoid_: rejection, abort, error (an outcome)
 
+**Dry run**:
+`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease, claim or comment. It exits 0, or 3 with the start's own refusal.
+_Avoid_: preview, simulation, plan
+
 **Suspended**:
 The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
@@ -257,6 +261,14 @@ _Avoid_: signal file, kill file, flag
 **Resume**:
 Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs.
 _Avoid_: restart, rerun, retry, continue
+
+**Seeded run**:
+A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun`. It claims nothing, and works on a branch of its own.
+_Avoid_: rerun, fork, clone, replay
+
+**Reused call**:
+A call a seeded run took from its `fromRun` run: its call directory copied, its journal line seeded, and `fromRun` on its `journal:append` event and its summary entry. It costs the seeded run nothing.
+_Avoid_: cached call, skipped call
 
 **Workspace**:
 The checkout a run works in, on its own branch. How it is made (a branch in the current clone, a git worktree, a container) is up to the workspace adapter.

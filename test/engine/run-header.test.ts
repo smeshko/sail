@@ -300,3 +300,46 @@ test("a header built with the run's workspace records its branch, repository and
     without: [],
   });
 });
+
+test('the header of a seeded run records its fromRun after the source and no claim, and validates', async () => {
+  const fromRun = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
+  const header = await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const { loaded, config } = await load(sail);
+    return buildRunHeader({
+      runId: RUN_ID,
+      source: FAKE_1,
+      fromRun,
+      sailDir: sail,
+      loaded,
+      config,
+      adapters: FAKE_ENTRIES,
+      now: NOW,
+      workspace: {
+        branch: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command-seeded-kwd3n0aa',
+        repository: { url: 'fake://origin', defaultBranch: 'main' },
+        baseSha: 'a'.repeat(40),
+      },
+    });
+  });
+  expect([Object.keys(header), header.fromRun, validateRunHeader(header)]).toEqual([
+    [
+      'schema',
+      'runId',
+      'source',
+      'fromRun',
+      'workflow',
+      'sail',
+      'adapters',
+      'intake',
+      'stages',
+      'budget',
+      'startedAt',
+      'branch',
+      'repository',
+      'workspace',
+    ],
+    fromRun,
+    [],
+  ]);
+});
