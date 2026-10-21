@@ -538,3 +538,24 @@ test("a ticket:fetched with no key, or under a step's key alone, sets no ticket:
   // The fold is the one under test: the same stream with the intake's key names the ticket.
   expect(folded(stamp([0, runStart()], [100, fetched('intake#1', 'Named')]))?.ticket?.title).toBe('Named');
 });
+
+test('a reused call is listed where its journal:append comes, with its fromRun and no duration, and counts in no total', () => {
+  const source = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [10, { type: 'journal:append', key: 'intake#1', line: 1, outcome: 'passed', fromRun: source }],
+      [100, start('spec#1')],
+      [600, end('spec#1', 'done', 480)],
+      [620, journal('spec#1', 2, 'done')],
+    ),
+  );
+  expect([summary?.calls, summary?.totals.stageCalls, summary?.totals.steps]).toEqual([
+    [
+      { key: 'intake#1', outcome: 'passed', durationMs: 0, fromRun: source },
+      { key: 'spec#1', kind: 'script', outcome: 'done', durationMs: 480, resultPath: 'spec/call-1/result.json' },
+    ],
+    1,
+    1,
+  ]);
+});

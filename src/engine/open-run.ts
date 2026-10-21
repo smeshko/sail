@@ -53,7 +53,7 @@ import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
-import { createJournal } from './journal';
+import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { modelProblems } from './roster';
 import { createRunDir, type RunStatus, readStatus, removeRunDir, runsDir, type Source, writeStatus } from './run-dir';
@@ -70,7 +70,7 @@ import {
 import { isRunIdOf, newRunId } from './run-id';
 import { findSailDir } from './sail-dir';
 import { formatIssue } from './schemas';
-import { type ClaimedSource, claimSource, resolveSource } from './source';
+import { type ClaimedSource, claimSource, type ResolvedSource, resolveSource } from './source';
 import { watchLabel } from './watchable';
 
 /** The realpaths of the `.sail/` directories a run has been opened from in this process. */
@@ -107,6 +107,8 @@ export interface OpenedRun {
   until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
+  /** A seeded run's reused calls, as its journal holds them, the run they were taken from, and the stage it runs. */
+  seeded?: { fromRun: string; stage: string; entries: readonly JournalEntry[] };
 }
 
 /** Where a run works, and what holds it there. */
@@ -149,7 +151,7 @@ export interface OpenRunOptions {
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */
-function claim(sailDir: string): void {
+export function claim(sailDir: string): void {
   const real = realpathSync(sailDir);
   if (claimed.has(real)) {
     throw new Error(
@@ -160,7 +162,7 @@ function claim(sailDir: string): void {
 }
 
 /** Finds `.sail/` from `cwd` and reads its config, refusing on either. */
-function findConfigured(cwd: string): { dir: string; config: ProjectConfig } | { refused: string } {
+export function findConfigured(cwd: string): { dir: string; config: ProjectConfig } | { refused: string } {
   const found = findSailDir(cwd);
   if ('refused' in found) return found;
   const config = readConfig(found.dir);
@@ -172,7 +174,7 @@ function findConfigured(cwd: string): { dir: string; config: ProjectConfig } | {
 }
 
 /** Why `loaded` can't run when one of its stages took the intake's name, as a refusal: the two would share a key. */
-function intakeNameTaken(loaded: LoadedWorkflow, sailDir: string): string | undefined {
+export function intakeNameTaken(loaded: LoadedWorkflow, sailDir: string): string | undefined {
   const taken = loaded.stages.find((stage) => stage.definition.name === INTAKE_STAGE);
   if (taken === undefined) return undefined;
   const file = relative(dirname(sailDir), join(taken.dir, 'stage.ts'));
@@ -205,7 +207,7 @@ function dispatchProblem(sailDir: string, ticketKey: string, runId: string): str
 }
 
 /** A port's failure as a refusal's words: its own message, with its code. Anything else is a bug, and is thrown on. */
-function portRefusal(error: unknown): string {
+export function portRefusal(error: unknown): string {
   if (!(error instanceof PortError)) throw error;
   return `${error.message} (${error.code})`;
 }
@@ -226,7 +228,7 @@ function statusOf(runDir: string): string {
 }
 
 /** Why `branch` can't be leased: the run that holds it, and how that run stands. */
-function leasedBy(branch: string, holder: { runId: string; runDir: string }): string {
+export function leasedBy(branch: string, holder: { runId: string; runDir: string }): string {
   return `the branch ${branch} is leased by run ${holder.runId} (${statusOf(holder.runDir)})`;
 }
 
@@ -234,7 +236,7 @@ function leasedBy(branch: string, holder: { runId: string; runDir: string }): st
  * Collects what the relay hears while `fn` runs: each `workspace:*` event, its path made relative to `root`. The relay
  * holds one sink at a time, so the collector is detached before this returns.
  */
-async function collecting<T>(
+export async function collecting<T>(
   relay: ProviderRelay,
   root: string,
   fn: (events: ProviderEvent[]) => Promise<T>,
@@ -259,25 +261,37 @@ async function quietly(step: () => Promise<unknown>): Promise<void> {
   }
 }
 
+/**
+ * Undoes an opened workspace whose run directory could not be written: releases the workspace, removes the run
+ * directory and releases the lease, each as far as it still can be.
+ */
+export async function undoOpened(port: WorkspacePort, run: RunRef, remote: string, branch: string): Promise<void> {
+  await quietly(() => port.release(run, false));
+  await quietly(async () => removeRunDir(run.runDir));
+  await quietly(() => port.releaseLease(remote, branch, run.runId));
+}
+
 /** What a fresh start made before its claim, for the claim to build on, or to undo. */
-interface Made {
+export interface Made {
   repository: Repository;
   workspace: Workspace;
 }
 
 /**
- * Leases `branch`, makes the run directory and the workspace, checks for an abort, and claims the ticket, in that
- * order. A refusal at any step undoes the ones before it, in reverse.
+ * Leases `branch`, makes the run directory and the workspace at `base`, the default branch's tip when left out, checks
+ * for an abort, and claims the ticket, in that order. A seeded run passes no `claim`, and claims nothing. A refusal at
+ * any step undoes the ones before it, in reverse.
  */
-async function startWorkspace(options: {
+export async function startWorkspace(options: {
   port: WorkspacePort;
   run: RunRef;
   sailDir: string;
   branch: string;
+  base?: string;
   signal: AbortSignal | undefined;
-  claim: () => Promise<ClaimedSource | { refused: string }>;
-}): Promise<{ made: Made; claimed: ClaimedSource } | { refused: string }> {
-  const { port, run, sailDir, branch, signal } = options;
+  claim?: () => Promise<ClaimedSource | { refused: string }>;
+}): Promise<{ made: Made; claimed: ClaimedSource | undefined } | { refused: string }> {
+  const { port, run, sailDir, branch, base, signal } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -301,7 +315,11 @@ async function startWorkspace(options: {
   };
   try {
     createRunDir(sailDir, run.runId);
-    workspace = await port.create(run, { branch, ...(signal === undefined ? {} : { signal }) });
+    workspace = await port.create(run, {
+      branch,
+      ...(base === undefined ? {} : { base }),
+      ...(signal === undefined ? {} : { signal }),
+    });
   } catch (error) {
     if (!(error instanceof PortError)) {
       await undo('');
@@ -309,27 +327,35 @@ async function startWorkspace(options: {
     }
     return undo(`the workspace could not be made: ${portRefusal(error)}`);
   }
+  if (options.claim === undefined) {
+    if (signal?.aborted) return undo('stopped before the run was opened');
+    return { made: { repository, workspace }, claimed: undefined };
+  }
   if (signal?.aborted) return undo('stopped before the ticket was claimed');
   const claimed = await options.claim();
   if ('refused' in claimed) return undo(claimed.refused);
   return { made: { repository, workspace }, claimed };
 }
 
+/** What a start's preflight found: everything `openRun()` goes on with once nothing has refused. */
+export interface Preflight {
+  sailDir: string;
+  config: ProjectConfig;
+  loaded: LoadedWorkflow;
+  /** The ticket as fetched for the checks, with the checks `--force` overrode. */
+  resolved: ResolvedSource;
+  source: Source;
+  runId: string;
+  branch: string;
+  /** The header built before the claim, with the state as fetched standing in for the claim's answer. */
+  header: RunHeader;
+}
+
 /**
- * Finds `.sail/`, reads its config, loads the workflow and checks the ticket, refusing at the first that fails, in the
- * order the header comment gives. It then mints the run id, names the branch, builds the run header and checks it. A
- * start whose `signal` has aborted by then is refused with nothing written. Then it leases the branch, makes the run
- * directory and the workspace, and claims the ticket, refusing and undoing what it made when any of them fails, or when
- * the start aborts before the claim. A claim, a forced move or a comment that fails refuses too, saying where the
- * ticket stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a refusal. Last, it writes the
- * header, the journal and STATUS. A failure there throws too, and its message says where the ticket stands: it has
- * moved, and no run is behind it. So the workspace, the run directory and the lease are undone first, as far as they
- * still can be.
- *
- * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
- * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
+ * A start's preflight: every check that can refuse, in the order the header comment gives, then the run id, the branch
+ * and the unclaimed header, built and checked. It writes nothing, but it claims the `.sail/` for the process.
  */
-export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
+export async function preflightRun(options: OpenRunOptions): Promise<Preflight | { refused: string }> {
   const { cwd, workflow, ticket, force = false, dispatch } = options;
   if (dispatch !== undefined && force) return { refused: "--dispatch and --force can't be combined" };
   // Read before anything can refuse, so the run id's time is the clock's first reading whatever else reads it later.
@@ -372,7 +398,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     via: dispatch === undefined ? 'cli' : 'watch',
     forced: resolved.forced,
   };
-  const unclaimed = buildRunHeader({
+  const header = buildRunHeader({
     runId,
     source,
     claim: { claimed: false, state: resolved.ticket.state },
@@ -382,7 +408,32 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     adapters: options.adapters.entries,
     now,
   });
-  assertRunHeader(unclaimed);
+  assertRunHeader(header);
+  return { sailDir: found.dir, config, loaded, resolved, source, runId, branch, header };
+}
+
+/**
+ * Runs the start's preflight, `preflightRun()`, which finds `.sail/`, reads its config, loads the workflow and checks the
+ * ticket, refusing at the first that fails, then mints the run id, names the branch, builds the run header and checks
+ * it. A start whose `signal` has aborted by then is refused with nothing written. Then it leases the branch, makes the run
+ * directory and the workspace, and claims the ticket, refusing and undoing what it made when any of them fails, or when
+ * the start aborts before the claim. A claim, a forced move or a comment that fails refuses too, saying where the
+ * ticket stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a refusal. Last, it writes the
+ * header, the journal and STATUS. A failure there throws too, and its message says where the ticket stands: it has
+ * moved, and no run is behind it. So the workspace, the run directory and the lease are undone first, as far as they
+ * still can be.
+ *
+ * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
+ * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
+ */
+export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
+  const preflight = await preflightRun(options);
+  if ('refused' in preflight) return preflight;
+  const { config, loaded, resolved, source, runId, branch, header: unclaimed } = preflight;
+  const found = { dir: preflight.sailDir };
+  const { ticketKey } = resolved;
+  const { force = false, until } = options;
+  const { ticketSource } = options.adapters.ports;
   // The last moment nothing is written. Everything up to here only read, so one check covers an abort at any of it.
   if (options.signal?.aborted) return { refused: 'stopped before the ticket was claimed' };
   const root = dirname(found.dir);
@@ -401,7 +452,9 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     });
   });
   if ('refused' in opened) return opened;
-  const { made, claimed: took } = opened;
+  const { made } = opened;
+  // Given a claim, startWorkspace() answers with what it did.
+  const took = opened.claimed as ClaimedSource;
   const forced = [...resolved.forced, ...took.forced];
   const header: RunHeader = {
     ...unclaimed,
@@ -420,10 +473,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     writeStatus(dir, 'running');
   } catch (error) {
     // No run is behind the claim, so nothing may hold its branch: undone as a refusal would, as far as it still can.
-    const { workspace: port } = options.adapters.ports;
-    await quietly(() => port.release(run, false));
-    await quietly(async () => removeRunDir(dir));
-    await quietly(() => port.releaseLease(made.repository.url, branch, runId));
+    await undoOpened(options.adapters.ports.workspace, run, made.repository.url, branch);
     const why = error instanceof Error ? error.message : String(error);
     throw new Error(
       `the ticket is now ${took.claim.state.name} and its comment names run ${runId}, but the run directory was not written: ${why}. --force runs the ticket in a new run`,

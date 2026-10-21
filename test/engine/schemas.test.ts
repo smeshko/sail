@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -1145,6 +1145,117 @@ test('run: claim holds whether the claim took and the state the provider reporte
 test('run: a header with no claim is refused, naming claim', () => {
   expect(validateDocument('sail.run.v1', omit(run, 'claim'))).toEqual([
     { schema: 'sail.run.v1', path: '/claim', message: 'is required' },
+  ]);
+});
+
+// A seeded run (D5): its header names the run it reused calls from, and records no claim.
+
+test('run: a seeded header names its fromRun and has no claim; one with a claim beside fromRun, or an empty fromRun, is refused', () => {
+  const seeded = { ...omit(run, 'claim'), fromRun: RUN_ID };
+  expect(validateDocument('sail.run.v1', seeded)).toEqual([]);
+  expect(validateDocument('sail.run.v1', { ...run, fromRun: RUN_ID })).toEqual([
+    { schema: 'sail.run.v1', path: '/claim', message: 'is not allowed' },
+  ]);
+  expect(paths('sail.run.v1', { ...seeded, fromRun: '' })).toEqual(['/fromRun']);
+});
+
+test('event: run:start and journal:append take a fromRun naming a run, and refuse an empty one', () => {
+  const append = { ...envelope, type: 'journal:append', key: 'intake#1', line: 1, outcome: 'passed' };
+  expect([
+    paths('sail.event.v1', { ...event, fromRun: RUN_ID }),
+    paths('sail.event.v1', { ...append, fromRun: RUN_ID }),
+    paths('sail.event.v1', { ...event, fromRun: '' }),
+    paths('sail.event.v1', { ...append, fromRun: '' }),
+  ]).toEqual([[], [], ['/fromRun'], ['/fromRun']]);
+});
+
+/**
+ * The golden run as a seeded run would hold it: a header with `fromRun` and no claim, the journal's first `reused` lines
+ * reported as reused calls (`journal:append` with `fromRun`), and every other result naming the seeded run.
+ */
+function seededRunDir(reused: number, fromRun = RUN_ID): { dir: string; seededId: string } {
+  const dir = tempDir({});
+  const golden = join(root, 'test', 'fixtures', 'runs', RUN_ID);
+  cpSync(golden, dir, { recursive: true });
+  const seededId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P';
+  const header = JSON.parse(readFileSync(join(golden, 'run.json'), 'utf8'));
+  chmodSync(join(dir, 'run.json'), 0o644);
+  writeFileSync(join(dir, 'run.json'), json({ ...omit(header, 'claim'), runId: seededId, fromRun: RUN_ID }));
+  const lines = readFileSync(join(dir, 'events.ndjson'), 'utf8')
+    .split('\n')
+    .filter((text) => text !== '');
+  const events = lines.map((text) => JSON.parse(text));
+  writeFileSync(
+    join(dir, 'events.ndjson'),
+    ndjson(...events.map((e) => (e.type === 'journal:append' && e.line <= reused ? { ...e, fromRun } : e))),
+  );
+  const journal = readFileSync(join(dir, 'journal.ndjson'), 'utf8')
+    .split('\n')
+    .filter((text) => text !== '');
+  for (const entry of journal.map((text) => JSON.parse(text)).slice(reused)) setRunId(dir, entry.resultPath, seededId);
+  return { dir, seededId };
+}
+
+function setRunId(dir: string, resultPath: string, runId: string): void {
+  const path = join(dir, resultPath);
+  writeFileSync(path, json({ ...JSON.parse(readFileSync(path, 'utf8')), runId }));
+}
+
+/** Each issue as its file and line, and whether it says the result names another run than `seededId`. */
+const issuesOf = (dir: string, seededId: string) =>
+  validateRunDir(dir).issues.map((issue) => [
+    issue.file,
+    issue.line,
+    issue.message.endsWith(`not "${seededId}")`) ? 'names another run' : issue.message,
+  ]);
+
+test('a seeded run directory may hold results that name the run it came from, only on the journal lines its events report as reused', () => {
+  const valid = seededRunDir(3);
+  // A fresh line whose result names another run is no reused call (review R1-2).
+  const fresh = seededRunDir(3);
+  setRunId(fresh.dir, '03-tests/call-1/result.json', RUN_ID);
+  // Reused lines its events don't report: here, all of them.
+  const unreported = seededRunDir(0);
+  for (const resultPath of ['00-intake/call-1/result.json', '01-spec/call-1/result.json'])
+    setRunId(unreported.dir, resultPath, RUN_ID);
+  expect([
+    issuesOf(valid.dir, valid.seededId),
+    issuesOf(fresh.dir, fresh.seededId),
+    issuesOf(unreported.dir, unreported.seededId),
+  ]).toEqual([
+    [],
+    [['journal.ndjson', 4, 'names another run']],
+    [
+      ['journal.ndjson', 1, 'names another run'],
+      ['journal.ndjson', 2, 'names another run'],
+    ],
+  ]);
+});
+
+test('a reused call reported for another run than the header names, or after a call of the run, is an issue of the events file', () => {
+  const other = seededRunDir(2, 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3Q');
+  const gap = seededRunDir(3);
+  const path = join(gap.dir, 'events.ndjson');
+  const events = readFileSync(path, 'utf8')
+    .split('\n')
+    .filter((text) => text !== '')
+    .map((text) => JSON.parse(text));
+  // Line 2 reported as this run's own call, so the reused line 3 comes after it.
+  writeFileSync(
+    path,
+    ndjson(...events.map((e) => (e.type === 'journal:append' && e.line === 2 ? omit(e, 'fromRun') : e))),
+  );
+  setRunId(gap.dir, '01-spec/call-1/result.json', gap.seededId);
+  const messages = (dir: string) =>
+    validateRunDir(dir)
+      .issues.filter((issue) => issue.file === 'events.ndjson')
+      .map((issue) => issue.message);
+  expect([messages(other.dir), messages(gap.dir)]).toEqual([
+    [
+      `reports a reused call from run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3Q, but run.json's fromRun is ${RUN_ID}`,
+      `reports a reused call from run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3Q, but run.json's fromRun is ${RUN_ID}`,
+    ],
+    ["reports journal line 3 as a reused call after a call of the run: reused calls are the journal's first lines"],
   ]);
 });
 
