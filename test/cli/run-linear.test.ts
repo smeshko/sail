@@ -56,6 +56,8 @@ interface LinearOptions {
   env?: Record<string, string | undefined>;
   /** The `ticketSource` line of `project.yaml`. */
   project?: string;
+  /** What the command reads on stdin. */
+  stdin?: string;
   /** Changes the world before the command runs, such as a failure to inject. */
   prepare?: (world: LinearWorld) => void;
 }
@@ -80,7 +82,10 @@ async function linearRun(argv: string[], options: LinearOptions = {}) {
     const served = linear.serve();
     try {
       const env = { ...repo.env, LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url, ...options.env };
-      const captured = await runCaptured(argv, repo.dir, { env });
+      const captured = await runCaptured(argv, repo.dir, {
+        env,
+        ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+      });
       const runs = join(repo.dir, '.sail-runs');
       const runIds = existsSync(runs) ? readdirSync(runs).filter((name) => name !== 'fake') : [];
       const [runId = ''] = runIds;
@@ -284,4 +289,21 @@ test('sail port ticket-source get on a Linear URL prints the Linear ticket as on
     { type: 'unstarted', name: 'Todo' },
     2,
   ]);
+});
+
+test('sail port ticket-source comment reaches Linear as one SailComment with the body, and the marker key is in no output', async () => {
+  const run = await linearRun(['port', 'ticket-source', 'comment', 'ADW-1'], { stdin: 'sail run r1 opened u\n' });
+  expect({ code: run.code, stderr: run.stderr, lines: run.stdout.split('\n').length }).toEqual({
+    code: EXIT_OK,
+    stderr: '',
+    lines: 2,
+  });
+  expect(JSON.parse(run.stdout)).toMatchObject({ id: 'comment-3', url: expect.stringContaining('ADW-1') });
+  expect(run.world.operations().filter((operation) => operation === 'SailComment')).toHaveLength(1);
+  expect(run.world.ticket(1).comments?.map((comment) => comment.body)).toEqual([
+    'Keep the exclamation mark.',
+    'And greet twice.',
+    'sail run r1 opened u\n',
+  ]);
+  expect(run.stdout + run.stderr + run.files).not.toContain(KEY);
 });

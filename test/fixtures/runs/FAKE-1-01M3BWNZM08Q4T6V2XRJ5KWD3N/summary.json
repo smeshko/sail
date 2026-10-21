@@ -14,8 +14,8 @@
   },
   "status": "completed",
   "startedAt": "2026-09-25T09:00:00.700Z",
-  "endedAt": "2026-09-25T09:00:16.700Z",
-  "durationMs": 16000,
+  "endedAt": "2026-09-25T09:00:16.800Z",
+  "durationMs": 16100,
   "result": {
     "pr": {
       "number": 5,
@@ -130,7 +130,7 @@
       "key": "open#1",
       "kind": "script",
       "outcome": "passed",
-      "durationMs": 900,
+      "durationMs": 1000,
       "resultPath": "06-open/call-1/result.json"
     }
   ],

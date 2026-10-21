@@ -157,19 +157,20 @@ test("open#1's output is the pull request's number, URL and draft flag, kept fro
   expect(result.consumed).toEqual({ title: 'workflow', body: '05-describe/call-1/pr-body.md', ticketKey: 'workflow' });
 });
 
-test("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled under the key open#1, after open#1's script:exec and before its script:exit, and the call directory keeps them in its port events file", async () => {
-  const { dir, events, repo } = await completed();
+test("the events hold codehost:pushed, codehost:pr_opened, codehost:labelled and ticket:commented under the key open#1, after open#1's script:exec and before its script:exit, and the call directory keeps them in its port events file", async () => {
+  const { dir, events, repo, runId } = await completed();
   const own = events.filter((event) => 'key' in event && event.key === 'open#1');
   const from = own.findIndex((event) => event.type === 'script:exec');
   const first = own[from]?.seq ?? 0;
-  expect(own.slice(from, from + 5).map((event) => [event.type, event.seq - first])).toEqual([
+  expect(own.slice(from, from + 6).map((event) => [event.type, event.seq - first])).toEqual([
     ['script:exec', 0],
     ['codehost:pushed', 1],
     ['codehost:pr_opened', 2],
     ['codehost:labelled', 3],
-    ['script:exit', 4],
+    ['ticket:commented', 4],
+    ['script:exit', 5],
   ]);
-  const stamped = own.slice(from + 1, from + 4) as unknown as Record<string, unknown>[];
+  const stamped = own.slice(from + 1, from + 5) as unknown as Record<string, unknown>[];
   const provider = stamped.map(({ seq: _seq, ts: _ts, runId: _runId, key: _key, ...rest }) => rest);
   expect<unknown>(provider).toEqual([
     {
@@ -185,6 +186,7 @@ test("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled 
       ticketKey: 'FAKE-1',
     },
     { type: 'codehost:labelled', number: 5, label: 'sail', change: 'added' },
+    { type: 'ticket:commented', ticketKey: 'FAKE-1', body: `sail run ${runId} opened ${PR.url}` },
   ]);
   const file = readFileSync(join(dir, '06-open', 'call-1', 'port-events.ndjson'), 'utf8');
   expect(
@@ -196,11 +198,14 @@ test("the events hold codehost:pushed, codehost:pr_opened and codehost:labelled 
   expect(events.filter((event) => event.type.startsWith('codehost:'))).toHaveLength(3);
 });
 
-test("the fake's FAKE-1 is In Progress, with the comment that names the run", async () => {
+test("the fake's FAKE-1 is In Progress, with the comment that names the run and then the one that links its pull request", async () => {
   const { repo, runId } = await completed();
   const ticket = fakeState(repo.dir, 'tickets.json').tickets[0];
   expect([ticket.ticketKey, ticket.state]).toEqual(['FAKE-1', { type: 'started', name: 'In Progress' }]);
-  expect(ticket.comments.at(-1)).toMatchObject({ author: 'sail', body: `sail run ${runId} started` });
+  expect(ticket.comments.slice(-2)).toMatchObject([
+    { author: 'sail', body: `sail run ${runId} started` },
+    { author: 'sail', body: `sail run ${runId} opened ${PR.url}` },
+  ]);
 });
 
 test('the run directory validates against the five sail.*.v1 schemas: one header, nine journal lines, nine results and one summary, with no issue', async () => {

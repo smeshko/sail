@@ -18,8 +18,8 @@
     "ticketKey": "workflow"
   },
   "startedAt": "2026-09-25T09:00:15.100Z",
-  "finishedAt": "2026-09-25T09:00:16.000Z",
-  "durationMs": 900,
+  "finishedAt": "2026-09-25T09:00:16.100Z",
+  "durationMs": 1000,
   "exit": {
     "code": 0,
     "mapped": "passed"
