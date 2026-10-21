@@ -3,6 +3,7 @@
 //   sail port ticket-source get <ticket>            the ticket, as the port's Ticket
 //   sail port ticket-source links <ticket>          its links
 //   sail port ticket-source attachments <ticket>    its attachments
+//   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
 //   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
 //
@@ -33,7 +34,7 @@ import type { ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
-import type { Ticket } from '../../ports/types';
+import { Posted, type Ticket } from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { CODEHOST } from './port-codehost';
@@ -116,6 +117,22 @@ const ticketOperation = (read: (ticket: Ticket) => unknown): PortOperation<Ticke
   },
 });
 
+/** A comment on the ticket `<ticket>` names: the port's `Posted`, parsed before it is printed. */
+const commentOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: { 'body-file': { value: 'path' } },
+  body: true,
+  async run(source, { positionals: [ref = ''], body }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const posted = Posted.safeParse(await source.comment(ticketKey, await body()));
+    if (posted.success) return { value: posted.data };
+    const [issue] = posted.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'comment', 'invalid', `its answer is not a Posted: ${where}`);
+  },
+};
+
 /** `links` and `attachments` are no operations of the port: they read `get`'s answer. */
 const TICKET_SOURCE: PortTable<'ticketSource'> = {
   port: 'ticketSource',
@@ -123,6 +140,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     get: ticketOperation((ticket) => ticket),
     links: ticketOperation((ticket) => ticket.links),
     attachments: ticketOperation((ticket) => ticket.attachments),
+    comment: commentOperation,
   },
 };
 

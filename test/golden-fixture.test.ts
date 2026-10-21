@@ -52,7 +52,7 @@ test('the golden run directory is valid against every run-directory schema', () 
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
     'sail.journal.v1': 9,
-    'sail.event.v1': 126,
+    'sail.event.v1': 127,
     'sail.summary.v1': 1,
     'sail.result.v1': 9,
   });
@@ -128,15 +128,16 @@ test('it holds nothing a run cannot write yet: no tool, thinking, denial or step
   expect(Object.keys(header.stages)).toEqual(['describe', 'implement', 'open', 'self-review', 'spec', 'tests']);
 });
 
-test("open#1's provider events are codehost:pushed, codehost:pr_opened and codehost:labelled, between its script:exec and script:exit, and its port events file holds the same three without an envelope", () => {
+test("open#1's provider events are codehost:pushed, codehost:pr_opened, codehost:labelled and ticket:commented, between its script:exec and script:exit, and its port events file holds the same four without an envelope", () => {
   const own = lines('events.ndjson').filter((event) => event.key === 'open#1');
   const from = own.findIndex((event) => event.type === 'script:exec');
-  const provider = own.slice(from + 1, from + 4);
-  expect(own.slice(from, from + 5).map((event) => event.type)).toEqual([
+  const provider = own.slice(from + 1, from + 5);
+  expect(own.slice(from, from + 6).map((event) => event.type)).toEqual([
     'script:exec',
     'codehost:pushed',
     'codehost:pr_opened',
     'codehost:labelled',
+    'ticket:commented',
     'script:exit',
   ]);
   expect(lines('06-open/call-1/port-events.ndjson')).toEqual(

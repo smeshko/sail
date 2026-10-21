@@ -13,7 +13,8 @@ import { copyFixture, edit, write } from '../helpers/fixture';
 import { type CaptureOptions, runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
-const TICKET_USAGE = 'usage: sail port ticket-source get|links|attachments <ticket>\n';
+const TICKET_USAGE =
+  'usage: sail port ticket-source get|links|attachments <ticket>\n       sail port ticket-source comment <ticket> [--body-file <path>]\n';
 const PUSH_USAGE = '       sail port codehost push <branch>\n';
 const OPEN_USAGE =
   '       sail port codehost open-pull-request --base <branch> --head <branch> --title <text> [--body-file <path>] [--draft] [--ticket <ticket key>] [--label <name>]...\n';
@@ -628,7 +629,7 @@ test.each<[string, string[], string]>([
   [
     '--body-file given to add-label',
     ['add-label', '1', 'x', '--body-file', 'note.md'],
-    "option '--body-file' belongs to sail port codehost open-pull-request or sail port codehost comment",
+    "option '--body-file' belongs to sail port ticket-source comment or sail port codehost open-pull-request or sail port codehost comment",
   ],
 ])('%s exits 3, naming where the option belongs', async (_, args, problem) => {
   await withTempRepo(async (repo) => {
