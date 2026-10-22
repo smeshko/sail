@@ -919,10 +919,7 @@ const pendingOf = (key: string, stage: StageDefinition, call: number, stageIndex
   group: GROUP,
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a fresh group keys its calls in the order given before any runs, the same stage twice as two calls, and ends the replay as one group end', async () => {
+test('a fresh group keys its calls in the order given before any runs, the same stage twice as two calls, and ends the replay as one group end', async () => {
   const seen = { after: false };
   const end = await replayed(async (run) => {
     await trio(run);
@@ -937,10 +934,7 @@ test
   expect(seen.after).toBe(false);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a group whose every call is journaled, in the order they completed, hands back its results in the order given, and the next call is keyed after it', async () => {
+test('a group whose every call is journaled, in the order they completed, hands back its results in the order given, and the next call is keyed after it', async () => {
   let outcomes: string[] = [];
   const end = await replayed(
     async (run) => {
@@ -954,10 +948,7 @@ test
   expect(end).toMatchObject({ kind: 'call', call: { key: 'c#1', stageIndex: 3 } });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a group with calls left ends the replay with only those, and reports no route into it; a move into a fresh group reports one, taking the group's first key", async () => {
+test("a group with calls left ends the replay with only those, and reports no route into it; a move into a fresh group reports one, taking the group's first key", async () => {
   const events: NewEvent[] = [];
   const left = await replayed(
     async (run) => {
@@ -982,10 +973,7 @@ test
   expect(events).toEqual([{ type: 'workflow:route', at: 'c#1', value: 'passed', took: 'a#1' }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, Body, JournalEntry[], string]>([
+test.each<[string, Body, JournalEntry[], string]>([
   [
     'a reordered group',
     (run) => run.all([[tests], [a]]),
@@ -1033,10 +1021,7 @@ test
   expect(await replayed(body, entries)).toEqual(failed('determinism_violation', message));
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a group's journaled error fails the run with stage_error, the first in the order given, unless that call asks for its error", async () => {
+test("a group's journaled error fails the run with stage_error, the first in the order given, unless that call asks for its error", async () => {
   const errored = [member('tests#1', 1, 'error', ['a#1', 'tests#1']), member('a#1', 2, 'passed', ['a#1', 'tests#1'])];
   for (const each of errored) each.reason = each.outcome === 'error' ? 'boom' : null;
   const unhandled = await replayed(async (run) => {
@@ -1062,10 +1047,7 @@ test
   expect(first).toEqual(failed('stage_error', 'a#1 ended in error: a#1 broke'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  .each<[string, Body, string]>([
+test.each<[string, Body, string]>([
   [
     'a stage the roster lacks',
     (run) => run.all([[a], [stray]]),
@@ -1085,10 +1067,7 @@ test
   expect(await replayed(body)).toEqual(failed('workflow_failed', message));
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('run.all([]) resolves to no results at once, and the next run.stage() is keyed as if the group were not there', async () => {
+test('run.all([]) resolves to no results at once, and the next run.stage() is keyed as if the group were not there', async () => {
   const events: NewEvent[] = [];
   let results: unknown;
   const end = await replayed(
