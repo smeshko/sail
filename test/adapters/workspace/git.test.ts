@@ -2,8 +2,9 @@
 // long is a failed result rather than a throw, and a remote's URL loses its credentials before anything keys or logs
 // it.
 import { expect, test } from 'bun:test';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { gitSync, nonInteractive, stripUserinfo } from '../../../src/adapters/workspace/git';
+import { fetchRemote, gitSync, nonInteractive, stripUserinfo } from '../../../src/adapters/workspace/git';
 import { withTempRepo } from '../../helpers/temp-repo';
 
 test("git never asks: no terminal prompt, no askpass, no credential manager dialog, the caller's ssh kept, and none of a hook's repository variables, but the user's own -c config (review #2.1)", () => {
@@ -69,6 +70,37 @@ test("a git call in a directory that is not there, or one that outruns its timeo
       slow: { code: slow.code, said: slow.stderr.startsWith('git wait timed out after 200 ms') },
       ran: { code: ran.code, stdout: ran.stdout },
     }).toEqual({ missing: -1, slow: { code: -1, said: true }, ran: { code: 0, stdout: 'true\n' } });
+  });
+});
+
+test("a fetch whose signal aborts while it waits to retry a lost ref lock is stopped there: no further git starts, and the error keeps git's message (review R1-1)", async () => {
+  await withTempRepo(async (repo) => {
+    // A git that always loses the ref lock, and counts its calls.
+    const bin = join(repo.dir, 'stub-bin');
+    const calls = join(repo.dir, 'calls');
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, 'git'),
+      `#!/bin/sh\necho "$*" >> '${calls}'\necho "error: cannot lock ref 'refs/remotes/origin/main': is at a but expected b" >&2\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const env = { ...repo.env, PATH: `${bin}:${repo.env.PATH ?? ''}` };
+    const counted = () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean).length : 0);
+    const controller = new AbortController();
+    const fetching = fetchRemote(repo.dir, 'origin', env, 10_000, controller.signal).then(
+      () => 'fetched',
+      (error: unknown) => (error as Error).message,
+    );
+    // Abort inside the first wait: the first try has run, and the next is 250 ms off.
+    while (counted() === 0) await Bun.sleep(5);
+    await Bun.sleep(50);
+    controller.abort();
+    const said = await fetching;
+    await Bun.sleep(300);
+    expect({ said, calls: counted() }).toEqual({
+      said: "workspace.create: git fetch origin stopped: error: cannot lock ref 'refs/remotes/origin/main': is at a but expected b",
+      calls: 1,
+    });
   });
 });
 
