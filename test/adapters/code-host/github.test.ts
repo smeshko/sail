@@ -569,6 +569,8 @@ const many = (count: number, fields: (number: number) => Partial<WorldSeedPull> 
   Array.from({ length: count }, (_, at) => count - at).map((number) => ({
     number,
     head: `sail/many-${number}`,
+    // A head sha of its own, so the world runs no git to look each branch up.
+    headSha: number.toString(16).padStart(40, '0'),
     ...fields(number),
   }));
 

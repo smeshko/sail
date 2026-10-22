@@ -156,7 +156,7 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
   }));
 
   const url = (pr: WorldPull) => `https://github.com/${owner}/${repo}/pull/${pr.number}`;
-  const node = (pr: WorldPull) => ({
+  const node = (pr: WorldPull, baseOf: (branch: string) => string | undefined = headOf) => ({
     number: pr.number,
     html_url: url(pr),
     title: pr.title,
@@ -170,7 +170,7 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
       label: `${pr.fork === true ? 'forker' : owner}:${pr.head}`,
       repo: pr.fork === 'deleted' ? null : { full_name: pr.fork ? `forker/${repo}` : `${owner}/${repo}` },
     },
-    base: { ref: pr.base, sha: headOf(pr.base) ?? '' },
+    base: { ref: pr.base, sha: baseOf(pr.base) ?? '' },
     labels: pr.labels.map((name, i) => ({ id: i + 1, name })),
     user: { login: pr.user },
   });
@@ -198,7 +198,16 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
           (head === null || `${owner}:${pr.head}` === head) &&
           (base === null || pr.base === base),
       );
-      return json(200, paged(listed, query).map(node));
+      // One git lookup per base branch for the page, not one per pull request: a page holds up to 100.
+      const bases = new Map<string, string | undefined>();
+      const baseOf = (branch: string) => {
+        if (!bases.has(branch)) bases.set(branch, headOf(branch));
+        return bases.get(branch);
+      };
+      return json(
+        200,
+        paged(listed, query).map((pr) => node(pr, baseOf)),
+      );
     }
     if (method === 'POST' && path === '/pulls') {
       const asked = body as { title?: string; head?: string; base?: string; body?: string; draft?: boolean };
