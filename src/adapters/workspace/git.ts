@@ -318,15 +318,18 @@ export async function fetchRemote(
       if (end.started && end.code === 0) return;
       const said = existsSync(stderr) ? readFileSync(stderr, 'utf8').trim() : '';
       const lost = end.started && !end.timedOut && !end.aborted && LOST_LOCK.test(said);
+      let stoppedWaiting = false;
       if (lost && attempt < FETCH_TRIES && signal?.aborted !== true) {
         await pause(FETCH_RETRY_WAITS_MS[attempt - 1] ?? 1_000, signal);
-        continue;
+        // An abort during the wait ends it here, with this try's message: no further git is started only to be stopped.
+        if (signal?.aborted !== true) continue;
+        stoppedWaiting = true;
       }
       const how = !end.started
         ? end.message
         : end.timedOut
           ? `timed out after ${timeoutMs} ms`
-          : end.aborted
+          : end.aborted || stoppedWaiting
             ? 'stopped'
             : `exited ${end.code ?? end.signal}${attempt > 1 ? ` after ${attempt} tries` : ''}`;
       throw new PortError('workspace', 'create', 'unavailable', `git fetch ${remote} ${how}: ${said}`.trim());
