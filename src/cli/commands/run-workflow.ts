@@ -11,7 +11,9 @@
 // as it was, and nothing exists to resume. Earlier still, during the type-check, it ends sail the default way.
 //
 // `--dispatch <run id>` is the watcher's, and not in the usage: the run it dispatches runs under the id it minted, as
-// a start `via` the watcher.
+// a start `via` the watcher. So is `--head-sha <sha>`, which pins a run from a pull request to the head sha the watcher
+// queued: a pull request that has moved since is refused. The positional is a ref: a ticket's key or URL, or a pull
+// request's `#12`, `12` or URL, which the ticket source and the code host both read.
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { join, relative } from 'node:path';
@@ -165,8 +167,10 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   const workflowFile = findWorkflowFile(project.sailDir, workflow);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
   const { until, dispatch } = args.values;
+  const headSha = args.values['head-sha'];
   const dry = args.values['dry-run'] === true;
   if (dry && dispatch !== undefined) return refuse("--dry-run and --dispatch can't be combined");
+  if (dry && headSha !== undefined) return refuse("--dry-run and --head-sha can't be combined");
   const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
   if (dry) {
@@ -190,6 +194,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
       force: args.values.force === true,
       ...(typeof until === 'string' ? { until } : {}),
       ...(typeof dispatch === 'string' ? { dispatch: { runId: dispatch } } : {}),
+      ...(typeof headSha === 'string' ? { headSha } : {}),
       adapters: project.adapters,
       signal,
       consumers: [terminal],

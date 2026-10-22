@@ -36,6 +36,7 @@ const USAGE = `sail: a software factory. A ticket goes in and a pull request com
 Usage:
   sail <ticket> [--workflow <name>] [--force] [--until <stage>] [-q|-v|-vv]
                                                              Start a run from a ticket: its key, or its URL
+  sail '#<pr>' [--workflow <name>] [--force] [-q|-v|-vv]     Start a run from a pull request: #12, 12, or its URL
   sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
@@ -59,7 +60,7 @@ Usage:
   sail --help                                                Print this help
 
 Starting a run from a ticket:
-  --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode
+  --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode; a pull request that is unlabelled, closed or a draft
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
   --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
 
@@ -227,6 +228,8 @@ const TICKET: CommandSpec = {
     'dry-run': { type: 'boolean' },
     // The watcher's: the run id it minted for the run it dispatches. Not in USAGE.
     dispatch: { type: 'string' },
+    // The watcher's too: the head sha the pull request it dispatches was queued at. Not in USAGE.
+    'head-sha': { type: 'string' },
     ...VERBOSITY_OPTIONS,
   },
   positionals: 1,

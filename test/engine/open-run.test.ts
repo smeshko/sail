@@ -663,10 +663,7 @@ test.each<[string, StubRun, string]>([
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a ref neither adapter reads, for an intake that takes no ticket, is refused naming both adapters, with no run directory', async () => {
+test('a ref neither adapter reads, for an intake that takes no ticket, is refused naming both adapters, with no run directory', async () => {
   await withTempRepo(async (repo) => {
     writePrOnly(writeStub(repo.dir));
     const refused =
