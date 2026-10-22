@@ -537,6 +537,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const crash = new AbortController();
       const groupSignal = signal === undefined ? crash.signal : AbortSignal.any([signal, crash.signal]);
       const live = new Set(calls.map((call) => call.key));
+      /** The calls this process journaled: once it holds them all, the journal holds the group whole. */
+      let journaledNow = 0;
       // A resume may run one call of a group, and it isn't the group's first.
       running = live.size === 1 ? [...live][0] : undefined;
       /** The relay's key is the running call's while exactly one of the group's runs, and none otherwise. */
@@ -551,6 +553,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
             // A call that returns once the run is stopping isn't journaled: a resume runs it again.
             if (groupSignal.aborted) return;
             const journaled = journal(result, paths, keys);
+            journaledNow++;
             settle(each);
             options.onCall?.(journaled);
           } catch (error) {
@@ -562,12 +565,16 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         }),
       );
       running = undefined;
+      // A group the journal holds whole has ended, even when an abort or a crash came after its last call: no replay
+      // reports it again, so this is its only all:end.
+      if (journaledNow === calls.length) {
+        const journaled = new Map(readJournal(dir).entries.map((entry) => [entry.key, entry.outcome]));
+        const outcomes = Object.fromEntries(keys.map((key) => [key, journaled.get(key) as JournalEntry['outcome']]));
+        bus.emit({ type: 'all:end', keys, outcomes, durationMs: Math.max(0, clock().getTime() - startedAt) });
+      }
       const rejected = settled.find((each): each is PromiseRejectedResult => each.status === 'rejected');
       if (rejected !== undefined) throw rejected.reason;
       if (signal?.aborted) return await interrupted(`stopped during ${what}`);
-      const journaled = new Map(readJournal(dir).entries.map((entry) => [entry.key, entry.outcome]));
-      const outcomes = Object.fromEntries(keys.map((key) => [key, journaled.get(key) as JournalEntry['outcome']]));
-      bus.emit({ type: 'all:end', keys, outcomes, durationMs: Math.max(0, clock().getTime() - startedAt) });
     }
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });
