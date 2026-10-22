@@ -69,10 +69,7 @@ function stub(repo: TempRepo, delayMs = 0): { sail: string; headSha: string } {
   return { sail, headSha };
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("sail '#1' --workflow review-pr runs to completion in a workspace at the head sha, on the head branch, with a pull-request source and no claim, and its review's prompt holds the body wrapped", async () => {
+test("sail '#1' --workflow review-pr runs to completion in a workspace at the head sha, on the head branch, with a pull-request source and no claim, and its review's prompt holds the body wrapped", async () => {
   await withTempRepo(async (repo) => {
     const { headSha } = stub(repo);
     const { code, stderr } = await runCaptured(['#1', '--workflow', 'review-pr'], repo.dir);
@@ -151,10 +148,7 @@ function leaseBranch(repo: TempRepo): void {
   takeLease(join(repo.dir, '.sail-runs', 'fake', 'leases'), 'fake://origin', BRANCH, holder, new Date());
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, string[], (repo: TempRepo) => void, string]>([
+test.each<[string, string[], (repo: TempRepo) => void, string]>([
   ['a closed pull request', ['#2'], () => {}, `sail #2: pull request #2 is closed. ${FORCE}\n`],
   [
     'an unlabelled one',
@@ -191,7 +185,7 @@ test
     'a head sha the pull request has moved from',
     ['#1', '--head-sha', 'a'.repeat(40)],
     () => {},
-    'sail #1: pull request #1\'s head is now <head>, not aaaaaaa\n',
+    "sail #1: pull request #1's head is now <head>, not aaaaaaa\n",
   ],
   [
     'a head sha the clone does not hold, once its lease and run directory are undone',
@@ -205,27 +199,34 @@ test
     leaseBranch,
     `sail #1: the branch ${BRANCH} is leased by run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N (starting)\n`,
   ],
-])('%s is refused with exit 3, before any run directory, workspace or lease of its own', async (_, argv, prepare, refused) => {
-  await withTempRepo(async (repo) => {
-    const { headSha } = stub(repo);
-    prepare(repo);
-    const held = leases(repo.dir);
-    const { code, stdout, stderr } = await runCaptured([...argv, '--workflow', 'review-pr'], repo.dir);
-    expect({ code, stdout, stderr, runs: runIds(repo.dir), worktrees: worktrees(repo), leases: leases(repo.dir) }).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr: refused.replace('<head>', headSha.slice(0, 7)),
-      runs: [],
-      worktrees: [`worktree ${repo.dir}`],
-      leases: held,
+])(
+  '%s is refused with exit 3, before any run directory, workspace or lease of its own',
+  async (_, argv, prepare, refused) => {
+    await withTempRepo(async (repo) => {
+      const { headSha } = stub(repo);
+      prepare(repo);
+      const held = leases(repo.dir);
+      const { code, stdout, stderr } = await runCaptured([...argv, '--workflow', 'review-pr'], repo.dir);
+      expect({
+        code,
+        stdout,
+        stderr,
+        runs: runIds(repo.dir),
+        worktrees: worktrees(repo),
+        leases: leases(repo.dir),
+      }).toEqual({
+        code: EXIT_REFUSED,
+        stdout: '',
+        stderr: refused.replace('<head>', headSha.slice(0, 7)),
+        runs: [],
+        worktrees: [`worktree ${repo.dir}`],
+        leases: held,
+      });
     });
-  });
-});
+  },
+);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('the ticket workflow given a pull request is refused for its intake, and --force on the closed pull request runs it, recording state', async () => {
+test('the ticket workflow given a pull request is refused for its intake, and --force on the closed pull request runs it, recording state', async () => {
   // Each start in a repository of its own: a process opens one run per .sail/, a refused one included.
   const ticketWorkflow = await withTempRepo(async (repo) => {
     stub(repo);
@@ -235,7 +236,8 @@ test
     stub(repo);
     const ran = await runCaptured(['#2', '--workflow', 'review-pr', '--force'], repo.dir);
     const [runId = ''] = runIds(repo.dir);
-    const header = runId === '' ? {} : JSON.parse(readFileSync(join(repo.dir, '.sail-runs', runId, 'run.json'), 'utf8'));
+    const header =
+      runId === '' ? {} : JSON.parse(readFileSync(join(repo.dir, '.sail-runs', runId, 'run.json'), 'utf8'));
     return [ran.code, ran.stderr, header.source?.forced, header.source?.number];
   });
   expect({ ticketWorkflow: [ticketWorkflow.code, ticketWorkflow.stderr], forced }).toEqual({
@@ -247,10 +249,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a pull-request run interrupted during its review resumes with sail resume in the same workspace, and completes', async () => {
+test('a pull-request run interrupted during its review resumes with sail resume in the same workspace, and completes', async () => {
   let runId = '';
   await withTempRepo(async (to) => {
     await withTempRepo(async (from) => {
@@ -280,10 +279,7 @@ test
   });
 }, 90_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("sail '#1' --workflow review-pr --dry-run prints the pull request, its branch and head sha, and writes nothing", async () => {
+test("sail '#1' --workflow review-pr --dry-run prints the pull request, its branch and head sha, and writes nothing", async () => {
   await withTempRepo(async (repo) => {
     const { headSha } = stub(repo);
     const { code, stdout, stderr } = await runCaptured(['#1', '--workflow', 'review-pr', '--dry-run'], repo.dir);
@@ -306,14 +302,13 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the usage lists sail '#<pr>' after sail <ticket>, and says what --force overrides for a pull request", async () => {
+test("the usage lists sail '#<pr>' after sail <ticket>, and says what --force overrides for a pull request", async () => {
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect({
     second: commands[1]?.startsWith("  sail '#<pr>' [--workflow <name>] [--force] [-q|-v|-vv]  "),
-    force: /^ {2}--force {2,}\S.*designated.*unstarted.*; a pull request that is unlabelled, closed or a draft$/m.test(stdout),
+    force: /^ {2}--force {2,}\S.*designated.*unstarted.*; a pull request that is unlabelled, closed or a draft$/m.test(
+      stdout,
+    ),
   }).toEqual({ second: true, force: true });
 });
