@@ -22,9 +22,12 @@ function filesIn(dir: string): string[] {
     .sort();
 }
 
-/** A file's text, with the one field that names the machine's Bun put aside. */
-const comparable = (dir: string, file: string): string =>
-  readFileSync(join(dir, file), 'utf8').replace(RUNTIME, '"runtime": "bun <version>"');
+/**
+ * A file's text, with the one field that names the machine's Bun put aside. `latin1` reads one character per byte, so
+ * two files compare equal only when their bytes are; `utf8` is the text a diff shows.
+ */
+const comparable = (dir: string, file: string, encoding: 'utf8' | 'latin1' = 'utf8'): string =>
+  readFileSync(join(dir, file), encoding).replace(RUNTIME, '"runtime": "bun <version>"');
 
 type Op = { kind: ' ' | '-' | '+'; line: string; stored: number; generated: number };
 
@@ -126,8 +129,10 @@ export function runDirDiff(generated: string, stored: string): string {
     ...made.filter((file) => !kept.includes(file)).map((file) => `${file} is not in the stored run`),
   ];
   for (const file of made.filter((name) => kept.includes(name))) {
+    if (comparable(generated, file, 'latin1') === comparable(stored, file, 'latin1')) continue;
     const [after, before] = [comparable(generated, file), comparable(stored, file)];
     if (after !== before) lines.push(...fileDiff(file, before, after));
+    else lines.push(`${file} differs from the stored run in bytes that are not UTF-8 text`);
   }
   return lines.length === 0 ? '' : `${lines.join('\n')}\n${GOLDEN_HINT}`;
 }

@@ -109,3 +109,12 @@ test('files too long to compare line by line differ as a whole, and stay readabl
   expect(diff).toContain('big.txt differs from the stored run');
   expect(diff.match(/@@ big\.txt line/g)).toHaveLength(1);
 });
+
+test('two files whose bytes differ differ, even where both decode to the same text (review #1.9)', () => {
+  const [generated, stored] = [runDir({}), runDir({})];
+  writeFileSync(join(generated, 'blob.bin'), Buffer.from([0x41, 0xff, 0x0a]));
+  writeFileSync(join(stored, 'blob.bin'), Buffer.from([0x41, 0xfe, 0x0a]));
+  const diff = runDirDiff(generated, stored);
+  expect(diff).toContain('blob.bin');
+  expect(diff).toEndWith('run bun run golden to regenerate it');
+});
