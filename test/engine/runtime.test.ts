@@ -2183,10 +2183,7 @@ test('a call of a group that throws inside sail stops its siblings, and the erro
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("until naming a group's stage suspends the run once the whole group is journaled, before the next call", async () => {
+test("until naming a group's stage suspends the run once the whole group is journaled, before the next call", async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 100, b: 300, c: 200 });
     const end = await ranTrio(repo.dir, { until: 'b' });

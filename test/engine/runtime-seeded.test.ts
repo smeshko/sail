@@ -184,10 +184,7 @@ test('onOpened runs once the run start and the reused calls are in the events fi
 
 // A group: trio's a, b and c, journaled b, c, a in the source, then d.
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a run seeded for a stage of a group runs the whole group as its first move, then stops with until; with --continue it runs on to the end', async () => {
+test('a run seeded for a stage of a group runs the whole group as its first move, then stops with until; with --continue it runs on to the end', async () => {
   await withTempRepo(async (repo) => {
     const { runId: fromRun, keys } = await trioRunInto(repo.dir);
     expect(keys).toEqual(TRIO_JOURNAL);
@@ -211,10 +208,7 @@ test
   });
 }, 90_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a seeded run whose workflow now asks for a group without the stage it was seeded for fails with determinism_violation, and runs nothing', async () => {
+test('a seeded run whose workflow now asks for a group without the stage it was seeded for fails with determinism_violation, and runs nothing', async () => {
   await withTempRepo(async (repo) => {
     const { runId: fromRun, keys } = await trioRunInto(repo.dir);
     expect(keys).toEqual(TRIO_JOURNAL);

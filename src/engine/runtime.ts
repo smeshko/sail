@@ -9,6 +9,12 @@
 // fetches the ticket again. An intake that didn't pass fails the run with `stage_error`: no workflow code has run, and
 // nothing can route on it.
 //
+// A group, `run.all()`, ends the replay with its unjournaled calls, which run at once, each in its own call directory.
+// Each is journaled as it completes, carrying the group's keys, so the journal holds them in completion order, and
+// `all:start` and `all:end` bracket them. An `error` doesn't stop its siblings. A call that throws, a bug in sail, stops
+// them, and the error goes on once they have settled. An abort suspends the run with the calls that completed
+// journaled. The relay's key is the running call's while exactly one runs, and none otherwise.
+//
 // What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
 // that is running. A workspace event carries none, and its path is made relative to the repository root. The lease, the
 // workspace and the claim are made before the run directory holds anything, so a fresh run reports them from what
@@ -37,7 +43,8 @@
 // A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
 // and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
 // reported once, right after what opening the run did, as a `journal:append` with `fromRun`. Unless `--continue`, it
-// stops after the stage it was seeded for, as `until` stops a run.
+// stops after the stage it was seeded for, as `until` stops a run. A seed never splits a group: when the stage's first
+// call belongs to one, the seeded run's first move is the whole group.
 //
 // `until` names a stage to stop after. Once that stage's first call is journaled the next replay still runs: if it
 // ends the run, the run ends that way, and if it asks for another call the run is suspended with `until` instead, where
@@ -477,8 +484,15 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         const { fromRun, stage } = seededFor;
         seededFor = undefined;
         const expected = `${stage}#1`;
-        if (end.kind !== 'failed' && (end.kind !== 'call' || end.call.key !== expected)) {
-          const asked = end.kind === 'call' ? `asks for ${end.call.key}` : 'ends';
+        const first = end.kind === 'call' && end.call.key === expected;
+        const grouped = end.kind === 'group' && end.keys.includes(expected);
+        if (end.kind !== 'failed' && !first && !grouped) {
+          const asked =
+            end.kind === 'call'
+              ? `asks for ${end.call.key}`
+              : end.kind === 'group'
+                ? `asks for the group ${end.keys.join(', ')}`
+                : 'ends';
           const message = `the workflow ${asked} after the calls reused from run ${fromRun}, not ${expected}: it changed since that run`;
           return await failed('determinism_violation', message);
         }

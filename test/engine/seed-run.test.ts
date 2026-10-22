@@ -345,10 +345,7 @@ test('a link a reused call does not point at is copied as a link, and seeding op
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("seeding a stage whose first call belongs to a group copies only the calls before the group, and none of its members, though the stage's call was journaled last", async () => {
+test("seeding a stage whose first call belongs to a group copies only the calls before the group, and none of its members, though the stage's call was journaled last", async () => {
   await withTempRepo(async (repo) => {
     const { runId: fromRun, keys } = await trioRunInto(repo.dir);
     expect(keys).toEqual(TRIO_JOURNAL);
