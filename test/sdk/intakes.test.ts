@@ -149,10 +149,7 @@ function unmarked(schema: z.ZodType, path = ''): string[] {
   return [];
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('pr is the built-in intake for pull requests, and PrInput marks every string the host returned untrusted: only headSha, baseSha and ticketKey are left bare', () => {
+test('pr is the built-in intake for pull requests, and PrInput marks every string the host returned untrusted: only headSha, baseSha and ticketKey are left bare', () => {
   expect(pr).toMatchObject({
     kind: 'intake',
     name: 'pr',

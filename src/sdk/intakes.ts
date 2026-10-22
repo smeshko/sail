@@ -32,7 +32,7 @@ export const ticket = intake('ticket', {
  * sha is the run's own, the one its workspace starts at, and the ticket key is there only when the pull request's ticket
  * marker matches its head branch.
  */
-const PrInputFinal = z.object({
+export const PrInput = z.object({
   number: z.number().int().positive(),
   url: untrusted().check(z.url()),
   title: untrusted(),
@@ -47,21 +47,6 @@ const PrInputFinal = z.object({
   comments: z.array(z.object({ author: untrusted(), body: untrusted() })),
   ticketKey: z.string().optional(),
 });
-export const PrInput = z.object({
-  number: z.number(),
-  url: z.string(),
-  title: z.string(),
-  body: z.string(),
-  author: z.string(),
-  base: z.string(),
-  head: z.string(),
-  headSha: z.string(),
-  baseSha: z.string(),
-  draft: z.boolean(),
-  labels: z.array(z.string()),
-  comments: z.array(z.object({ author: z.string(), body: z.string() })),
-  ticketKey: z.string().optional(),
-}) as unknown as typeof PrInputFinal;
 export type PrInput = z.infer<typeof PrInput>;
 
 /**

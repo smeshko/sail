@@ -47,7 +47,7 @@ export declare const ticket: import("./intake").Intake<z.ZodObject<{
  * sha is the run's own, the one its workspace starts at, and the ticket key is there only when the pull request's ticket
  * marker matches its head branch.
  */
-declare const PrInputFinal: z.ZodObject<{
+export declare const PrInput: z.ZodObject<{
     number: z.ZodNumber;
     url: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
     title: z.core.$ZodBranded<z.ZodString, "untrusted", "out">;
@@ -65,7 +65,6 @@ declare const PrInputFinal: z.ZodObject<{
     }, z.core.$strip>>;
     ticketKey: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
-export declare const PrInput: typeof PrInputFinal;
 export type PrInput = z.infer<typeof PrInput>;
 /**
  * The built-in intake for pull requests. The engine runs its body, which leaves `pr.json`, `diff.patch`, the change
@@ -93,4 +92,3 @@ export declare const pr: import("./intake").Intake<z.ZodObject<{
     'diff.patch': "file";
     'brief.md': "file";
 }, import("./steps").StepList>;
-export {};

@@ -9,10 +9,7 @@ import * as intakes from '../../../src/sdk/intakes';
 const isIntake = (value: unknown): value is Intake =>
   typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'intake';
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('BUILTIN_INTAKES holds a body for every intake sail/intakes exports, and for nothing else', () => {
+test('BUILTIN_INTAKES holds a body for every intake sail/intakes exports, and for nothing else', () => {
   const exported = Object.values<unknown>(intakes).filter(isIntake);
   // A module namespace lists its exports by name, so pr comes before ticket.
   expect(exported.map((intake) => intake.name)).toEqual(['pr', 'ticket']);

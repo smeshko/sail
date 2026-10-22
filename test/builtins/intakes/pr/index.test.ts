@@ -95,10 +95,7 @@ async function made(repo: TempRepo): Promise<Made> {
 /** A wrapped value: its source, and its text without the newlines of the block form. */
 const SPAN = /<untrusted-input source="([^"]*)">\n?([\s\S]*?)\n?<\/untrusted-input>/g;
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("the body writes pr.json, diff.patch from the merge base to the source's head and brief.md, and returns a PrInput with the source's head sha and the marker's key", async () => {
+test("the body writes pr.json, diff.patch from the merge base to the source's head and brief.md, and returns a PrInput with the source's head sha and the marker's key", async () => {
   await withTempRepo(async (repo) => {
     const m = await made(repo);
     const output = (await m.run(3)) as Record<string, unknown>;
@@ -129,10 +126,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("every string the host returned is wrapped in brief.md with its own source, a planted instruction and a lookalike delimiter included, and diff.patch is named as the author's code", async () => {
+test("every string the host returned is wrapped in brief.md with its own source, a planted instruction and a lookalike delimiter included, and diff.patch is named as the author's code", async () => {
   await withTempRepo(async (repo) => {
     const m = await made(repo);
     await m.run(3);
@@ -164,10 +158,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a pull request the host can't find, or one whose ticket marker doesn't match its branch, leaves a PortError and no file", async () => {
+test("a pull request the host can't find, or one whose ticket marker doesn't match its branch, leaves a PortError and no file", async () => {
   await withTempRepo(async (repo) => {
     const m = await made(repo);
     const missing = await rejection(m.run(99));
