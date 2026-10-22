@@ -215,6 +215,73 @@ test('a fetch that hangs is killed at fetchTimeoutMs, and one whose signal abort
   });
 }, 5_000);
 
+test("two creates at once on a clone whose origin moved both succeed: the fetch that lost git's ref lock is tried again", async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    const w = world(repo);
+    for (let round = 0; round < 5; round++) {
+      const pushed = origin.push(`round-${round}.txt`);
+      const first = runIn(w.runsDir, `a${round}`);
+      const second = runIn(w.runsDir, `b${round}`);
+      const made = await Promise.all([
+        settle(adapterOf(repo, w).create(first, { branch: `${BRANCH}-a${round}` })),
+        settle(adapterOf(repo, w).create(second, { branch: `${BRANCH}-b${round}` })),
+      ]);
+      expect(made.map((one) => ('rejected' in one ? one : one.baseSha))).toEqual([pushed, pushed]);
+      for (const run of [first, second]) {
+        expect(gitIn(repo, join(run.runDir, 'workspace'), 'rev-parse', 'HEAD').stdout).toBe(pushed);
+      }
+    }
+    const listed = gitIn(repo, repo.dir, 'worktree', 'list', '--porcelain').stdout.split('\n');
+    expect(listed.filter((line) => line.startsWith('worktree ')).length).toBe(1 + 10);
+  });
+}, 60_000);
+
+test('a ref lock held for a moment and then released no longer fails create', async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    const pushed = origin.push('later.txt');
+    const w = world(repo);
+    const common = gitIn(repo, repo.dir, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout;
+    const lock = join(common, 'refs', 'remotes', 'origin', 'main.lock');
+    writeFileSync(lock, '');
+    const release = setTimeout(() => rmSync(lock, { force: true }), 600);
+    try {
+      const created = await settle(adapterOf(repo, w).create(runIn(w.runsDir), { branch: BRANCH }));
+      expect('rejected' in created ? created : created.baseSha).toBe(pushed);
+    } finally {
+      clearTimeout(release);
+      rmSync(lock, { force: true });
+    }
+  });
+}, 30_000);
+
+test("a ref lock never released fails create as unavailable after 4 tries, naming them and git's message", async () => {
+  await withTempRepo(async (repo) => {
+    const origin = withOrigin(repo);
+    origin.push('later.txt');
+    const w = world(repo);
+    const common = gitIn(repo, repo.dir, 'rev-parse', '--path-format=absolute', '--git-common-dir').stdout;
+    const lock = join(common, 'refs', 'remotes', 'origin', 'main.lock');
+    writeFileSync(lock, '');
+    try {
+      const started = performance.now();
+      const failure = await adapterOf(repo, w)
+        .create(runIn(w.runsDir), { branch: BRANCH })
+        .then(
+          () => undefined,
+          (error: unknown) => ({ failure: portFailure(error), message: messageOf(error) }),
+        );
+      expect(failure?.failure).toEqual({ port: 'workspace', op: 'create', code: 'unavailable' });
+      expect(failure?.message).toContain('after 4 tries');
+      expect(failure?.message).toContain('main.lock');
+      expect(performance.now() - started).toBeLessThan(10_000);
+    } finally {
+      rmSync(lock, { force: true });
+    }
+  });
+}, 30_000);
+
 test('credentials are stripped from the remote: neither repository() nor workspace:leased holds them', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
