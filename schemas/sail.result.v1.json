@@ -173,18 +173,7 @@
         },
         "command": { "type": "string" },
         "network": { "$ref": "#/$defs/network" },
-        "env": { "$ref": "#/$defs/env" },
-        "codeHost": {
-          "description": "the CodeHost operation a script step ran through `sail port codehost`",
-          "type": "object",
-          "properties": {
-            "operation": { "type": "string" },
-            "reviewers": { "type": "array", "items": { "type": "string" } },
-            "ticketLinked": { "type": "boolean" }
-          },
-          "required": ["operation"],
-          "additionalProperties": false
-        }
+        "env": { "$ref": "#/$defs/env" }
       },
       "required": [
         "schema",

@@ -640,10 +640,7 @@ test('result: dispatch reports only the branch the document claims to be', () =>
   expect(paths('sail.result.v1', { ...multiStepResult, steps: [describeStep] })).toEqual(['/steps']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('result: a script result declares no codeHost, which nothing writes: one that carries it is refused, naming it', () => {
+test('result: a script result declares no codeHost, which nothing writes: one that carries it is refused, naming it', () => {
   const issues = validateDocument('sail.result.v1', { ...scriptResult, codeHost: { operation: 'merge' } });
   expect(issues.map((issue) => [issue.path, issue.message])).toEqual([['/codeHost', 'is not allowed']]);
   expect(validateDocument('sail.result.v1', scriptResult)).toEqual([]);
