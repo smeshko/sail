@@ -151,6 +151,30 @@ export interface RecordingOptions {
   readonly roots: Readonly<Record<string, string>>;
 }
 
+/**
+ * Each secret with the forms of it that `redactor()` doesn't know, for a recording that may hold any text a session saw:
+ * - JSON-escaped, as it reads inside a JSON text a tool returned or a session wrote, with and without `/` escaped;
+ * - base64 inside a longer encoding, such as a Basic header's `user:<secret>`, at each of the three byte offsets: the
+ *   characters that depend only on the secret's own bytes, so a byte before or after it can't hide it.
+ */
+export function secretForms(secrets: readonly string[]): string[] {
+  const forms: string[] = [];
+  for (const secret of secrets) {
+    const escaped = JSON.stringify(secret).slice(1, -1);
+    forms.push(secret, escaped, escaped.replaceAll('/', '\\/'));
+    const bytes = Buffer.from(secret, 'utf8');
+    for (const lead of [0, 1, 2]) {
+      const whole = Math.floor((lead + bytes.length) / 3);
+      const from = lead === 0 ? 0 : 4;
+      const core = Buffer.concat([Buffer.alloc(lead), bytes])
+        .toString('base64')
+        .slice(from, whole * 4);
+      if (core.length >= 8) forms.push(core);
+    }
+  }
+  return [...new Set(forms)];
+}
+
 const failure = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Writes `file` through a temp file and a rename, so a reader never sees half a recording. */
@@ -171,7 +195,7 @@ function updated(file: string, key: string, recorded: RecordedTry): Recording {
 
 /** Runs every session on `inner` unchanged, and writes each try into its call key's recording. It never rejects. */
 export function recordingHarness(inner: Harness, options: RecordingOptions): Harness {
-  const secrets = redactor(options.secrets);
+  const secrets = redactor(secretForms(options.secrets));
   return {
     name: inner.name,
     capabilities: () => inner.capabilities(),
@@ -209,12 +233,13 @@ export function recordingHarness(inner: Harness, options: RecordingOptions): Har
         const { raw: _raw, ...kept } = result;
         const roots = { ...options.roots, ...requestRoots(request) };
         const mask = maskPaths(roots);
-        const scrub = <T>(value: T): T => secrets.value(mask(value));
+        // Secrets first: a secret that holds a root would be split by the path's word, and leave the rest of itself.
+        const scrub = <T>(value: T): T => mask(secrets.value(value));
         const maskBytes = maskPaths(
           Object.fromEntries(Object.entries(roots).map(([word, path]) => [word, asBytes(path)])),
         );
-        const secretBytes = redactor(options.secrets.map(asBytes));
-        const scrubBytes = (input: string): string => secretBytes.text(maskBytes(input));
+        const secretBytes = redactor(secretForms(options.secrets.map(asBytes)));
+        const scrubBytes = (input: string): string => maskBytes(secretBytes.text(input));
         const files = changedFiles(out, before, stageIn).map(
           ([name, bytes]) => [scrub(name), recordedFile(bytes, scrub, scrubBytes)] as const,
         );
