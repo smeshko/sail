@@ -241,3 +241,12 @@ test("parseRef takes a number, #number or this remote's pull URL, whole, and not
   const refs = ['7', '#7', 'fake://codehost/fixture/pull/7', 'fake://codehost/other/pull/7', '#x', '7a', 'pull/7'];
   expect(refs.map((ref) => host.parseRef(ref))).toEqual([7, 7, 7, undefined, undefined, undefined, undefined]);
 });
+
+test('listDesignated leaves out a fork, as a designated pull request has its head in this repository (review R1-3)', async () => {
+  const host = createFakeCodeHost(
+    files((seed) => {
+      seed.pullRequests.push(seeded(5, { fork: true }), seeded(6, { fork: false }));
+    }),
+  );
+  expect((await host.listDesignated('sail')).map((pr) => pr.number)).toEqual([1, 3, 4, 6]);
+});
