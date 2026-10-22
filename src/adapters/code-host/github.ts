@@ -12,6 +12,7 @@ import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import type { Labelled, PullRequest } from '../../ports/types';
 import { gitSync, stripUserinfo } from '../workspace/git';
+import { readChecks } from './github-checks';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
 import { type GitHubPull, toPullRequest, withTicketMarker } from './github-pull';
 import { gitEnv, pushHead } from './github-push';
@@ -179,7 +180,18 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
       }),
     listDesignated: unsupported('listDesignated'),
     getPullRequest: (number) => guarded(() => read('getPullRequest', number)),
-    checks: unsupported('checks'),
+    checks: (number) =>
+      guarded(async () => {
+        const pr = await read('checks', number);
+        const { checks, raw } = await readChecks(client, 'checks', pr.headSha);
+        emit({
+          type: 'codehost:checks',
+          number,
+          headSha: pr.headSha,
+          checks: checks.map(({ name, status }) => ({ name, status })),
+        });
+        return { number, headSha: pr.headSha, checks, raw };
+      }),
     merge: unsupported('merge'),
     addLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
@@ -222,7 +234,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         emit({ type: 'codehost:commented', number, body: text });
         return { id: String(posted.id), url: posted.html_url, raw: posted };
       }),
-    capabilities: () => ({ checks: false, labels: true, drafts: true, mergeMethods: [] }),
+    capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: [] }),
   };
 }
 

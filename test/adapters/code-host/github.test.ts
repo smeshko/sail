@@ -34,7 +34,6 @@ const TOKEN = 'ghp_MARKER_adapter_0a7e44c2';
 /** What github doesn't offer yet. Phase 14.2 offers listDesignated. */
 const UNSUPPORTED: Unsupported[] = [
   'listDesignated',
-  'checks', // TDD-PENDING TASK-004
   'merge', // TDD-PENDING TASK-005
 ];
 const held = holdTempRepo();
@@ -592,10 +591,7 @@ test('a 404 on the DELETE, the label gone in a race, answers a fresh read of the
 /** Pull request 7's head sha in `on`. */
 const headOf7 = (on: GitHubWorld): string => on.pullRequests.find((pr) => pr.number === 7)?.headSha ?? '';
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('every check run status and conclusion GitHub documents, and every commit status state, reads as its check status, and what GitHub does not document reads as failed', async () => {
+test('every check run status and conclusion GitHub documents, and every commit status state, reads as its check status, and what GitHub does not document reads as failed', async () => {
   const runs: [string, string | null, CheckStatus][] = [
     ['queued', null, 'pending'],
     ['in_progress', null, 'pending'],
@@ -654,10 +650,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a read of checks asks for pull request 7, then the check runs and the status of its head sha, and emits one codehost:checks', async () => {
+test('a read of checks asks for pull request 7, then the check runs and the status of its head sha, and emits one codehost:checks', async () => {
   const on = suiteWorld();
   const capture = captureEvents();
   const read = await settle(host(on, capture.emit).checks(7));
@@ -702,10 +695,7 @@ const manyRuns = (count: number) =>
     ],
   });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('150 check runs are read across two pages of 100, all of them, in order', async () => {
+test('150 check runs are read across two pages of 100, all of them, in order', async () => {
   const on = manyRuns(150);
   const read = await settle(host(on).checks(7));
   expect({
@@ -720,10 +710,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('more than 1000 check runs reject as unavailable, naming the head sha, and emit nothing', async () => {
+test('more than 1000 check runs reject as unavailable, naming the head sha, and emit nothing', async () => {
   const on = manyRuns(1001);
   const capture = captureEvents();
   const error = await rejection(host(on, capture.emit).checks(7));
@@ -736,10 +723,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('checks of a pull request GitHub does not have reject as not_found, with no request for any commit', async () => {
+test('checks of a pull request GitHub does not have reject as not_found, with no request for any commit', async () => {
   const on = world();
   const error = await rejection(host(on).checks(99));
   expect([portFailure(error), on.routes()]).toEqual([
