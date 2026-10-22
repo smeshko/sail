@@ -11,6 +11,9 @@
 //   a resume that leaves the run unended parks the item with why; no `run.json` is a start that was refused, whose
 //   reason is the last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding
 //   no slot.
+// - **A due pull request**, in queue order: the lease on its queued branch first, then the re-check of the pull request
+//   through the CodeHost. One that is closed, merged, a draft, unlabelled, a fork or moved to another sha is dropped
+//   with why, and its run starts as `sail '#<n>' --head-sha <sha>`, pinned to the queued sha. It claims nothing.
 // - **A due item**, in queue order: first the lease on its branch, named from its queued title, then the re-check of
 //   its ticket through the TicketSource, then the lease on the branch its fresh title names when that differs. The
 //   lease comes first because a leased item is skipped on every tick for as long as the lease lasts, and checking it
@@ -25,6 +28,7 @@
 import { join } from 'node:path';
 import { branchFor } from '../engine/branch';
 import { cancelUnwatch } from '../engine/control';
+import { getPullRequestDetails } from '../engine/pr-source';
 import { newRunId } from '../engine/run-id';
 import type { ResumedFrom } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
@@ -86,11 +90,14 @@ export interface Dispatcher {
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-/** The ticket key of a ticket item. */
-const ticketOf = (item: QueueItem): string => (item.source.kind === 'ticket' ? item.source.ticketKey : '');
+/** What a settled item names: its ticket, or its pull request at its head sha. */
+const sourceOf = (item: QueueItem): Pick<Settled, 'ticketKey' | 'pr'> =>
+  item.source.kind === 'ticket'
+    ? { ticketKey: item.source.ticketKey }
+    : { pr: { number: item.source.number, headSha: item.source.headSha } };
 
 export function createDispatcher(options: DispatcherOptions): Dispatcher {
-  const { workflow, label, store, ticketSource, workspace, isAlive, now } = options;
+  const { workflow, label, store, ticketSource, codeHost, workspace, isAlive, now } = options;
   /** The run that held each skipped item's branch when it was last reported. */
   const skipped = new Map<string, string>();
   /** The exit codes of the processes this dispatcher started, a run or a resume, by dedup key. */
@@ -110,7 +117,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const retryAt = store.snapshot().items.find((each) => each.dedupKey === item.dedupKey)?.retryAt;
     options.onSettled?.({
       dedupKey: item.dedupKey,
-      ticketKey: ticketOf(item),
+      ...sourceOf(item),
       runId,
       outcome,
       reason,
@@ -145,7 +152,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     store.parked(item.dedupKey, reason);
     options.onSettled?.({
       dedupKey: item.dedupKey,
-      ticketKey: ticketOf(item),
+      ...sourceOf(item),
       runId,
       outcome: 'parked',
       reason,
@@ -177,7 +184,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
           break;
         case 'done':
           store.done(item.dedupKey);
-          options.onSettled?.({ dedupKey: item.dedupKey, ticketKey: ticketOf(item), runId, outcome: 'done' });
+          options.onSettled?.({ dedupKey: item.dedupKey, ...sourceOf(item), runId, outcome: 'done' });
           break;
         case 'failed':
           fail(item, runId, answer.reason);
@@ -214,9 +221,38 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     return true;
   };
 
+  /**
+   * Whether a pull-request item may start now: its branch is free, from the queue alone, and a re-check finds the pull
+   * request still designated at the queued sha (D10). One that isn't is dropped, with why.
+   */
+  const eligiblePullRequest = async (
+    item: QueueItem,
+    source: Extract<QueueItem['source'], { kind: 'pr' }>,
+    remote: string,
+  ): Promise<boolean> => {
+    if (await leased(item, remote, source.branch)) return false;
+    const pr = await getPullRequestDetails(codeHost, source.number);
+    const why =
+      pr.state !== 'open'
+        ? `it is ${pr.state}`
+        : pr.draft
+          ? 'it is a draft'
+          : !pr.labels.includes(label)
+            ? `it is not designated: it carries no '${label}' label`
+            : pr.fork
+              ? 'it comes from a fork'
+              : pr.headSha !== source.headSha
+                ? `its head moved to ${pr.headSha.slice(0, 7)}: the next poll queues it`
+                : undefined;
+    if (why === undefined) return true;
+    store.drop(item.dedupKey, why);
+    return false;
+  };
+
   /** Whether the item may start now: its branches are free, and its ticket is still designated and unstarted. */
   const eligible = async (item: QueueItem, remote: string): Promise<boolean> => {
-    const ticketKey = ticketOf(item);
+    if (item.source.kind === 'pr') return eligiblePullRequest(item, item.source, remote);
+    const { ticketKey } = item.source;
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
     if (await leased(item, remote, branch)) return false;
     if (item.forced === true) return true;
@@ -234,8 +270,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   };
 
   const start = (item: QueueItem) => {
-    const ticketKey = ticketOf(item);
-    const runId = newRunId(ticketKey, now().getTime());
+    const { source } = item;
+    const runId = newRunId(source.kind === 'pr' ? `pr-${source.number}` : source.ticketKey, now().getTime());
     store.dispatched(item.dedupKey, runId);
     let spawned: SpawnedRun;
     try {
@@ -243,7 +279,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         root: options.root,
         runsDir: options.runsDir,
         workflow,
-        ticketKey,
+        ...(source.kind === 'pr'
+          ? { pr: { number: source.number, headSha: source.headSha } }
+          : { ticketKey: source.ticketKey }),
         runId,
         env: options.env,
         ...(item.forced === true ? { force: true } : {}),

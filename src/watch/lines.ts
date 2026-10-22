@@ -81,7 +81,9 @@ export function queueLine(event: QueueEvent, afterError = false): WatchLine | un
 
 /** The line of an item the dispatch settled. A parked item has none: its `queue:parked` says so. */
 export function settledLine(workflow: string, settled: Settled, at: Date): WatchLine | undefined {
-  const { ticketKey, runId } = settled;
+  const { runId } = settled;
+  const { pr } = settled;
+  const ticketKey = pr === undefined ? settled.ticketKey : `#${pr.number}@${pr.headSha.slice(0, 7)}`;
   if (settled.outcome === 'done') return { at, workflow, text: `${ticketKey} done: run ${runId} completed` };
   if (settled.outcome === 'parked') return undefined;
   const due = settled.retryAt === undefined ? 0 : Math.max(0, Date.parse(settled.retryAt) - at.getTime());

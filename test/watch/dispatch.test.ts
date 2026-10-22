@@ -601,10 +601,7 @@ async function prWorld(repo: TempRepo) {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a pull-request item whose branch a live run leases waits with one queue:skipped_leased, no attempt and no read of the pull request, then starts as #<n> pinned to its head sha once the lease is released', async () => {
+test('a pull-request item whose branch a live run leases waits with one queue:skipped_leased, no attempt and no read of the pull request, then starts as #<n> pinned to its head sha once the lease is released', async () => {
   await withTempRepo(async (repo) => {
     const w = await prWorld(repo);
     const { url } = await w.workspace.repository();
@@ -612,7 +609,12 @@ test
     await w.workspace.lease(url, PR_BRANCH, ticketRun);
     await w.dispatcher.tick();
     await w.dispatcher.tick();
-    const waited = { spawned: w.spawner.runs.length, reads: w.reads.count, items: w.items(), skipped: w.typed('queue:skipped_leased') };
+    const waited = {
+      spawned: w.spawner.runs.length,
+      reads: w.reads.count,
+      items: w.items(),
+      skipped: w.typed('queue:skipped_leased'),
+    };
     await w.workspace.releaseLease(url, PR_BRANCH, ticketRun.runId);
     await w.dispatcher.tick();
     expect({
@@ -634,10 +636,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  .each<[string, Partial<PullRequestDetails>, (sha7: string) => string]>([
+test.each<[string, Partial<PullRequestDetails>, (sha7: string) => string]>([
   ['closed', { state: 'closed' }, () => 'it is closed'],
   ['merged', { state: 'merged' }, () => 'it is merged'],
   ['a draft', { draft: true }, () => 'it is a draft'],
@@ -657,16 +656,18 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a re-check of a pull request that fails unavailable fails its item with no attempt counted, and starts nothing', async () => {
+test('a re-check of a pull request that fails unavailable fails its item with no attempt counted, and starts nothing', async () => {
   await withTempRepo(async (repo) => {
     const w = await prWorld(repo);
     w.reads.change = new PortError('codeHost', 'getPullRequest', 'unavailable', 'the host is down');
     await w.dispatcher.tick();
     const [item] = w.store.snapshot().items;
-    expect({ items: w.items(), reason: item?.reason, spawned: w.spawner.runs.length, settled: w.settled.map((each) => each.pr) }).toEqual({
+    expect({
+      items: w.items(),
+      reason: item?.reason,
+      spawned: w.spawner.runs.length,
+      settled: w.settled.map((each) => each.pr),
+    }).toEqual({
       items: [`#1@${w.sha7} failed 0`],
       reason: 'codeHost.getPullRequest: the host is down (unavailable)',
       spawned: 0,

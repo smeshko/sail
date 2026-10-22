@@ -202,13 +202,18 @@ test('a pull-request item is named #<number>@<sha7> on its lines, and a ticket k
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a settled pull-request item is named #<number>@<sha7>: done, or when it is due again', () => {
-  const base = { dedupKey: 'pr:12@abc1234', pr: { number: 12, headSha: `abc1234${'0'.repeat(33)}` }, runId: 'pr-12-run' };
+test('a settled pull-request item is named #<number>@<sha7>: done, or when it is due again', () => {
+  const base = {
+    dedupKey: 'pr:12@abc1234',
+    pr: { number: 12, headSha: `abc1234${'0'.repeat(33)}` },
+    runId: 'pr-12-run',
+  };
   const done = settledLine('r', { ...base, outcome: 'done' }, AT);
-  const retry = settledLine('r', { ...base, outcome: 'retry', reason: 'the host is down', retryAt: '2026-10-15T08:14:10.000Z' }, AT);
+  const retry = settledLine(
+    'r',
+    { ...base, outcome: 'retry', reason: 'the host is down', retryAt: '2026-10-15T08:14:10.000Z' },
+    AT,
+  );
   expect([done && utc(done), retry && utc(retry)]).toEqual([
     '08:09:10 r  #12@abc1234 done: run pr-12-run completed\n',
     '08:09:10 r  #12@abc1234 failed: the host is down; due again in 5m 0s\n',

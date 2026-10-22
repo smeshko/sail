@@ -1,4 +1,5 @@
-// Spawning a dispatched run, `sail <ticket> --workflow <name> --dispatch <run id> [--force]`, and a resume of one,
+// Spawning a dispatched run, `sail <ticket> --workflow <name> --dispatch <run id> [--force]` or, for a pull request,
+// `sail '#<n>' --workflow <name> --dispatch <run id> --head-sha <sha>`, and a resume of one,
 // `sail resume <run id>`, each as a process of its own.
 //
 // - The child is detached: a session and a process group of its own, stdin ignored and unreferenced, so a run outlives
@@ -84,13 +85,16 @@ function spawnSail(
 
 /** Starts the dispatched run, detached, its output appended to its dispatch log. */
 export function spawnRun(options: SpawnRunOptions): SpawnedRun {
-  const { root, runsDir, workflow, ticketKey, runId, env } = options;
+  const { root, runsDir, workflow, ticketKey, pr, runId, env } = options;
+  const ref = pr === undefined ? (ticketKey ?? '') : `#${pr.number}`;
+  const pinned = pr === undefined ? [] : ['--head-sha', pr.headSha];
   const args = [
-    ticketKey ?? '',
+    ref,
     '--workflow',
     workflow,
     '--dispatch',
     runId,
+    ...pinned,
     ...(options.force === true ? ['--force'] : []),
   ];
   return spawnSail(root, dispatchLog(runsDir, workflow, runId), args, env, options.cli);

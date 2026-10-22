@@ -17,10 +17,7 @@ import { writeTickets } from '../helpers/watched';
 
 const BRANCH = 'sail/FAKE-1-add-a-greeting';
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a ticket run's pull request is queued while the run holds its branch, reviewed only once the run has released it, and a second push is reviewed in turn while the first sha is never queued again", async () => {
+test("a ticket run's pull request is queued while the run holds its branch, reviewed only once the run has released it, and a second push is reviewed in turn while the first sha is never queued again", async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeStub(repo.dir, { testsPassAt: 1 });
     writePublishingWorkflow(sailDir, 'ship', { label: 'sail', cap: 1 });
@@ -32,18 +29,19 @@ test
     const runs = join(repo.dir, '.sail-runs');
     const reviews = () => runsIn(runs).filter((run) => run.workflow === 'review-pr');
     const completedReviews = () => reviews().filter((run) => run.status === 'completed').length;
-    const queued = (type: string) =>
-      queueEvents(queueDir(runs, 'review-pr')).filter((event) => event.type === type);
+    const queued = (type: string) => queueEvents(queueDir(runs, 'review-pr')).filter((event) => event.type === type);
     let watcher: SailProcess | undefined;
     try {
       watcher = sailProcess(repo.dir, env, ['watch', 'ship', 'review-pr']);
       expect(await until('the ticket run held', () => heldRuns(repo.dir).length === 1)).toBe('the ticket run held');
       expect((await sail(repo.dir, env, ['queue', 'poll', 'review-pr'])).code).toBe(0);
-      expect(await until('the pull request waiting on the lease', () => queued('queue:skipped_leased').length === 1)).toBe(
-        'the pull request waiting on the lease',
-      );
+      expect(
+        await until('the pull request waiting on the lease', () => queued('queue:skipped_leased').length === 1),
+      ).toBe('the pull request waiting on the lease');
       releaseHeld(repo.dir);
-      expect(await until('the first review completed', () => completedReviews() === 1)).toBe('the first review completed');
+      expect(await until('the first review completed', () => completedReviews() === 1)).toBe(
+        'the first review completed',
+      );
 
       // A second push to the branch, as a person would make it, from a worktree of the clone.
       const worktree = join(repo.dir, '..', 'second-push');
