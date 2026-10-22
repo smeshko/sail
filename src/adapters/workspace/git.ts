@@ -275,6 +275,9 @@ export const FETCH_RETRY_WAITS_MS: readonly number[] = [250, 500, 1_000];
 /** What git says when another process holds a lock the fetch needs: two runs fetching into one clone at once. */
 const LOST_LOCK = /cannot lock ref|Unable to create '[^']*\.lock': File exists/;
 
+/** Whether `signal` has aborted, read afresh at each call. */
+const stopped = (signal: AbortSignal | undefined): boolean => signal?.aborted === true;
+
 /** Waits `ms`, or less when `signal` aborts. */
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((done) => {
@@ -319,10 +322,10 @@ export async function fetchRemote(
       const said = existsSync(stderr) ? readFileSync(stderr, 'utf8').trim() : '';
       const lost = end.started && !end.timedOut && !end.aborted && LOST_LOCK.test(said);
       let stoppedWaiting = false;
-      if (lost && attempt < FETCH_TRIES && signal?.aborted !== true) {
+      if (lost && attempt < FETCH_TRIES && !stopped(signal)) {
         await pause(FETCH_RETRY_WAITS_MS[attempt - 1] ?? 1_000, signal);
         // An abort during the wait ends it here, with this try's message: no further git is started only to be stopped.
-        if (signal?.aborted !== true) continue;
+        if (!stopped(signal)) continue;
         stoppedWaiting = true;
       }
       const how = !end.started
