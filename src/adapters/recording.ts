@@ -61,22 +61,49 @@ function trimmed(path: string): string | undefined {
   return bare === '' ? undefined : bare;
 }
 
-/** A function that replaces each root with its word in every string of a value: longest first, realpath forms too. */
-export function maskPaths(roots: Readonly<Record<string, string>>): <T>(value: T) => T {
+/**
+ * The forms a path takes in what a session sees: as written, URL-encoded (a `file://` URL, a query), and with every
+ * character but a letter or a digit turned into `-`, as Claude Code names a project's folder after its cwd. The dashed
+ * form is left out for a path of one segment, such as `/tmp`, which would match ordinary words.
+ */
+function pathForms(path: string): string[] {
+  const dashed = path.split('/').filter((part) => part !== '').length >= 2 ? [path.replace(/[^A-Za-z0-9]/g, '-')] : [];
+  return [path, encodeURI(path), encodeURIComponent(path), ...dashed];
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A function that replaces each root with its word in every string of a value: longest first, realpath forms too, each
+ * also URL-encoded and dashed (`pathForms()`). Each of `names`, such as the user's login, is then replaced as a whole
+ * word in any case, wherever a path doesn't carry it: the owner column of `ls -l`, or a home path under another root.
+ */
+export function maskPaths(
+  roots: Readonly<Record<string, string>>,
+  names: Readonly<Record<string, string>> = {},
+): <T>(value: T) => T {
   const pairs: [string, string][] = [];
   for (const [word, path] of Object.entries(roots)) {
     const bare = trimmed(path);
     if (bare === undefined) continue;
-    pairs.push([bare, word]);
+    const paths = [bare];
     try {
       const real = trimmed(realpathSync(bare));
-      if (real !== undefined && real !== bare) pairs.push([real, word]);
+      if (real !== undefined && real !== bare) paths.push(real);
     } catch {
       // A root that doesn't exist has no other form.
     }
+    for (const form of new Set(paths.flatMap(pathForms))) pairs.push([form, word]);
   }
   pairs.sort((a, b) => b[0].length - a[0].length);
-  const text = (input: string): string => pairs.reduce((out, [path, word]) => out.split(path).join(word), input);
+  const words = Object.entries(names)
+    .filter(([, name]) => name.length >= 3)
+    .map(([word, name]) => [new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'gi'), word] as const);
+  const text = (input: string): string =>
+    words.reduce(
+      (out, [name, word]) => out.replace(name, word),
+      pairs.reduce((out, [path, word]) => out.split(path).join(word), input),
+    );
   const value = <T>(input: T): T => {
     if (typeof input === 'string') return text(input) as T;
     if (Array.isArray(input)) return input.map((each) => value(each)) as T;
@@ -149,6 +176,8 @@ export interface RecordingOptions {
   readonly secrets: readonly string[];
   /** Paths masked beside the request's own, by the word that replaces each: `$RUNS`, `$REPO`, `$HOME`, `$TMPDIR`. */
   readonly roots: Readonly<Record<string, string>>;
+  /** Names masked as whole words, by the word that replaces each: the user's login as `$USER`. */
+  readonly names?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -232,11 +261,13 @@ export function recordingHarness(inner: Harness, options: RecordingOptions): Har
       try {
         const { raw: _raw, ...kept } = result;
         const roots = { ...options.roots, ...requestRoots(request) };
-        const mask = maskPaths(roots);
+        const names = options.names ?? {};
+        const mask = maskPaths(roots, names);
         // Secrets first: a secret that holds a root would be split by the path's word, and leave the rest of itself.
         const scrub = <T>(value: T): T => mask(secrets.value(value));
         const maskBytes = maskPaths(
           Object.fromEntries(Object.entries(roots).map(([word, path]) => [word, asBytes(path)])),
+          names,
         );
         const secretBytes = redactor(secretForms(options.secrets.map(asBytes)));
         const scrubBytes = (input: string): string => maskBytes(secretBytes.text(input));

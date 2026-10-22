@@ -15,7 +15,7 @@
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
 import { mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
 import { recordingHarness, writeJournalKeys } from '../../adapters/recording';
@@ -179,7 +179,9 @@ export function recorded(
     $TMPDIR: env.TMPDIR ?? tmpdir(),
     ...(env.HOME === undefined ? {} : { $HOME: env.HOME }),
   };
-  const harness = recordingHarness(project.adapters.ports.harness, { dir, secrets, roots });
+  // The login, as a word: it names the home folder under any root, and the owner in `ls -l`, even when HOME is another.
+  const names = { $USER: env.USER ?? userInfo().username };
+  const harness = recordingHarness(project.adapters.ports.harness, { dir, secrets, roots, names });
   return {
     adapters: { ...project.adapters, ports: { ...project.adapters.ports, harness } },
     finish: (runDir) => writeJournalKeys(dir, runDir),
