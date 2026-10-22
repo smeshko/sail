@@ -110,7 +110,9 @@ function snapshot(out: string | undefined, skip: string | undefined): Map<string
     }
   };
   walk(out);
-  return seen;
+  // In name order: a directory lists its entries in an order of its own, which differs between macOS and Linux, and a
+  // recording must be the same file wherever it was made.
+  return new Map([...seen].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
 /** The files that are new or changed since `before`, read from `out`. */
