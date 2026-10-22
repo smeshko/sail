@@ -9,10 +9,15 @@ sail is a software factory: a ticket goes in and a pull request comes out, along
 
 Bun `>=1.3.14` is the only runtime. No command needs Node.
 
-- `bun install`: installs dependencies and points `core.hooksPath` at `.githooks`, so the pre-push hook runs `verify`.
+- `bun install`: installs dependencies and points `core.hooksPath` at `.githooks`, so the pre-push hook runs `gate`.
 - `bun run verify`: typecheck, lint, then tests with the coverage gate. A change is green when this passes.
 - `bun run test [path]`: tests without the coverage gate. A path filters the run.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
+- `bun run gate`: typecheck, lint, then only the tests the branch affects, with no coverage gate. It's what the pre-push
+  hook runs. `bun scripts/affected-tests.ts --list` prints the selection: test files changed since the merge-base with
+  `origin/staging`, and test files that reach a changed file through imports or a path they name, such as a helper or
+  a fixture. A change to `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `scripts/test.ts`, `test/setup.ts`
+  or the coverage census, or a branch with no merge-base, runs every test. A prose-only change runs none.
 - `bun run types`: regenerates `types/`, the SDK's committed declarations. Run it after changing `src/sdk`: `verify`
   fails while they're stale.
 - `bun run golden`: regenerates the golden run in `test/fixtures/runs/` and the four views in `test/fixtures/terminal/`
@@ -29,7 +34,8 @@ Bun `>=1.3.14` is the only runtime. No command needs Node.
 - Branch names carry the Linear issue id, as in `chore/adw-77-<slug>`. One commit per task, in Conventional Commits.
 - Stage files by name: `git add <paths>`.
 - `staging` is protected, admins included. Every change lands through a PR whose `verify` check is green on a head that
-  contains the latest `staging`. The pre-push hook runs the same `bun run verify`, so a red check shows up before the
+  contains the latest `staging`. CI runs the full `bun run verify` as that check, and a PR is ready only when it's green.
+  The pre-push hook runs the narrow `bun run gate`, so a typecheck, lint or affected-test failure shows up before the
   push.
 
 ## Tracker
