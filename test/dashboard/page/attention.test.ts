@@ -22,7 +22,10 @@ afterEach(() => m.remove());
 
 const PARKED = 'stage_error: implement#1 ended in error: harness: the session ended before it submitted a result';
 
-test("attention lists, across both repositories, FAKE-2's failure, error and denial, FAKE-3's suspension and error, and FAKE-6 parked, and nothing of the golden run", () => {
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("attention lists, across both repositories, FAKE-2's failure, error and denial, FAKE-3's suspension and error, and FAKE-6 parked, and nothing of the golden run", () => {
   const items = attention(index(m.registryDir));
   expect(items).toEqual([
     {
@@ -79,7 +82,10 @@ test("attention lists, across both repositories, FAKE-2's failure, error and den
   expect(items.some((item) => item.runId === GOLDEN_RUN_ID)).toBe(false);
 });
 
-test("without beta's queue/ the parked item is gone, and the rest stays", () => {
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("without beta's queue/ the parked item is gone, and the rest stays", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(attention(index(m.registryDir)).map((item) => `${item.repo} ${item.kind}`)).toEqual([
     'alpha failed',

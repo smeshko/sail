@@ -550,7 +550,10 @@ test.each<[string, NewEvent | undefined]>([
   ['close()', undefined],
 ])('in a terminal, %s leaves no live line and no timer', (_, ending) => {
   const t = inTerminal();
-  const [start, last] = stream([stageStart('implement#2'), ending ?? { type: 'all:start' }]) as [SailEvent, SailEvent];
+  const [start, last] = stream([
+    stageStart('implement#2'),
+    ending ?? { type: 'journal:append', key: 'implement#1', line: 1, outcome: 'done' },
+  ]) as [SailEvent, SailEvent];
   t.terminal.onEvent(start);
   expect(visibleLive(t.out)).toBe('implement#2 running · 0s');
   if (ending === undefined) t.terminal.close();
@@ -619,8 +622,6 @@ test('at trace, an event of every type prints a line of its own', () => {
     ],
     [{ type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 }, head('fix', '↻ iteration 1/3', w)],
     [{ type: 'loop:exit', loop: 'fix', iterations: 1, max: 3, reason: 'break' }, head('fix', '↻ break after 1/3', w)],
-    [{ type: 'all:start', count: 2 }, head('', '· all:start {"count":2}', w)],
-    [{ type: 'all:end' }, head('', '· all:end {}', w)],
     [{ type: 'workflow:route', at: 'tests#1', value: 'passed', took: 'end' }, head('tests#1', '→ end · on passed', w)],
     [{ type: 'journal:append', key: 'tests#1', line: 1, outcome: 'done' }, detail('tests#1', 'journal line 1', w)],
     [{ type: 'agent:message', key: 'spec#1', text: 'hi' }, head('spec#1', '· agent:message {"text":"hi"}', w)],
@@ -829,7 +830,9 @@ test('at trace, an event of every type prints a line of its own', () => {
     [{ type: 'run:end', status: 'completed', replays: 1 }, '  replays  1'],
     [{ type: 'error:crash', message: 'boom' }, head('', '✗ crash: boom', w)],
   ];
-  expect(cases.map(([event]) => event.type).sort()).toEqual([...EVENT_TYPES].sort());
+  // A group's two lines are their own test's, at every verbosity they print at.
+  const grouped = new Set<string>(['all:start', 'all:end']);
+  expect(cases.map(([event]) => event.type).sort()).toEqual(EVENT_TYPES.filter((type) => !grouped.has(type)).sort());
 
   const lines = render(stream(cases.map(([event]) => event)), 'trace').split('\n');
   const missing = cases.filter(([, line]) => !lines.includes(line)).map(([event, line]) => `${event.type}: ${line}`);
@@ -1129,5 +1132,87 @@ test('at trace, a session prints its thinking, each tool call from its start to 
     head(DESCRIBE, '· tool:end {"callId":"tool-2","status":"denied","durationMs":0}', w18),
     head(DESCRIBE, '· tool:start {"callId":"tool-3","tool":"Bash","input":{"command":"git log main.."}}', w18),
     head(DESCRIBE, '· tool:end {"callId":"tool-3","status":"failed","durationMs":12}', w18),
+  ]);
+});
+
+// A group: a header keyed `all`, its calls' lines as they come, then a closing line. Nothing is held back.
+
+const GROUP = ['spec#1', 'implement#1', 'tests#1'];
+/** A run of the hand-written roster whose three calls run as one group, interleaved, one of them failing. */
+const grouped = (): SailEvent[] =>
+  stream([
+    rosterStart(),
+    { type: 'all:start', keys: GROUP, running: GROUP },
+    stageStart('spec#1', 'agent'),
+    stageStart('implement#1', 'agent'),
+    stageStart('tests#1'),
+    stageEnd('implement#1', 'done', 1200, '02-implement/call-1/result.json'),
+    stageEnd('spec#1', 'done', 1500, '01-spec/call-1/result.json'),
+    stageEnd('tests#1', 'failed', 1800, '03-tests/call-1/result.json'),
+    {
+      type: 'all:end',
+      keys: GROUP,
+      outcomes: { 'spec#1': 'done', 'implement#1': 'done', 'tests#1': 'failed' },
+      durationMs: 1840,
+    },
+  ]);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("at normal, a group prints one header keyed all before its calls' lines and one closing line after them, in event order, and so does trace; quiet prints neither", () => {
+  const w = 18;
+  const header = head('all', '⇉ 3 at once: spec#1 · implement#1 · tests#1', w);
+  const closing = head('all', '⇉ 3 ended · 2 done · 1 failed · 1.8s', w);
+  expect(render(grouped(), 'normal')).toBe(
+    view(
+      'sail · ticket-to-pr v1 · RUN-1',
+      header,
+      head('spec#1', '▶ spec · agent', w),
+      head('implement#1', '▶ implement · agent', w),
+      head('tests#1', '▶ tests · script', w),
+      head('implement#1', '✓ done · 1.2s', w),
+      head('spec#1', '✓ done · 1.5s', w),
+      head('tests#1', '✗ failed · 1.8s', w),
+      closing,
+    ),
+  );
+  const trace = render(grouped(), 'trace').split('\n');
+  expect([trace.indexOf(header), trace.indexOf(closing)]).toEqual([1, trace.length - 2]);
+  expect(render(grouped(), 'quiet')).toBe(view('sail · ticket-to-pr v1 · RUN-1'));
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('a resumed group says how many of its calls it starts now, and names those', () => {
+  const resumed = stream([rosterStart(), { type: 'all:start', keys: GROUP, running: ['tests#1'] }]);
+  expect(render(resumed, 'normal').split('\n')[1]).toBe(head('all', '⇉ 1 of 3 at once: tests#1', 18));
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("in a terminal, the live line counts a group's running calls, never naming one while two or more run, and goes back to the calls once the group ends", () => {
+  const t = inTerminal();
+  const events = grouped().slice(1);
+  const after = stream([stageStart('describe#1', 'agent')]);
+  const seen: (string | undefined)[] = [];
+  for (const event of [...events, ...after]) {
+    t.terminal.onEvent(event);
+    t.advance(1000);
+    t.timers.tick();
+    seen.push(visibleLive(t.out));
+  }
+  expect(seen).toEqual([
+    'all 0/3 running · 1s',
+    'all 1/3 running · 2s',
+    'all 2/3 running · 3s',
+    'all 3/3 running · 4s',
+    'all 2/3 running · 5s',
+    'all 1/3 running · 6s',
+    'all 0/3 running · 7s',
+    undefined,
+    'describe#1 running · 1s',
   ]);
 });

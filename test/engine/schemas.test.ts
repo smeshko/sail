@@ -62,8 +62,8 @@ const runStart: Payload<'run:start'> = {
 };
 const event = { ...envelope, type: 'run:start', ...runStart };
 const runEnd = { ...envelope, seq: 2, type: 'run:end', status: 'completed', result: 'done', replays: 1 };
-/** An event of a family a later epic closes. */
-const later = { ...envelope, type: 'all:start' };
+/** An agent's message: an event whose payload is closed, as every run event's is. */
+const message = { ...envelope, type: 'agent:message', key: 'spec#1', text: 'hi' };
 const summary = {
   schema: 'sail.summary.v1',
   runId: RUN_ID,
@@ -233,11 +233,31 @@ test('permission:denied names tools as its rule, with the tools the step lists; 
   expect(paths('sail.event.v1', { ...denied, rule: 'mcp' })).toEqual(['/rule']);
 });
 
-test("event: the type is exhaustive, runId is required, and a later family's payload is open, key and all", () => {
-  expect(paths('sail.event.v1', { ...later, type: 'agent:thought' })).toEqual(['/type']);
-  expect(paths('sail.event.v1', omit(later, 'runId'))).toEqual(['/runId']);
-  expect(paths('sail.event.v1', { ...later, remote: 'fake://codehost/fixture', anything: [1, 2] })).toEqual([]);
-  expect(paths('sail.event.v1', { ...later, type: 'agent:message', key: 'spec#1', text: 'hi' })).toEqual([]);
+test('event: the type is exhaustive, and runId is required', () => {
+  expect(paths('sail.event.v1', message)).toEqual([]);
+  expect(paths('sail.event.v1', { ...message, type: 'agent:thought' })).toEqual(['/type']);
+  expect(paths('sail.event.v1', omit(message, 'runId'))).toEqual(['/runId']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("event: all:start and all:end carry a group's keys, and refuse a missing or empty keys, a key that isn't a call's, an unknown outcome and a field they don't declare", () => {
+  const start = { ...envelope, type: 'all:start', keys: ['style#1', 'coverage#1'], running: ['coverage#1'] };
+  const end = {
+    ...envelope,
+    type: 'all:end',
+    keys: ['style#1', 'coverage#1'],
+    outcomes: { 'style#1': 'done', 'coverage#1': 'error' },
+    durationMs: 612,
+  };
+  expect([paths('sail.event.v1', start), paths('sail.event.v1', end)]).toEqual([[], []]);
+  expect(paths('sail.event.v1', omit(start, 'keys'))).toEqual(['/keys']);
+  expect(paths('sail.event.v1', { ...start, running: [] })).toEqual(['/running']);
+  expect(paths('sail.event.v1', { ...start, keys: ['style#1/review'] })).toEqual(['/keys/0']);
+  expect(paths('sail.event.v1', { ...end, outcomes: { 'style#1': 'maybe' } })).toEqual(['/outcomes/style#1']);
+  expect(paths('sail.event.v1', omit(end, 'durationMs'))).toEqual(['/durationMs']);
+  expect(paths('sail.event.v1', { ...end, key: 'style#1' })).toEqual(['/key']);
 });
 
 const KEY = 'tests#1';

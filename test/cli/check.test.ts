@@ -19,6 +19,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { editorDeclarations } from '../../src/engine/editor';
 import { writePublish } from '../helpers/fixture';
+import { dropReview } from '../helpers/review-fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { copyRun, writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -60,18 +61,26 @@ test('check --list in the in-repo fixture groups its stages under its workflow, 
   expect(await runCaptured(['check', '--list'], inRepoFixture)).toEqual({
     code: EXIT_OK,
     stdout: [
-      '.sail/ checked: 1 workflow, 6 stages',
+      '.sail/ checked: 2 workflows, 12 stages',
       '',
       'workflows',
+      '  review        intake ticket  .sail/workflows/review/workflow.ts',
+      '    private',
+      '      architecture  agent',
+      '      coverage      agent',
+      '      performance   agent',
+      '      security      agent',
+      '      side-effects  agent',
+      '      style         agent',
       '  ticket-to-pr  intake ticket  .sail/workflows/ticket-to-pr/workflow.ts',
       '    private',
-      '      describe     agent',
-      '      open         script',
-      '      self-review  agent',
-      '      spec         agent',
+      '      describe      agent',
+      '      open          script',
+      '      self-review   agent',
+      '      spec          agent',
       '    shared',
-      '      implement    agent',
-      '      tests        script',
+      '      implement     agent',
+      '      tests         script',
       '',
       'shared stages',
       '  implement  agent   used by ticket-to-pr  .sail/stages/implement/stage.ts',
@@ -85,6 +94,7 @@ test('check --list in the in-repo fixture groups its stages under its workflow, 
 test('check --list orders private stages by folder, intake first, lists a multi-step stage with its steps, and marks a shared stage no one uses', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
+    dropReview(sail);
     writePublish(sail);
     const write = (path: string, text: string) => {
       mkdirSync(dirname(join(sail, path)), { recursive: true });
@@ -149,7 +159,7 @@ test('check --list orders private stages by folder, intake first, lists a multi-
 test('check without --list prints only the summary', async () => {
   expect(await runCaptured(['check'], inRepoFixture)).toEqual({
     code: EXIT_OK,
-    stdout: '.sail/ checked: 1 workflow, 6 stages\n',
+    stdout: '.sail/ checked: 2 workflows, 12 stages\n',
     stderr: '',
   });
 });
@@ -160,7 +170,7 @@ test('a copy of the fixture checks from a subdirectory with no node_modules in r
     const { code, stdout, stderr } = await runCaptured(['check', '--list'], subdirectory(repo.dir));
     expect(stderr).toBe('');
     expect(code).toBe(EXIT_OK);
-    expect(stdout).toStartWith('../../.sail/ checked: 1 workflow, 6 stages\n');
+    expect(stdout).toStartWith('../../.sail/ checked: 2 workflows, 12 stages\n');
     expect(stdout).toContain('  ../../.sail/workflows/ticket-to-pr/workflow.ts\n');
     expect(stdout).toContain('used by ticket-to-pr  ../../.sail/stages/tests/stage.ts\n');
     expect(stdout).not.toContain(repo.dir);
@@ -493,7 +503,12 @@ test('with --list, the line that says what it wrote comes first, then the checke
     writeFileSync(join(sail, 'tsconfig.json'), '{}\n');
     const { code, stdout } = await checked(repo, '--list');
     const lines = stdout.split('\n');
-    expect(lines.slice(0, 4)).toEqual([WROTE_BOTH.trimEnd(), '.sail/ checked: 1 workflow, 6 stages', '', 'workflows']);
+    expect(lines.slice(0, 4)).toEqual([
+      WROTE_BOTH.trimEnd(),
+      '.sail/ checked: 2 workflows, 12 stages',
+      '',
+      'workflows',
+    ]);
     expect(code).toBe(EXIT_OK);
     expect(declared(sail)).toEqual(current());
   });

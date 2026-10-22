@@ -559,3 +559,29 @@ test('a reused call is listed where its journal:append comes, with its fromRun a
     1,
   ]);
 });
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('a group is listed once, with its keys in the order given and its duration from its all:end, though a resume reported its all:start again; its calls stay among the calls, in the order they started', () => {
+  const keys = ['style#1', 'coverage#1'];
+  const events = stamp(
+    [0, runStart()],
+    [10, { type: 'all:start', keys, running: keys }],
+    [20, start('style#1', { kind: 'agent' })],
+    [30, start('coverage#1', { kind: 'agent' })],
+    [130, end('coverage#1', 'done', 100)],
+    [140, journal('coverage#1', 1, 'done')],
+    [200, runEnd('suspended', 1, { stopReason: 'interrupted' })],
+    [300, { type: 'all:start', keys, running: ['style#1'] }],
+    [310, start('style#1', { kind: 'agent', try: 2 })],
+    [510, end('style#1', 'done', 200, 2)],
+    [520, journal('style#1', 2, 'done')],
+    [530, { type: 'all:end', keys, outcomes: { 'style#1': 'done', 'coverage#1': 'done' }, durationMs: 230 }],
+    [600, runEnd('completed', 2)],
+  );
+  expect(folded(events.slice(0, 9))?.groups).toEqual([{ keys }]);
+  const summary = folded(events);
+  expect(summary?.groups).toEqual([{ keys, durationMs: 230 }]);
+  expect(summary?.calls.map((call) => call.key)).toEqual(['style#1', 'coverage#1']);
+});

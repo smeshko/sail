@@ -11,6 +11,7 @@ import { readEvents } from '../../src/events/consumers/ndjson';
 import type { Summary } from '../../src/events/summary';
 import { fakeAdapters } from '../helpers/adapters';
 import { edit } from '../helpers/fixture';
+import { TRIO, TRIO_GROUP, TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
 import { SOURCE_BRANCH, SOURCE_JOURNAL, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -178,5 +179,56 @@ test('onOpened runs once the run start and the reused calls are in the events fi
       { status: 'suspended', stopReason: 'until' },
       [`run:start ${from.runId}`, `journal:append ${from.runId}`],
     ]);
+  });
+}, 60_000);
+
+// A group: trio's a, b and c, journaled b, c, a in the source, then d.
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a run seeded for a stage of a group runs the whole group as its first move, then stops with until; with --continue it runs on to the end', async () => {
+  await withTempRepo(async (repo) => {
+    const { runId: fromRun, keys } = await trioRunInto(repo.dir);
+    expect(keys).toEqual(TRIO_JOURNAL);
+    const end = await seeded(repo, fromRun, 'a');
+    expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const dir = dirOf(end);
+    expect(journaled(dir)).toEqual(['intake#1 passed', 'b#1 done', 'c#1 done', 'a#1 done']);
+    expect(JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')).fromRun).toBe(fromRun);
+    expect(
+      readEvents(dir)
+        .filter((event) => event.type === 'stage:start')
+        .map((event) => event.key),
+    ).toEqual(['a#1', 'b#1', 'c#1']);
+  });
+  await withTempRepo(async (repo) => {
+    const { runId: fromRun, keys } = await trioRunInto(repo.dir);
+    expect(keys).toEqual(TRIO_JOURNAL);
+    const end = await seeded(repo, fromRun, 'b', { continue: true });
+    expect(endOf(end)).toEqual({ status: 'completed', stopReason: undefined });
+    expect(journaled(dirOf(end))).toEqual(['intake#1 passed', 'b#1 done', 'c#1 done', 'a#1 done', 'd#1 done']);
+  });
+}, 90_000);
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a seeded run whose workflow now asks for a group without the stage it was seeded for fails with determinism_violation, and runs nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const { runId: fromRun, keys } = await trioRunInto(repo.dir);
+    expect(keys).toEqual(TRIO_JOURNAL);
+    edit(
+      join(repo.dir, '.sail'),
+      `workflows/${TRIO}/workflow.ts`,
+      TRIO_GROUP,
+      '  const results = await run.all([[a, { brief }], [c, { brief }]]);\n',
+    );
+    const end = await seeded(repo, fromRun, 'b');
+    expect(endOf(end)).toEqual({ status: 'failed', stopReason: 'determinism_violation' });
+    expect('refused' in end ? '' : end.message).toBe(
+      `the workflow asks for the group a#1, c#1 after the calls reused from run ${fromRun}, not b#1: it changed since that run`,
+    );
+    expect(journaled(dirOf(end))).toEqual(['intake#1 passed']);
   });
 }, 60_000);

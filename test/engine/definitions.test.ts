@@ -11,17 +11,20 @@ import {
 } from '../../src/engine/definitions';
 import { z } from '../../src/sdk/index';
 import { writePublish } from '../helpers/fixture';
+import { dropReview } from '../helpers/review-fixture';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const fixture = join(import.meta.dir, '..', 'fixtures', 'repo', '.sail');
 
 /**
  * A copy of the fixture's `.sail/` whose `describe` and `open` are the two steps of one stage, `publish`: these cases
- * hold a multi-step stage beside the one-step ones, which the fixture has none of until the engine can run one.
+ * hold a multi-step stage beside the one-step ones, which the fixture has none of until the engine can run one. The
+ * copy is ticket-to-pr's alone: these cases are about its layout, and review's six reviewers would only lengthen them.
  */
 function copyFixture(repoDir: string): string {
   const sail = join(repoDir, '.sail');
   cpSync(fixture, sail, { recursive: true });
+  dropReview(sail);
   writePublish(sail);
   return sail;
 }

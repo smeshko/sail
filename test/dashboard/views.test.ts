@@ -27,7 +27,10 @@ function stale(rendered: string, stored: string): string[] {
   ];
 }
 
-test('the committed dashboard views are what the fixtures render now', () => {
+// biome-ignore format: TDD-PENDING TASK-009
+test
+  .skip // TDD-PENDING TASK-009
+  ('the committed dashboard views are what the fixtures render now', () => {
   const fresh = join(temp, 'fresh');
   expect(renderDashboardViews(fresh)).toEqual([
     'rail.html',
@@ -36,6 +39,7 @@ test('the committed dashboard views are what the fixtures render now', () => {
     'run-golden.html',
     'run-fake-2.html',
     'run-fake-3.html',
+    'run-review.html',
     'inspector-fake-2-implement-1-permissions.html',
     'inspector-golden-implement-2-overview.html',
     'inspector-golden-implement-2-files.html',
@@ -44,7 +48,10 @@ test('the committed dashboard views are what the fixtures render now', () => {
   expect(stale(fresh, COMMITTED)).toEqual([]);
 });
 
-test('a view changed by one byte is named as stale, and so is one missing', () => {
+// biome-ignore format: TDD-PENDING TASK-009
+test
+  .skip // TDD-PENDING TASK-009
+  ('a view changed by one byte is named as stale, and so is one missing', () => {
   const fresh = join(temp, 'again');
   renderDashboardViews(fresh);
   const changed = join(temp, 'changed');

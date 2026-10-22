@@ -70,6 +70,33 @@ test('the consumer writes summary.json at run:start, each journal:append, run:en
   expect(wrote).toEqual(['run:start', 'journal:append', 'run:end', 'error:crash']);
 });
 
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("the consumer writes summary.json again at a group's all:end, with the group's duration", () => {
+  const dir = runDir();
+  const consumer = summaryConsumer(dir);
+  const keys = ['style#1', 'coverage#1'];
+  const wrote: string[] = [];
+  for (const event of stamp(
+    [0, runStart()],
+    [10, { type: 'all:start', keys, running: keys }],
+    [20, start('style#1')],
+    [30, start('coverage#1')],
+    [130, end('coverage#1', 'passed', 100)],
+    [140, journal('coverage#1', 1, 'passed')],
+    [230, end('style#1', 'passed', 210)],
+    [240, journal('style#1', 2, 'passed')],
+    [250, { type: 'all:end', keys, outcomes: { 'style#1': 'passed', 'coverage#1': 'passed' }, durationMs: 240 }],
+  )) {
+    rmSync(join(dir, 'summary.json'), { force: true });
+    consumer.onEvent(event);
+    if (existsSync(join(dir, 'summary.json'))) wrote.push(event.type);
+  }
+  expect(wrote).toEqual(['run:start', 'journal:append', 'journal:append', 'all:end']);
+  expect(summaryIn(dir)?.groups).toEqual([{ keys, durationMs: 240 }]);
+});
+
 /** A first process's events: `spec#1` journaled, then suspended after 2 replays. */
 const FIRST_PROCESS = stamp(
   [0, runStart()],
