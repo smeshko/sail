@@ -76,6 +76,8 @@ export interface StageCard {
   steps: CardStep[];
   /** The loop iteration open when the call started, the innermost when loops nest. */
   iteration?: { loop: string; iteration: number; max: number };
+  /** The index in `groups` of the group the call ran in. */
+  group?: number;
   resultPath?: string;
   /** The call's last agent message. */
   message?: string;
@@ -115,6 +117,8 @@ export interface RunModel {
   loops: Record<string, { iteration: number; max: number; exited?: 'break' | 'exceeded' }>;
   /** The loops open now, innermost last. */
   openLoops: string[];
+  /** Each group, in the order its first `all:start` came: its keys in declaration order, and whether it has ended. */
+  groups: { keys: string[]; ended: boolean }[];
   routes: { at: string; value: string; took: string }[];
   end?: { status: string; stopReason?: string; message?: string };
   /** The `ts` of the `run:end` in `end`. */
@@ -143,6 +147,7 @@ export function emptyRun(): RunModel {
     pending: [],
     loops: dict(),
     openLoops: [],
+    groups: [],
     routes: [],
     toolInputs: dict(),
     lastSeq: 0,

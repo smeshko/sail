@@ -24,6 +24,8 @@ export interface JournalEntry {
   files: Record<string, string>;
   /** Relative to the run directory. */
   resultPath: string;
+  /** The keys of the group the call belongs to, in declaration order: present only on a group's calls. */
+  group?: string[];
   recordedAt: string;
 }
 

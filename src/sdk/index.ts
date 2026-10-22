@@ -64,9 +64,12 @@ export {
 export { type Untrusted, untrusted } from './untrusted';
 export {
   type AgentResult,
+  type AllCall,
+  type AllResults,
   type BindingsOf,
   type BlockedResult,
   type CallOptions,
+  type CheckedCalls,
   type DoneResult,
   type Duration,
   type ErrorResult,

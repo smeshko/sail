@@ -437,6 +437,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       }
       if (end.kind === 'completed') return await finish({ runId, dir, status: 'completed', result: end.result });
       if (end.kind === 'failed') return await failed(end.stopReason, end.message);
+      if (end.kind === 'group')
+        return await failed('workflow_failed', `the group ${end.keys.join(', ')} can't run yet`);
 
       const { call } = end;
       // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it. A

@@ -53,6 +53,12 @@ export interface CallEntry {
   fromRun?: string;
 }
 
+/** One group: its keys in declaration order, and how long it took once it ended. */
+export interface GroupEntry {
+  keys: string[];
+  durationMs?: number;
+}
+
 /** Tokens and dollars. */
 export interface Usage {
   inputTokens?: number;
@@ -78,6 +84,8 @@ export interface Summary {
   calls: CallEntry[];
   loops?: Record<string, { iterations: number; max: number }>;
   routes?: { at: string; value: unknown; took: string }[];
+  /** The calls that ran together, each group's keys in declaration order: present only when the run had a group. */
+  groups?: GroupEntry[];
   totals: {
     stageCalls: number;
     steps: number;

@@ -42,10 +42,14 @@ export interface PendingCall {
   definition: StageDefinition;
   stageFile: string;
   supplied: Record<string, Supplied>;
+  /** The keys of the group the call belongs to, in declaration order, when it belongs to one. */
+  group?: string[];
 }
 
 export type ReplayEnd =
   | { kind: 'call'; call: PendingCall }
+  /** A group the journal doesn't hold whole: its keys in declaration order, and its calls not journaled yet. */
+  | { kind: 'group'; keys: string[]; calls: PendingCall[] }
   | { kind: 'completed'; result: unknown }
   | {
       kind: 'failed';
