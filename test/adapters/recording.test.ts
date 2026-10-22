@@ -321,6 +321,30 @@ describe('masking secrets', () => {
     expect(JSON.stringify(recorded?.result)).not.toContain(SECRET);
   });
 
+  test('a file that is not UTF-8 has the secret and the paths in its bytes masked, at any offset (review #1.2)', async () => {
+    const req = request();
+    const home = tempDir();
+    const binary = (lead: number) =>
+      Buffer.concat([
+        Buffer.from([0xff, 0xfe]),
+        Buffer.alloc(lead, 0x41),
+        Buffer.from(`${SECRET} in ${req.cwd}/a and ${home}/b`),
+        Buffer.from([0x80]),
+      ]);
+    const files = { 'a.bin': binary(0), 'b.bin': binary(1), 'c.bin': binary(2) };
+    const { dir, harness } = recorder(standIn({ files }), { secrets: [SECRET], roots: { $HOME: home } });
+    expect((await harness.run(req)).outcome).toBe('done');
+    for (const name of Object.keys(files)) {
+      const file = read(dir, 'spec#1').tries[0]?.files[name];
+      expect(file?.encoding).toBe('base64');
+      const decoded = Buffer.from(file?.content ?? '', 'base64').toString('latin1');
+      expect(decoded).not.toContain(SECRET);
+      expect(decoded).not.toContain(req.root);
+      expect(decoded).not.toContain(home);
+      expect(decoded).toContain('[redacted] in $WORKSPACE/a and $HOME/b');
+    }
+  });
+
   test('a shape of real-looking tokens is masked: an OAuth token, a GitHub token and a Linear key', async () => {
     const tokens = [
       'sk-ant-oat01-Zk3b9QfVwX7mLp2RtYh8NcDe5GaJ1uSo4IiKq6TnUBvMxCyPdWlOrEAz0H-9_fgjhwQAA',
