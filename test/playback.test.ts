@@ -143,7 +143,15 @@ for (const set of RECORDED_SETS) {
       for (const [name, file] of Object.entries(last?.files ?? {})) {
         const bytes =
           file.encoding === 'base64' ? Buffer.from(file.content, 'base64') : Buffer.from(file.content, 'utf8');
-        expect(entry.files[name]).toBe(createHash('sha256').update(bytes).digest('hex'));
+        // The journal names each produced file by its path in the run directory: the played-back file's bytes are the
+        // recording's.
+        const path = entry.files[name];
+        expect(path).toBeString();
+        expect(
+          createHash('sha256')
+            .update(readFileSync(join(played, path ?? '')))
+            .digest('hex'),
+        ).toBe(createHash('sha256').update(bytes).digest('hex'));
       }
     }
   });
