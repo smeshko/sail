@@ -273,6 +273,7 @@ test('the secrets masked are every credential-named value of 8 characters or mor
       'cccccccccccc',
       '{"k":"dddddddd"}',
       'X-Api-Auth: eeeeeeee',
+      'eeeeeeee',
       'ffffffffffff',
       'gggggggggggg',
       'proxyuser:hhhhhhhh',
@@ -281,4 +282,23 @@ test('the secrets masked are every credential-named value of 8 characters or mor
       'iiiiiiii',
     ].sort(),
   );
+});
+
+test('a percent-encoded URL password is taken decoded too, and a credential inside a header value alone (review #2.1)', () => {
+  const secrets = recordedSecrets({
+    HTTPS_PROXY: 'https://alice:long%40password42@proxy.example',
+    ALL_PROXY: 'http://bob:bad%zzpassword@proxy.example',
+    ANTHROPIC_CUSTOM_HEADERS: 'x-api-key: sk-ant-example-1234567890, X-Other: zzzzzzzzzz',
+  });
+  for (const secret of [
+    'long%40password42',
+    'long@password42',
+    'alice:long@password42',
+    'bad%zzpassword',
+    'sk-ant-example-1234567890',
+    'zzzzzzzzzz',
+  ]) {
+    expect(secrets).toContain(secret);
+  }
+  expect(secrets).not.toContain('x-api-key:');
 });
