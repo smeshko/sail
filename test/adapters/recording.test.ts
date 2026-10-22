@@ -2,7 +2,16 @@
 // recording, masked of secrets and machine paths (11.3 D2 to D6). The inner harness is a stand-in that writes files and
 // emits events, so each case sees exactly what the recorder saw.
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -507,6 +516,29 @@ describe('failures never reject', () => {
       transcript: 'assistant: hi',
     });
     expect(result.outcome === 'error' && result.message.startsWith('recording:')).toBe(true);
+  });
+
+  test('a file in STAGE_OUT that cannot be read before the session is an error result, not a rejection (review #1.14)', async () => {
+    const req = request();
+    const locked = join(req.env.STAGE_OUT ?? '', 'locked.md');
+    writeFileSync(locked, 'x');
+    chmodSync(locked, 0o000);
+    let ran = false;
+    const { harness } = recorder({
+      ...standIn(),
+      run: async (r) => {
+        ran = true;
+        return standIn().run(r);
+      },
+    });
+    try {
+      const result = await harness.run(req);
+      expect(result).toMatchObject({ outcome: 'error', reason: 'harness' });
+      expect(result.outcome === 'error' && result.message).toContain('recording: ');
+      expect(ran).toBe(false);
+    } finally {
+      chmodSync(locked, 0o644);
+    }
   });
 
   test('a recording file zod refuses is an error naming the problem', async () => {
