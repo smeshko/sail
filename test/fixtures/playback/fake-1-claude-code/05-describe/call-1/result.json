@@ -1,0 +1,60 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "describe",
+  "call": 1,
+  "key": "describe#1",
+  "kind": "agent",
+  "outcome": "done",
+  "output": {
+    "title": "Add a --shout flag to the greet command (FAKE-1)",
+    "bodyFile": "pr-body.md"
+  },
+  "files": {
+    "pr-body.md": {
+      "path": "05-describe/call-1/pr-body.md",
+      "bytes": 937,
+      "sha256": "e66507b1ce84439b8a822e671f3936dca4f531a8993a2d030b2de1e86d92fb1b"
+    }
+  },
+  "consumed": {
+    "ticket": "00-intake/call-1/result.json#/output",
+    "spec": "01-spec/call-1/spec.md"
+  },
+  "startedAt": "2026-09-25T09:00:57.800Z",
+  "finishedAt": "2026-09-25T09:01:00.200Z",
+  "durationMs": 2400,
+  "try": 1,
+  "validationTry": 1,
+  "prompt": {
+    "path": "05-describe/call-1/prompt.md",
+    "untrusted": 0,
+    "fragments": [
+      {
+        "name": "untrusted-input",
+        "origin": "builtin"
+      },
+      {
+        "name": "finish",
+        "origin": "builtin"
+      }
+    ],
+    "conventions": []
+  },
+  "harness": {
+    "adapter": "fake",
+    "model": "sonnet",
+    "sessionId": "bed6c3d7-1634-460b-865a-23ede3d1339a",
+    "turns": 6,
+    "toolCalls": 5,
+    "denials": 0
+  },
+  "usage": {
+    "inputTokens": 1172,
+    "cacheReadTokens": 44283,
+    "cacheWriteTokens": 7157,
+    "outputTokens": 1320,
+    "costUsd": 0.0517976
+  },
+  "validationFailed": false
+}

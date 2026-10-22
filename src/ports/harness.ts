@@ -35,6 +35,11 @@ export interface HarnessRequest {
   readonly outputSchema: Readonly<Record<string, unknown>>;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: HarnessEvent) => void;
+  /**
+   * Each message the provider sends, as it comes, for a recording. A harness that has none never calls it. Its throw
+   * is ignored.
+   */
+  readonly onRaw?: (raw: unknown) => void;
 }
 
 export interface Harness {

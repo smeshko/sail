@@ -198,6 +198,14 @@ _Avoid_: conversation, thread, chat, run (the workflow's word)
 What was said in a session, as the harness returns it. The engine keeps it as `session.log` beside the try's result.
 _Avoid_: log, history, conversation
 
+**Recording**:
+One agent session's tries as `--record` wrote them, one file per call key: the harness's events, its result, the files it produced in `$STAGE_OUT`, and the provider's own messages, with secrets and machine paths masked. The fake harness plays a recording back in place of a session.
+_Avoid_: cassette, snapshot, fixture (alone), replay (the journal's word)
+
+**Playback**:
+The fake harness answering a session from its recording: the recorded events in order, the recorded files written into `$STAGE_OUT`, and the recorded result, offline and at $0. A prompt that differs from the recorded one fails the session, or only warns where the config says so.
+_Avoid_: replay, rerun, mock run
+
 ### Definitions and extension
 
 **Definition**:

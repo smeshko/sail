@@ -63,6 +63,7 @@ Starting a run from a ticket:
   --force          Runs a ticket that is not designated, or not unstarted, and records which check it overrode; a pull request that is unlabelled, closed or a draft
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
   --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
+  --record <dir>   Writes each agent session to <dir> as a recording; sail resume takes it too
 
 A seeded run:
   --continue  Runs the rest of the workflow after the stage, not just the stage
@@ -161,7 +162,7 @@ const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
   ['dashboard', { options: { port: { type: 'string' } }, positionals: 0, command: dashboard }],
   ['init', bare(init)],
-  ['resume', { options: VERBOSITY_OPTIONS, positionals: 1, command: resume }],
+  ['resume', { options: { ...VERBOSITY_OPTIONS, record: { type: 'string' } }, positionals: 1, command: resume }],
   [
     'run',
     {
@@ -226,6 +227,7 @@ const TICKET: CommandSpec = {
     force: { type: 'boolean' },
     until: { type: 'string' },
     'dry-run': { type: 'boolean' },
+    record: { type: 'string' },
     // The watcher's: the run id it minted for the run it dispatches. Not in USAGE.
     dispatch: { type: 'string' },
     // The watcher's too: the head sha the pull request it dispatches was queued at. Not in USAGE.

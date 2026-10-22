@@ -1,0 +1,92 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "spec",
+  "call": 1,
+  "key": "spec#1",
+  "kind": "agent",
+  "outcome": "done",
+  "output": {
+    "summary": "Add a `--shout` flag to the greet CLI that prints the whole greeting in upper case (e.g. `HELLO, ADA!`), leave the default output unchanged, and list the flag in `--help`.",
+    "tasks": [
+      {
+        "title": "Add an optional shout option to greet() that upper-cases the whole greeting, with unit tests",
+        "files": [
+          "src/greet.ts",
+          "test/greet.test.ts"
+        ]
+      },
+      {
+        "title": "Parse --shout anywhere in the CLI arguments and pass it to greet(), with CLI tests for shouted and plain output",
+        "files": [
+          "src/cli.ts",
+          "test/cli.test.ts"
+        ]
+      },
+      {
+        "title": "List --shout in the --help usage text and update the help test",
+        "files": [
+          "src/cli.ts",
+          "test/cli.test.ts"
+        ]
+      }
+    ]
+  },
+  "files": {
+    "spec.md": {
+      "path": "01-spec/call-1/spec.md",
+      "bytes": 1403,
+      "sha256": "d0efae3eaa8c803d688700be7d68c1c86f746358ad6580d930ff14d3259ba0e2",
+      "validation": {
+        "ok": true,
+        "checks": [
+          "hasSections(Requirements, Tasks)",
+          "noPlaceholders",
+          "countItems(Tasks, min 1)"
+        ]
+      }
+    }
+  },
+  "consumed": {
+    "brief": "00-intake/call-1/brief.md"
+  },
+  "startedAt": "2026-09-25T09:00:02.600Z",
+  "finishedAt": "2026-09-25T09:00:06.600Z",
+  "durationMs": 4000,
+  "try": 1,
+  "validationTry": 1,
+  "prompt": {
+    "path": "01-spec/call-1/prompt.md",
+    "untrusted": 0,
+    "fragments": [
+      {
+        "name": "untrusted-input",
+        "origin": "builtin"
+      },
+      {
+        "name": "finish",
+        "origin": "builtin"
+      }
+    ],
+    "conventions": []
+  },
+  "harness": {
+    "adapter": "fake",
+    "model": "opus",
+    "sessionId": "f60109b4-c120-4d97-a419-384be98b7739",
+    "turns": 11,
+    "toolCalls": 10,
+    "denials": 1
+  },
+  "usage": {
+    "inputTokens": 1176,
+    "cacheReadTokens": 44171,
+    "cacheWriteTokens": 7988,
+    "outputTokens": 2442,
+    "costUsd": 0.12254419999999999
+  },
+  "derived": {
+    "tasks": 3
+  },
+  "validationFailed": false
+}

@@ -5,7 +5,8 @@
 //
 // It ports the loop's `engine/worktree.ts`: fetch, then `worktree add --detach`, and on release `remove --force`, then
 // a plain removal, then `prune`. It refuses to port two things. Nothing is symlinked or copied into the worktree, secrets
-// least of all. And a fetch that fails fails the workspace: a run never starts from a stale base without saying so.
+// least of all. And a fetch that fails fails the workspace, after the retries a lost ref lock gets: a run never starts
+// from a stale base without saying so.
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
