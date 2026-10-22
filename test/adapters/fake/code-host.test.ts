@@ -101,8 +101,7 @@ test('a merge scripted pending or refused says so, leaves the pull request open,
   expect(capture.events).toEqual([]);
 });
 
-test
-  ('a stale or malformed expected head leaves the state file with nothing merged and the merge script unread, and a rejected merge reads it once and merges nothing', async () => {
+test('a stale or malformed expected head leaves the state file with nothing merged and the merge script unread, and a rejected merge reads it once and merges nothing', async () => {
   const world = files(rejecting);
   const capture = captureEvents();
   const host = createFakeCodeHost({ ...world, emit: capture.emit });

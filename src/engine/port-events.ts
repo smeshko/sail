@@ -1,9 +1,10 @@
 // The port events file: `port-events.ndjson` in a script step's call directory, where a `sail port` the script runs
-// leaves the provider events its adapter emitted. `SAIL_EVENTS` names it. The child appends one line per event, with no
+// leaves the provider events its adapter emitted, and an `error:port` for a call that failed. `SAIL_EVENTS` names it. The child appends one line per event, with no
 // envelope, and the script kind reads the file once the script has ended and emits each event under the step's key.
 //
-// What a line must be is decided here alone: a JSON object whose type is a `ticket:*` or `codehost:*` event, with none
-// of the fields the run stamps, that validates against `sail.event.v1` once enveloped. A script can write the file
+// What a line must be is decided here alone: a JSON object whose type is a `ticket:*` or `codehost:*` event, or exactly
+// `error:port`, with none of the fields the run stamps, that validates against `sail.event.v1` once enveloped. Any other
+// `error:*` is refused: only the port command reports one. A script can write the file
 // itself, so nothing else is taken from it. A `workspace:*` event carries no key, and no port command emits one.
 import { appendFileSync, closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import type { PortErrorEvent, ProviderEvent } from '../events/types';
@@ -22,8 +23,8 @@ export function appendPortEvent(path: string, event: PortEvent): void {
   appendFileSync(path, `${JSON.stringify(event)}\n`);
 }
 
-/** The provider event `line` holds, or why it holds none. */
-function parseLine(line: string, envelope: { runId: string; key: string }): ProviderEvent | string {
+/** The port event `line` holds, or why it holds none. */
+function parseLine(line: string, envelope: { runId: string; key: string }): PortEvent | string {
   let data: unknown;
   try {
     data = JSON.parse(line);
@@ -34,17 +35,20 @@ function parseLine(line: string, envelope: { runId: string; key: string }): Prov
   const stamped = STAMPED.find((field) => Object.hasOwn(data, field));
   if (stamped !== undefined) return `it carries ${stamped}, which the run stamps`;
   const { type } = data as { type?: unknown };
-  if (typeof type !== 'string' || !(type.startsWith('ticket:') || type.startsWith('codehost:'))) {
-    return `its type ${JSON.stringify(type) ?? 'is missing: it'} is no ticket:* or codehost:* event`;
+  if (
+    typeof type !== 'string' ||
+    !(type.startsWith('ticket:') || type.startsWith('codehost:') || type === 'error:port')
+  ) {
+    return `its type ${JSON.stringify(type) ?? 'is missing: it'} is no ticket:*, codehost:* or error:port event`;
   }
   const enveloped = { seq: 1, ts: new Date(0).toISOString(), ...envelope, ...data };
   const issues = validateDocument('sail.event.v1', enveloped);
   if (issues.length > 0) return issues.map((issue) => `${issue.path} ${issue.message}`).join('; ');
-  return data as ProviderEvent;
+  return data as PortEvent;
 }
 
 /**
- * The provider events the file at `path` holds, in order, and a problem for each whole line that is none:
+ * The port events the file at `path` holds, in order, and a problem for each whole line that is none:
  * `port-events.ndjson line <n> is not a provider event: <why>`. The valid lines around a bad one are still given. A
  * last line with no newline is left out: a child was killed while writing it. A file that isn't there holds nothing,
  * and one that is no regular file is a problem, unread.

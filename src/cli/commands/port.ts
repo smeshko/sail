@@ -18,7 +18,8 @@
 //
 // No run is attached to the adapters it resolves, so their provider events go to the port events file: with
 // `SAIL_EVENTS` set, as the script kind sets it for every script step, each event is appended to the file it names,
-// and the engine emits them when the step ends. Without it nothing is emitted.
+// and the engine emits them when the step ends. A call that fails leaves an `error:port` there too, with the port's
+// message, so the run's stream shows it under the step's key (DECISIONS D3). Without it nothing is emitted.
 //
 // `.sail/` is the directory of `SAIL_CONFIG` when the environment sets it, as the preamble does for every script step,
 // and is found from the working directory otherwise. Only the port asked for is resolved, so no other adapter is
@@ -30,7 +31,7 @@ import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
 import { findSailDir } from '../../engine/sail-dir';
 import { notATicket } from '../../engine/source';
-import type { ProviderEmit } from '../../events/types';
+import type { PortErrorEvent, ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
@@ -225,12 +226,18 @@ function findSail(io: Io): { dir: string } | { refused: string } {
  * Where the adapters' provider events go: appended to the file `SAIL_EVENTS` names, or nowhere when it is unset. A
  * file whose directory doesn't exist is refused, before any port is called: nothing could be appended to it.
  */
-function portEmit(io: Io): { emit?: ProviderEmit } | { refused: string } {
+function portEmit(io: Io): { emit?: ProviderEmit; file?: string } | { refused: string } {
   const named = (io.env ?? process.env).SAIL_EVENTS;
   if (named === undefined || named === '') return {};
   const file = resolve(io.cwd, named);
   if (!isDirectory(dirname(file))) return { refused: `SAIL_EVENTS names ${named}, whose directory doesn't exist` };
-  return { emit: (event) => appendPortEvent(file, event) };
+  return { emit: (event) => appendPortEvent(file, event), file };
+}
+
+/** The `error:port` a failed call of `error`'s port leaves: none for a port no script calls through this command. */
+function portErrorEvent(error: PortError): PortErrorEvent | undefined {
+  if (error.port !== 'ticketSource' && error.port !== 'codeHost') return undefined;
+  return { type: 'error:port', port: error.port, op: error.op, code: error.code, message: error.message };
 }
 
 /**
@@ -308,8 +315,9 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
   }
   const events = portEmit(io);
   if ('refused' in events) return refuse(events.refused);
+  const { file: eventsFile, ...emitting } = events;
 
-  const project = await findProject(io, COMMAND, { found: findSail(io), ports: [table.port], ...events });
+  const project = await findProject(io, COMMAND, { found: findSail(io), ports: [table.port], ...emitting });
   if (typeof project === 'number') return project;
   const adapter = project.adapters.ports[table.port];
   // The body is read when the operation asks for it, once it has refused what only its adapter can read. An empty one
@@ -335,6 +343,8 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
     if (error instanceof EmptyBody) return refuse(error.message);
     // A port that failed is this command's failure. Anything else is a bug in sail, and run() reports it.
     if (!(error instanceof PortError)) throw error;
+    const failed = portErrorEvent(error);
+    if (eventsFile !== undefined && failed !== undefined) appendPortEvent(eventsFile, failed);
     io.stderr(`${COMMAND}: ${error.message} (${error.code})\n`);
     return EXIT_FAILED;
   }

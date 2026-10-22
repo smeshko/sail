@@ -475,8 +475,7 @@ test("checks prints the port's Checks, and the fake's script carries on between 
   });
 });
 
-test
-  ('a merge the host answers pending or refused is a printed result with exit code 0, and one that lands prints merged with its sha', async () => {
+test('a merge the host answers pending or refused is a printed result with exit code 0, and one that lands prints merged with its sha', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const merge = async (...args: string[]) => {
@@ -535,8 +534,7 @@ test
   });
 });
 
-test
-  ('a merge whose expected head is not the head of the pull request prints refused, naming both shas, exits 0, and leaves it open with no event in the port events file', async () => {
+test('a merge whose expected head is not the head of the pull request prints refused, naming both shas, exits 0, and leaves it open with no event in the port events file', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const file = join(repo.dir, 'port-events.ndjson');
@@ -558,10 +556,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a merge the host rejects exits 1 with its message, and leaves one error:port with it in the port events file and no codehost:merged', async () => {
+test('a merge the host rejects exits 1 with its message, and leaves one error:port with it in the port events file and no codehost:merged', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     edit(sail, 'fake/prs.json', '"merges": ["pending", "merged"]', '"merges": ["rejected"]');
@@ -590,10 +585,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a read of a pull request the host does not have leaves one error:port of code not_found in the port events file', async () => {
+test('a read of a pull request the host does not have leaves one error:port of code not_found in the port events file', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const file = join(repo.dir, 'port-events.ndjson');
@@ -660,8 +652,7 @@ test
   });
 });
 
-test
-  ('with SAIL_EVENTS set, each operation appends what its adapter emitted: checks, a merge that landed, a label that changed and a comment each one event, and a read, a merge that did not land and a label already there none', async () => {
+test('with SAIL_EVENTS set, each operation appends what its adapter emitted: checks, a merge that landed, a label that changed and a comment each one event, and a read, a merge that did not land and a label already there none', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const file = join(repo.dir, 'port-events.ndjson');

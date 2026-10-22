@@ -435,10 +435,7 @@ test("comment on a ref parseKey refuses exits 3 naming it with no port call, and
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('with SAIL_EVENTS set, a comment on a ticket the source lacks leaves one error:port of the ticket source with its message', async () => {
+test('with SAIL_EVENTS set, a comment on a ticket the source lacks leaves one error:port of the ticket source with its message', async () => {
   await withTempRepo(async (repo) => {
     fixtureWithLinked(repo.dir);
     const file = join(repo.dir, 'port-events.ndjson');

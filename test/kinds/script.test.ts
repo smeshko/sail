@@ -693,10 +693,7 @@ test('a script that runs sail port has its provider event emitted between script
   expect(lines.map((line) => (line === '' ? '' : JSON.parse(line)))).toEqual([events[1], '']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a script whose sail port call fails, and which carries on to exit 0, has the call's error:port emitted before script:exit, valid under the step's key", async () => {
+test("a script whose sail port call fails, and which carries on to exit 0, has the call's error:port emitted before script:exit, valid under the step's key", async () => {
   const s = setup();
   withTicket(s);
   s.run(`sail port ticket-source get FAKE-9 >/dev/null || true\n${JUNIT}\necho '${PASSING}'`);

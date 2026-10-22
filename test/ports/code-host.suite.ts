@@ -298,9 +298,7 @@ export function codeHostSuite(
     },
   );
 
-  test.skipIf(
-    lacks('merge'),
-  )(
+  test.skipIf(lacks('merge'))(
     `${label}: a merge whose expected head isn't the pull request's head is refused, naming both, it stays open, and nothing is emitted (needs merge)`,
     async () => {
       const { adapter, world, capture } = await start();
@@ -318,9 +316,7 @@ export function codeHostSuite(
     },
   );
 
-  test.skipIf(
-    lacks('merge'),
-  )(
+  test.skipIf(lacks('merge'))(
     `${label}: a merge by a method that isn't one, or with an expected head that is no sha, rejects as invalid, merges nothing, and emits nothing (needs merge)`,
     async () => {
       const { adapter, world, capture } = await start();
@@ -340,9 +336,7 @@ export function codeHostSuite(
     },
   );
 
-  test.skipIf(
-    unarranged.includes('rejectedMerge') || lacks('merge'),
-  )(
+  test.skipIf(unarranged.includes('rejectedMerge') || lacks('merge'))(
     `${label}: a merge the host rejects is a PortError of code conflict, it stays open, and nothing is emitted (needs merge)`,
     async () => {
       const { adapter, world, capture } = await start();

@@ -422,7 +422,7 @@ One implementation of a port for one provider, selected in the config: by name f
 _Avoid_: plugin, driver, connector, integration, backend
 
 **Port command**:
-`sail port <port> <operation>`: how a script step reaches the configured adapter of a port, with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key.
+`sail port <port> <operation>`: how a script step reaches the configured adapter of a port, with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
 _Avoid_: port helper, port CLI, bridge
 
 **Adapter registry**:

@@ -87,19 +87,13 @@ test.each([
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('an error:port is read back as it was appended, between provider events, and validates once enveloped', () => {
+test('an error:port is read back as it was appended, between provider events, and validates once enveloped', () => {
   const path = eventsFile();
   for (const event of [PUSHED, FAILED, LABELLED]) appendPortEvent(path, event);
   expect(readPortEvents(path, ENVELOPE)).toEqual({ events: [PUSHED, FAILED, LABELLED], problems: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  .each([
+test.each([
   [
     'a line with no type',
     line({ branch: 'sail/FAKE-1' }),
