@@ -40,22 +40,43 @@ export function commitStatus(status: Pick<GitHubStatus, 'state'>): CheckStatus {
   return 'failed';
 }
 
-/** Every item of a paged list, page after page of 100, until `total_count` items have been read. */
+/**
+ * Every item of a paged list, page after page of 100, until `total_count` items have been read. A page without its list
+ * or its count, or one that ends the list short of the count, is `unavailable`: a check left unread could have failed.
+ */
 async function readPaged<T>(
   client: GitHubClient,
   op: string,
   sha: string,
-  path: string,
-  items: (answer: Record<string, unknown>) => readonly T[] | undefined,
+  endpoint: 'check-runs' | 'status',
+  field: 'check_runs' | 'statuses',
 ): Promise<T[]> {
   const read: T[] = [];
+  const path = client.repoPath('commits', sha, endpoint);
   for (let page = 1; page <= MAX_PAGES; page++) {
     const query = new URLSearchParams({ per_page: String(PER_PAGE), page: String(page) });
-    const answer = await client.request<Record<string, unknown>>(op, 'GET', `${path}?${query}`);
-    const listed = items(answer) ?? [];
-    read.push(...listed);
-    const total = Number(answer.total_count ?? read.length);
-    if (read.length >= total || listed.length === 0) return read;
+    const answer = await client.request<unknown>(op, 'GET', `${path}?${query}`);
+    const { [field]: listed, total_count: total } = (typeof answer === 'object' && answer !== null ? answer : {}) as {
+      [key: string]: unknown;
+    };
+    if (!Array.isArray(listed) || typeof total !== 'number' || !Number.isInteger(total) || total < 0) {
+      throw new PortError(
+        'codeHost',
+        op,
+        'unavailable',
+        `GitHub's ${endpoint} answer for ${sha} holds no list and total_count`,
+      );
+    }
+    read.push(...(listed as T[]));
+    if (read.length >= total) return read;
+    if (listed.length === 0) {
+      throw new PortError(
+        'codeHost',
+        op,
+        'unavailable',
+        `GitHub listed ${read.length} of ${total} ${endpoint} on ${sha}`,
+      );
+    }
   }
   throw new PortError('codeHost', op, 'unavailable', `more than ${PER_PAGE * MAX_PAGES} checks on ${sha}`);
 }
@@ -66,20 +87,8 @@ export async function readChecks(
   op: string,
   sha: string,
 ): Promise<{ checks: Check[]; raw: { checkRuns: GitHubCheckRun[]; statuses: GitHubStatus[] } }> {
-  const checkRuns = await readPaged<GitHubCheckRun>(
-    client,
-    op,
-    sha,
-    client.repoPath('commits', sha, 'check-runs'),
-    (answer) => answer.check_runs as GitHubCheckRun[] | undefined,
-  );
-  const statuses = await readPaged<GitHubStatus>(
-    client,
-    op,
-    sha,
-    client.repoPath('commits', sha, 'status'),
-    (answer) => answer.statuses as GitHubStatus[] | undefined,
-  );
+  const checkRuns = await readPaged<GitHubCheckRun>(client, op, sha, 'check-runs', 'check_runs');
+  const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses');
   const runUrl = (run: GitHubCheckRun) => run.html_url ?? run.details_url ?? undefined;
   const checks: Check[] = [
     ...checkRuns.map((run) => {
