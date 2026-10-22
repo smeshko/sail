@@ -19,6 +19,7 @@ import {
   findProject,
   interruptibly,
   printEnd,
+  recorded,
   refuseAs,
   terminalFor,
   typecheckWorkflow,
@@ -43,6 +44,7 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
   await registerRepository(io, COMMAND, project);
+  const recording = recorded(args, io, project);
 
   const terminal = terminalFor(io, project.sailDir, verbosity, readEvents(run.dir));
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
@@ -50,11 +52,12 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
     resumeWorkflow({
       cwd: io.cwd,
       runId,
-      adapters: project.adapters,
+      adapters: recording?.adapters ?? project.adapters,
       signal,
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );
   if ('refused' in end) return refuse(end.refused);
+  recording?.finish(end.dir);
   return printEnd(end, io);
 }
