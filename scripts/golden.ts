@@ -62,7 +62,7 @@ export interface RecordedSet {
   /** `warn` for a set whose prompts may drift, since a real set can't be recorded again at $0. */
   readonly onPromptMismatch: 'fail' | 'warn';
 }
-export const RECORDED_SETS: readonly RecordedSet[] = [];
+export const RECORDED_SETS: readonly RecordedSet[] = [{ name: 'fake-1-claude-code', onPromptMismatch: 'warn' }];
 
 /** The golden run's id: its ticket key, then the ULID of `START` and `RANDOM`. */
 export const GOLDEN_RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
