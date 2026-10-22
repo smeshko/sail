@@ -763,6 +763,49 @@ test.each<[string, string, unknown, (sha: string) => string]>([
   },
 );
 
+test.each<[string, 'check-runs' | 'status', unknown, unknown]>([
+  [
+    'check runs',
+    'check-runs',
+    {
+      total_count: 150,
+      check_runs: Array.from({ length: 100 }, (_, i) => ({
+        name: `ci-${i}`,
+        status: 'completed',
+        conclusion: 'success',
+      })),
+    },
+    { total_count: 0, check_runs: [] },
+  ],
+  [
+    'commit statuses',
+    'status',
+    { total_count: 150, statuses: Array.from({ length: 100 }, (_, i) => ({ context: `ci-${i}`, state: 'success' })) },
+    { total_count: 100, statuses: [] },
+  ],
+])(
+  '%s whose total_count changes between pages reject as unavailable, and emit nothing',
+  async (_, endpoint, first, second) => {
+    const on = world();
+    const sha = headOf7(on);
+    on.inject(`GET /commits/${sha}/${endpoint}`, { status: 200, body: first });
+    on.inject(`GET /commits/${sha}/${endpoint}`, { status: 200, body: second });
+    const capture = captureEvents();
+    const error = await rejection(host(on, capture.emit).checks(7));
+    const changed = (second as { total_count: number }).total_count;
+    expect({
+      error: error instanceof PortError ? [error.code, error.message] : String(error),
+      events: capture.events,
+    }).toEqual({
+      error: [
+        'unavailable',
+        `codeHost.checks: GitHub's ${endpoint} count for ${sha} changed from 150 to ${changed} while it was read`,
+      ],
+      events: [],
+    });
+  },
+);
+
 test('checks of a pull request GitHub does not have reject as not_found, with no request for any commit', async () => {
   const on = world();
   const error = await rejection(host(on).checks(99));
