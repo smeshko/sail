@@ -14,17 +14,24 @@ import { z } from 'zod';
 import type { ProjectConfig } from '../engine/config';
 import { loadWorkflow } from '../engine/load-workflow';
 import { runsDir } from '../engine/run-dir';
-import { parseEvery, watchLabel, watchProblem } from '../engine/watchable';
+import { parseEvery, pollKind, watchLabel, watchProblem } from '../engine/watchable';
 import type { QueueEvent } from '../events/types';
+import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import { Ticket } from '../ports/types';
+import type { SourceKind } from '../sdk/intake';
 import type { Command } from './inbox';
 import { DEFAULT_QUEUE_POLICY, openQueue, type QueuePolicy, type QueueStore } from './queue-store';
 
-/** What a watched workflow declares: the label it polls, how often, and how many of its runs may run at once. */
+/**
+ * What a watched workflow declares: the kind of source it polls, the label it polls for, how often, and how many of its
+ * runs may run at once.
+ */
 export interface WatchDeclaration {
   workflow: string;
+  /** Tickets through the TicketSource, or pull requests through the CodeHost: the one its intake accepts. */
+  kind: SourceKind;
   label: string;
   everyMs: number;
   maxConcurrentRuns: number;
@@ -33,6 +40,7 @@ export interface WatchDeclaration {
 /** One watched workflow, ready to poll. */
 export interface WatchTarget extends WatchDeclaration {
   ticketSource: TicketSource;
+  codeHost: CodeHost;
   store: QueueStore;
 }
 
@@ -56,11 +64,13 @@ export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclara
   if (problem !== undefined || everyMs === undefined || maxConcurrentRuns === undefined) {
     return { refused: `workflow '${name}' ${problem}` };
   }
-  return { workflow: name, label: watchLabel(workflow, options.config), everyMs, maxConcurrentRuns };
+  const kind = pollKind(workflow);
+  return { workflow: name, kind, label: watchLabel(workflow, options.config), everyMs, maxConcurrentRuns };
 }
 
 export interface OpenWatchTargetOptions extends ReadWatchOptions {
   ticketSource: TicketSource;
+  codeHost: CodeHost;
   now: () => Date;
   policy?: QueuePolicy;
   /** Hears each event the workflow's queue emits. */
@@ -81,7 +91,7 @@ export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<
     ...(onEvent ? { onEvent } : {}),
   });
   if ('refused' in store) return store;
-  return { ...watch, ticketSource: options.ticketSource, store };
+  return { ...watch, ticketSource: options.ticketSource, codeHost: options.codeHost, store };
 }
 
 /** How a poll went. `dropped`: its poller was dropped while it waited for the provider, so its answer went unrecorded. */

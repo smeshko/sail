@@ -67,7 +67,9 @@ export interface Summary {
   schema: 'sail.summary.v1';
   runId: string;
   workflow: string;
-  source: { kind: 'ticket'; ticketKey: string; via: 'cli' | 'watch' };
+  source:
+    | { kind: 'ticket'; ticketKey: string; via: 'cli' | 'watch' }
+    | { kind: 'pr'; number: number; headSha: string; via: 'cli' | 'watch' };
   ticket?: { ticketKey: string; title: string; url?: string };
   status: 'running' | 'suspended' | 'completed' | 'failed';
   stopReason?: StopReason;
@@ -246,11 +248,14 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
 
 function foldRunStart(state: SummaryState, event: EventOf<'run:start'>): void {
   if (state.run !== undefined) return;
-  const { kind, ticketKey, via } = event.source;
+  const { source } = event;
   state.run = {
     runId: event.runId,
     workflow: `${event.workflow.name}@${event.workflow.version}`,
-    source: { kind, ticketKey, via },
+    source:
+      source.kind === 'ticket'
+        ? { kind: 'ticket', ticketKey: source.ticketKey, via: source.via }
+        : { kind: 'pr', number: 0, headSha: '', via: source.via },
     startedAt: event.ts,
     maxUsd: event.budget?.maxUsd,
   };

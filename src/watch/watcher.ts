@@ -36,6 +36,7 @@ import { requestUnwatch } from '../engine/control';
 import { readStatus, runsDir as runsDirOf } from '../engine/run-dir';
 import { resolveSource } from '../engine/source';
 import type { QueueEvent } from '../events/types';
+import type { CodeHost } from '../ports/code-host';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
 import { createDispatcher, type Dispatcher } from './dispatch';
@@ -98,7 +99,7 @@ export const TICK_MS = 1000;
 export interface WatcherOptions {
   sailDir: string;
   config: ProjectConfig;
-  adapters: { ticketSource: TicketSource; workspace: WorkspacePort };
+  adapters: { ticketSource: TicketSource; codeHost: CodeHost; workspace: WorkspacePort };
   /** The repository's registry entry, as `repositoryEntry()` builds it: the watcher adds its field to it. */
   entry: RegistryEntry;
   registryDir: string;
@@ -151,7 +152,7 @@ interface Watched {
 
 export async function startWatcher(options: WatcherOptions): Promise<Watcher | { refused: string }> {
   const { sailDir, config, timers, now, policy } = options;
-  const { ticketSource, workspace } = options.adapters;
+  const { ticketSource, codeHost, workspace } = options.adapters;
   const pid = options.pid ?? process.pid;
   const isAlive = options.isAlive ?? processIsAlive;
   const tickMs = options.tickMs ?? TICK_MS;
@@ -184,6 +185,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
         config,
         name,
         ticketSource,
+        codeHost,
         now,
         onEvent,
         ...(policy ? { policy } : {}),
@@ -272,6 +274,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       root: dirname(sailDir),
       store: target.store,
       ticketSource,
+      codeHost,
       workspace,
       env: options.env,
       now,

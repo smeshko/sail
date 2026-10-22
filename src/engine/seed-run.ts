@@ -202,7 +202,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   const copied = callDirs(source.dir, fromRun, seed);
   if ('refused' in copied) return copied;
 
-  const { ticketKey } = source.header.source;
+  const ticketKey = source.header.source.kind === 'ticket' ? source.header.source.ticketKey : 'STUB';
   const runId = newRunId(ticketKey, now.getTime(), options.random);
   const branch = `${sourceBranch}-seeded-${runId.slice(-8).toLowerCase()}`;
   const runSource: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: [] };

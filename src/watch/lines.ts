@@ -38,7 +38,7 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
       if (event.found === 0 && event.added === 0 && !afterError) return undefined;
       return { text: `polled ${event.label}: ${event.found} found, ${event.added} queued` };
     case 'queue:item_added':
-      return { text: `${event.source.ticketKey} queued: ${event.title}` };
+      return { text: `${event.source.kind === 'ticket' ? event.source.ticketKey : ''} queued: ${event.title}` };
     case 'queue:dispatched':
       return {
         text: `${keyOf(event.dedupKey)} dispatched as run ${event.run}, attempt ${event.attempt}, pid ${event.pid}`,

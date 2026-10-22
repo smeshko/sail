@@ -72,7 +72,8 @@ function intakeLines(intake: IntakeEntry): string[] {
 /** The roster a start would freeze, as the dry run prints it. */
 export function rosterText(header: RunHeader, ticket: { title: string; state: { name: string } }, branch: string) {
   const { workflow, source, adapters, budget } = header;
-  const lines = [`${workflow.name}@${workflow.version} on ${source.ticketKey}: ${ticket.title} (${ticket.state.name})`];
+  const on = source.kind === 'ticket' ? source.ticketKey : '';
+  const lines = [`${workflow.name}@${workflow.version} on ${on}: ${ticket.title} (${ticket.state.name})`];
   lines.push(field('  ', 'branch', branch));
   const used = Object.entries(adapters).map(([port, entry]) => `${port} ${entry.use} (${entry.origin})`);
   lines.push(field('  ', 'adapters', used.join(', ')));

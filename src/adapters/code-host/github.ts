@@ -10,7 +10,7 @@ import type { AdapterDefinition } from '../../ports/adapter';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
-import type { Labelled, PullRequest } from '../../ports/types';
+import type { Labelled, PullRequest, PullRequestDetails } from '../../ports/types';
 import { gitSync, stripUserinfo } from '../workspace/git';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
 import { type GitHubPull, toPullRequest, withTicketMarker } from './github-pull';
@@ -178,7 +178,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         return { ...pr, labels };
       }),
     listDesignated: unsupported('listDesignated'),
-    getPullRequest: (number) => guarded(() => read('getPullRequest', number)),
+    getPullRequest: (number) => guarded(async () => (await read('getPullRequest', number)) as PullRequestDetails),
     checks: unsupported('checks'),
     merge: unsupported('merge'),
     addLabel: (number, label) =>

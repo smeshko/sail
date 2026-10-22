@@ -13,6 +13,7 @@ import {
   MergeMethod,
   type MergeResult,
   type PullRequest,
+  type PullRequestDetails,
 } from '../../ports/types';
 import { createStore } from './store';
 
@@ -46,6 +47,12 @@ const StoredPullRequest = z.object({
     .default(['merged']),
   reads: z.object({ checks: z.number().int(), merges: z.number().int() }).default({ checks: 0, merges: 0 }),
   comments: z.array(Comment).default([]),
+  /** Who opened it: `sail` unless the seed says otherwise. Left out of `raw` when the seed leaves it out. */
+  author: z.string().optional(),
+  /** Whether its head branch lives outside the repository: false unless the seed says otherwise. */
+  fork: z.boolean().optional(),
+  /** The base commit the host records for it: `branches[base]` when left out. */
+  baseSha: z.string().optional(),
 });
 type StoredPullRequest = z.infer<typeof StoredPullRequest>;
 
@@ -197,7 +204,7 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
     },
     async getPullRequest(number) {
       const world = store.read();
-      return toPullRequest(world, find(world, 'getPullRequest', number));
+      return toPullRequest(world, find(world, 'getPullRequest', number)) as PullRequestDetails;
     },
     async checks(number) {
       const checks = store.change((world) => {

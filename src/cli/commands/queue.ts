@@ -69,7 +69,9 @@ function itemLine(item: QueueItem): string {
 
 /** The item `ref` names, by its dedup key or its ticket key. */
 const itemOf = (queue: QueueFile | undefined, ref: string): QueueItem | undefined =>
-  queue?.items.find((item) => item.dedupKey === ref || item.source.ticketKey === ref);
+  queue?.items.find(
+    (item) => item.dedupKey === ref || (item.source.kind === 'ticket' && item.source.ticketKey === ref),
+  );
 
 const noQueue = (workflow: string) => `no queue for '${workflow}' in .sail-runs/queue: it has never been watched`;
 

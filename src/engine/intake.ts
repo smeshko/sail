@@ -8,8 +8,10 @@
 import { BUILTIN_INTAKES, type IntakeBody } from '../builtins/intakes/index';
 import type { Emit } from '../events/types';
 import type { StepRun } from '../kinds/index';
+import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
+import type { WorkspacePort } from '../ports/workspace';
 import { type CallPaths, callPaths, createCallDir, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { type ContractError, recordFiles, validateOutput } from './contract';
@@ -35,6 +37,12 @@ export interface IntakeRequest {
   body: IntakeBody;
   source: Source;
   ticketSource: TicketSource;
+  /** The run's CodeHost, which the `pr` intake reads. */
+  codeHost?: CodeHost;
+  /** The run's workspace: the port, and the absolute path of the run's worktree, where the `pr` intake takes its diff. */
+  workspace?: { port: WorkspacePort; path: string };
+  /** The prefix a ticket's branch is named with, which the `pr` intake checks the ticket marker against. */
+  branchPrefix?: string;
   /** 1 unless an earlier try was interrupted. */
   try?: number;
   signal?: AbortSignal;
@@ -122,6 +130,9 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
     returned = await request.body({
       source: request.source,
       ticketSource: request.ticketSource,
+      ...(request.codeHost === undefined ? {} : { codeHost: request.codeHost }),
+      ...(request.workspace === undefined ? {} : { workspace: request.workspace }),
+      ...(request.branchPrefix === undefined ? {} : { branchPrefix: request.branchPrefix }),
       out: paths.dir,
       ...(request.signal === undefined ? {} : { signal: request.signal }),
     });

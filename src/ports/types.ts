@@ -73,6 +73,20 @@ export const PullRequest = z.object({
 });
 export type PullRequest = z.infer<typeof PullRequest>;
 
+/**
+ * A pull request as `getPullRequest` reads it: `PullRequest` with its body (`''` when the host has none), its author's
+ * login, the base commit the host records for it, whether its head branch lives outside the repository, and its
+ * conversation comments, oldest first.
+ */
+export const PullRequestDetails = PullRequest.extend({
+  body: z.string(),
+  author: z.string(),
+  baseSha: z.string(),
+  fork: z.boolean(),
+  comments: z.array(Comment),
+});
+export type PullRequestDetails = z.infer<typeof PullRequestDetails>;
+
 export const Pushed = z.object({ branch: z.string(), headSha: z.string(), raw: Raw });
 export type Pushed = z.infer<typeof Pushed>;
 

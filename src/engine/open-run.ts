@@ -149,6 +149,11 @@ export interface OpenRunOptions {
   adapters: ResolvedAdapters;
   /** A start the watcher dispatched: the run takes the id it minted, and its source is recorded `via: 'watch'`. */
   dispatch?: { runId: string };
+  /**
+   * The head sha a pull request must still be at: the one the watcher queued it at. A pull request whose head has moved
+   * since is refused. Only a pull request takes it.
+   */
+  headSha?: string;
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */

@@ -27,6 +27,7 @@ import { branchFor } from '../engine/branch';
 import { cancelUnwatch } from '../engine/control';
 import { newRunId } from '../engine/run-id';
 import type { ResumedFrom } from '../events/types';
+import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import { getTicket, type TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
@@ -37,7 +38,10 @@ import type { SpawnedRun, SpawnResumeOptions, SpawnRunOptions } from './spawn';
 /** An item whose run has ended, as the dispatch settled it. */
 export interface Settled {
   dedupKey: string;
-  ticketKey: string;
+  /** The item's ticket, for a ticket item. */
+  ticketKey?: string;
+  /** The item's pull request at its head sha, for a pull-request item. */
+  pr?: { number: number; headSha: string };
   runId: string;
   /** `done`, or a failed attempt: retried at `retryAt`, or parked. */
   outcome: 'done' | 'retry' | 'parked';
@@ -57,6 +61,8 @@ export interface DispatcherOptions {
   root: string;
   store: QueueStore;
   ticketSource: TicketSource;
+  /** Re-checks a queued pull request before its run starts. */
+  codeHost: CodeHost;
   workspace: WorkspacePort;
   /** The environment a run starts in. */
   env: Readonly<Record<string, string>>;
@@ -80,6 +86,9 @@ export interface Dispatcher {
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** The ticket key of a ticket item. */
+const ticketOf = (item: QueueItem): string => (item.source.kind === 'ticket' ? item.source.ticketKey : '');
+
 export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const { workflow, label, store, ticketSource, workspace, isAlive, now } = options;
   /** The run that held each skipped item's branch when it was last reported. */
@@ -101,7 +110,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const retryAt = store.snapshot().items.find((each) => each.dedupKey === item.dedupKey)?.retryAt;
     options.onSettled?.({
       dedupKey: item.dedupKey,
-      ticketKey: item.source.ticketKey,
+      ticketKey: ticketOf(item),
       runId,
       outcome,
       reason,
@@ -136,7 +145,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     store.parked(item.dedupKey, reason);
     options.onSettled?.({
       dedupKey: item.dedupKey,
-      ticketKey: item.source.ticketKey,
+      ticketKey: ticketOf(item),
       runId,
       outcome: 'parked',
       reason,
@@ -168,7 +177,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
           break;
         case 'done':
           store.done(item.dedupKey);
-          options.onSettled?.({ dedupKey: item.dedupKey, ticketKey: item.source.ticketKey, runId, outcome: 'done' });
+          options.onSettled?.({ dedupKey: item.dedupKey, ticketKey: ticketOf(item), runId, outcome: 'done' });
           break;
         case 'failed':
           fail(item, runId, answer.reason);
@@ -207,7 +216,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
 
   /** Whether the item may start now: its branches are free, and its ticket is still designated and unstarted. */
   const eligible = async (item: QueueItem, remote: string): Promise<boolean> => {
-    const { ticketKey } = item.source;
+    const ticketKey = ticketOf(item);
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
     if (await leased(item, remote, branch)) return false;
     if (item.forced === true) return true;
@@ -225,7 +234,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   };
 
   const start = (item: QueueItem) => {
-    const { ticketKey } = item.source;
+    const ticketKey = ticketOf(item);
     const runId = newRunId(ticketKey, now().getTime());
     store.dispatched(item.dedupKey, runId);
     let spawned: SpawnedRun;

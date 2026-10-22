@@ -24,7 +24,10 @@ export interface SpawnRunOptions {
   root: string;
   runsDir: string;
   workflow: string;
-  ticketKey: string;
+  /** The ticket the run starts from. A pull-request run names `pr` instead. */
+  ticketKey?: string;
+  /** The pull request the run starts from, pinned to the head sha it was queued at. */
+  pr?: { number: number; headSha: string };
   runId: string;
   /** The child's whole environment. */
   env: Readonly<Record<string, string>>;
@@ -82,7 +85,14 @@ function spawnSail(
 /** Starts the dispatched run, detached, its output appended to its dispatch log. */
 export function spawnRun(options: SpawnRunOptions): SpawnedRun {
   const { root, runsDir, workflow, ticketKey, runId, env } = options;
-  const args = [ticketKey, '--workflow', workflow, '--dispatch', runId, ...(options.force === true ? ['--force'] : [])];
+  const args = [
+    ticketKey ?? '',
+    '--workflow',
+    workflow,
+    '--dispatch',
+    runId,
+    ...(options.force === true ? ['--force'] : []),
+  ];
   return spawnSail(root, dispatchLog(runsDir, workflow, runId), args, env, options.cli);
 }
 

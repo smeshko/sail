@@ -69,6 +69,11 @@ export function watchProblem(workflow: Workflow): string | undefined {
   return undefined;
 }
 
+/** The one source kind a watched workflow's intake accepts that the watcher can poll. */
+export function pollKind(_workflow: Workflow): SourceKind {
+  return 'ticket';
+}
+
 /** The label a watched workflow polls for: its own, then `project.yaml`'s, then sail's. */
 export function watchLabel(workflow: Workflow, config: Pick<ProjectConfig, 'label'>): string {
   return workflow.watch?.label ?? config.label ?? DEFAULT_LABEL;
