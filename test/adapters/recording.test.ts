@@ -345,6 +345,47 @@ describe('masking secrets', () => {
     }
   });
 
+  test('base64 of a secret inside a longer value is masked at every offset, followed by more or not (review #1.3)', async () => {
+    const encoded = ['', 'u:', 'jdoe:'].flatMap((lead) =>
+      ['', 'x', '\n'].map((tail) => Buffer.from(`${lead}${SECRET}${tail}`).toString('base64')),
+    );
+    const { dir, harness } = recorder(standIn({ events: encoded.map((text) => SAID(`Basic ${text}`)) }), {
+      secrets: [SECRET],
+    });
+    await harness.run(request());
+    const said = read(dir, 'spec#1').tries[0]?.events.map((event) => String(event.text)) ?? [];
+    expect(said).toHaveLength(encoded.length);
+    for (const text of said) {
+      expect(text).toContain('[redacted]');
+      const left = Buffer.from(text.slice('Basic '.length).split('[redacted]').join(''), 'base64').toString('latin1');
+      expect(left).not.toContain(SECRET.slice(2, -2));
+    }
+  });
+
+  test('a secret JSON-escaped inside a JSON text is masked, quotes, backslashes and newlines included (review #1.4)', async () => {
+    const tricky = 'pa"ss\\wo/rd\nline-2-xyz';
+    const content = JSON.stringify({ password: tricky });
+    const { dir, harness } = recorder(
+      standIn({ files: { 'creds.json': content }, raw: [{ type: 'user', content: [{ tool_result: content }] }] }),
+      { secrets: [tricky] },
+    );
+    await harness.run(request());
+    const recorded = JSON.stringify(read(dir, 'spec#1').tries[0]);
+    expect(recorded).not.toContain(JSON.stringify(tricky).slice(1, -1));
+    expect(recorded).not.toContain('line-2-xyz');
+    expect(read(dir, 'spec#1').tries[0]?.files['creds.json']?.content).toBe('{"password":"[redacted]"}');
+  });
+
+  test('a secret that holds a root path is masked whole, before the paths are (review #1.5)', async () => {
+    const secret = 'Zq9/x9-root/Kw7Lm2Np';
+    const { dir, harness } = recorder(standIn({ events: [SAID(`key ${secret}`)] }), {
+      secrets: [secret],
+      roots: { $ROOT: '/x9-root' },
+    });
+    await harness.run(request());
+    expect(read(dir, 'spec#1').tries[0]?.events).toEqual([SAID('key [redacted]')]);
+  });
+
   test('a shape of real-looking tokens is masked: an OAuth token, a GitHub token and a Linear key', async () => {
     const tokens = [
       'sk-ant-oat01-Zk3b9QfVwX7mLp2RtYh8NcDe5GaJ1uSo4IiKq6TnUBvMxCyPdWlOrEAz0H-9_fgjhwQAA',
