@@ -115,19 +115,31 @@ function snapshot(out: string | undefined, skip: string | undefined): Map<string
   return new Map([...seen].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-/** The files that are new or changed since `before`, read from `out`. */
+/** The bytes of each file that is new or changed since `before`, read from `out`, by name. */
 function changedFiles(out: string | undefined, before: Map<string, string>, skip: string | undefined) {
-  const files: Record<string, z.infer<typeof RecordedFile>> = {};
+  const files: [string, Buffer][] = [];
   if (out === undefined) return files;
   for (const [name, sha] of snapshot(out, skip)) {
-    if (before.get(name) === sha) continue;
-    const bytes = readFileSync(join(out, name));
-    const text = bytes.toString('utf8');
-    files[name] = Buffer.from(text, 'utf8').equals(bytes)
-      ? { encoding: 'utf8', content: text }
-      : { encoding: 'base64', content: bytes.toString('base64') };
+    if (before.get(name) !== sha) files.push([name, readFileSync(join(out, name))]);
   }
   return files;
+}
+
+/** The text of `text`'s UTF-8 bytes, one character per byte: how a secret or a path reads inside a binary file. */
+const asBytes = (text: string): string => Buffer.from(text, 'utf8').toString('latin1');
+
+/**
+ * A recorded file, masked. Text that survives a UTF-8 round trip is masked as text. Anything else is masked byte by byte
+ * before it is base64-encoded: a secret or a path inside the encoding would no longer read as itself.
+ */
+function recordedFile(
+  bytes: Buffer,
+  text: (input: string) => string,
+  binary: (input: string) => string,
+): z.infer<typeof RecordedFile> {
+  const decoded = bytes.toString('utf8');
+  if (Buffer.from(decoded, 'utf8').equals(bytes)) return { encoding: 'utf8', content: text(decoded) };
+  return { encoding: 'base64', content: Buffer.from(binary(bytes.toString('latin1')), 'latin1').toString('base64') };
 }
 
 export interface RecordingOptions {
@@ -195,19 +207,27 @@ export function recordingHarness(inner: Harness, options: RecordingOptions): Har
       }
       try {
         const { raw: _raw, ...kept } = result;
-        const mask = maskPaths({ ...options.roots, ...requestRoots(request) });
-        const recorded = RecordedTry.parse(
-          secrets.value(
-            mask({
-              try: request.try,
-              request: { model: request.model, budget: request.budget, promptSha256: promptSha256(request) },
-              events,
-              result: kept,
-              files: changedFiles(out, before, stageIn),
-              raw,
-            }),
-          ),
+        const roots = { ...options.roots, ...requestRoots(request) };
+        const mask = maskPaths(roots);
+        const scrub = <T>(value: T): T => secrets.value(mask(value));
+        const maskBytes = maskPaths(
+          Object.fromEntries(Object.entries(roots).map(([word, path]) => [word, asBytes(path)])),
         );
+        const secretBytes = redactor(options.secrets.map(asBytes));
+        const scrubBytes = (input: string): string => secretBytes.text(maskBytes(input));
+        const files = changedFiles(out, before, stageIn).map(
+          ([name, bytes]) => [scrub(name), recordedFile(bytes, scrub, scrubBytes)] as const,
+        );
+        const recorded = RecordedTry.parse({
+          ...scrub({
+            try: request.try,
+            request: { model: request.model, budget: request.budget, promptSha256: promptSha256(request) },
+            events,
+            result: kept,
+            raw,
+          }),
+          files: Object.fromEntries(files),
+        });
         const file = recordingFile(options.dir, request.key);
         writeAtomic(file, `${JSON.stringify(updated(file, request.key, recorded), null, 2)}\n`);
         return result;
