@@ -773,3 +773,18 @@ test('addPullRequests queues a pull request once per head sha, as pr:<number>@<s
     issues: [],
   });
 });
+
+test('a new head sha that shares its first 7 with a done item is queued in its place, and one that shares them with an item not done waits for it (review R1-1)', () => {
+  const store = open(runsDir());
+  const [old, collides, again] = [`1234567${'a'.repeat(33)}`, `1234567${'b'.repeat(33)}`, `1234567${'c'.repeat(33)}`];
+  const added = [store.addPullRequests([pullRequest(12, old)])];
+  store.done('pr:12@1234567');
+  added.push(store.addPullRequests([pullRequest(12, collides)]), store.addPullRequests([pullRequest(12, collides)]));
+  const queued = store.snapshot().items.map((item) => [item.dedupKey, item.state, item.source]);
+  added.push(store.addPullRequests([pullRequest(12, again)]));
+  expect({ added, queued, after: store.snapshot().items.map((item) => [item.state, item.source]) }).toEqual({
+    added: [1, 1, 0, 0],
+    queued: [['pr:12@1234567', 'queued', { kind: 'pr', number: 12, headSha: collides, branch: 'sail/FAKE-12-x' }]],
+    after: [['queued', { kind: 'pr', number: 12, headSha: collides, branch: 'sail/FAKE-12-x' }]],
+  });
+});
