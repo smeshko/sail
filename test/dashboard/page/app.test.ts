@@ -185,10 +185,7 @@ const cards = (region: string | undefined) => [...(region ?? '').matchAll(/data-
 const runQuery = (repo: string, runId: string) => `run=${encodeURIComponent(`${repo}/${runId}`)}`;
 const GOLDEN = () => m.alpha.runDir;
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('boot renders the rail with alpha and beta from the first index, opens the newest run, and renders its nine cards, each region once a flush', () => {
+test('boot renders the rail with alpha and beta from the first index, opens the newest run, and renders its nine cards, each region once a flush', () => {
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);

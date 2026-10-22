@@ -560,10 +560,7 @@ test('a reused call is listed where its journal:append comes, with its fromRun a
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a group is listed once, with its keys in the order given and its duration from its all:end, though a resume reported its all:start again; its calls stay among the calls, in the order they started', () => {
+test('a group is listed once, with its keys in the order given and its duration from its all:end, though a resume reported its all:start again; its calls stay among the calls, in the order they started', () => {
   const keys = ['style#1', 'coverage#1'];
   const events = stamp(
     [0, runStart()],

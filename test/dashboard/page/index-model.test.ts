@@ -44,10 +44,7 @@ const named = (file: string) => {
   return NAMES.filter((name) => new RegExp(`['"\`]${name}(['"\`#/:])`).test(source));
 };
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('railRepos lists alpha then beta, each run newest first with its status, stop reason, duration and cost, and neither model names a fixture', () => {
+test('railRepos lists alpha then beta, each run newest first with its status, stop reason, duration and cost, and neither model names a fixture', () => {
   const repos = railRepos(index(m.registryDir), NOW);
   expect(repos.map((repo) => [repo.name, repo.remote, repo.live, repo.problem])).toEqual([
     ['alpha', 'https://example.com/alpha.git', false, undefined],

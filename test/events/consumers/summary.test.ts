@@ -70,10 +70,7 @@ test('the consumer writes summary.json at run:start, each journal:append, run:en
   expect(wrote).toEqual(['run:start', 'journal:append', 'run:end', 'error:crash']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the consumer writes summary.json again at a group's all:end, with the group's duration", () => {
+test("the consumer writes summary.json again at a group's all:end, with the group's duration", () => {
   const dir = runDir();
   const consumer = summaryConsumer(dir);
   const keys = ['style#1', 'coverage#1'];

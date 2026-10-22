@@ -38,10 +38,7 @@ const filesIn = (dir: string): string[] =>
     .map((entry) => relative(dir, join(entry.parentPath, entry.name)))
     .sort();
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('each recorded run passes validateRunDir, and its summary.json is summarize() of its events', () => {
+test('each recorded run passes validateRunDir, and its summary.json is summarize() of its events', () => {
   expect(readdirSync(join(DASHBOARD_FIXTURES, 'alpha')).sort()).toEqual([FAKE_2_ID]);
   expect(readdirSync(join(DASHBOARD_FIXTURES, 'beta')).sort()).toEqual([FAKE_3_ID, FAKE_4_ID, 'queue']);
   for (const [repo, ids] of Object.entries(RUNS) as ['alpha' | 'beta', string[]][]) {
@@ -111,10 +108,7 @@ test("FAKE-3's roster has a lint stage the fixture repository's workflows don't 
   expect(events.filter((event) => event.type === 'budget:exceeded')).toMatchObject([{ budget: 'usd', limit: 1 }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("seedFixtures registers alpha with the golden run and FAKE-2, and beta with FAKE-3, FAKE-4's review and its queue, each with its summary", () => {
+test("seedFixtures registers alpha with the golden run and FAKE-2, and beta with FAKE-3, FAKE-4's review and its queue, each with its summary", () => {
   seeded = seedFixtures();
   const repos = index(seeded.registryDir);
   expect(
