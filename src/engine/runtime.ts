@@ -24,6 +24,11 @@
 // lease that can't be released doesn't keep `run:end` from the stream either, which says so too. A suspended run keeps
 // both, and so does a crashed one, whose lease goes stale with its pid.
 //
+// A request from outside the run's process comes through its control file (`control.ts`), taken before the intake and
+// before each call, right after the abort check: `unwatched` suspends the run with that stop reason, keeping its
+// workspace and lease, and `stopped` fails it with that stop reason, releasing both. An abort seen at the same boundary
+// goes first, and leaves the request for the next boundary that runs. A request goes ahead of `until`'s suspension.
+//
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
 // Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
@@ -58,6 +63,7 @@ import type { Supplied } from './bindings';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
+import { takeControl } from './control';
 import { INTAKE_INDEX, INTAKE_KEY, INTAKE_STAGE, intakeBody, runIntake } from './intake';
 import {
   appendJournal,
@@ -318,9 +324,16 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   };
   const failed = (stopReason: StopReason, message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'failed', stopReason, message });
-  const suspended = (stopReason: 'interrupted' | 'until', message: string): Promise<RunEnd> =>
+  const suspended = (stopReason: 'interrupted' | 'until' | 'unwatched', message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'suspended', stopReason, message });
   const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
+  /** How the run ends at the boundary before `key`, when its control file asks it to, or undefined to go on. */
+  const controlled = (key: string): Promise<RunEnd> | undefined => {
+    const request = takeControl(dir);
+    if (request === 'unwatched') return suspended('unwatched', `its workflow was unwatched: stopped before ${key}`);
+    if (request === 'stopped') return failed('stopped', `stopped by sail stop before ${key}`);
+    return undefined;
+  };
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
   let reached = false;
@@ -360,6 +373,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         return await failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
       }
       if (signal?.aborted) return await interrupted(`stopped before ${INTAKE_KEY}`);
+      const beforeIntake = controlled(INTAKE_KEY);
+      if (beforeIntake !== undefined) return await beforeIntake;
       running = INTAKE_KEY;
       const { result, paths } = await runIntake({
         runDir: dir,
@@ -424,8 +439,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       if (end.kind === 'failed') return await failed(end.stopReason, end.message);
 
       const { call } = end;
-      // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it.
-      if (reached) return await suspended('until', `stopped after ${last}, as --until asked`);
+      // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it. A
+      // control request goes first: a stop asked during the call `--until` names ends the run, not waits with it.
+      if (reached) return await (controlled(call.key) ?? suspended('until', `stopped after ${last}, as --until asked`));
       running = call.key;
       const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
       const diffs = await gitDiffs(opened, call);
@@ -434,6 +450,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const problems = callProblems(call.definition, supplied, agent);
       if (problems.length > 0) return await failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
       if (signal?.aborted) return await interrupted(`stopped before ${call.key}`);
+      const beforeCall = controlled(call.key);
+      if (beforeCall !== undefined) return await beforeCall;
       const { result, paths } = await runCall({
         runDir: dir,
         runId,

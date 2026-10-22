@@ -1005,16 +1005,12 @@ test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, 
   });
 });
 
-test('sail FAKE-1 --dispatch with a malformed id, or with --force, exits 3 in one line, with no run directory', async () => {
+test('sail FAKE-1 --dispatch with a malformed id exits 3 in one line, with no run directory', async () => {
   const malformed = await sailIn(['FAKE-1', '--dispatch', 'FAKE-1-nope']);
-  const forced = await sailIn(['FAKE-1', '--force', '--dispatch', DISPATCHED]);
-  expect([malformed, forced].map(({ code, stderr, touched }) => ({ code, stderr, touched }))).toEqual([
-    {
-      code: EXIT_REFUSED,
-      stderr:
-        "sail FAKE-1: --dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-nope' is not one\n",
-      touched: false,
-    },
-    { code: EXIT_REFUSED, stderr: "sail FAKE-1: --dispatch and --force can't be combined\n", touched: false },
-  ]);
+  expect({ code: malformed.code, stderr: malformed.stderr, touched: malformed.touched }).toEqual({
+    code: EXIT_REFUSED,
+    stderr:
+      "sail FAKE-1: --dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-nope' is not one\n",
+    touched: false,
+  });
 });

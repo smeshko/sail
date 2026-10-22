@@ -2,8 +2,8 @@
 // change by dropping a command file. The watcher stays the only writer of its own state (ADR-0019).
 //
 // - A command is applied, then deleted. A crash between the two applies it again at the next drain, so every command
-//   is safe to apply twice: a poll, a `watch` or `unwatch` of workflows already in or out of the set, and the queue
-//   edits 13.3 adds to `Command`. An apply that returns a promise is awaited before its file is deleted, so a `watch`
+//   is safe to apply twice: a poll, a `watch` or `unwatch` of workflows already in or out of the set, an `add` of a
+//   ticket already queued, a `requeue` of an item already queued, and a `drop` of an item already gone. An apply that returns a promise is awaited before its file is deleted, so a `watch`
 //   has opened its workflows by then.
 // - A watcher empties its inbox as it starts (`clearCommands`): a command a stopped watcher left never changes a watch
 //   set nobody asked for.
@@ -43,6 +43,17 @@ export const Command = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('watch'), workflows: Workflows }),
   /** Takes the workflows out of the watch set. */
   z.strictObject({ op: z.literal('unwatch'), workflows: Workflows }),
+  /** Queues a ticket in a watched workflow's queue, forced or not. */
+  z.strictObject({
+    op: z.literal('add'),
+    workflow: z.string().min(1),
+    ticketKey: z.string().min(1),
+    force: z.literal(true).optional(),
+  }),
+  /** Puts a parked or failed item back in the queue. */
+  z.strictObject({ op: z.literal('requeue'), workflow: z.string().min(1), dedupKey: z.string().min(1) }),
+  /** Takes an item out of the queue. */
+  z.strictObject({ op: z.literal('drop'), workflow: z.string().min(1), dedupKey: z.string().min(1) }),
 ]);
 export type Command = z.infer<typeof Command>;
 

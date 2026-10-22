@@ -3,14 +3,16 @@
 //
 // The spawner hands out pids from 900000 up, which no real process has, and counts a pid alive until the test ends its
 // run. A run it is given a TicketSource for claims its ticket as a dispatched `sail <ticket>` would, through
-// `claimSource()`. The test then ends it: with a run directory and a STATUS, or refused, with only a dispatch log.
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+// `claimSource()`. The test then ends it: with a run directory and a STATUS, or refused, with only a dispatch log. It
+// stands in for `sail resume <run>` too: a resume takes a pid from the same counter, and the test ends it with the
+// STATUS it leaves and the line it logs.
+import { appendFileSync, cpSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isAlive as processIsAlive } from '../../src/adapters/leases';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import { claimSource } from '../../src/engine/source';
 import type { TicketSource } from '../../src/ports/ticket-source';
-import { dispatchLog, type SpawnedRun, type SpawnRunOptions } from '../../src/watch/spawn';
+import { dispatchLog, type SpawnedRun, type SpawnResumeOptions, type SpawnRunOptions } from '../../src/watch/spawn';
 import { edit } from './fixture';
 
 /** One ticket of the fake TicketSource: Todo with the title `Ticket <key>` unless it says otherwise. */
@@ -64,6 +66,21 @@ export interface FakeRun extends Pick<SpawnRunOptions, 'workflow' | 'ticketKey' 
   pid: number;
   /** Its claim, when the spawner claims. */
   claimed: Promise<unknown>;
+  /** Whether it was started with `--force`. */
+  force: boolean;
+}
+
+/** A `sail resume` the fake spawner started. */
+export interface FakeResume extends Pick<SpawnResumeOptions, 'workflow' | 'runId'> {
+  pid: number;
+}
+
+/** How a resume ends: the STATUS it leaves its run with, when it changed it, the line it logs, and its exit code. */
+export interface ResumeEnding {
+  status?: Status;
+  stopReason?: StopReason;
+  log?: string;
+  code?: number | null;
 }
 
 /** How a run ends: with a run directory and STATUS, or refused before it made one, with a line in its dispatch log. */
@@ -71,9 +88,14 @@ export type Ending = { status: Status; stopReason?: StopReason } | { refused: st
 
 export interface FakeSpawner {
   spawn(options: SpawnRunOptions): SpawnedRun;
+  resume(options: SpawnResumeOptions): SpawnedRun;
   isAlive(pid: number): boolean;
   /** Every run started, in order. */
   readonly runs: FakeRun[];
+  /** Every resume started, in order. */
+  readonly resumes: FakeResume[];
+  /** Ends the latest resume of run `runId`: its run reads as `ending` says, its log gains the line, and it exits. */
+  endResume(runId: string, ending?: ResumeEnding): void;
   /** The most runs of each workflow alive at once. */
   readonly peak: Record<string, number>;
   /** The latest run of `ticketKey`. */
@@ -86,6 +108,7 @@ export interface FakeSpawner {
 
 export function fakeSpawner(runsDir: string, ticketSource?: TicketSource): FakeSpawner {
   const runs: FakeRun[] = [];
+  const resumes: FakeResume[] = [];
   const live = new Set<number>();
   const exits = new Map<number, (code: number | null) => void>();
   const peak: Record<string, number> = {};
@@ -97,14 +120,34 @@ export function fakeSpawner(runsDir: string, ticketSource?: TicketSource): FakeS
   };
   return {
     runs,
+    resumes,
     peak,
+    resume(options) {
+      const pid = next++;
+      live.add(pid);
+      const exited = new Promise<number | null>((resolve) => exits.set(pid, resolve));
+      resumes.push({ workflow: options.workflow, runId: options.runId, pid });
+      return { pid, exited };
+    },
+    endResume(runId, ending = { status: 'completed' }) {
+      const resumed = resumes.findLast((each) => each.runId === runId);
+      if (resumed === undefined) throw new Error(`no resume of ${runId} was started`);
+      if (ending.status !== undefined) writeStatus(join(runsDir, runId), ending.status, ending.stopReason);
+      if (ending.log !== undefined) {
+        const log = dispatchLog(runsDir, resumed.workflow, runId);
+        mkdirSync(dirname(log), { recursive: true });
+        appendFileSync(log, `${ending.log}\n`);
+      }
+      live.delete(resumed.pid);
+      exits.get(resumed.pid)?.(ending.code === undefined ? (ending.status === 'completed' ? 0 : 1) : ending.code);
+    },
     spawn(options) {
       const pid = next++;
       live.add(pid);
       const exited = new Promise<number | null>((resolve) => exits.set(pid, resolve));
       const { workflow, ticketKey, runId } = options;
       const claimed = ticketSource === undefined ? Promise.resolve() : claimSource({ ticketKey, runId, ticketSource });
-      runs.push({ workflow, ticketKey, runId, pid, claimed });
+      runs.push({ workflow, ticketKey, runId, pid, claimed, force: options.force === true });
       const alive = runs.filter((each) => each.workflow === workflow && live.has(each.pid)).length;
       peak[workflow] = Math.max(peak[workflow] ?? 0, alive);
       return { pid, exited };

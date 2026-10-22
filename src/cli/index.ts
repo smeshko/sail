@@ -6,11 +6,13 @@ import { dashboard } from './commands/dashboard';
 import { fromRun } from './commands/from-run';
 import { init } from './commands/init';
 import { port } from './commands/port';
+import { queue } from './commands/queue';
 import { resume } from './commands/resume';
 import { runWorkflowCommand } from './commands/run-workflow';
 import { runs } from './commands/runs';
 import { show } from './commands/show';
 import { stageRun } from './commands/stage-run';
+import { stop } from './commands/stop';
 import { unwatch, watch } from './commands/watch';
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from './exit-codes';
 
@@ -37,6 +39,7 @@ Usage:
   sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
+  sail stop <run>                                            Stop a run: at its next call boundary while it runs, at once when it is suspended
   sail run --from-run <run> --stage <stage> [--continue]     Rerun one stage on another run's earlier calls: a seeded run
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
@@ -44,6 +47,9 @@ Usage:
   sail dashboard [--port <n>]                                Serve every repository's runs read-only on localhost
   sail watch <workflow>...                                   Watch these workflows: start this repository's watcher, or add them to it
   sail unwatch <workflow>...                                 Stop watching them. The watcher exits when it watches none
+  sail queue ls|poll <workflow>                              List a watched workflow's queue, or have its watcher poll it now
+  sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
+  sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
   sail port ticket-source comment <ticket> [--body-file <path>]
                                                              Comment on a ticket, the body from the file or stdin
@@ -205,6 +211,8 @@ const commands = new Map<string, CommandSpec>([
   ],
   ['watch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: watch }],
   ['unwatch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: unwatch }],
+  ['queue', { options: { force: { type: 'boolean' } }, positionals: 3, command: queue }],
+  ['stop', { options: {}, positionals: 1, command: stop }],
   ['--help', bare(help)],
   ['-h', bare(help)],
   ['--version', bare(version)],

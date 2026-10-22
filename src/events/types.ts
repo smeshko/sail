@@ -18,8 +18,6 @@ import type { Budget, Permissions } from '../sdk/steps';
 export const EVENT_TYPES = [
   'run:start',
   'run:end',
-  'run:adopted',
-  'run:resumed',
   'intake:start',
   'intake:end',
   'stage:start',
@@ -311,8 +309,8 @@ export interface Consumer {
 
 /**
  * Every type a watched workflow's queue event stream carries, after `EVENT_TYPES` in `sail.event.v1`'s enum. Each has
- * a closed payload: the watch set's changes, the polls, queued items, dispatches, lease skips, drops, parking and
- * errors.
+ * a closed payload: the watch set's changes, the polls, queued items, dispatches, lease skips, drops, parking, errors,
+ * and what the watcher did with a dispatched run it found: adopted it, or resumed it. Then a requeue by hand.
  */
 export const QUEUE_EVENT_TYPES = [
   'watch:added',
@@ -324,6 +322,9 @@ export const QUEUE_EVENT_TYPES = [
   'queue:dropped',
   'queue:parked',
   'queue:error',
+  'run:adopted',
+  'run:resumed',
+  'queue:requeued',
 ] as const;
 export type QueueEventType = (typeof QUEUE_EVENT_TYPES)[number];
 
@@ -369,7 +370,19 @@ export interface QueuePayloads {
     paused: boolean;
     retryInMs?: number;
   };
+  /** The watcher took charge of run `run`, alive as process `pid`: one it dispatched, or one a resume started. */
+  'run:adopted': { workflow: string; dedupKey: string; run: string; pid: number };
+  /**
+   * The watcher started `sail resume <run>` as process `pid`, for a run it found `running` with its process gone, or
+   * `suspended` with `interrupted` or `unwatched`.
+   */
+  'run:resumed': { workflow: string; dedupKey: string; run: string; pid: number; from: ResumedFrom };
+  /** A parked or failed item put back in the queue by hand, with no attempts. */
+  'queue:requeued': { workflow: string; dedupKey: string; reason: string };
 }
+
+/** Where a resumed run was: running with its process gone, or suspended, with why. */
+export type ResumedFrom = { status: 'running' } | { status: 'suspended'; stopReason: 'interrupted' | 'unwatched' };
 
 type QueuePayloadOf<T extends QueueEventType> = QueuePayloads[T];
 

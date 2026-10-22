@@ -57,6 +57,15 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
       const next = event.paused ? 'polling paused' : `next poll in ${formatDuration(event.retryInMs ?? 0)}`;
       return { text: `error: ${event.adapter}${code}: ${event.message}; ${next}`, alert: true };
     }
+    case 'run:adopted':
+      return { text: `${keyOf(event.dedupKey)} adopted: run ${event.run}, pid ${event.pid}` };
+    case 'run:resumed': {
+      const { from } = event;
+      const was = from.status === 'suspended' ? `suspended ${from.stopReason}` : from.status;
+      return { text: `${keyOf(event.dedupKey)} resumed: run ${event.run} (was ${was}), pid ${event.pid}` };
+    }
+    case 'queue:requeued':
+      return { text: `${keyOf(event.dedupKey)} requeued: ${event.reason}` };
     default: {
       const unknown: never = event;
       return unknown;
@@ -83,6 +92,16 @@ export function settledLine(workflow: string, settled: Settled, at: Date): Watch
 export function errorLine(workflow: string | undefined, error: unknown, at: Date): WatchLine {
   const message = error instanceof Error ? error.message : String(error);
   return { at, ...(workflow === undefined ? {} : { workflow }), text: `error: ${message}`, alert: true };
+}
+
+/** The line of an unwatched workflow's run asked to suspend at its next call boundary. */
+export function suspendLine(workflow: string, dedupKey: string, runId: string, at: Date): WatchLine {
+  return { at, workflow, text: `${keyOf(dedupKey)} suspends at its next call boundary: run ${runId}` };
+}
+
+/** The line of the worktrees of ended runs a starting watcher swept. */
+export function sweptLine(count: number, at: Date): WatchLine {
+  return { at, text: `swept ${plural(count, 'worktree')} of ended runs` };
 }
 
 /** The line of the watch set as it is now. */

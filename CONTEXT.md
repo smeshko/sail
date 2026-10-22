@@ -254,6 +254,10 @@ _Avoid_: preview, simulation, plan
 The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
+**Control file**:
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. The run takes it before its intake and before each call.
+_Avoid_: signal file, kill file, flag
+
 **Resume**:
 Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs.
 _Avoid_: restart, rerun, retry, continue
@@ -464,7 +468,7 @@ A run's exclusive hold on its git branch, from workspace creation to release, ke
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:
-A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once.
+A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A stopped run's item is parked too.
 _Avoid_: reattach, recovery, takeover
 
 **Poll**:

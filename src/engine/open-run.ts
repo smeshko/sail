@@ -31,7 +31,8 @@
 // A dispatched start (`dispatch`) is the run the watcher started: it runs under the run id the watcher minted and named
 // in its queue, and records `via: 'watch'`. It takes every step above, the claim included, in this order: the watcher
 // only reads before it spawns the run, so everything a start can refuse still comes before the ticket moves. An id
-// that isn't one of this ticket's, or whose run directory exists, is refused, and so is `force` with it.
+// that isn't one of this ticket's, or whose run directory exists, is refused. A forced queue item is dispatched with
+// `force`, and records the checks it overrode as a forced manual run does.
 //
 // Every start checks designation against the workflow's label: its `watch.label`, then `project.yaml`'s, then sail's,
 // the label its watcher polls.
@@ -357,7 +358,6 @@ export interface Preflight {
  */
 export async function preflightRun(options: OpenRunOptions): Promise<Preflight | { refused: string }> {
   const { cwd, workflow, ticket, force = false, dispatch } = options;
-  if (dispatch !== undefined && force) return { refused: "--dispatch and --force can't be combined" };
   // Read before anything can refuse, so the run id's time is the clock's first reading whatever else reads it later.
   const now = (options.clock ?? systemClock)();
   const found = findConfigured(cwd);
@@ -523,11 +523,16 @@ export function findRun(
     return { refused: `no run '${runId}' in ${relative(dirname(sailDir), runs)}` };
   }
   const status = readStatus(dir);
-  if (status.status === 'completed') return { refused: `run ${runId} has completed: there is nothing to resume` };
-  if (status.status === 'failed') {
-    return { refused: `run ${runId} failed (${status.stopReason}): a failed run is final` };
-  }
+  const ended = endedRefusal(runId, status);
+  if (ended !== undefined) return { refused: ended };
   return { dir, header: readRunHeader(dir), status };
+}
+
+/** Why run `runId` can't be resumed because it has ended, or undefined while it hasn't. */
+function endedRefusal(runId: string, status: RunStatus): string | undefined {
+  if (status.status === 'completed') return `run ${runId} has completed: there is nothing to resume`;
+  if (status.status === 'failed') return `run ${runId} failed (${status.stopReason}): a failed run is final`;
+  return undefined;
 }
 
 /** One line per port whose adapter, by `use` or `origin`, differs from the one the run started with. */
@@ -568,6 +573,16 @@ async function resumeWorkspace(
       return { refused: `run ${run.runId} is still running, in process ${holder.pid}: stop it before resuming it` };
     }
     return { refused: leasedBy(branch, holder) };
+  }
+  // A run that ended while this resume loaded its workflow, as a `sail stop` ends one, stays ended: the lease goes back.
+  const ended = endedRefusal(run.runId, readStatus(run.runDir));
+  if (ended !== undefined) {
+    try {
+      await port.releaseLease(repository.url, branch, run.runId);
+    } catch (error) {
+      return { refused: `${ended}, and its lease on ${branch} was not released: ${portRefusal(error)}` };
+    }
+    return { refused: ended };
   }
   try {
     const reopened = await port.reopen(run, { branch, baseSha: repository.baseSha });
