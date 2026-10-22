@@ -7,7 +7,7 @@
 // Every tool call passes the gate first (7.3 D1): its PreToolUse hook asks the permission engine, and canUseTool denies
 // whatever still reaches it. The session is offered only the tools its step can use (D2). The CLI scrubs the provider's
 // credentials from the Bash tool's environment (D3), returns that tool to the workspace after each command (D4), and
-// runs it under bash, the shell decide() reads. The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
+// runs it under bash, the shell decide() reads. Each SDK message also goes to the request's onRaw as it comes, for a recording (11.3 D3). The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
 import {
   type Options,
   type SDKMessage,
@@ -37,6 +37,15 @@ export interface ClaudeCodeHarnessOptions {
   readonly now?: () => number;
   /** The timers the minute budget runs on: the system's when left out (D14). */
   readonly timers?: BudgetTimers;
+}
+
+/** Hands `message` to the request's onRaw, if it has one: a recorder's trouble never changes the session. */
+function tap(request: HarnessRequest, message: SDKMessage): void {
+  try {
+    request.onRaw?.(message);
+  } catch {
+    // A recording that fails is not a reason to fail the session.
+  }
 }
 
 const SYSTEM_TIMERS: BudgetTimers = {
@@ -239,6 +248,7 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       progress.started = true;
       watch.start();
       for await (const message of query({ prompt: request.prompt, options: sessionAt })) {
+        tap(request, message);
         for (const event of reader.read(message)) emit(event);
         watch.turn(reader.state().turns);
         if (message.type === 'result') result = message;

@@ -6,12 +6,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { requestStop, requestUnwatch } from '../../src/engine/control';
+import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
+import type { PullRequestDetails } from '../../src/ports/types';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
 import { fakeAdapters } from '../helpers/adapters';
-import { manualClock, queueEventIssues, queueEvents } from '../helpers/queue';
+import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
+import { manualClock, queueEventIssues, queueEvents, sourceKey } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helpers/watched';
@@ -69,6 +72,7 @@ async function world(
       root: repo.dir,
       store: on,
       ticketSource,
+      codeHost: adapters.ports.codeHost,
       workspace: adapters.ports.workspace,
       env: repo.env,
       now: clock,
@@ -82,7 +86,7 @@ async function world(
 
 const spawnedKeys = (spawner: FakeSpawner) => spawner.runs.map((run) => run.ticketKey);
 const states = (store: QueueStore) =>
-  store.snapshot().items.map((item) => `${item.source.ticketKey} ${item.state} ${item.attempts}`);
+  store.snapshot().items.map((item) => `${sourceKey(item)} ${item.state} ${item.attempts}`);
 const eventsOf = (runs: string, type: string) =>
   queueEvents(queueDir(runs, 'a'))
     .filter((event) => event.type === type)
@@ -193,7 +197,7 @@ test('a re-check the ticket source fails leaves the item failed with no attempt,
     });
     down = false;
     w.clock.advance(FIVE_MINUTES - 1);
-    expect(w.store.due().map((item) => item.source.ticketKey)).toEqual(['FAKE-2']);
+    expect(w.store.due().map(sourceKey)).toEqual(['FAKE-2']);
     w.clock.advance(1);
     await dispatcher.tick();
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
@@ -251,7 +255,7 @@ test('a run whose process is gone while it reads suspended interrupted or runnin
     expect({
       spawned: spawnedKeys(w.spawner),
       resumes: w.spawner.resumes.map(({ runId, pid }) => [runId, pid]),
-      items: w.store.snapshot().items.map((item) => [item.source.ticketKey, item.state, item.attempts, item.pid]),
+      items: w.store.snapshot().items.map((item) => [sourceKey(item), item.state, item.attempts, item.pid]),
       inFlight: dispatcher.inFlight(),
       resumed: eventsOf(w.runs, 'run:resumed'),
       settled: w.settled,
@@ -474,6 +478,7 @@ test('a dispatcher whose cap was lowered resumes dead runs within it: one at a t
       root: repo.dir,
       store: reopened,
       ticketSource: w.ticketSource,
+      codeHost: w.adapters.ports.codeHost,
       workspace: w.adapters.ports.workspace,
       env: repo.env,
       now: w.clock,
@@ -523,6 +528,150 @@ test('a forced item whose ticket lost its label, or is In Progress, is started w
       items: ['FAKE-1 dispatched 1', 'FAKE-2 dispatched 1', 'FAKE-4 queued 0'],
       dropped: [{ dedupKey: 'ticket:FAKE-3', reason: "it is not designated: it carries no 'sail' label" }],
       skipped: [{ dedupKey: 'ticket:FAKE-4', branch: byHand.branch, heldBy: byHand.holder.runId }],
+    });
+  });
+});
+
+// Pull requests (14.2's D10): the lease on the queued branch first, from the queue alone, then a re-check of the pull
+// request through the CodeHost, and a run pinned to the queued head sha.
+
+const PR_BRANCH = 'sail/FAKE-1-add-a-greeting';
+
+/**
+ * The stub with pull request 1 from `PR_BRANCH`, queued in workflow `r`'s queue at its head sha, and a dispatcher of `r`
+ * whose CodeHost counts its reads and answers each with `change` over the fake's answer, or throws it.
+ */
+async function prWorld(repo: TempRepo) {
+  const sail = writeStub(repo.dir);
+  const headSha = commitBranch(repo, PR_BRANCH);
+  seedPullRequests(sail, repo, [{ number: 1, head: PR_BRANCH, title: 'Add a greeting', ticketKey: 'FAKE-1' }]);
+  const adapters = await fakeAdapters(repo.dir);
+  const runs = join(repo.dir, '.sail-runs');
+  const clock = manualClock(START);
+  const store = openQueue({ runsDir: runs, workflow: 'r', label: 'sail', now: clock });
+  if ('refused' in store) throw new Error(store.refused);
+  const own = adapters.ports.codeHost;
+  store.addPullRequests(await own.listDesignated('sail'));
+  const reads = { count: 0, change: {} as Partial<PullRequestDetails> | Error };
+  const codeHost: CodeHost = {
+    ...own,
+    async getPullRequest(number) {
+      reads.count++;
+      if (reads.change instanceof Error) throw reads.change;
+      return { ...(await own.getPullRequest(number)), ...reads.change };
+    },
+  };
+  const spawner = fakeSpawner(runs);
+  const settled: Settled[] = [];
+  const dispatcher = createDispatcher({
+    workflow: 'r',
+    label: 'sail',
+    maxConcurrentRuns: 1,
+    branchPrefix: 'sail/',
+    runsDir: runs,
+    root: repo.dir,
+    store,
+    ticketSource: adapters.ports.ticketSource,
+    codeHost,
+    workspace: adapters.ports.workspace,
+    env: repo.env,
+    now: clock,
+    spawn: spawner.spawn,
+    resume: spawner.resume,
+    isAlive: spawner.isAlive,
+    onSettled: (each) => settled.push(each),
+  });
+  const items = () => store.snapshot().items.map((item) => `${sourceKey(item)} ${item.state} ${item.attempts}`);
+  const typed = (type: string) =>
+    queueEvents(queueDir(runs, 'r'))
+      .filter((event) => event.type === type)
+      .map(({ seq, ts, workflow, type: _, ...event }) => event);
+  return {
+    headSha,
+    sha7: headSha.slice(0, 7),
+    runs,
+    store,
+    reads,
+    spawner,
+    settled,
+    dispatcher,
+    items,
+    typed,
+    workspace: adapters.ports.workspace,
+  };
+}
+
+test('a pull-request item whose branch a live run leases waits with one queue:skipped_leased, no attempt and no read of the pull request, then starts as #<n> pinned to its head sha once the lease is released', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await prWorld(repo);
+    const { url } = await w.workspace.repository();
+    const ticketRun = { runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N', runDir: join(w.runs, 'by-hand'), pid: process.pid };
+    await w.workspace.lease(url, PR_BRANCH, ticketRun);
+    await w.dispatcher.tick();
+    await w.dispatcher.tick();
+    const waited = {
+      spawned: w.spawner.runs.length,
+      reads: w.reads.count,
+      items: w.items(),
+      skipped: w.typed('queue:skipped_leased'),
+    };
+    await w.workspace.releaseLease(url, PR_BRANCH, ticketRun.runId);
+    await w.dispatcher.tick();
+    expect({
+      waited,
+      runs: w.spawner.runs.map((run) => [run.pr, run.ticketKey, /^pr-1-[0-9A-Z]{26}$/.test(run.runId)]),
+      reads: w.reads.count,
+      items: w.items(),
+    }).toEqual({
+      waited: {
+        spawned: 0,
+        reads: 0,
+        items: [`#1@${w.sha7} queued 0`],
+        skipped: [{ dedupKey: `pr:1@${w.sha7}`, branch: PR_BRANCH, heldBy: ticketRun.runId }],
+      },
+      runs: [[{ number: 1, headSha: w.headSha }, undefined, true]],
+      reads: 1,
+      items: [`#1@${w.sha7} dispatched 1`],
+    });
+  });
+});
+
+test.each<[string, Partial<PullRequestDetails>, (sha7: string) => string]>([
+  ['closed', { state: 'closed' }, () => 'it is closed'],
+  ['merged', { state: 'merged' }, () => 'it is merged'],
+  ['a draft', { draft: true }, () => 'it is a draft'],
+  ['unlabelled', { labels: [] }, () => "it is not designated: it carries no 'sail' label"],
+  ['a fork', { fork: true }, () => 'it comes from a fork'],
+  ['moved to another sha', { headSha: 'b'.repeat(40) }, () => 'its head moved to bbbbbbb: the next poll queues it'],
+])('a pull request that is %s by its dispatch is dropped with the reason, and never run', async (_, change, reason) => {
+  await withTempRepo(async (repo) => {
+    const w = await prWorld(repo);
+    w.reads.change = change;
+    await w.dispatcher.tick();
+    expect({
+      dropped: w.typed('queue:dropped'),
+      items: w.items(),
+      spawned: w.spawner.runs.length,
+    }).toEqual({ dropped: [{ dedupKey: `pr:1@${w.sha7}`, reason: reason(w.sha7) }], items: [], spawned: 0 });
+  });
+});
+
+test('a re-check of a pull request that fails unavailable fails its item with no attempt counted, and starts nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await prWorld(repo);
+    w.reads.change = new PortError('codeHost', 'getPullRequest', 'unavailable', 'the host is down');
+    await w.dispatcher.tick();
+    const [item] = w.store.snapshot().items;
+    expect({
+      items: w.items(),
+      reason: item?.reason,
+      spawned: w.spawner.runs.length,
+      settled: w.settled.map((each) => each.pr),
+    }).toEqual({
+      items: [`#1@${w.sha7} failed 0`],
+      reason: 'codeHost.getPullRequest: the host is down (unavailable)',
+      spawned: 0,
+      settled: [{ number: 1, headSha: w.headSha }],
     });
   });
 });

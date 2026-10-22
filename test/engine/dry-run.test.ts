@@ -68,7 +68,7 @@ test('dryRun on a designated, unstarted ticket answers with the header a start t
     expect('refused' in result ? result.refused : 'answered').toBe('answered');
     if ('refused' in result) return;
     const { header } = result;
-    expect([result.branch, result.ticket.title, result.ticket.state]).toEqual([
+    expect([result.branch, result.ticket?.title, result.ticket?.state]).toEqual([
       BRANCH,
       'Add a --shout flag to the greet command',
       { type: 'unstarted', name: 'Todo' },

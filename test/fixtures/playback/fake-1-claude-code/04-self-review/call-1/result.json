@@ -1,0 +1,84 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "self-review",
+  "call": 1,
+  "key": "self-review#1",
+  "kind": "agent",
+  "outcome": "done",
+  "output": {
+    "summary": "The `--shout` change meets the spec and nothing blocks the pull request. `greet()` has an optional `shout` option that defaults to off and upper-cases the whole greeting. The CLI accepts `--shout` before or after the name, and the help text lists it. Every test the spec asks for is present, and the help test was updated. There are two low findings, both small departures from the spec's wording: the name is the first argument that isn't `--shout` rather than the first non-flag, and `--help` now works in any position, which changes existing behaviour. There are also two nits: a unit test that repeats an existing one, and an empty, untracked `test/_tmp-sha.test.ts`. I could not run `bun test` because the command is not permitted in this step, so the tests were checked by reading the code, not by running it. The verdict is approve, preferably with the first finding fixed and the temp file removed. The review is in review.md.",
+    "findings": [
+      {
+        "severity": "low",
+        "file": "src/cli.ts",
+        "title": "The name is the first argument that isn't `--shout`, not the first non-flag argument",
+        "detail": "Task 2 says to take the first remaining argument that isn't a flag as the name. The code uses `args.find((arg) => arg !== '--shout')`, so an unknown flag becomes the name: `greet --loud Ada` prints `Hello, --loud!`. Filtering with `!arg.startsWith('-')` would match the spec. No test covers this case."
+      },
+      {
+        "severity": "low",
+        "file": "src/cli.ts",
+        "title": "`--help` now works anywhere in the arguments, which changes existing behaviour",
+        "detail": "Before, `greet Ada --help` printed `Hello, Ada!`. Now it prints the usage line. The spec doesn't ask for this and says existing behaviour should stay the same. It is arguably an improvement, but it should be noted in the PR or reverted to an `args[0] === '--help'` check."
+      },
+      {
+        "severity": "nit",
+        "file": "test/greet.test.ts",
+        "title": "The default-case test repeats an existing test",
+        "detail": "`defaults to not shouting` is the same check as the existing `greets a name` test. The spec asked for it, but it adds no coverage. `greet('Ada', { shout: false })` would test the explicit-off path instead."
+      },
+      {
+        "severity": "nit",
+        "file": "test/_tmp-sha.test.ts",
+        "title": "Stray empty, untracked temp file in the workspace",
+        "detail": "An empty, untracked `test/_tmp-sha.test.ts` is in the working tree. It should be deleted so it isn't committed by accident or picked up by the test runner."
+      }
+    ]
+  },
+  "files": {
+    "review.md": {
+      "path": "04-self-review/call-1/review.md",
+      "bytes": 2626,
+      "sha256": "34e2cc07e080ce2ef1c9bb5ba99fdd7b63f6f9c0f2269859eabccf0a11ef58f5"
+    }
+  },
+  "consumed": {
+    "spec": "01-spec/call-1/spec.md"
+  },
+  "startedAt": "2026-09-25T09:00:53.700Z",
+  "finishedAt": "2026-09-25T09:00:56.900Z",
+  "durationMs": 3200,
+  "try": 1,
+  "validationTry": 1,
+  "prompt": {
+    "path": "04-self-review/call-1/prompt.md",
+    "untrusted": 0,
+    "fragments": [
+      {
+        "name": "untrusted-input",
+        "origin": "builtin"
+      },
+      {
+        "name": "finish",
+        "origin": "builtin"
+      }
+    ],
+    "conventions": []
+  },
+  "harness": {
+    "adapter": "fake",
+    "model": "opus",
+    "sessionId": "25c75661-e5ec-46dd-9135-82b63c2981be",
+    "turns": 8,
+    "toolCalls": 7,
+    "denials": 2
+  },
+  "usage": {
+    "inputTokens": 1154,
+    "cacheReadTokens": 44956,
+    "cacheWriteTokens": 8233,
+    "outputTokens": 3000,
+    "costUsd": 0.13585919999999999
+  },
+  "validationFailed": false
+}

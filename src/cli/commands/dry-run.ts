@@ -69,11 +69,18 @@ function intakeLines(intake: IntakeEntry): string[] {
   return [`intake ${intake.name}  ${intake.origin}`, ...entryLines(intake, '  ')];
 }
 
-/** The roster a start would freeze, as the dry run prints it. */
-export function rosterText(header: RunHeader, ticket: { title: string; state: { name: string } }, branch: string) {
+/** The roster a start would freeze, as the dry run prints it: from a ticket, or from a pull request at its head sha. */
+export function rosterText(
+  header: RunHeader,
+  from: { title: string; state: { name: string } } | { title: string; state: string },
+  branch: string,
+) {
   const { workflow, source, adapters, budget } = header;
-  const lines = [`${workflow.name}@${workflow.version} on ${source.ticketKey}: ${ticket.title} (${ticket.state.name})`];
+  const on = source.kind === 'ticket' ? source.ticketKey : `#${source.number}`;
+  const state = typeof from.state === 'string' ? from.state : from.state.name;
+  const lines = [`${workflow.name}@${workflow.version} on ${on}: ${from.title} (${state})`];
   lines.push(field('  ', 'branch', branch));
+  if (source.kind === 'pr') lines.push(field('  ', 'head', source.headSha));
   const used = Object.entries(adapters).map(([port, entry]) => `${port} ${entry.use} (${entry.origin})`);
   lines.push(field('  ', 'adapters', used.join(', ')));
   if (budget !== undefined) lines.push(field('  ', 'budget', `run ${budgetOf(budget)}`));
@@ -110,6 +117,8 @@ export async function dryRunTicket(
     io.stderr(`${command}: ${result.refused}\n`);
     return EXIT_REFUSED;
   }
-  io.stdout(rosterText(result.header, result.ticket, result.branch));
+  const from = result.ticket ?? result.pullRequest;
+  if (from === undefined) throw new Error('a dry run found neither a ticket nor a pull request');
+  io.stdout(rosterText(result.header, from, result.branch));
   return EXIT_OK;
 }

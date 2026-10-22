@@ -48,6 +48,7 @@ import type { PortAdapters } from '../ports/adapter';
 import { PortError } from '../ports/errors';
 import type { Repository, Workspace } from '../ports/types';
 import type { RunRef, WorkspacePort } from '../ports/workspace';
+import type { SourceKind } from '../sdk/intake';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { branchFor, DEFAULT_BRANCH_PREFIX } from './branch';
 import { isPlainName } from './call-dir';
@@ -56,12 +57,14 @@ import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
 import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
+import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
 import { modelProblems } from './roster';
 import { createRunDir, type RunStatus, readStatus, removeRunDir, runsDir, type Source, writeStatus } from './run-dir';
 import {
   type AdapterEntry,
   assertRunHeader,
   buildRunHeader,
+  type ClaimRecord,
   RUN_HEADER_FILE,
   type RunHeader,
   readRunHeader,
@@ -149,6 +152,11 @@ export interface OpenRunOptions {
   adapters: ResolvedAdapters;
   /** A start the watcher dispatched: the run takes the id it minted, and its source is recorded `via: 'watch'`. */
   dispatch?: { runId: string };
+  /**
+   * The head sha a pull request must still be at: the one the watcher queued it at. A pull request whose head has moved
+   * since is refused. Only a pull request takes it.
+   */
+  headSha?: string;
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */
@@ -182,12 +190,16 @@ export function intakeNameTaken(loaded: LoadedWorkflow, sailDir: string): string
   return `${file}: a stage can't be named '${INTAKE_STAGE}': its first call's key would be the intake's, ${INTAKE_KEY}`;
 }
 
-/** Why the workflow's intake can't take the ticket `ref`, as a refusal: it accepts no ticket, or isn't a built-in. */
-function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): string | undefined {
+/**
+ * Why the workflow's intake can't take `ref`, a source of `kind`, as a refusal: it accepts no source of that kind, or
+ * isn't a built-in.
+ */
+function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string, kind: SourceKind): string | undefined {
   const { name, accepts } = loaded.intake.definition;
   const file = relative(dirname(sailDir), join(loaded.dir, 'workflow.ts'));
-  if (!accepts.includes('ticket')) {
-    return `${file}: its intake '${name}' accepts ${accepts.join(', ') || 'nothing'}, and ${ref} is a ticket`;
+  if (!accepts.includes(kind)) {
+    const is = kind === 'ticket' ? 'a ticket' : 'a pull request';
+    return `${file}: its intake '${name}' accepts ${accepts.join(', ') || 'nothing'}, and ${ref} is ${is}`;
   }
   if (intakeBody(loaded.intake) === undefined) {
     return `${file}: its intake '${name}' is the repository's own, and only a built-in intake runs`;
@@ -195,7 +207,10 @@ function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string): st
   return undefined;
 }
 
-/** Why a dispatch can't take `runId`: it isn't an id of a run of `ticketKey`, or that run's directory exists. */
+/**
+ * Why a dispatch can't take `runId`: it isn't an id of a run of `ticketKey`, `pr-<number>` for a pull request, or that
+ * run's directory exists.
+ */
 function dispatchProblem(sailDir: string, ticketKey: string, runId: string): string | undefined {
   if (!isRunIdOf(ticketKey, runId)) {
     return `--dispatch takes the id of a new run of ${ticketKey}, ${ticketKey}-<26 Crockford characters>: '${runId}' is not one`;
@@ -343,8 +358,10 @@ export interface Preflight {
   sailDir: string;
   config: ProjectConfig;
   loaded: LoadedWorkflow;
-  /** The ticket as fetched for the checks, with the checks `--force` overrode. */
-  resolved: ResolvedSource;
+  /** The ticket as fetched for the checks, with the checks `--force` overrode: a start from a ticket's. */
+  resolved?: ResolvedSource;
+  /** The pull request as fetched for the checks, with the checks `--force` overrode: a start from a pull request's. */
+  pullRequest?: ResolvedPullRequest;
   source: Source;
   runId: string;
   branch: string;
@@ -370,7 +387,14 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   if (models.length > 0) return { refused: models.join('\n') };
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
-  const unfit = intakeProblem(loaded, found.dir, ticket);
+  const { ticketSource, codeHost } = options.adapters.ports;
+  // Both adapters read the ref (D6). One neither reads is taken as a ticket's for an intake that takes no pull request,
+  // so the ticket source's own refusal names it, as before pull requests were sources.
+  const ref = resolveRef(ticket, ticketSource, codeHost);
+  const neither = 'refused' in ref && ticketSource.parseKey(ticket) === undefined;
+  if ('refused' in ref && !(neither && !loaded.intake.definition.accepts.includes('pr'))) return ref;
+  const kind: SourceKind = 'refused' in ref ? 'ticket' : ref.kind;
+  const unfit = intakeProblem(loaded, found.dir, ticket, kind);
   if (unfit !== undefined) return { refused: unfit };
   const { until } = options;
   const stages = loaded.stages.map((stage) => stage.definition.name);
@@ -380,35 +404,67 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
       refused: `--until names '${until}', which is no stage of workflow '${loaded.name}': its stages are ${known}`,
     };
   }
-  const { ticketSource } = options.adapters.ports;
   const label = watchLabel(loaded.workflow, config);
+  const branchPrefix = config.branchPrefix ?? DEFAULT_BRANCH_PREFIX;
+  const via = dispatch === undefined ? 'cli' : 'watch';
+  const headerOf = (runId: string, source: Source, claimed?: ClaimRecord): RunHeader => {
+    const header = buildRunHeader({
+      runId,
+      source,
+      ...(claimed === undefined ? {} : { claim: claimed }),
+      sailDir: found.dir,
+      loaded,
+      config,
+      adapters: options.adapters.entries,
+      now,
+    });
+    assertRunHeader(header);
+    return header;
+  };
+  const runIdOf = (key: string): string | { refused: string } => {
+    if (dispatch === undefined) return newRunId(key, now.getTime(), options.random);
+    const refused = dispatchProblem(found.dir, key, dispatch.runId);
+    return refused === undefined ? dispatch.runId : { refused };
+  };
+
+  if (!('refused' in ref) && ref.kind === 'pr') {
+    let repository: Repository;
+    try {
+      repository = await options.adapters.ports.workspace.repository();
+    } catch (error) {
+      return { refused: `the workspace could not be read: ${portRefusal(error)}` };
+    }
+    const pullRequest = await resolvePullRequest({
+      number: ref.number,
+      codeHost,
+      label,
+      branchPrefix,
+      defaultBranch: repository.defaultBranch,
+      force,
+      ...(options.headSha === undefined ? {} : { headSha: options.headSha }),
+    });
+    if ('refused' in pullRequest) return pullRequest;
+    const runId = runIdOf(`pr-${ref.number}`);
+    if (typeof runId !== 'string') return runId;
+    const { pr } = pullRequest;
+    const source: Source = { kind: 'pr', number: pr.number, headSha: pr.headSha, via, forced: pullRequest.forced };
+    // A pull-request run moves no ticket, so its header has no claim.
+    const header = headerOf(runId, source);
+    return { sailDir: found.dir, config, loaded, pullRequest, source, runId, branch: pr.head, header };
+  }
+
+  if (options.headSha !== undefined) {
+    return { refused: `--head-sha pins a pull request to its head, and ${ticket} is a ticket` };
+  }
   const resolved = await resolveSource({ ref: ticket, ticketSource, label, force });
   if ('refused' in resolved) return resolved;
   const { ticketKey } = resolved;
-  if (dispatch !== undefined) {
-    const refused = dispatchProblem(found.dir, ticketKey, dispatch.runId);
-    if (refused !== undefined) return { refused };
-  }
-  const runId = dispatch?.runId ?? newRunId(ticketKey, now.getTime(), options.random);
-  const branch = branchFor(config.branchPrefix ?? DEFAULT_BRANCH_PREFIX, ticketKey, resolved.ticket.title);
+  const runId = runIdOf(ticketKey);
+  if (typeof runId !== 'string') return runId;
+  const branch = branchFor(branchPrefix, ticketKey, resolved.ticket.title);
   // Built and checked before anything is written, with the state as fetched standing in for the claim's answer.
-  const source: Source = {
-    kind: 'ticket',
-    ticketKey,
-    via: dispatch === undefined ? 'cli' : 'watch',
-    forced: resolved.forced,
-  };
-  const header = buildRunHeader({
-    runId,
-    source,
-    claim: { claimed: false, state: resolved.ticket.state },
-    sailDir: found.dir,
-    loaded,
-    config,
-    adapters: options.adapters.entries,
-    now,
-  });
-  assertRunHeader(header);
+  const source: Source = { kind: 'ticket', ticketKey, via, forced: resolved.forced };
+  const header = headerOf(runId, source, { claimed: false, state: resolved.ticket.state });
   return { sailDir: found.dir, config, loaded, resolved, source, runId, branch, header };
 }
 
@@ -429,13 +485,16 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
   const preflight = await preflightRun(options);
   if ('refused' in preflight) return preflight;
-  const { config, loaded, resolved, source, runId, branch, header: unclaimed } = preflight;
+  const { config, loaded, source, runId, branch, header: unclaimed } = preflight;
   const found = { dir: preflight.sailDir };
-  const { ticketKey } = resolved;
   const { force = false, until } = options;
   const { ticketSource } = options.adapters.ports;
   // The last moment nothing is written. Everything up to here only read, so one check covers an abort at any of it.
-  if (options.signal?.aborted) return { refused: 'stopped before the ticket was claimed' };
+  if (options.signal?.aborted) {
+    return {
+      refused: source.kind === 'pr' ? 'stopped before the run was opened' : 'stopped before the ticket was claimed',
+    };
+  }
   const root = dirname(found.dir);
   const run: RunRef = { runId, runDir: join(runsDir(found.dir), runId) };
   const { relay } = options.adapters;
@@ -448,18 +507,20 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       sailDir: found.dir,
       branch,
       signal: options.signal,
-      claim: () => claimSource({ ticketKey, runId, ticketSource, force }),
+      // A pull-request run starts at the head sha it was resolved at, and claims nothing (D4, D5).
+      ...(source.kind === 'pr'
+        ? { base: source.headSha }
+        : { claim: () => claimSource({ ticketKey: source.ticketKey, runId, ticketSource, force }) }),
     });
   });
   if ('refused' in opened) return opened;
   const { made } = opened;
   // Given a claim, startWorkspace() answers with what it did.
-  const took = opened.claimed as ClaimedSource;
-  const forced = [...resolved.forced, ...took.forced];
+  const took = opened.claimed;
   const header: RunHeader = {
     ...unclaimed,
-    source: { ...source, forced },
-    claim: took.claim,
+    source: { ...source, forced: [...source.forced, ...(took?.forced ?? [])] },
+    ...(took === undefined ? {} : { claim: took.claim }),
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
   };
   // The ticket has moved, so whatever fails from here says where it stands. It is still thrown on, not refused: these
@@ -475,6 +536,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     // No run is behind the claim, so nothing may hold its branch: undone as a refusal would, as far as it still can.
     await undoOpened(options.adapters.ports.workspace, run, made.repository.url, branch);
     const why = error instanceof Error ? error.message : String(error);
+    if (took === undefined) throw new Error(`run ${runId}'s directory was not written: ${why}`, { cause: error });
     throw new Error(
       `the ticket is now ${took.claim.state.name} and its comment names run ${runId}, but the run directory was not written: ${why}. --force runs the ticket in a new run`,
       { cause: error },
@@ -491,7 +553,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     loaded,
     workspace: { path: made.workspace.path, branch, baseSha: made.workspace.baseSha, remote: made.repository.url },
     started,
-    claimed: took.events,
+    claimed: took?.events ?? [],
     ...(until === undefined ? {} : { until }),
     firstSeq: 1,
   };

@@ -9,14 +9,29 @@
     "runId": { "type": "string" },
     "workflow": { "type": "string" },
     "source": {
+      "description": "a ticket by its key, or a pull request by its number at its head sha",
       "type": "object",
-      "properties": {
-        "kind": { "const": "ticket" },
-        "ticketKey": { "type": "string" },
-        "via": { "enum": ["cli", "watch"] }
+      "required": ["kind"],
+      "if": { "properties": { "kind": { "const": "pr" } }, "required": ["kind"] },
+      "then": {
+        "properties": {
+          "kind": { "const": "pr" },
+          "number": { "type": "integer", "minimum": 1 },
+          "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "via": { "enum": ["cli", "watch"] }
+        },
+        "required": ["kind", "number", "headSha", "via"],
+        "additionalProperties": false
       },
-      "required": ["kind", "ticketKey", "via"],
-      "additionalProperties": false
+      "else": {
+        "properties": {
+          "kind": { "const": "ticket" },
+          "ticketKey": { "type": "string" },
+          "via": { "enum": ["cli", "watch"] }
+        },
+        "required": ["kind", "ticketKey", "via"],
+        "additionalProperties": false
+      }
     },
     "ticket": {
       "description": "the fetched ticket; absent when intake did not get that far",

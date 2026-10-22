@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="6" failures="1" time="0.009">
+  <testsuite name="fixture" tests="6" failures="1" time="0.009">
+    <testcase name="greet › greets by name" classname="test/greet.test.ts" time="0.001"/>
+    <testcase name="greet › defaults to world" classname="test/greet.test.ts" time="0.001"/>
+    <testcase name="greet › trims whitespace" classname="test/greet.test.ts" time="0.001"/>
+    <testcase name="cli › prints help" classname="test/cli.test.ts" time="0.001"/>
+    <testcase name="greet --shout › uppercases the name" classname="test/greet.test.ts" time="0.002">
+      <failure message="Expected &quot;HELLO, ADA!&quot; but received &quot;HELLO, Ada!&quot;"/>
+    </testcase>
+    <testcase name="greet --shout › keeps the exclamation mark" classname="test/greet.test.ts" time="0.001"/>
+  </testsuite>
+</testsuites>

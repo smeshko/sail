@@ -1,13 +1,17 @@
 // createGitHubWorld(): a scripted GitHub for the github CodeHost's tests. One repository, `owner/repo`, whose branch
 // heads are read from a bare git repository, and its pull requests, answering the REST routes the adapter calls as
 // GitHub's published docs describe them (API version 2022-11-28), either as an injected `fetch` or served on
-// 127.0.0.1 for the CLI. Any other route answers 404, so an unplanned call shows up. A missing or wrong bearer token
+// 127.0.0.1 for the CLI. The pull requests and a pull request's comments are paged by `per_page` and `page`, as GitHub
+// pages them, 30 to a page unless asked. A fork's head names another repository, or none once the fork is deleted. Any
+// other route answers 404, so an unplanned call shows up. A missing or wrong bearer token
 // answers 401 `Bad credentials`. Each request is recorded with whether its token matched: the token is never kept.
 
 export interface WorldPull {
   readonly number: number;
   title: string;
   body: string;
+  /** Answered as GitHub's `null`: a pull request opened with no description. */
+  readonly nullBody: boolean;
   readonly head: string;
   readonly base: string;
   headSha: string;
@@ -19,7 +23,11 @@ export interface WorldPull {
   /** False when GitHub won't merge it, as for a conflict or a protected base: its merge answers 405. */
   mergeable: boolean;
   labels: string[];
-  comments: { id: number; body: string }[];
+  comments: { id: number; body: string; user: string; createdAt: string }[];
+  /** Its author's login. */
+  readonly user: string;
+  /** Whether its head is another repository's, or a deleted fork's, which GitHub gives no repository. */
+  readonly fork: boolean | 'deleted';
 }
 
 /** A check run on a head sha, as GitHub's check-runs endpoint lists it. */
@@ -43,7 +51,7 @@ export interface WorldSeedPull {
   readonly head: string;
   readonly base?: string;
   readonly title?: string;
-  readonly body?: string;
+  readonly body?: string | null;
   readonly draft?: boolean;
   readonly state?: 'open' | 'closed';
   readonly mergedAt?: string;
@@ -54,6 +62,14 @@ export interface WorldSeedPull {
   readonly checkRuns?: readonly WorldCheckRun[];
   /** The commit statuses on its head sha. */
   readonly statuses?: readonly WorldStatus[];
+  /** Its author's login: `sail-bot` unless given. */
+  readonly user?: string;
+  /** A head in another repository, `true`, or in a fork since deleted. Its head sha is then the seed's, or zeros. */
+  readonly fork?: boolean | 'deleted';
+  /** Its conversation comments, oldest first. */
+  readonly comments?: readonly { readonly user: string; readonly body: string }[];
+  /** Its head sha, when its head is no branch of the bare repository. */
+  readonly headSha?: string;
 }
 
 export interface GitHubWorldSeed {
@@ -153,20 +169,29 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     return shown.exitCode === 0 ? shown.stdout.toString().trim() : undefined;
   };
 
+  let nextComment = 1000;
+  /** When the world's comments were made: one minute apart, in the order they were made. */
+  const commentedAt = () => new Date(Date.UTC(2026, 9, 1) + (nextComment - 1000) * 60_000).toISOString();
   const pullRequests: WorldPull[] = (seed.pullRequests ?? []).map((pr) => ({
     number: pr.number,
     title: pr.title ?? `Pull request ${pr.number}`,
     body: pr.body ?? '',
+    nullBody: pr.body === null,
     head: pr.head,
     base: pr.base ?? seed.defaultBranch,
-    headSha: headOf(pr.head) ?? '0'.repeat(40),
+    headSha: pr.headSha ?? (pr.fork ? undefined : headOf(pr.head)) ?? '0'.repeat(40),
     draft: pr.draft ?? false,
     state: pr.state ?? 'open',
     mergedAt: pr.mergedAt ?? null,
     mergeCommitSha: null,
     mergeable: pr.mergeable !== false,
     labels: [...(pr.labels ?? [])],
-    comments: [],
+    comments: (pr.comments ?? []).map(({ user, body }) => {
+      const createdAt = commentedAt();
+      return { id: nextComment++, body, user, createdAt };
+    }),
+    user: pr.user ?? 'sail-bot',
+    fork: pr.fork ?? false,
   }));
   /** The check runs and statuses by head sha, from the seed. */
   const checksBySha = new Map<string, { checkRuns: readonly WorldCheckRun[]; statuses: readonly WorldStatus[] }>();
@@ -175,24 +200,34 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     if (headSha === undefined || (pr.checkRuns === undefined && pr.statuses === undefined)) continue;
     checksBySha.set(headSha, { checkRuns: pr.checkRuns ?? [], statuses: pr.statuses ?? [] });
   }
-  let nextComment = 1000;
 
   const url = (pr: WorldPull) => `https://github.com/${owner}/${repo}/pull/${pr.number}`;
-  const node = (pr: WorldPull) => ({
+  const node = (pr: WorldPull, baseOf: (branch: string) => string | undefined = headOf) => ({
     number: pr.number,
     html_url: url(pr),
     title: pr.title,
-    body: pr.body,
+    body: pr.nullBody ? null : pr.body,
     state: pr.state,
     merged_at: pr.mergedAt,
     merged: pr.mergedAt !== null,
     merge_commit_sha: pr.mergeCommitSha,
     draft: pr.draft,
-    head: { ref: pr.head, sha: pr.headSha, label: `${owner}:${pr.head}` },
-    base: { ref: pr.base, sha: headOf(pr.base) ?? '' },
+    head: {
+      ref: pr.head,
+      sha: pr.headSha,
+      label: `${pr.fork === true ? 'forker' : owner}:${pr.head}`,
+      repo: pr.fork === 'deleted' ? null : { full_name: pr.fork ? `forker/${repo}` : `${owner}/${repo}` },
+    },
+    base: { ref: pr.base, sha: baseOf(pr.base) ?? '' },
     labels: pr.labels.map((name, i) => ({ id: i + 1, name })),
-    user: { login: 'sail-bot' },
+    user: { login: pr.user },
   });
+  /** The `page`th page of `items`, `per_page` to a page, as the query asks: 30 to a page, from page 1, unless it says. */
+  const paged = <T>(items: readonly T[], query: URLSearchParams): T[] => {
+    const size = Number(query.get('per_page') ?? 30);
+    const page = Number(query.get('page') ?? 1);
+    return items.slice((page - 1) * size, page * size);
+  };
   const find = (number: number) => pullRequests.find((pr) => pr.number === number);
   const isIssue = (number: number) => (seed.issues ?? []).includes(number);
   const nextNumber = () => Math.max(0, ...pullRequests.map((pr) => pr.number), ...(seed.issues ?? [])) + 1;
@@ -211,7 +246,16 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
           (head === null || `${owner}:${pr.head}` === head) &&
           (base === null || pr.base === base),
       );
-      return json(200, listed.map(node));
+      // One git lookup per base branch for the page, not one per pull request: a page holds up to 100.
+      const bases = new Map<string, string | undefined>();
+      const baseOf = (branch: string) => {
+        if (!bases.has(branch)) bases.set(branch, headOf(branch));
+        return bases.get(branch);
+      };
+      return json(
+        200,
+        paged(listed, query).map((pr) => node(pr, baseOf)),
+      );
     }
     if (method === 'POST' && path === '/pulls') {
       const asked = body as { title?: string; head?: string; base?: string; body?: string; draft?: boolean };
@@ -249,6 +293,9 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
         mergeable: true,
         labels: [],
         comments: [],
+        user: 'sail-bot',
+        fork: false,
+        nullBody: false,
       };
       pullRequests.push(pr);
       return json(201, node(pr));
@@ -274,11 +321,29 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
       );
     }
     const comments = /^\/issues\/(\d+)\/comments$/.exec(path);
+    if (method === 'GET' && comments !== null) {
+      const number = Number(comments[1]);
+      const pr = find(number);
+      if (pr === undefined && !isIssue(number)) return notFound();
+      const listed = (pr?.comments ?? []).map((comment) => ({
+        id: comment.id,
+        user: { login: comment.user },
+        body: comment.body,
+        created_at: comment.createdAt,
+      }));
+      return json(200, paged(listed, query));
+    }
     if (method === 'POST' && comments !== null) {
       const number = Number(comments[1]);
       const pr = find(number);
       if (pr === undefined && !isIssue(number)) return notFound();
-      const comment = { id: nextComment++, body: String((body as { body?: string }).body) };
+      const comment = {
+        id: nextComment,
+        body: String((body as { body?: string }).body),
+        user: 'sail-bot',
+        createdAt: commentedAt(),
+      };
+      nextComment++;
       pr?.comments.push(comment);
       return json(201, {
         id: comment.id,

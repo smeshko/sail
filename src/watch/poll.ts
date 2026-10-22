@@ -1,30 +1,38 @@
-// Polling: each watched workflow's designated tickets, on a timer of its own, into its queue.
+// Polling: each watched workflow's designated tickets, or designated pull requests, on a timer of its own, into its
+// queue. A workflow polls the one kind its intake accepts: tickets through the TicketSource, pull requests through the
+// CodeHost, one queue item per pull request and head sha (14.2's D9).
 //
 // - A provider that refuses the credentials (401 or 403) pauses that workflow's timed polls instead of retrying them:
 //   retrying would only hammer the provider. A `poll` command or a watcher restart tries again, and a poll that succeeds
 //   clears the pause (DECISIONS D8). Any other failure backs off, never more often than `every`.
 // - The answer is checked and filtered again: a repository's own adapter is untrusted code, so one that over-answers
-//   still can't queue a started or undesignated ticket (D10).
+//   still can't queue a started or undesignated ticket (D10), or a draft, closed or unlabelled pull request.
 // - One poll at a time per workflow: a poll asked for while one is in flight joins it (D11).
 // - A poll that throws, as a queue write on a full disk does, is retried at the backoff all the same. `pollNow` rejects
 //   with it, and a poll nobody awaits (a timer's, a command's, the start's) hands it to `onError`, never to an unhandled
 //   rejection, which would end the watcher.
-// - Only tickets are polled so far. Epic 14.2 adds the CodeHost poll for `pr`.
 import { z } from 'zod';
 import type { ProjectConfig } from '../engine/config';
 import { loadWorkflow } from '../engine/load-workflow';
 import { runsDir } from '../engine/run-dir';
-import { parseEvery, watchLabel, watchProblem } from '../engine/watchable';
+import { parseEvery, pollKind, watchLabel, watchProblem } from '../engine/watchable';
 import type { QueueEvent } from '../events/types';
+import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
-import { Ticket } from '../ports/types';
+import { PullRequest, Ticket } from '../ports/types';
+import type { SourceKind } from '../sdk/intake';
 import type { Command } from './inbox';
 import { DEFAULT_QUEUE_POLICY, openQueue, type QueuePolicy, type QueueStore } from './queue-store';
 
-/** What a watched workflow declares: the label it polls, how often, and how many of its runs may run at once. */
+/**
+ * What a watched workflow declares: the kind of source it polls, the label it polls for, how often, and how many of its
+ * runs may run at once.
+ */
 export interface WatchDeclaration {
   workflow: string;
+  /** Tickets through the TicketSource, or pull requests through the CodeHost: the one its intake accepts. */
+  kind: SourceKind;
   label: string;
   everyMs: number;
   maxConcurrentRuns: number;
@@ -33,6 +41,7 @@ export interface WatchDeclaration {
 /** One watched workflow, ready to poll. */
 export interface WatchTarget extends WatchDeclaration {
   ticketSource: TicketSource;
+  codeHost: CodeHost;
   store: QueueStore;
 }
 
@@ -56,11 +65,13 @@ export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclara
   if (problem !== undefined || everyMs === undefined || maxConcurrentRuns === undefined) {
     return { refused: `workflow '${name}' ${problem}` };
   }
-  return { workflow: name, label: watchLabel(workflow, options.config), everyMs, maxConcurrentRuns };
+  const kind = pollKind(workflow);
+  return { workflow: name, kind, label: watchLabel(workflow, options.config), everyMs, maxConcurrentRuns };
 }
 
 export interface OpenWatchTargetOptions extends ReadWatchOptions {
   ticketSource: TicketSource;
+  codeHost: CodeHost;
   now: () => Date;
   policy?: QueuePolicy;
   /** Hears each event the workflow's queue emits. */
@@ -81,7 +92,7 @@ export async function openWatchTarget(options: OpenWatchTargetOptions): Promise<
     ...(onEvent ? { onEvent } : {}),
   });
   if ('refused' in store) return store;
-  return { ...watch, ticketSource: options.ticketSource, store };
+  return { ...watch, ticketSource: options.ticketSource, codeHost: options.codeHost, store };
 }
 
 /** How a poll went. `dropped`: its poller was dropped while it waited for the provider, so its answer went unrecorded. */
@@ -110,6 +121,38 @@ async function listDesignated(target: WatchTarget): Promise<Ticket[]> {
   throw new PortError('ticketSource', 'listDesignated', 'invalid', `the answer is not a list of tickets: ${where}`);
 }
 
+/** The pull requests `listDesignated` answered, checked: an answer that isn't a list of them is a PortError. */
+async function listPullRequests(target: WatchTarget): Promise<PullRequest[]> {
+  const answer: unknown = await target.codeHost.listDesignated(target.label);
+  const parsed = z.array(PullRequest).safeParse(answer);
+  if (parsed.success) return parsed.data;
+  const [issue] = parsed.error.issues;
+  const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+  throw new PortError('codeHost', 'listDesignated', 'invalid', `the answer is not a list of pull requests: ${where}`);
+}
+
+/**
+ * Lists `target`'s designated sources, filters them again, and queues them: how many were found, and how many queued.
+ * A designated pull request is open, no draft, and carries the label.
+ */
+async function pollSources(target: WatchTarget): Promise<() => { found: number; added: number }> {
+  if (target.kind === 'pr') {
+    const answered = await listPullRequests(target);
+    return () => {
+      const prs = answered.filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(target.label));
+      return { found: prs.length, added: target.store.addPullRequests(prs) };
+    };
+  }
+  const answered = await listDesignated(target);
+  return () => {
+    const { ticketSource, label } = target;
+    const tickets = answered.filter(
+      (ticket) => ticketSource.isDesignated(ticket, label) && ticket.state.type === 'unstarted',
+    );
+    return { found: tickets.length, added: target.store.add(tickets) };
+  };
+}
+
 /**
  * Polls `target` once into its queue, and says how it went. When `dropped` says so once the provider has answered,
  * nothing is recorded: the queue store is no longer this poll's to write.
@@ -121,15 +164,16 @@ export async function pollOnce(
   dropped?: () => boolean,
 ): Promise<PollOutcome> {
   const started = now().getTime();
-  let answered: Ticket[];
+  let queue: () => { found: number; added: number };
   try {
-    answered = await listDesignated(target);
+    queue = await pollSources(target);
   } catch (error) {
     if (dropped?.()) return 'dropped';
     const code = error instanceof PortError ? error.code : undefined;
+    const port = target.kind === 'pr' ? ('codeHost' as const) : ('ticketSource' as const);
     const failure = {
-      port: 'ticketSource' as const,
-      adapter: target.ticketSource.name,
+      port,
+      adapter: target.kind === 'pr' ? target.codeHost.name : target.ticketSource.name,
       ...(code === undefined ? {} : { code }),
       message: messageOf(error),
     };
@@ -142,14 +186,10 @@ export async function pollOnce(
     return 'failed';
   }
   if (dropped?.()) return 'dropped';
-  const { ticketSource, label } = target;
-  const tickets = answered.filter(
-    (ticket) => ticketSource.isDesignated(ticket, label) && ticket.state.type === 'unstarted',
-  );
-  const added = target.store.add(tickets);
+  const { found, added } = queue();
   target.store.polled({
-    kind: 'ticket',
-    found: tickets.length,
+    kind: target.kind,
+    found,
     added,
     durationMs: Math.max(0, now().getTime() - started),
   });

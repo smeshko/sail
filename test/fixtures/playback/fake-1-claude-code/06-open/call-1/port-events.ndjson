@@ -1,0 +1,4 @@
+{"type":"codehost:pushed","branch":"sail/FAKE-1-add-a-shout-flag-to-the-greet-command","headSha":"4203211311dad98c507528d05a25fff53b821b31"}
+{"type":"codehost:pr_opened","number":5,"url":"fake://codehost/fixture/pull/5","draft":false,"base":"main","head":"sail/FAKE-1-add-a-shout-flag-to-the-greet-command","ticketKey":"FAKE-1"}
+{"type":"codehost:labelled","number":5,"label":"sail","change":"added"}
+{"type":"ticket:commented","ticketKey":"FAKE-1","body":"sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N opened fake://codehost/fixture/pull/5"}

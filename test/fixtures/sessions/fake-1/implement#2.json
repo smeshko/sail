@@ -1,0 +1,122 @@
+{
+  "recording": 1,
+  "key": "implement#2",
+  "tries": [
+    {
+      "try": 1,
+      "request": {
+        "model": "claude-sonnet-5",
+        "budget": {
+          "maxTurns": 60,
+          "maxUsd": 5,
+          "maxMinutes": 20
+        },
+        "promptSha256": "adcf352adb4b56cd91f66cae64156a06b44cb48ec69e7057242e4a940a972d63"
+      },
+      "events": [
+        {
+          "type": "harness:session_start",
+          "adapter": "fake",
+          "sessionId": "fake-session-implement-2",
+          "model": "claude-sonnet-5"
+        },
+        {
+          "type": "agent:message",
+          "text": "Fixed: the whole line is upper-cased. Added a test for the help text."
+        },
+        {
+          "type": "usage:update",
+          "turn": 1,
+          "tokens": {
+            "input": 1525,
+            "cacheRead": 17875,
+            "cacheWrite": 550,
+            "output": 425
+          },
+          "costUsdSoFar": 0.05975
+        },
+        {
+          "type": "usage:update",
+          "turn": 2,
+          "tokens": {
+            "input": 3050,
+            "cacheRead": 35750,
+            "cacheWrite": 1100,
+            "output": 850
+          },
+          "costUsdSoFar": 0.1195
+        },
+        {
+          "type": "usage:update",
+          "turn": 3,
+          "tokens": {
+            "input": 4575,
+            "cacheRead": 53625,
+            "cacheWrite": 1650,
+            "output": 1275
+          },
+          "costUsdSoFar": 0.17925
+        },
+        {
+          "type": "usage:update",
+          "turn": 4,
+          "tokens": {
+            "input": 6100,
+            "cacheRead": 71500,
+            "cacheWrite": 2200,
+            "output": 1700
+          },
+          "costUsdSoFar": 0.239
+        },
+        {
+          "type": "harness:session_end",
+          "sessionId": "fake-session-implement-2",
+          "outcome": "done",
+          "reason": "submitted",
+          "turns": 4,
+          "toolCalls": 0,
+          "denials": 0,
+          "usage": {
+            "inputTokens": 6100,
+            "cacheReadTokens": 71500,
+            "cacheWriteTokens": 2200,
+            "outputTokens": 1700,
+            "costUsd": 0.239
+          }
+        }
+      ],
+      "result": {
+        "outcome": "done",
+        "output": {
+          "commits": [
+            {
+              "sha": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b",
+              "message": "fix: upper-case the name when shouting"
+            }
+          ],
+          "files": [
+            "src/greet.ts",
+            "test/cli.test.ts"
+          ],
+          "notes": "bun test passes locally: 7 of 7."
+        },
+        "sessionId": "fake-session-implement-2",
+        "usage": {
+          "inputTokens": 6100,
+          "cacheReadTokens": 71500,
+          "cacheWriteTokens": 2200,
+          "outputTokens": 1700,
+          "costUsd": 0.239
+        },
+        "transcript": "assistant: Fixed: the whole line is upper-cased. Added a test for the help text."
+      },
+      "files": {
+        "diff.patch": {
+          "encoding": "utf8",
+          "content": "diff --git a/src/greet.ts b/src/greet.ts\n--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,4 +1,4 @@\n export function greet(name: string, options: { shout?: boolean } = {}): string {\n-  const greeting = options.shout ? 'HELLO' : 'Hello';\n-  return `${greeting}, ${name.trim() || 'world'}!`;\n+  const line = `Hello, ${name.trim() || 'world'}!`;\n+  return options.shout ? line.toUpperCase() : line;\n }\ndiff --git a/test/cli.test.ts b/test/cli.test.ts\n--- a/test/cli.test.ts\n+++ b/test/cli.test.ts\n@@ -8,3 +8,7 @@\n+test('cli › lists --shout in help', () => {\n+  expect(run(['--help']).stdout).toContain('--shout');\n+});\n"
+        }
+      },
+      "raw": []
+    }
+  ]
+}

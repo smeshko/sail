@@ -161,15 +161,17 @@ test("a token GitHub refuses makes open-pull-request exit 1 with GitHub's own me
   }, 'ghp_another_token');
 });
 
-test("an operation github doesn't offer yet exits 1, saying so, and asks GitHub nothing", async () => {
-  await onGitHub(async ({ world, codehost, repo }) => {
-    const listed = await codehost(['list-designated', 'sail']);
-    expect([listed.code, listed.stderr, world.requests.length, existsSync(join(repo.dir, '.sail-runs'))]).toEqual([
-      EXIT_FAILED,
-      "sail port: codeHost.listDesignated: github doesn't support listDesignated yet (invalid)\n",
-      0,
-      false,
-    ]);
+test('list-designated on github, every operation now offered, prints the labelled pull request and only that one', async () => {
+  await onGitHub(async (on) => {
+    await openOne(on);
+    const unlabelled = await on.codehost(['list-designated', 'sail']);
+    await on.codehost(['add-label', '1', 'sail']);
+    const listed = await on.codehost(['list-designated', 'sail']);
+    expect({
+      unlabelled: [unlabelled.code, unlabelled.stdout.trim(), unlabelled.stderr],
+      listed: [listed.code, listed.stderr],
+      numbers: listed.code === EXIT_OK ? JSON.parse(listed.stdout).map((pr: { number: number }) => pr.number) : [],
+    }).toEqual({ unlabelled: [EXIT_OK, '[]', ''], listed: [EXIT_OK, ''], numbers: [1] });
   });
 });
 

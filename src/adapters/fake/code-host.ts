@@ -14,6 +14,7 @@ import {
   type MergeResult,
   mergeRequestIssue,
   type PullRequest,
+  type PullRequestDetails,
 } from '../../ports/types';
 import { createStore } from './store';
 
@@ -47,6 +48,12 @@ const StoredPullRequest = z.object({
   merges: MergeScripts.default(['merged']),
   reads: z.object({ checks: z.number().int(), merges: z.number().int() }).default({ checks: 0, merges: 0 }),
   comments: z.array(Comment).default([]),
+  /** Who opened it: `sail` unless the seed says otherwise. Left out of `raw` when the seed leaves it out. */
+  author: z.string().optional(),
+  /** Whether its head branch lives outside the repository: false unless the seed says otherwise. */
+  fork: z.boolean().optional(),
+  /** The base commit the host records for it: `branches[base]` when left out. */
+  baseSha: z.string().optional(),
 });
 type StoredPullRequest = z.infer<typeof StoredPullRequest>;
 
@@ -88,6 +95,26 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
     ...(pr.ticketKey === undefined ? {} : { ticketKey: pr.ticketKey }),
     raw: structuredClone(pr),
   });
+  /** The details `getPullRequest` answers: the base sha the seed gives, or its base branch's head. */
+  const details = (world: World, pr: StoredPullRequest): PullRequestDetails => {
+    const baseSha = pr.baseSha ?? world.branches[pr.base];
+    if (baseSha === undefined) {
+      throw new PortError(
+        'codeHost',
+        'getPullRequest',
+        'invalid',
+        `pull request #${pr.number} has no base sha: the seed gives none, and holds no branch ${pr.base}`,
+      );
+    }
+    return {
+      ...toPullRequest(world, pr),
+      body: pr.body,
+      author: pr.author ?? 'sail',
+      baseSha,
+      fork: pr.fork ?? false,
+      comments: pr.comments.map((comment) => ({ ...comment })),
+    };
+  };
   const find = (world: World, op: string, number: number): StoredPullRequest => {
     const found = world.pullRequests.find((pr) => pr.number === number);
     if (found === undefined) throw new PortError('codeHost', op, 'not_found', `no pull request #${number}`);
@@ -113,8 +140,17 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
   return {
     name: 'fake',
     parseRef(ref) {
-      const pull = `${store.read().remote}/pull/`;
-      const digits = ref.startsWith(pull) ? ref.slice(pull.length) : ref.replace(/^#/, '');
+      const bare = ref.replace(/^#/, '');
+      if (NUMBER.test(bare)) return Number(bare);
+      // Only a URL needs the world's remote: a ref of any other form never reads it, so a world with no seed reads none.
+      let remote: string;
+      try {
+        remote = store.read().remote;
+      } catch {
+        return undefined;
+      }
+      const pull = `${remote}/pull/`;
+      const digits = ref.startsWith(pull) ? ref.slice(pull.length) : '';
       return NUMBER.test(digits) ? Number(digits) : undefined;
     },
     async push(cwd, branch) {
@@ -196,13 +232,13 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
     async listDesignated(name) {
       const world = store.read();
       return world.pullRequests
-        .filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(name))
+        .filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(name) && pr.fork !== true)
         .sort((a, b) => a.number - b.number)
         .map((pr) => toPullRequest(world, pr));
     },
     async getPullRequest(number) {
       const world = store.read();
-      return toPullRequest(world, find(world, 'getPullRequest', number));
+      return details(world, find(world, 'getPullRequest', number));
     },
     async checks(number) {
       const checks = store.change((world) => {

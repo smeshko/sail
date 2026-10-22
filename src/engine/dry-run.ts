@@ -3,14 +3,18 @@
 // the run's branch, a read that takes no lease, so a leased branch refuses as a start would. It writes nothing: no run
 // directory, workspace, lease, claim or comment. Like a start, it claims the `.sail/` for the process.
 import { PortError } from '../ports/errors';
-import type { Ticket } from '../ports/types';
+import type { PullRequestDetails, Ticket } from '../ports/types';
 import { leasedBy, type OpenRunOptions, preflightRun } from './open-run';
 import type { RunHeader } from './run-header';
 
-/** What a start would freeze: its unclaimed header, the ticket as fetched, and the branch it would lease. */
+/**
+ * What a start would freeze: its unclaimed header, the ticket or the pull request as fetched, and the branch it would
+ * lease.
+ */
 export interface DryRun {
   header: RunHeader;
-  ticket: Ticket;
+  ticket?: Ticket;
+  pullRequest?: PullRequestDetails;
   branch: string;
 }
 
@@ -20,7 +24,7 @@ export async function dryRun(
 ): Promise<DryRun | { refused: string }> {
   const preflight = await preflightRun(options);
   if ('refused' in preflight) return preflight;
-  const { header, branch, resolved } = preflight;
+  const { header, branch, resolved, pullRequest } = preflight;
   const port = options.adapters.ports.workspace;
   try {
     const repository = await port.repository();
@@ -30,5 +34,10 @@ export async function dryRun(
     if (!(error instanceof PortError)) throw error;
     return { refused: `the workspace could not be read: ${error.message} (${error.code})` };
   }
-  return { header, ticket: resolved.ticket, branch };
+  return {
+    header,
+    ...(resolved === undefined ? {} : { ticket: resolved.ticket }),
+    ...(pullRequest === undefined ? {} : { pullRequest: pullRequest.pr }),
+    branch,
+  };
 }

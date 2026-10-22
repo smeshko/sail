@@ -15,8 +15,8 @@ export function runsDir(sailDir: string): string {
 export const FORCED = ['designation', 'state'] as const;
 export type Forced = (typeof FORCED)[number];
 
-/** What a run was started from: the run header's `source`. Intake resolves it into the run's input. */
-export interface Source {
+/** A run started from a ticket, by its key. */
+export interface TicketRunSource {
   kind: 'ticket';
   ticketKey: string;
   via: 'cli' | 'watch';
@@ -27,6 +27,23 @@ export interface Source {
    */
   forced: Forced[];
 }
+
+/** A run started from a pull request, by its number, at the head sha it was resolved at. */
+export interface PullRequestRunSource {
+  kind: 'pr';
+  number: number;
+  /** The full sha the run is for: its workspace starts there. */
+  headSha: string;
+  via: 'cli' | 'watch';
+  /**
+   * The checks `--force` overrode: `designation` when the pull request didn't carry the label, `state` when it was
+   * closed, merged or a draft.
+   */
+  forced: Forced[];
+}
+
+/** What a run was started from: the run header's `source`. Intake resolves it into the run's input. */
+export type Source = TicketRunSource | PullRequestRunSource;
 
 /**
  * Creates the directory of run `runId` and returns its absolute path, creating `.sail-runs/` on first use. Both entries

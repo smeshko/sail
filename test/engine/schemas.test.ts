@@ -1541,3 +1541,77 @@ test('a run:resumed from suspended needs interrupted or unwatched, one from runn
     requeuedReason: ['/reason'],
   });
 });
+
+// A pull-request source (14.2's D4): its number and the head sha the run is for, and no claim, since a pull-request run
+// moves no ticket.
+
+const HEAD_SHA = 'c'.repeat(40);
+const prSource = { kind: 'pr', number: 12, headSha: HEAD_SHA, via: 'watch', forced: ['state'] };
+const prRun = { ...omit(run, 'claim'), runId: 'pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N', source: prSource };
+
+test('run: a pull-request header has no claim; one with a claim, a ticketKey, a short headSha or a number of 0 is refused, naming each', () => {
+  const withSource = (change: Record<string, unknown>) => ({ ...prRun, source: { ...prSource, ...change } });
+  expect({
+    valid: paths('sail.run.v1', prRun),
+    claim: validateDocument('sail.run.v1', { ...prRun, claim: run.claim }),
+    ticketKey: paths('sail.run.v1', withSource({ ticketKey: 'FAKE-1' })),
+    headSha: paths('sail.run.v1', withSource({ headSha: 'abc1234' })),
+    number: paths('sail.run.v1', withSource({ number: 0 })),
+  }).toEqual({
+    valid: [],
+    claim: [{ schema: 'sail.run.v1', path: '/claim', message: 'is not allowed' }],
+    ticketKey: ['/source/ticketKey'],
+    headSha: ['/source/headSha'],
+    number: ['/source/number'],
+  });
+});
+
+test('event and summary: run:start takes a pull-request source, and summary.json one with its number and head sha; neither takes a ticketKey beside them', () => {
+  const start = { ...event, runId: prRun.runId, source: prSource };
+  const folded = {
+    ...summary,
+    runId: prRun.runId,
+    source: { kind: 'pr', number: 12, headSha: HEAD_SHA, via: 'watch' },
+  };
+  expect({
+    start: paths('sail.event.v1', start),
+    summary: paths('sail.summary.v1', folded),
+    startWithKey: paths('sail.event.v1', { ...start, source: { ...prSource, ticketKey: 'FAKE-1' } }),
+    summaryWithKey: paths('sail.summary.v1', { ...folded, source: { ...folded.source, ticketKey: 'FAKE-1' } }),
+  }).toEqual({ start: [], summary: [], startWithKey: ['/source/ticketKey'], summaryWithKey: ['/source/ticketKey'] });
+});
+
+test('queue events: queue:polled takes the kind pr, queue:item_added a pull request at its head sha with its branch, and a dedup key is pr:<number>@<sha7>, nothing looser', () => {
+  const queueEnvelope = { seq: 1, ts: TS, workflow: 'review-pr' };
+  const added = {
+    ...queueEnvelope,
+    type: 'queue:item_added',
+    dedupKey: 'pr:12@ccccccc',
+    source: { kind: 'pr', number: 12, headSha: HEAD_SHA, branch: 'sail/FAKE-1-x' },
+    title: 'Add a greeting',
+  };
+  const polled = {
+    ...queueEnvelope,
+    type: 'queue:polled',
+    kind: 'pr',
+    label: 'sail',
+    found: 1,
+    added: 1,
+    durationMs: 0,
+  };
+  expect({
+    polled: paths('sail.event.v1', polled),
+    added: paths('sail.event.v1', added),
+    upper: paths('sail.event.v1', { ...added, dedupKey: 'pr:12@CCCCCCC' }),
+    zero: paths('sail.event.v1', { ...added, dedupKey: 'pr:0@ccccccc' }),
+    short: paths('sail.event.v1', { ...added, dedupKey: 'pr:12@cccccc' }),
+    noBranch: paths('sail.event.v1', { ...added, source: { kind: 'pr', number: 12, headSha: HEAD_SHA } }),
+  }).toEqual({
+    polled: [],
+    added: [],
+    upper: ['/dedupKey'],
+    zero: ['/dedupKey'],
+    short: ['/dedupKey'],
+    noBranch: ['/source/branch'],
+  });
+});

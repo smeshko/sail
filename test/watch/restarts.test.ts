@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateRunDir } from '../../src/engine/schemas';
 import { type QueueFile, queueDir } from '../../src/watch/queue-store';
-import { queueEventIssues, queueEvents } from '../helpers/queue';
+import { queueEventIssues, queueEvents, sourceKey } from '../helpers/queue';
 import {
   alive,
   gone,
@@ -244,7 +244,7 @@ test(
         releaseHeld(repo.dir);
         const suspended = () => runsIn(runs).find((run) => run.runId === held?.runId)?.status === 'suspended unwatched';
         expect(await until('the run suspended', suspended)).toBe('the run suspended');
-        const kept = queueOf(runs, 'b').items.map((item) => `${item.source.ticketKey} ${item.state}`);
+        const kept = queueOf(runs, 'b').items.map((item) => `${sourceKey(item)} ${item.state}`);
         const watched = await sail(repo.dir, env, ['watch', 'b']);
         expect(await until("both of b's runs completed", () => completed(runs) === 2)).toBe(
           "both of b's runs completed",

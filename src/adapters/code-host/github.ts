@@ -1,9 +1,10 @@
 // The GitHub CodeHost: pushes a run's HEAD to its branch and opens a labelled pull request against one repository on
 // github.com. Opening again from an open pull request's head into its base returns that pull request (DECISIONS D2),
 // the default branch is never pushed (D3), and the ticket key rides in the body as a hidden marker (D9). It reads checks,
-// swaps labels and merges at the head a workflow expects, recording a merge only once GitHub reports it (ADW-127's D2);
-// listing designated pull requests isn't offered yet. Everything that leaves the adapter, its errors, `raw` values and
-// events, is redacted of the token (D11).
+// swaps labels and merges at the head a workflow expects, recording a merge only once GitHub reports it (ADW-127's D2).
+// `listDesignated` pages through the open pull requests and keeps the designated ones of this repository, and
+// `getPullRequest` reads the details with the comments, paged (14.2's D11). Everything that leaves the adapter, its
+// errors, `raw` values and events, is redacted of the token (D11).
 import { z } from 'zod';
 import { redactor } from '../../engine/redact';
 import type { ProviderEvent } from '../../events/types';
@@ -15,7 +16,14 @@ import { type Labelled, MergeRequest, type MergeResult, mergeRequestIssue, type 
 import { gitSync, stripUserinfo } from '../workspace/git';
 import { readChecks } from './github-checks';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
-import { type GitHubPull, toPullRequest, withTicketMarker } from './github-pull';
+import {
+  type GitHubComment,
+  type GitHubPull,
+  isFork,
+  toPullRequest,
+  toPullRequestDetails,
+  withTicketMarker,
+} from './github-pull';
 import { gitEnv, pushHead } from './github-push';
 
 export const GITHUB_WEB_URL = 'https://github.com';
@@ -41,11 +49,11 @@ const NUMBER = /^#?([1-9]\d*)$/;
 
 const SHA = /^[0-9a-f]{40}$/;
 
-const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+/** A page of a list GitHub pages, and how many pages are read at most: 1000 items. */
+const PAGE = 100;
+const MAX_PAGES = 10;
 
-const unsupported = (op: string) => async (): Promise<never> => {
-  throw new PortError('codeHost', op, 'invalid', `github doesn't support ${op} yet`);
-};
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
 export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
   const { owner, repo } = options;
@@ -83,6 +91,22 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
   const readDefaultBranch = async (op: string): Promise<string> => {
     defaultBranch ??= (await client.request<{ default_branch: string }>(op, 'GET', client.repoPath())).default_branch;
     return defaultBranch;
+  };
+  /** Every item of the list at `path`, page after page until one holds fewer than `PAGE`, at most `MAX_PAGES`. */
+  const paged = async <T>(op: string, path: string, query: Record<string, string>): Promise<T[]> => {
+    const items: T[] = [];
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const search = new URLSearchParams({ ...query, per_page: String(PAGE), page: String(page) });
+      const answer = await client.request<T[]>(op, 'GET', `${path}?${search}`);
+      items.push(...answer);
+      if (answer.length < PAGE) return items;
+    }
+    throw new PortError(
+      'codeHost',
+      op,
+      'invalid',
+      `GitHub lists ${PAGE * MAX_PAGES} or more: sail reads ${MAX_PAGES} pages`,
+    );
   };
   const read = async (op: string, number: number): Promise<PullRequest> =>
     toPullRequest(await client.request<GitHubPull>(op, 'GET', client.repoPath('pulls', number)));
@@ -181,8 +205,28 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         const { labels } = await addLabels('openPullRequest', pr.number, request.labels ?? [], pr.labels);
         return { ...pr, labels };
       }),
-    listDesignated: unsupported('listDesignated'),
-    getPullRequest: (number) => guarded(() => read('getPullRequest', number)),
+    listDesignated: (label) =>
+      guarded(async () => {
+        const open = await paged<GitHubPull>('listDesignated', client.repoPath('pulls'), { state: 'open' });
+        // Checked again here: designation is code, never what a list query was asked for.
+        return open
+          .filter(
+            (node) =>
+              node.state === 'open' &&
+              node.draft !== true &&
+              (node.labels ?? []).some((each) => each.name === label) &&
+              !isFork(node, `${owner}/${repo}`),
+          )
+          .sort((a, b) => a.number - b.number)
+          .map(toPullRequest);
+      }),
+    getPullRequest: (number) =>
+      guarded(async () => {
+        const node = await client.request<GitHubPull>('getPullRequest', 'GET', client.repoPath('pulls', number));
+        const path = client.repoPath('issues', number, 'comments');
+        const comments = await paged<GitHubComment>('getPullRequest', path, {});
+        return toPullRequestDetails(node, comments, `${owner}/${repo}`);
+      }),
     checks: (number) =>
       guarded(async () => {
         const pr = await read('checks', number);
