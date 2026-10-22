@@ -42,7 +42,8 @@ export function commitStatus(status: Pick<GitHubStatus, 'state'>): CheckStatus {
 
 /**
  * Every item of a paged list, page after page of 100, until `total_count` items have been read. A page without its list
- * or its count, or one that ends the list short of the count, is `unavailable`: a check left unread could have failed.
+ * or its count, one whose count differs from the first page's, or one that ends the list short of the count, is
+ * `unavailable`: a check left unread could have failed.
  */
 async function readPaged<T>(
   client: GitHubClient,
@@ -52,6 +53,7 @@ async function readPaged<T>(
   field: 'check_runs' | 'statuses',
 ): Promise<T[]> {
   const read: T[] = [];
+  let expected: number | undefined;
   const path = client.repoPath('commits', sha, endpoint);
   for (let page = 1; page <= MAX_PAGES; page++) {
     const query = new URLSearchParams({ per_page: String(PER_PAGE), page: String(page) });
@@ -65,6 +67,16 @@ async function readPaged<T>(
         op,
         'unavailable',
         `GitHub's ${endpoint} answer for ${sha} holds no list and total_count`,
+      );
+    }
+    // The count the first page gave holds for the whole read: a later page's count can't end it early.
+    expected ??= total;
+    if (total !== expected) {
+      throw new PortError(
+        'codeHost',
+        op,
+        'unavailable',
+        `GitHub's ${endpoint} count for ${sha} changed from ${expected} to ${total} while it was read`,
       );
     }
     read.push(...(listed as T[]));
