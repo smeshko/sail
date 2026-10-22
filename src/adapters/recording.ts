@@ -75,8 +75,10 @@ const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/
 
 /**
  * A function that replaces each root with its word in every string of a value: longest first, realpath forms too, each
- * also URL-encoded and dashed (`pathForms()`). Each of `names`, such as the user's login, is then replaced as a whole
- * word in any case, wherever a path doesn't carry it: the owner column of `ls -l`, or a home path under another root.
+ * also URL-encoded and dashed (`pathForms()`). Each of `names`, such as the user's login, is then replaced in any case
+ * where a path or a listing carries it and no root did: a path segment (`/Users/<login>/`), a dashed one
+ * (`-Users-<login>-`), and the owner and group columns of `ls -l` (`1 <login> <login>`). Only there: a login can be a
+ * word the recording itself uses, such as `agent`, `model` or `user`, in an event's type or a request's field.
  */
 export function maskPaths(
   roots: Readonly<Record<string, string>>,
@@ -98,7 +100,10 @@ export function maskPaths(
   pairs.sort((a, b) => b[0].length - a[0].length);
   const words = Object.entries(names)
     .filter(([, name]) => name.length >= 3)
-    .map(([word, name]) => [new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'gi'), word] as const);
+    .map(([word, name]) => {
+      const login = escapeRegExp(name);
+      return [new RegExp(`(?<=[/-]|\\d\\s+|${login}\\s+)${login}(?![A-Za-z0-9_])`, 'gi'), word] as const;
+    });
   const text = (input: string): string =>
     words.reduce(
       (out, [name, word]) => out.replace(name, word),
