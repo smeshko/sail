@@ -2197,3 +2197,56 @@ test("until naming a group's stage suspends the run once the whole group is jour
     expect(ofType(events(end.dir), 'all:end')).toHaveLength(1);
   });
 }, 30_000);
+
+test("a resume that runs one call of a group stamps what an adapter emits during it with that call's key, not the group's first", async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeTrio(from.dir, { a: 50, b: 100, c: 20_000 });
+      const controller = new AbortController();
+      const end = await ranTrio(from.dir, {
+        signal: controller.signal,
+        onCall: (entry) => {
+          if (entry.key === 'b#1') controller.abort();
+        },
+      });
+      expect(journaled(end.dir)).toEqual(['intake#1 passed', 'a#1 done', 'b#1 done']);
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+
+    writeTrio(repo.dir, { a: 50, b: 50, c: 50 });
+    const adapters = await fakeAdapters(repo.dir);
+    const during: Consumer = {
+      name: 'provider',
+      onEvent(event) {
+        if (event.type === 'stage:start' && event.key === 'c#1') adapters.relay.emit(PUSHED);
+      },
+    };
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, consumers: [during] })).toMatchObject({
+      status: 'completed',
+    });
+    const pushed = ofType(events(join(repo.dir, '.sail-runs', runId)), 'codehost:pushed');
+    expect(pushed.map((event) => event.key)).toEqual(['c#1']);
+  });
+}, 60_000);
+
+test('an abort as the last call of a group is journaled still ends the group with all:end, since the journal holds it whole', async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    const controller = new AbortController();
+    const end = await ranTrio(repo.dir, {
+      signal: controller.signal,
+      onCall: (entry) => {
+        if (entry.key === 'a#1') controller.abort();
+      },
+    });
+
+    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted' });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 done', 'c#1 done', 'a#1 done']);
+    const list = events(end.dir);
+    expect(ofType(list, 'all:end').map((event) => event.outcomes)).toEqual([
+      { 'a#1': 'done', 'b#1': 'done', 'c#1': 'done' },
+    ]);
+    expect(typed(list).indexOf('all:end')).toBeLessThan(typed(list).indexOf('run:end'));
+  });
+}, 30_000);
