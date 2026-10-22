@@ -871,10 +871,7 @@ test('an add, a requeue and a drop for a workflow outside the set are each rejec
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a ticket workflow and a pull-request workflow that both poll sail open under one watcher, and the registry claims sail once, for the ticket source (ADW-235)', async () => {
+test('a ticket workflow and a pull-request workflow that both poll sail open under one watcher, and the registry claims sail once, for the ticket source (ADW-235)', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail', cap: 1 }], tickets({ 'FAKE-1': 'sail' }));
     writePrWorkflow(w.sail, 'r', { watch: { label: 'sail', cap: 1 } });
@@ -883,7 +880,10 @@ test
     expect({
       watching: typeof started === 'string' ? started : started.watching(),
       labels: readEntry(w.registryDir, 'stub')?.watcher?.labels,
-      polled: w.events('r').filter((event) => event.type === 'queue:polled').map((event) => event.kind),
+      polled: w
+        .events('r')
+        .filter((event) => event.type === 'queue:polled')
+        .map((event) => event.kind),
     }).toEqual({ watching: ['a', 'r'], labels: ['sail'], polled: ['pr'] });
     if (typeof started !== 'string') await started.stop();
   });

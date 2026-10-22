@@ -640,10 +640,7 @@ function prTarget(runs: string, host: CodeHost, now: () => Date): WatchTarget {
   };
 }
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a pr workflow's poll queues the designated pull request as pr:<number>@<sha7>, and not the draft, the closed or the unlabelled one", async () => {
+test("a pr workflow's poll queues the designated pull request as pr:<number>@<sha7>, and not the draft, the closed or the unlabelled one", async () => {
   const dir = tempDir();
   const clock = manualClock(START);
   const r = prTarget(dir, fakeHost(dir).host, clock);
@@ -663,10 +660,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a new head sha is a new item beside the old one, and a sha already queued is never queued again, even once its item is done', async () => {
+test('a new head sha is a new item beside the old one, and a sha already queued is never queued again, even once its item is done', async () => {
   const dir = tempDir();
   const clock = manualClock(START);
   const { host, state } = fakeHost(dir);
@@ -677,7 +671,10 @@ test
   await pollOnce(r, clock);
   const again = r.store.snapshot().items.map((item) => `${item.dedupKey} ${item.state}`);
   const moved = PULLS.map((pr) => (pr.number === 1 ? { ...pr, headSha: 'b'.repeat(40) } : pr));
-  writeFileSync(state, JSON.stringify({ remote: 'fake://codehost/stub', defaultBranch: 'main', branches: {}, pullRequests: moved }));
+  writeFileSync(
+    state,
+    JSON.stringify({ remote: 'fake://codehost/stub', defaultBranch: 'main', branches: {}, pullRequests: moved }),
+  );
   await pollOnce(r, clock);
   expect({
     again,
@@ -692,10 +689,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("a CodeHost of the repository's own that answers a draft, a closed and an unlabelled pull request beside the designated one queues only the designated one", async () => {
+test("a CodeHost of the repository's own that answers a draft, a closed and an unlabelled pull request beside the designated one queues only the designated one", async () => {
   const dir = tempDir();
   const clock = manualClock(START);
   const { host } = fakeHost(dir);
@@ -705,10 +699,7 @@ test
   expect(itemKeys(dir, 'r')).toEqual(['pr:1@1111111']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("an answer that is no list of pull requests fails a pr workflow's poll as the codeHost's invalid, and a codeHost that refuses the credentials pauses it", async () => {
+test("an answer that is no list of pull requests fails a pr workflow's poll as the codeHost's invalid, and a codeHost that refuses the credentials pauses it", async () => {
   const dir = tempDir();
   const clock = manualClock(START);
   const { host } = fakeHost(dir);
@@ -732,6 +723,12 @@ test
     failed: 'failed',
     error: ['codeHost', 'odd', 'invalid'],
     paused: 'paused',
-    pause: { port: 'codeHost', adapter: 'refusing', code: 'unauthorized', message: 'codeHost.listDesignated: bad token', at: START },
+    pause: {
+      port: 'codeHost',
+      adapter: 'refusing',
+      code: 'unauthorized',
+      message: 'codeHost.listDesignated: bad token',
+      at: START,
+    },
   });
 });

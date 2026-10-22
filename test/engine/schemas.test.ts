@@ -1575,10 +1575,7 @@ test('event and summary: run:start takes a pull-request source, and summary.json
   }).toEqual({ start: [], summary: [], startWithKey: ['/source/ticketKey'], summaryWithKey: ['/source/ticketKey'] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('queue events: queue:polled takes the kind pr, queue:item_added a pull request at its head sha with its branch, and a dedup key is pr:<number>@<sha7>, nothing looser', () => {
+test('queue events: queue:polled takes the kind pr, queue:item_added a pull request at its head sha with its branch, and a dedup key is pr:<number>@<sha7>, nothing looser', () => {
   const queueEnvelope = { seq: 1, ts: TS, workflow: 'review-pr' };
   const added = {
     ...queueEnvelope,
@@ -1587,7 +1584,15 @@ test
     source: { kind: 'pr', number: 12, headSha: HEAD_SHA, branch: 'sail/FAKE-1-x' },
     title: 'Add a greeting',
   };
-  const polled = { ...queueEnvelope, type: 'queue:polled', kind: 'pr', label: 'sail', found: 1, added: 1, durationMs: 0 };
+  const polled = {
+    ...queueEnvelope,
+    type: 'queue:polled',
+    kind: 'pr',
+    label: 'sail',
+    found: 1,
+    added: 1,
+    durationMs: 0,
+  };
   expect({
     polled: paths('sail.event.v1', polled),
     added: paths('sail.event.v1', added),
@@ -1595,5 +1600,12 @@ test
     zero: paths('sail.event.v1', { ...added, dedupKey: 'pr:0@ccccccc' }),
     short: paths('sail.event.v1', { ...added, dedupKey: 'pr:12@cccccc' }),
     noBranch: paths('sail.event.v1', { ...added, source: { kind: 'pr', number: 12, headSha: HEAD_SHA } }),
-  }).toEqual({ polled: [], added: [], upper: ['/dedupKey'], zero: ['/dedupKey'], short: ['/dedupKey'], noBranch: ['/source/branch'] });
+  }).toEqual({
+    polled: [],
+    added: [],
+    upper: ['/dedupKey'],
+    zero: ['/dedupKey'],
+    short: ['/dedupKey'],
+    noBranch: ['/source/branch'],
+  });
 });

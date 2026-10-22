@@ -74,10 +74,7 @@ test.each([
 const both = intake('both', { accepts: ['ticket', 'pr'], output: z.object({}) });
 const none = intake('none', { accepts: [], output: z.object({}) });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('watchProblem takes an intake that accepts pr, refuses one that accepts both kinds or none, and pollKind names the kind a watched workflow polls (ADW-235)', () => {
+test('watchProblem takes an intake that accepts pr, refuses one that accepts both kinds or none, and pollKind names the kind a watched workflow polls (ADW-235)', () => {
   const watch = { watch: { every: '5m' }, maxConcurrentRuns: 2 };
   expect({
     problems: [prOnly, both, none].map((on) => watchProblem(declared(watch, on as never))),

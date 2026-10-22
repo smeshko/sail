@@ -7,13 +7,14 @@
 //   hour, so a shorter interval on a few workflows would spend it.
 // - `every` has a ceiling too, the longest a timer can wait: past it, `setTimeout` fires after 1 ms, and the watcher
 //   would poll without pause.
-// - Only ticket sources are polled so far. Epic 14.2 adds `pr` to `POLLABLE_KINDS`, with the CodeHost poll.
+// - Tickets are polled through the TicketSource, and pull requests through the CodeHost. A watched workflow polls one kind:
+//   the one its intake accepts, so an intake that accepts both, or neither, is refused (14.2's D9).
 import type { Workflow } from '../sdk/index';
 import type { SourceKind } from '../sdk/intake';
 import { DEFAULT_LABEL, type ProjectConfig } from './config';
 
 /** The source kinds the watcher can poll for. */
-export const POLLABLE_KINDS: readonly SourceKind[] = ['ticket'];
+export const POLLABLE_KINDS: readonly SourceKind[] = ['ticket', 'pr'];
 
 /** The shortest `watch.every`. */
 export const MIN_EVERY_MS = 30_000;
@@ -62,16 +63,20 @@ export function watchProblem(workflow: Workflow): string | undefined {
   if (label !== undefined && (typeof label !== 'string' || label.trim() === '')) {
     return `has watch.label ${JSON.stringify(label)}, and a label is a non-empty string`;
   }
-  if (!intake.accepts.some((kind) => POLLABLE_KINDS.includes(kind))) {
+  const pollable = intake.accepts.filter((kind) => POLLABLE_KINDS.includes(kind));
+  if (pollable.length === 0) {
     const accepts = intake.accepts.length > 0 ? intake.accepts.join(', ') : 'nothing';
-    return `its intake '${intake.name}' accepts ${accepts}, and sail polls only ticket sources so far`;
+    return `its intake '${intake.name}' accepts ${accepts}, and sail polls only ${POLLABLE_KINDS.join(' and ')} sources`;
+  }
+  if (pollable.length > 1) {
+    return `its intake '${intake.name}' accepts ${pollable.join(' and ')}, and a watched workflow polls one kind of source`;
   }
   return undefined;
 }
 
 /** The one source kind a watched workflow's intake accepts that the watcher can poll. */
-export function pollKind(_workflow: Workflow): SourceKind {
-  return 'ticket';
+export function pollKind(workflow: Workflow): SourceKind {
+  return workflow.intake.accepts.find((kind) => POLLABLE_KINDS.includes(kind)) ?? 'ticket';
 }
 
 /** The label a watched workflow polls for: its own, then `project.yaml`'s, then sail's. */

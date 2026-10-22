@@ -6,8 +6,9 @@
 //   holding what `queue.json` holds: the old queue when the write failed before its rename, and the new one when only
 //   the directory's sync after it failed. So the next change never writes an old queue back over a newer one. When
 //   `queue.json` can't be read back either, no change is made until it can.
-// - Items are known by their dedup key. A key whose item is done may be queued again: the ticket system is the memory
-//   of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run.
+// - Items are known by their dedup key. A ticket key whose item is done may be queued again: the ticket system is the
+//   memory of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run. A pull request's
+//   key carries its head sha, so a done one stays taken while the item is kept: the same sha is never reviewed twice.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
 //   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
 //   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
@@ -122,7 +123,7 @@ export const DEFAULT_QUEUE_POLICY: QueuePolicy = {
 
 /** The key a queue item is known by: `ticket:<ticket key>`, or `pr:<number>@<the head sha's first 7>`. */
 export function dedupKey(source: QueueSource): string {
-  return source.kind === 'ticket' ? `${source.kind}:${source.ticketKey}` : `pr:${source.number}`;
+  return source.kind === 'ticket' ? `ticket:${source.ticketKey}` : `pr:${source.number}@${source.headSha.slice(0, 7)}`;
 }
 
 /** A poll that failed, as `pollFailed()` records it. */
@@ -289,6 +290,16 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       item.pid = pid;
       return { ...item };
     });
+  const emitAdded = (added: readonly QueueItem[]) =>
+    stream.emitAll(
+      added.map((item) => ({
+        type: 'queue:item_added' as const,
+        workflow,
+        dedupKey: item.dedupKey,
+        source: item.source,
+        title: item.title,
+      })),
+    );
   const isDue = (item: QueueItem, at: number) =>
     item.state === 'queued' || (item.state === 'failed' && Date.parse(item.retryAt ?? '') <= at);
 
@@ -317,19 +328,32 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         return queued;
       });
-      stream.emitAll(
-        added.map((item) => ({
-          type: 'queue:item_added' as const,
-          workflow,
-          dedupKey: item.dedupKey,
-          source: item.source,
-          title: item.title,
-        })),
-      );
+      emitAdded(added);
       return added.length;
     },
-    addPullRequests(_pullRequests) {
-      return 0;
+    addPullRequests(pullRequests) {
+      const added = change((next) => {
+        const queued: QueueItem[] = [];
+        for (const pr of pullRequests) {
+          const source = { kind: 'pr' as const, number: pr.number, headSha: pr.headSha, branch: pr.head };
+          const key = dedupKey(source);
+          if (next.items.some((item) => item.dedupKey === key)) continue;
+          const item: QueueItem = {
+            dedupKey: key,
+            source,
+            title: pr.title,
+            url: pr.url,
+            state: 'queued',
+            attempts: 0,
+            addedAt: now().toISOString(),
+          };
+          next.items.push(item);
+          queued.push(item);
+        }
+        return queued;
+      });
+      emitAdded(added);
+      return added.length;
     },
     due() {
       const at = now().getTime();

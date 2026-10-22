@@ -743,10 +743,7 @@ const pullRequest = (number: number, headSha: string): PullRequest => ({
   raw: null,
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('addPullRequests queues a pull request once per head sha, as pr:<number>@<sha7> with its branch, and a done pr: key stays taken while a done ticket: key is queued again', () => {
+test('addPullRequests queues a pull request once per head sha, as pr:<number>@<sha7> with its branch, and a done pr: key stays taken while a done ticket: key is queued again', () => {
   const runs = runsDir();
   const store = open(runs);
   const [first, moved] = ['c'.repeat(40), 'd'.repeat(40)];

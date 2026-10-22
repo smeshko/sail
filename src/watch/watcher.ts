@@ -172,7 +172,10 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
 
   const set = new Map<string, Watched>();
   const watching = () => [...set.keys()];
-  const labelsOf = (targets: readonly WatchTarget[]) => [...new Set(targets.map((target) => target.label))];
+  /** The ticket labels of `targets`: the registry claims those alone, since a pull request's lives in its code host. */
+  const labelsOf = (targets: readonly WatchTarget[]) => [
+    ...new Set(targets.filter((target) => target.kind === 'ticket').map((target) => target.label)),
+  ];
   const watchedTargets = () => [...set.values()].map((watched) => watched.target);
 
   /** Opens the workflows of `names` not watched yet, refusing on one that refuses, or on two that poll one label. */
@@ -194,8 +197,9 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       targets.push(target);
     }
     const all = [...watchedTargets(), ...targets];
+    // One label per kind: a ticket workflow and a pull-request workflow may both poll `sail`, which is the hand-over.
     for (const [index, target] of all.entries()) {
-      const other = all.slice(0, index).find((each) => each.label === target.label);
+      const other = all.slice(0, index).find((each) => each.label === target.label && each.kind === target.kind);
       if (other !== undefined) {
         return {
           refused: `workflows '${other.workflow}' and '${target.workflow}' both poll the label '${target.label}'`,

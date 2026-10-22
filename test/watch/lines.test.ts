@@ -180,15 +180,19 @@ test('a settled item prints done or when it is due again, and a parked one leave
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a pull-request item is named #<number>@<sha7> on its lines, and a ticket keeps its key', () => {
+test('a pull-request item is named #<number>@<sha7> on its lines, and a ticket keeps its key', () => {
   const key = 'pr:12@abc1234';
   const source = { kind: 'pr' as const, number: 12, headSha: `abc1234${'0'.repeat(33)}`, branch: 'sail/FAKE-1-x' };
   const lines = [
     queueLine({ ...envelope, type: 'queue:item_added', dedupKey: key, source, title: 'Add a greeting' }),
-    queueLine({ ...envelope, type: 'queue:dispatched', dedupKey: key, run: 'pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N', attempt: 1, pid: 42 }),
+    queueLine({
+      ...envelope,
+      type: 'queue:dispatched',
+      dedupKey: key,
+      run: 'pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      attempt: 1,
+      pid: 42,
+    }),
     queueLine({ ...envelope, type: 'queue:skipped_leased', dedupKey: key, branch: 'sail/FAKE-1-x', heldBy: RUN }),
   ];
   expect(lines.map((line) => line?.text)).toEqual([

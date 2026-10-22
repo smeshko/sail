@@ -308,10 +308,7 @@ test('a watched workflow with a cap of 0, written past the types, is refused, na
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a watched workflow whose own intake accepts both tickets and pull requests is refused, naming its workflow.ts', async () => {
+test('a watched workflow whose own intake accepts both tickets and pull requests is refused, naming its workflow.ts', async () => {
   await withTempRepo(async (repo) => {
     const reviews = join(copyFixture(repo.dir), 'workflows', 'reviews');
     mkdirSync(reviews);
