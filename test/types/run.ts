@@ -191,6 +191,14 @@ export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
   read(unread.output);
   // @ts-expect-error TS2367: without { onError: 'return' }, a group's call never hands back an error
   read(unread.outcome === 'error');
+  // A list whose calls are a union, as a .map() choosing onError per call gives, keeps the error on every result.
+  const mixed = [true, false].map((soft) =>
+    soft ? ([tests, {}, { onError: 'return' }] as const) : ([tests] as const),
+  );
+  for (const either of await run.all(mixed)) {
+    // @ts-expect-error TS2339: a call that may hand back an error can't be read before error is ruled out
+    read(either.output);
+  }
 
   // @ts-expect-error TS2322: onError takes only 'return'
   await run.stage(tests, {}, { onError: 'ignore' });
