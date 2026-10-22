@@ -1,3 +1,4 @@
 #!/bin/sh
-# Runs the full gate before every push. Bypass once with `git push --no-verify`.
-exec bun run verify
+# Runs the narrow gate before every push: typecheck, lint and the tests the branch affects (scripts/affected-tests.ts).
+# CI runs the full `bun run verify`. Bypass once with `git push --no-verify`.
+exec bun run gate
