@@ -237,6 +237,19 @@ describe('which files are recorded', () => {
     await harness.run({ ...req, env: {} });
     expect(read(dir, 'spec#1').tries[0]?.files).toEqual({});
   });
+
+  test('the files are recorded in name order, whatever order the directory lists them in (review #1.1)', async () => {
+    const files = { 'z.md': 'z', 'notes.txt': 'n', 'spec.md': 's', 'm/b.md': 'b', 'a.md': 'a' };
+    const { dir, harness } = recorder(standIn({ files }));
+    await harness.run(request());
+    expect(Object.keys(read(dir, 'spec#1').tries[0]?.files ?? {})).toEqual([
+      'a.md',
+      'm/b.md',
+      'notes.txt',
+      'spec.md',
+      'z.md',
+    ]);
+  });
 });
 
 describe('tries and keys', () => {

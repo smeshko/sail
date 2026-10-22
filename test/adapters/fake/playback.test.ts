@@ -85,7 +85,8 @@ const tree = (out: string | undefined): Record<string, string> => {
     }
   };
   if (out !== undefined) walk(out, '');
-  return found;
+  // In name order: a directory lists its entries in an order of its own, and it differs between macOS and Linux.
+  return Object.fromEntries(Object.entries(found).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 };
 
 describe('a recorded session plays back as it ran', () => {
