@@ -133,6 +133,11 @@ export interface Watcher {
   watching(): string[];
 }
 
+/** Why an add for `workflow` is refused: it polls pull requests, and an add queues a ticket. */
+export function addsNoTicket(workflow: string): string {
+  return `workflow '${workflow}' polls pull requests: only a workflow that polls tickets takes an add`;
+}
+
 /** Why a watcher can't start, or can't take a label, when `holder` is in its way. */
 export function holderRefusal(holder: Holder, name: string): string {
   const { watcher } = holder;
@@ -358,6 +363,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     const { store } = target;
     const itemOf = (key: string): QueueItem | undefined => store.snapshot().items.find((item) => item.dedupKey === key);
     if (command.op === 'add') {
+      if (target.kind !== 'ticket') throw new Error(addsNoTicket(target.workflow));
       const force = command.force === true;
       const resolved = await resolveSource({ ref: command.ticketKey, ticketSource, label: target.label, force });
       if ('refused' in resolved) throw new Error(resolved.refused);
