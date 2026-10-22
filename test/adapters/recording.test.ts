@@ -474,6 +474,32 @@ describe('masking machine paths', () => {
     ]);
   });
 
+  test('a login that is also a protocol word is masked only where a path or a listing carries it (review #2.3)', async () => {
+    for (const login of ['agent', 'model', 'user', 'type']) {
+      const req = { ...request(), model: 'model' };
+      const events: HarnessEvent[] = [
+        START,
+        SAID(`agent:message from /home/${login}/x, -home-${login}-proj, 1 ${login} ${login} 12 a.md`),
+      ];
+      const raw = [{ type: 'user', message: { role: 'user', model: 'model' } }];
+      const rec = join(tempDir(), 'rec');
+      const result = await recordingHarness(standIn({ events, raw }), {
+        dir: rec,
+        secrets: [],
+        roots: {},
+        names: { $USER: login },
+      }).run(req);
+      expect(result.outcome).toBe('done');
+      const recorded = read(rec, 'spec#1').tries[0];
+      expect(recorded?.request.model).toBe('model');
+      expect(recorded?.events.map((event) => event.type)).toEqual(['harness:session_start', 'agent:message']);
+      expect(recorded?.events[1]).toEqual(
+        SAID('agent:message from /home/$USER/x, -home-$USER-proj, 1 $USER $USER 12 a.md'),
+      );
+      expect(recorded?.raw).toEqual(raw);
+    }
+  });
+
   test('the realpath form of a symlinked root is replaced too', () => {
     const real = tempDir();
     const link = join(tempDir(), 'link');
