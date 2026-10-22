@@ -51,7 +51,7 @@ test('a queue.json that is not JSON or not a queue gives its workflow a problem 
   ]);
   expect(views[3]?.problem).toContain('/version');
   const beta = index(m.registryDir).find((repo) => repo.name === 'beta');
-  expect([beta?.runs.length, beta?.problem, beta?.queues.length]).toEqual([1, undefined, 4]);
+  expect([beta?.runs.length, beta?.problem, beta?.queues.length]).toEqual([2, undefined, 4]);
 });
 
 test('a queue/ linked out of .sail-runs/, a workflow directory linked out, a queue.json linked to a secret, and names that are not plain lead nowhere and read no byte from outside', () => {

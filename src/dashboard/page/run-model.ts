@@ -6,6 +6,9 @@
 // a file nothing re-validates on read, so every field is checked before use. An event whose fields don't fit is counted
 // as unreadable, and a type the fold doesn't handle is counted on its card, or on the run when it has none. Nothing
 // here throws.
+//
+// A group's `all:start` lists it in `groups`, once however often a resume reports it, and each call that starts while it
+// is open and is one of its keys carries its index, so the view can put the group's cards side by side.
 import type { RosterEntry } from '../../engine/roster';
 import type { SailEvent } from '../../events/types';
 import { text } from './html';
@@ -76,6 +79,8 @@ export interface StageCard {
   steps: CardStep[];
   /** The loop iteration open when the call started, the innermost when loops nest. */
   iteration?: { loop: string; iteration: number; max: number };
+  /** The index in `groups` of the group the call ran in. */
+  group?: number;
   resultPath?: string;
   /** The call's last agent message. */
   message?: string;
@@ -115,6 +120,8 @@ export interface RunModel {
   loops: Record<string, { iteration: number; max: number; exited?: 'break' | 'exceeded' }>;
   /** The loops open now, innermost last. */
   openLoops: string[];
+  /** Each group, in the order its first `all:start` came: its keys in declaration order, and whether it has ended. */
+  groups: { keys: string[]; ended: boolean }[];
   routes: { at: string; value: string; took: string }[];
   end?: { status: string; stopReason?: string; message?: string };
   /** The `ts` of the `run:end` in `end`. */
@@ -143,6 +150,7 @@ export function emptyRun(): RunModel {
     pending: [],
     loops: dict(),
     openLoops: [],
+    groups: [],
     routes: [],
     toolInputs: dict(),
     lastSeq: 0,
@@ -344,6 +352,8 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       if (key === undefined || stage === undefined || call === undefined || tryNumber === undefined) return false;
       if (kind === undefined || !STAGE_KINDS.has(kind) || key.includes('/')) return false;
       const started = card ?? newCard(model, { key, stage, call, kind: kind as CardKind, startedAt: ts });
+      const group = model.groups.findIndex((each) => !each.ended && each.keys.includes(key));
+      if (group !== -1) started.group ??= group;
       started.state = 'running';
       started.tries = Math.max(started.tries, tryNumber);
       const stageModel = str(e.model) ?? model.roster?.stages[stage]?.model;
@@ -402,6 +412,19 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       if (reason !== 'break' && reason !== 'exceeded') return false;
       model.loops[loop] = { iteration: iterations, max, exited: reason };
       model.openLoops = model.openLoops.filter((name) => name !== loop);
+      return true;
+    }
+    case 'all:start':
+    case 'all:end': {
+      const keys = strings(e.keys);
+      if (keys === undefined || keys.length === 0) return false;
+      const same = (each: { keys: string[] }) =>
+        each.keys.length === keys.length && each.keys.every((entry, i) => entry === keys[i]);
+      const known = model.groups.find(same);
+      if (type === 'all:end') {
+        if (known === undefined) return false;
+        known.ended = true;
+      } else if (known === undefined) model.groups.push({ keys, ended: false });
       return true;
     }
     case 'workflow:route': {

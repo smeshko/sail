@@ -36,6 +36,7 @@ test('the committed dashboard views are what the fixtures render now', () => {
     'run-golden.html',
     'run-fake-2.html',
     'run-fake-3.html',
+    'run-review.html',
     'inspector-fake-2-implement-1-permissions.html',
     'inspector-golden-implement-2-overview.html',
     'inspector-golden-implement-2-files.html',

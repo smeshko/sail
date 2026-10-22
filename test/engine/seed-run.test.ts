@@ -19,6 +19,7 @@ import { readStatus } from '../../src/engine/run-dir';
 import { type RunHeader, readRunHeader } from '../../src/engine/run-header';
 import { openSeededRun, type SeededRunOptions } from '../../src/engine/seed-run';
 import { fakeAdapters } from '../helpers/adapters';
+import { TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
 import { cutJournal, runIds, SOURCE_BRANCH, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -359,5 +360,19 @@ test('a link a reused call does not point at is copied as a link, and seeding op
     const opened = openedFrom(await seed(repo, { fromRun: from.runId, stage: 'implement' }));
     const copied = join(opened.dir, '01-spec', 'call-1', 'in', 'brief.md');
     expect(lstatSync(copied).isSymbolicLink()).toBe(true);
+  });
+}, 60_000);
+
+test("seeding a stage whose first call belongs to a group copies only the calls before the group, and none of its members, though the stage's call was journaled last", async () => {
+  await withTempRepo(async (repo) => {
+    const { runId: fromRun, keys } = await trioRunInto(repo.dir);
+    expect(keys).toEqual(TRIO_JOURNAL);
+    const opened = openedFrom(await seed(repo, { fromRun, stage: 'a' }));
+    expect({
+      journal: readJournal(opened.dir).entries.map((entry) => entry.key),
+      reused: opened.seeded?.entries.map((entry) => entry.key),
+      members: ['01-a', '02-b', '03-c'].filter((path) => existsSync(join(opened.dir, path))),
+      until: opened.until,
+    }).toEqual({ journal: ['intake#1'], reused: ['intake#1'], members: [], until: 'a' });
   });
 }, 60_000);

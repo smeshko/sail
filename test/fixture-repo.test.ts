@@ -1,6 +1,7 @@
 // The fixture repository's .sail/: the stages and ticket-to-pr workflow a repository would write. It must load in Bun
 // and match the golden run, which is generated from a run of it: the same roster, and schemas that accept every output
-// the golden run recorded.
+// the golden run recorded. Its review workflow, six reviewers in one group, has no golden run: the roster compared is
+// ticket-to-pr's stages, the shared ones and its own.
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
@@ -20,9 +21,9 @@ const { models } = Bun.YAML.parse(readFileSync(join(sail, 'project.yaml'), 'utf8
 };
 
 const sources = [...new Bun.Glob('**/*.ts').scanSync({ cwd: sail, dot: true })].sort();
-/** Each stage folder, shared or private, under its name: `spec` → `workflows/ticket-to-pr/stages/spec`. */
+/** Each stage folder ticket-to-pr reaches, by name: `spec` → `workflows/ticket-to-pr/stages/spec`. */
 const stageFolders = new Map(
-  ['stages/*/stage.ts', 'workflows/*/stages/*/stage.ts']
+  ['stages/*/stage.ts', 'workflows/ticket-to-pr/stages/*/stage.ts']
     .flatMap((pattern) => [...new Bun.Glob(pattern).scanSync({ cwd: sail })])
     .map((path) => [basename(dirname(path)), dirname(path)]),
 );
@@ -77,7 +78,7 @@ test('the typecheck includes every fixture .ts file, though tsc skips dot-direct
   );
   expect(tsc.exitCode).toBe(0);
   const listed = new Set(tsc.stdout.toString().split('\n'));
-  expect(sources.length).toBe(8);
+  expect(sources.length).toBe(15);
   expect(sources.filter((path) => !listed.has(join(sail, path)))).toEqual([]);
 });
 
@@ -163,6 +164,12 @@ test('no prompt asks the model for a count: a count a validator can derive is de
   const prompts = [...new Bun.Glob('**/prompt.md').scanSync({ cwd: sail, dot: true })].sort();
   expect(prompts).toEqual([
     'stages/implement/prompt.md',
+    'workflows/review/stages/architecture/prompt.md',
+    'workflows/review/stages/coverage/prompt.md',
+    'workflows/review/stages/performance/prompt.md',
+    'workflows/review/stages/security/prompt.md',
+    'workflows/review/stages/side-effects/prompt.md',
+    'workflows/review/stages/style/prompt.md',
     'workflows/ticket-to-pr/stages/describe/prompt.md',
     'workflows/ticket-to-pr/stages/self-review/prompt.md',
     'workflows/ticket-to-pr/stages/spec/prompt.md',

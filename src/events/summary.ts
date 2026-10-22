@@ -8,6 +8,10 @@
 // A seeded run's reused calls arrive as `journal:append` events carrying `fromRun`. Each is listed among the calls, in
 // event order, with that `fromRun` and no duration, and counts in no total: the totals are this run's own work.
 //
+// A group's calls are listed among the calls like any other, in `stage:start` order, and the group itself in `groups`:
+// its keys in declaration order from its `all:start`, and its duration once its `all:end` came. A resume that runs the
+// rest of a group reports its `all:start` again, and the group is listed once.
+//
 // The run's ticket is the one its intake fetched: the first `ticket:fetched` under the intake's key. A script step's
 // `sail port ticket-source get` emits one too, under its own key, and names another fetch, not the run's ticket.
 import { INTAKE_KEY } from '../engine/intake';
@@ -53,6 +57,12 @@ export interface CallEntry {
   fromRun?: string;
 }
 
+/** One group: its keys in declaration order, and how long it took once it ended. */
+export interface GroupEntry {
+  keys: string[];
+  durationMs?: number;
+}
+
 /** Tokens and dollars. */
 export interface Usage {
   inputTokens?: number;
@@ -80,6 +90,8 @@ export interface Summary {
   calls: CallEntry[];
   loops?: Record<string, { iterations: number; max: number }>;
   routes?: { at: string; value: unknown; took: string }[];
+  /** The calls that ran together, each group's keys in declaration order: present only when the run had a group. */
+  groups?: GroupEntry[];
   totals: {
     stageCalls: number;
     steps: number;
@@ -149,6 +161,8 @@ export interface SummaryState {
   feedback: Map<string, string>;
   loops: Map<string, { iterations: number; max: number }>;
   routes: { at: string; value: unknown; took: string }[];
+  /** Each group, in the order its first `all:start` came. */
+  groups: GroupEntry[];
   journaledSinceRoute: boolean;
   totals: {
     toolCalls: number;
@@ -188,6 +202,7 @@ export function emptyState(): SummaryState {
     feedback: new Map(),
     loops: new Map(),
     routes: [],
+    groups: [],
     journaledSinceRoute: false,
     totals: { toolCalls: 0, denials: 0, replays: 0, tokens: {}, costUsd: 0 },
   };
@@ -240,6 +255,14 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
     case 'workflow:route':
       foldRoute(state, event);
       break;
+    case 'all:start':
+      if (groupOf(state, event.keys) === undefined) state.groups.push({ keys: [...event.keys] });
+      break;
+    case 'all:end': {
+      const group = groupOf(state, event.keys);
+      if (group !== undefined) group.durationMs = event.durationMs;
+      break;
+    }
     case 'journal:append':
       state.journaledSinceRoute = true;
       if (event.fromRun !== undefined) reuseCall(state, event, event.fromRun);
@@ -368,6 +391,10 @@ function raiseLoop(state: SummaryState, name: string, iterations: number, max: n
   state.loops.set(name, { iterations: Math.max(state.loops.get(name)?.iterations ?? 0, iterations), max });
 }
 
+/** The group listed with exactly these keys, in this order. */
+const groupOf = (state: SummaryState, keys: readonly string[]): GroupEntry | undefined =>
+  state.groups.find((group) => group.keys.length === keys.length && group.keys.every((key, i) => key === keys[i]));
+
 /** The same move reported again with no call journaled since is a resume's repeat, and is dropped. */
 function foldRoute(state: SummaryState, event: EventOf<'workflow:route'>): void {
   const last = state.routes.at(-1);
@@ -399,6 +426,7 @@ export function toSummary(state: SummaryState): Summary | undefined {
     calls: ended.map((call) => callEntry(state, call)),
     loops: Object.fromEntries([...state.loops].map(([name, loop]) => [name, { ...loop }])),
     routes: state.routes.map((route) => ({ ...route })),
+    groups: state.groups.length === 0 ? undefined : state.groups.map((group) => ({ ...group, keys: [...group.keys] })),
     totals: defined<Summary['totals']>({
       stageCalls: own.length,
       steps: own.reduce((sum, call) => sum + (call.kind === 'stage' ? endedSteps(call).length : 1), 0),

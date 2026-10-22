@@ -1,7 +1,7 @@
 // The run view: the run's header, its totals against its budget, its loops and routes, one stage card per call grouped
-// by loop iteration, the roster stages not called yet, the pull request it opened, and the CLI commands to copy. The
-// cards come from the run model, fed by the run's events. The totals, loops and routes come from the summary in the
-// index when there is one, and from the cards otherwise.
+// by loop iteration, a group's cards side by side under a header of their own, the roster stages not called yet, the
+// pull request it opened, and the CLI commands to copy. The cards come from the run model, fed by the run's events. The
+// totals, loops and routes come from the summary in the index when there is one, and from the cards otherwise.
 import type { Summary } from '../../events/summary';
 import { runCommands } from './commands';
 import { cost, duration, percent } from './format';
@@ -54,7 +54,10 @@ function pendingCard(entry: PendingCard): SafeHtml {
 <div class="c-agent">${entry.kind}${entry.model === undefined ? '' : html` <span class="c-model">${entry.model}</span>`}</div></div>`;
 }
 
-/** The cards in order, grouped: a run of cards in the same loop iteration under one header. */
+/**
+ * The cards in order, grouped: a run of cards in the same loop iteration under one header, and a group's cards under
+ * one of their own, which names the iteration too when the group ran in one.
+ */
 function groups(model: RunModel, ui: UiState, now: number): SafeHtml[] {
   const out: SafeHtml[] = [];
   let current: string | undefined;
@@ -66,14 +69,21 @@ function groups(model: RunModel, ui: UiState, now: number): SafeHtml[] {
   };
   model.cards.forEach((entry, place) => {
     const { iteration } = entry;
-    const id = iteration === undefined ? '' : `${iteration.loop}#${iteration.iteration}`;
+    const within = iteration === undefined ? '' : `${iteration.loop}#${iteration.iteration}`;
+    const group = entry.group === undefined ? undefined : model.groups[entry.group];
+    const id = group === undefined ? within : `${within}/all#${entry.group}`;
     if (id !== current) {
       flush();
       current = id;
-      header =
-        iteration === undefined
-          ? ''
-          : html`<div class="grp-t">${iteration.loop} · iteration ${iteration.iteration} of ${iteration.max}</div>`;
+      const loop =
+        iteration === undefined ? '' : `${iteration.loop} · iteration ${iteration.iteration} of ${iteration.max}`;
+      if (group === undefined) header = loop === '' ? '' : html`<div class="grp-t">${loop}</div>`;
+      else {
+        const running = model.cards.filter((each) => each.group === entry.group && each.state === 'running').length;
+        const open = group.ended ? '' : ` · ${running} running`;
+        const all = `run.all · ${group.keys.length} calls${open}`;
+        header = html`<div class="grp-t">${loop === '' ? all : `${loop} · ${all}`}</div>`;
+      }
     }
     members.push(card(entry, place, ui, now));
   });

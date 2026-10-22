@@ -1,4 +1,4 @@
-// Run-level type cases: what run.stage(), run.loop() and workflow() refuse, and what must compile.
+// Run-level type cases: what run.stage(), run.all(), run.loop() and workflow() refuse, and what must compile.
 // test/types/expect-error.test.ts proves that each directive's line fails with the code it names. Cases import only
 // from `sail` and `sail/intakes`, because the harness checks a copy of this file in a temp directory.
 import { agent, file, fromStep, gitDiff, script, stage, type Untrusted, untrusted, value, workflow, z } from 'sail';
@@ -32,6 +32,14 @@ const implement = agent('implement', {
   consumes: { spec: file('spec.md'), feedback: value(Feedback).optional() },
   produces: { 'diff.patch': 'file' },
   output: z.object({ notes: z.string() }),
+  permissions,
+  budget,
+});
+/** A second agent on the brief, with an output of its own: a group's results are typed call by call. */
+const triage = agent('triage', {
+  prompt,
+  consumes: { brief: file('brief.md') },
+  output: Findings,
   permissions,
   budget,
 });
@@ -109,6 +117,32 @@ export const compiles = workflow('compiles', { intake: ticket }, async (run) => 
   const ended: 'done' | 'blocked' | 'error' = redone.outcome;
   read(ended);
 
+  // run.all() types each call's result by its own stage, in the order given, and each narrows on its own outcome.
+  const [specced, triaged] = await run.all([
+    [spec, { brief: run.intake.files['brief.md'] }],
+    [triage, { brief: run.intake.files['brief.md'] }],
+  ]);
+  if (specced.outcome === 'done') read(specced.output.summary, specced.files['spec.md']);
+  if (triaged.outcome === 'blocked') return run.fail(triaged.reason);
+  read(triaged.output.findings);
+  // A stage that consumes nothing takes no bindings in a group either.
+  const [ran] = await run.all([[tests]]);
+  const scripted: 'passed' | 'failed' = ran.outcome;
+  read(scripted, ran.output.failed, ran.files['junit.xml']);
+  // { onError: 'return' } as a call's third element lets that call's result be an error.
+  const [soft, hard] = await run.all([[tests, {}, { onError: 'return' }], [tests]]);
+  if (soft.outcome === 'error') read(soft.reason);
+  else read(soft.output.ok);
+  read(hard.output.ok);
+  // A group built with .map() over a list of stages: each call as const, and each result typed by the list's stages.
+  const reviewers = [spec, triage];
+  const reviews = await run.all(
+    reviewers.map((reviewer) => [reviewer, { brief: run.intake.files['brief.md'] }] as const),
+  );
+  for (const each of reviews) if (each.outcome === 'blocked') read(each.reason);
+  const none: [] = await run.all([]);
+  read(none);
+
   const p = await run.stage(publish, { ticket: run.input, spec: s.files['spec.md'] });
   const settled: 'passed' | 'failed' = p.outcome;
   read(settled, p.files['pr-body.md']);
@@ -147,6 +181,24 @@ export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
   read(t.reason);
   // @ts-expect-error TS2367: without { onError: 'return' }, an error never reaches the workflow
   read(t.outcome === 'error');
+
+  // @ts-expect-error TS2322: a typed value where a file() is declared, in one call of a group
+  await run.all([[tests], [spec, { brief: run.input }]]);
+  // @ts-expect-error TS2741: the required binding `brief` is left out of a group's call
+  await run.all([[spec, {}]]);
+  const [unread] = await run.all([[spec, { brief: run.intake.files['brief.md'] }]]);
+  // @ts-expect-error TS2339: a group's agent result can't be read until blocked is ruled out
+  read(unread.output);
+  // @ts-expect-error TS2367: without { onError: 'return' }, a group's call never hands back an error
+  read(unread.outcome === 'error');
+  // A list whose calls are a union, as a .map() choosing onError per call gives, keeps the error on every result.
+  const mixed = [true, false].map((soft) =>
+    soft ? ([tests, {}, { onError: 'return' }] as const) : ([tests] as const),
+  );
+  for (const either of await run.all(mixed)) {
+    // @ts-expect-error TS2339: a call that may hand back an error can't be read before error is ruled out
+    read(either.output);
+  }
 
   // @ts-expect-error TS2322: onError takes only 'return'
   await run.stage(tests, {}, { onError: 'ignore' });

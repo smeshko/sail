@@ -88,6 +88,37 @@ test('appends number each entry and stamp it with the clock, one line each', () 
   expect(journalIssues.map((issue) => issue.path)).toEqual(['/resultPath', '/resultPath', '/resultPath']);
 });
 
+test("a group's call is journaled with the group's keys, in declaration order, and reads back with them", () => {
+  const dir = runDir();
+  createJournal(dir);
+  const group = ['style#1', 'coverage#1', 'security#1'];
+  expect(() => appendJournal(dir, { ...entry('coverage'), group }, at(1))).not.toThrow();
+  appendJournal(dir, entry('spec'), at(2));
+  expect(readJournal(dir).entries.map((e) => [e.key, e.group])).toEqual([
+    ['coverage#1', group],
+    ['spec#1', undefined],
+  ]);
+  expect(JSON.parse(text(dir).split('\n')[0] ?? '').group).toEqual(group);
+});
+
+test("a line whose group doesn't hold its own key is corruption, named by its line", () => {
+  const dir = runDir();
+  const stray = JSON.stringify({ seq: 2, ...entry('style'), group: ['coverage#1'], recordedAt: at(2).toISOString() });
+  writeFileSync(join(dir, JOURNAL_FILE), `${line(1, 'spec')}\n${stray}\n`);
+  const error = journalError(() => readJournal(dir));
+  expect(error.line).toBe(2);
+  expect(error.message).toContain(`${JOURNAL_FILE}:2 has a group that doesn't hold its key 'style#1'`);
+});
+
+test("an append refuses an entry whose group doesn't hold its key, a bug in sail, and writes nothing", () => {
+  const dir = runDir();
+  createJournal(dir);
+  expect(() => appendJournal(dir, { ...entry('style'), group: ['coverage#1'] }, at(1))).toThrow(
+    "'style#1' names a group that doesn't hold it, a bug in sail: coverage#1",
+  );
+  expect(text(dir)).toBe('');
+});
+
 test('the clock defaults to now', () => {
   const dir = runDir();
   createJournal(dir);

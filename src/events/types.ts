@@ -1,9 +1,10 @@
 // The event union: every line of a run's event stream, typed. It mirrors `sail.event.v1`, and
 // test/events/types.test.ts keeps the two in step. Each event is the envelope `{ seq, ts, type, runId }` with its
-// payload beside it. The families the engine emits have closed payloads, and a call-level event carries the key of the
-// call it belongs to. So do the provider families the port adapters emit: ticket:*, codehost:* and workspace:*, and the
-// families a harness emits, which the agent kind stamps with its call's key. The families later epics emit are declared
-// with open payloads, and close as they are built (ADR-0012). Types only, apart from `EVENT_TYPES` and
+// payload beside it. Every type has a closed payload here, and a call-level event carries the key of the call it belongs
+// to. So do the provider families the port adapters emit: ticket:*, codehost:* and workspace:*, and the families a
+// harness emits, which the agent kind stamps with its call's key. A group's all:start and all:end carry its keys and no
+// key of their own: a group is not a call. The schema still leaves some families open for the adapters to come
+// (ADR-0012), but nothing emits them other than as typed here. Types only, apart from `EVENT_TYPES` and
 // `QUEUE_EVENT_TYPES`, so importing this module does nothing.
 import type { ContractError } from '../engine/contract';
 import type { JournalEntry } from '../engine/journal';
@@ -84,7 +85,7 @@ type Outcome = JournalEntry['outcome'];
 /** Binding → where it came from, as `result.json`'s `consumed` records it. */
 type Consumed = Record<string, string | null>;
 
-/** The payload of each type this phase closes. A call-level type requires `key`, `<stage>#<call>[/<step>]`. */
+/** The payload of each type. A call-level type requires `key`, `<stage>#<call>[/<step>]`. */
 interface Payloads {
   'run:start': {
     source: RunHeader['source'];
@@ -191,6 +192,10 @@ interface Payloads {
     feedback?: { from: string };
   };
   'loop:exit': { loop: string; iterations: number; max: number; reason: 'break' | 'exceeded' };
+  /** A group starting: its keys in declaration order, and the ones this process starts now, all of them unless resumed. */
+  'all:start': { keys: string[]; running: string[] };
+  /** A group whose every call is journaled: each call's outcome, and how long the group took in this process. */
+  'all:end': { keys: string[]; outcomes: Record<string, Outcome>; durationMs: number };
   /** The last journaled call's key and outcome, and what the workflow did next: a call's key, `end` or `fail`. */
   'workflow:route': { at: string; value: Outcome; took: string };
   // The harness families. A harness emits them without a key, and the agent kind stamps its call's.
@@ -274,15 +279,7 @@ interface Payloads {
   'workspace:released': { path: string; kept: boolean };
 }
 
-type ClosedType = keyof Payloads;
-
-/** A family a later epic emits: any fields, and a key when it belongs to a call. */
-interface OpenPayload {
-  key?: string;
-  [field: string]: unknown;
-}
-
-type PayloadOf<T extends EventType> = T extends ClosedType ? Payloads[T] : OpenPayload;
+type PayloadOf<T extends EventType> = Payloads[T];
 
 /** One line of a run's event stream. */
 export type SailEvent = { [T in EventType]: Envelope & { type: T } & PayloadOf<T> }[EventType];

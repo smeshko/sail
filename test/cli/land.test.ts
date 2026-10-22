@@ -60,7 +60,7 @@ function ported(events: readonly SailEvent[]): string[] {
   return events.flatMap((event) => {
     const key = 'key' in event ? event.key : undefined;
     if (key === undefined || key.startsWith('intake#')) return [];
-    const e = event as Record<string, unknown>;
+    const e = event as unknown as Record<string, unknown>;
     if (event.type === 'codehost:labelled') return [`${key} ${event.type} ${e.label} ${e.change}`];
     if (event.type === 'ticket:updated') return [`${key} ${event.type} ${(e.change as { state: string }).state}`];
     if (event.type === 'codehost:merged') return [`${key} ${event.type} ${e.method} ${e.sha}`];
@@ -148,16 +148,16 @@ test('sail check type-checks the fixture with land added, and lists its five pri
       code: EXIT_OK,
       stderr: '',
       head: [
-        '.sail/ checked: 2 workflows, 11 stages',
+        '.sail/ checked: 3 workflows, 17 stages',
         '',
         'workflows',
         '  land          intake ticket  .sail/workflows/land/workflow.ts',
         '    private',
-        '      checks       script',
-        '      hand-over    script',
-        '      merge        script',
-        '      publish      script',
-        '      relabel      script',
+        '      checks        script',
+        '      hand-over     script',
+        '      merge         script',
+        '      publish       script',
+        '      relabel       script',
       ],
     });
   });

@@ -112,7 +112,7 @@ test("the package's own bin/sail, the one a script step finds first, prints the 
 test('sail check passes on the fixture, with sail resolved from the installed package', async () => {
   const result = await sh(['sail', 'check'], repo);
   expect(result.code).toBe(0);
-  expect(result.stdout.trimEnd().endsWith('.sail/ checked: 1 workflow, 6 stages')).toBe(true);
+  expect(result.stdout.trimEnd().endsWith('.sail/ checked: 2 workflows, 12 stages')).toBe(true);
   const declarations = readFileSync(join(repo, '.sail', 'sail.d.ts'), 'utf8');
   expect(declarations).toContain(join(installed.root, 'types'));
 }, 60_000);

@@ -10,6 +10,7 @@ import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import type { Summary } from '../../../src/events/summary';
 import { DASHBOARD_FIXTURES, FAKE_2_ID, FAKE_3_ID, GOLDEN_RUN, GOLDEN_RUN_ID } from '../../helpers/dashboard';
+import { FAKE_4_ID, REVIEW_KEYS } from '../../helpers/review-fixture';
 
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const summaryOf = (dir: string) => JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
@@ -118,4 +119,31 @@ test('a running card shows running and its time so far, a PR link is drawn only 
   expect(renderStatus(foldRun(readEvents(FAKE_2)), summaryOf(FAKE_2)).value).toBe(
     '<span>calls <b>3/3</b></span><span>tools <b>1</b></span><span class="w">denied <b>1</b></span><span>cost <b>$0.36</b></span><span class="spacer"></span><span>ended failed</span>',
   );
+});
+
+const FAKE_4 = join(DASHBOARD_FIXTURES, 'beta', FAKE_4_ID);
+
+test("a group's cards share one block headed run.all · 6 calls, side by side in its grid, the intake's card outside it, and while it runs the header counts its running calls", () => {
+  const events = readEvents(FAKE_4);
+  const markup = renderRun(foldRun(events), summaryOf(FAKE_4), initialUi(0), NOW).value;
+  expect(groups(markup)).toEqual(['-: intake#1', `run.all · 6 calls: ${REVIEW_KEYS.join(' ')}`]);
+  const firstEnd = events.findIndex((event) => event.type === 'stage:end' && event.key !== 'intake#1');
+  const running = renderRun(foldRun(events.slice(0, firstEnd + 1)), undefined, initialUi(0), NOW).value;
+  expect(groups(running)).toEqual(['-: intake#1', `run.all · 6 calls · 5 running: ${REVIEW_KEYS.join(' ')}`]);
+});
+
+test("a group inside a loop iteration is headed by the iteration and the group, and the iteration's other cards keep their own block", () => {
+  const events = readEvents(FAKE_4);
+  const at = events.findIndex((event) => event.type === 'all:start');
+  const ts = events[at]?.ts ?? '';
+  const looped = [
+    ...events.slice(0, at),
+    { seq: 900, ts, runId: FAKE_4_ID, type: 'loop:iteration', loop: 'rounds', iteration: 1, max: 2 },
+    ...events.slice(at),
+  ];
+  const markup = renderRun(foldRun(looped), undefined, initialUi(0), NOW).value;
+  expect(groups(markup)).toEqual([
+    '-: intake#1',
+    `rounds · iteration 1 of 2 · run.all · 6 calls: ${REVIEW_KEYS.join(' ')}`,
+  ]);
 });

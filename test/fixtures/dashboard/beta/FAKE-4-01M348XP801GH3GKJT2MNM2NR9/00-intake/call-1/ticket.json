@@ -1,0 +1,48 @@
+{
+  "ticketKey": "FAKE-4",
+  "title": "Review the --shout flag before it ships",
+  "url": "fake://tickets/FAKE-4",
+  "description": "Add a `--shout` flag to the `greet` command. With the flag, the whole greeting is printed in upper case.\n\n## Acceptance criteria\n\n- `greet Ada --shout` prints `HELLO, ADA!`\n- `greet Ada` still prints `Hello, Ada!`\n- `greet --help` lists `--shout`",
+  "state": {
+    "type": "started",
+    "name": "In Progress"
+  },
+  "labels": [
+    "sail"
+  ],
+  "comments": [
+    {
+      "author": "sail",
+      "body": "sail run FAKE-4-01M348XP801GH3GKJT2MNM2NR9 started",
+      "createdAt": "2026-10-22T07:41:13.828Z"
+    }
+  ],
+  "links": [],
+  "attachments": [],
+  "raw": {
+    "ticketKey": "FAKE-4",
+    "title": "Review the --shout flag before it ships",
+    "description": "Add a `--shout` flag to the `greet` command. With the flag, the whole greeting is printed in upper case.\n\n## Acceptance criteria\n\n- `greet Ada --shout` prints `HELLO, ADA!`\n- `greet Ada` still prints `Hello, Ada!`\n- `greet --help` lists `--shout`",
+    "state": {
+      "type": "started",
+      "name": "In Progress"
+    },
+    "labels": [
+      "sail"
+    ],
+    "comments": [
+      {
+        "author": "sail",
+        "body": "sail run FAKE-4-01M348XP801GH3GKJT2MNM2NR9 started",
+        "createdAt": "2026-10-22T07:41:13.828Z"
+      }
+    ],
+    "links": [],
+    "attachments": []
+  },
+  "acceptanceCriteria": [
+    "`greet Ada --shout` prints `HELLO, ADA!`",
+    "`greet Ada` still prints `Hello, Ada!`",
+    "`greet --help` lists `--shout`"
+  ]
+}

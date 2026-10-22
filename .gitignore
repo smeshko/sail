@@ -10,6 +10,8 @@ spikes/
 .sail-runs/
 node_modules/
 coverage/
+# The fixture's review workflow has a reviewer stage named coverage.
+!test/fixtures/repo/.sail/workflows/review/stages/coverage/
 .linear
 .DS_Store
 *.tgz
