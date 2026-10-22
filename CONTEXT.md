@@ -102,6 +102,10 @@ _Avoid_: interface (the TypeScript keyword), signature, spec (a document)
 One invocation of a stage by the workflow, numbered per stage. A loop that runs the implement stage twice makes `implement#1` and `implement#2`.
 _Avoid_: attempt, execution, stage run, invocation
 
+**Group**:
+The calls one `run.all()` makes at once. Their keys are assigned in the order given, before any starts, and each call is journaled as it completes, with the group's keys, so a resume runs only the ones not yet journaled.
+_Avoid_: batch, fan-out, parallel block
+
 **Try**:
 One execution of a call's body, in a directory of its own. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects.
 _Avoid_: attempt, retry (as a noun)
@@ -299,7 +303,7 @@ Re-executing the workflow function after every completed call, so journaled call
 _Avoid_: rerun, recovery, fast-forward
 
 **Determinism guard**:
-The check that fails a run when the workflow asks for a key sequence that diverges from the journal. That is the sign of non-deterministic workflow code or a mid-run change.
+The check that fails a run when the workflow asks for a key sequence that diverges from the journal, and, for a group, its whole key sequence. That is the sign of non-deterministic workflow code or a mid-run change.
 _Avoid_: replay check, drift detection
 
 **Result**:

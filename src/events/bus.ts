@@ -42,7 +42,7 @@ export function createBus(options: BusOptions): EventBus {
   let seq = options.firstSeq;
 
   // The envelope comes first, then the key, then the payload, so a written line reads in that order. The envelope is
-  // spread again last, since it is the bus's: an open payload's `seq`, `ts` or `runId` must not replace it.
+  // spread again last, since it is the bus's: a payload's `seq`, `ts` or `runId` must not replace it.
   function stamp(event: NewEvent): SailEvent {
     const { type, ...rest } = event;
     const { key, ...payload } = rest as { key?: string };

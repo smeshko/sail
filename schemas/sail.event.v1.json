@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.event.v1.json",
   "title": "sail event: one line of a run's or a queue's event stream",
-  "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. The families later epics emit keep open payloads until they are built. A watched workflow's queue event stream, .sail-runs/queue/<workflow>/events.ndjson, uses the same envelope without runId or key, with the workflow it belongs to: its watch set changes, polls, items and dispatches, and the runs the watcher adopted or resumed.",
-  "$comment": "Closed: run:start, run:end, intake:*, stage:*, step:*, input:materialised, script:*, output:*, file:*, journal:append, loop:*, workflow:route, error:timeout, error:crash, error:consumer, ticket:*, codehost:* and workspace:*. Open, and closed as their epics emit them (ADR-0012): all:*, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* and error:harness. The queue family follows error:consumer in the enum, alone may leave out runId, and is closed: watch:*, queue:polled, queue:item_added, queue:dispatched, queue:skipped_leased, queue:dropped, queue:parked, queue:error, run:adopted, run:resumed and queue:requeued. The root validates the envelope and allows additional properties for the open families. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
+  "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. A watched workflow's queue event stream, .sail-runs/queue/<workflow>/events.ndjson, uses the same envelope without runId or key, with the workflow it belongs to: its watch set changes, polls, items and dispatches, and the runs the watcher adopted or resumed.",
+  "$comment": "Closed: every type of a run's stream: run:start, run:end, intake:*, stage:*, step:*, input:materialised, prompt:rendered, script:*, output:*, file:*, journal:append, loop:*, all:*, workflow:route, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:*, error:*, ticket:*, codehost:* and workspace:*. The queue family follows error:consumer in the enum, alone may leave out runId, and is closed: watch:*, queue:polled, queue:item_added, queue:dispatched, queue:skipped_leased, queue:dropped, queue:parked, queue:error, run:adopted, run:resumed and queue:requeued. The root validates the envelope and allows additional properties, which each closed payload then refuses. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -119,6 +119,14 @@
     {
       "if": { "properties": { "type": { "const": "loop:exit" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/loopExit" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "all:start" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/allStart" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "all:end" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/allEnd" }
     },
     {
       "if": { "properties": { "type": { "const": "workflow:route" } }, "required": ["type"] },
@@ -694,6 +702,40 @@
         "reason": { "enum": ["break", "exceeded"] }
       },
       "required": ["loop", "iterations", "max", "reason"],
+      "unevaluatedProperties": false
+    },
+    "callKeys": {
+      "description": "call keys, each once",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+$" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "allStart": {
+      "description": "a group starting: its keys in declaration order, and the ones this process starts now",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "keys": { "$ref": "#/$defs/callKeys" },
+        "running": { "$ref": "#/$defs/callKeys" }
+      },
+      "required": ["keys", "running"],
+      "unevaluatedProperties": false
+    },
+    "allEnd": {
+      "description": "a group whose every call is journaled: each call's outcome, and this process's wall time for the group",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "keys": { "$ref": "#/$defs/callKeys" },
+        "outcomes": {
+          "type": "object",
+          "patternProperties": { "^[a-z0-9-]+#[0-9]+$": { "$ref": "#/$defs/outcome" } },
+          "additionalProperties": false
+        },
+        "durationMs": { "type": "number", "minimum": 0 }
+      },
+      "required": ["keys", "outcomes", "durationMs"],
       "unevaluatedProperties": false
     },
     "workflowRoute": {

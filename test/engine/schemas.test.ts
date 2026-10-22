@@ -239,10 +239,7 @@ test('event: the type is exhaustive, and runId is required', () => {
   expect(paths('sail.event.v1', omit(message, 'runId'))).toEqual(['/runId']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("event: all:start and all:end carry a group's keys, and refuse a missing or empty keys, a key that isn't a call's, an unknown outcome and a field they don't declare", () => {
+test("event: all:start and all:end carry a group's keys, and refuse a missing or empty keys, a key that isn't a call's, an unknown outcome and a field they don't declare", () => {
   const start = { ...envelope, type: 'all:start', keys: ['style#1', 'coverage#1'], running: ['coverage#1'] };
   const end = {
     ...envelope,

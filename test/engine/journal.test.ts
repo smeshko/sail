@@ -88,10 +88,7 @@ test('appends number each entry and stamp it with the clock, one line each', () 
   expect(journalIssues.map((issue) => issue.path)).toEqual(['/resultPath', '/resultPath', '/resultPath']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("a group's call is journaled with the group's keys, in declaration order, and reads back with them", () => {
+test("a group's call is journaled with the group's keys, in declaration order, and reads back with them", () => {
   const dir = runDir();
   createJournal(dir);
   const group = ['style#1', 'coverage#1', 'security#1'];
@@ -104,10 +101,7 @@ test
   expect(JSON.parse(text(dir).split('\n')[0] ?? '').group).toEqual(group);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("a line whose group doesn't hold its own key is corruption, named by its line", () => {
+test("a line whose group doesn't hold its own key is corruption, named by its line", () => {
   const dir = runDir();
   const stray = JSON.stringify({ seq: 2, ...entry('style'), group: ['coverage#1'], recordedAt: at(2).toISOString() });
   writeFileSync(join(dir, JOURNAL_FILE), `${line(1, 'spec')}\n${stray}\n`);
@@ -116,10 +110,7 @@ test
   expect(error.message).toContain(`${JOURNAL_FILE}:2 has a group that doesn't hold its key 'style#1'`);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("an append refuses an entry whose group doesn't hold its key, a bug in sail, and writes nothing", () => {
+test("an append refuses an entry whose group doesn't hold its key, a bug in sail, and writes nothing", () => {
   const dir = runDir();
   createJournal(dir);
   expect(() => appendJournal(dir, { ...entry('style'), group: ['coverage#1'] }, at(1))).toThrow(
