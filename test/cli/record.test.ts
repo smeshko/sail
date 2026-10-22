@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFi
 import { join } from 'node:path';
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { Recording } from '../../src/adapters/recording';
+import { recordedSecrets } from '../../src/cli/commands/run-workflow';
 import { EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
 import { runDirIn } from '../helpers/agent-fixture';
@@ -248,4 +249,36 @@ test('sail resume --record keeps spec#1.json from the suspended run, records the
     expect(after['spec#1.json']).toBe(afterFirst['spec#1.json']);
     expect(after['journal.txt']).toBe(resumed.journal);
   });
+});
+
+test('the secrets masked are every credential-named value of 8 characters or more, and the password in any URL (review #1.7)', () => {
+  const env = {
+    CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-aaaaaaaa',
+    GH_PAT: 'github_pat_bbbbbbbb',
+    AWS_SECRET_ACCESS_KEY: 'cccccccccccc',
+    GOOGLE_CREDENTIALS: '{"k":"dddddddd"}',
+    ANTHROPIC_CUSTOM_HEADERS: 'X-Api-Auth: eeeeeeee',
+    SESSION_COOKIE: 'ffffffffffff',
+    DB_PASSPHRASE: 'gggggggggggg',
+    HTTPS_PROXY: 'http://proxyuser:hhhhhhhh@proxy.example:8080',
+    DATABASE_URL: 'postgres://app:iiiiiiii@db.example/app',
+    SHORT_TOKEN: 'abc',
+    PATH: '/usr/bin:/bin',
+    HOME: '/home/someone',
+  };
+  expect(recordedSecrets(env).sort()).toEqual(
+    [
+      'sk-ant-oat01-aaaaaaaa',
+      'github_pat_bbbbbbbb',
+      'cccccccccccc',
+      '{"k":"dddddddd"}',
+      'X-Api-Auth: eeeeeeee',
+      'ffffffffffff',
+      'gggggggggggg',
+      'proxyuser:hhhhhhhh',
+      'hhhhhhhh',
+      'app:iiiiiiii',
+      'iiiiiiii',
+    ].sort(),
+  );
 });
