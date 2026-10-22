@@ -888,3 +888,21 @@ test('a ticket workflow and a pull-request workflow that both poll sail open und
     if (typeof started !== 'string') await started.stop();
   });
 });
+
+test('an add command for a pull-request workflow is rejected, naming what it polls, and queues nothing (review R1-5)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-r' }));
+    writePrWorkflow(w.sail, 'r', { watch: { label: 'sail-r', cap: 1 } });
+    seedPullRequests(w.sail, repo, []);
+    const watcher = await w.start(['a', 'r']);
+    await w.timers.advance(1000);
+    dropCommand(w.runs, { op: 'add', workflow: 'r', ticketKey: 'FAKE-1' });
+    await w.timers.advance(1000);
+    const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'r'), 'queue.json'), 'utf8')).items;
+    expect({ rejected: rejections(w.out), items }).toEqual({
+      rejected: ["workflow 'r' polls pull requests: only a workflow that polls tickets takes an add\n"],
+      items: [],
+    });
+    await watcher.stop();
+  });
+});
