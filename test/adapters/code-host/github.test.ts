@@ -572,10 +572,7 @@ const many = (count: number, fields: (number: number) => Partial<WorldSeedPull> 
     ...fields(number),
   }));
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('listDesignated reads the open pull requests 100 to a page until a short page, and lists the labelled ones that are no draft by number', async () => {
+test('listDesignated reads the open pull requests 100 to a page until a short page, and lists the labelled ones that are no draft by number', async () => {
   const on = world({
     pullRequests: many(150, (number) => ({
       labels: number % 50 === 0 || number === 149 ? ['sail'] : [],
@@ -592,10 +589,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('listDesignated reads at most 10 pages: a 10th page that is full rejects as invalid, and no 11th is asked for', async () => {
+test('listDesignated reads at most 10 pages: a 10th page that is full rejects as invalid, and no 11th is asked for', async () => {
   const on = world({ pullRequests: many(1001, (number) => ({ labels: number === 1 ? ['sail'] : [] })) });
   const error = await rejection(host(on).listDesignated('sail'));
   expect({ failure: portFailure(error), pages: on.routes().length, last: on.routes().at(-1) }).toEqual({
@@ -605,10 +599,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a fork's pull request, open and labelled, is never listed, a deleted fork's head counts as one, and the details read fork: true for both", async () => {
+test("a fork's pull request, open and labelled, is never listed, a deleted fork's head counts as one, and the details read fork: true for both", async () => {
   const on = world({
     pullRequests: [
       { number: 7, head: 'sail/designated', labels: ['sail'] },
@@ -625,10 +616,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("getPullRequest reads the pull request, then its conversation comments 100 to a page, oldest first: a null body reads '', with the author's login and GitHub's base sha, and a missing one asks for no comments", async () => {
+test("getPullRequest reads the pull request, then its conversation comments 100 to a page, oldest first: a null body reads '', with the author's login and GitHub's base sha, and a missing one asks for no comments", async () => {
   const comments = Array.from({ length: 101 }, (_, at) => ({ user: `reviewer-${at + 1}`, body: `Comment ${at + 1}.` }));
   const on = world({
     pullRequests: [{ number: 7, head: 'sail/designated', labels: ['sail'], body: null, user: 'ada', comments }],
@@ -654,15 +642,16 @@ test
     body: '',
     author: 'ada',
     baseSha: main.stdout.toString().trim(),
-    comments: [101, { author: 'reviewer-1', body: 'Comment 1.', createdAt: '2026-10-01T00:00:00.000Z' }, 'Comment 101.'],
+    comments: [
+      101,
+      { author: 'reviewer-1', body: 'Comment 1.', createdAt: '2026-10-01T00:00:00.000Z' },
+      'Comment 101.',
+    ],
     missing: [{ port: 'codeHost', op: 'getPullRequest', code: 'not_found' }, ['GET /repos/o/r/pulls/99']],
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("with the pulls list and a pull request's comments answered 401 echoing the token, listDesignated and getPullRequest reject unauthorized, and neither error holds it", async () => {
+test("with the pulls list and a pull request's comments answered 401 echoing the token, listDesignated and getPullRequest reject unauthorized, and neither error holds it", async () => {
   const on = world();
   const adapter = host(on);
   const echo = { status: 401, body: { message: `Bad credentials: ${TOKEN}`, token: TOKEN } };

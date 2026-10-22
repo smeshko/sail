@@ -150,10 +150,7 @@ export function codeHostSuite(
     expectValidEvents(capture);
   });
 
-  // biome-ignore format: TDD-PENDING TASK-002
-  test
-    .skip // TDD-PENDING TASK-002
-    .skipIf(lacks('listDesignated'))(
+  test.skipIf(lacks('listDesignated'))(
     `${label}: a pull request opened from a pushed branch is then listed as designated (needs listDesignated)`,
     async () => {
       const { adapter, world } = await start();
@@ -230,16 +227,16 @@ export function codeHostSuite(
     },
   );
 
-  // biome-ignore format: TDD-PENDING TASK-002
-  test
-    .skip // TDD-PENDING TASK-002
-    .skipIf(lacks('listDesignated'))(
+  test.skipIf(lacks('listDesignated'))(
     `${label}: listDesignated lists the designated pull request, and none of the draft, the closed or the unlabelled one (needs listDesignated)`,
     async () => {
       const { adapter, world } = await start();
       const settled = await settle(adapter.listDesignated(world.label));
       const listed = 'rejected' in settled ? [] : settled;
-      expect(['rejected' in settled ? settled : 'listed', listed.flatMap((pr) => parseIssues(PullRequest, pr))]).toEqual(['listed', []]);
+      expect([
+        'rejected' in settled ? settled : 'listed',
+        listed.flatMap((pr) => parseIssues(PullRequest, pr)),
+      ]).toEqual(['listed', []]);
       const held = numbers(listed);
       expect({
         designated: held.includes(world.designated),
@@ -248,10 +245,7 @@ export function codeHostSuite(
     },
   );
 
-  // biome-ignore format: TDD-PENDING TASK-002
-  test
-    .skip // TDD-PENDING TASK-002
-    (`${label}: getPullRequest answers its details, which parse, with the base it targets, not a fork, and a comment posted to it last`, async () => {
+  test(`${label}: getPullRequest answers its details, which parse, with the base it targets, not a fork, and a comment posted to it last`, async () => {
     const { adapter, world } = await start();
     await adapter.comment(world.designated, 'Reviewed by the suite.');
     const details = await adapter.getPullRequest(world.designated);

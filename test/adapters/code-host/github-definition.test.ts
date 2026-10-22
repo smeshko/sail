@@ -93,10 +93,7 @@ async function withWorld<T>(repo: TempRepo, token: string, fn: (world: GitHubWor
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('github resolves with GITHUB_TOKEN alone or SAIL_GITHUB_TOKEN alone, and with both it sends SAIL_GITHUB_TOKEN, to SAIL_GITHUB_API_URL, with the pull request and its comments', async () => {
+test('github resolves with GITHUB_TOKEN alone or SAIL_GITHUB_TOKEN alone, and with both it sends SAIL_GITHUB_TOKEN, to SAIL_GITHUB_API_URL, with the pull request and its comments', async () => {
   await withTempRepo(async (repo) => {
     const read = async (token: string, env: Record<string, string>) =>
       withWorld(repo, token, async (world, url) => {
@@ -150,10 +147,7 @@ test('an option github cannot read is refused, naming the option: a draft that i
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("without the repository option, a github.com origin names the repository, and any other origin is refused, naming the option and none of the URL's credentials", async () => {
+test("without the repository option, a github.com origin names the repository, and any other origin is refused, naming the option and none of the URL's credentials", async () => {
   await withTempRepo(async (repo) => {
     const env = { GITHUB_TOKEN };
     repo.git('remote', 'add', 'origin', '/tmp/origin.git');
