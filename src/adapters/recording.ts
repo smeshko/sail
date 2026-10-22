@@ -232,9 +232,11 @@ export function recordingHarness(inner: Harness, options: RecordingOptions): Har
       const { STAGE_IN: stageIn, STAGE_OUT: out } = request.env;
       const events: HarnessEvent[] = [];
       const raw: unknown[] = [];
-      const before = snapshot(out, stageIn);
+      let before: Map<string, string>;
       let result: HarnessResult;
       try {
+        // Inside the try: a file in $STAGE_OUT that can't be read is the recording's failure, and never a rejection.
+        before = snapshot(out, stageIn);
         result = await inner.run({
           ...request,
           onEvent: (event) => {
