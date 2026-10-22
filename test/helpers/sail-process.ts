@@ -90,6 +90,8 @@ export interface RunOnDisk {
   runId: string;
   workflow: string;
   ticketKey: string;
+  /** The run header's source: a ticket, or a pull request at a head sha. */
+  source: { kind: string; ticketKey?: string; number?: number; headSha?: string };
   via: string;
   startedAt: string;
   status: string;
@@ -121,6 +123,7 @@ export function runsIn(runs: string): RunOnDisk[] {
         runId,
         workflow: header.workflow.name,
         ticketKey: header.source.ticketKey,
+        source: header.source,
         via: header.source.via,
         startedAt: header.startedAt,
         status,

@@ -1,6 +1,6 @@
 // The runtime rules for a watched workflow: its interval, its bound, its label and an intake the watcher can poll for.
 import { expect, test } from 'bun:test';
-import { parseEvery, watchLabel, watchProblem } from '../../src/engine/watchable';
+import { parseEvery, pollKind, watchLabel, watchProblem } from '../../src/engine/watchable';
 import { intake, type Workflow, workflow, z } from '../../src/sdk/index';
 import { ticket } from '../../src/sdk/intakes';
 
@@ -71,10 +71,25 @@ test.each([
   expect(watchProblem(declared(options))).toBe(message);
 });
 
-test('watchProblem refuses an intake that accepts only pr, naming pr and the ticket-only polling', () => {
-  expect(watchProblem(declared({ watch: { every: '5m' }, maxConcurrentRuns: 2 }, prOnly as never))).toBe(
-    "its intake 'pr-review' accepts pr, and sail polls only ticket sources so far",
-  );
+const both = intake('both', { accepts: ['ticket', 'pr'], output: z.object({}) });
+const none = intake('none', { accepts: [], output: z.object({}) });
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('watchProblem takes an intake that accepts pr, refuses one that accepts both kinds or none, and pollKind names the kind a watched workflow polls (ADW-235)', () => {
+  const watch = { watch: { every: '5m' }, maxConcurrentRuns: 2 };
+  expect({
+    problems: [prOnly, both, none].map((on) => watchProblem(declared(watch, on as never))),
+    kinds: [pollKind(declared(watch)), pollKind(declared(watch, prOnly as never))],
+  }).toEqual({
+    problems: [
+      undefined,
+      "its intake 'both' accepts ticket and pr, and a watched workflow polls one kind of source",
+      "its intake 'none' accepts nothing, and sail polls only ticket and pr sources",
+    ],
+    kinds: ['ticket', 'pr'],
+  });
 });
 
 test("watchProblem finds nothing in an unwatched workflow, or in the fixture's watch on the ticket intake", () => {

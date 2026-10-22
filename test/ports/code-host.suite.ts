@@ -13,6 +13,7 @@ import {
   MergeResult,
   Posted,
   PullRequest,
+  PullRequestDetails,
   Pushed,
 } from '../../src/ports/types';
 import {
@@ -35,6 +36,10 @@ export interface CodeHostWorld {
   readonly designated: number;
   /** Labelled, and a draft. */
   readonly draft: number;
+  /** Open, not a draft, and without the label. */
+  readonly unlabelled: number;
+  /** Labelled, and closed. */
+  readonly closed: number;
   /** No such pull request. */
   readonly missing: number;
   /**
@@ -54,6 +59,12 @@ export type MakeCodeHost = (emit: ProviderEmit) => Promise<{ adapter: CodeHost; 
 export type Unsupported = 'listDesignated' | 'checks' | 'merge' | 'removeLabel';
 
 const numbers = (pullRequests: readonly PullRequest[]): number[] => pullRequests.map((pr) => pr.number);
+
+/** The numbers `listDesignated` lists, or how it rejected: settled, so a rejection fails the case's assertion. */
+async function listedNumbers(adapter: CodeHost, label: string): Promise<number[] | { rejected: unknown }> {
+  const listed = await settle(adapter.listDesignated(label));
+  return 'rejected' in listed ? listed : numbers(listed);
+}
 
 /** A merge result without its raw. */
 function merge(result: MergeResult): Record<string, unknown> {
@@ -139,17 +150,23 @@ export function codeHostSuite(
     expectValidEvents(capture);
   });
 
-  test.skipIf(lacks('listDesignated'))(
+  // biome-ignore format: TDD-PENDING TASK-002
+  test
+    .skip // TDD-PENDING TASK-002
+    .skipIf(lacks('listDesignated'))(
     `${label}: a pull request opened from a pushed branch is then listed as designated (needs listDesignated)`,
     async () => {
       const { adapter, world } = await start();
       const { cwd, branch } = await world.pushable();
       await adapter.push(cwd, branch);
-      const before = numbers(await adapter.listDesignated(world.label));
+      const before = await listedNumbers(adapter, world.label);
       const request = { base: world.base, head: branch, title: 'Listed', body: '', labels: [world.label] };
       const pr = await adapter.openPullRequest(request);
-      expect(before).not.toContain(pr.number);
-      expect(numbers(await adapter.listDesignated(world.label))).toContain(pr.number);
+      const after = await listedNumbers(adapter, world.label);
+      expect({
+        before: Array.isArray(before) ? before.includes(pr.number) : before,
+        after: Array.isArray(after) ? after.includes(pr.number) : after,
+      }).toEqual({ before: false, after: true });
     },
   );
 
@@ -213,16 +230,39 @@ export function codeHostSuite(
     },
   );
 
-  test.skipIf(lacks('listDesignated'))(
-    `${label}: listDesignated holds the designated pull request, but not the draft (needs listDesignated)`,
+  // biome-ignore format: TDD-PENDING TASK-002
+  test
+    .skip // TDD-PENDING TASK-002
+    .skipIf(lacks('listDesignated'))(
+    `${label}: listDesignated lists the designated pull request, and none of the draft, the closed or the unlabelled one (needs listDesignated)`,
     async () => {
       const { adapter, world } = await start();
-      const listed = await adapter.listDesignated(world.label);
-      expect(listed.flatMap((pr) => parseIssues(PullRequest, pr))).toEqual([]);
-      expect(numbers(listed)).toContain(world.designated);
-      expect(numbers(listed)).not.toContain(world.draft);
+      const settled = await settle(adapter.listDesignated(world.label));
+      const listed = 'rejected' in settled ? [] : settled;
+      expect(['rejected' in settled ? settled : 'listed', listed.flatMap((pr) => parseIssues(PullRequest, pr))]).toEqual(['listed', []]);
+      const held = numbers(listed);
+      expect({
+        designated: held.includes(world.designated),
+        others: [world.draft, world.closed, world.unlabelled].filter((number) => held.includes(number)),
+      }).toEqual({ designated: true, others: [] });
     },
   );
+
+  // biome-ignore format: TDD-PENDING TASK-002
+  test
+    .skip // TDD-PENDING TASK-002
+    (`${label}: getPullRequest answers its details, which parse, with the base it targets, not a fork, and a comment posted to it last`, async () => {
+    const { adapter, world } = await start();
+    await adapter.comment(world.designated, 'Reviewed by the suite.');
+    const details = await adapter.getPullRequest(world.designated);
+    expect(parseIssues(PullRequestDetails, details)).toEqual([]);
+    expect({
+      number: details.number,
+      base: details.base,
+      fork: details.fork,
+      last: details.comments.at(-1)?.body,
+    }).toEqual({ number: world.designated, base: world.base, fork: false, last: 'Reviewed by the suite.' });
+  });
 
   test(`${label}: every operation it offers on an unknown pull request rejects with not_found, naming the operation`, async () => {
     const { adapter, world, capture } = await start();

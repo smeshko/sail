@@ -308,14 +308,17 @@ test('a watched workflow with a cap of 0, written past the types, is refused, na
   });
 });
 
-test('a watched workflow whose own intake accepts only pr is refused, naming its workflow.ts', async () => {
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('a watched workflow whose own intake accepts both tickets and pull requests is refused, naming its workflow.ts', async () => {
   await withTempRepo(async (repo) => {
     const reviews = join(copyFixture(repo.dir), 'workflows', 'reviews');
     mkdirSync(reviews);
     writeFileSync(
       join(reviews, 'intake.ts'),
       "import { intake, z } from 'sail';\n\n" +
-        "export const reviewIntake = intake('reviews', { accepts: ['pr'], output: z.object({}) });\n",
+        "export const reviewIntake = intake('reviews', { accepts: ['ticket', 'pr'], output: z.object({}) });\n",
     );
     writeFileSync(
       join(reviews, 'workflow.ts'),
@@ -328,7 +331,7 @@ test('a watched workflow whose own intake accepts only pr is refused, naming its
       code: EXIT_REFUSED,
       stdout: '',
       stderr:
-        ".sail/workflows/reviews/workflow.ts  its intake 'reviews' accepts pr, and sail polls only ticket sources so far\n",
+        ".sail/workflows/reviews/workflow.ts  its intake 'reviews' accepts ticket and pr, and a watched workflow polls one kind of source\n",
     });
   });
 });

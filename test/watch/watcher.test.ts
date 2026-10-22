@@ -13,6 +13,7 @@ import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/regi
 import { startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
+import { seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
 import { queueEventIssues, queueEvents } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -867,5 +868,23 @@ test('an add, a requeue and a drop for a workflow outside the set are each rejec
       b: false,
     });
     await watcher.stop();
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('a ticket workflow and a pull-request workflow that both poll sail open under one watcher, and the registry claims sail once, for the ticket source (ADW-235)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail', cap: 1 }], tickets({ 'FAKE-1': 'sail' }));
+    writePrWorkflow(w.sail, 'r', { watch: { label: 'sail', cap: 1 } });
+    seedPullRequests(w.sail, repo, []);
+    const started = await w.start(['a', 'r']).catch((error: unknown) => String(error));
+    expect({
+      watching: typeof started === 'string' ? started : started.watching(),
+      labels: readEntry(w.registryDir, 'stub')?.watcher?.labels,
+      polled: w.events('r').filter((event) => event.type === 'queue:polled').map((event) => event.kind),
+    }).toEqual({ watching: ['a', 'r'], labels: ['sail'], polled: ['pr'] });
+    if (typeof started !== 'string') await started.stop();
   });
 });

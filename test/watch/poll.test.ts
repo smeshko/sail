@@ -4,10 +4,12 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createFakeCodeHost } from '../../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
+import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
-import type { Ticket } from '../../src/ports/types';
+import type { PullRequest, Ticket } from '../../src/ports/types';
 import { drainCommands, dropCommand } from '../../src/watch/inbox';
 import {
   createPoller,
@@ -18,6 +20,7 @@ import {
   type WatchTarget,
 } from '../../src/watch/poll';
 import { openQueue, type QueueFile, queueDir } from '../../src/watch/queue-store';
+import { stubAdapter } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
 import { copyFixture, write } from '../helpers/fixture';
 import { manualClock, queueEventIssues, queueEvents, ticket } from '../helpers/queue';
@@ -82,7 +85,16 @@ function target(
 ) {
   const store = openQueue({ runsDir: runs, workflow, label, now });
   if ('refused' in store) throw new Error(store.refused);
-  return { workflow, label, everyMs, maxConcurrentRuns: 1, ticketSource: source, store } satisfies WatchTarget;
+  return {
+    workflow,
+    kind: 'ticket',
+    label,
+    everyMs,
+    maxConcurrentRuns: 1,
+    ticketSource: source,
+    codeHost: NO_CODE_HOST,
+    store,
+  } satisfies WatchTarget;
 }
 
 /** The workflow's queue.json, which must exist. */
@@ -94,6 +106,9 @@ function queueFile(runs: string, workflow: string): QueueFile {
 const itemKeys = (runs: string, workflow: string) => queueFile(runs, workflow).items.map((item) => item.dedupKey);
 const events = (runs: string, workflow: string) =>
   queueEvents(queueDir(runs, workflow)).map(({ seq, ts, workflow: _, ...event }) => event);
+
+/** A CodeHost a ticket poll never calls. */
+const NO_CODE_HOST = stubAdapter('codeHost') as unknown as CodeHost;
 
 const unauthorized = new PortError('ticketSource', 'listDesignated', 'unauthorized', 'key expired');
 
@@ -358,7 +373,13 @@ test("openWatchTarget gives a fixture copy's ticket-to-pr its label, interval an
       state: join(repo.dir, 'state.json'),
     });
     const clock = manualClock(START);
-    const options = { sailDir: sail, config: { label: 'sail' }, ticketSource: source, now: clock };
+    const options = {
+      sailDir: sail,
+      config: { label: 'sail' },
+      ticketSource: source,
+      codeHost: NO_CODE_HOST,
+      now: clock,
+    };
     const opened = await openWatchTarget({ ...options, name: 'ticket-to-pr' });
     expect(opened).toMatchObject({ workflow: 'ticket-to-pr', label: 'sail', everyMs: 300_000 });
     if ('refused' in opened) throw new Error(opened.refused);
@@ -551,6 +572,7 @@ test("readWatch gives a fixture copy's ticket-to-pr its label, interval and cap 
     const options = { sailDir: sail, config: { label: 'sail' }, name: 'ticket-to-pr' };
     expect(await readWatch(options)).toEqual({
       workflow: 'ticket-to-pr',
+      kind: 'ticket',
       label: 'sail',
       everyMs: 300_000,
       maxConcurrentRuns: 2,
@@ -560,7 +582,156 @@ test("readWatch gives a fixture copy's ticket-to-pr its label, interval and cap 
       seed: join(sail, 'fake', 'tickets.json'),
       state: join(repo.dir, 'state.json'),
     });
-    const opened = await openWatchTarget({ ...options, ticketSource: source, now: manualClock(START) });
+    const opened = await openWatchTarget({
+      ...options,
+      ticketSource: source,
+      codeHost: NO_CODE_HOST,
+      now: manualClock(START),
+    });
     expect('refused' in opened ? opened : opened.maxConcurrentRuns).toBe(2);
+  });
+});
+
+// Pull requests (14.2's D9): a watched workflow on the `pr` intake polls the CodeHost, one queue item per head sha.
+
+/** The fake CodeHost's world: 1 designated, 2 a draft, 3 closed and 4 unlabelled, each from a branch of its own. */
+const PULLS = [
+  { number: 1, draft: false, state: 'open', labels: ['sail'] },
+  { number: 2, draft: true, state: 'open', labels: ['sail'] },
+  { number: 3, draft: false, state: 'closed', labels: ['sail'] },
+  { number: 4, draft: false, state: 'open', labels: [] },
+].map((pr) => ({
+  ...pr,
+  title: `Pull request ${pr.number}`,
+  body: '',
+  base: 'main',
+  head: `sail/FAKE-${pr.number}-x`,
+  headSha: `${pr.number}`.repeat(40),
+}));
+
+/** The fake CodeHost on a temp seed of `PULLS`, and its state file, which a test edits to move a head. */
+function fakeHost(dir: string): { host: CodeHost; state: string } {
+  const seed = join(dir, 'prs.json');
+  const world = {
+    remote: 'fake://codehost/stub',
+    defaultBranch: 'main',
+    branches: { main: 'a'.repeat(40) },
+    pullRequests: PULLS,
+  };
+  writeFileSync(seed, JSON.stringify(world));
+  const state = join(dir, 'prs-state.json');
+  return { host: createFakeCodeHost({ seed, state }), state };
+}
+
+/** A watched `pr` workflow, `r`, on `host`. */
+function prTarget(runs: string, host: CodeHost, now: () => Date): WatchTarget {
+  const store = openQueue({ runsDir: runs, workflow: 'r', label: 'sail', now });
+  if ('refused' in store) throw new Error(store.refused);
+  const ticketSource = stubAdapter('ticketSource') as unknown as TicketSource;
+  return {
+    workflow: 'r',
+    kind: 'pr',
+    label: 'sail',
+    everyMs: 60_000,
+    maxConcurrentRuns: 1,
+    ticketSource,
+    codeHost: host,
+    store,
+  };
+}
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("a pr workflow's poll queues the designated pull request as pr:<number>@<sha7>, and not the draft, the closed or the unlabelled one", async () => {
+  const dir = tempDir();
+  const clock = manualClock(START);
+  const r = prTarget(dir, fakeHost(dir).host, clock);
+  expect(await pollOnce(r, clock)).toBe('polled');
+  expect({ keys: itemKeys(dir, 'r'), events: events(dir, 'r'), issues: queueEventIssues(queueDir(dir, 'r')) }).toEqual({
+    keys: ['pr:1@1111111'],
+    events: [
+      {
+        type: 'queue:item_added',
+        dedupKey: 'pr:1@1111111',
+        source: { kind: 'pr', number: 1, headSha: '1'.repeat(40), branch: 'sail/FAKE-1-x' },
+        title: 'Pull request 1',
+      },
+      { type: 'queue:polled', kind: 'pr', label: 'sail', found: 1, added: 1, durationMs: 0 },
+    ],
+    issues: [],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('a new head sha is a new item beside the old one, and a sha already queued is never queued again, even once its item is done', async () => {
+  const dir = tempDir();
+  const clock = manualClock(START);
+  const { host, state } = fakeHost(dir);
+  const r = prTarget(dir, host, clock);
+  await pollOnce(r, clock);
+  expect(itemKeys(dir, 'r')).toEqual(['pr:1@1111111']);
+  r.store.done('pr:1@1111111');
+  await pollOnce(r, clock);
+  const again = r.store.snapshot().items.map((item) => `${item.dedupKey} ${item.state}`);
+  const moved = PULLS.map((pr) => (pr.number === 1 ? { ...pr, headSha: 'b'.repeat(40) } : pr));
+  writeFileSync(state, JSON.stringify({ remote: 'fake://codehost/stub', defaultBranch: 'main', branches: {}, pullRequests: moved }));
+  await pollOnce(r, clock);
+  expect({
+    again,
+    after: r.store.snapshot().items.map((item) => `${item.dedupKey} ${item.state}`),
+    added: events(dir, 'r')
+      .filter((event) => event.type === 'queue:polled')
+      .map((event) => event.added),
+  }).toEqual({
+    again: ['pr:1@1111111 done'],
+    after: ['pr:1@1111111 done', 'pr:1@bbbbbbb queued'],
+    added: [1, 0, 1],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("a CodeHost of the repository's own that answers a draft, a closed and an unlabelled pull request beside the designated one queues only the designated one", async () => {
+  const dir = tempDir();
+  const clock = manualClock(START);
+  const { host } = fakeHost(dir);
+  const answer: PullRequest[] = await Promise.all(PULLS.map((pr) => host.getPullRequest(pr.number)));
+  const r = prTarget(dir, { ...host, listDesignated: async () => answer }, clock);
+  expect(await pollOnce(r, clock)).toBe('polled');
+  expect(itemKeys(dir, 'r')).toEqual(['pr:1@1111111']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("an answer that is no list of pull requests fails a pr workflow's poll as the codeHost's invalid, and a codeHost that refuses the credentials pauses it", async () => {
+  const dir = tempDir();
+  const clock = manualClock(START);
+  const { host } = fakeHost(dir);
+  const odd = prTarget(dir, { ...host, name: 'odd', listDesignated: async () => ({ nope: true }) as never }, clock);
+  const failed = await pollOnce(odd, clock);
+  const refusing = {
+    ...host,
+    name: 'refusing',
+    listDesignated: async (): Promise<PullRequest[]> => {
+      throw new PortError('codeHost', 'listDesignated', 'unauthorized', 'bad token');
+    },
+  };
+  const paused = await pollOnce(prTarget(join(dir, 'other'), refusing, clock), clock);
+  const error = events(dir, 'r').find((event) => event.type === 'queue:error');
+  expect({
+    failed,
+    error: error === undefined ? undefined : [error.port, error.adapter, error.code],
+    paused,
+    pause: queueFile(join(dir, 'other'), 'r').polling.paused,
+  }).toEqual({
+    failed: 'failed',
+    error: ['codeHost', 'odd', 'invalid'],
+    paused: 'paused',
+    pause: { port: 'codeHost', adapter: 'refusing', code: 'unauthorized', message: 'codeHost.listDesignated: bad token', at: START },
   });
 });

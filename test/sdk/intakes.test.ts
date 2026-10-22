@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { z } from 'zod';
 import { render } from '../../src/engine/render';
 import { markUntrusted } from '../../src/engine/untrusted';
-import { TicketInput, ticket } from '../../src/sdk/intakes';
+import { PrInput, pr, TicketInput, ticket } from '../../src/sdk/intakes';
 import { isUntrusted } from '../../src/sdk/untrusted';
 
 const goldenIntake = join(
@@ -127,4 +128,55 @@ test("a prompt that prints the input's URL or an attachment's MIME type keeps a 
   expect(rendered.text.split(closing)).toHaveLength(3);
   expect(rendered.text).toContain('source="input.url"');
   expect(rendered.text).toContain('source="input.attachments.0.mimeType"');
+});
+
+/** The paths of the strings `schema` holds that are not marked untrusted, as `a.b[]`. */
+function unmarked(schema: z.ZodType, path = ''): string[] {
+  const def = schema.def as {
+    type: string;
+    shape?: Record<string, z.ZodType>;
+    element?: z.ZodType;
+    innerType?: z.ZodType;
+  };
+  if (def.type === 'string') return isUntrusted(schema) ? [] : [path];
+  if (def.type === 'object') {
+    return Object.entries(def.shape ?? {}).flatMap(([key, field]) =>
+      unmarked(field, path === '' ? key : `${path}.${key}`),
+    );
+  }
+  if (def.type === 'array' && def.element !== undefined) return unmarked(def.element, `${path}[]`);
+  if (def.type === 'optional' && def.innerType !== undefined) return unmarked(def.innerType, path);
+  return [];
+}
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('pr is the built-in intake for pull requests, and PrInput marks every string the host returned untrusted: only headSha, baseSha and ticketKey are left bare', () => {
+  expect(pr).toMatchObject({
+    kind: 'intake',
+    name: 'pr',
+    accepts: ['pr'],
+    produces: { 'pr.json': 'file', 'diff.patch': 'file', 'brief.md': 'file' },
+  });
+  expect({ output: pr.output === PrInput, unmarked: unmarked(PrInput) }).toEqual({
+    output: true,
+    unmarked: ['headSha', 'baseSha', 'ticketKey'],
+  });
+  // The URL is the host's, so it is marked, and checked as a URL too.
+  const pullRequest = {
+    number: 3,
+    url: 'not a url',
+    title: 'T',
+    body: '',
+    author: 'a',
+    base: 'main',
+    head: 'h',
+    headSha: 'c'.repeat(40),
+    baseSha: 'a'.repeat(40),
+    draft: false,
+    labels: [],
+    comments: [],
+  };
+  expect(PrInput.safeParse(pullRequest).error?.issues.map((issue) => issue.path)).toEqual([['url']]);
 });

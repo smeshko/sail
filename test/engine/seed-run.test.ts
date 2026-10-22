@@ -183,6 +183,27 @@ test.each<[string, (dir: string) => void, (runId: string) => Partial<SeededRunOp
   60_000,
 );
 
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ('seeding from a pull-request run is refused, naming its pull request, and leaves only the source run and the fakes', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const path = join(from.dir, 'run.json');
+    const { claim: _, ...header } = JSON.parse(readFileSync(path, 'utf8'));
+    const pr = { kind: 'pr', number: 3, headSha: 'c'.repeat(40), via: 'watch', forced: [] };
+    chmodSync(path, 0o644);
+    writeFileSync(path, `${JSON.stringify({ ...header, source: pr }, null, 2)}\n`);
+    const worktrees = repo.git('worktree', 'list', '--porcelain');
+    const result = await seed(repo, { fromRun: from.runId });
+    expect([result, runIds(repo.dir), repo.git('worktree', 'list', '--porcelain')]).toEqual([
+      { refused: `a seeded run starts from a ticket run: run ${from.runId} started from pull request #3` },
+      [from.runId],
+      worktrees,
+    ]);
+  });
+}, 60_000);
+
 test('a seeded run reads no ticket and claims nothing: the fake ticket state is as it was, and nothing it reports is about the ticket', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);

@@ -5,8 +5,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeCodeHost } from '../../../src/adapters/fake/code-host';
+import { PullRequestDetails } from '../../../src/ports/types';
 import { holdTempRepo } from '../../helpers/held-repo';
-import { captureEvents, portFailure, rejection } from '../../helpers/ports';
+import { captureEvents, parseIssues, portFailure, rejection } from '../../helpers/ports';
 import { codeHostSuite } from '../../ports/code-host.suite';
 
 const SEED = join(import.meta.dir, '..', '..', 'fixtures', 'repo', '.sail', 'fake', 'prs.json');
@@ -35,13 +36,34 @@ function files(edit?: (seed: { pullRequests: Record<string, unknown>[] }) => voi
 
 let pushes = 0;
 
+/** A pull request the fixture seed lacks, open and ready unless `fields` say otherwise. */
+const seeded = (number: number, fields: Record<string, unknown>) => ({
+  number,
+  title: `Pull request ${number}`,
+  body: '',
+  base: 'main',
+  head: `sail/FAKE-${number}`,
+  headSha: `${number}`.repeat(40).slice(0, 40),
+  draft: false,
+  state: 'open',
+  labels: ['sail'],
+  ...fields,
+});
+
+/** The fixture seed with an unlabelled pull request, 5, and a closed one that keeps its label, 6. */
+const suiteSeed = (seed: { pullRequests: Record<string, unknown>[] }) => {
+  seed.pullRequests.push(seeded(5, { labels: [] }), seeded(6, { state: 'closed' }));
+};
+
 codeHostSuite('fake', async (emit) => ({
-  adapter: createFakeCodeHost({ ...files(), env: repo().env, emit }),
+  adapter: createFakeCodeHost({ ...files(suiteSeed), env: repo().env, emit }),
   world: {
     label: 'sail',
     base: 'main',
     designated: 1,
     draft: 2,
+    unlabelled: 5,
+    closed: 6,
     missing: 99,
     pendingMerge: 3,
     refs: [
@@ -169,6 +191,51 @@ test("the fixture seed holds four pull requests, three of them designated, every
     labels: true,
     drafts: true,
     mergeMethods: ['merge', 'squash', 'rebase'],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("getPullRequest answers the details: the seed's body, author, fork and comments, a comment posted since last, and a baseSha that is branches[base] unless the seed gives one; with neither it is invalid", async () => {
+  const host = createFakeCodeHost(
+    files((seed) => {
+      Object.assign(seed.pullRequests[0] ?? {}, {
+        author: 'ada',
+        fork: true,
+        baseSha: 'a'.repeat(40),
+        comments: [{ author: 'bob', body: 'Looks good.' }],
+      });
+      seed.pullRequests.push(seeded(9, { base: 'release' }));
+    }),
+  );
+  await host.comment(1, 'Checks passed.');
+  const details = async (number: number) => {
+    const { body, author, baseSha, fork, comments } = await host.getPullRequest(number);
+    return { body, author, baseSha, fork, comments: comments?.map(({ author, body }) => `${author}: ${body}`) };
+  };
+  expect({
+    issues: parseIssues(PullRequestDetails, await host.getPullRequest(1)),
+    first: await details(1),
+    second: await details(2),
+    noBase: portFailure(await rejection(host.getPullRequest(9))),
+  }).toEqual({
+    issues: [],
+    first: {
+      body: "Links the changelog from the README's first section.",
+      author: 'ada',
+      baseSha: 'a'.repeat(40),
+      fork: true,
+      comments: ['bob: Looks good.', 'sail: Checks passed.'],
+    },
+    second: {
+      body: 'Adds `--version`.',
+      author: 'sail',
+      baseSha: 'f569e7f50659194ebd39f2f141e95091f40791da',
+      fork: false,
+      comments: [],
+    },
+    noBase: { port: 'codeHost', op: 'getPullRequest', code: 'invalid' },
   });
 });
 

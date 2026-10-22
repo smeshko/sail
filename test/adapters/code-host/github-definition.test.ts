@@ -93,7 +93,10 @@ async function withWorld<T>(repo: TempRepo, token: string, fn: (world: GitHubWor
   }
 }
 
-test('github resolves with GITHUB_TOKEN alone or SAIL_GITHUB_TOKEN alone, and with both it sends SAIL_GITHUB_TOKEN, to SAIL_GITHUB_API_URL', async () => {
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('github resolves with GITHUB_TOKEN alone or SAIL_GITHUB_TOKEN alone, and with both it sends SAIL_GITHUB_TOKEN, to SAIL_GITHUB_API_URL, with the pull request and its comments', async () => {
   await withTempRepo(async (repo) => {
     const read = async (token: string, env: Record<string, string>) =>
       withWorld(repo, token, async (world, url) => {
@@ -110,7 +113,7 @@ test('github resolves with GITHUB_TOKEN alone or SAIL_GITHUB_TOKEN alone, and wi
           matched: world.requests.map((request) => request.tokenMatched),
         };
       });
-    const answered = { name: 'github', number: 7, matched: [true] };
+    const answered = { name: 'github', number: 7, matched: [true, true] };
     expect([
       await read(GITHUB_TOKEN, { GITHUB_TOKEN }),
       await read(SAIL_TOKEN, { SAIL_GITHUB_TOKEN: SAIL_TOKEN }),
@@ -147,7 +150,10 @@ test('an option github cannot read is refused, naming the option: a draft that i
   });
 });
 
-test("without the repository option, a github.com origin names the repository, and any other origin is refused, naming the option and none of the URL's credentials", async () => {
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("without the repository option, a github.com origin names the repository, and any other origin is refused, naming the option and none of the URL's credentials", async () => {
   await withTempRepo(async (repo) => {
     const env = { GITHUB_TOKEN };
     repo.git('remote', 'add', 'origin', '/tmp/origin.git');
@@ -171,7 +177,7 @@ test("without the repository option, a github.com origin names the repository, a
           '/adapters/codeHost github could not be created: github codeHost: lab is not a github.com remote (https://gitlab.com/o/r.git): set the repository option, such as repository: owner/name',
         ],
       },
-      hub: ['GET /repos/o/r/pulls/7'],
+      hub: ['GET /repos/o/r/pulls/7', 'GET /repos/o/r/issues/7/comments?per_page=100&page=1'],
     });
   });
 });

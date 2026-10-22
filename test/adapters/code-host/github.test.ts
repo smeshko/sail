@@ -1,11 +1,14 @@
 // The github CodeHost: the port suite offline, on a scripted GitHub whose branches are a real bare origin, then what only
 // the adapter does. Opening again answers the open pull request (DECISIONS D2), the default branch is refused (D3), the
-// ticket key rides in the body (D9), Epic 14's operations aren't offered (D5) and the token leaves in nothing (D11).
+// ticket key rides in the body (D9), the operations Epic 14 has yet to add aren't offered (D5) and the token leaves in
+// nothing (D11). listDesignated pages through the open pull requests and keeps only the designated ones of this
+// repository, and getPullRequest reads the details with the conversation comments, paged (14.2's D11).
 //
 // Against GitHub itself, the suite runs only when SAIL_LIVE_CODE_HOST=1 (D14), on the sandbox repository that
-// SAIL_LIVE_GITHUB_REPOSITORY names, pushing from the clone SAIL_LIVE_GITHUB_CLONE, with SAIL_LIVE_GITHUB_LABEL and the
-// designated pull request SAIL_LIVE_GITHUB_DESIGNATED. The token comes from SAIL_GITHUB_TOKEN or GITHUB_TOKEN. Without
-// the switch the live suite is not registered at all.
+// SAIL_LIVE_GITHUB_REPOSITORY names, pushing from the clone SAIL_LIVE_GITHUB_CLONE, with SAIL_LIVE_GITHUB_LABEL, the
+// designated pull request SAIL_LIVE_GITHUB_DESIGNATED, an open draft labelled SAIL_LIVE_GITHUB_DRAFT, an open one
+// without the label SAIL_LIVE_GITHUB_UNLABELLED and a closed labelled one SAIL_LIVE_GITHUB_CLOSED. The token comes from
+// SAIL_GITHUB_TOKEN or GITHUB_TOKEN. Without the switch the live suite is not registered at all.
 import { describe, expect, setDefaultTimeout, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,15 +16,21 @@ import { createGitHubCodeHost, type GitHubCodeHostOptions } from '../../../src/a
 import type { ProviderEmit } from '../../../src/events/types';
 import type { CodeHost } from '../../../src/ports/code-host';
 import { PortError } from '../../../src/ports/errors';
-import { createGitHubWorld, type GitHubWorld, type GitHubWorldSeed, WORLD_API } from '../../helpers/github-world';
+import {
+  createGitHubWorld,
+  type GitHubWorld,
+  type GitHubWorldSeed,
+  WORLD_API,
+  type WorldSeedPull,
+} from '../../helpers/github-world';
 import { holdTempRepo } from '../../helpers/held-repo';
 import { withOrigin } from '../../helpers/origin';
-import { captureEvents, portFailure, rejection } from '../../helpers/ports';
+import { captureEvents, portFailure, rejection, settle } from '../../helpers/ports';
 import type { TempRepo } from '../../helpers/temp-repo';
 import { type CodeHostWorld, codeHostSuite, type Unsupported } from '../../ports/code-host.suite';
 
 const TOKEN = 'ghp_MARKER_adapter_0a7e44c2';
-const UNSUPPORTED: Unsupported[] = ['listDesignated', 'checks', 'merge', 'removeLabel'];
+const UNSUPPORTED: Unsupported[] = ['checks', 'merge', 'removeLabel'];
 const held = holdTempRepo();
 
 let origin: string | undefined;
@@ -50,7 +59,10 @@ function commit(repository: TempRepo, name: string): string {
   return repository.git('rev-parse', 'HEAD');
 }
 
-/** A world on the origin: pull request 7 open, designated and labelled `sail`, 8 a labelled draft, and issue 9. */
+/**
+ * A world on the origin: pull request 7 open, designated and labelled `sail`, 8 a labelled draft, 5 open without the
+ * label, 6 closed with it, and issue 9.
+ */
 function world(more: Partial<GitHubWorldSeed> = {}): GitHubWorld {
   const { origin: bare, env } = repo();
   return createGitHubWorld({
@@ -63,6 +75,8 @@ function world(more: Partial<GitHubWorldSeed> = {}): GitHubWorld {
     pullRequests: [
       { number: 7, head: 'sail/designated', labels: ['sail'] },
       { number: 8, head: 'sail/draft', draft: true, labels: ['sail'] },
+      { number: 5, head: 'sail/unlabelled' },
+      { number: 6, head: 'sail/closed', state: 'closed', labels: ['sail'] },
     ],
     issues: [9],
     ...more,
@@ -95,6 +109,8 @@ const offline: CodeHostWorld = {
   base: 'main',
   designated: 7,
   draft: 8,
+  unlabelled: 5,
+  closed: 6,
   missing: 99,
   refs: [
     ['7', 7],
@@ -117,7 +133,16 @@ describe('the port suite, offline', () => {
 });
 
 /** The live sandbox, from the environment: every variable is required. */
-function live(): { repository: string; clone: string; label: string; designated: number; token: string } {
+function live(): {
+  repository: string;
+  clone: string;
+  label: string;
+  designated: number;
+  draft: number;
+  unlabelled: number;
+  closed: number;
+  token: string;
+} {
   const need = (name: string): string => {
     const value = process.env[name];
     if (value === undefined || value === '') throw new Error(`the live suite needs ${name}`);
@@ -129,6 +154,9 @@ function live(): { repository: string; clone: string; label: string; designated:
     clone: need('SAIL_LIVE_GITHUB_CLONE'),
     label: need('SAIL_LIVE_GITHUB_LABEL'),
     designated: Number(need('SAIL_LIVE_GITHUB_DESIGNATED')),
+    draft: Number(need('SAIL_LIVE_GITHUB_DRAFT')),
+    unlabelled: Number(need('SAIL_LIVE_GITHUB_UNLABELLED')),
+    closed: Number(need('SAIL_LIVE_GITHUB_CLOSED')),
     token,
   };
 }
@@ -164,7 +192,9 @@ if (process.env.SAIL_LIVE_CODE_HOST === '1') {
           label: sandbox.label,
           base: 'main',
           designated: sandbox.designated,
-          draft: sandbox.designated,
+          draft: sandbox.draft,
+          unlabelled: sandbox.unlabelled,
+          closed: sandbox.closed,
           missing: 999_999,
           refs: [[`https://github.com/${sandbox.repository}/pull/${sandbox.designated}`, sandbox.designated]],
           pushable: async () => {
@@ -413,12 +443,11 @@ test('a title, body or comment that holds the token is refused as invalid, and n
   });
 });
 
-test("listDesignated, checks, merge and removeLabel reject as invalid, saying github doesn't support them yet, with no request and no event", async () => {
+test("checks, merge and removeLabel reject as invalid, saying github doesn't support them yet, with no request and no event", async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
   const errors = [
-    await rejection(adapter.listDesignated('sail')),
     await rejection(adapter.checks(7)),
     await rejection(adapter.merge(7, 'squash')),
     await rejection(adapter.removeLabel(7, 'sail')),
@@ -429,7 +458,7 @@ test("listDesignated, checks, merge and removeLabel reject as invalid, saying gi
     events: capture.events,
     capabilities: adapter.capabilities(),
   }).toEqual({
-    errors: ['listDesignated', 'checks', 'merge', 'removeLabel'].map((op) => [
+    errors: ['checks', 'merge', 'removeLabel'].map((op) => [
       'invalid',
       `codeHost.${op}: github doesn't support ${op} yet`,
     ]),
@@ -530,5 +559,129 @@ test('with every request answered 401 echoing the token, no message, raw or even
     marker: false,
     redacted: true,
     tokenSent: true,
+  });
+});
+
+// listDesignated and the details (14.2's D11).
+
+/** `count` open pull requests, numbered from `count` down to 1, as GitHub lists the newest first: `fields` for each. */
+const many = (count: number, fields: (number: number) => Partial<WorldSeedPull> = () => ({})): WorldSeedPull[] =>
+  Array.from({ length: count }, (_, at) => count - at).map((number) => ({
+    number,
+    head: `sail/many-${number}`,
+    ...fields(number),
+  }));
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('listDesignated reads the open pull requests 100 to a page until a short page, and lists the labelled ones that are no draft by number', async () => {
+  const on = world({
+    pullRequests: many(150, (number) => ({
+      labels: number % 50 === 0 || number === 149 ? ['sail'] : [],
+      draft: number === 149,
+    })),
+  });
+  const listed = await settle(host(on).listDesignated('sail'));
+  expect({ numbers: 'rejected' in listed ? listed : listed.map((pr) => pr.number), routes: on.routes() }).toEqual({
+    numbers: [50, 100, 150],
+    routes: [
+      'GET /repos/o/r/pulls?state=open&per_page=100&page=1',
+      'GET /repos/o/r/pulls?state=open&per_page=100&page=2',
+    ],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('listDesignated reads at most 10 pages: a 10th page that is full rejects as invalid, and no 11th is asked for', async () => {
+  const on = world({ pullRequests: many(1001, (number) => ({ labels: number === 1 ? ['sail'] : [] })) });
+  const error = await rejection(host(on).listDesignated('sail'));
+  expect({ failure: portFailure(error), pages: on.routes().length, last: on.routes().at(-1) }).toEqual({
+    failure: { port: 'codeHost', op: 'listDesignated', code: 'invalid' },
+    pages: 10,
+    last: 'GET /repos/o/r/pulls?state=open&per_page=100&page=10',
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("a fork's pull request, open and labelled, is never listed, a deleted fork's head counts as one, and the details read fork: true for both", async () => {
+  const on = world({
+    pullRequests: [
+      { number: 7, head: 'sail/designated', labels: ['sail'] },
+      { number: 13, head: 'patch-1', labels: ['sail'], fork: true, headSha: 'a'.repeat(40) },
+      { number: 14, head: 'patch-2', labels: ['sail'], fork: 'deleted', headSha: 'b'.repeat(40) },
+    ],
+  });
+  const adapter = host(on);
+  const forks = await Promise.all([7, 13, 14].map(async (number) => (await adapter.getPullRequest(number)).fork));
+  const listed = await settle(adapter.listDesignated('sail'));
+  expect({ listed: 'rejected' in listed ? listed : listed.map((pr) => pr.number), forks }).toEqual({
+    listed: [7],
+    forks: [false, true, true],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("getPullRequest reads the pull request, then its conversation comments 100 to a page, oldest first: a null body reads '', with the author's login and GitHub's base sha, and a missing one asks for no comments", async () => {
+  const comments = Array.from({ length: 101 }, (_, at) => ({ user: `reviewer-${at + 1}`, body: `Comment ${at + 1}.` }));
+  const on = world({
+    pullRequests: [{ number: 7, head: 'sail/designated', labels: ['sail'], body: null, user: 'ada', comments }],
+  });
+  const adapter = host(on);
+  const pr = await adapter.getPullRequest(7);
+  const read = on.routes();
+  const missing = await rejection(adapter.getPullRequest(99));
+  const main = Bun.spawnSync(['git', 'rev-parse', 'main'], { cwd: repo().origin, env: repo().env });
+  expect({
+    read,
+    body: pr.body,
+    author: pr.author,
+    baseSha: pr.baseSha,
+    comments: [pr.comments?.length, pr.comments?.[0], pr.comments?.at(-1)?.body],
+    missing: [portFailure(missing), on.routes().slice(read.length)],
+  }).toEqual({
+    read: [
+      'GET /repos/o/r/pulls/7',
+      'GET /repos/o/r/issues/7/comments?per_page=100&page=1',
+      'GET /repos/o/r/issues/7/comments?per_page=100&page=2',
+    ],
+    body: '',
+    author: 'ada',
+    baseSha: main.stdout.toString().trim(),
+    comments: [101, { author: 'reviewer-1', body: 'Comment 1.', createdAt: '2026-10-01T00:00:00.000Z' }, 'Comment 101.'],
+    missing: [{ port: 'codeHost', op: 'getPullRequest', code: 'not_found' }, ['GET /repos/o/r/pulls/99']],
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("with the pulls list and a pull request's comments answered 401 echoing the token, listDesignated and getPullRequest reject unauthorized, and neither error holds it", async () => {
+  const on = world();
+  const adapter = host(on);
+  const echo = { status: 401, body: { message: `Bad credentials: ${TOKEN}`, token: TOKEN } };
+  on.inject('GET /pulls', echo);
+  on.inject('GET /issues/7/comments', echo);
+  const errors = [await rejection(adapter.listDesignated('sail')), await rejection(adapter.getPullRequest(7))];
+  const said = JSON.stringify(
+    errors.map((error) => (error instanceof PortError ? [error.message, error.raw] : String(error))),
+  );
+  expect({
+    failures: errors.map(portFailure),
+    marker: said.includes('MARKER'),
+    redacted: said.includes('Bad credentials: [redacted]'),
+  }).toEqual({
+    failures: [
+      { port: 'codeHost', op: 'listDesignated', code: 'unauthorized' },
+      { port: 'codeHost', op: 'getPullRequest', code: 'unauthorized' },
+    ],
+    marker: false,
+    redacted: true,
   });
 });

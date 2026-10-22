@@ -150,3 +150,20 @@ test("a spawned resume gets resume and the run id, runs in the root in a process
   const pgid = Number(lines.find((line) => line.startsWith('pgid: '))?.slice('pgid: '.length));
   expect([pgid, spawned.pid > 0]).toEqual([spawned.pid, true]);
 });
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ('a dispatched pull-request run gets #<number>, its workflow, --dispatch with the run id and --head-sha with the queued sha', async () => {
+  const dir = tempDir();
+  const root = join(dir, 'repo');
+  mkdirSync(root);
+  const runs = join(root, '.sail-runs');
+  const runId = 'pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+  const headSha = 'c'.repeat(40);
+  const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: join(dir, 'home'), SAIL_SPAWN_MARK: 'pr' };
+  const spawned = spawnRun({ root, runsDir: runs, workflow: 'r', pr: { number: 12, headSha }, runId, env, cli: ['/bin/sh', fakeSail(dir)] });
+  expect(await spawned.exited).toBe(3);
+  const [argv] = readFileSync(dispatchLog(runs, 'r', runId), 'utf8').split('\n');
+  expect(argv).toBe(`argv: #12 --workflow r --dispatch ${runId} --head-sha ${headSha}`);
+});
