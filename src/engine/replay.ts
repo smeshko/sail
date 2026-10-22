@@ -1,6 +1,7 @@
 // One replay: the workflow function run once from the top against the journal's entries (ADR-0001). Each journaled
 // `run.stage()` returns its recorded result, and the replay ends at the first of these:
 //   - the first call the journal doesn't hold, which the runtime then runs and journals before the next replay
+//   - the first group the journal doesn't hold whole: its calls not journaled yet, which the runtime runs at once
 //   - the workflow returning, or `run.fail()`
 //   - an `error` the call didn't ask for, a replay that diverges from the journal, or a call that can't start
 //
@@ -14,6 +15,12 @@
 //
 // Replay goes by position: request n must be journal entry n. That is how a request finds its result, and it catches a
 // workflow whose calls changed between replays, which a lookup by key would silently accept.
+//
+// A group, `run.all()`, keys its calls in the order given before it looks at the journal, so the same stage twice gets
+// two consecutive calls. Its calls are journaled as they complete, so its lines are one run of entries in completion
+// order, each carrying the group's keys in declaration order: that list is what the determinism guard compares, since
+// the keys alone can't show a reorder. Its journaled calls come back in declaration order. A group with calls left is
+// the journal's last: nothing else could be journaled while the workflow waited for it.
 //
 // Every replay passes the same moves again, so the loop and route events are emitted only past the journal's end, once
 // every journaled call has been handed back. A move there is new: the workflow asking for a call the journal doesn't
@@ -42,10 +49,14 @@ export interface PendingCall {
   definition: StageDefinition;
   stageFile: string;
   supplied: Record<string, Supplied>;
+  /** The keys of the group the call belongs to, in declaration order, when it belongs to one. */
+  group?: string[];
 }
 
 export type ReplayEnd =
   | { kind: 'call'; call: PendingCall }
+  /** A group the journal doesn't hold whole: its keys in declaration order, and its calls not journaled yet. */
+  | { kind: 'group'; keys: string[]; calls: PendingCall[] }
   | { kind: 'completed'; result: unknown }
   | {
       kind: 'failed';
@@ -170,6 +181,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       else if (
         next === undefined ||
         end.kind === 'call' ||
+        end.kind === 'group' ||
         (end.kind === 'failed' && end.stopReason === 'determinism_violation')
       ) {
         resolve(end);
@@ -225,21 +237,57 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       return problems.length > 0 ? { problems } : { supplied: Object.fromEntries(supplied) };
     }
 
-    function request(definition: StageDefinition, bindings: unknown, callOptions?: CallOptions): Promise<unknown> {
-      if (ended) return never();
-      if (!isObject(definition) || typeof definition.name !== 'string') {
-        failRun('workflow_failed', `run.stage() was given ${String(definition)}, not a stage`);
-        return never();
-      }
+    /** The next call of `definition`'s stage: its number, its stage directory's number and its key. */
+    function keyOf(definition: StageDefinition): { key: string; stage: string; call: number; stageIndex: number } {
       const stage = definition.name;
       const call = (calls.get(stage) ?? 0) + 1;
       calls.set(stage, call);
       if (!stageIndexes.has(stage)) stageIndexes.set(stage, stageIndexes.size + 1);
       const stageIndex = stageIndexes.get(stage) ?? 0;
-      const key = `${stage}#${call}`;
+      return { key: `${stage}#${call}`, stage, call, stageIndex };
+    }
+
+    const isStage = (definition: unknown): definition is StageDefinition =>
+      isObject(definition) && typeof (definition as { name?: unknown }).name === 'string';
+
+    /** The call `keyed` names, ready to run, or undefined once the run has failed on why it can't. */
+    function pending(
+      keyed: ReturnType<typeof keyOf>,
+      definition: StageDefinition,
+      bindings: unknown,
+    ): Omit<PendingCall, 'group'> | undefined {
+      const { key, stage } = keyed;
+      const reached = stages.find((each) => each.definition === definition);
+      if (reached === undefined) {
+        failRun('workflow_failed', `${key} can't run: '${stage}' isn't a stage the workflow's roster holds`);
+        return undefined;
+      }
+      const resolved = resolveBindings(definition, bindings);
+      if ('problems' in resolved) {
+        failRun('workflow_failed', `${key} can't run: ${resolved.problems.join('; ')}`);
+        return undefined;
+      }
+      return { ...keyed, definition, stageFile: join(reached.dir, 'stage.ts'), ...resolved };
+    }
+
+    const listed = (keys: readonly string[]) => `[${keys.join(', ')}]`;
+
+    function request(definition: StageDefinition, bindings: unknown, callOptions?: CallOptions): Promise<unknown> {
+      if (ended) return never();
+      if (!isStage(definition)) {
+        failRun('workflow_failed', `run.stage() was given ${String(definition)}, not a stage`);
+        return never();
+      }
+      const keyed = keyOf(definition);
+      const { key } = keyed;
 
       const journaled = entries[position];
       if (journaled !== undefined) {
+        if (journaled.group !== undefined) {
+          const message = `the workflow asked for '${key}' where the journal has the group ${listed(journaled.group)}`;
+          failRun('determinism_violation', message);
+          return never();
+        }
         if (journaled.key !== key) {
           failRun('determinism_violation', `the workflow asked for '${key}' where the journal has '${journaled.key}'`);
           return never();
@@ -248,19 +296,86 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         return rebuild(journaled, key, callOptions);
       }
 
-      const reached = stages.find((each) => each.definition === definition);
-      if (reached === undefined) {
-        failRun('workflow_failed', `${key} can't run: '${stage}' isn't a stage the workflow's roster holds`);
-        return never();
-      }
-      const resolved = resolveBindings(definition, bindings);
-      if ('problems' in resolved) {
-        failRun('workflow_failed', `${key} can't run: ${resolved.problems.join('; ')}`);
-        return never();
-      }
-      const stageFile = join(reached.dir, 'stage.ts');
+      const call = pending(keyed, definition, bindings);
+      if (call === undefined) return never();
       move(key);
-      record({ kind: 'call', call: { key, stage, call, stageIndex, definition, stageFile, ...resolved } });
+      record({ kind: 'call', call });
+      return never();
+    }
+
+    /**
+     * A group: every call keyed in the order given, then its journaled calls handed back in that order once all are,
+     * or the calls left recorded as the replay's end.
+     */
+    function group(list: unknown): Promise<unknown[]> {
+      if (ended) return never();
+      if (!Array.isArray(list)) {
+        failRun('workflow_failed', `run.all() was given ${String(list)}, not a list of calls`);
+        return never();
+      }
+      if (list.length === 0) return Promise.resolve([]);
+      const members: {
+        keyed: ReturnType<typeof keyOf>;
+        definition: StageDefinition;
+        bindings: unknown;
+        options?: CallOptions | undefined;
+      }[] = [];
+      for (const [index, element] of list.entries()) {
+        const [definition, bindings = {}, options] = Array.isArray(element) ? element : [];
+        if (!Array.isArray(element) || element.length > 3 || !isStage(definition)) {
+          failRun('workflow_failed', `run.all()'s call ${index + 1} is not [stage, bindings, options]`);
+          return never();
+        }
+        members.push({ keyed: keyOf(definition), definition, bindings, options: options as CallOptions | undefined });
+      }
+      const keys = members.map((member) => member.keyed.key);
+      const same = (group: readonly string[] | undefined) =>
+        group !== undefined && group.length === keys.length && group.every((key, i) => key === keys[i]);
+
+      const first = entries[position];
+      const done = new Map<string, JournalEntry>();
+      if (first !== undefined) {
+        if (first.group === undefined) {
+          failRun(
+            'determinism_violation',
+            `the workflow asked for the group ${listed(keys)} where the journal has '${first.key}'`,
+          );
+          return never();
+        }
+        if (!same(first.group)) {
+          const message = `the workflow asked for the group ${listed(keys)} where the journal has the group ${listed(first.group)}`;
+          failRun('determinism_violation', message);
+          return never();
+        }
+        while (done.size < keys.length && same(entries[position]?.group)) {
+          const entry = entries[position] as JournalEntry;
+          done.set(entry.key, entry);
+          position++;
+        }
+        const after = entries[position];
+        if (done.size < keys.length && after !== undefined) {
+          failRun(
+            'determinism_violation',
+            `the journal holds '${after.key}' after the unfinished group ${listed(keys)}`,
+          );
+          return never();
+        }
+        if (done.size === keys.length) {
+          return Promise.all(
+            members.map(({ keyed, options }) => rebuild(done.get(keyed.key) as JournalEntry, keyed.key, options)),
+          );
+        }
+      }
+
+      const calls: PendingCall[] = [];
+      for (const { keyed, definition, bindings } of members) {
+        if (done.has(keyed.key)) continue;
+        const call = pending(keyed, definition, bindings);
+        if (call === undefined) return never();
+        calls.push({ ...call, group: keys });
+      }
+      if (done.size === 0) move(keys[0] as string);
+      record({ kind: 'group', keys, calls });
       return never();
     }
 
@@ -350,6 +465,15 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       stage(definition: StageDefinition, bindings: unknown = {}, callOptions?: CallOptions): Promise<unknown> {
         try {
           return request(definition, bindings, callOptions);
+        } catch (error) {
+          record({ kind: 'crashed', error });
+          return never();
+        }
+      },
+      /** An exception here is a bug in sail, as in `stage()`. */
+      all(list: unknown): Promise<unknown[]> {
+        try {
+          return group(list);
         } catch (error) {
           record({ kind: 'crashed', error });
           return never();

@@ -1,0 +1,146 @@
+{
+  "schema": "sail.summary.v1",
+  "runId": "FAKE-4-01M348XP801GH3GKJT2MNM2NR9",
+  "workflow": "review@1",
+  "source": {
+    "kind": "ticket",
+    "ticketKey": "FAKE-4",
+    "via": "cli"
+  },
+  "ticket": {
+    "ticketKey": "FAKE-4",
+    "title": "Review the --shout flag before it ships",
+    "url": "fake://tickets/FAKE-4"
+  },
+  "status": "completed",
+  "startedAt": "2026-09-22T10:00:00.100Z",
+  "endedAt": "2026-09-22T10:00:10.100Z",
+  "durationMs": 10000,
+  "result": {
+    "summaries": [
+      "The change reads like the code around it.",
+      "The flag sits where the other options do.",
+      "Nothing outside greet() and the CLI changes.",
+      "Upper-casing one line costs nothing to speak of.",
+      "The flag takes no input of its own.",
+      "Both paths of the flag are tested."
+    ]
+  },
+  "calls": [
+    {
+      "key": "intake#1",
+      "kind": "builtin",
+      "outcome": "passed",
+      "durationMs": 700,
+      "files": [
+        "ticket.json",
+        "brief.md"
+      ],
+      "resultPath": "00-intake/call-1/result.json"
+    },
+    {
+      "key": "style#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 7200,
+      "turns": 1,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.02,
+      "resultPath": "01-style/call-1/result.json"
+    },
+    {
+      "key": "architecture#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 5900,
+      "turns": 1,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.02,
+      "resultPath": "02-architecture/call-1/result.json"
+    },
+    {
+      "key": "side-effects#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 4600,
+      "turns": 1,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.02,
+      "resultPath": "03-side-effects/call-1/result.json"
+    },
+    {
+      "key": "performance#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 3300,
+      "turns": 1,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.02,
+      "resultPath": "04-performance/call-1/result.json"
+    },
+    {
+      "key": "security#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 2000,
+      "turns": 1,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.02,
+      "resultPath": "05-security/call-1/result.json"
+    },
+    {
+      "key": "coverage#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 700,
+      "turns": 1,
+      "toolCalls": 0,
+      "denials": 0,
+      "costUsd": 0.02,
+      "resultPath": "06-coverage/call-1/result.json"
+    }
+  ],
+  "loops": {},
+  "routes": [
+    {
+      "at": "style#1",
+      "value": "done",
+      "took": "end"
+    }
+  ],
+  "groups": [
+    {
+      "keys": [
+        "style#1",
+        "architecture#1",
+        "side-effects#1",
+        "performance#1",
+        "security#1",
+        "coverage#1"
+      ],
+      "durationMs": 7900
+    }
+  ],
+  "totals": {
+    "stageCalls": 7,
+    "steps": 7,
+    "toolCalls": 0,
+    "denials": 0,
+    "replays": 2,
+    "usage": {
+      "inputTokens": 7200,
+      "outputTokens": 1200,
+      "costUsd": 0.12
+    },
+    "budget": {
+      "maxUsd": 25,
+      "usedPct": 0.5
+    }
+  },
+  "version": 1
+}

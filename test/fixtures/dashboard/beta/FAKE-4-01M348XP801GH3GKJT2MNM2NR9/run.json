@@ -1,0 +1,182 @@
+{
+  "schema": "sail.run.v1",
+  "runId": "FAKE-4-01M348XP801GH3GKJT2MNM2NR9",
+  "source": {
+    "kind": "ticket",
+    "ticketKey": "FAKE-4",
+    "via": "cli",
+    "forced": []
+  },
+  "claim": {
+    "claimed": true,
+    "state": {
+      "type": "started",
+      "name": "In Progress"
+    }
+  },
+  "workflow": {
+    "name": "review",
+    "version": 1,
+    "origin": "repo:.sail/workflows/review",
+    "sha256": "30b1dfe599d2f7f77d59d1706eab618baa767869f4d90518d8d27e08065fd7f9"
+  },
+  "sail": {
+    "version": "0.0.0",
+    "runtime": "bun 1.4.2"
+  },
+  "adapters": {
+    "ticketSource": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "codeHost": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "harness": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "workspace": {
+      "use": "fake",
+      "origin": "builtin"
+    }
+  },
+  "intake": {
+    "name": "ticket",
+    "origin": "builtin",
+    "output": "TicketInput",
+    "produces": [
+      "ticket.json",
+      "brief.md"
+    ]
+  },
+  "stages": {
+    "architecture": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/review/stages/architecture",
+      "model": "claude-sonnet-5",
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": []
+      },
+      "budget": {
+        "maxTurns": 10,
+        "maxUsd": 1,
+        "maxMinutes": 10
+      }
+    },
+    "coverage": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/review/stages/coverage",
+      "model": "claude-sonnet-5",
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": []
+      },
+      "budget": {
+        "maxTurns": 10,
+        "maxUsd": 1,
+        "maxMinutes": 10
+      }
+    },
+    "performance": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/review/stages/performance",
+      "model": "claude-sonnet-5",
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": []
+      },
+      "budget": {
+        "maxTurns": 10,
+        "maxUsd": 1,
+        "maxMinutes": 10
+      }
+    },
+    "security": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/review/stages/security",
+      "model": "claude-sonnet-5",
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": []
+      },
+      "budget": {
+        "maxTurns": 10,
+        "maxUsd": 1,
+        "maxMinutes": 10
+      }
+    },
+    "side-effects": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/review/stages/side-effects",
+      "model": "claude-sonnet-5",
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": []
+      },
+      "budget": {
+        "maxTurns": 10,
+        "maxUsd": 1,
+        "maxMinutes": 10
+      }
+    },
+    "style": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/review/stages/style",
+      "model": "claude-sonnet-5",
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": []
+      },
+      "budget": {
+        "maxTurns": 10,
+        "maxUsd": 1,
+        "maxMinutes": 10
+      }
+    }
+  },
+  "budget": {
+    "maxUsd": 25,
+    "maxMinutes": 90
+  },
+  "startedAt": "2026-09-22T10:00:00.000Z",
+  "branch": "sail/FAKE-4-review-the-shout-flag-before-it-ships",
+  "repository": {
+    "url": "fake://origin",
+    "defaultBranch": "main",
+    "baseSha": "1378768e21367f6c5920a704745d5aea9c3fb1ff"
+  },
+  "workspace": "workspace"
+}

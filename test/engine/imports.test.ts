@@ -54,6 +54,14 @@ test("the fixture's graph holds exactly the imports its files make within .sail/
     console.log(`the fixture's import graph: ${JSON.stringify(graph, null, 2)}`);
     expect(graph).toEqual({
       'stages/implement/stage.ts': ['stages/tests/stage.ts'],
+      'workflows/review/workflow.ts': [
+        'workflows/review/stages/architecture/stage.ts',
+        'workflows/review/stages/coverage/stage.ts',
+        'workflows/review/stages/performance/stage.ts',
+        'workflows/review/stages/security/stage.ts',
+        'workflows/review/stages/side-effects/stage.ts',
+        'workflows/review/stages/style/stage.ts',
+      ],
       'workflows/ticket-to-pr/stages/self-review/stage.ts': ['stages/implement/stage.ts'],
       'workflows/ticket-to-pr/workflow.ts': [
         'stages/implement/stage.ts',

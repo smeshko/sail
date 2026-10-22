@@ -8,6 +8,7 @@ import { applyEvent, elapsedMs, emptyRun, foldRun } from '../../../src/dashboard
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import type { Summary } from '../../../src/events/summary';
 import { DASHBOARD_FIXTURES, FAKE_2_ID, FAKE_3_ID, GOLDEN_RUN } from '../../helpers/dashboard';
+import { FAKE_4_ID, REVIEW_KEYS } from '../../helpers/review-fixture';
 
 const golden = () => readEvents(GOLDEN_RUN);
 const fake2 = () => readEvents(join(DASHBOARD_FIXTURES, 'alpha', FAKE_2_ID));
@@ -267,7 +268,7 @@ test('an unknown type counts on its card, an event that does not fit counts as u
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x' };
   const model = foldRun([
     ...events.slice(0, 14),
-    { ...at, seq: 901, type: 'all:start', key: 'spec#1', branches: 2 },
+    { ...at, seq: 901, type: 'agent:thinking', key: 'spec#1', text: 'hm' },
     { ...at, seq: 902, type: 'stage:end', key: 'nope#1', stage: 'nope', outcome: 'done', durationMs: 1 },
     { ...at, seq: 903, type: 'stage:start', key: 7, stage: 'spec', call: 2, try: 1, kind: 'agent' },
     { ...at, seq: 904, type: 'stage:start', key: 'spec#2', stage: 'spec', call: '2', try: 1, kind: 'agent' },
@@ -276,7 +277,7 @@ test('an unknown type counts on its card, an event that does not fit counts as u
     { seq: 905 },
   ]);
   expect(model.cards.map((card) => card.key)).toEqual(['intake#1', 'spec#1']);
-  expect(model.cards[1]?.other).toEqual({ 'all:start': 1 });
+  expect(model.cards[1]?.other).toEqual({ 'agent:thinking': 1 });
   expect(model.unreadable).toBe(6);
 
   const next = random(42);
@@ -309,4 +310,22 @@ test('event types, loop names and tool call ids that are Object.prototype keys a
   expect(Object.entries(model.loops)).toEqual([['__proto__', { iteration: 1, max: 2 }]]);
   expect(card?.denials.map((denial) => [denial.callId, denial.command])).toEqual([['c3', undefined]]);
   expect(model.unreadable).toBe(0);
+});
+
+test("a group's all:start lists it once, though a resume reports it again, its all:end ends it, each call started while it is open carries its index, and neither counts as a type the fold doesn't handle", () => {
+  const events = readEvents(join(DASHBOARD_FIXTURES, 'beta', FAKE_4_ID));
+  const started = events.find((event) => event.type === 'all:start');
+  const ended = events.findIndex((event) => event.type === 'all:end');
+  const open = foldRun(events.slice(0, ended));
+  expect(open.groups).toEqual([{ keys: REVIEW_KEYS, ended: false }]);
+  const again = { ...started, seq: 999, running: ['coverage#1'] };
+  const model = foldRun([...events.slice(0, ended), again, ...events.slice(ended)]);
+  expect(model.groups).toEqual([{ keys: REVIEW_KEYS, ended: true }]);
+  expect(model.cards.map((card) => [card.key, card.group])).toEqual([
+    ['intake#1', undefined],
+    ...REVIEW_KEYS.map((key) => [key, 0]),
+  ]);
+  expect(
+    [model.other, ...model.cards.map((card) => card.other)].filter((other) => Object.keys(other).length > 0),
+  ).toEqual([]);
 });

@@ -4,6 +4,10 @@
 //
 // Reads are stateless, with no writer object: the replay loop re-executes the workflow from the top, and a run appends
 // once per call, so reading the file again before each append costs little.
+//
+// A call of a group carries `group`, the group's keys in declaration order, which the determinism guard compares with
+// the keys the workflow asks for. A `group` that doesn't hold its own line's key was written by something else, or by a
+// bug in sail: reading it throws, and so does appending it.
 import { readFileSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { appendLine, createFileOnce } from './durable';
@@ -24,6 +28,8 @@ export interface JournalEntry {
   files: Record<string, string>;
   /** Relative to the run directory. */
   resultPath: string;
+  /** The keys of the group the call belongs to, in declaration order: present only on a group's calls. */
+  group?: string[];
   recordedAt: string;
 }
 
@@ -49,6 +55,10 @@ interface Scanned {
   complete: number;
 }
 
+/** Whether the entry names a group its own key isn't in. */
+const outsideGroup = (entry: Pick<JournalEntry, 'key' | 'group'>): boolean =>
+  entry.group !== undefined && !entry.group.includes(entry.key);
+
 function scan(path: string): Scanned {
   const text = readFileSync(path, 'utf8');
   const end = text.lastIndexOf('\n') + 1;
@@ -72,6 +82,7 @@ function scan(path: string): Scanned {
       const issues = validateDocument('sail.journal.v1', data);
       if (issues.length > 0) throw fail(`breaks sail.journal.v1: ${issues.map(formatIssue).join('; ')}`);
       const entry = data as JournalEntry;
+      if (outsideGroup(entry)) throw fail(`has a group that doesn't hold its key '${entry.key}'`);
       if (entry.seq !== at) throw fail(`has seq ${entry.seq}, and its place in the journal is ${at}`);
       const first = lines.get(entry.key);
       if (first !== undefined) throw fail(`repeats key '${entry.key}', journaled at line ${first}`);
@@ -99,13 +110,17 @@ export function readJournal(runDir: string): { entries: JournalEntry[]; torn: bo
 /**
  * Appends `entry` as the next line, numbered after the last and stamped with `now`, and returns it as journaled. A
  * torn tail is cut off first, or the new line would be glued onto the fragment. A key already journaled throws, and so
- * does an entry that breaks `sail.journal.v1`, a bug in sail. Either way nothing is written.
+ * does an entry whose group doesn't hold its key or that breaks `sail.journal.v1`, a bug in sail. Either way nothing is
+ * written.
  */
 export function appendJournal(runDir: string, entry: NewJournalEntry, now: Date = new Date()): JournalEntry {
   const path = join(runDir, JOURNAL_FILE);
   const { entries, torn, complete } = scan(path);
   if (entries.some((journaled) => journaled.key === entry.key)) {
     throw new Error(`'${entry.key}' is already journaled in ${path}`);
+  }
+  if (outsideGroup(entry)) {
+    throw new Error(`'${entry.key}' names a group that doesn't hold it, a bug in sail: ${entry.group?.join(', ')}`);
   }
   const full: JournalEntry = { seq: entries.length + 1, ...entry, recordedAt: now.toISOString() };
   const issues = validateDocument('sail.journal.v1', full);

@@ -898,3 +898,186 @@ test("a loop that fails a pass with run.input names the intake's result as where
   expect(end).toMatchObject({ call: { key: 'c#1', supplied: { data: { value: { ticketKey: 'FAKE-1' }, from } } } });
   checkStamped(events);
 });
+
+// run.all(): a group keyed in the order given, its journaled calls handed back in that order, and the guard over its
+// whole key sequence. Its lines carry the group's keys, and are journaled in the order its calls completed.
+
+const GROUP = ['a#1', 'tests#1', 'a#2'];
+/** A journaled call of the group `GROUP`, or of `group`, at line `seq`. */
+const member = (key: string, seq: number, outcome: JournalEntry['outcome'] = 'passed', group = GROUP) =>
+  entry(key, outcome, { seq, group, output: { ok: outcome === 'passed' } });
+/** The group `[a, tests, a]`, as a workflow asks for it. */
+const trio = (run: Run<typeof ticket.output>) => run.all([[a], [tests], [a]]);
+const pendingOf = (key: string, stage: StageDefinition, call: number, stageIndex: number) => ({
+  key,
+  stage: stage.name,
+  call,
+  stageIndex,
+  definition: stage,
+  stageFile: `/repo/.sail/stages/${stage.name}/stage.ts`,
+  supplied: {},
+  group: GROUP,
+});
+
+test('a fresh group keys its calls in the order given before any runs, the same stage twice as two calls, and ends the replay as one group end', async () => {
+  const seen = { after: false };
+  const end = await replayed(async (run) => {
+    await trio(run);
+    seen.after = true;
+  });
+  await settle();
+  expect(end).toEqual({
+    kind: 'group',
+    keys: GROUP,
+    calls: [pendingOf('a#1', a, 1, 1), pendingOf('tests#1', tests, 1, 2), pendingOf('a#2', a, 2, 1)],
+  });
+  expect(seen.after).toBe(false);
+});
+
+test('a group whose every call is journaled, in the order they completed, hands back its results in the order given, and the next call is keyed after it', async () => {
+  let outcomes: string[] = [];
+  const end = await replayed(
+    async (run) => {
+      const results = await trio(run);
+      outcomes = results.map((result) => result.outcome);
+      await run.stage(c, { data: 1 });
+    },
+    [member('tests#1', 1, 'failed'), member('a#2', 2, 'failed'), member('a#1', 3, 'passed')],
+  );
+  expect(outcomes).toEqual(['passed', 'failed', 'failed']);
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'c#1', stageIndex: 3 } });
+});
+
+test("a group with calls left ends the replay with only those, and reports no route into it; a move into a fresh group reports one, taking the group's first key", async () => {
+  const events: NewEvent[] = [];
+  const left = await replayed(
+    async (run) => {
+      await run.stage(c, { data: 1 });
+      await trio(run);
+    },
+    [entry('c#1', 'passed', { seq: 1 }), member('tests#1', 2)],
+    (event) => events.push(event),
+  );
+  expect(left).toEqual({ kind: 'group', keys: GROUP, calls: [pendingOf('a#1', a, 1, 2), pendingOf('a#2', a, 2, 2)] });
+  expect(events).toEqual([]);
+
+  const fresh = await replayed(
+    async (run) => {
+      await run.stage(c, { data: 1 });
+      await trio(run);
+    },
+    [entry('c#1', 'passed', { seq: 1 })],
+    (event) => events.push(event),
+  );
+  expect(fresh).toMatchObject({ kind: 'group', keys: GROUP });
+  expect(events).toEqual([{ type: 'workflow:route', at: 'c#1', value: 'passed', took: 'a#1' }]);
+});
+
+test.each<[string, Body, JournalEntry[], string]>([
+  [
+    'a reordered group',
+    (run) => run.all([[tests], [a]]),
+    [member('a#1', 1, 'passed', ['a#1', 'tests#1'])],
+    'the workflow asked for the group [tests#1, a#1] where the journal has the group [a#1, tests#1]',
+  ],
+  [
+    'a group where the journal has a plain call',
+    (run) => run.all([[a], [tests]]),
+    [entry('a#1', 'passed')],
+    "the workflow asked for the group [a#1, tests#1] where the journal has 'a#1'",
+  ],
+  [
+    'a plain call where the journal has a group',
+    (run) => run.stage(a),
+    [member('a#1', 1, 'passed', ['a#1', 'tests#1'])],
+    "the workflow asked for 'a#1' where the journal has the group [a#1, tests#1]",
+  ],
+  [
+    'a group whose size changed',
+    (run) => run.all([[a], [tests], [c, { data: 1 }]]),
+    [member('a#1', 1, 'passed', ['a#1', 'tests#1'])],
+    'the workflow asked for the group [a#1, tests#1, c#1] where the journal has the group [a#1, tests#1]',
+  ],
+  [
+    'an entry after an unfinished group',
+    (run) => run.all([[a], [tests]]),
+    [member('a#1', 1, 'passed', ['a#1', 'tests#1']), entry('c#1', 'passed', { seq: 2 })],
+    "the journal holds 'c#1' after the unfinished group [a#1, tests#1]",
+  ],
+  [
+    'the workflow ending where the journal still holds lines of a group',
+    async (run) => {
+      await run.all([[a], [tests]]);
+      return 'early';
+    },
+    [
+      member('tests#1', 1, 'passed', ['a#1', 'tests#1']),
+      member('a#1', 2, 'passed', ['a#1', 'tests#1']),
+      member('c#1', 3, 'passed', ['c#1', 'implement#1']),
+    ],
+    "the workflow ended where the journal has 'c#1'",
+  ],
+])('%s fails the run with determinism_violation, naming both sides', async (_, body, entries, message) => {
+  expect(await replayed(body, entries)).toEqual(failed('determinism_violation', message));
+});
+
+test("a group's journaled error fails the run with stage_error, the first in the order given, unless that call asks for its error", async () => {
+  const errored = [member('tests#1', 1, 'error', ['a#1', 'tests#1']), member('a#1', 2, 'passed', ['a#1', 'tests#1'])];
+  for (const each of errored) each.reason = each.outcome === 'error' ? 'boom' : null;
+  const unhandled = await replayed(async (run) => {
+    await run.all([[a], [tests]]);
+  }, errored);
+  expect(unhandled).toEqual(failed('stage_error', 'tests#1 ended in error: boom'));
+
+  let soft: unknown;
+  const handled = await replayed(async (run) => {
+    const [, t] = await run.all([[a], [tests, {}, { onError: 'return' }]]);
+    soft = t;
+    return 'handled';
+  }, errored);
+  expect({ handled, soft }).toEqual({
+    handled: { kind: 'completed', result: 'handled' },
+    soft: { outcome: 'error', reason: 'boom' },
+  });
+
+  const both = errored.map((each) => ({ ...each, outcome: 'error' as const, reason: `${each.key} broke` }));
+  const first = await replayed(async (run) => {
+    await run.all([[a], [tests]]);
+  }, both);
+  expect(first).toEqual(failed('stage_error', 'a#1 ended in error: a#1 broke'));
+});
+
+test.each<[string, Body, string]>([
+  [
+    'a stage the roster lacks',
+    (run) => run.all([[a], [stray]]),
+    "stray#1 can't run: 'stray' isn't a stage the workflow's roster holds",
+  ],
+  [
+    'a bad binding',
+    (run) => run.all([[a], [b, { report: { name: 'r.txt' } as ProducedFile }]]),
+    "b#1 can't run: 'report' needs a file a call produced",
+  ],
+  [
+    'an element that is not a call',
+    (run) => run.all([[a], 'tests'] as never),
+    "run.all()'s call 2 is not [stage, bindings, options]",
+  ],
+])('a group with %s fails the run with workflow_failed before any of its calls runs', async (_, body, message) => {
+  expect(await replayed(body)).toEqual(failed('workflow_failed', message));
+});
+
+test('run.all([]) resolves to no results at once, and the next run.stage() is keyed as if the group were not there', async () => {
+  const events: NewEvent[] = [];
+  let results: unknown;
+  const end = await replayed(
+    async (run) => {
+      results = await run.all([]);
+      await run.stage(a);
+    },
+    [],
+    (event) => events.push(event),
+  );
+  expect({ results, events }).toEqual({ results: [], events: [] });
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'a#1', stageIndex: 1 } });
+});

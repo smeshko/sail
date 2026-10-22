@@ -16,6 +16,7 @@ import {
   runningCopy,
   seedFixtures,
 } from '../../helpers/dashboard';
+import { FAKE_4_ID } from '../../helpers/review-fixture';
 
 let m: Machine;
 beforeEach(() => {
@@ -64,6 +65,7 @@ test('railRepos lists alpha then beta, each run newest first with its status, st
     ['alpha', GOLDEN_RUN_ID, 'FAKE-1', 'completed', undefined, 16_100, 1.35],
     ['alpha', FAKE_2_ID, 'FAKE-2', 'failed', 'stage_error', 4900, 0.3625],
     ['beta', FAKE_3_ID, 'FAKE-3', 'suspended', 'budget_exceeded', 6200, 1.0625],
+    ['beta', FAKE_4_ID, 'FAKE-4', 'completed', undefined, 10_000, 0.12],
   ]);
   expect(repos[1]?.runs[0]).toMatchObject({
     title: 'Escape <b>this</b> & "that"',
@@ -126,7 +128,7 @@ test('a repository whose .sail/ is gone shows in the rail with its problem and n
   const repos = railRepos(index(m.registryDir), NOW);
   expect(repos.map((repo) => [repo.name, repo.runs.length, typeof repo.problem])).toEqual([
     ['alpha', 0, 'string'],
-    ['beta', 1, 'undefined'],
+    ['beta', 2, 'undefined'],
   ]);
   expect(repos[0]?.problem).toContain('no longer exists');
 });

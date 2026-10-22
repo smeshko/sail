@@ -33,7 +33,7 @@ test("the rail shows alpha's FAKE-2, its completed section open on the selected 
     '<span class="r-title">Escape &lt;b&gt;this&lt;/b&gt; &amp; &quot;that&quot;</span><span class="r-sub">suspended · <span class="why">budget_exceeded</span> · 6.2s · $1.06</span>',
   );
   expect(markup).toContain('failed · <span class="why">stage_error</span> · 4.9s · $0.36');
-  expect(markup).toContain('<div class="rail-h"><span>repositories</span><span class="c">3 runs</span></div>');
+  expect(markup).toContain('<div class="rail-h"><span>repositories</span><span class="c">4 runs</span></div>');
 });
 
 test('the completed section stays closed unless it is opened or holds the selection', () => {

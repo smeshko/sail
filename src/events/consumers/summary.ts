@@ -1,8 +1,8 @@
 // summary.json: the run's summary, rewritten after every call and rebuilt from `events.ndjson` on demand.
 //
-// - It is written after `run:start`, each `journal:append`, `run:end` and `error:crash`: once per call, and once a crash
-//   stops the run, so it keeps the run's last state. Agent events are dense, and a write on each would sync every
-//   message.
+// - It is written after `run:start`, each `journal:append`, each `all:end`, `run:end` and `error:crash`: once per call,
+//   once a group ends, and once a crash stops the run, so it keeps the run's last state. Agent events are dense, and a
+//   write on each would sync every message.
 // - Each write replaces the file atomically through a temp file of this process's own, so a rebuild in another process
 //   never shares one with the run.
 // - A write that fails throws, and the bus reports it as `error:consumer`. The next write point writes the whole state
@@ -19,7 +19,13 @@ import { readEventsFrom, START } from './ndjson';
 export const SUMMARY_FILE = 'summary.json';
 
 /** The events after which `summary.json` is written. */
-const WRITE_POINTS: ReadonlySet<EventType> = new Set(['run:start', 'journal:append', 'run:end', 'error:crash']);
+const WRITE_POINTS: ReadonlySet<EventType> = new Set([
+  'run:start',
+  'journal:append',
+  'all:end',
+  'run:end',
+  'error:crash',
+]);
 
 /** Writes `summary` as the run's `summary.json`, and gives its path. */
 export function writeSummary(runDir: string, summary: Summary): string {

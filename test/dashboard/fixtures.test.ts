@@ -19,8 +19,9 @@ import {
   QUEUE_WORKFLOW,
   seedFixtures,
 } from '../helpers/dashboard';
+import { FAKE_4_ID } from '../helpers/review-fixture';
 
-const RUNS = { alpha: [FAKE_2_ID], beta: [FAKE_3_ID] };
+const RUNS = { alpha: [FAKE_2_ID], beta: [FAKE_3_ID, FAKE_4_ID] };
 const runDir = (repo: 'alpha' | 'beta', runId: string) => join(DASHBOARD_FIXTURES, repo, runId);
 const QUEUE = join(DASHBOARD_FIXTURES, 'beta', 'queue', QUEUE_WORKFLOW);
 
@@ -39,7 +40,7 @@ const filesIn = (dir: string): string[] =>
 
 test('each recorded run passes validateRunDir, and its summary.json is summarize() of its events', () => {
   expect(readdirSync(join(DASHBOARD_FIXTURES, 'alpha')).sort()).toEqual([FAKE_2_ID]);
-  expect(readdirSync(join(DASHBOARD_FIXTURES, 'beta')).sort()).toEqual([FAKE_3_ID, 'queue']);
+  expect(readdirSync(join(DASHBOARD_FIXTURES, 'beta')).sort()).toEqual([FAKE_3_ID, FAKE_4_ID, 'queue']);
   for (const [repo, ids] of Object.entries(RUNS) as ['alpha' | 'beta', string[]][]) {
     for (const id of ids) {
       const dir = runDir(repo, id);
@@ -49,6 +50,7 @@ test('each recorded run passes validateRunDir, and its summary.json is summarize
   }
   expect(readFileSync(join(runDir('alpha', FAKE_2_ID), 'STATUS'), 'utf8')).toBe('failed stage_error\n');
   expect(readFileSync(join(runDir('beta', FAKE_3_ID), 'STATUS'), 'utf8')).toBe('suspended budget_exceeded\n');
+  expect(readFileSync(join(runDir('beta', FAKE_4_ID), 'STATUS'), 'utf8')).toBe('completed\n');
 });
 
 test("beta's queue.json is a QueueFile, and every line of its event stream is a sail.event.v1 queue event in seq order", () => {
@@ -106,7 +108,7 @@ test("FAKE-3's roster has a lint stage the fixture repository's workflows don't 
   expect(events.filter((event) => event.type === 'budget:exceeded')).toMatchObject([{ budget: 'usd', limit: 1 }]);
 });
 
-test('seedFixtures registers alpha with the golden run and FAKE-2, and beta with FAKE-3 and its queue, each with its summary', () => {
+test("seedFixtures registers alpha with the golden run and FAKE-2, and beta with FAKE-3, FAKE-4's review and its queue, each with its summary", () => {
   seeded = seedFixtures();
   const repos = index(seeded.registryDir);
   expect(
@@ -124,7 +126,14 @@ test('seedFixtures registers alpha with the golden run and FAKE-2, and beta with
         [GOLDEN_RUN_ID, GOLDEN_RUN_ID, undefined],
       ],
     ],
-    ['beta', undefined, [[FAKE_3_ID, FAKE_3_ID, undefined]]],
+    [
+      'beta',
+      undefined,
+      [
+        [FAKE_4_ID, FAKE_4_ID, undefined],
+        [FAKE_3_ID, FAKE_3_ID, undefined],
+      ],
+    ],
   ]);
   expect(existsSync(join(seeded.beta.clone, '.sail-runs', 'queue', QUEUE_WORKFLOW, 'queue.json'))).toBe(true);
 });

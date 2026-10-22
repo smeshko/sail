@@ -1,0 +1,51 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-4-01M348XP801GH3GKJT2MNM2NR9",
+  "stage": "side-effects",
+  "call": 1,
+  "key": "side-effects#1",
+  "kind": "agent",
+  "outcome": "done",
+  "output": {
+    "summary": "Nothing outside greet() and the CLI changes.",
+    "findings": []
+  },
+  "files": {},
+  "consumed": {
+    "brief": "00-intake/call-1/brief.md"
+  },
+  "startedAt": "2026-09-22T10:00:03.400Z",
+  "finishedAt": "2026-09-22T10:00:08.000Z",
+  "durationMs": 4600,
+  "try": 1,
+  "validationTry": 1,
+  "prompt": {
+    "path": "03-side-effects/call-1/prompt.md",
+    "untrusted": 0,
+    "fragments": [
+      {
+        "name": "untrusted-input",
+        "origin": "builtin"
+      },
+      {
+        "name": "finish",
+        "origin": "builtin"
+      }
+    ],
+    "conventions": []
+  },
+  "harness": {
+    "adapter": "fake",
+    "model": "claude-sonnet-5",
+    "sessionId": "fake-session-side-effects-1",
+    "turns": 1,
+    "toolCalls": 0,
+    "denials": 0
+  },
+  "usage": {
+    "inputTokens": 1200,
+    "outputTokens": 200,
+    "costUsd": 0.02
+  },
+  "validationFailed": false
+}

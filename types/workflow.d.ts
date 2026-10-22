@@ -76,6 +76,24 @@ export interface CallOptions {
     readonly onError: 'return';
 }
 /**
+ * One call of a group: the stage, then its bindings, which may be left out when every binding is optional, or its
+ * bindings and its options.
+ */
+export type AllCall<S extends StageDefinition = StageDefinition> = readonly [definition: S, ...bindings: BindingsArgument<S['consumes']>] | readonly [definition: S, bindings: BindingsOf<S['consumes']>, options: CallOptions];
+/** Each call of a group, checked against its own stage's contract. */
+export type CheckedCalls<T extends readonly unknown[]> = {
+    readonly [K in keyof T]: T[K] extends readonly [infer S extends StageDefinition, ...unknown[]] ? AllCall<S> : never;
+};
+/**
+ * One call's result: `{ onError: 'return' }` lets it be an `error` too. It distributes over a union of calls, as a
+ * `.map()` choosing the options per call gives, so a call that may pass them keeps the `error`.
+ */
+type AllResult<C> = C extends readonly [infer S extends StageDefinition, unknown, CallOptions] ? Result<S> | ErrorResult : C extends readonly [infer S extends StageDefinition, ...unknown[]] ? Result<S> : never;
+/** Each call's result, in the order given: `{ onError: 'return' }` lets that call's result be an `error` too. */
+export type AllResults<T extends readonly unknown[]> = {
+    -readonly [K in keyof T]: AllResult<T[K]>;
+};
+/**
  * One pass through a loop. A failed pass hands `In` to `fail()`, and the engine parses it with the loop's `feedback`
  * schema into the next pass's `previous`, an `Out`. They differ only when the schema transforms.
  */
@@ -100,6 +118,13 @@ export interface Run<I extends z.ZodType = z.ZodType, P extends Produces = Produ
     stage<S extends StageDefinition>(definition: S, ...bindings: BindingsArgument<S['consumes']>): Promise<Result<S>>;
     /** Calls a stage with its bindings and options. `{ onError: 'return' }` resolves to an `error` too. */
     stage<S extends StageDefinition>(definition: S, bindings: BindingsOf<S['consumes']>, options: CallOptions): Promise<Result<S> | ErrorResult>;
+    /**
+     * Calls the stages of a group at once, each with its bindings and options, and resolves to their results in the
+     * order given. Keys are assigned in that order before any call starts, each call is journaled as it completes, and a
+     * resume runs only the calls not journaled yet. An `error` doesn't stop the others: the group ends, then fails the
+     * run unless that call passed `{ onError: 'return' }`. A list built with `.map()` needs `as const` on each call.
+     */
+    all<const T extends readonly (readonly [StageDefinition, ...unknown[]])[]>(calls: T & CheckedCalls<T>): Promise<AllResults<T>>;
     /** A bounded loop whose failed passes carry `feedback`, checked against its schema. */
     loop<F extends z.ZodType>(name: string, options: LoopOptions & {
         readonly feedback: F;

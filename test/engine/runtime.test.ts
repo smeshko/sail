@@ -50,6 +50,7 @@ import {
 } from '../helpers/agent-fixture';
 import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, type SteppingClock, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
+import { TRIO, TRIO_GROUP, TRIO_KEYS, writeTrio } from '../helpers/review-fixture';
 import {
   copyRun,
   interruptWhenAsleep,
@@ -2017,3 +2018,235 @@ test("a run whose agent step's documents derive one key twice fails before the c
     expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed']);
   });
 }, 20_000);
+
+// A group: trio's a, b and c in one run.all(), on the fake harness, then d. Each call is journaled as it completes.
+
+/** Runs trio from `cwd` on the fixture's `FAKE-1`, which must not be refused. */
+const ranTrio = (cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> =>
+  ran(cwd, { workflow: TRIO, ...options });
+
+/** Each event's type, with its key when it has one: `stage:start a#1`. */
+const typed = (list: readonly SailEvent[]) =>
+  list.map((event) => ('key' in event ? `${event.type} ${event.key}` : event.type));
+const ofType = <T extends SailEvent['type']>(list: readonly SailEvent[], type: T) =>
+  list.filter((event): event is Extract<SailEvent, { type: T }> => event.type === type);
+/** The events a group's calls emit: those carrying one of its keys. */
+const CALL_TYPES = ['stage:', 'harness:', 'agent:', 'usage:', 'prompt:', 'input:', 'output:', 'file:'];
+
+test("a group's calls run at once and are journaled as each completes, the workflow gets their results in the order given, and all:start and all:end bracket them", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    const end = await ranTrio(repo.dir);
+
+    expect(end).toMatchObject({ status: 'completed', result: { names: ['a', 'b', 'c'], last: 'done' } });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 done', 'c#1 done', 'a#1 done', 'd#1 done']);
+    expect(readJournal(end.dir).entries.map((entry) => entry.group)).toEqual([
+      undefined,
+      TRIO_KEYS,
+      TRIO_KEYS,
+      TRIO_KEYS,
+      undefined,
+    ]);
+    const list = events(end.dir);
+    expect(list.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue)).toEqual([]);
+    const starts = list.flatMap((event, i) => (event.type === 'stage:start' && event.key !== 'd#1' ? [i] : []));
+    const firstEnd = list.findIndex((event) => event.type === 'stage:end');
+    expect({ starts: starts.length, before: starts.every((i) => i < firstEnd) }).toEqual({ starts: 3, before: true });
+
+    const [started] = ofType(list, 'all:start');
+    const [ended, ...more] = ofType(list, 'all:end');
+    expect({ keys: started?.keys, running: started?.running, more: more.length }).toEqual({
+      keys: TRIO_KEYS,
+      running: TRIO_KEYS,
+      more: 0,
+    });
+    expect(ended?.outcomes).toEqual({ 'a#1': 'done', 'b#1': 'done', 'c#1': 'done' });
+    expect(ended?.durationMs).toBeLessThan(600);
+    const from = list.indexOf(started as SailEvent);
+    const to = list.indexOf(ended as SailEvent);
+    expect(typed(list.slice(to - 1, to + 2))).toEqual(['journal:append a#1', 'all:end', 'workflow:route']);
+    // Inside the bracket every event of a call carries its own key, a group's key.
+    const inside = list.slice(from + 1, to).filter((event) => CALL_TYPES.some((type) => event.type.startsWith(type)));
+    expect(inside.length).toBeGreaterThan(9);
+    expect(inside.filter((event) => !TRIO_KEYS.includes((event as { key?: string }).key ?? ''))).toEqual([]);
+  });
+}, 30_000);
+
+test("a call of a group that ends in error lets its siblings end and be journaled, then fails the run with stage_error, and all:end carries every call's outcome", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 300, b: 100, c: 200 }, { b: [{ outcome: 'error', message: 'b broke' }] });
+    const end = await ranTrio(repo.dir);
+
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'stage_error',
+      message: 'b#1 ended in error: harness: b broke',
+    });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 error', 'c#1 done', 'a#1 done']);
+    const ends = ofType(events(end.dir), 'all:end');
+    expect(ends.map((event) => event.outcomes)).toEqual([{ 'a#1': 'done', 'b#1': 'error', 'c#1': 'done' }]);
+  });
+}, 30_000);
+
+test('an abort after a call of a group completes suspends the run with that call journaled and no all:end, and a resume runs only the others', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeTrio(from.dir, { a: 20_000, b: 100, c: 20_000 });
+      const controller = new AbortController();
+      const end = await ranTrio(from.dir, {
+        signal: controller.signal,
+        onCall: (entry) => {
+          if (entry.key === 'b#1') controller.abort();
+        },
+      });
+      expect(end).toMatchObject({
+        status: 'suspended',
+        stopReason: 'interrupted',
+        message: 'stopped during the group a#1, b#1, c#1',
+      });
+      expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 done']);
+      expect(ofType(events(end.dir), 'all:end')).toEqual([]);
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+
+    writeTrio(repo.dir, { a: 50, b: 50, c: 50 });
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const before = events(dir).length;
+    const adapters = await fakeAdapters(repo.dir);
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId })).toMatchObject({
+      status: 'completed',
+      result: { names: ['a', 'b', 'c'], last: 'done' },
+    });
+    const resumed = events(dir).slice(before);
+    expect(ofType(resumed, 'stage:start').map((event) => event.key)).toEqual(['a#1', 'c#1', 'd#1']);
+    expect(ofType(resumed, 'all:start').map((event) => [event.keys, event.running])).toEqual([
+      [TRIO_KEYS, ['a#1', 'c#1']],
+    ]);
+    expect(ofType(resumed, 'all:end').map((event) => event.outcomes)).toEqual([
+      { 'a#1': 'done', 'b#1': 'done', 'c#1': 'done' },
+    ]);
+    expect(keys(dir).sort()).toEqual(['a#1', 'b#1', 'c#1', 'd#1', 'intake#1']);
+  });
+}, 60_000);
+
+test("a group whose third call can't run fails the run with workflow_failed before any of its calls starts", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeTrio(repo.dir, { a: 0, b: 0, c: 0 });
+    edit(
+      sail,
+      `workflows/${TRIO}/workflow.ts`,
+      TRIO_GROUP,
+      '  const results = await run.all([[a, { brief }], [b, { brief }], [c, { brief, extra: 1 } as never]]);\n',
+    );
+    const end = await ranTrio(repo.dir);
+
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'workflow_failed',
+      message: "c#1 can't run: 'extra' is not a binding of this stage",
+    });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed']);
+    expect(typed(events(end.dir)).filter((type) => type.startsWith('stage:start') || type === 'all:start')).toEqual([]);
+  });
+}, 30_000);
+
+test('a call of a group that throws inside sail stops its siblings, and the error goes on once they have settled: no all:end, and STATUS stays running', async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 20_000, b: 100, c: 20_000 });
+    const crashed = ranTrio(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key === 'b#1') throw new Error('a bug in sail');
+      },
+    });
+    const started = performance.now();
+    expect(
+      await crashed.then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      ),
+    ).toBe('a bug in sail');
+    expect(performance.now() - started).toBeLessThan(10_000);
+
+    const dir = onlyRun(repo.dir);
+    expect(readStatus(dir)).toEqual({ status: 'running' });
+    expect(journaled(dir)).toEqual(['intake#1 passed', 'b#1 done']);
+    const list = events(dir);
+    expect(ofType(list, 'all:end')).toEqual([]);
+    expect(
+      ofType(list, 'stage:end')
+        .map((event) => event.key)
+        .sort(),
+    ).toEqual(['a#1', 'b#1', 'c#1']);
+    expect(list.at(-1)).toMatchObject({ type: 'error:crash', message: 'a bug in sail' });
+    expect(list.at(-1)).not.toHaveProperty('key');
+  });
+}, 30_000);
+
+test("until naming a group's stage suspends the run once the whole group is journaled, before the next call", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 100, b: 300, c: 200 });
+    const end = await ranTrio(repo.dir, { until: 'b' });
+
+    expect(end).toMatchObject({
+      status: 'suspended',
+      stopReason: 'until',
+      message: 'stopped after b#1, as --until asked',
+    });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'a#1 done', 'c#1 done', 'b#1 done']);
+    expect(ofType(events(end.dir), 'all:end')).toHaveLength(1);
+  });
+}, 30_000);
+
+test("a resume that runs one call of a group stamps what an adapter emits during it with that call's key, not the group's first", async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeTrio(from.dir, { a: 50, b: 100, c: 20_000 });
+      const controller = new AbortController();
+      const end = await ranTrio(from.dir, {
+        signal: controller.signal,
+        onCall: (entry) => {
+          if (entry.key === 'b#1') controller.abort();
+        },
+      });
+      expect(journaled(end.dir)).toEqual(['intake#1 passed', 'a#1 done', 'b#1 done']);
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+
+    writeTrio(repo.dir, { a: 50, b: 50, c: 50 });
+    const adapters = await fakeAdapters(repo.dir);
+    const during: Consumer = {
+      name: 'provider',
+      onEvent(event) {
+        if (event.type === 'stage:start' && event.key === 'c#1') adapters.relay.emit(PUSHED);
+      },
+    };
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId, consumers: [during] })).toMatchObject({
+      status: 'completed',
+    });
+    const pushed = ofType(events(join(repo.dir, '.sail-runs', runId)), 'codehost:pushed');
+    expect(pushed.map((event) => event.key)).toEqual(['c#1']);
+  });
+}, 60_000);
+
+test('an abort as the last call of a group is journaled still ends the group with all:end, since the journal holds it whole', async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    const controller = new AbortController();
+    const end = await ranTrio(repo.dir, {
+      signal: controller.signal,
+      onCall: (entry) => {
+        if (entry.key === 'a#1') controller.abort();
+      },
+    });
+
+    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted' });
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 done', 'c#1 done', 'a#1 done']);
+    const list = events(end.dir);
+    expect(ofType(list, 'all:end').map((event) => event.outcomes)).toEqual([
+      { 'a#1': 'done', 'b#1': 'done', 'c#1': 'done' },
+    ]);
+    expect(typed(list).indexOf('all:end')).toBeLessThan(typed(list).indexOf('run:end'));
+  });
+}, 30_000);

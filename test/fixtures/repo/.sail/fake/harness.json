@@ -141,5 +141,107 @@
         "costUsd": 0.101
       }
     }
+  ],
+  "style": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The change reads like the code around it.",
+        "findings": []
+      },
+      "messages": ["style review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 600
+    }
+  ],
+  "architecture": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The flag sits where the other options do.",
+        "findings": []
+      },
+      "messages": ["architecture review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 500
+    }
+  ],
+  "side-effects": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Nothing outside greet() and the CLI changes.",
+        "findings": []
+      },
+      "messages": ["side-effects review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 400
+    }
+  ],
+  "performance": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Upper-casing one line costs nothing to speak of.",
+        "findings": []
+      },
+      "messages": ["performance review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 300
+    }
+  ],
+  "security": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The flag takes no input of its own.",
+        "findings": []
+      },
+      "messages": ["security review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 200
+    }
+  ],
+  "coverage": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Both paths of the flag are tested.",
+        "findings": []
+      },
+      "messages": ["coverage review done: no findings."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      },
+      "delayMs": 100
+    }
   ]
 }
