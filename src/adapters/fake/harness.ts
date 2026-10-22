@@ -98,7 +98,10 @@ const endOf = (
 });
 
 /** Where each of `files` lands in `out`, or the first name that would land outside it. */
-function placeFiles(out: string, files: Record<string, string>): { paths: [string, string][] } | { outside: string } {
+export function placeFiles(
+  out: string,
+  files: Record<string, string>,
+): { paths: [string, string][] } | { outside: string } {
   const paths: [string, string][] = [];
   for (const [name, text] of Object.entries(files)) {
     const path = resolve(out, name);
