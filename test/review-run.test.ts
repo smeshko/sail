@@ -63,10 +63,7 @@ async function killedAt(repo: TempRepo, lines: number): Promise<string> {
   return dir;
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('six reviewers with staggered delays run at once: every one starts before the first ends, the group takes well under the sum of their delays, the journal holds them as they completed, and the workflow gets them in the order declared', async () => {
+test('six reviewers with staggered delays run at once: every one starts before the first ends, the group takes well under the sum of their delays, the journal holds them as they completed, and the workflow gets them in the order declared', async () => {
   await withTempRepo(async (repo) => {
     writeReviewFixture(repo.dir);
     const { code, stderr, dir } = await review(repo);
@@ -86,10 +83,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a review's events all validate against sail.event.v1, its all:start and all:end included, and its summary.json validates and lists one group of the six keys in the order declared", async () => {
+test("a review's events all validate against sail.event.v1, its all:start and all:end included, and its summary.json validates and lists one group of the six keys in the order declared", async () => {
   await withTempRepo(async (repo) => {
     writeReviewFixture(repo.dir);
     const { code, dir } = await review(repo);
@@ -107,10 +101,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a review killed once three reviewers finished resumes with sail resume, which runs only the other three: the journal holds each call once', async () => {
+test('a review killed once three reviewers finished resumes with sail resume, which runs only the other three: the journal holds each call once', async () => {
   await withTempRepo(async (repo) => {
     writeReviewFixture(repo.dir);
     setReviewerDelays(repo.dir, {
@@ -138,10 +129,7 @@ test
   });
 }, 120_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a review killed mid-group whose reviewers were reordered since fails its resume with determinism_violation, naming both key lists', async () => {
+test('a review killed mid-group whose reviewers were reordered since fails its resume with determinism_violation, naming both key lists', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeReviewFixture(repo.dir);
     setReviewerDelays(repo.dir, { style: 20_000 });
@@ -160,10 +148,7 @@ test
   });
 }, 120_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('one reviewer ending in error lets the other five finish, then fails the run with stage_error', async () => {
+test('one reviewer ending in error lets the other five finish, then fails the run with stage_error', async () => {
   await withTempRepo(async (repo) => {
     writeReviewFixture(repo.dir);
     failReviewer(repo.dir, 'security');
