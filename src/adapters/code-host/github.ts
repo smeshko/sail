@@ -179,9 +179,8 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
       }),
     listDesignated: unsupported('listDesignated'),
     getPullRequest: (number) => guarded(() => read('getPullRequest', number)),
-    // TDD stubs (ADW-127): a wrong answer of the right type, not yet GitHub's.
-    checks: async (number) => ({ number, headSha: '', checks: [], raw: null }),
-    merge: async () => ({ state: 'pending', reason: 'TDD stub: not merged', raw: null }),
+    checks: unsupported('checks'),
+    merge: unsupported('merge'),
     addLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
         const pr = await read('addLabel', number);
@@ -189,7 +188,27 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         const added = await addLabels('addLabel', number, [label], pr.labels);
         return { number, labels: added.labels, raw: added.raw };
       }),
-    removeLabel: async (number) => ({ number, labels: [], raw: null }),
+    removeLabel: (number, label) =>
+      guarded(async (): Promise<Labelled> => {
+        const pr = await read('removeLabel', number);
+        if (!pr.labels.includes(label)) return { number, labels: pr.labels, raw: pr.raw };
+        let answer: { name: string }[];
+        try {
+          answer = await client.request<{ name: string }[]>(
+            'removeLabel',
+            'DELETE',
+            client.repoPath('issues', number, 'labels', label),
+          );
+        } catch (error) {
+          // The label went in a race: the labels as they are now are the answer, and nothing changed here.
+          if (!(error instanceof PortError) || error.code !== 'not_found') throw error;
+          const now = await read('removeLabel', number);
+          return { number, labels: now.labels, raw: now.raw };
+        }
+        const labels = answer.map((each) => each.name);
+        if (!labels.includes(label)) emit({ type: 'codehost:labelled', number, label, change: 'removed' });
+        return { number, labels, raw: answer };
+      }),
     comment: (number, text) =>
       guarded(async () => {
         unsent('comment', 'the comment', text);

@@ -36,7 +36,6 @@ const UNSUPPORTED: Unsupported[] = [
   'listDesignated',
   'checks', // TDD-PENDING TASK-004
   'merge', // TDD-PENDING TASK-005
-  'removeLabel', // TDD-PENDING TASK-003
 ];
 const held = holdTempRepo();
 
@@ -523,10 +522,7 @@ test
 const sentSince = (on: GitHubWorld, from: number) =>
   on.requests.slice(from).map(({ method, path, body }) => (body === undefined ? [method, path] : [method, path, body]));
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('adding then removing a label sends exactly the label: a POST of { labels: [name] } and a DELETE with no body, each after a read', async () => {
+test('adding then removing a label sends exactly the label: a POST of { labels: [name] } and a DELETE with no body, each after a read', async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
@@ -551,10 +547,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('removing a label the pull request lacks answers its labels after only the read, and emits nothing', async () => {
+test('removing a label the pull request lacks answers its labels after only the read, and emits nothing', async () => {
   const on = world();
   const capture = captureEvents();
   const removed = await host(on, capture.emit).removeLabel(7, 'needs-review');
@@ -565,10 +558,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a label holding a slash and a space is removed as one encoded path segment', async () => {
+test('a label holding a slash and a space is removed as one encoded path segment', async () => {
   const on = world({
     pullRequests: [{ number: 7, head: 'sail/designated', labels: ['sail', 'needs review/now'] }],
   });
@@ -587,10 +577,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a 404 on the DELETE, the label gone in a race, answers a fresh read of the labels and emits nothing', async () => {
+test('a 404 on the DELETE, the label gone in a race, answers a fresh read of the labels and emits nothing', async () => {
   const on = world();
   const capture = captureEvents();
   on.inject('DELETE /issues/7/labels/sail', { status: 404, body: { message: 'Label does not exist' } });
