@@ -227,7 +227,7 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
     async listDesignated(name) {
       const world = store.read();
       return world.pullRequests
-        .filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(name))
+        .filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(name) && pr.fork !== true)
         .sort((a, b) => a.number - b.number)
         .map((pr) => toPullRequest(world, pr));
     },
