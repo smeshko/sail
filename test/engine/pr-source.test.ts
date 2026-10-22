@@ -76,10 +76,7 @@ const mismatch = (number: number, key: string, head: string) =>
 
 type Expected = { refused: string } | { number: number; ticketKey: string | null; forced: string[] };
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, number, Partial<ResolvePullRequestOptions>, Expected]>([
+test.each<[string, number, Partial<ResolvePullRequestOptions>, Expected]>([
   ['a marker on its ticket branch with a slug', 1, {}, { number: 1, ticketKey: 'FAKE-1', forced: [] }],
   ['a marker on its ticket branch alone', 2, {}, { number: 2, ticketKey: 'FAKE-1', forced: [] }],
   ['no marker', 3, {}, { number: 3, ticketKey: null, forced: [] }],
@@ -101,21 +98,51 @@ test
   ],
   ['a marker naming another ticket', 10, {}, { refused: mismatch(10, 'FAKE-5', 'sail/FAKE-7-x') }],
   ["a marker whose key is a prefix of the branch's", 11, {}, { refused: mismatch(11, 'FAKE-1', 'sail/FAKE-12-x') }],
-  ['a marker on a branch of another prefix', 15, { branchPrefix: 'bot/' }, { refused: mismatch(15, 'FAKE-1', 'sail/FAKE-1-x') }],
-  ['a head that moved since it was queued', 1, { headSha: sha(99) }, { refused: `pull request #1's head is now ${sha(1).slice(0, 7)}, not ${sha(99).slice(0, 7)}` }],
-  ['a pull request that does not exist', 99, {}, { refused: 'codeHost.getPullRequest: no pull request #99 (not_found)' }],
+  [
+    'a marker on a branch of another prefix',
+    15,
+    { branchPrefix: 'bot/' },
+    { refused: mismatch(15, 'FAKE-1', 'sail/FAKE-1-x') },
+  ],
+  [
+    'a head that moved since it was queued',
+    1,
+    { headSha: sha(99) },
+    { refused: `pull request #1's head is now ${sha(1).slice(0, 7)}, not ${sha(99).slice(0, 7)}` },
+  ],
+  [
+    'a pull request that does not exist',
+    99,
+    {},
+    { refused: 'codeHost.getPullRequest: no pull request #99 (not_found)' },
+  ],
   ['a closed one, forced', 4, { force: true }, { number: 4, ticketKey: null, forced: ['state'] }],
   ['a draft, forced', 6, { force: true }, { number: 6, ticketKey: null, forced: ['state'] }],
   ['an unlabelled one, forced', 7, { force: true }, { number: 7, ticketKey: null, forced: ['designation'] }],
-  ['a closed, unlabelled one, forced', 12, { force: true }, { number: 12, ticketKey: null, forced: ['designation', 'state'] }],
+  [
+    'a closed, unlabelled one, forced',
+    12,
+    { force: true },
+    { number: 12, ticketKey: null, forced: ['designation', 'state'] },
+  ],
   [
     'a closed fork, forced',
     13,
     { force: true },
     { refused: `pull request #13 comes from a fork: its head patch-2 is not a branch of this repository. ${NO_FORCE}` },
   ],
-  ['a head on the default branch, forced', 9, { force: true }, { refused: `pull request #9's head is main, the default branch, which no run may lease. ${NO_FORCE}` }],
-  ['a draft whose marker does not match, forced', 14, { force: true }, { refused: mismatch(14, 'FAKE-1', 'sail/FAKE-12-x') }],
+  [
+    'a head on the default branch, forced',
+    9,
+    { force: true },
+    { refused: `pull request #9's head is main, the default branch, which no run may lease. ${NO_FORCE}` },
+  ],
+  [
+    'a draft whose marker does not match, forced',
+    14,
+    { force: true },
+    { refused: mismatch(14, 'FAKE-1', 'sail/FAKE-12-x') },
+  ],
 ])('resolvePullRequest on %s', async (_, number, options, expected) => {
   const { codeHost, states } = world();
   const resolved = await resolvePullRequest({
@@ -133,10 +160,7 @@ test
   expect({ got, written: states.filter((state) => existsSync(state)) }).toEqual({ got: expected, written: [] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('resolveRef asks both adapters: one reading is the source, a ref both read is refused naming both readings, and one neither reads names both adapters', () => {
+test('resolveRef asks both adapters: one reading is the source, a ref both read is refused naming both readings, and one neither reads names both adapters', () => {
   const { codeHost, ticketSource, states } = world();
   /** A CodeHost of the repository's own that reads any ref as pull request 12. */
   const greedy: CodeHost = { ...codeHost, name: 'greedy', parseRef: () => 12 };
