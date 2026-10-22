@@ -106,7 +106,12 @@ export const CODEHOST: PortTable<'codeHost'> = {
       { positionals: ['pr'], options: { method: { value: 'merge|squash|rebase', required: true } } },
       // The method as given: the port refuses one it doesn't know.
       async (host, number, { values }) =>
-        answered('merge', 'MergeResult', MergeResult, await host.merge(number, text(values.method) as MergeMethod)),
+        answered(
+          'merge',
+          'MergeResult',
+          MergeResult,
+          await host.merge(number, { method: text(values.method) as MergeMethod, expectedHeadSha: '' }),
+        ),
     ),
     'add-label': onPullRequest(
       { positionals: ['pr', 'label'] },

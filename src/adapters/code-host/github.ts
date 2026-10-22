@@ -179,8 +179,9 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
       }),
     listDesignated: unsupported('listDesignated'),
     getPullRequest: (number) => guarded(() => read('getPullRequest', number)),
-    checks: unsupported('checks'),
-    merge: unsupported('merge'),
+    // TDD stubs (ADW-127): a wrong answer of the right type, not yet GitHub's.
+    checks: async (number) => ({ number, headSha: '', checks: [], raw: null }),
+    merge: async () => ({ state: 'pending', reason: 'TDD stub: not merged', raw: null }),
     addLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
         const pr = await read('addLabel', number);
@@ -188,7 +189,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         const added = await addLabels('addLabel', number, [label], pr.labels);
         return { number, labels: added.labels, raw: added.raw };
       }),
-    removeLabel: unsupported('removeLabel'),
+    removeLabel: async (number) => ({ number, labels: [], raw: null }),
     comment: (number, text) =>
       guarded(async () => {
         unsent('comment', 'the comment', text);

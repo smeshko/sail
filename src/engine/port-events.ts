@@ -6,7 +6,7 @@
 // of the fields the run stamps, that validates against `sail.event.v1` once enveloped. A script can write the file
 // itself, so nothing else is taken from it. A `workspace:*` event carries no key, and no port command emits one.
 import { appendFileSync, closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
-import type { ProviderEvent } from '../events/types';
+import type { PortErrorEvent, ProviderEvent } from '../events/types';
 import { validateDocument } from './schemas';
 
 export const PORT_EVENTS_FILE = 'port-events.ndjson';
@@ -14,8 +14,11 @@ export const PORT_EVENTS_FILE = 'port-events.ndjson';
 /** The fields the run stamps on an event: a line that carries one is refused. */
 const STAMPED = ['seq', 'ts', 'runId', 'key'] as const;
 
+/** What a port command leaves in the file: a provider event, or a failed call. */
+export type PortEvent = ProviderEvent | PortErrorEvent;
+
 /** Appends `event` to the file at `path` as one line, in one write. The file's directory must exist. */
-export function appendPortEvent(path: string, event: ProviderEvent): void {
+export function appendPortEvent(path: string, event: PortEvent): void {
   appendFileSync(path, `${JSON.stringify(event)}\n`);
 }
 
@@ -49,7 +52,7 @@ function parseLine(line: string, envelope: { runId: string; key: string }): Prov
 export function readPortEvents(
   path: string,
   envelope: { runId: string; key: string },
-): { events: ProviderEvent[]; problems: string[] } {
+): { events: PortEvent[]; problems: string[] } {
   let text: string;
   try {
     // Opened without blocking and looked at before it is read: a script can leave a FIFO here, whose read would never
@@ -68,7 +71,7 @@ export function readPortEvents(
     const code = (error as NodeJS.ErrnoException).code ?? (error as Error).message;
     return { events: [], problems: code === 'ENOENT' ? [] : [`${PORT_EVENTS_FILE} can't be read (${code})`] };
   }
-  const events: ProviderEvent[] = [];
+  const events: PortEvent[] = [];
   const problems: string[] = [];
   const lines = text
     .slice(0, text.lastIndexOf('\n') + 1)

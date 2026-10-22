@@ -41,7 +41,7 @@ const StoredPullRequest = z.object({
   checks: z.array(z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1) })).default([]),
   /** What each merge call is answered, the last repeating. */
   merges: z
-    .array(z.enum(['merged', 'pending', 'refused']))
+    .array(z.enum(['merged', 'pending', 'refused', 'rejected']))
     .min(1)
     .default(['merged']),
   reads: z.object({ checks: z.number().int(), merges: z.number().int() }).default({ checks: 0, merges: 0 }),
@@ -209,7 +209,9 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       emit({ type: 'codehost:checks', number, headSha: checks.headSha, checks: checks.checks });
       return checks;
     },
-    async merge(number, method) {
+    async merge(number, request) {
+      // TDD stub (ADW-127): the method alone, as before; the expected head is not yet checked.
+      const method = request.method;
       // A method from outside TypeScript, such as `sail port`, is checked before anything merges.
       if (!MergeMethod.safeParse(method).success) {
         throw new PortError('codeHost', 'merge', 'invalid', `${String(method)} is not a merge method`);
@@ -229,7 +231,8 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
         pr.reads.merges++;
         if (answer !== 'merged') {
           const reason = `fake: merge scripted ${answer}`;
-          return { result: { state: answer, reason, raw: structuredClone(pr) }, merged: false };
+          const state = answer === 'rejected' ? 'refused' : answer;
+          return { result: { state, reason, raw: structuredClone(pr) }, merged: false };
         }
         pr.state = 'merged';
         return { result: { state: 'merged', sha: mergeSha(pr), raw: structuredClone(pr) }, merged: true };

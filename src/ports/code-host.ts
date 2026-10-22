@@ -4,7 +4,7 @@ import type {
   Checks,
   CodeHostCapabilities,
   Labelled,
-  MergeMethod,
+  MergeRequest,
   MergeResult,
   Posted,
   PullRequest,
@@ -43,7 +43,7 @@ export interface CodeHost {
   /** The checks on the pull request's head sha. Emits `codehost:checks`. */
   checks(number: number): Promise<Checks>;
   /** Emits `codehost:merged` only when the host reports the merge. */
-  merge(number: number, method: MergeMethod): Promise<MergeResult>;
+  merge(number: number, request: MergeRequest): Promise<MergeResult>;
   /** Emits `codehost:labelled` only when the labels changed. */
   addLabel(number: number, label: string): Promise<Labelled>;
   /** Emits `codehost:labelled` only when the labels changed. */
