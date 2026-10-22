@@ -717,6 +717,52 @@ test('more than 1000 check runs reject as unavailable, naming the head sha, and 
   });
 });
 
+test.each<[string, string, unknown, (sha: string) => string]>([
+  [
+    'a check-runs page with no list',
+    'check-runs',
+    { total_count: 1 },
+    (sha) => `GitHub's check-runs answer for ${sha} holds no list and total_count`,
+  ],
+  [
+    'a check-runs page with no total_count',
+    'check-runs',
+    { check_runs: [{ name: 'build', status: 'completed', conclusion: 'success' }] },
+    (sha) => `GitHub's check-runs answer for ${sha} holds no list and total_count`,
+  ],
+  [
+    'a check-runs page that ends before total_count',
+    'check-runs',
+    { total_count: 1, check_runs: [] },
+    (sha) => `GitHub listed 0 of 1 check-runs on ${sha}`,
+  ],
+  [
+    'a status page whose list is no array',
+    'status',
+    { total_count: 1, statuses: 'failure' },
+    (sha) => `GitHub's status answer for ${sha} holds no list and total_count`,
+  ],
+  [
+    'a status page that ends before total_count',
+    'status',
+    { total_count: 2, statuses: [] },
+    (sha) => `GitHub listed 0 of 2 status on ${sha}`,
+  ],
+])(
+  '%s rejects the read as unavailable, and emits nothing: an unread check never passes',
+  async (_, endpoint, body, message) => {
+    const on = world();
+    const sha = headOf7(on);
+    on.inject(`GET /commits/${sha}/${endpoint}`, { status: 200, body });
+    const capture = captureEvents();
+    const error = await rejection(host(on, capture.emit).checks(7));
+    expect({
+      error: error instanceof PortError ? [error.code, error.message] : String(error),
+      events: capture.events,
+    }).toEqual({ error: ['unavailable', `codeHost.checks: ${message(sha)}`], events: [] });
+  },
+);
+
 test('checks of a pull request GitHub does not have reject as not_found, with no request for any commit', async () => {
   const on = world();
   const error = await rejection(host(on).checks(99));
