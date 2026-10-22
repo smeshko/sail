@@ -153,7 +153,24 @@ export interface Recorder {
 }
 
 /** The names that hold a credential: their values are masked in every form in a recording. */
-const SECRET_NAME = /TOKEN|KEY|SECRET|PASSWORD/i;
+const SECRET_NAME = /TOKEN|KEY|SECRET|PASS|AUTH|CREDENTIAL|COOKIE|SESSION|PRIVATE|HEADER|(^|_)PAT$/i;
+/** A URL's `user:password` part, as a proxy or a database URL carries it under any name. */
+const USERINFO = /[a-z][a-z0-9+.-]*:\/\/([^\s/:@]+):([^\s/@]+)@/gi;
+
+/**
+ * The values a recording masks: every credential-named one of 8 characters or more, and the `user:password` and the
+ * password of any URL in any value, such as `HTTPS_PROXY` or `DATABASE_URL`.
+ */
+export function recordedSecrets(env: Readonly<Record<string, string | undefined>>): string[] {
+  const found = new Set<string>();
+  for (const [name, value = ''] of Object.entries(env)) {
+    if (SECRET_NAME.test(name) && value.length >= 8) found.add(value);
+    for (const [, user, password = ''] of value.matchAll(USERINFO)) {
+      for (const secret of [`${user}:${password}`, password]) if (secret.length >= 8) found.add(secret);
+    }
+  }
+  return [...found];
+}
 
 /**
  * `--record <dir>`: wraps the project's harness in a recorder (11.3 D2, D5). `dir` is relative to where sail runs and is
@@ -170,9 +187,7 @@ export function recorded(
   const dir = resolve(io.cwd, named);
   mkdirSync(dir, { recursive: true });
   const env = io.env ?? process.env;
-  const secrets = Object.entries(env)
-    .filter((entry): entry is [string, string] => SECRET_NAME.test(entry[0]) && (entry[1] ?? '').length >= 8)
-    .map(([, value]) => value);
+  const secrets = recordedSecrets(env);
   const roots: Record<string, string> = {
     $RUNS: runsDir(project.sailDir),
     $REPO: dirname(project.sailDir),
