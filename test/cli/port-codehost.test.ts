@@ -388,10 +388,7 @@ const USAGE = `${TICKET_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehos
        sail port render --untrusted --source <text> [--inline]
 `;
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("get-pull-request prints the pull request with its details, as the port's PullRequestDetails, named by its number, by #number or by its URL", async () => {
+test("get-pull-request prints the pull request with its details, as the port's PullRequestDetails, named by its number, by #number or by its URL", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const byNumber = await codehost(repo, ['get-pull-request', '1']);

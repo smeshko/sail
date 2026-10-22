@@ -20,7 +20,16 @@
 import { z } from 'zod';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
-import { Checks, Labelled, type MergeMethod, MergeResult, Posted, PullRequest, Pushed } from '../../ports/types';
+import {
+  Checks,
+  Labelled,
+  type MergeMethod,
+  MergeResult,
+  Posted,
+  PullRequest,
+  PullRequestDetails,
+  Pushed,
+} from '../../ports/types';
 import type { PortCall, PortOperation, PortTable } from './port';
 
 /**
@@ -92,7 +101,7 @@ export const CODEHOST: PortTable<'codeHost'> = {
       },
     },
     'get-pull-request': onPullRequest({ positionals: ['pr'] }, async (host, number) =>
-      answered('getPullRequest', 'PullRequest', PullRequest, await host.getPullRequest(number)),
+      answered('getPullRequest', 'PullRequestDetails', PullRequestDetails, await host.getPullRequest(number)),
     ),
     'list-designated': {
       positionals: ['label'],

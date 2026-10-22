@@ -194,10 +194,7 @@ test("the fixture seed holds four pull requests, three of them designated, every
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("getPullRequest answers the details: the seed's body, author, fork and comments, a comment posted since last, and a baseSha that is branches[base] unless the seed gives one; with neither it is invalid", async () => {
+test("getPullRequest answers the details: the seed's body, author, fork and comments, a comment posted since last, and a baseSha that is branches[base] unless the seed gives one; with neither it is invalid", async () => {
   const host = createFakeCodeHost(
     files((seed) => {
       Object.assign(seed.pullRequests[0] ?? {}, {
