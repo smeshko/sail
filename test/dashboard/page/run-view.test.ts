@@ -123,10 +123,7 @@ test('a running card shows running and its time so far, a PR link is drawn only 
 
 const FAKE_4 = join(DASHBOARD_FIXTURES, 'beta', FAKE_4_ID);
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("a group's cards share one block headed run.all · 6 calls, side by side in its grid, the intake's card outside it, and while it runs the header counts its running calls", () => {
+test("a group's cards share one block headed run.all · 6 calls, side by side in its grid, the intake's card outside it, and while it runs the header counts its running calls", () => {
   const events = readEvents(FAKE_4);
   const markup = renderRun(foldRun(events), summaryOf(FAKE_4), initialUi(0), NOW).value;
   expect(groups(markup)).toEqual(['-: intake#1', `run.all · 6 calls: ${REVIEW_KEYS.join(' ')}`]);
@@ -135,10 +132,7 @@ test
   expect(groups(running)).toEqual(['-: intake#1', `run.all · 6 calls · 5 running: ${REVIEW_KEYS.join(' ')}`]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("a group inside a loop iteration is headed by the iteration and the group, and the iteration's other cards keep their own block", () => {
+test("a group inside a loop iteration is headed by the iteration and the group, and the iteration's other cards keep their own block", () => {
   const events = readEvents(FAKE_4);
   const at = events.findIndex((event) => event.type === 'all:start');
   const ts = events[at]?.ts ?? '';

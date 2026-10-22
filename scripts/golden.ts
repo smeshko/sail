@@ -41,6 +41,7 @@ import { readEvents } from '../src/events/consumers/ndjson';
 import { terminalConsumer, type Verbosity } from '../src/events/consumers/terminal';
 import type { QueueEvent, SailEvent } from '../src/events/types';
 import { FAKE_2_ID, FAKE_3_ID, fake2Dir, QUEUE_WORKFLOW, queueDirOf, seedFixtures } from '../test/helpers/dashboard';
+import { FAKE_4_ID } from '../test/helpers/review-fixture';
 
 const root = join(import.meta.dir, '..');
 const FIXTURE_SAIL = join(root, 'test', 'fixtures', 'repo', '.sail');
@@ -176,8 +177,9 @@ export function renderDashboardViews(outDir: string): string[] {
       golden: ['alpha', machine.alpha.runDir],
       'fake-2': ['alpha', fake2Dir(machine)],
       'fake-3': ['beta', machine.beta.runDir],
+      review: ['beta', join(machine.beta.clone, '.sail-runs', FAKE_4_ID)],
     };
-    const runIdOf = { golden: GOLDEN_RUN_ID, 'fake-2': FAKE_2_ID, 'fake-3': FAKE_3_ID };
+    const runIdOf = { golden: GOLDEN_RUN_ID, 'fake-2': FAKE_2_ID, 'fake-3': FAKE_3_ID, review: FAKE_4_ID };
     const summaryOf = (repo: string, runId: string) =>
       repos.find((entry) => entry.name === repo)?.runs.find((run) => run.runId === runId)?.summary;
     const views: Record<string, SafeHtml> = {};

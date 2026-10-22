@@ -312,10 +312,7 @@ test('event types, loop names and tool call ids that are Object.prototype keys a
   expect(model.unreadable).toBe(0);
 });
 
-// biome-ignore format: TDD-PENDING TASK-009
-test
-  .skip // TDD-PENDING TASK-009
-  ("a group's all:start lists it once, though a resume reports it again, its all:end ends it, each call started while it is open carries its index, and neither counts as a type the fold doesn't handle", () => {
+test("a group's all:start lists it once, though a resume reports it again, its all:end ends it, each call started while it is open carries its index, and neither counts as a type the fold doesn't handle", () => {
   const events = readEvents(join(DASHBOARD_FIXTURES, 'beta', FAKE_4_ID));
   const started = events.find((event) => event.type === 'all:start');
   const ended = events.findIndex((event) => event.type === 'all:end');
