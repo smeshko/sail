@@ -1,0 +1,126 @@
+{
+  "recording": 1,
+  "key": "self-review#1",
+  "tries": [
+    {
+      "try": 1,
+      "request": {
+        "model": "claude-opus-5-5",
+        "budget": {
+          "maxTurns": 30,
+          "maxUsd": 2,
+          "maxMinutes": 10
+        },
+        "promptSha256": "e9487456d82cef70461eac54451b11bf879b42be8d30d511d6a10ed625e2be93"
+      },
+      "events": [
+        {
+          "type": "harness:session_start",
+          "adapter": "fake",
+          "sessionId": "fake-session-self-review-1",
+          "model": "claude-opus-5-5"
+        },
+        {
+          "type": "agent:message",
+          "text": "Every requirement is met. One low finding and one nit."
+        },
+        {
+          "type": "usage:update",
+          "turn": 1,
+          "tokens": {
+            "input": 1075,
+            "cacheRead": 5700,
+            "cacheWrite": 475,
+            "output": 275
+          },
+          "costUsdSoFar": 0.055375
+        },
+        {
+          "type": "usage:update",
+          "turn": 2,
+          "tokens": {
+            "input": 2150,
+            "cacheRead": 11400,
+            "cacheWrite": 950,
+            "output": 550
+          },
+          "costUsdSoFar": 0.11075
+        },
+        {
+          "type": "usage:update",
+          "turn": 3,
+          "tokens": {
+            "input": 3225,
+            "cacheRead": 17100,
+            "cacheWrite": 1425,
+            "output": 825
+          },
+          "costUsdSoFar": 0.166125
+        },
+        {
+          "type": "usage:update",
+          "turn": 4,
+          "tokens": {
+            "input": 4300,
+            "cacheRead": 22800,
+            "cacheWrite": 1900,
+            "output": 1100
+          },
+          "costUsdSoFar": 0.2215
+        },
+        {
+          "type": "harness:session_end",
+          "sessionId": "fake-session-self-review-1",
+          "outcome": "done",
+          "reason": "submitted",
+          "turns": 4,
+          "toolCalls": 0,
+          "denials": 0,
+          "usage": {
+            "inputTokens": 4300,
+            "cacheReadTokens": 22800,
+            "cacheWriteTokens": 1900,
+            "outputTokens": 1100,
+            "costUsd": 0.2215
+          }
+        }
+      ],
+      "result": {
+        "outcome": "done",
+        "output": {
+          "summary": "The change meets the spec. Two minor findings, nothing that blocks.",
+          "findings": [
+            {
+              "severity": "low",
+              "file": "src/cli.ts",
+              "title": "Unknown flags are treated as missing names",
+              "detail": "An argument such as --loud is skipped rather than reported."
+            },
+            {
+              "severity": "nit",
+              "file": "test/greet.test.ts",
+              "title": "Test names could mention the option",
+              "detail": "The shout tests could say \"{ shout: true }\" to match the spec."
+            }
+          ]
+        },
+        "sessionId": "fake-session-self-review-1",
+        "usage": {
+          "inputTokens": 4300,
+          "cacheReadTokens": 22800,
+          "cacheWriteTokens": 1900,
+          "outputTokens": 1100,
+          "costUsd": 0.2215
+        },
+        "transcript": "assistant: Every requirement is met. One low finding and one nit."
+      },
+      "files": {
+        "review.md": {
+          "encoding": "utf8",
+          "content": "# Review: FAKE-1\n\n## Findings\n\n- **low**, `src/cli.ts`: Unknown flags are treated as missing names. An argument such as --loud is skipped rather than reported.\n- **nit**, `test/greet.test.ts`: Test names could mention the option. The shout tests could say \"{ shout: true }\" to match the spec.\n\n## Verdict\n\nThe change meets the spec. Two minor findings, nothing that blocks.\n"
+        }
+      },
+      "raw": []
+    }
+  ]
+}
