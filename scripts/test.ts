@@ -24,7 +24,12 @@ Object.assign(env, {
   SAIL_TEST_HOME: home,
 });
 
-const child = Bun.spawn([process.execPath, 'test', ...process.argv.slice(2)], {
+// Many tests spawn the sail CLI or git, and on a loaded machine they outrun Bun's 5 s default per test. A caller's own
+// --timeout wins. bunfig.toml can't hold this: Bun ignores a `timeout` under [test].
+const args = process.argv.slice(2);
+const timeout = args.some((arg) => arg === '--timeout' || arg.startsWith('--timeout=')) ? [] : ['--timeout', '30000'];
+
+const child = Bun.spawn([process.execPath, 'test', ...timeout, ...args], {
   env,
   stdio: ['inherit', 'inherit', 'inherit'],
 });

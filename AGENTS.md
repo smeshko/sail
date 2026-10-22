@@ -11,7 +11,8 @@ Bun `>=1.3.14` is the only runtime. No command needs Node.
 
 - `bun install`: installs dependencies and points `core.hooksPath` at `.githooks`, so the pre-push hook runs `verify`.
 - `bun run verify`: typecheck, lint, then tests with the coverage gate. A change is green when this passes.
-- `bun run test [path]`: tests without the coverage gate. A path filters the run.
+- `bun run test [path]`: tests without the coverage gate. A path filters the run. Each test gets 30 s unless you pass
+  `--timeout`.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
 - `bun run types`: regenerates `types/`, the SDK's committed declarations. Run it after changing `src/sdk`: `verify`
   fails while they're stale.
