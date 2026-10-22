@@ -65,6 +65,11 @@ if (process.env.SAIL_LIVE_LAND === '1') {
         stdin: 'ignore',
       });
       expect(cloned.exitCode).toBe(0);
+      // The workspace's git blanks GIT_ASKPASS on purpose, so its fetch asks the clone's own helper, which reads the
+      // token from the environment when git asks: no file holds it.
+      const helper = '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f';
+      const configured = Bun.spawnSync(['git', '-C', clone, 'config', 'credential.helper', helper], { env });
+      expect(configured.exitCode).toBe(0);
       writeFileSync(join(clone, '.git', 'info', 'exclude'), '.sail-runs/\n');
       const sail = addLand(copyFixture(clone));
       writeFileSync(
