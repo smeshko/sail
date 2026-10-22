@@ -537,7 +537,8 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const crash = new AbortController();
       const groupSignal = signal === undefined ? crash.signal : AbortSignal.any([signal, crash.signal]);
       const live = new Set(calls.map((call) => call.key));
-      running = live.size === 1 ? first : undefined;
+      // A resume may run one call of a group, and it isn't the group's first.
+      running = live.size === 1 ? [...live][0] : undefined;
       /** The relay's key is the running call's while exactly one of the group's runs, and none otherwise. */
       const settle = (each: Ready) => {
         live.delete(each.call.key);
