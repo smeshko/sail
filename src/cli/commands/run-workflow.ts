@@ -157,16 +157,41 @@ const SECRET_NAME = /TOKEN|KEY|SECRET|PASS|AUTH|CREDENTIAL|COOKIE|SESSION|PRIVAT
 /** A URL's `user:password` part, as a proxy or a database URL carries it under any name. */
 const USERINFO = /[a-z][a-z0-9+.-]*:\/\/([^\s/:@]+):([^\s/@]+)@/gi;
 
+/** `text` percent-decoded, or as it is when it isn't valid percent-encoding. */
+function decoded(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 /**
- * The values a recording masks: every credential-named one of 8 characters or more, and the `user:password` and the
- * password of any URL in any value, such as `HTTPS_PROXY` or `DATABASE_URL`.
+ * The values a recording masks, each of 8 characters or more:
+ * - every credential-named value, and each part of it between spaces, commas and semicolons but a header's name, as a
+ *   session may print the token of `x-api-key: <token>` alone;
+ * - the `user:password` and the password of any URL in any value, such as `HTTPS_PROXY` or `DATABASE_URL`, as written
+ *   and percent-decoded.
  */
 export function recordedSecrets(env: Readonly<Record<string, string | undefined>>): string[] {
   const found = new Set<string>();
+  const add = (secret: string) => {
+    if (secret.length >= 8) found.add(secret);
+  };
   for (const [name, value = ''] of Object.entries(env)) {
-    if (SECRET_NAME.test(name) && value.length >= 8) found.add(value);
-    for (const [, user, password = ''] of value.matchAll(USERINFO)) {
-      for (const secret of [`${user}:${password}`, password]) if (secret.length >= 8) found.add(secret);
+    if (SECRET_NAME.test(name)) {
+      add(value);
+      for (const part of value.split(/[\s,;]+/)) if (!part.endsWith(':')) add(part);
+    }
+    for (const [, user = '', password = ''] of value.matchAll(USERINFO)) {
+      for (const secret of [
+        `${user}:${password}`,
+        password,
+        `${decoded(user)}:${decoded(password)}`,
+        decoded(password),
+      ]) {
+        add(secret);
+      }
     }
   }
   return [...found];
