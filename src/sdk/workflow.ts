@@ -121,14 +121,18 @@ export type CheckedCalls<T extends readonly unknown[]> = {
   readonly [K in keyof T]: T[K] extends readonly [infer S extends StageDefinition, ...unknown[]] ? AllCall<S> : never;
 };
 
+/**
+ * One call's result: `{ onError: 'return' }` lets it be an `error` too. It distributes over a union of calls, as a
+ * `.map()` choosing the options per call gives, so a call that may pass them keeps the `error`.
+ */
+type AllResult<C> = C extends readonly [infer S extends StageDefinition, unknown, CallOptions]
+  ? Result<S> | ErrorResult
+  : C extends readonly [infer S extends StageDefinition, ...unknown[]]
+    ? Result<S>
+    : never;
+
 /** Each call's result, in the order given: `{ onError: 'return' }` lets that call's result be an `error` too. */
-export type AllResults<T extends readonly unknown[]> = {
-  -readonly [K in keyof T]: T[K] extends readonly [infer S extends StageDefinition, unknown, CallOptions]
-    ? Result<S> | ErrorResult
-    : T[K] extends readonly [infer S extends StageDefinition, ...unknown[]]
-      ? Result<S>
-      : never;
-};
+export type AllResults<T extends readonly unknown[]> = { -readonly [K in keyof T]: AllResult<T[K]> };
 
 /**
  * One pass through a loop. A failed pass hands `In` to `fail()`, and the engine parses it with the loop's `feedback`
