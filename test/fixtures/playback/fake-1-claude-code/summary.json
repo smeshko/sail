@@ -1,0 +1,204 @@
+{
+  "schema": "sail.summary.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "workflow": "ticket-to-pr@1",
+  "source": {
+    "kind": "ticket",
+    "ticketKey": "FAKE-1",
+    "via": "cli"
+  },
+  "ticket": {
+    "ticketKey": "FAKE-1",
+    "title": "Add a --shout flag to the greet command",
+    "url": "fake://tickets/FAKE-1"
+  },
+  "status": "completed",
+  "startedAt": "2026-09-25T09:00:00.700Z",
+  "endedAt": "2026-09-25T09:01:02.800Z",
+  "durationMs": 62100,
+  "result": {
+    "pr": {
+      "number": 5,
+      "url": "fake://codehost/fixture/pull/5",
+      "draft": false
+    }
+  },
+  "calls": [
+    {
+      "key": "intake#1",
+      "kind": "builtin",
+      "outcome": "passed",
+      "durationMs": 900,
+      "files": [
+        "ticket.json",
+        "brief.md"
+      ],
+      "resultPath": "00-intake/call-1/result.json"
+    },
+    {
+      "key": "spec#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 4000,
+      "turns": 11,
+      "toolCalls": 10,
+      "denials": 1,
+      "costUsd": 0.12254419999999999,
+      "files": [
+        "spec.md"
+      ],
+      "resultPath": "01-spec/call-1/result.json"
+    },
+    {
+      "key": "implement#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 25300,
+      "turns": 61,
+      "toolCalls": 60,
+      "denials": 15,
+      "costUsd": 1.0931388000000002,
+      "files": [
+        "diff.patch"
+      ],
+      "resultPath": "02-implement/call-1/result.json"
+    },
+    {
+      "key": "tests#1",
+      "kind": "script",
+      "outcome": "failed",
+      "durationMs": 700,
+      "files": [
+        "junit.xml"
+      ],
+      "resultPath": "03-tests/call-1/result.json"
+    },
+    {
+      "key": "implement#2",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 16800,
+      "turns": 40,
+      "toolCalls": 39,
+      "denials": 15,
+      "costUsd": 0.5175838,
+      "feedbackFrom": "tests#1",
+      "files": [
+        "diff.patch"
+      ],
+      "resultPath": "02-implement/call-2/result.json"
+    },
+    {
+      "key": "tests#2",
+      "kind": "script",
+      "outcome": "passed",
+      "durationMs": 700,
+      "files": [
+        "junit.xml"
+      ],
+      "resultPath": "03-tests/call-2/result.json"
+    },
+    {
+      "key": "self-review#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 3200,
+      "turns": 8,
+      "toolCalls": 7,
+      "denials": 2,
+      "costUsd": 0.13585919999999999,
+      "files": [
+        "review.md"
+      ],
+      "resultPath": "04-self-review/call-1/result.json"
+    },
+    {
+      "key": "describe#1",
+      "kind": "agent",
+      "outcome": "done",
+      "durationMs": 2400,
+      "turns": 6,
+      "toolCalls": 5,
+      "denials": 0,
+      "costUsd": 0.0517976,
+      "files": [
+        "pr-body.md"
+      ],
+      "resultPath": "05-describe/call-1/result.json"
+    },
+    {
+      "key": "open#1",
+      "kind": "script",
+      "outcome": "passed",
+      "durationMs": 1000,
+      "resultPath": "06-open/call-1/result.json"
+    }
+  ],
+  "loops": {
+    "fix": {
+      "iterations": 2,
+      "max": 3
+    }
+  },
+  "routes": [
+    {
+      "at": "spec#1",
+      "value": "done",
+      "took": "implement#1"
+    },
+    {
+      "at": "implement#1",
+      "value": "done",
+      "took": "tests#1"
+    },
+    {
+      "at": "tests#1",
+      "value": "failed",
+      "took": "implement#2"
+    },
+    {
+      "at": "implement#2",
+      "value": "done",
+      "took": "tests#2"
+    },
+    {
+      "at": "tests#2",
+      "value": "passed",
+      "took": "self-review#1"
+    },
+    {
+      "at": "self-review#1",
+      "value": "done",
+      "took": "describe#1"
+    },
+    {
+      "at": "describe#1",
+      "value": "done",
+      "took": "open#1"
+    },
+    {
+      "at": "open#1",
+      "value": "passed",
+      "took": "end"
+    }
+  ],
+  "totals": {
+    "stageCalls": 9,
+    "steps": 9,
+    "toolCalls": 121,
+    "denials": 33,
+    "replays": 9,
+    "usage": {
+      "inputTokens": 5950,
+      "cacheReadTokens": 2860103,
+      "cacheWriteTokens": 129550,
+      "outputTokens": 70585,
+      "costUsd": 1.920924
+    },
+    "budget": {
+      "maxUsd": 25,
+      "usedPct": 7.7
+    }
+  },
+  "version": 1
+}

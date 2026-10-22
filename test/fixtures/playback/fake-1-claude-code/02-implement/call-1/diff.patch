@@ -1,0 +1,68 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 8a71c9f..2adce7b 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1,8 +1,10 @@
+ import { greet } from './greet.ts';
+ 
+-const arg = process.argv[2];
+-if (arg === '--help') {
+-  console.log('usage: greet [name]');
++const args = process.argv.slice(2);
++if (args.includes('--help')) {
++  console.log('usage: greet [name] [--shout]');
+ } else {
+-  console.log(greet(arg ?? ''));
++  const shout = args.includes('--shout');
++  const name = args.find((arg) => arg !== '--shout') ?? '';
++  console.log(greet(name, { shout }));
+ }
+diff --git a/src/greet.ts b/src/greet.ts
+index 97f0574..c1bcd2c 100644
+--- a/src/greet.ts
++++ b/src/greet.ts
+@@ -1,4 +1,5 @@
+ /** Greets a name, or the world when the name is blank. */
+-export function greet(name: string): string {
+-  return `Hello, ${name.trim() || 'world'}!`;
++export function greet(name: string, options: { shout?: boolean } = {}): string {
++  const greeting = `Hello, ${name.trim() || 'world'}!`;
++  return options.shout ? greeting.toUpperCase() : greeting;
+ }
+diff --git a/test/cli.test.ts b/test/cli.test.ts
+index c502138..82735ea 100644
+--- a/test/cli.test.ts
++++ b/test/cli.test.ts
+@@ -2,5 +2,20 @@ import { expect, test } from 'bun:test';
+ 
+ test('prints the usage for --help', () => {
+   const out = Bun.spawnSync(['bun', 'src/cli.ts', '--help']).stdout.toString();
+-  expect(out).toBe('usage: greet [name]\n');
++  expect(out).toBe('usage: greet [name] [--shout]\n');
++});
++
++test('shouts when --shout follows the name', () => {
++  const out = Bun.spawnSync(['bun', 'src/cli.ts', 'Ada', '--shout']).stdout.toString();
++  expect(out).toBe('HELLO, ADA!\n');
++});
++
++test('shouts when --shout precedes the name', () => {
++  const out = Bun.spawnSync(['bun', 'src/cli.ts', '--shout', 'Ada']).stdout.toString();
++  expect(out).toBe('HELLO, ADA!\n');
++});
++
++test('greets normally without --shout', () => {
++  const out = Bun.spawnSync(['bun', 'src/cli.ts', 'Ada']).stdout.toString();
++  expect(out).toBe('Hello, Ada!\n');
+ });
+diff --git a/test/greet.test.ts b/test/greet.test.ts
+index 69f5e00..1232c17 100644
+--- a/test/greet.test.ts
++++ b/test/greet.test.ts
+@@ -4,3 +4,6 @@ import { greet } from '../src/greet.ts';
+ test('greets a name', () => expect(greet('Ada')).toBe('Hello, Ada!'));
+ test('trims the name', () => expect(greet('  Ada ')).toBe('Hello, Ada!'));
+ test('greets the world when blank', () => expect(greet('  ')).toBe('Hello, world!'));
++test('shouts the greeting', () => expect(greet('Ada', { shout: true })).toBe('HELLO, ADA!'));
++test('shouts the world when blank', () => expect(greet('  ', { shout: true })).toBe('HELLO, WORLD!'));
++test('defaults to not shouting', () => expect(greet('Ada')).toBe('Hello, Ada!'));

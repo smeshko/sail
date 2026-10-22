@@ -1,0 +1,127 @@
+{
+  "recording": 1,
+  "key": "spec#1",
+  "tries": [
+    {
+      "try": 1,
+      "request": {
+        "model": "claude-opus-5-5",
+        "budget": {
+          "maxTurns": 40,
+          "maxUsd": 2,
+          "maxMinutes": 10
+        },
+        "promptSha256": "fd10925d592ef766b2d69eea2264f5f94d58a8e39901e74f08d52ef16a41fa4d"
+      },
+      "events": [
+        {
+          "type": "harness:session_start",
+          "adapter": "fake",
+          "sessionId": "fake-session-spec-1",
+          "model": "claude-opus-5-5"
+        },
+        {
+          "type": "agent:message",
+          "text": "Spec written: two tasks, greet() and the CLI first, then the tests."
+        },
+        {
+          "type": "usage:update",
+          "turn": 1,
+          "tokens": {
+            "input": 1300,
+            "cacheRead": 4600,
+            "cacheWrite": 775,
+            "output": 363
+          },
+          "costUsdSoFar": 0.078125
+        },
+        {
+          "type": "usage:update",
+          "turn": 2,
+          "tokens": {
+            "input": 2600,
+            "cacheRead": 9200,
+            "cacheWrite": 1550,
+            "output": 725
+          },
+          "costUsdSoFar": 0.15625
+        },
+        {
+          "type": "usage:update",
+          "turn": 3,
+          "tokens": {
+            "input": 3900,
+            "cacheRead": 13800,
+            "cacheWrite": 2325,
+            "output": 1088
+          },
+          "costUsdSoFar": 0.234375
+        },
+        {
+          "type": "usage:update",
+          "turn": 4,
+          "tokens": {
+            "input": 5200,
+            "cacheRead": 18400,
+            "cacheWrite": 3100,
+            "output": 1450
+          },
+          "costUsdSoFar": 0.3125
+        },
+        {
+          "type": "harness:session_end",
+          "sessionId": "fake-session-spec-1",
+          "outcome": "done",
+          "reason": "submitted",
+          "turns": 4,
+          "toolCalls": 0,
+          "denials": 0,
+          "usage": {
+            "inputTokens": 5200,
+            "cacheReadTokens": 18400,
+            "cacheWriteTokens": 3100,
+            "outputTokens": 1450,
+            "costUsd": 0.3125
+          }
+        }
+      ],
+      "result": {
+        "outcome": "done",
+        "output": {
+          "summary": "Add an optional shout flag to greet() and the CLI; with it the whole greeting is upper-cased.",
+          "tasks": [
+            {
+              "title": "Add the shout option to greet() and the --shout flag to the CLI",
+              "files": [
+                "src/greet.ts",
+                "src/cli.ts"
+              ]
+            },
+            {
+              "title": "Cover --shout and its help text in tests",
+              "files": [
+                "test/greet.test.ts"
+              ]
+            }
+          ]
+        },
+        "sessionId": "fake-session-spec-1",
+        "usage": {
+          "inputTokens": 5200,
+          "cacheReadTokens": 18400,
+          "cacheWriteTokens": 3100,
+          "outputTokens": 1450,
+          "costUsd": 0.3125
+        },
+        "transcript": "assistant: Spec written: two tasks, greet() and the CLI first, then the tests."
+      },
+      "files": {
+        "spec.md": {
+          "encoding": "utf8",
+          "content": "# Spec: Add a --shout flag to the greet command\n\n## Requirements\n\n- `greet(name, { shout: true })` returns the whole greeting in upper case, the name included.\n- Without the option, `greet` behaves exactly as before.\n- `greet --help` lists `--shout`.\n\n## Tasks\n\n1. Add the shout option to greet() and the --shout flag to the CLI (`src/greet.ts`, `src/cli.ts`)\n2. Cover --shout and its help text in tests (`test/greet.test.ts`)\n"
+        }
+      },
+      "raw": []
+    }
+  ]
+}

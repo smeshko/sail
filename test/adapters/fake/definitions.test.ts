@@ -172,3 +172,42 @@ test('BUILTINS holds the fake for every port, each a definition with create alon
   const github = Object.entries(BUILTINS.github ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(github)).toEqual({ codeHost: ['requires', 'create'] });
 });
+
+test('the harness fake with a playback option plays from sailDir/<playback>, named fake', async () => {
+  await withTempRepo(async (repo) => {
+    const ctx = context(repo);
+    const harness = await fakeAdapters.harness.create({ playback: './sessions/x' }, ctx);
+    expect(harness.name).toBe('fake');
+    const out = join(repo.dir, 'out');
+    mkdirSync(out);
+    const result = await harness.run({
+      key: 'spec#1',
+      try: 1,
+      prompt: 'p',
+      cwd: repo.dir,
+      env: { STAGE_OUT: out },
+      model: 'fake-model',
+      permissions: { read: ['**'], write: [], commands: [] },
+      budget: { maxTurns: 5, maxUsd: 1, maxMinutes: 5 },
+      outputSchema: { type: 'object' },
+    });
+    expect(result.outcome === 'error' ? result.message : result).toBe(
+      `fake harness: nothing recorded for spec#1 in ${join(ctx.sailDir, 'sessions', 'x')}`,
+    );
+    const warned = await fakeAdapters.harness.create({ playback: './sessions/x', onPromptMismatch: 'warn' }, ctx);
+    expect(warned.name).toBe('fake');
+  });
+});
+
+test.each<[Record<string, unknown>, string]>([
+  [{ script: './s.json', playback: './sessions/x' }, 'playback'],
+  [{ onPromptMismatch: 'warn' }, 'onPromptMismatch'],
+  [{ playback: './sessions/x', onPromptMismatch: 'loud' }, 'onPromptMismatch'],
+  [{ playback: 3 }, 'playback'],
+])('the harness fake created with %j throws, naming %s', async (options, name) => {
+  await withTempRepo(async (repo) => {
+    const message = await thrown(() => fakeAdapters.harness.create(options, context(repo)));
+    expect(message).toContain(name);
+    expect(message).not.toBe('created');
+  });
+});

@@ -1,0 +1,138 @@
+{
+  "recording": 1,
+  "key": "implement#1",
+  "tries": [
+    {
+      "try": 1,
+      "request": {
+        "model": "claude-sonnet-5",
+        "budget": {
+          "maxTurns": 60,
+          "maxUsd": 5,
+          "maxMinutes": 20
+        },
+        "promptSha256": "adcf352adb4b56cd91f66cae64156a06b44cb48ec69e7057242e4a940a972d63"
+      },
+      "events": [
+        {
+          "type": "harness:session_start",
+          "adapter": "fake",
+          "sessionId": "fake-session-implement-1",
+          "model": "claude-sonnet-5"
+        },
+        {
+          "type": "agent:message",
+          "text": "Implemented both tasks in two commits. Pushing is not allowed here, so the branch stays local."
+        },
+        {
+          "type": "usage:update",
+          "turn": 1,
+          "tokens": {
+            "input": 1960,
+            "cacheRead": 12800,
+            "cacheWrite": 1480,
+            "output": 780
+          },
+          "costUsdSoFar": 0.09519999999999999
+        },
+        {
+          "type": "usage:update",
+          "turn": 2,
+          "tokens": {
+            "input": 3920,
+            "cacheRead": 25600,
+            "cacheWrite": 2960,
+            "output": 1560
+          },
+          "costUsdSoFar": 0.19039999999999999
+        },
+        {
+          "type": "usage:update",
+          "turn": 3,
+          "tokens": {
+            "input": 5880,
+            "cacheRead": 38400,
+            "cacheWrite": 4440,
+            "output": 2340
+          },
+          "costUsdSoFar": 0.28559999999999997
+        },
+        {
+          "type": "usage:update",
+          "turn": 4,
+          "tokens": {
+            "input": 7840,
+            "cacheRead": 51200,
+            "cacheWrite": 5920,
+            "output": 3120
+          },
+          "costUsdSoFar": 0.38079999999999997
+        },
+        {
+          "type": "usage:update",
+          "turn": 5,
+          "tokens": {
+            "input": 9800,
+            "cacheRead": 64000,
+            "cacheWrite": 7400,
+            "output": 3900
+          },
+          "costUsdSoFar": 0.476
+        },
+        {
+          "type": "harness:session_end",
+          "sessionId": "fake-session-implement-1",
+          "outcome": "done",
+          "reason": "submitted",
+          "turns": 5,
+          "toolCalls": 0,
+          "denials": 0,
+          "usage": {
+            "inputTokens": 9800,
+            "cacheReadTokens": 64000,
+            "cacheWriteTokens": 7400,
+            "outputTokens": 3900,
+            "costUsd": 0.476
+          }
+        }
+      ],
+      "result": {
+        "outcome": "done",
+        "output": {
+          "commits": [
+            {
+              "sha": "89541459e5b0696a12a6adb712334ea24cff1a31",
+              "message": "feat: add a shout option to greet"
+            },
+            {
+              "sha": "17c569cb442d288920415d862cfabdb2bb335469",
+              "message": "test: cover greet --shout"
+            }
+          ],
+          "files": [
+            "src/greet.ts",
+            "src/cli.ts",
+            "test/greet.test.ts"
+          ],
+          "notes": "The push was denied; publishing pushes the branch."
+        },
+        "sessionId": "fake-session-implement-1",
+        "usage": {
+          "inputTokens": 9800,
+          "cacheReadTokens": 64000,
+          "cacheWriteTokens": 7400,
+          "outputTokens": 3900,
+          "costUsd": 0.476
+        },
+        "transcript": "assistant: Implemented both tasks in two commits. Pushing is not allowed here, so the branch stays local."
+      },
+      "files": {
+        "diff.patch": {
+          "encoding": "utf8",
+          "content": "diff --git a/src/greet.ts b/src/greet.ts\n--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,3 +1,4 @@\n-export function greet(name: string): string {\n-  return `Hello, ${name.trim() || 'world'}!`;\n+export function greet(name: string, options: { shout?: boolean } = {}): string {\n+  const greeting = options.shout ? 'HELLO' : 'Hello';\n+  return `${greeting}, ${name.trim() || 'world'}!`;\n }\ndiff --git a/src/cli.ts b/src/cli.ts\n--- a/src/cli.ts\n+++ b/src/cli.ts\n@@ -3,5 +3,6 @@\n const args = process.argv.slice(2);\n-console.log(greet(args[0] ?? ''));\n+const shout = args.includes('--shout');\n+console.log(greet(args.find((arg) => !arg.startsWith('--')) ?? '', { shout }));\ndiff --git a/test/greet.test.ts b/test/greet.test.ts\n--- a/test/greet.test.ts\n+++ b/test/greet.test.ts\n@@ -12,3 +12,11 @@\n+test('greet --shout › uppercases the name', () => {\n+  expect(greet('Ada', { shout: true })).toBe('HELLO, ADA!');\n+});\n+\n+test('greet --shout › keeps the exclamation mark', () => {\n+  expect(greet('Ada', { shout: true })).toEndWith('!');\n+});\n"
+        }
+      },
+      "raw": []
+    }
+  ]
+}
