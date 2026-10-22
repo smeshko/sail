@@ -11,7 +11,8 @@ Bun `>=1.3.14` is the only runtime. No command needs Node.
 
 - `bun install`: installs dependencies and points `core.hooksPath` at `.githooks`, so the pre-push hook runs `gate`.
 - `bun run verify`: typecheck, lint, then tests with the coverage gate. A change is green when this passes.
-- `bun run test [path]`: tests without the coverage gate. A path filters the run.
+- `bun run test [path]`: tests without the coverage gate. A path filters the run. Each test gets 30 s unless you pass
+  `--timeout`.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
 - `bun run gate`: typecheck, lint, then only the tests the branch affects, with no coverage gate. It's what the pre-push
   hook runs. `bun scripts/affected-tests.ts --list` prints the selection: test files changed since the merge-base with
