@@ -183,10 +183,7 @@ test.each<[string, (dir: string) => void, (runId: string) => Partial<SeededRunOp
   60_000,
 );
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('seeding from a pull-request run is refused, naming its pull request, and leaves only the source run and the fakes', async () => {
+test('seeding from a pull-request run is refused, naming its pull request, and leaves only the source run and the fakes', async () => {
   await withTempRepo(async (repo) => {
     const from = await source.copyInto(repo.dir);
     const path = join(from.dir, 'run.json');

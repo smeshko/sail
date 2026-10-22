@@ -1543,10 +1543,7 @@ const HEAD_SHA = 'c'.repeat(40);
 const prSource = { kind: 'pr', number: 12, headSha: HEAD_SHA, via: 'watch', forced: ['state'] };
 const prRun = { ...omit(run, 'claim'), runId: 'pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N', source: prSource };
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('run: a pull-request header has no claim; one with a claim, a ticketKey, a short headSha or a number of 0 is refused, naming each', () => {
+test('run: a pull-request header has no claim; one with a claim, a ticketKey, a short headSha or a number of 0 is refused, naming each', () => {
   const withSource = (change: Record<string, unknown>) => ({ ...prRun, source: { ...prSource, ...change } });
   expect({
     valid: paths('sail.run.v1', prRun),
@@ -1563,12 +1560,13 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('event and summary: run:start takes a pull-request source, and summary.json one with its number and head sha; neither takes a ticketKey beside them', () => {
+test('event and summary: run:start takes a pull-request source, and summary.json one with its number and head sha; neither takes a ticketKey beside them', () => {
   const start = { ...event, runId: prRun.runId, source: prSource };
-  const folded = { ...summary, runId: prRun.runId, source: { kind: 'pr', number: 12, headSha: HEAD_SHA, via: 'watch' } };
+  const folded = {
+    ...summary,
+    runId: prRun.runId,
+    source: { kind: 'pr', number: 12, headSha: HEAD_SHA, via: 'watch' },
+  };
   expect({
     start: paths('sail.event.v1', start),
     summary: paths('sail.summary.v1', folded),

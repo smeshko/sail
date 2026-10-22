@@ -8,21 +8,12 @@
     "schema": { "const": "sail.run.v1" },
     "runId": { "type": "string" },
     "source": {
-      "description": "what the run was started from; intake resolves it into the input",
+      "description": "what the run was started from, a ticket or a pull request; intake resolves it into the input",
       "type": "object",
-      "properties": {
-        "kind": { "const": "ticket" },
-        "ticketKey": { "type": "string" },
-        "via": { "enum": ["cli", "watch"] },
-        "forced": {
-          "description": "the checks --force overrode: empty for a run nobody forced",
-          "type": "array",
-          "items": { "enum": ["designation", "state"] },
-          "uniqueItems": true
-        }
-      },
-      "required": ["kind", "ticketKey", "via", "forced"],
-      "additionalProperties": false
+      "required": ["kind"],
+      "if": { "properties": { "kind": { "const": "pr" } }, "required": ["kind"] },
+      "then": { "$ref": "#/$defs/prSource" },
+      "else": { "$ref": "#/$defs/ticketSource" }
     },
     "fromRun": { "description": "the run a seeded run reused calls from", "type": "string", "minLength": 1 },
     "claim": {
@@ -105,10 +96,54 @@
       "$comment": "a seeded run claims nothing: claim is required unless fromRun is present, and refused when it is",
       "if": { "properties": { "fromRun": true }, "required": ["fromRun"] },
       "then": { "properties": { "claim": false } },
-      "else": { "properties": { "claim": true }, "required": ["claim"] }
+      "else": { "properties": { "claim": true } }
+    },
+    {
+      "$comment": "a pull-request run moves no ticket, so it claims nothing; a ticket run without fromRun has a claim",
+      "if": {
+        "properties": {
+          "source": { "type": "object", "properties": { "kind": { "const": "pr" } }, "required": ["kind"] }
+        },
+        "required": ["source"]
+      },
+      "then": { "properties": { "claim": false } },
+      "else": {
+        "if": { "properties": { "fromRun": true }, "required": ["fromRun"] },
+        "else": { "required": ["claim"] }
+      }
     }
   ],
   "$defs": {
+    "forced": {
+      "description": "the checks --force overrode: empty for a run nobody forced",
+      "type": "array",
+      "items": { "enum": ["designation", "state"] },
+      "uniqueItems": true
+    },
+    "ticketSource": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "ticket" },
+        "ticketKey": { "type": "string" },
+        "via": { "enum": ["cli", "watch"] },
+        "forced": { "$ref": "#/$defs/forced" }
+      },
+      "required": ["kind", "ticketKey", "via", "forced"],
+      "additionalProperties": false
+    },
+    "prSource": {
+      "description": "a pull request by its number, at the full head sha the run is for",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "pr" },
+        "number": { "type": "integer", "minimum": 1 },
+        "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "via": { "enum": ["cli", "watch"] },
+        "forced": { "$ref": "#/$defs/forced" }
+      },
+      "required": ["kind", "number", "headSha", "via", "forced"],
+      "additionalProperties": false
+    },
     "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" },
     "origin": { "type": "string", "pattern": "^(builtin|repo:.+)$" },
     "ticketState": {

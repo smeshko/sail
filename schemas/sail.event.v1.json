@@ -485,14 +485,29 @@
       "properties": {
         "source": {
           "type": "object",
-          "properties": {
-            "kind": { "const": "ticket" },
-            "ticketKey": { "type": "string" },
-            "via": { "enum": ["cli", "watch"] },
-            "forced": { "type": "array", "items": { "enum": ["designation", "state"] }, "uniqueItems": true }
+          "required": ["kind"],
+          "if": { "properties": { "kind": { "const": "pr" } }, "required": ["kind"] },
+          "then": {
+            "properties": {
+              "kind": { "const": "pr" },
+              "number": { "type": "integer", "minimum": 1 },
+              "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+              "via": { "enum": ["cli", "watch"] },
+              "forced": { "type": "array", "items": { "enum": ["designation", "state"] }, "uniqueItems": true }
+            },
+            "required": ["kind", "number", "headSha", "via", "forced"],
+            "additionalProperties": false
           },
-          "required": ["kind", "ticketKey", "via", "forced"],
-          "additionalProperties": false
+          "else": {
+            "properties": {
+              "kind": { "const": "ticket" },
+              "ticketKey": { "type": "string" },
+              "via": { "enum": ["cli", "watch"] },
+              "forced": { "type": "array", "items": { "enum": ["designation", "state"] }, "uniqueItems": true }
+            },
+            "required": ["kind", "ticketKey", "via", "forced"],
+            "additionalProperties": false
+          }
         },
         "workflow": {
           "type": "object",

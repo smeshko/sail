@@ -255,7 +255,7 @@ function foldRunStart(state: SummaryState, event: EventOf<'run:start'>): void {
     source:
       source.kind === 'ticket'
         ? { kind: 'ticket', ticketKey: source.ticketKey, via: source.via }
-        : { kind: 'pr', number: 0, headSha: '', via: source.via },
+        : { kind: 'pr', number: source.number, headSha: source.headSha, via: source.via },
     startedAt: event.ts,
     maxUsd: event.budget?.maxUsd,
   };

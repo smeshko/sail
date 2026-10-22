@@ -560,10 +560,7 @@ test('a reused call is listed where its journal:append comes, with its fromRun a
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a run from a pull request names its source by its number and head sha, and has no ticket', () => {
+test('a run from a pull request names its source by its number and head sha, and has no ticket', () => {
   const headSha = 'c'.repeat(40);
   const source = { kind: 'pr' as const, number: 12, headSha, via: 'watch' as const, forced: [] };
   const summary = folded(stamp([0, { ...runStart(), source } as NewEvent], [100, INTAKE_START]));

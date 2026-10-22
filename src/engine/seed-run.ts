@@ -169,6 +169,13 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   claim(found.dir);
   const source = findSource(found.dir, fromRun);
   if ('refused' in source) return source;
+  const from = source.header.source;
+  if (from.kind !== 'ticket') {
+    return {
+      refused: `a seeded run starts from a ticket run: run ${fromRun} started from pull request #${from.number}`,
+    };
+  }
+  const { ticketKey } = from;
   const { branch: sourceBranch, repository } = source.header;
   if (sourceBranch === undefined || repository === undefined) {
     return { refused: `run ${fromRun} started before runs had workspaces: it can't seed a run` };
@@ -202,7 +209,6 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   const copied = callDirs(source.dir, fromRun, seed);
   if ('refused' in copied) return copied;
 
-  const ticketKey = source.header.source.kind === 'ticket' ? source.header.source.ticketKey : 'STUB';
   const runId = newRunId(ticketKey, now.getTime(), options.random);
   const branch = `${sourceBranch}-seeded-${runId.slice(-8).toLowerCase()}`;
   const runSource: Source = { kind: 'ticket', ticketKey, via: 'cli', forced: [] };
