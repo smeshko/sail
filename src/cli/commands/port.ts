@@ -4,6 +4,7 @@
 //   sail port ticket-source links <ticket>          its links
 //   sail port ticket-source attachments <ticket>    its attachments
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
+//   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
 //   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
 //
@@ -35,7 +36,7 @@ import type { PortErrorEvent, ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
-import { Posted, type Ticket } from '../../ports/types';
+import { Moved, Posted, type Ticket, type TicketMove } from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { CODEHOST } from './port-codehost';
@@ -134,6 +135,25 @@ const commentOperation: PortOperation<TicketSource> = {
   },
 };
 
+/**
+ * A move of the ticket `<ticket>` names: the port's `Moved`, parsed before it is printed. The move is passed on as
+ * given, and the adapter refuses one it doesn't know.
+ */
+const updateOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: { state: { value: 'unstarted|in-progress|in-review|done', required: true } },
+  async run(source, { positionals: [ref = ''], values }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const state = (typeof values.state === 'string' ? values.state : '') as TicketMove;
+    const moved = Moved.safeParse(await source.update(ticketKey, { state }));
+    if (moved.success) return { value: moved.data };
+    const [issue] = moved.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'update', 'invalid', `its answer is not a Moved: ${where}`);
+  },
+};
+
 /** `links` and `attachments` are no operations of the port: they read `get`'s answer. */
 const TICKET_SOURCE: PortTable<'ticketSource'> = {
   port: 'ticketSource',
@@ -142,6 +162,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     links: ticketOperation((ticket) => ticket.links),
     attachments: ticketOperation((ticket) => ticket.attachments),
     comment: commentOperation,
+    update: updateOperation,
   },
 };
 

@@ -280,10 +280,7 @@ test.each<[string, string[], string]>([
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("an operation the code host does not have exits 3, naming it, and so do codehost with no operation and with an option of render's", async () => {
+test("an operation the code host does not have exits 3, naming it, and so do codehost with no operation and with an option of render's", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const unknown = await codehost(repo, ['nonsense']);
@@ -502,10 +499,7 @@ test('a merge the host answers pending or refused is a printed result with exit 
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('merge with no --method or no --expected-head-sha exits 3 with the usage, and a method the port does not know, or an expected head that is no sha, exits 1 with its message: nothing merges', async () => {
+test('merge with no --method or no --expected-head-sha exits 3 with the usage, and a method the port does not know, or an expected head that is no sha, exits 1 with its message: nothing merges', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const none = await codehost(repo, ['merge', '1', '--expected-head-sha', HEAD[1]]);
@@ -622,10 +616,7 @@ test("add-label prints the pull request's labels with the new one, and remove-la
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("comment posts the body from --body-file, or from stdin without it, and prints the port's Posted with an id and a URL each time", async () => {
+test("comment posts the body from --body-file, or from stdin without it, and prints the port's Posted with an id and a URL each time", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     writeFileSync(join(repo.dir, 'note.md'), 'From the file.\n');
@@ -690,10 +681,7 @@ test('with SAIL_EVENTS set, each operation appends what its adapter emitted: che
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string[], string]>([
+test.each<[string[], string]>([
   [['get-pull-request'], 'codehost get-pull-request needs a pull request'],
   [['get-pull-request', '1', 'extra'], "unknown argument 'extra'"],
   [['list-designated'], 'codehost list-designated needs a label'],
@@ -720,10 +708,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string, string[], string]>([
+test.each<[string, string[], string]>([
   [
     '--method given to checks',
     ['checks', '4', '--method', 'squash'],
@@ -751,10 +736,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a usage error of sail port prints every operation of ticket-source and codehost, and render', async () => {
+test('a usage error of sail port prints every operation of ticket-source and codehost, and render', async () => {
   await withTempRepo(async (repo) => {
     for (const [argv, problem] of [
       [['port'], 'no port given'],

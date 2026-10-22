@@ -205,6 +205,7 @@ const commands = new Map<string, CommandSpec>([
         label: { type: 'string', multiple: true },
         method: { type: 'string' },
         'expected-head-sha': { type: 'string' },
+        state: { type: 'string' },
       },
       positionals: 4,
       command: port,

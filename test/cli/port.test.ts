@@ -468,10 +468,7 @@ function fake1(repoDir: string): unknown {
   ).state;
 }
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("update moves the ticket and prints the port's Moved, and with SAIL_EVENTS set appends one ticket:updated", async () => {
+test("update moves the ticket and prints the port's Moved, and with SAIL_EVENTS set appends one ticket:updated", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const file = join(repo.dir, 'port-events.ndjson');
@@ -496,10 +493,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("update to a move the port doesn't know, such as the epic's in_review, exits 1 with the adapter's refusal, and the ticket stays as it was", async () => {
+test("update to a move the port doesn't know, such as the epic's in_review, exits 1 with the adapter's refusal, and the ticket stays as it was", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     expect(await runCaptured(['port', 'ticket-source', 'update', 'FAKE-1', '--state', 'in_review'], repo.dir)).toEqual({
@@ -511,10 +505,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('update without --state exits 3 with the usage, which lists update, and update of a ref that is no ticket exits 3 naming it: no port is called', async () => {
+test('update without --state exits 3 with the usage, which lists update, and update of a ref that is no ticket exits 3 naming it: no port is called', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const stateless = await runCaptured(['port', 'ticket-source', 'update', 'FAKE-1'], repo.dir);
