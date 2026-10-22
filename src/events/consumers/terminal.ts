@@ -7,6 +7,10 @@
 //
 // Every event updates the state at every verbosity, so the final block is right at quiet too. What prints is gated by
 // one table that mirrors the plan's level table: an event type prints its own lines from the verbosity it names.
+//
+// A group's calls print their lines as they come, interleaved, between a header and a closing line keyed `all`: lines
+// are never held back, so `sail show --follow` prints what the run printed. While a group runs, the live line counts
+// its running calls instead of naming one of them.
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { JournalEntry } from '../../engine/journal';
@@ -42,6 +46,8 @@ const SHOWN_FROM: Partial<Record<EventType, Verbosity>> = {
   'step:end': 'normal',
   'loop:iteration': 'normal',
   'loop:exit': 'normal',
+  'all:start': 'normal',
+  'all:end': 'normal',
   'workflow:route': 'verbose',
   'journal:append': 'trace',
   'run:end': 'quiet',
@@ -180,13 +186,21 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   let replays = 0;
   /** The calls and steps running now, innermost last: the live line names the last. */
   let running: { key: string; since: number }[] = [];
+  /** The group running now, from its `all:start` to its `all:end`: the live line counts its calls. */
+  let group: { keys: string[]; since: number } | undefined;
   /** Set by `prior` until the first live event, which prints the resume line first. */
   let resuming = false;
 
+  /** The group's running calls of all its calls: `2/3`. */
+  const groupCount = ({ keys }: { keys: string[] }): string =>
+    `${running.filter((each) => keys.includes(each.key)).length}/${keys.length}`;
   const liveText = (): string => {
+    if (group !== undefined) return `all ${groupCount(group)} running · ${liveElapsed(now() - group.since)}`;
     const top = running.at(-1);
     return top === undefined ? '' : `${top.key} running · ${liveElapsed(now() - top.since)}`;
   };
+  /** What the live line shows, apart from its clock: undefined when there is none. */
+  const liveShape = (): string | undefined => (group === undefined ? running.at(-1)?.key : `all ${groupCount(group)}`);
 
   const column = (key: string | undefined): Segment => ['dim', (key ?? '').padEnd(width)];
   /** A head line: the key column, then a marker and its text. */
@@ -247,6 +261,12 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       case 'journal:append':
         if (!event.key.includes('/')) calls.push({ key: event.key, outcome: event.outcome });
         return;
+      case 'all:start':
+        group = { keys: [...event.keys], since: now() };
+        return;
+      case 'all:end':
+        group = undefined;
+        return;
       case 'loop:iteration': {
         const seen = loops.get(event.loop);
         if (seen === undefined || event.iteration > seen.iteration) {
@@ -257,9 +277,11 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       case 'run:end':
         replays += event.replays;
         running = [];
+        group = undefined;
         return;
       case 'error:crash':
         running = [];
+        group = undefined;
         return;
     }
   }
@@ -378,6 +400,21 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         const feedback = event.feedback === undefined ? '' : ` · feedback from ${source(event.feedback.from)}`;
         return [head(event.loop, '↻', `iteration ${event.iteration}/${event.max}${feedback}`)];
       }
+      case 'all:start': {
+        const { keys, running: started } = event;
+        const many = started.length === keys.length ? `${keys.length}` : `${started.length} of ${keys.length}`;
+        return [head('all', '⇉', `${many} at once: ${started.join(' · ')}`)];
+      }
+      case 'all:end': {
+        const outcomes = Object.values(event.outcomes);
+        const counts = OUTCOMES.flatMap((outcome) => {
+          const n = outcomes.filter((each) => each === outcome).length;
+          return n === 0 ? [] : [`${n} ${outcome}`];
+        });
+        return [
+          head('all', '⇉', [`${event.keys.length} ended`, ...counts, formatDuration(event.durationMs)].join(' · ')),
+        ];
+      }
       case 'loop:exit':
         return event.reason === 'break'
           ? [head(event.loop, '↻', `break after ${event.iterations}/${event.max}`)]
@@ -418,6 +455,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       }
     }
     running = [];
+    group = undefined;
     resuming = true;
   }
 
@@ -428,14 +466,16 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         resuming = false;
         screen.print(resumeLine(event.runId));
       }
-      const was = running.at(-1);
+      const was = liveShape();
       update(event);
-      // The live line follows the innermost running call, and goes when none is left.
-      if (running.at(-1) !== was) screen.live(running.length === 0 ? undefined : liveText);
+      // The live line follows the innermost running call, or the group's count, and goes when neither is left.
+      const shape = liveShape();
+      if (shape !== was) screen.live(shape === undefined ? undefined : liveText);
       if (shows(event)) for (const line of lines(event)) screen.print(line);
     },
     close() {
       running = [];
+      group = undefined;
       screen.close();
     },
   };

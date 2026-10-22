@@ -1157,10 +1157,7 @@ const grouped = (): SailEvent[] =>
     },
   ]);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("at normal, a group prints one header keyed all before its calls' lines and one closing line after them, in event order, and so does trace; quiet prints neither", () => {
+test("at normal, a group prints one header keyed all before its calls' lines and one closing line after them, in event order, and so does trace; quiet prints neither", () => {
   const w = 18;
   const header = head('all', '⇉ 3 at once: spec#1 · implement#1 · tests#1', w);
   const closing = head('all', '⇉ 3 ended · 2 done · 1 failed · 1.8s', w);
@@ -1182,18 +1179,12 @@ test
   expect(render(grouped(), 'quiet')).toBe(view('sail · ticket-to-pr v1 · RUN-1'));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a resumed group says how many of its calls it starts now, and names those', () => {
+test('a resumed group says how many of its calls it starts now, and names those', () => {
   const resumed = stream([rosterStart(), { type: 'all:start', keys: GROUP, running: ['tests#1'] }]);
   expect(render(resumed, 'normal').split('\n')[1]).toBe(head('all', '⇉ 1 of 3 at once: tests#1', 18));
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("in a terminal, the live line counts a group's running calls, never naming one while two or more run, and goes back to the calls once the group ends", () => {
+test("in a terminal, the live line counts a group's running calls, never naming one while two or more run, and goes back to the calls once the group ends", () => {
   const t = inTerminal();
   const events = grouped().slice(1);
   const after = stream([stageStart('describe#1', 'agent')]);
