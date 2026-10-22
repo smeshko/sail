@@ -126,6 +126,13 @@ test('the usage lists sail port ticket-source and its three operations', async (
   expect(stdout).toContain('\n  sail port ticket-source get|links|attachments <ticket>  ');
 });
 
+test('the usage lists sail port ticket-source update and the moves it takes', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toMatch(
+    /^ {2}sail port ticket-source update <ticket> --state <unstarted\|in-progress\|in-review\|done>\n {10,}Move a ticket/m,
+  );
+});
+
 test('the usage lists sail port codehost, by its operation', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toContain('\n  sail port codehost <operation> [arguments]  ');
