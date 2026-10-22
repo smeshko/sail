@@ -54,6 +54,8 @@ Usage:
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
   sail port ticket-source comment <ticket> [--body-file <path>]
                                                              Comment on a ticket, the body from the file or stdin
+  sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>
+                                                             Move a ticket to that state
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version
@@ -206,6 +208,8 @@ const commands = new Map<string, CommandSpec>([
         ticket: { type: 'string' },
         label: { type: 'string', multiple: true },
         method: { type: 'string' },
+        'expected-head-sha': { type: 'string' },
+        state: { type: 'string' },
       },
       positionals: 4,
       command: port,

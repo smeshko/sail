@@ -15,6 +15,7 @@ import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const TICKET_USAGE =
   'usage: sail port ticket-source get|links|attachments <ticket>\n       sail port ticket-source comment <ticket> [--body-file <path>]\n';
+const UPDATE_USAGE = '       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>\n';
 const PUSH_USAGE = '       sail port codehost push <branch>\n';
 const OPEN_USAGE =
   '       sail port codehost open-pull-request --base <branch> --head <branch> --title <text> [--body-file <path>] [--draft] [--ticket <ticket key>] [--label <name>]...\n';
@@ -287,7 +288,9 @@ test("an operation the code host does not have exits 3, naming it, and so do cod
     expect(unknown.stderr).toStartWith(`sail port: unknown operation 'nonsense' of codehost\n${TICKET_USAGE}`);
     const none = await codehost(repo, []);
     expect(none.code).toBe(EXIT_REFUSED);
-    expect(none.stderr).toStartWith(`sail port: no operation given for codehost\n${TICKET_USAGE}${PUSH_USAGE}`);
+    expect(none.stderr).toStartWith(
+      `sail port: no operation given for codehost\n${TICKET_USAGE}${UPDATE_USAGE}${PUSH_USAGE}`,
+    );
     // An option of render's is refused for the code host as it is for the ticket source.
     const untrusted = await codehost(repo, ['push', 'sail/x', '--untrusted']);
     expect(untrusted.code).toBe(EXIT_REFUSED);
@@ -378,11 +381,18 @@ test("an answer that is not the port's, from a repository's own code host, exits
 });
 
 // The other seven operations, on the seed's pull requests: 1 is open and labelled `sail`, 2 is a draft, 3 merges on the
-// second ask, and 4's check goes from pending to failed.
+// second ask, and 4's check goes from pending to failed. A merge names the head it expects, each seed's own.
 
-const USAGE = `${TICKET_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehost get-pull-request|checks <pr>
+const HEAD = {
+  1: 'b4efb0c5de84d87c1455d4504b8b75b095a8e10b',
+  2: '3c7e1a0d9b2f4e6a8c0b1d3f5a7c9e1b3d5f7a90',
+  3: '5d2b8f4a6c0e1d3b5f7a9c1e3b5d7f9a1c3e5b70',
+  4: '7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a50',
+} as const;
+
+const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehost get-pull-request|checks <pr>
        sail port codehost list-designated <label>
-       sail port codehost merge <pr> --method <merge|squash|rebase>
+       sail port codehost merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
        sail port codehost add-label|remove-label <pr> <label>
        sail port codehost comment <pr> [--body-file <path>]
        sail port render --untrusted --source <text> [--inline]
@@ -475,18 +485,18 @@ test('a merge the host answers pending or refused is a printed result with exit 
       const { raw: _raw, ...result } = oneLine(stdout);
       return { code, stderr, result };
     };
-    expect(await merge('3', '--method', 'squash')).toEqual({
+    expect(await merge('3', '--method', 'squash', '--expected-head-sha', HEAD[3])).toEqual({
       code: EXIT_OK,
       stderr: '',
       result: { state: 'pending', reason: 'fake: merge scripted pending' },
     });
-    expect(await merge('3', '--method', 'squash')).toEqual({
+    expect(await merge('3', '--method', 'squash', '--expected-head-sha', HEAD[3])).toEqual({
       code: EXIT_OK,
       stderr: '',
       result: { state: 'merged', sha: expect.stringMatching(/^[0-9a-f]{40}$/) },
     });
     expect(world(repo.dir).pullRequests[2].state).toBe('merged');
-    expect(await merge('2', '--method', 'merge')).toEqual({
+    expect(await merge('2', '--method', 'merge', '--expected-head-sha', HEAD[2])).toEqual({
       code: EXIT_OK,
       stderr: '',
       result: { state: 'refused', reason: 'fake: pull request #2 is a draft' },
@@ -494,21 +504,103 @@ test('a merge the host answers pending or refused is a printed result with exit 
   });
 });
 
-test('merge with no --method exits 3 with the usage, and a method the port does not know exits 1 with its message: nothing merges', async () => {
+test('merge with no --method or no --expected-head-sha exits 3 with the usage, and a method the port does not know, or an expected head that is no sha, exits 1 with its message: nothing merges', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
-    const none = await codehost(repo, ['merge', '1']);
+    const none = await codehost(repo, ['merge', '1', '--expected-head-sha', HEAD[1]]);
     expect([none.code, none.stdout, none.stderr]).toEqual([
       EXIT_REFUSED,
       '',
       `sail port: codehost merge needs --method <merge|squash|rebase>\n${USAGE}`,
     ]);
-    expect(await codehost(repo, ['merge', '1', '--method', 'fast'])).toEqual({
+    const headless = await codehost(repo, ['merge', '1', '--method', 'squash']);
+    expect([headless.code, headless.stdout, headless.stderr]).toEqual([
+      EXIT_REFUSED,
+      '',
+      `sail port: codehost merge needs --expected-head-sha <sha>\n${USAGE}`,
+    ]);
+    expect(await codehost(repo, ['merge', '1', '--method', 'fast', '--expected-head-sha', HEAD[1]])).toEqual({
       code: EXIT_FAILED,
       stdout: '',
       stderr: 'sail port: codeHost.merge: fast is not a merge method (invalid)\n',
     });
+    expect(await codehost(repo, ['merge', '1', '--method', 'squash', '--expected-head-sha', 'b4efb0c'])).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: codeHost.merge: expectedHeadSha "b4efb0c" is not a 40-character hex sha (invalid)\n',
+    });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('a merge whose expected head is not the head of the pull request prints refused, naming both shas, exits 0, and leaves it open with no event in the port events file', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    writeFileSync(file, '');
+    const stale = '0'.repeat(40);
+    const { code, stdout, stderr } = await codehost(
+      repo,
+      ['merge', '1', '--method', 'squash', '--expected-head-sha', stale],
+      { env: { SAIL_EVENTS: file } },
+    );
+    const { raw: _raw, ...result } = oneLine(stdout);
+    expect({ code, stderr, result, state: world(repo.dir).pullRequests[0].state, events: appended(file) }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      result: { state: 'refused', reason: `fake: head moved: expected ${stale}, pull request #1 is at ${HEAD[1]}` },
+      state: 'open',
+      events: [],
+    });
+  });
+});
+
+test('a merge the host rejects exits 1 with its message, and leaves one error:port with it in the port events file and no codehost:merged', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    edit(sail, 'fake/prs.json', '"merges": ["pending", "merged"]', '"merges": ["rejected"]');
+    const file = join(repo.dir, 'port-events.ndjson');
+    writeFileSync(file, '');
+    const merged = await codehost(repo, ['merge', '3', '--method', 'squash', '--expected-head-sha', HEAD[3]], {
+      env: { SAIL_EVENTS: file },
+    });
+    expect(merged).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: codeHost.merge: fake: merge rejected (scripted) (conflict)\n',
+    });
+    expect({ state: world(repo.dir).pullRequests[2].state, events: appended(file) }).toEqual({
+      state: 'open',
+      events: [
+        {
+          type: 'error:port',
+          port: 'codeHost',
+          op: 'merge',
+          code: 'conflict',
+          message: 'codeHost.merge: fake: merge rejected (scripted)',
+        },
+      ],
+    });
+  });
+});
+
+test('a read of a pull request the host does not have leaves one error:port of code not_found in the port events file', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const read = await codehost(repo, ['get-pull-request', '99'], { env: { SAIL_EVENTS: file } });
+    expect([read.code, appended(file)]).toEqual([
+      EXIT_FAILED,
+      [
+        {
+          type: 'error:port',
+          port: 'codeHost',
+          op: 'getPullRequest',
+          code: 'not_found',
+          message: 'codeHost.getPullRequest: no pull request #99',
+        },
+      ],
+    ]);
   });
 });
 
@@ -576,8 +668,9 @@ test('with SAIL_EVENTS set, each operation appends what its adapter emitted: che
     expect(await emitted(['checks', '4'])).toEqual([
       { type: 'codehost:checks', number: 4, headSha, checks: [{ name: 'ci', status: 'pending' }] },
     ]);
-    expect(await emitted(['merge', '3', '--method', 'squash'])).toEqual([]);
-    expect(await emitted(['merge', '3', '--method', 'squash'])).toEqual([
+    const merging = ['merge', '3', '--method', 'squash', '--expected-head-sha', HEAD[3]];
+    expect(await emitted(merging)).toEqual([]);
+    expect(await emitted(merging)).toEqual([
       { type: 'codehost:merged', number: 3, method: 'squash', sha: expect.stringMatching(/^[0-9a-f]{40}$/) },
     ]);
     expect(await emitted(['add-label', '1', 'sail'])).toEqual([]);
@@ -600,8 +693,8 @@ test.each<[string[], string]>([
   [['list-designated', 'sail', 'extra'], "unknown argument 'extra'"],
   [['checks'], 'codehost checks needs a pull request'],
   [['checks', '4', 'extra'], "unknown argument 'extra'"],
-  [['merge', '--method', 'squash'], 'codehost merge needs a pull request'],
-  [['merge', '3', 'extra', '--method', 'squash'], "unknown argument 'extra'"],
+  [['merge', '--method', 'squash', '--expected-head-sha', HEAD[3]], 'codehost merge needs a pull request'],
+  [['merge', '3', 'extra', '--method', 'squash', '--expected-head-sha', HEAD[3]], "unknown argument 'extra'"],
   [['add-label'], 'codehost add-label needs a pull request'],
   [['add-label', '1'], 'codehost add-label needs a label'],
   [['remove-label', '1'], 'codehost remove-label needs a label'],
@@ -628,7 +721,7 @@ test.each<[string, string[], string]>([
   ],
   [
     '--base given to merge',
-    ['merge', '3', '--method', 'squash', '--base', 'main'],
+    ['merge', '3', '--method', 'squash', '--expected-head-sha', HEAD[3], '--base', 'main'],
     "option '--base' belongs to sail port codehost open-pull-request",
   ],
   [

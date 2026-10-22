@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK } from '../../src/cli/exit-codes';
 import type { ProviderEvent } from '../../src/events/types';
 import { copyFixture, edit } from '../helpers/fixture';
-import { createGitHubWorld, type GitHubWorld } from '../helpers/github-world';
+import { createGitHubWorld, type GitHubWorld, worldMergeSha } from '../helpers/github-world';
 import { withOrigin } from '../helpers/origin';
 import { captureEvents, eventIssues } from '../helpers/ports';
 import { runCaptured } from '../helpers/run-captured';
@@ -161,14 +161,90 @@ test("a token GitHub refuses makes open-pull-request exit 1 with GitHub's own me
   }, 'ghp_another_token');
 });
 
-test("an operation github doesn't offer yet exits 1, saying so, and asks GitHub nothing", async () => {
-  await onGitHub(async ({ world, codehost, repo }) => {
-    const merged = await codehost(['merge', '1', '--method', 'squash']);
-    expect([merged.code, merged.stderr, world.requests.length, existsSync(join(repo.dir, '.sail-runs'))]).toEqual([
-      EXIT_FAILED,
-      "sail port: codeHost.merge: github doesn't support merge yet (invalid)\n",
-      0,
-      false,
-    ]);
+test('list-designated on github, every operation now offered, prints the labelled pull request and only that one', async () => {
+  await onGitHub(async (on) => {
+    await openOne(on);
+    const unlabelled = await on.codehost(['list-designated', 'sail']);
+    await on.codehost(['add-label', '1', 'sail']);
+    const listed = await on.codehost(['list-designated', 'sail']);
+    expect({
+      unlabelled: [unlabelled.code, unlabelled.stdout.trim(), unlabelled.stderr],
+      listed: [listed.code, listed.stderr],
+      numbers: listed.code === EXIT_OK ? JSON.parse(listed.stdout).map((pr: { number: number }) => pr.number) : [],
+    }).toEqual({ unlabelled: [EXIT_OK, '[]', ''], listed: [EXIT_OK, ''], numbers: [1] });
+  });
+});
+
+/** Pushes the commit as BRANCH and opens pull request 1 from it, in the world: its head sha. */
+async function openOne({ repo, codehost }: OnGitHub): Promise<string> {
+  writeFileSync(join(repo.dir, 'b.md'), 'Adds the flag.\n');
+  await codehost(['push', BRANCH]);
+  const opened = await codehost([
+    'open-pull-request',
+    '--base',
+    'main',
+    '--head',
+    BRANCH,
+    '--title',
+    'T',
+    '--body-file',
+    'b.md',
+  ]);
+  expect(opened.code).toBe(EXIT_OK);
+  return repo.git('rev-parse', 'HEAD');
+}
+
+/** The events a command appended to `file`, one per line. */
+const appended = (file: string): Record<string, unknown>[] =>
+  (existsSync(file) ? readFileSync(file, 'utf8') : '')
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => JSON.parse(line));
+
+test("merge at the pull request's head prints merged with the sha GitHub answered, and the port events file holds codehost:merged with that sha", async () => {
+  await onGitHub(async (on) => {
+    const head = await openOne(on);
+    const events = join(on.repo.home, 'port-events.ndjson');
+    const merged = await on.codehost(['merge', '1', '--method', 'squash', '--expected-head-sha', head], {
+      SAIL_EVENTS: events,
+    });
+    const sha = worldMergeSha(1, head);
+    expect<unknown>({
+      code: merged.code,
+      stderr: merged.stderr,
+      printed: merged.code === EXIT_OK ? { ...printed(merged.stdout), raw: undefined } : merged.stdout,
+      events: appended(events),
+    }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      printed: { state: 'merged', sha, raw: undefined },
+      events: [{ type: 'codehost:merged', number: 1, method: 'squash', sha }],
+    });
+  });
+});
+
+test("a merge GitHub rejects with a 405 exits 1 with GitHub's message, and the port events file holds one error:port and no codehost:merged", async () => {
+  await onGitHub(async (on) => {
+    const head = await openOne(on);
+    on.world.inject('PUT /pulls/1/merge', { status: 405, body: { message: 'Pull Request is not mergeable' } });
+    const events = join(on.repo.home, 'port-events.ndjson');
+    const rejected = await on.codehost(['merge', '1', '--method', 'squash', '--expected-head-sha', head], {
+      SAIL_EVENTS: events,
+    });
+    expect({ ...rejected, events: appended(events), open: on.world.pullRequests[0]?.state }).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: codeHost.merge: GitHub 405: Pull Request is not mergeable (conflict)\n',
+      events: [
+        {
+          type: 'error:port',
+          port: 'codeHost',
+          op: 'merge',
+          code: 'conflict',
+          message: 'codeHost.merge: GitHub 405: Pull Request is not mergeable',
+        },
+      ],
+      open: 'open',
+    });
   });
 });

@@ -421,6 +421,10 @@ _Avoid_: git provider, repo host, SCM, VCS
 The status checks the code host reports for a pull request's head sha: the repository's CI. A workflow reads them through CodeHost. They are distinct from any tests a workflow runs itself.
 _Avoid_: CI (ambiguous), tests, status
 
+**Expected head**:
+The head sha a merge names: the one the workflow checked. The host merges the pull request only while it is still at that head, and refuses it, with nothing sent, once it has moved.
+_Avoid_: base sha, review sha
+
 **Harness**:
 The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. v1 adapter: Claude Code.
 _Avoid_: agent provider, runner, executor, model
@@ -434,7 +438,7 @@ One implementation of a port for one provider, selected in the config: by name f
 _Avoid_: plugin, driver, connector, integration, backend
 
 **Port command**:
-`sail port <port> <operation>`: how a script step reaches the configured adapter of a port, with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key.
+`sail port <port> <operation>`: how a script step reaches the configured adapter of a port, with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
 _Avoid_: port helper, port CLI, bridge
 
 **Adapter registry**:

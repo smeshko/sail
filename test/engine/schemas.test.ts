@@ -657,6 +657,12 @@ test('result: dispatch reports only the branch the document claims to be', () =>
   expect(paths('sail.result.v1', { ...multiStepResult, steps: [describeStep] })).toEqual(['/steps']);
 });
 
+test('result: a script result declares no codeHost, which nothing writes: one that carries it is refused, naming it', () => {
+  const issues = validateDocument('sail.result.v1', { ...scriptResult, codeHost: { operation: 'merge' } });
+  expect(issues.map((issue) => [issue.path, issue.message])).toEqual([['/codeHost', 'is not allowed']]);
+  expect(validateDocument('sail.result.v1', scriptResult)).toEqual([]);
+});
+
 test('result: an agent result records its try, its place in validation and its prompt, and only the session facts it has', () => {
   const prompt = { path: '01-spec/call-1/try-3/prompt.md', untrusted: 2, fragments, conventions: ['AGENTS.md'] };
   const recorded = { ...agentResult, try: 3, validationTry: 2, validationFailed: false, prompt };

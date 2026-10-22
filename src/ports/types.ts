@@ -109,6 +109,23 @@ export type Checks = z.infer<typeof Checks>;
 export const MergeMethod = z.enum(['merge', 'squash', 'rebase']);
 export type MergeMethod = z.infer<typeof MergeMethod>;
 
+/**
+ * What a merge asks for: the method, and the expected head, the head sha the workflow checked. The host merges only
+ * while the pull request is still at it (DECISIONS D1).
+ */
+export const MergeRequest = z.object({
+  method: MergeMethod,
+  expectedHeadSha: z.string().regex(/^[0-9a-f]{40}$/, 'must be a 40-character hex sha'),
+});
+export type MergeRequest = z.infer<typeof MergeRequest>;
+
+/** Why `request` is no MergeRequest: a method that isn't one, or an expected head that is no sha. */
+export function mergeRequestIssue(request: unknown): string {
+  const { method, expectedHeadSha } = (request ?? {}) as { method?: unknown; expectedHeadSha?: unknown };
+  if (!MergeMethod.safeParse(method).success) return `${String(method)} is not a merge method`;
+  return `expectedHeadSha ${JSON.stringify(expectedHeadSha) ?? 'undefined'} is not a 40-character hex sha`;
+}
+
 /** A merge counts once the host reports it (D4): `pending` and `refused` say why it hasn't happened. */
 export const MergeResult = z.discriminatedUnion('state', [
   z.object({ state: z.literal('merged'), sha: z.string(), raw: Raw }),

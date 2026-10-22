@@ -10,6 +10,7 @@ export interface GitHubPull {
   readonly title: string;
   readonly state: string;
   readonly merged_at?: string | null;
+  readonly merge_commit_sha?: string | null;
   readonly draft?: boolean | null;
   readonly body?: string | null;
   /** Null for a fork that was deleted: GitHub keeps no repository for its head. */

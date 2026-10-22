@@ -36,6 +36,9 @@ function files(edit?: (seed: { pullRequests: Record<string, unknown>[] }) => voi
 
 let pushes = 0;
 
+/** The fixture seed's pull request 1, open and not a draft, at the head the seed gives it. */
+const PR_1_HEAD = 'b4efb0c5de84d87c1455d4504b8b75b095a8e10b';
+
 /** A pull request the fixture seed lacks, open and ready unless `fields` say otherwise. */
 const seeded = (number: number, fields: Record<string, unknown>) => ({
   number,
@@ -50,8 +53,14 @@ const seeded = (number: number, fields: Record<string, unknown>) => ({
   ...fields,
 });
 
-/** The fixture seed with an unlabelled pull request, 5, and a closed one that keeps its label, 6. */
+/** Pull request 4 of the seed, with its merges scripted as rejected. */
+const rejecting = (seed: { pullRequests: Record<string, unknown>[] }) => {
+  if (seed.pullRequests[3] !== undefined) seed.pullRequests[3].merges = ['rejected'];
+};
+
+/** The fixture seed with 4's merges rejected, an unlabelled pull request, 5, and a closed one that keeps its label, 6. */
 const suiteSeed = (seed: { pullRequests: Record<string, unknown>[] }) => {
+  rejecting(seed);
   seed.pullRequests.push(seeded(5, { labels: [] }), seeded(6, { state: 'closed' }));
 };
 
@@ -66,6 +75,8 @@ codeHostSuite('fake', async (emit) => ({
     closed: 6,
     missing: 99,
     pendingMerge: 3,
+    rejectedMerge: 4,
+    mergeable: async () => ({ number: 1, headSha: PR_1_HEAD }),
     refs: [
       ['12', 12],
       ['#12', 12],
@@ -102,14 +113,51 @@ test('a merge scripted pending or refused says so, leaves the pull request open,
     }),
     emit: capture.emit,
   });
-  const { raw: _refusedRaw, ...refused } = await host.merge(1, 'merge');
-  const { raw: _pendingRaw, ...pending } = await host.merge(3, 'rebase');
+  const { raw: _refusedRaw, ...refused } = await host.merge(1, { method: 'merge', expectedHeadSha: PR_1_HEAD });
+  const head3 = (await host.getPullRequest(3)).headSha;
+  const { raw: _pendingRaw, ...pending } = await host.merge(3, { method: 'rebase', expectedHeadSha: head3 });
   expect([refused, pending]).toEqual([
     { state: 'refused', reason: 'fake: merge scripted refused' },
     { state: 'pending', reason: 'fake: merge scripted pending' },
   ]);
   expect([(await host.getPullRequest(1)).state, (await host.getPullRequest(3)).state]).toEqual(['open', 'open']);
   expect(capture.events).toEqual([]);
+});
+
+test('a stale or malformed expected head leaves the state file with nothing merged and the merge script unread, and a rejected merge reads it once and merges nothing', async () => {
+  const world = files(rejecting);
+  const capture = captureEvents();
+  const host = createFakeCodeHost({ ...world, emit: capture.emit });
+  const stale = await host.merge(1, { method: 'squash', expectedHeadSha: '0'.repeat(40) });
+  const malformed = await rejection(host.merge(1, { method: 'squash', expectedHeadSha: 'b4efb0c' }));
+  const head4 = (await host.getPullRequest(4)).headSha;
+  const rejected = await rejection(host.merge(4, { method: 'squash', expectedHeadSha: head4 }));
+  const state = JSON.parse(readFileSync(world.state, 'utf8'));
+  const { raw: _raw, ...refused } = stale;
+  expect({
+    refused,
+    malformed: malformed instanceof Error ? [portFailure(malformed), malformed.message] : malformed,
+    rejected: rejected instanceof Error ? [portFailure(rejected), rejected.message] : rejected,
+    after: state.pullRequests.map((pr: { state: string; reads: { merges: number } }) => [pr.state, pr.reads.merges]),
+    events: capture.events,
+  }).toEqual({
+    refused: {
+      state: 'refused',
+      reason: `fake: head moved: expected ${'0'.repeat(40)}, pull request #1 is at ${PR_1_HEAD}`,
+    },
+    malformed: [
+      { port: 'codeHost', op: 'merge', code: 'invalid' },
+      'codeHost.merge: expectedHeadSha "b4efb0c" is not a 40-character hex sha',
+    ],
+    rejected: [{ port: 'codeHost', op: 'merge', code: 'conflict' }, 'codeHost.merge: fake: merge rejected (scripted)'],
+    after: [
+      ['open', 0],
+      ['open', 0],
+      ['open', 0],
+      ['open', 1],
+    ],
+    events: [],
+  });
 });
 
 test("a push to an open pull request's branch moves its head, and its scripted checks start again", async () => {
@@ -153,11 +201,12 @@ test('a new instance on the same state file carries on where the last left off, 
   const world = files();
   const seed = readFileSync(world.seed, 'utf8');
   const first = createFakeCodeHost(world);
-  expect((await first.merge(3, 'squash')).state).toBe('pending');
+  const request = { method: 'squash', expectedHeadSha: (await first.getPullRequest(3)).headSha } as const;
+  expect((await first.merge(3, request)).state).toBe('pending');
   await first.addLabel(1, 'needs-review');
 
   const next = createFakeCodeHost(world);
-  expect((await next.merge(3, 'squash')).state).toBe('merged');
+  expect((await next.merge(3, request)).state).toBe('merged');
   expect((await next.getPullRequest(1)).labels).toEqual(['sail', 'needs-review']);
   expect(readFileSync(world.seed, 'utf8')).toBe(seed);
 });

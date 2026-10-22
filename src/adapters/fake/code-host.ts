@@ -10,8 +10,9 @@ import {
   CheckStatus,
   Comment,
   type Labelled,
-  MergeMethod,
+  MergeRequest,
   type MergeResult,
+  mergeRequestIssue,
   type PullRequest,
   type PullRequestDetails,
 } from '../../ports/types';
@@ -26,6 +27,9 @@ export interface FakeCodeHostOptions extends ProviderOptions {
   readonly env?: Readonly<Record<string, string>>;
 }
 
+const CheckScripts = z.array(z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1) }));
+const MergeScripts = z.array(z.enum(['merged', 'pending', 'refused', 'rejected'])).min(1);
+
 /** A pull request as the seed holds it, with its scripts and how far each has been read. */
 const StoredPullRequest = z.object({
   number: z.number().int().positive(),
@@ -39,12 +43,9 @@ const StoredPullRequest = z.object({
   labels: z.array(z.string()),
   ticketKey: z.string().optional(),
   /** Each check's status on every read, the last repeating. */
-  checks: z.array(z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1) })).default([]),
-  /** What each merge call is answered, the last repeating. */
-  merges: z
-    .array(z.enum(['merged', 'pending', 'refused']))
-    .min(1)
-    .default(['merged']),
+  checks: CheckScripts.default([]),
+  /** What each merge call is answered, the last repeating: `rejected` is the host refusing it, a PortError. */
+  merges: MergeScripts.default(['merged']),
   reads: z.object({ checks: z.number().int(), merges: z.number().int() }).default({ checks: 0, merges: 0 }),
   comments: z.array(Comment).default([]),
   /** Who opened it: `sail` unless the seed says otherwise. Left out of `raw` when the seed leaves it out. */
@@ -63,6 +64,8 @@ const World = z.object({
   /** Each pushed branch's head sha. */
   branches: z.record(z.string(), z.string()),
   pullRequests: z.array(StoredPullRequest),
+  /** The scripts a pull request `openPullRequest` opens starts with. Left out, it has no checks and merges at once. */
+  opened: z.object({ checks: CheckScripts.optional(), merges: MergeScripts.optional() }).optional(),
 });
 type World = z.infer<typeof World>;
 
@@ -202,6 +205,8 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
           state: 'open',
           labels: [...(request.labels ?? [])],
           ...(request.ticketKey === undefined ? {} : { ticketKey: request.ticketKey }),
+          ...(world.opened?.checks === undefined ? {} : { checks: world.opened.checks }),
+          ...(world.opened?.merges === undefined ? {} : { merges: world.opened.merges }),
         });
         world.pullRequests.push(stored);
         return { pr: toPullRequest(world, stored), added: undefined };
@@ -245,31 +250,53 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       emit({ type: 'codehost:checks', number, headSha: checks.headSha, checks: checks.checks });
       return checks;
     },
-    async merge(number, method) {
-      // A method from outside TypeScript, such as `sail port`, is checked before anything merges.
-      if (!MergeMethod.safeParse(method).success) {
-        throw new PortError('codeHost', 'merge', 'invalid', `${String(method)} is not a merge method`);
-      }
-      const { result, merged } = store.change((world): { result: MergeResult; merged: boolean } => {
-        const pr = find(world, 'merge', number);
-        // A merge already reported is reported again, but announced only the first time.
-        if (pr.state === 'merged') {
-          return { result: { state: 'merged', sha: mergeSha(pr), raw: structuredClone(pr) }, merged: false };
-        }
-        // A host merges neither a closed pull request nor a draft.
-        if (pr.state === 'closed' || pr.draft) {
-          const reason = `fake: pull request #${number} is ${pr.draft ? 'a draft' : 'closed'}`;
-          return { result: { state: 'refused', reason, raw: structuredClone(pr) }, merged: false };
-        }
-        const answer = scripted(pr.merges, pr.reads.merges);
-        pr.reads.merges++;
-        if (answer !== 'merged') {
-          const reason = `fake: merge scripted ${answer}`;
-          return { result: { state: answer, reason, raw: structuredClone(pr) }, merged: false };
-        }
-        pr.state = 'merged';
-        return { result: { state: 'merged', sha: mergeSha(pr), raw: structuredClone(pr) }, merged: true };
-      });
+    async merge(number, request) {
+      // A request from outside TypeScript, such as `sail port`, is checked before anything is read.
+      const parsed = MergeRequest.safeParse(request);
+      if (!parsed.success) throw new PortError('codeHost', 'merge', 'invalid', mergeRequestIssue(request));
+      const { method, expectedHeadSha } = parsed.data;
+      const { result, merged, rejected } = store.change(
+        (world): { result: MergeResult; merged: boolean; rejected: boolean } => {
+          const pr = find(world, 'merge', number);
+          const answer = (state: 'refused' | 'pending', reason: string) => ({
+            result: { state, reason, raw: structuredClone(pr) },
+            merged: false,
+            rejected: false,
+          });
+          // A merge already reported is reported again, but announced only the first time.
+          if (pr.state === 'merged') {
+            return {
+              result: { state: 'merged', sha: mergeSha(pr), raw: structuredClone(pr) },
+              merged: false,
+              rejected: false,
+            };
+          }
+          // A host merges neither a closed pull request nor a draft, nor one whose head has moved.
+          if (pr.state === 'closed' || pr.draft) {
+            return answer('refused', `fake: pull request #${number} is ${pr.draft ? 'a draft' : 'closed'}`);
+          }
+          if (pr.headSha !== expectedHeadSha) {
+            return answer(
+              'refused',
+              `fake: head moved: expected ${expectedHeadSha}, pull request #${number} is at ${pr.headSha}`,
+            );
+          }
+          const scriptedAnswer = scripted(pr.merges, pr.reads.merges);
+          pr.reads.merges++;
+          if (scriptedAnswer === 'rejected') {
+            return { ...answer('refused', 'rejected'), rejected: true };
+          }
+          if (scriptedAnswer !== 'merged') return answer(scriptedAnswer, `fake: merge scripted ${scriptedAnswer}`);
+          pr.state = 'merged';
+          return {
+            result: { state: 'merged', sha: mergeSha(pr), raw: structuredClone(pr) },
+            merged: true,
+            rejected: false,
+          };
+        },
+      );
+      // Rejected once the read is saved: the host refused the merge, and nothing merged.
+      if (rejected) throw new PortError('codeHost', 'merge', 'conflict', 'fake: merge rejected (scripted)');
       if (merged && result.state === 'merged') emit({ type: 'codehost:merged', number, method, sha: result.sha });
       return result;
     },

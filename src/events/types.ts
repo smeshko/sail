@@ -67,6 +67,7 @@ export const EVENT_TYPES = [
   'error:timeout',
   'error:crash',
   'error:consumer',
+  'error:port',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -239,6 +240,8 @@ interface Payloads {
   'error:timeout': { key: string; message: string; timeoutSeconds: number };
   'error:crash': { message: string; key?: string };
   'error:consumer': { consumer: string; failed: { seq: number; type: EventType }; message: string };
+  /** A port call of a script step's `sail port` that failed, with the port's own message (DECISIONS D3). */
+  'error:port': { key?: string; port: 'ticketSource' | 'codeHost'; op: string; code: PortErrorCode; message: string };
   // The provider families (D10). A ticket or codehost event carries its call's key when a call emitted it, and none at
   // dispatch; a workspace event carries none.
   'ticket:fetched': {
@@ -297,6 +300,9 @@ type ProviderType = Extract<EventType, `ticket:${string}` | `codehost:${string}`
 export type ProviderEvent = Extract<CallEvent, { type: ProviderType }>;
 
 export type ProviderEmit = (event: ProviderEvent) => void;
+
+/** A failed port call, as `sail port` reports it into the port events file: its caller stamps the key. */
+export type PortErrorEvent = Extract<CallEvent, { type: 'error:port' }>;
 
 /** Receives the event stream and does one thing with it. A consumer that throws is reported as `error:consumer`. */
 export interface Consumer {

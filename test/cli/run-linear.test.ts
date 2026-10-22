@@ -307,3 +307,21 @@ test('sail port ticket-source comment reaches Linear as one SailComment with the
   ]);
   expect(run.stdout + run.stderr + run.files).not.toContain(KEY);
 });
+
+test("sail port ticket-source update --state in-review moves the Linear ticket to the state the inReview option names, with one SailMove and no other change, and prints the port's Moved", async () => {
+  const run = await linearRun(['port', 'ticket-source', 'update', 'ADW-1', '--state', 'in-review']);
+  const mutations = run.world.requests.filter((request) => ['SailMove', 'SailComment'].includes(request.operationName));
+  expect({
+    code: run.code,
+    stderr: run.stderr,
+    printed: run.code === EXIT_OK ? { ...JSON.parse(run.stdout), raw: undefined } : run.stdout,
+    mutations: mutations.map((request) => [request.operationName, request.variables.stateId]),
+    held: run.world.ticket(1).state,
+  }).toEqual({
+    code: EXIT_OK,
+    stderr: '',
+    printed: { state: { type: 'started', name: 'In Review' }, raw: undefined },
+    mutations: [['SailMove', 'state-in-review']],
+    held: 'In Review',
+  });
+});

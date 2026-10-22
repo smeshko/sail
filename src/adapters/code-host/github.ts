@@ -1,9 +1,10 @@
 // The GitHub CodeHost: pushes a run's HEAD to its branch and opens a labelled pull request against one repository on
 // github.com. Opening again from an open pull request's head into its base returns that pull request (DECISIONS D2),
-// the default branch is never pushed (D3), and the ticket key rides in the body as a hidden marker (D9). `checks`,
-// `merge` and `removeLabel` aren't offered yet (D5). `listDesignated` pages through the open pull requests and keeps
-// the designated ones of this repository, and `getPullRequest` reads the details with the comments, paged (14.2's D11).
-// Everything that leaves the adapter, its errors, `raw` values and events, is redacted of the token (D11).
+// the default branch is never pushed (D3), and the ticket key rides in the body as a hidden marker (D9). It reads checks,
+// swaps labels and merges at the head a workflow expects, recording a merge only once GitHub reports it (ADW-127's D2).
+// `listDesignated` pages through the open pull requests and keeps the designated ones of this repository, and
+// `getPullRequest` reads the details with the comments, paged (14.2's D11). Everything that leaves the adapter, its
+// errors, `raw` values and events, is redacted of the token (D11).
 import { z } from 'zod';
 import { redactor } from '../../engine/redact';
 import type { ProviderEvent } from '../../events/types';
@@ -11,8 +12,9 @@ import type { AdapterDefinition } from '../../ports/adapter';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
-import type { Labelled, PullRequest } from '../../ports/types';
+import { type Labelled, MergeRequest, type MergeResult, mergeRequestIssue, type PullRequest } from '../../ports/types';
 import { gitSync, stripUserinfo } from '../workspace/git';
+import { readChecks } from './github-checks';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
 import {
   type GitHubComment,
@@ -45,15 +47,13 @@ export interface GitHubCodeHostOptions extends ProviderOptions {
 
 const NUMBER = /^#?([1-9]\d*)$/;
 
+const SHA = /^[0-9a-f]{40}$/;
+
 /** A page of a list GitHub pages, and how many pages are read at most: 1000 items. */
 const PAGE = 100;
 const MAX_PAGES = 10;
 
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-
-const unsupported = (op: string) => async (): Promise<never> => {
-  throw new PortError('codeHost', op, 'invalid', `github doesn't support ${op} yet`);
-};
 
 export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
   const { owner, repo } = options;
@@ -227,8 +227,56 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         const comments = await paged<GitHubComment>('getPullRequest', path, {});
         return toPullRequestDetails(node, comments, `${owner}/${repo}`);
       }),
-    checks: unsupported('checks'),
-    merge: unsupported('merge'),
+    checks: (number) =>
+      guarded(async () => {
+        const pr = await read('checks', number);
+        const { checks, raw } = await readChecks(client, 'checks', pr.headSha);
+        emit({
+          type: 'codehost:checks',
+          number,
+          headSha: pr.headSha,
+          checks: checks.map(({ name, status }) => ({ name, status })),
+        });
+        return { number, headSha: pr.headSha, checks, raw };
+      }),
+    merge: (number, request) =>
+      guarded(async (): Promise<MergeResult> => {
+        const parsed = MergeRequest.safeParse(request);
+        if (!parsed.success) throw new PortError('codeHost', 'merge', 'invalid', mergeRequestIssue(request));
+        const { method, expectedHeadSha } = parsed.data;
+        const node = await client.request<GitHubPull>('merge', 'GET', client.repoPath('pulls', number));
+        // Merged already: the merge GitHub reports, announced by the call that made it, and by no later one.
+        if (node.merged_at) {
+          const sha = node.merge_commit_sha ?? '';
+          return SHA.test(sha)
+            ? { state: 'merged', sha, raw: node }
+            : { state: 'pending', reason: `GitHub reports #${number} merged without its merge commit`, raw: node };
+        }
+        if (node.state !== 'open') return { state: 'refused', reason: `pull request #${number} is closed`, raw: node };
+        if (node.draft === true) return { state: 'refused', reason: `pull request #${number} is a draft`, raw: node };
+        if (node.head.sha !== expectedHeadSha) {
+          const reason = `head moved: expected ${expectedHeadSha}, pull request #${number} is at ${node.head.sha}`;
+          return { state: 'refused', reason, raw: node };
+        }
+        // The sha too: GitHub refuses the merge, 409, if the head moved since the read above.
+        const answer = await client.request<{ sha?: unknown; merged?: unknown; message?: unknown }>(
+          'merge',
+          'PUT',
+          client.repoPath('pulls', number, 'merge'),
+          { merge_method: method, sha: expectedHeadSha },
+        );
+        if (answer.merged === true && typeof answer.sha === 'string' && SHA.test(answer.sha)) {
+          emit({ type: 'codehost:merged', number, method, sha: answer.sha });
+          return { state: 'merged', sha: answer.sha, raw: answer };
+        }
+        const reason =
+          answer.merged === true
+            ? `GitHub reports #${number} merged without its merge commit`
+            : typeof answer.message === 'string' && answer.message !== ''
+              ? answer.message
+              : 'GitHub answered without reporting the merge';
+        return { state: 'pending', reason, raw: answer };
+      }),
     addLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
         const pr = await read('addLabel', number);
@@ -236,7 +284,27 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         const added = await addLabels('addLabel', number, [label], pr.labels);
         return { number, labels: added.labels, raw: added.raw };
       }),
-    removeLabel: unsupported('removeLabel'),
+    removeLabel: (number, label) =>
+      guarded(async (): Promise<Labelled> => {
+        const pr = await read('removeLabel', number);
+        if (!pr.labels.includes(label)) return { number, labels: pr.labels, raw: pr.raw };
+        let answer: { name: string }[];
+        try {
+          answer = await client.request<{ name: string }[]>(
+            'removeLabel',
+            'DELETE',
+            client.repoPath('issues', number, 'labels', label),
+          );
+        } catch (error) {
+          // The label went in a race: the labels as they are now are the answer, and nothing changed here.
+          if (!(error instanceof PortError) || error.code !== 'not_found') throw error;
+          const now = await read('removeLabel', number);
+          return { number, labels: now.labels, raw: now.raw };
+        }
+        const labels = answer.map((each) => each.name);
+        if (!labels.includes(label)) emit({ type: 'codehost:labelled', number, label, change: 'removed' });
+        return { number, labels, raw: answer };
+      }),
     comment: (number, text) =>
       guarded(async () => {
         unsent('comment', 'the comment', text);
@@ -250,7 +318,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         emit({ type: 'codehost:commented', number, body: text });
         return { id: String(posted.id), url: posted.html_url, raw: posted };
       }),
-    capabilities: () => ({ checks: false, labels: true, drafts: true, mergeMethods: [] }),
+    capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: ['merge', 'squash', 'rebase'] }),
   };
 }
 

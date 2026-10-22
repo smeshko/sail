@@ -827,6 +827,17 @@ test('at trace, an event of every type prints a line of its own', () => {
       { type: 'error:consumer', consumer: 'x', failed: { seq: 3, type: 'stage:end' }, message: 'm' },
       head('', '✗ consumer x failed on stage:end #3: m', w),
     ],
+    [
+      {
+        type: 'error:port',
+        key: 'merge#1',
+        port: 'codeHost',
+        op: 'merge',
+        code: 'conflict',
+        message: 'codeHost.merge: GitHub 405: Pull Request is not mergeable',
+      },
+      head('merge#1', '✗ error:port: codeHost.merge: GitHub 405: Pull Request is not mergeable', w),
+    ],
     [{ type: 'run:end', status: 'completed', replays: 1 }, '  replays  1'],
     [{ type: 'error:crash', message: 'boom' }, head('', '✗ crash: boom', w)],
   ];
