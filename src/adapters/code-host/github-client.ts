@@ -56,6 +56,8 @@ const MAPPING: readonly [(response: Response, body: Body) => boolean, PortErrorC
   [(response, body) => response.status === 403 && isRateLimit(response, body), 'unavailable'],
   [(response) => response.status === 403, 'forbidden'],
   [(response) => response.status === 404, 'not_found'],
+  // A merge GitHub won't make: conflicts, branch protection, a method the repository disallows, or a merge queue.
+  [(response) => response.status === 405, 'conflict'],
   [(response) => response.status === 409, 'conflict'],
   [(response) => response.status === 422, 'invalid'],
 ];

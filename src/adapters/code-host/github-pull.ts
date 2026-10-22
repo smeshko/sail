@@ -10,6 +10,8 @@ export interface GitHubPull {
   readonly title: string;
   readonly state: string;
   readonly merged_at?: string | null;
+  readonly merged?: boolean | null;
+  readonly merge_commit_sha?: string | null;
   readonly draft?: boolean | null;
   readonly body?: string | null;
   readonly head: { readonly ref: string; readonly sha: string };

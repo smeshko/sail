@@ -32,10 +32,7 @@ import { type CodeHostWorld, codeHostSuite, type MakeCodeHost, type Unsupported 
 
 const TOKEN = 'ghp_MARKER_adapter_0a7e44c2';
 /** What github doesn't offer yet. Phase 14.2 offers listDesignated. */
-const UNSUPPORTED: Unsupported[] = [
-  'listDesignated',
-  'merge', // TDD-PENDING TASK-005
-];
+const UNSUPPORTED: Unsupported[] = ['listDesignated'];
 const held = holdTempRepo();
 
 let origin: string | undefined;
@@ -496,10 +493,7 @@ test('a title, body or comment that holds the token is refused as invalid, and n
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("listDesignated rejects as invalid, saying github doesn't support it yet, with no request and no event, and capabilities offer checks and every merge method", async () => {
+test("listDesignated rejects as invalid, saying github doesn't support it yet, with no request and no event, and capabilities offer checks and every merge method", async () => {
   const on = world();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);
@@ -736,10 +730,7 @@ test('checks of a pull request GitHub does not have reject as not_found, with no
 const headIn = (on: GitHubWorld, number: number): string =>
   on.pullRequests.find((pr) => pr.number === number)?.headSha ?? '';
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a merge reads the pull request, then sends exactly { merge_method, sha } and nothing else, and records the merge GitHub reports with its sha', async () => {
+test('a merge reads the pull request, then sends exactly { merge_method, sha } and nothing else, and records the merge GitHub reports with its sha', async () => {
   const on = suiteWorld();
   const capture = captureEvents();
   const head = headIn(on, 10);
@@ -759,10 +750,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a merge whose expected head is stale is refused after only the read: no merge request is sent', async () => {
+test('a merge whose expected head is stale is refused after only the read: no merge request is sent', async () => {
   const on = suiteWorld();
   const capture = captureEvents();
   const stale = '0'.repeat(40);
@@ -784,10 +772,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, number, { status: number; body: unknown } | undefined, string]>([
+test.each<[string, number, { status: number; body: unknown } | undefined, string]>([
   [
     'a 409, the head pushed after the read,',
     10,
@@ -817,10 +802,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, unknown, string]>([
+test.each<[string, unknown, string]>([
   [
     'merged true with no sha',
     { merged: true, message: 'Pull Request successfully merged' },
@@ -844,10 +826,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('merging a pull request GitHub reports merged answers its merge commit after only the read, and emits nothing again', async () => {
+test('merging a pull request GitHub reports merged answers its merge commit after only the read, and emits nothing again', async () => {
   const on = suiteWorld();
   const capture = captureEvents();
   const adapter = host(on, capture.emit);

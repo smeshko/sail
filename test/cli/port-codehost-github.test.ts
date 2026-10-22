@@ -199,10 +199,7 @@ const appended = (file: string): Record<string, unknown>[] =>
     .filter((line) => line !== '')
     .map((line) => JSON.parse(line));
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("merge at the pull request's head prints merged with the sha GitHub answered, and the port events file holds codehost:merged with that sha", async () => {
+test("merge at the pull request's head prints merged with the sha GitHub answered, and the port events file holds codehost:merged with that sha", async () => {
   await onGitHub(async (on) => {
     const head = await openOne(on);
     const events = join(on.repo.home, 'port-events.ndjson');
@@ -224,10 +221,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a merge GitHub rejects with a 405 exits 1 with GitHub's message, and the port events file holds one error:port and no codehost:merged", async () => {
+test("a merge GitHub rejects with a 405 exits 1 with GitHub's message, and the port events file holds one error:port and no codehost:merged", async () => {
   await onGitHub(async (on) => {
     const head = await openOne(on);
     on.world.inject('PUT /pulls/1/merge', { status: 405, body: { message: 'Pull Request is not mergeable' } });

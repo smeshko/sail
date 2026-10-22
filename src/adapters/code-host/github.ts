@@ -1,8 +1,9 @@
 // The GitHub CodeHost: pushes a run's HEAD to its branch and opens a labelled pull request against one repository on
 // github.com. Opening again from an open pull request's head into its base returns that pull request (DECISIONS D2),
-// the default branch is never pushed (D3), and the ticket key rides in the body as a hidden marker (D9). Epic 14's
-// operations aren't offered yet (D5). Everything that leaves the adapter, its errors, `raw` values and events, is
-// redacted of the token (D11).
+// the default branch is never pushed (D3), and the ticket key rides in the body as a hidden marker (D9). It reads checks,
+// swaps labels and merges at the head a workflow expects, recording a merge only once GitHub reports it (ADW-127's D2);
+// listing designated pull requests isn't offered yet. Everything that leaves the adapter, its errors, `raw` values and
+// events, is redacted of the token (D11).
 import { z } from 'zod';
 import { redactor } from '../../engine/redact';
 import type { ProviderEvent } from '../../events/types';
@@ -10,7 +11,7 @@ import type { AdapterDefinition } from '../../ports/adapter';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
-import type { Labelled, PullRequest } from '../../ports/types';
+import { type Labelled, MergeRequest, type MergeResult, mergeRequestIssue, type PullRequest } from '../../ports/types';
 import { gitSync, stripUserinfo } from '../workspace/git';
 import { readChecks } from './github-checks';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
@@ -37,6 +38,8 @@ export interface GitHubCodeHostOptions extends ProviderOptions {
 }
 
 const NUMBER = /^#?([1-9]\d*)$/;
+
+const SHA = /^[0-9a-f]{40}$/;
 
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
@@ -192,7 +195,44 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         });
         return { number, headSha: pr.headSha, checks, raw };
       }),
-    merge: unsupported('merge'),
+    merge: (number, request) =>
+      guarded(async (): Promise<MergeResult> => {
+        const parsed = MergeRequest.safeParse(request);
+        if (!parsed.success) throw new PortError('codeHost', 'merge', 'invalid', mergeRequestIssue(request));
+        const { method, expectedHeadSha } = parsed.data;
+        const node = await client.request<GitHubPull>('merge', 'GET', client.repoPath('pulls', number));
+        // Merged already: the merge GitHub reports, announced by the call that made it, and by no later one.
+        if (node.merged_at) {
+          const sha = node.merge_commit_sha ?? '';
+          return SHA.test(sha)
+            ? { state: 'merged', sha, raw: node }
+            : { state: 'pending', reason: `GitHub reports #${number} merged without its merge commit`, raw: node };
+        }
+        if (node.state !== 'open') return { state: 'refused', reason: `pull request #${number} is closed`, raw: node };
+        if (node.draft === true) return { state: 'refused', reason: `pull request #${number} is a draft`, raw: node };
+        if (node.head.sha !== expectedHeadSha) {
+          const reason = `head moved: expected ${expectedHeadSha}, pull request #${number} is at ${node.head.sha}`;
+          return { state: 'refused', reason, raw: node };
+        }
+        // The sha too: GitHub refuses the merge, 409, if the head moved since the read above.
+        const answer = await client.request<{ sha?: unknown; merged?: unknown; message?: unknown }>(
+          'merge',
+          'PUT',
+          client.repoPath('pulls', number, 'merge'),
+          { merge_method: method, sha: expectedHeadSha },
+        );
+        if (answer.merged === true && typeof answer.sha === 'string' && SHA.test(answer.sha)) {
+          emit({ type: 'codehost:merged', number, method, sha: answer.sha });
+          return { state: 'merged', sha: answer.sha, raw: answer };
+        }
+        const reason =
+          answer.merged === true
+            ? `GitHub reports #${number} merged without its merge commit`
+            : typeof answer.message === 'string' && answer.message !== ''
+              ? answer.message
+              : 'GitHub answered without reporting the merge';
+        return { state: 'pending', reason, raw: answer };
+      }),
     addLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
         const pr = await read('addLabel', number);
@@ -234,7 +274,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
         emit({ type: 'codehost:commented', number, body: text });
         return { id: String(posted.id), url: posted.html_url, raw: posted };
       }),
-    capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: [] }),
+    capabilities: () => ({ checks: true, labels: true, drafts: true, mergeMethods: ['merge', 'squash', 'rebase'] }),
   };
 }
 
