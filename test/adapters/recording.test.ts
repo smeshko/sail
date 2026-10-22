@@ -439,6 +439,32 @@ describe('masking machine paths', () => {
     expect(text).toContain('$TMPDIR/loose');
   });
 
+  test('a root URL-encoded or dashed as Claude Code names a project folder is replaced, and the login as a word (review #1.6)', async () => {
+    const req = request();
+    const home = join(tempDir(), 'Users', 'Jdoe Smith');
+    mkdirSync(home, { recursive: true });
+    const dashed = (path: string) => path.replace(/[^A-Za-z0-9]/g, '-');
+    const events: HarnessEvent[] = [
+      SAID(`open ${encodeURIComponent(`${home}/notes`)}`),
+      SAID(`file://${encodeURI(home)}/notes.md`),
+      SAID(`${home}/.claude/projects/${dashed(req.cwd)}/s1.jsonl`),
+      SAID('-rw-r--r--  1 jdoe  staff  12 notes.md; /Users/JDOE/x; jdoes stays'),
+    ];
+    const rec = join(tempDir(), 'rec');
+    await recordingHarness(standIn({ events }), {
+      dir: rec,
+      secrets: [],
+      roots: { $HOME: home },
+      names: { $USER: 'jdoe', $SHORT: 'jd' },
+    }).run(req);
+    expect(read(rec, 'spec#1').tries[0]?.events).toEqual([
+      SAID(`open $HOME%2Fnotes`),
+      SAID('file://$HOME/notes.md'),
+      SAID('$HOME/.claude/projects/$WORKSPACE/s1.jsonl'),
+      SAID('-rw-r--r--  1 $USER  staff  12 notes.md; /Users/$USER/x; jdoes stays'),
+    ]);
+  });
+
   test('the realpath form of a symlinked root is replaced too', () => {
     const real = tempDir();
     const link = join(tempDir(), 'link');
