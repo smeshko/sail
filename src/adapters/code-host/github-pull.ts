@@ -1,7 +1,7 @@
 // GitHub's pull request in the port's words, and the hidden marker that keeps a pull request's ticket key in its body
 // (DECISIONS D9): GitHub has no field for it, and a later read must give it back.
 import { PortError } from '../../ports/errors';
-import type { PullRequest } from '../../ports/types';
+import type { PullRequest, PullRequestDetails } from '../../ports/types';
 
 /** The fields of GitHub's pull request the adapter reads. */
 export interface GitHubPull {
@@ -12,9 +12,25 @@ export interface GitHubPull {
   readonly merged_at?: string | null;
   readonly draft?: boolean | null;
   readonly body?: string | null;
-  readonly head: { readonly ref: string; readonly sha: string };
-  readonly base: { readonly ref: string };
+  /** Null for a fork that was deleted: GitHub keeps no repository for its head. */
+  readonly head: { readonly ref: string; readonly sha: string; readonly repo?: { readonly full_name: string } | null };
+  readonly base: { readonly ref: string; readonly sha?: string };
   readonly labels?: readonly { readonly name: string }[];
+  readonly user?: { readonly login: string } | null;
+}
+
+/** The fields of a conversation comment the adapter reads. */
+export interface GitHubComment {
+  readonly id: number;
+  readonly body?: string | null;
+  readonly user?: { readonly login: string } | null;
+  readonly created_at?: string;
+}
+
+/** Whether the pull request's head lives outside `repository` (`owner/name`): a deleted fork's head has no repository. */
+export function isFork(node: GitHubPull, repository: string): boolean {
+  const name = node.head.repo?.full_name;
+  return name === undefined || name.toLowerCase() !== repository.toLowerCase();
 }
 
 /** A ticket key the marker can hold: nothing that could close the comment. */
@@ -50,5 +66,26 @@ export function toPullRequest(node: GitHubPull): PullRequest {
     labels: (node.labels ?? []).map((label) => label.name),
     ...(ticketKey === undefined ? {} : { ticketKey }),
     raw: node,
+  };
+}
+
+/** The pull request with its details: its body, author, base sha, whether it is a fork, and its comments in order. */
+export function toPullRequestDetails(
+  node: GitHubPull,
+  comments: readonly GitHubComment[],
+  repository: string,
+): PullRequestDetails {
+  return {
+    ...toPullRequest(node),
+    body: node.body ?? '',
+    author: node.user?.login ?? '',
+    baseSha: node.base.sha ?? '',
+    fork: isFork(node, repository),
+    comments: comments.map((comment) => ({
+      author: comment.user?.login ?? '',
+      body: comment.body ?? '',
+      ...(comment.created_at === undefined ? {} : { createdAt: comment.created_at }),
+    })),
+    raw: { pull: node, comments },
   };
 }

@@ -10,6 +10,7 @@ import type { Io } from '../../src/cli/index';
 import { commandsDir } from '../../src/watch/inbox';
 import { readEntry } from '../../src/watch/registry';
 import { fakeTimers } from '../helpers/fake-timers';
+import { writePrWorkflow } from '../helpers/pr-workflow';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -79,8 +80,8 @@ async function commandDropped(runsDir: string): Promise<void> {
 }
 
 /** A watcher running in process from `repo` on fake timers, under WATCHER_PID, and the deps a second command needs. */
-async function running(repo: TempRepo, names: string[]) {
-  const world = repository(repo);
+async function running(repo: TempRepo, names: string[], extra?: (sail: string) => void) {
+  const world = repository(repo, extra);
   const timers = fakeTimers(START);
   const spawner = fakeSpawner(join(repo.dir, '.sail-runs'));
   const isAlive = (pid: number) => pid === WATCHER_PID || spawner.isAlive(pid);
@@ -206,6 +207,21 @@ test('with a watcher running, sail watch c exits 0 printing the set with c, and 
     expect({ code: watching, ...again.printed }).toEqual({
       code: EXIT_OK,
       stdout: `sail watch: the watcher of 'stub' (pid ${WATCHER_PID}) watches a, b, c\n`,
+      stderr: '',
+    });
+    w.interrupts.interrupt();
+    expect(await w.exited).toBe(EXIT_OK);
+  });
+}, 30_000);
+
+test("with a watcher running, sail watch of a pull-request workflow on a ticket workflow's label exits 0: labels are unique per kind (ADW-235)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, ['a'], (sail) => writePrWorkflow(sail, 'rv', { watch: { label: 'sail-a', cap: 1 } }));
+    expect(w.recorded).toBe(true);
+    const added = await w.second(watchCommand, ['rv']);
+    expect(added).toEqual({
+      code: EXIT_OK,
+      stdout: `sail watch: the watcher of 'stub' (pid ${WATCHER_PID}) watches a, rv\n`,
       stderr: '',
     });
     w.interrupts.interrupt();

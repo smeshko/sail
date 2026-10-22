@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import type { Ticket, TicketState } from '../../src/ports/types';
+import type { QueueSource } from '../../src/watch/queue-store';
 
 export interface ManualClock {
   (): Date;
@@ -38,6 +39,12 @@ export function ticket(ticketKey: string, fields: Partial<Ticket> = {}): Ticket 
     raw: { ticketKey },
     ...fields,
   };
+}
+
+/** The ticket key of a queued ticket, or `#<number>@<sha7>` for a queued pull request: what a test reads an item as. */
+export function sourceKey(item: { source: QueueSource }): string {
+  const { source } = item;
+  return source.kind === 'ticket' ? source.ticketKey : `#${source.number}@${source.headSha.slice(0, 7)}`;
 }
 
 /** Every line of `<dir>/events.ndjson`, parsed. None when the file is missing. */

@@ -2,7 +2,7 @@
 // test/types/expect-error.test.ts proves that each directive's line fails with the code it names. Cases import only
 // from `sail` and `sail/intakes`, because the harness checks a copy of this file in a temp directory.
 import { agent, file, fromStep, gitDiff, script, stage, type Untrusted, untrusted, value, workflow, z } from 'sail';
-import { TicketInput, ticket } from 'sail/intakes';
+import { pr, TicketInput, ticket } from 'sail/intakes';
 
 /** Marks a value as read, so a case can be one expression. */
 declare function read(...values: unknown[]): void;
@@ -187,3 +187,16 @@ workflow('unbounded', { intake: ticket, watch: { every: '5m' } }, async () => un
 workflow('vague', { intake: ticket, watch: { every: '5 min' }, maxConcurrentRuns: 1 }, async () => undefined);
 // @ts-expect-error TS2322: a misspelt option is an error, not an unwatched workflow
 workflow('misspelt', { intake: ticket, wacth: { every: '5m' } }, async () => undefined);
+
+// A pull-request run's input: the host's text is untrusted, and the head sha and the files are the run's own.
+export const reviewsPr = workflow('reviews-pr', { intake: pr }, async (run) => {
+  const body: Untrusted = run.input.body;
+  const title: Untrusted = run.input.title;
+  const comment: Untrusted | undefined = run.input.comments[0]?.body;
+  const headSha: string = run.input.headSha;
+  read(body, title, comment, headSha, run.intake.files['diff.patch'], run.intake.files['pr.json']);
+  // @ts-expect-error TS2322: the head sha is the run's own, never text from the host
+  const marked: Untrusted = run.input.headSha;
+  read(marked);
+  return undefined;
+});

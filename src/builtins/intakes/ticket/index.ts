@@ -49,7 +49,10 @@ function briefValues(key: string, ticket: Ticket, request: string, criteria: rea
  * so does an answer that is no Ticket, before any file is written.
  */
 export async function ticketIntake(context: IntakeContext): Promise<unknown> {
-  const key = context.source.ticketKey;
+  const { source } = context;
+  if (source.kind !== 'ticket')
+    throw new Error(`the ticket intake reads a ticket, not a source of kind ${source.kind}`);
+  const key = source.ticketKey;
   const ticket = await getTicket(context.ticketSource, key);
   const { request, criteria } = splitDescription(ticket.description);
 

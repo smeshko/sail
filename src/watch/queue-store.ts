@@ -6,8 +6,10 @@
 //   holding what `queue.json` holds: the old queue when the write failed before its rename, and the new one when only
 //   the directory's sync after it failed. So the next change never writes an old queue back over a newer one. When
 //   `queue.json` can't be read back either, no change is made until it can.
-// - Items are known by their dedup key. A key whose item is done may be queued again: the ticket system is the memory
-//   of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run.
+// - Items are known by their dedup key. A ticket key whose item is done may be queued again: the ticket system is the
+//   memory of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run. A pull request's
+//   key carries its head sha, so a done one stays taken while the item is kept: the same sha is never reviewed twice.
+//   Only the same full sha keeps it: a done item at another sha that shares its first 7 is replaced.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
 //   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
 //   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
@@ -26,7 +28,7 @@ import { z } from 'zod';
 import { replaceFile } from '../engine/durable';
 import type { NewQueueEvent, QueueEvent, ResumedFrom } from '../events/types';
 import { PORT_ERROR_CODES, type PortErrorCode } from '../ports/errors';
-import type { Ticket } from '../ports/types';
+import type { PullRequest, Ticket } from '../ports/types';
 import { openQueueStream } from './queue-events';
 
 export const QUEUE_DIR = 'queue';
@@ -37,7 +39,16 @@ export function queueDir(runsDir: string, workflow: string): string {
   return join(runsDir, QUEUE_DIR, workflow);
 }
 
-export const QueueSource = z.strictObject({ kind: z.literal('ticket'), ticketKey: z.string().min(1) });
+export const QueueSource = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('ticket'), ticketKey: z.string().min(1) }),
+  /** A pull request at one head sha: `branch` is its head, so dispatch checks the lease before asking the host. */
+  z.strictObject({
+    kind: z.literal('pr'),
+    number: z.number().int().min(1),
+    headSha: z.string().regex(/^[0-9a-f]{40}$/),
+    branch: z.string().min(1),
+  }),
+]);
 export type QueueSource = z.infer<typeof QueueSource>;
 
 export const QueueItemState = z.enum(['queued', 'dispatched', 'done', 'failed', 'parked']);
@@ -111,9 +122,9 @@ export const DEFAULT_QUEUE_POLICY: QueuePolicy = {
   doneKept: 100,
 };
 
-/** The key a queue item is known by: `ticket:<ticket key>`. */
+/** The key a queue item is known by: `ticket:<ticket key>`, or `pr:<number>@<the head sha's first 7>`. */
 export function dedupKey(source: QueueSource): string {
-  return `${source.kind}:${source.ticketKey}`;
+  return source.kind === 'ticket' ? `ticket:${source.ticketKey}` : `pr:${source.number}@${source.headSha.slice(0, 7)}`;
 }
 
 /** A poll that failed, as `pollFailed()` records it. */
@@ -133,6 +144,11 @@ export interface QueueStore {
   snapshot(): QueueFile;
   /** Queues each ticket whose key isn't taken, and gives how many it queued. A forced add marks each item forced. */
   add(tickets: readonly Ticket[], options?: { forced?: boolean }): number;
+  /**
+   * Queues each pull request at its head sha whose key isn't taken, and gives how many it queued. A `pr:` key whose item
+   * is done stays taken: the same sha is never queued twice.
+   */
+  addPullRequests(pullRequests: readonly PullRequest[]): number;
   /** The items a dispatch may start: queued ones, and failed ones past their `retryAt`, oldest first. */
   due(): QueueItem[];
   /** Records a dispatch of the item, which counts an attempt. */
@@ -162,7 +178,7 @@ export interface QueueStore {
   /** Records a failed attempt: the item retries later, or is parked once it has had `maxAttempts`. */
   failed(key: string, reason: string): 'retry' | 'parked';
   /** Records a poll that succeeded, which clears the failures and the pause. */
-  polled(poll: { kind: 'ticket'; found: number; added: number; durationMs: number }): void;
+  polled(poll: { kind: 'ticket' | 'pr'; found: number; added: number; durationMs: number }): void;
   /** Records a failed poll: a refusal of the credentials pauses the workflow, and any other failure clears the pause. */
   pollFailed(failure: PollFailure): void;
 }
@@ -275,6 +291,16 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
       item.pid = pid;
       return { ...item };
     });
+  const emitAdded = (added: readonly QueueItem[]) =>
+    stream.emitAll(
+      added.map((item) => ({
+        type: 'queue:item_added' as const,
+        workflow,
+        dedupKey: item.dedupKey,
+        source: item.source,
+        title: item.title,
+      })),
+    );
   const isDue = (item: QueueItem, at: number) =>
     item.state === 'queued' || (item.state === 'failed' && Date.parse(item.retryAt ?? '') <= at);
 
@@ -303,15 +329,36 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         return queued;
       });
-      stream.emitAll(
-        added.map((item) => ({
-          type: 'queue:item_added' as const,
-          workflow,
-          dedupKey: item.dedupKey,
-          source: item.source,
-          title: item.title,
-        })),
-      );
+      emitAdded(added);
+      return added.length;
+    },
+    addPullRequests(pullRequests) {
+      const added = change((next) => {
+        const queued: QueueItem[] = [];
+        for (const pr of pullRequests) {
+          const source = { kind: 'pr' as const, number: pr.number, headSha: pr.headSha, branch: pr.head };
+          const key = dedupKey(source);
+          const taken = next.items.find((item) => item.dedupKey === key);
+          // A key is the sha's first 7, so another sha can share it: a done item at another sha gives way to the new
+          // one, and one not done holds the key until it is (a queued one is dropped at dispatch as moved).
+          const same = taken?.source.kind === 'pr' && taken.source.headSha === pr.headSha;
+          if (taken !== undefined && (same || taken.state !== 'done')) continue;
+          if (taken !== undefined) next.items.splice(next.items.indexOf(taken), 1);
+          const item: QueueItem = {
+            dedupKey: key,
+            source,
+            title: pr.title,
+            url: pr.url,
+            state: 'queued',
+            attempts: 0,
+            addedAt: now().toISOString(),
+          };
+          next.items.push(item);
+          queued.push(item);
+        }
+        return queued;
+      });
+      emitAdded(added);
       return added.length;
     },
     due() {

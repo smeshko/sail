@@ -8,6 +8,7 @@ import type {
   MergeResult,
   Posted,
   PullRequest,
+  PullRequestDetails,
   Pushed,
 } from './types';
 
@@ -37,9 +38,10 @@ export interface CodeHost {
    * and emits no `codehost:pr_opened`: its title, body and draft stay as they are.
    */
   openPullRequest(request: OpenPullRequest): Promise<PullRequest>;
-  /** The open, non-draft pull requests that carry `label`. */
+  /** The open, non-draft pull requests that carry `label`, with their head in this repository: never a fork. */
   listDesignated(label: string): Promise<PullRequest[]>;
-  getPullRequest(number: number): Promise<PullRequest>;
+  /** The pull request with its details: its body, author, base sha, whether it is a fork, and its comments. */
+  getPullRequest(number: number): Promise<PullRequestDetails>;
   /** The checks on the pull request's head sha. Emits `codehost:checks`. */
   checks(number: number): Promise<Checks>;
   /** Emits `codehost:merged` only when the host reports the merge. */

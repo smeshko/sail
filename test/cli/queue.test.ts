@@ -13,6 +13,7 @@ import { commandsDir } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
 import { readEntry } from '../../src/watch/registry';
 import { fakeTimers } from '../helpers/fake-timers';
+import { writePrWorkflow } from '../helpers/pr-workflow';
 import { queueEvents } from '../helpers/queue';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
 import { writeStub } from '../helpers/stub-workflow';
@@ -68,8 +69,9 @@ async function commandDropped(runsDir: string, ended: () => boolean): Promise<vo
 }
 
 /** A watcher of a running in process from `repo` on fake timers, under WATCHER_PID, and `sail queue` beside it. */
-async function running(repo: TempRepo, tickets: SeedTicket[]) {
+async function running(repo: TempRepo, tickets: SeedTicket[], extra?: (sail: string) => string) {
   const world = repository(repo, tickets);
+  const also = extra?.(world.sail);
   const runs = join(repo.dir, '.sail-runs');
   const timers = fakeTimers(START);
   const spawner = fakeSpawner(runs);
@@ -84,7 +86,9 @@ async function running(repo: TempRepo, tickets: SeedTicket[]) {
   };
   const interrupts = fakeInterrupts();
   const watcher = io(repo.dir, world.env, interrupts.onInterrupt);
-  const exited = Promise.resolve(watchCommand(deps)({ values: {}, positionals: ['a'] }, watcher.io));
+  const exited = Promise.resolve(
+    watchCommand(deps)({ values: {}, positionals: also === undefined ? ['a'] : ['a', also] }, watcher.io),
+  );
   const deadline = performance.now() + 10_000;
   while (readEntry(world.registry, 'stub')?.watcher === undefined && performance.now() < deadline) {
     await Bun.sleep(5);
@@ -396,6 +400,23 @@ test("the dashboard's commands for a parked item run as printed: its requeue que
       { code: EXIT_OK, stdout: 'sail queue: queued ticket:FAKE-1 Ticket FAKE-1\n', stderr: '' },
       { code: EXIT_OK, stdout: 'sail queue: ticket:FAKE-1 dropped\n', stderr: '' },
     ]);
+    await w.stop();
+  });
+}, 30_000);
+
+test('sail queue add of a ticket to a pull-request workflow exits 3, naming what it polls, before any command is dropped (review R1-5)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, [{ key: 'FAKE-1', labels: ['sail-r'] }], (sail) => {
+      writePrWorkflow(sail, 'r', { watch: { label: 'sail-r', cap: 1 } });
+      return 'r';
+    });
+    await w.timers.advance(1000);
+    expect(await w.refused(['add', 'r', 'FAKE-1'])).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: "sail queue: workflow 'r' polls pull requests: only a workflow that polls tickets takes an add\n",
+      inbox: [],
+    });
     await w.stop();
   });
 }, 30_000);

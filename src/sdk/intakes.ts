@@ -25,3 +25,36 @@ export const ticket = intake('ticket', {
   output: TicketInput,
   produces: { 'ticket.json': 'file', 'brief.md': 'file' },
 });
+
+/**
+ * A pull request as the `pr` intake hands it to the workflow: `run.input`. Every string the host returned is marked
+ * untrusted: the title, body, author, branch names, labels, comments and URL, which is checked as a URL too. The head
+ * sha is the run's own, the one its workspace starts at, and the ticket key is there only when the pull request's ticket
+ * marker matches its head branch.
+ */
+export const PrInput = z.object({
+  number: z.number().int().positive(),
+  url: untrusted().check(z.url()),
+  title: untrusted(),
+  body: untrusted(),
+  author: untrusted(),
+  base: untrusted(),
+  head: untrusted(),
+  headSha: z.string(),
+  baseSha: z.string(),
+  draft: z.boolean(),
+  labels: z.array(untrusted()),
+  comments: z.array(z.object({ author: untrusted(), body: untrusted() })),
+  ticketKey: z.string().optional(),
+});
+export type PrInput = z.infer<typeof PrInput>;
+
+/**
+ * The built-in intake for pull requests. The engine runs its body, which leaves `pr.json`, `diff.patch`, the change
+ * from the merge base to the head sha, and `brief.md`.
+ */
+export const pr = intake('pr', {
+  accepts: ['pr'],
+  output: PrInput,
+  produces: { 'pr.json': 'file', 'diff.patch': 'file', 'brief.md': 'file' },
+});

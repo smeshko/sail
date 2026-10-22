@@ -641,11 +641,6 @@ test.each<[string, StubRun, string]>([
     `${PR_ONLY}, and FAKE-1 is a ticket`,
   ],
   [
-    'an intake that accepts only pull requests, before the ticket source is asked about the key',
-    { ticket: 'FAKE1', workflow: 'pr-only' },
-    `${PR_ONLY}, and FAKE1 is a ticket`,
-  ],
-  [
     'a key the ticket source does not parse',
     { ticket: 'FAKE1' },
     "'FAKE1' is not a ticket of the fake ticket source: a ticket key, or a URL it owns",
@@ -665,6 +660,16 @@ test.each<[string, StubRun, string]>([
   await withTempRepo(async (repo) => {
     writePrOnly(writeStub(repo.dir));
     expect([await openStub(repo.dir, run), existsSync(join(repo.dir, '.sail-runs'))]).toEqual([{ refused }, false]);
+  });
+});
+
+test('a ref neither adapter reads, for an intake that takes no ticket, is refused naming both adapters, with no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    writePrOnly(writeStub(repo.dir));
+    const refused =
+      "'FAKE1' is neither a ticket of the fake ticket source (a ticket key, or a URL it owns) nor a pull request of the fake code host (#<number>, or its URL)";
+    const run = await openStub(repo.dir, { ticket: 'FAKE1', workflow: 'pr-only' });
+    expect([run, existsSync(join(repo.dir, '.sail-runs'))]).toEqual([{ refused }, false]);
   });
 });
 
@@ -1045,7 +1050,12 @@ test("a workflow's own watch.label is the label a start checks: only the reposit
     withTempRepo(async (repo) => {
       watchedOnReview(repo.dir);
       const run = await openStub(repo.dir, { ticket });
-      return 'refused' in run ? run : { runId: run.runId.slice(0, 7), label: run.header.source.ticketKey };
+      return 'refused' in run
+        ? run
+        : {
+            runId: run.runId.slice(0, 7),
+            label: run.header.source.kind === 'ticket' ? run.header.source.ticketKey : '',
+          };
     });
   expect([await start('FAKE-1'), await start('FAKE-6')]).toEqual([
     { refused: "the ticket is not designated: it carries no 'sail-review' label. --force runs it anyway" },

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { run } from '../../src/cli/index';
-import { PullRequest, Pushed } from '../../src/ports/types';
+import { PullRequest, PullRequestDetails, Pushed } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { type CaptureOptions, runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -388,7 +388,7 @@ const USAGE = `${TICKET_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehos
        sail port render --untrusted --source <text> [--inline]
 `;
 
-test("get-pull-request prints the pull request as the port's PullRequest, named by its number, by #number or by its URL", async () => {
+test("get-pull-request prints the pull request with its details, as the port's PullRequestDetails, named by its number, by #number or by its URL", async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const byNumber = await codehost(repo, ['get-pull-request', '1']);
@@ -401,8 +401,13 @@ test("get-pull-request prints the pull request as the port's PullRequest, named 
       draft: false,
       state: 'open',
       labels: ['sail'],
+      body: "Links the changelog from the README's first section.",
+      author: 'sail',
+      baseSha: 'f569e7f50659194ebd39f2f141e95091f40791da',
+      fork: false,
+      comments: [],
     });
-    expect<unknown>(PullRequest.parse(printed)).toEqual(printed);
+    expect<unknown>(PullRequestDetails.parse(printed)).toEqual(printed);
     for (const ref of ['#1', 'fake://codehost/fixture/pull/1']) {
       expect(await codehost(repo, ['get-pull-request', ref])).toEqual(byNumber);
     }
