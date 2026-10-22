@@ -64,10 +64,11 @@ test('the pull-request fake merges #3 as pending, then merged, with its state in
     const ctx = context(repo);
     const options = { seed: './fake/prs.json' };
     const first = await fakeAdapters.codeHost.create(options, ctx);
-    expect((await first.merge(3, 'squash')).state).toBe('pending');
+    const request = { method: 'squash', expectedHeadSha: (await first.getPullRequest(3)).headSha } as const;
+    expect((await first.merge(3, request)).state).toBe('pending');
     expect(existsSync(join(ctx.runsDir, 'fake', 'prs.json'))).toBe(true);
     const next = await fakeAdapters.codeHost.create(options, ctx);
-    expect((await next.merge(3, 'squash')).state).toBe('merged');
+    expect((await next.merge(3, request)).state).toBe('merged');
   });
 });
 

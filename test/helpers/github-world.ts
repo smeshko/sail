@@ -14,8 +14,28 @@ export interface WorldPull {
   draft: boolean;
   state: 'open' | 'closed';
   mergedAt: string | null;
+  /** The merge commit's sha once merged: sha1 of `merge #<number> <headSha>`, so a test can predict it. */
+  mergeCommitSha: string | null;
+  /** False when GitHub won't merge it, as for a conflict or a protected base: its merge answers 405. */
+  mergeable: boolean;
   labels: string[];
   comments: { id: number; body: string }[];
+}
+
+/** A check run on a head sha, as GitHub's check-runs endpoint lists it. */
+export interface WorldCheckRun {
+  readonly name: string;
+  readonly status: string;
+  readonly conclusion?: string | null;
+  readonly html_url?: string | null;
+  readonly details_url?: string | null;
+}
+
+/** A commit status on a head sha, as GitHub's combined status lists it. */
+export interface WorldStatus {
+  readonly context: string;
+  readonly state: string;
+  readonly target_url?: string | null;
 }
 
 export interface WorldSeedPull {
@@ -28,6 +48,12 @@ export interface WorldSeedPull {
   readonly state?: 'open' | 'closed';
   readonly mergedAt?: string;
   readonly labels?: readonly string[];
+  /** False when GitHub won't merge it: its merge answers 405. */
+  readonly mergeable?: false;
+  /** The check runs on its head sha. */
+  readonly checkRuns?: readonly WorldCheckRun[];
+  /** The commit statuses on its head sha. */
+  readonly statuses?: readonly WorldStatus[];
 }
 
 export interface GitHubWorldSeed {
@@ -99,6 +125,17 @@ const json = (status: number, body: unknown): WorldResponse => ({ status, body }
 
 const notFound = () => json(404, { message: 'Not Found', documentation_url: 'https://docs.github.com/rest' });
 
+/** The merge commit GitHub makes of `number` at `headSha`, derived so that a test can predict it. */
+export const worldMergeSha = (number: number, headSha: string): string =>
+  new Bun.CryptoHasher('sha1').update(`merge #${number} ${headSha}`).digest('hex');
+
+/** One page of `items`, by GitHub's `page` (from 1) and `per_page` (30 unless given, at most 100). */
+function page<T>(items: readonly T[], query: URLSearchParams): T[] {
+  const size = Math.min(Number(query.get('per_page') ?? 30) || 30, 100);
+  const at = Math.max(Number(query.get('page') ?? 1) || 1, 1);
+  return items.slice((at - 1) * size, at * size);
+}
+
 export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
   const { owner, repo } = seed;
   const prefix = `/repos/${owner}/${repo}`;
@@ -126,9 +163,18 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     draft: pr.draft ?? false,
     state: pr.state ?? 'open',
     mergedAt: pr.mergedAt ?? null,
+    mergeCommitSha: null,
+    mergeable: pr.mergeable !== false,
     labels: [...(pr.labels ?? [])],
     comments: [],
   }));
+  /** The check runs and statuses by head sha, from the seed. */
+  const checksBySha = new Map<string, { checkRuns: readonly WorldCheckRun[]; statuses: readonly WorldStatus[] }>();
+  for (const [i, pr] of (seed.pullRequests ?? []).entries()) {
+    const headSha = pullRequests[i]?.headSha;
+    if (headSha === undefined || (pr.checkRuns === undefined && pr.statuses === undefined)) continue;
+    checksBySha.set(headSha, { checkRuns: pr.checkRuns ?? [], statuses: pr.statuses ?? [] });
+  }
   let nextComment = 1000;
 
   const url = (pr: WorldPull) => `https://github.com/${owner}/${repo}/pull/${pr.number}`;
@@ -139,6 +185,8 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     body: pr.body,
     state: pr.state,
     merged_at: pr.mergedAt,
+    merged: pr.mergedAt !== null,
+    merge_commit_sha: pr.mergeCommitSha,
     draft: pr.draft,
     head: { ref: pr.head, sha: pr.headSha, label: `${owner}:${pr.head}` },
     base: { ref: pr.base, sha: headOf(pr.base) ?? '' },
@@ -197,6 +245,8 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
         draft: asked.draft === true,
         state: 'open',
         mergedAt: null,
+        mergeCommitSha: null,
+        mergeable: true,
         labels: [],
         comments: [],
       };
@@ -235,6 +285,64 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
         html_url: `https://github.com/${owner}/${repo}/pull/${number}#issuecomment-${comment.id}`,
         body: comment.body,
       });
+    }
+    const label = /^\/issues\/(\d+)\/labels\/([^/]+)$/.exec(path);
+    if (method === 'DELETE' && label !== null) {
+      const number = Number(label[1]);
+      const pr = find(number);
+      const name = decodeURIComponent(String(label[2]));
+      // An issue's labels aren't kept: one never has the label asked for.
+      if (pr === undefined || !pr.labels.includes(name)) {
+        return json(404, { message: 'Label does not exist', documentation_url: 'https://docs.github.com/rest' });
+      }
+      pr.labels = pr.labels.filter((each) => each !== name);
+      return json(
+        200,
+        pr.labels.map((each, i) => ({ id: i + 1, name: each })),
+      );
+    }
+    const checkRuns = /^\/commits\/([^/]+)\/check-runs$/.exec(path);
+    if (method === 'GET' && checkRuns !== null) {
+      const runs = checksBySha.get(String(checkRuns[1]))?.checkRuns ?? [];
+      return json(200, { total_count: runs.length, check_runs: page(runs, query) });
+    }
+    const status = /^\/commits\/([^/]+)\/status$/.exec(path);
+    if (method === 'GET' && status !== null) {
+      const sha = String(status[1]);
+      const statuses = checksBySha.get(sha)?.statuses ?? [];
+      const state = statuses.some((each) => each.state !== 'success')
+        ? statuses.some((each) => each.state === 'failure' || each.state === 'error')
+          ? 'failure'
+          : 'pending'
+        : statuses.length === 0
+          ? 'pending'
+          : 'success';
+      return json(200, { state, sha, total_count: statuses.length, statuses: page(statuses, query) });
+    }
+    const merge = /^\/pulls\/(\d+)\/merge$/.exec(path);
+    if (method === 'PUT' && merge !== null) {
+      const pr = find(Number(merge[1]));
+      if (pr === undefined) return notFound();
+      const asked = (body ?? {}) as { merge_method?: unknown; sha?: unknown };
+      if (pr.state !== 'open' || pr.mergedAt !== null || !pr.mergeable) {
+        return json(405, {
+          message: 'Pull Request is not mergeable',
+          documentation_url: 'https://docs.github.com/rest',
+        });
+      }
+      if (asked.sha !== undefined && asked.sha !== pr.headSha) {
+        return json(409, { message: 'Head branch was modified. Review and try the merge again.' });
+      }
+      if (!['merge', 'squash', 'rebase'].includes(String(asked.merge_method ?? 'merge'))) {
+        return json(422, {
+          message: 'Validation Failed',
+          errors: [{ resource: 'PullRequest', field: 'merge_method', code: 'invalid' }],
+        });
+      }
+      pr.mergedAt = '2026-10-22T09:00:00Z';
+      pr.mergeCommitSha = worldMergeSha(pr.number, pr.headSha);
+      pr.state = 'closed';
+      return json(200, { sha: pr.mergeCommitSha, merged: true, message: 'Pull Request successfully merged' });
     }
     return notFound();
   }

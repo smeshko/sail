@@ -10,6 +10,7 @@ import {
   CodeHostCapabilities,
   Labelled,
   type MergeMethod,
+  type MergeRequest,
   MergeResult,
   Posted,
   PullRequest,
@@ -42,11 +43,21 @@ export interface CodeHostWorld {
    * out and named unarranged.
    */
   readonly pendingMerge?: number;
+  /** One whose merge the host rejects. Where that can't be arranged, it is left out and named unarranged. */
+  readonly rejectedMerge?: number;
   /** Refs the adapter accepts, each with the number it names. */
   readonly refs: readonly (readonly [string, number])[];
   /** A checkout holding a new commit, a branch no pull request uses, and that commit's sha. */
   pushable(): Promise<{ cwd: string; branch: string; headSha: string }>;
+  /**
+   * An open pull request that isn't a draft, which the case may merge: a new one on each call where the host is real,
+   * so a case never merges one the world keeps. Its number and its head sha.
+   */
+  mergeable(): Promise<{ number: number; headSha: string }>;
 }
+
+/** The cases a world may be unable to arrange. */
+export type Unarranged = 'pendingMerge' | 'rejectedMerge';
 
 export type MakeCodeHost = (emit: ProviderEmit) => Promise<{ adapter: CodeHost; world: CodeHostWorld }>;
 
@@ -54,6 +65,9 @@ export type MakeCodeHost = (emit: ProviderEmit) => Promise<{ adapter: CodeHost; 
 export type Unsupported = 'listDesignated' | 'checks' | 'merge' | 'removeLabel';
 
 const numbers = (pullRequests: readonly PullRequest[]): number[] => pullRequests.map((pr) => pr.number);
+
+/** A sha that is well-formed, and not `headSha`. */
+const otherSha = (headSha: string): string => (headSha === '0'.repeat(40) ? '1' : '0').repeat(40);
 
 /** A merge result without its raw. */
 function merge(result: MergeResult): Record<string, unknown> {
@@ -75,7 +89,7 @@ function expectValidEvents(capture: Pick<Captured<ProviderEvent>, 'stamped'>): v
 export function codeHostSuite(
   label: string,
   make: MakeCodeHost,
-  unarranged: readonly 'pendingMerge'[] = [],
+  unarranged: readonly Unarranged[] = [],
   unsupported: readonly Unsupported[] = [],
 ): void {
   const start = async () => {
@@ -205,7 +219,8 @@ export function codeHostSuite(
     `${label}: a draft's merge is refused, and it stays open with nothing emitted (needs merge)`,
     async () => {
       const { adapter, world, capture } = await start();
-      const result = await adapter.merge(world.draft, 'squash');
+      const { headSha } = await adapter.getPullRequest(world.draft);
+      const result = await adapter.merge(world.draft, { method: 'squash', expectedHeadSha: headSha });
       expect(parseIssues(MergeResult, result)).toEqual([]);
       expect(result.state).toBe('refused');
       expect((await adapter.getPullRequest(world.draft)).state).toBe('open');
@@ -230,7 +245,7 @@ export function codeHostSuite(
     const calls: [string, () => Promise<unknown>][] = [
       ['getPullRequest', () => adapter.getPullRequest(missing)],
       ['checks', () => adapter.checks(missing)],
-      ['merge', () => adapter.merge(missing, 'squash')],
+      ['merge', () => adapter.merge(missing, { method: 'squash', expectedHeadSha: 'a'.repeat(40) })],
       ['addLabel', () => adapter.addLabel(missing, world.label)],
       ['removeLabel', () => adapter.removeLabel(missing, world.label)],
       ['comment', () => adapter.comment(missing, 'hello')],
@@ -269,26 +284,83 @@ export function codeHostSuite(
     `${label}: a merge the host reports reads merged, and merging again gives the same merge with no second event (needs merge)`,
     async () => {
       const { adapter, world, capture } = await start();
-      const result = await adapter.merge(world.designated, 'squash');
+      const { number, headSha } = await world.mergeable();
+      const request = { method: 'squash', expectedHeadSha: headSha } as const;
+      const result = await adapter.merge(number, request);
       expect(parseIssues(MergeResult, result)).toEqual([]);
       expect(result.state).toBe('merged');
-      expect((await adapter.getPullRequest(world.designated)).state).toBe('merged');
-      expect(merge(await adapter.merge(world.designated, 'squash'))).toEqual(merge(result));
+      expect((await adapter.getPullRequest(number)).state).toBe('merged');
+      expect(merge(await adapter.merge(number, request))).toEqual(merge(result));
       expect(capture.events).toEqual([
-        { type: 'codehost:merged', number: world.designated, method: 'squash', sha: merge(result).sha as string },
+        { type: 'codehost:merged', number, method: 'squash', sha: merge(result).sha as string },
       ]);
       expectValidEvents(capture);
     },
   );
 
-  test.skipIf(lacks('merge'))(
-    `${label}: a merge by a method that isn't one rejects as invalid, merges nothing, and emits nothing (needs merge)`,
+  // biome-ignore format: TDD-PENDING TASK-001
+  test.skipIf(
+    true || // TDD-PENDING TASK-001
+    lacks('merge'),
+  )(
+    `${label}: a merge whose expected head isn't the pull request's head is refused, naming both, it stays open, and nothing is emitted (needs merge)`,
     async () => {
       const { adapter, world, capture } = await start();
-      const error = await rejection(adapter.merge(world.designated, 'fast-forward' as MergeMethod));
-      expect(portFailure(error)).toEqual({ port: 'codeHost', op: 'merge', code: 'invalid' });
-      expect((await adapter.getPullRequest(world.designated)).state).toBe('open');
-      expect(capture.events).toEqual([]);
+      const { number, headSha } = await world.mergeable();
+      const stale = otherSha(headSha);
+      const result = await adapter.merge(number, { method: 'squash', expectedHeadSha: stale });
+      expect(parseIssues(MergeResult, result)).toEqual([]);
+      const reason = result.state === 'merged' ? '' : result.reason;
+      expect({
+        state: result.state,
+        names: [reason.includes(stale), reason.includes(headSha)],
+        after: (await adapter.getPullRequest(number)).state,
+        events: capture.events,
+      }).toEqual({ state: 'refused', names: [true, true], after: 'open', events: [] });
+    },
+  );
+
+  // biome-ignore format: TDD-PENDING TASK-001
+  test.skipIf(
+    true || // TDD-PENDING TASK-001
+    lacks('merge'),
+  )(
+    `${label}: a merge by a method that isn't one, or with an expected head that is no sha, rejects as invalid, merges nothing, and emits nothing (needs merge)`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const { number, headSha } = await world.mergeable();
+      const failures = [
+        await rejection(adapter.merge(number, { method: 'fast-forward' as MergeMethod, expectedHeadSha: headSha })),
+        await rejection(adapter.merge(number, { method: 'squash', expectedHeadSha: headSha.slice(0, 7) })),
+        await rejection(adapter.merge(number, { method: 'squash', expectedHeadSha: headSha.toUpperCase() })),
+        await rejection(adapter.merge(number, { method: 'squash' } as MergeRequest)),
+      ].map(portFailure);
+      const invalid = { port: 'codeHost', op: 'merge', code: 'invalid' };
+      expect({ failures, after: (await adapter.getPullRequest(number)).state, events: capture.events }).toEqual({
+        failures: [invalid, invalid, invalid, invalid],
+        after: 'open',
+        events: [],
+      });
+    },
+  );
+
+  // biome-ignore format: TDD-PENDING TASK-001
+  test.skipIf(
+    true || // TDD-PENDING TASK-001
+    unarranged.includes('rejectedMerge') || lacks('merge'),
+  )(
+    `${label}: a merge the host rejects is a PortError of code conflict, it stays open, and nothing is emitted (needs merge)`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const rejected = world.rejectedMerge;
+      if (rejected === undefined) throw new Error('no rejectedMerge in the world, and none named unarranged');
+      const { headSha } = await adapter.getPullRequest(rejected);
+      const error = await rejection(adapter.merge(rejected, { method: 'squash', expectedHeadSha: headSha }));
+      expect({
+        failure: portFailure(error),
+        after: (await adapter.getPullRequest(rejected)).state,
+        events: capture.events,
+      }).toEqual({ failure: { port: 'codeHost', op: 'merge', code: 'conflict' }, after: 'open', events: [] });
     },
   );
 
@@ -298,13 +370,14 @@ export function codeHostSuite(
       const { adapter, world, capture } = await start();
       const pending = world.pendingMerge;
       if (pending === undefined) throw new Error('no pendingMerge in the world, and none named unarranged');
-      const first = await adapter.merge(pending, 'squash');
+      const request = { method: 'squash', expectedHeadSha: (await adapter.getPullRequest(pending)).headSha } as const;
+      const first = await adapter.merge(pending, request);
       expect(parseIssues(MergeResult, first)).toEqual([]);
       expect(first.state).toBe('pending');
       expect((await adapter.getPullRequest(pending)).state).toBe('open');
       expect(capture.events).toEqual([]);
 
-      const later = await adapter.merge(pending, 'squash');
+      const later = await adapter.merge(pending, request);
       expect(later.state).toBe('merged');
       expect(capture.events).toEqual([
         { type: 'codehost:merged', number: pending, method: 'squash', sha: merge(later).sha as string },

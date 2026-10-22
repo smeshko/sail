@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir } from '../../src/engine/call-dir';
+import { validateDocument } from '../../src/engine/schemas';
 import type { CallEvent } from '../../src/events/types';
 import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
 import { BIN_DIR, DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
@@ -692,6 +693,45 @@ test('a script that runs sail port has its provider event emitted between script
   expect(lines.map((line) => (line === '' ? '' : JSON.parse(line)))).toEqual([events[1], '']);
 });
 
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ("a script whose sail port call fails, and which carries on to exit 0, has the call's error:port emitted before script:exit, valid under the step's key", async () => {
+  const s = setup();
+  withTicket(s);
+  s.run(`sail port ticket-source get FAKE-9 >/dev/null || true\n${JUNIT}\necho '${PASSING}'`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  const failed = events.filter((event) => event.type === 'error:port');
+  expect({
+    types: typesOf(events),
+    failed,
+    issues: failed.flatMap((event) =>
+      validateDocument('sail.event.v1', {
+        seq: 1,
+        ts: '2026-10-22T09:00:00.000Z',
+        runId: RUN_ID,
+        key: 'tests#1',
+        ...event,
+      }),
+    ),
+    outcome: [run.outcome, run.errors],
+  }).toEqual({
+    types: ['script:exec', 'error:port', 'script:exit', 'output:validated', 'file:produced'],
+    failed: [
+      {
+        type: 'error:port',
+        port: 'ticketSource',
+        op: 'get',
+        code: 'not_found',
+        message: 'ticketSource.get: no ticket FAKE-9',
+      },
+    ],
+    issues: [],
+    outcome: ['passed', []],
+  });
+});
+
 test.each<[string, string, number | undefined, string, string[]]>([
   ['times out', 'sleep 5', 1, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
   [
@@ -751,10 +791,10 @@ test('a line of the port events file that is no provider event ends the step in 
 });
 
 test('a bad line joins the errors the step already has: a script that timed out, or left a declared file out, has both', async () => {
-  const forged = { type: 'run:end', status: 'completed', replays: 1 };
+  const forged = { ...PUSHED, seq: 1 };
   const port = {
     reason: 'port' as const,
-    message: 'port-events.ndjson line 1 is not a provider event: its type "run:end" is no ticket:* or codehost:* event',
+    message: 'port-events.ndjson line 1 is not a provider event: it carries seq, which the run stamps',
   };
   const timedOut = setup();
   timedOut.run(`${reports(forged)}\nsleep 5`);

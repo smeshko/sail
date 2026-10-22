@@ -12,6 +12,18 @@ export function copyFixture(repoDir: string): string {
   return sail;
 }
 
+/**
+ * Where `land` lives: the review operations demonstration (ADW-127), kept beside the fixture repository rather than in
+ * it, so the fixture's roster and its golden run stay ticket-to-pr's alone.
+ */
+export const LAND_SAIL = join(import.meta.dir, '..', 'fixtures', 'land', '.sail');
+
+/** Adds `land` to the copy `sail` of the fixture's `.sail/`, as `workflows/land/`, and returns `sail`. */
+export function addLand(sail: string): string {
+  cpSync(LAND_SAIL, sail, { recursive: true });
+  return sail;
+}
+
 /** Writes `text` to `path` under `sail`, making its folder, and returns the file. */
 export function write(sail: string, path: string, text: string): string {
   const file = join(sail, path);

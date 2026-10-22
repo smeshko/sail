@@ -435,6 +435,106 @@ test("comment on a ref parseKey refuses exits 3 naming it with no port call, and
   });
 });
 
+// biome-ignore format: TDD-PENDING TASK-002
+test
+  .skip // TDD-PENDING TASK-002
+  ('with SAIL_EVENTS set, a comment on a ticket the source lacks leaves one error:port of the ticket source with its message', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const failed = await runCaptured(['port', 'ticket-source', 'comment', 'FAKE-9'], repo.dir, {
+      env: { SAIL_EVENTS: file },
+      stdin: 'Hello\n',
+    });
+    const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n').slice(0, -1) : [];
+    expect([failed.code, lines.map((line) => JSON.parse(line))]).toEqual([
+      EXIT_FAILED,
+      [
+        {
+          type: 'error:port',
+          port: 'ticketSource',
+          op: 'comment',
+          code: 'not_found',
+          message: 'ticketSource.comment: no ticket FAKE-9',
+        },
+      ],
+    ]);
+  });
+});
+
+/** What the fake ticket source holds of FAKE-1 now: its state file, or the seed before anything changed. */
+function fake1(repoDir: string): unknown {
+  const state = join(repoDir, '.sail-runs', 'fake', 'tickets.json');
+  const file = existsSync(state) ? state : join(repoDir, '.sail', 'fake', 'tickets.json');
+  return JSON.parse(readFileSync(file, 'utf8')).tickets.find(
+    (ticket: { ticketKey: string }) => ticket.ticketKey === 'FAKE-1',
+  ).state;
+}
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("update moves the ticket and prints the port's Moved, and with SAIL_EVENTS set appends one ticket:updated", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const moved = await runCaptured(['port', 'ticket-source', 'update', 'FAKE-1', '--state', 'in-review'], repo.dir, {
+      env: { SAIL_EVENTS: file },
+    });
+    expect({ code: moved.code, stderr: moved.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const { raw: _raw, ...printed } = oneLine(moved.stdout) as Record<string, unknown>;
+    const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n').slice(0, -1) : [];
+    expect({ printed, held: fake1(repo.dir), events: lines.map((line) => JSON.parse(line)) }).toEqual({
+      printed: { state: { type: 'started', name: 'In Review' } },
+      held: { type: 'started', name: 'In Review' },
+      events: [
+        {
+          type: 'ticket:updated',
+          ticketKey: 'FAKE-1',
+          change: { state: 'in-review' },
+          state: { type: 'started', name: 'In Review' },
+        },
+      ],
+    });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("update to a move the port doesn't know, such as the epic's in_review, exits 1 with the adapter's refusal, and the ticket stays as it was", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    expect(await runCaptured(['port', 'ticket-source', 'update', 'FAKE-1', '--state', 'in_review'], repo.dir)).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.update: in_review is not a move (invalid)\n',
+    });
+    expect(fake1(repo.dir)).toEqual({ type: 'unstarted', name: 'Todo' });
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ('update without --state exits 3 with the usage, which lists update, and update of a ref that is no ticket exits 3 naming it: no port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const stateless = await runCaptured(['port', 'ticket-source', 'update', 'FAKE-1'], repo.dir);
+    expect({ code: stateless.code, stdout: stateless.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(stateless.stderr).toStartWith(
+      `sail port: ticket-source update needs --state <unstarted|in-progress|in-review|done>\n${USAGE}\n`,
+    );
+    expect(stateless.stderr).toContain(
+      '\n       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>\n',
+    );
+    const notATicket = await runCaptured(['port', 'ticket-source', 'update', 'ADW-7', '--state', 'done'], repo.dir);
+    expect({ code: notATicket.code, stdout: notATicket.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(notATicket.stderr).toStartWith("sail port: 'ADW-7' is not a ticket of the fake ticket source");
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
 test("an answer that is no Posted, from a repository's own adapter, exits 1 naming the port and the operation", async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureWithLinked(repo.dir);
