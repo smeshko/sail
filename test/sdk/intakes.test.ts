@@ -130,23 +130,41 @@ test("a prompt that prints the input's URL or an attachment's MIME type keeps a 
   expect(rendered.text).toContain('source="input.attachments.0.mimeType"');
 });
 
-/** The paths of the strings `schema` holds that are not marked untrusted, as `a.b[]`. */
+/** Schema types that hold no string. */
+const STRINGLESS = ['number', 'int', 'boolean', 'bigint', 'literal', 'enum', 'null', 'undefined', 'date'];
+/** Schema types that hold one schema, `innerType`, and parse what it parses. */
+const WRAPS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
+
+/**
+ * The paths of the strings `schema` holds that are not marked untrusted, as `a.b[]`, and of each schema of a type it
+ * doesn't know, as `a.b (<type>)`: a new kind of field fails the test until this walks it (review R1-8).
+ */
 function unmarked(schema: z.ZodType, path = ''): string[] {
   const def = schema.def as {
     type: string;
     shape?: Record<string, z.ZodType>;
     element?: z.ZodType;
     innerType?: z.ZodType;
+    options?: z.ZodType[];
+    valueType?: z.ZodType;
+    in?: z.ZodType;
+    out?: z.ZodType;
   };
   if (def.type === 'string') return isUntrusted(schema) ? [] : [path];
+  if (isUntrusted(schema) || STRINGLESS.includes(def.type)) return [];
   if (def.type === 'object') {
     return Object.entries(def.shape ?? {}).flatMap(([key, field]) =>
       unmarked(field, path === '' ? key : `${path}.${key}`),
     );
   }
   if (def.type === 'array' && def.element !== undefined) return unmarked(def.element, `${path}[]`);
-  if (def.type === 'optional' && def.innerType !== undefined) return unmarked(def.innerType, path);
-  return [];
+  if (WRAPS.includes(def.type) && def.innerType !== undefined) return unmarked(def.innerType, path);
+  if (def.type === 'union') return (def.options ?? []).flatMap((option) => unmarked(option, path));
+  if (def.type === 'record' && def.valueType !== undefined) return unmarked(def.valueType, `${path}{}`);
+  if (def.type === 'pipe' && def.in !== undefined && def.out !== undefined) {
+    return [...new Set([...unmarked(def.in, path), ...unmarked(def.out, path)])];
+  }
+  return [`${path} (${def.type})`];
 }
 
 test('pr is the built-in intake for pull requests, and PrInput marks every string the host returned untrusted: only headSha, baseSha and ticketKey are left bare', () => {
