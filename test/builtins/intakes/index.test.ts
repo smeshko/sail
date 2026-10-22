@@ -1,6 +1,7 @@
 // The registry of the built-in intakes' bodies: one per intake `sail/intakes` exports.
 import { expect, test } from 'bun:test';
 import { BUILTIN_INTAKES } from '../../../src/builtins/intakes/index';
+import { prIntake } from '../../../src/builtins/intakes/pr/index';
 import { ticketIntake } from '../../../src/builtins/intakes/ticket/index';
 import type { Intake } from '../../../src/sdk/intake';
 import * as intakes from '../../../src/sdk/intakes';
@@ -10,7 +11,8 @@ const isIntake = (value: unknown): value is Intake =>
 
 test('BUILTIN_INTAKES holds a body for every intake sail/intakes exports, and for nothing else', () => {
   const exported = Object.values<unknown>(intakes).filter(isIntake);
-  expect(exported.map((intake) => intake.name)).toEqual(['ticket']);
-  expect([...BUILTIN_INTAKES.keys()]).toEqual(exported);
-  expect(BUILTIN_INTAKES.get(intakes.ticket)).toBe(ticketIntake);
+  // A module namespace lists its exports by name, so pr comes before ticket.
+  expect(exported.map((intake) => intake.name)).toEqual(['pr', 'ticket']);
+  expect(new Set(BUILTIN_INTAKES.keys())).toEqual(new Set(exported));
+  expect([BUILTIN_INTAKES.get(intakes.ticket), BUILTIN_INTAKES.get(intakes.pr)]).toEqual([ticketIntake, prIntake]);
 });

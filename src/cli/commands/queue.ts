@@ -6,7 +6,7 @@
 // - `add`, `requeue`, `drop` and `poll` change the queue only through the live watcher of this repository, and only for
 //   a workflow in its set: the watcher alone writes its queue file. Each checks what it can first, so the refusal shows
 //   in this terminal: `add` the ticket as a start checks it, designated and unstarted unless `--force`, and not already
-//   queued; `requeue` an item that is parked or failed and whose last run has ended; `drop` an item that isn't
+//   queued, for a workflow that polls tickets only; `requeue` an item that is parked or failed and whose last run has ended; `drop` an item that isn't
 //   dispatched. Then it drops the command, waits up to 15 s for the watcher to take it, and prints the item as
 //   its queue file holds it then. A command not taken in time waits in the inbox, and the command exits 0 saying so, as
 //   `sail watch` does. One the watcher took but didn't apply exits 3: its terminal says why. What it applied is read
@@ -23,8 +23,9 @@ import { resolveSource } from '../../engine/source';
 import { EVENTS_FILE } from '../../events/consumers/ndjson';
 import { clean } from '../../events/consumers/screen';
 import { dropCommand, type Command as QueueCommand } from '../../watch/inbox';
+import { readWatch } from '../../watch/poll';
 import { dedupKey, type QueueFile, type QueueItem, queueDir, readQueue } from '../../watch/queue-store';
-import { holderRefusal } from '../../watch/watcher';
+import { addsNoTicket, holderRefusal } from '../../watch/watcher';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Command, Io } from '../index';
 import { at, findProject, refuseAs } from './run-workflow';
@@ -69,7 +70,9 @@ function itemLine(item: QueueItem): string {
 
 /** The item `ref` names, by its dedup key or its ticket key. */
 const itemOf = (queue: QueueFile | undefined, ref: string): QueueItem | undefined =>
-  queue?.items.find((item) => item.dedupKey === ref || item.source.ticketKey === ref);
+  queue?.items.find(
+    (item) => item.dedupKey === ref || (item.source.kind === 'ticket' && item.source.ticketKey === ref),
+  );
 
 const noQueue = (workflow: string) => `no queue for '${workflow}' in .sail-runs/queue: it has never been watched`;
 
@@ -153,6 +156,8 @@ export function queueCommand(deps: WatchDeps = {}): Command {
     if (op === 'poll') {
       command = { op: 'poll', workflow };
     } else if (op === 'add') {
+      const declared = await readWatch({ sailDir: project.sailDir, config: project.config, name: workflow });
+      if (!('refused' in declared) && declared.kind !== 'ticket') return refuse(addsNoTicket(workflow));
       const { ticketSource } = project.adapters.ports;
       const resolved = await resolveSource({ ref: ref ?? '', ticketSource, label: watched.label, force });
       if ('refused' in resolved) return refuse(resolved.refused);

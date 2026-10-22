@@ -17,7 +17,7 @@ _Avoid_: pipeline, bot, the agent (for the whole)
 ### Input
 
 **Source**:
-What a run was started from: a ticket key such as `ADW-23`, or a pull request. It comes from the CLI or from the watcher's queue, and intake resolves it into the input. The run header records it, with the checks `--force` overrode.
+What a run was started from: a ticket key such as `ADW-23`, or a pull request, which the run header records as its number and head sha. It comes from the CLI or from the watcher's queue, and intake resolves it into the input. The run header records it, with the checks `--force` overrode.
 _Avoid_: trigger, argument, request
 
 **Input**:
@@ -41,8 +41,12 @@ A ticket its team has marked for sail with a label (`sail` by default, configura
 _Avoid_: tagged ticket, eligible ticket, allowlisted ticket
 
 **Designated pull request**:
-An open, non-draft pull request carrying the designation label. A workflow that opens a pull request adds the label to hand it to a workflow that watches pull requests, and a human adds it to consent to the same. The watcher polls these, and the built-in `pr` intake accepts them.
+An open, non-draft pull request carrying the designation label, whose head branch is in the repository. A workflow that opens a pull request adds the label to hand it to a workflow that watches pull requests, and a human adds it to consent to the same. The watcher polls these, and the built-in `pr` intake accepts them.
 _Avoid_: tagged PR, labelled PR, bot PR
+
+**Ticket marker**:
+The hidden `<!-- sail:ticket KEY -->` line in a pull request's body. It names the ticket only when the head branch is that ticket's branch; a mismatch is refused, and `--force` does not override it.
+_Avoid_: ticket tag, PR link
 
 **Claim**:
 Moving a designated ticket to In Progress through TicketSource before its run starts: at dispatch for a run the watcher starts, and at its start for a run started by hand. sail then comments on the ticket with the run id. After a claim the ticket is no longer unstarted, so a restart cannot pick it up twice. A forced run of a ticket that is not unstarted makes no claim: it moves the ticket to In Progress through `update`.
@@ -198,6 +202,14 @@ _Avoid_: conversation, thread, chat, run (the workflow's word)
 What was said in a session, as the harness returns it. The engine keeps it as `session.log` beside the try's result.
 _Avoid_: log, history, conversation
 
+**Recording**:
+One agent session's tries as `--record` wrote them, one file per call key: the harness's events, its result, the files it produced in `$STAGE_OUT`, and the provider's own messages, with secrets and machine paths masked. The fake harness plays a recording back in place of a session.
+_Avoid_: cassette, snapshot, fixture (alone), replay (the journal's word)
+
+**Playback**:
+The fake harness answering a session from its recording: the recorded events in order, the recorded files written into `$STAGE_OUT`, and the recorded result, offline and at $0. A prompt that differs from the recorded one fails the session, or only warns where the config says so.
+_Avoid_: replay, rerun, mock run
+
 ### Definitions and extension
 
 **Definition**:
@@ -279,7 +291,7 @@ The checkout a run works in, on its own branch. How it is made (a branch in the 
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
 
 **Base**:
-The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`.
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`. For a pull-request source it is the pull request's head.
 _Avoid_: start point, fork point
 
 **Branch**:
@@ -488,7 +500,7 @@ A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjso
 _Avoid_: queue log, daemon log
 
 **Dedup key**:
-The key a queue item is known by, minted from its source: `ticket:<ticket key>`, and `pr:<number>@<sha>` so a new push is a new item. A key already queued, dispatched, waiting to retry or parked is not queued again.
+The key a queue item is known by, minted from its source: `ticket:<ticket key>`, and `pr:<number>@<sha7>` so a new push is a new item. A key already queued, dispatched, waiting to retry or parked is not queued again.
 _Avoid_: item id, queue key
 
 **Parked**:

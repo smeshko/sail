@@ -36,6 +36,7 @@ import { requestUnwatch } from '../engine/control';
 import { readStatus, runsDir as runsDirOf } from '../engine/run-dir';
 import { resolveSource } from '../engine/source';
 import type { QueueEvent } from '../events/types';
+import type { CodeHost } from '../ports/code-host';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
 import { createDispatcher, type Dispatcher } from './dispatch';
@@ -98,7 +99,7 @@ export const TICK_MS = 1000;
 export interface WatcherOptions {
   sailDir: string;
   config: ProjectConfig;
-  adapters: { ticketSource: TicketSource; workspace: WorkspacePort };
+  adapters: { ticketSource: TicketSource; codeHost: CodeHost; workspace: WorkspacePort };
   /** The repository's registry entry, as `repositoryEntry()` builds it: the watcher adds its field to it. */
   entry: RegistryEntry;
   registryDir: string;
@@ -132,6 +133,11 @@ export interface Watcher {
   watching(): string[];
 }
 
+/** Why an add for `workflow` is refused: it polls pull requests, and an add queues a ticket. */
+export function addsNoTicket(workflow: string): string {
+  return `workflow '${workflow}' polls pull requests: only a workflow that polls tickets takes an add`;
+}
+
 /** Why a watcher can't start, or can't take a label, when `holder` is in its way. */
 export function holderRefusal(holder: Holder, name: string): string {
   const { watcher } = holder;
@@ -151,7 +157,7 @@ interface Watched {
 
 export async function startWatcher(options: WatcherOptions): Promise<Watcher | { refused: string }> {
   const { sailDir, config, timers, now, policy } = options;
-  const { ticketSource, workspace } = options.adapters;
+  const { ticketSource, codeHost, workspace } = options.adapters;
   const pid = options.pid ?? process.pid;
   const isAlive = options.isAlive ?? processIsAlive;
   const tickMs = options.tickMs ?? TICK_MS;
@@ -171,7 +177,10 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
 
   const set = new Map<string, Watched>();
   const watching = () => [...set.keys()];
-  const labelsOf = (targets: readonly WatchTarget[]) => [...new Set(targets.map((target) => target.label))];
+  /** The ticket labels of `targets`: the registry claims those alone, since a pull request's lives in its code host. */
+  const labelsOf = (targets: readonly WatchTarget[]) => [
+    ...new Set(targets.filter((target) => target.kind === 'ticket').map((target) => target.label)),
+  ];
   const watchedTargets = () => [...set.values()].map((watched) => watched.target);
 
   /** Opens the workflows of `names` not watched yet, refusing on one that refuses, or on two that poll one label. */
@@ -184,6 +193,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
         config,
         name,
         ticketSource,
+        codeHost,
         now,
         onEvent,
         ...(policy ? { policy } : {}),
@@ -192,8 +202,9 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       targets.push(target);
     }
     const all = [...watchedTargets(), ...targets];
+    // One label per kind: a ticket workflow and a pull-request workflow may both poll `sail`, which is the hand-over.
     for (const [index, target] of all.entries()) {
-      const other = all.slice(0, index).find((each) => each.label === target.label);
+      const other = all.slice(0, index).find((each) => each.label === target.label && each.kind === target.kind);
       if (other !== undefined) {
         return {
           refused: `workflows '${other.workflow}' and '${target.workflow}' both poll the label '${target.label}'`,
@@ -272,6 +283,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       root: dirname(sailDir),
       store: target.store,
       ticketSource,
+      codeHost,
       workspace,
       env: options.env,
       now,
@@ -351,6 +363,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     const { store } = target;
     const itemOf = (key: string): QueueItem | undefined => store.snapshot().items.find((item) => item.dedupKey === key);
     if (command.op === 'add') {
+      if (target.kind !== 'ticket') throw new Error(addsNoTicket(target.workflow));
       const force = command.force === true;
       const resolved = await resolveSource({ ref: command.ticketKey, ticketSource, label: target.label, force });
       if ('refused' in resolved) throw new Error(resolved.refused);

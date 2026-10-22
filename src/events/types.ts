@@ -339,12 +339,19 @@ export interface QueuePayloads {
   'watch:added': { workflow: string; pid: number; label: string; everyMs: number; maxConcurrentRuns: number };
   /** The watcher `pid` took the workflow out of its watch set, or stopped. */
   'watch:removed': { workflow: string; pid: number };
-  'queue:polled': { workflow: string; kind: 'ticket'; label: string; found: number; added: number; durationMs: number };
+  'queue:polled': {
+    workflow: string;
+    kind: 'ticket' | 'pr';
+    label: string;
+    found: number;
+    added: number;
+    durationMs: number;
+  };
   /** The title is the provider's: untrusted text. */
   'queue:item_added': {
     workflow: string;
     dedupKey: string;
-    source: { kind: 'ticket'; ticketKey: string };
+    source: { kind: 'ticket'; ticketKey: string } | { kind: 'pr'; number: number; headSha: string; branch: string };
     title: string;
   };
   /**

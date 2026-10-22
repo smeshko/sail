@@ -11,11 +11,16 @@
 // as it was, and nothing exists to resume. Earlier still, during the type-check, it ends sail the default way.
 //
 // `--dispatch <run id>` is the watcher's, and not in the usage: the run it dispatches runs under the id it minted, as
-// a start `via` the watcher.
+// a start `via` the watcher. So is `--head-sha <sha>`, which pins a run from a pull request to the head sha the watcher
+// queued: a pull request that has moved since is refused. The positional is a ref: a ticket's key or URL, or a pull
+// request's `#12`, `12` or URL, which the ticket source and the code host both read.
 //
 // `sail resume` takes the same steps: the helpers exported here are the ones both commands run, so they can't drift.
-import { join, relative } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
+import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
+import { recordingHarness, writeJournalKeys } from '../../adapters/recording';
 import { type ResolvedAdapters, resolveAdapters } from '../../engine/adapters';
 import { type Port, type ProjectConfig, readConfig } from '../../engine/config';
 import { findWorkflowFile } from '../../engine/load-workflow';
@@ -142,6 +147,89 @@ export function terminalFor(
   });
 }
 
+/** What `--record <dir>` gives a command: the adapters with the recording harness, and the journal keys to write at the end. */
+export interface Recorder {
+  readonly adapters: ResolvedAdapters;
+  /** Writes `journal.txt` beside the recordings, from the run's journal, whatever the run's status. */
+  finish(runDir: string): void;
+}
+
+/** The names that hold a credential: their values are masked in every form in a recording. */
+const SECRET_NAME = /TOKEN|KEY|SECRET|PASS|AUTH|CREDENTIAL|COOKIE|SESSION|PRIVATE|HEADER|(^|_)PAT$/i;
+/** A URL's `user:password` part, as a proxy or a database URL carries it under any name. */
+const USERINFO = /[a-z][a-z0-9+.-]*:\/\/([^\s/:@]+):([^\s/@]+)@/gi;
+
+/** `text` percent-decoded, or as it is when it isn't valid percent-encoding. */
+function decoded(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * The values a recording masks, each of 8 characters or more:
+ * - every credential-named value, and each part of it between spaces, commas and semicolons but a header's name, as a
+ *   session may print the token of `x-api-key: <token>` alone;
+ * - the `user:password` and the password of any URL in any value, such as `HTTPS_PROXY` or `DATABASE_URL`, as written
+ *   and percent-decoded.
+ */
+export function recordedSecrets(env: Readonly<Record<string, string | undefined>>): string[] {
+  const found = new Set<string>();
+  const add = (secret: string) => {
+    if (secret.length >= 8) found.add(secret);
+  };
+  for (const [name, value = ''] of Object.entries(env)) {
+    if (SECRET_NAME.test(name)) {
+      add(value);
+      for (const part of value.split(/[\s,;]+/)) if (!part.endsWith(':')) add(part);
+    }
+    for (const [, user = '', password = ''] of value.matchAll(USERINFO)) {
+      for (const secret of [
+        `${user}:${password}`,
+        password,
+        `${decoded(user)}:${decoded(password)}`,
+        decoded(password),
+      ]) {
+        add(secret);
+      }
+    }
+  }
+  return [...found];
+}
+
+/**
+ * `--record <dir>`: wraps the project's harness in a recorder (11.3 D2, D5). `dir` is relative to where sail runs and is
+ * made when missing. Secrets are the environment's credentials of 8 characters or more, and the machine's paths are
+ * masked in the files only. Undefined without the option.
+ */
+export function recorded(
+  args: Parsed,
+  io: Io,
+  project: { sailDir: string; adapters: ResolvedAdapters },
+): Recorder | undefined {
+  const named = args.values.record;
+  if (typeof named !== 'string') return undefined;
+  const dir = resolve(io.cwd, named);
+  mkdirSync(dir, { recursive: true });
+  const env = io.env ?? process.env;
+  const secrets = recordedSecrets(env);
+  const roots: Record<string, string> = {
+    $RUNS: runsDir(project.sailDir),
+    $REPO: dirname(project.sailDir),
+    $TMPDIR: env.TMPDIR ?? tmpdir(),
+    ...(env.HOME === undefined ? {} : { $HOME: env.HOME }),
+  };
+  // The login, as a word: it names the home folder under any root, and the owner in `ls -l`, even when HOME is another.
+  const names = { $USER: env.USER ?? userInfo().username };
+  const harness = recordingHarness(project.adapters.ports.harness, { dir, secrets, roots, names });
+  return {
+    adapters: { ...project.adapters, ports: { ...project.adapters.ports, harness } },
+    finish: (runDir) => writeJournalKeys(dir, runDir),
+  };
+}
+
 /** After the terminal view's final block, prints how to resume a suspended run. Returns the status's exit code. */
 export function printEnd(end: RunEnd, io: Io): ExitCode {
   if (end.status === 'suspended') io.stdout(`resume it with: sail resume ${end.runId}\n`);
@@ -165,8 +253,11 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   const workflowFile = findWorkflowFile(project.sailDir, workflow);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
   const { until, dispatch } = args.values;
+  const headSha = args.values['head-sha'];
   const dry = args.values['dry-run'] === true;
   if (dry && dispatch !== undefined) return refuse("--dry-run and --dispatch can't be combined");
+  if (dry && headSha !== undefined) return refuse("--dry-run and --head-sha can't be combined");
+  if (dry && args.values.record !== undefined) return refuse("--record and --dry-run can't be combined");
   const typed = await typecheckWorkflow(io, command, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
   if (dry) {
@@ -179,6 +270,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
     });
   }
   await registerRepository(io, command, project);
+  const recording = recorded(args, io, project);
 
   const terminal = terminalFor(io, project.sailDir, verbosity);
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
@@ -190,11 +282,13 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
       force: args.values.force === true,
       ...(typeof until === 'string' ? { until } : {}),
       ...(typeof dispatch === 'string' ? { dispatch: { runId: dispatch } } : {}),
-      adapters: project.adapters,
+      ...(typeof headSha === 'string' ? { headSha } : {}),
+      adapters: recording?.adapters ?? project.adapters,
       signal,
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );
   if ('refused' in end) return refuse(end.refused);
+  recording?.finish(end.dir);
   return printEnd(end, io);
 }

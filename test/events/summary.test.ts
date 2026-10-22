@@ -582,3 +582,10 @@ test('a group is listed once, with its keys in the order given and its duration 
   expect(summary?.groups).toEqual([{ keys, durationMs: 230 }]);
   expect(summary?.calls.map((call) => call.key)).toEqual(['style#1', 'coverage#1']);
 });
+
+test('a run from a pull request names its source by its number and head sha, and has no ticket', () => {
+  const headSha = 'c'.repeat(40);
+  const source = { kind: 'pr' as const, number: 12, headSha, via: 'watch' as const, forced: [] };
+  const summary = folded(stamp([0, { ...runStart(), source } as NewEvent], [100, INTAKE_START]));
+  expect([summary?.source, summary?.ticket]).toEqual([{ kind: 'pr', number: 12, headSha, via: 'watch' }, undefined]);
+});

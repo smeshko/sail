@@ -2,7 +2,7 @@
 // temp repository, and a fake spawner that stands in for a dispatched run's process.
 //
 // The spawner hands out pids from 900000 up, which no real process has, and counts a pid alive until the test ends its
-// run. A run it is given a TicketSource for claims its ticket as a dispatched `sail <ticket>` would, through
+// run. A run of a ticket it is given a TicketSource for claims its ticket as a dispatched `sail <ticket>` would, through
 // `claimSource()`. The test then ends it: with a run directory and a STATUS, or refused, with only a dispatch log. It
 // stands in for `sail resume <run>` too: a resume takes a pid from the same counter, and the test ends it with the
 // STATUS it leaves and the line it logs.
@@ -61,8 +61,8 @@ export function writeWatched(sail: string, name: string, watch: { label: string;
 /** The first pid the spawner hands out. */
 export const FAKE_PID = 900_000;
 
-/** A run the fake spawner started. */
-export interface FakeRun extends Pick<SpawnRunOptions, 'workflow' | 'ticketKey' | 'runId'> {
+/** A run the fake spawner started: of a ticket, or of a pull request at a head sha, which claims nothing. */
+export interface FakeRun extends Pick<SpawnRunOptions, 'workflow' | 'ticketKey' | 'pr' | 'runId'> {
   pid: number;
   /** Its claim, when the spawner claims. */
   claimed: Promise<unknown>;
@@ -98,9 +98,12 @@ export interface FakeSpawner {
   endResume(runId: string, ending?: ResumeEnding): void;
   /** The most runs of each workflow alive at once. */
   readonly peak: Record<string, number>;
-  /** The latest run of `ticketKey`. */
+  /** The latest run of `ticketKey`, or of a pull request named `#<number>`. */
   run(ticketKey: string): FakeRun;
-  /** Ends the latest run of `ticketKey`: its process exits once its run directory reads as `ending` says. */
+  /**
+   * Ends the latest run of `ticketKey`, or of a pull request named `#<number>`: its process exits once its run directory
+   * reads as `ending` says.
+   */
   end(ticketKey: string, ending?: Ending): Promise<void>;
   /** Waits for every claim the runs made. */
   claims(): Promise<void>;
@@ -114,7 +117,9 @@ export function fakeSpawner(runsDir: string, ticketSource?: TicketSource): FakeS
   const peak: Record<string, number> = {};
   let next = FAKE_PID;
   const run = (ticketKey: string): FakeRun => {
-    const found = runs.findLast((each) => each.ticketKey === ticketKey);
+    const found = runs.findLast(
+      (each) => each.ticketKey === ticketKey || (each.pr !== undefined && `#${each.pr.number}` === ticketKey),
+    );
     if (found === undefined) throw new Error(`no run of ${ticketKey} was spawned`);
     return found;
   };
@@ -145,9 +150,20 @@ export function fakeSpawner(runsDir: string, ticketSource?: TicketSource): FakeS
       const pid = next++;
       live.add(pid);
       const exited = new Promise<number | null>((resolve) => exits.set(pid, resolve));
-      const { workflow, ticketKey, runId } = options;
-      const claimed = ticketSource === undefined ? Promise.resolve() : claimSource({ ticketKey, runId, ticketSource });
-      runs.push({ workflow, ticketKey, runId, pid, claimed, force: options.force === true });
+      const { workflow, ticketKey, pr, runId } = options;
+      const claimed =
+        ticketSource === undefined || ticketKey === undefined
+          ? Promise.resolve()
+          : claimSource({ ticketKey, runId, ticketSource });
+      runs.push({
+        workflow,
+        ...(ticketKey === undefined ? {} : { ticketKey }),
+        ...(pr === undefined ? {} : { pr }),
+        runId,
+        pid,
+        claimed,
+        force: options.force === true,
+      });
       const alive = runs.filter((each) => each.workflow === workflow && live.has(each.pid)).length;
       peak[workflow] = Math.max(peak[workflow] ?? 0, alive);
       return { pid, exited };

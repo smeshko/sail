@@ -393,7 +393,10 @@ test('sail given a URL the ticket source owns starts the run of the ticket it na
     writeStub(repo.dir, { testsPassAt: 1 });
     const { code, stderr, runId, header } = await started(repo.dir, ['fake://tickets/FAKE-1']);
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
-    expect([runId.slice(0, 7), header.source?.ticketKey]).toEqual(['FAKE-1-', 'FAKE-1']);
+    expect([runId.slice(0, 7), header.source?.kind === 'ticket' ? header.source.ticketKey : undefined]).toEqual([
+      'FAKE-1-',
+      'FAKE-1',
+    ]);
   });
   const refused = await sailIn(['fake://tickets/FAKE-3']);
   expect(refused.stderr).toStartWith('sail fake://tickets/FAKE-3: the ticket is not designated: ');

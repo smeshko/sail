@@ -58,7 +58,10 @@ function railRun(run: RunItem, now: number): RailRun {
   const status = statusOf(run);
   const row: RailRun = { runId: run.runId, status };
   const { summary } = run;
-  const ticketKey = summary?.source.ticketKey ?? run.source?.ticketKey;
+  // A pull-request run has no ticket key: its rail entry falls back to its run id.
+  const keyOf = (source: { kind: string; ticketKey?: string } | undefined) =>
+    source?.kind === 'ticket' ? source.ticketKey : undefined;
+  const ticketKey = keyOf(summary?.source) ?? keyOf(run.source);
   const startedAt = run.startedAt ?? summary?.startedAt;
   const stopReason = stopReasonOf(run);
   const started = startedAt === undefined ? Number.NaN : Date.parse(startedAt);

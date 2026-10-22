@@ -3,6 +3,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { PullRequest } from '../../src/ports/types';
 import {
   dedupKey,
   openQueue,
@@ -726,4 +727,64 @@ test('a forced add marks its items forced, and a queue.json written before the f
     ],
     ['ticket:FAKE-1', 'ticket:FAKE-2'],
   ]);
+});
+
+/** A pull request as a CodeHost lists it: open, ready and labelled, from `sail/FAKE-<n>-x`, at `headSha`. */
+const pullRequest = (number: number, headSha: string): PullRequest => ({
+  number,
+  url: `fake://codehost/stub/pull/${number}`,
+  title: `Pull request ${number}`,
+  base: 'main',
+  head: `sail/FAKE-${number}-x`,
+  headSha,
+  draft: false,
+  state: 'open',
+  labels: ['sail'],
+  raw: null,
+});
+
+test('addPullRequests queues a pull request once per head sha, as pr:<number>@<sha7> with its branch, and a done pr: key stays taken while a done ticket: key is queued again', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  const [first, moved] = ['c'.repeat(40), 'd'.repeat(40)];
+  const added = [store.addPullRequests([pullRequest(12, first), pullRequest(12, first)])];
+  expect(keys(store)).toEqual(['pr:12@ccccccc queued']);
+  store.done('pr:12@ccccccc');
+  added.push(store.addPullRequests([pullRequest(12, first)]), store.addPullRequests([pullRequest(12, moved)]));
+  store.add([ticket('FAKE-1')]);
+  store.done('ticket:FAKE-1');
+  added.push(store.add([ticket('FAKE-1')]));
+  const [item] = store.snapshot().items;
+  expect({
+    added,
+    keys: keys(store),
+    item: item === undefined ? undefined : [item.source, item.title, item.url],
+    key: dedupKey({ kind: 'pr', number: 12, headSha: first, branch: 'sail/FAKE-12-x' }),
+    issues: queueEventIssues(queueDir(runs, 'ticket-to-pr')),
+  }).toEqual({
+    added: [1, 0, 1, 1],
+    keys: ['pr:12@ccccccc done', 'pr:12@ddddddd queued', 'ticket:FAKE-1 queued'],
+    item: [
+      { kind: 'pr', number: 12, headSha: first, branch: 'sail/FAKE-12-x' },
+      'Pull request 12',
+      'fake://codehost/stub/pull/12',
+    ],
+    key: 'pr:12@ccccccc',
+    issues: [],
+  });
+});
+
+test('a new head sha that shares its first 7 with a done item is queued in its place, and one that shares them with an item not done waits for it (review R1-1)', () => {
+  const store = open(runsDir());
+  const [old, collides, again] = [`1234567${'a'.repeat(33)}`, `1234567${'b'.repeat(33)}`, `1234567${'c'.repeat(33)}`];
+  const added = [store.addPullRequests([pullRequest(12, old)])];
+  store.done('pr:12@1234567');
+  added.push(store.addPullRequests([pullRequest(12, collides)]), store.addPullRequests([pullRequest(12, collides)]));
+  const queued = store.snapshot().items.map((item) => [item.dedupKey, item.state, item.source]);
+  added.push(store.addPullRequests([pullRequest(12, again)]));
+  expect({ added, queued, after: store.snapshot().items.map((item) => [item.state, item.source]) }).toEqual({
+    added: [1, 1, 0, 0],
+    queued: [['pr:12@1234567', 'queued', { kind: 'pr', number: 12, headSha: collides, branch: 'sail/FAKE-12-x' }]],
+    after: [['queued', { kind: 'pr', number: 12, headSha: collides, branch: 'sail/FAKE-12-x' }]],
+  });
 });

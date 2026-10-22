@@ -1,0 +1,203 @@
+{
+  "schema": "sail.run.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "source": {
+    "kind": "ticket",
+    "ticketKey": "FAKE-1",
+    "via": "cli",
+    "forced": []
+  },
+  "claim": {
+    "claimed": true,
+    "state": {
+      "type": "started",
+      "name": "In Progress"
+    }
+  },
+  "workflow": {
+    "name": "ticket-to-pr",
+    "version": 1,
+    "origin": "repo:.sail/workflows/ticket-to-pr",
+    "sha256": "f94d30a42e726ec2271de2f0b28f759a04ea9c90dc2ca1ccc68c83c564c50edc"
+  },
+  "sail": {
+    "version": "0.0.0",
+    "runtime": "bun 1.4.2"
+  },
+  "adapters": {
+    "ticketSource": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "codeHost": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "harness": {
+      "use": "fake",
+      "origin": "builtin"
+    },
+    "workspace": {
+      "use": "fake",
+      "origin": "builtin"
+    }
+  },
+  "intake": {
+    "name": "ticket",
+    "origin": "builtin",
+    "output": "TicketInput",
+    "produces": [
+      "ticket.json",
+      "brief.md"
+    ]
+  },
+  "stages": {
+    "describe": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/describe",
+      "model": "sonnet",
+      "output": "PrDescription",
+      "produces": [
+        "pr-body.md"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "git log *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 20,
+        "maxUsd": 1,
+        "maxMinutes": 5
+      }
+    },
+    "implement": {
+      "kind": "agent",
+      "origin": "repo:.sail/stages/implement",
+      "model": "sonnet",
+      "output": "ChangeSet",
+      "produces": [
+        "diff.patch"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "src/**",
+          "test/**",
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "bun test*",
+          "git add *",
+          "git commit *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 60,
+        "maxUsd": 5,
+        "maxMinutes": 20
+      }
+    },
+    "open": {
+      "kind": "script",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/open",
+      "output": "PrInfo",
+      "exitCodes": {
+        "passed": [
+          0
+        ],
+        "failed": []
+      }
+    },
+    "self-review": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/self-review",
+      "model": "opus",
+      "output": "ReviewOutput",
+      "produces": [
+        "review.md"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "git log *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 30,
+        "maxUsd": 2,
+        "maxMinutes": 10
+      }
+    },
+    "spec": {
+      "kind": "agent",
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/spec",
+      "model": "opus",
+      "output": "SpecOutput",
+      "produces": [
+        "spec.md"
+      ],
+      "permissions": {
+        "read": [
+          "**"
+        ],
+        "write": [
+          "$STAGE_OUT/**"
+        ],
+        "commands": [
+          "git log *",
+          "git diff *"
+        ]
+      },
+      "budget": {
+        "maxTurns": 40,
+        "maxUsd": 2,
+        "maxMinutes": 10
+      }
+    },
+    "tests": {
+      "kind": "script",
+      "origin": "repo:.sail/stages/tests",
+      "output": "TestReport",
+      "produces": [
+        "junit.xml"
+      ],
+      "exitCodes": {
+        "passed": [
+          0
+        ],
+        "failed": [
+          1
+        ]
+      }
+    }
+  },
+  "budget": {
+    "maxUsd": 25,
+    "maxMinutes": 90
+  },
+  "startedAt": "2026-09-25T09:00:00.000Z",
+  "branch": "sail/FAKE-1-add-a-shout-flag-to-the-greet-command",
+  "repository": {
+    "url": "fake://origin",
+    "defaultBranch": "main",
+    "baseSha": "4203211311dad98c507528d05a25fff53b821b31"
+  },
+  "workspace": "workspace"
+}

@@ -13,6 +13,7 @@ import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/regi
 import { startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
+import { seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
 import { queueEventIssues, queueEvents } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -865,6 +866,42 @@ test('an add, a requeue and a drop for a workflow outside the set are each rejec
       rejected: Array(3).fill("not watching workflow 'b'\n"),
       a: true,
       b: false,
+    });
+    await watcher.stop();
+  });
+});
+
+test('a ticket workflow and a pull-request workflow that both poll sail open under one watcher, and the registry claims sail once, for the ticket source (ADW-235)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail', cap: 1 }], tickets({ 'FAKE-1': 'sail' }));
+    writePrWorkflow(w.sail, 'r', { watch: { label: 'sail', cap: 1 } });
+    seedPullRequests(w.sail, repo, []);
+    const started = await w.start(['a', 'r']).catch((error: unknown) => String(error));
+    expect({
+      watching: typeof started === 'string' ? started : started.watching(),
+      labels: readEntry(w.registryDir, 'stub')?.watcher?.labels,
+      polled: w
+        .events('r')
+        .filter((event) => event.type === 'queue:polled')
+        .map((event) => event.kind),
+    }).toEqual({ watching: ['a', 'r'], labels: ['sail'], polled: ['pr'] });
+    if (typeof started !== 'string') await started.stop();
+  });
+});
+
+test('an add command for a pull-request workflow is rejected, naming what it polls, and queues nothing (review R1-5)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-r' }));
+    writePrWorkflow(w.sail, 'r', { watch: { label: 'sail-r', cap: 1 } });
+    seedPullRequests(w.sail, repo, []);
+    const watcher = await w.start(['a', 'r']);
+    await w.timers.advance(1000);
+    dropCommand(w.runs, { op: 'add', workflow: 'r', ticketKey: 'FAKE-1' });
+    await w.timers.advance(1000);
+    const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'r'), 'queue.json'), 'utf8')).items;
+    expect({ rejected: rejections(w.out), items }).toEqual({
+      rejected: ["workflow 'r' polls pull requests: only a workflow that polls tickets takes an add\n"],
+      items: [],
     });
     await watcher.stop();
   });

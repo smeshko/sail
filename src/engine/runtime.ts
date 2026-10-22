@@ -67,6 +67,7 @@ import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
 import type { Supplied } from './bindings';
+import { DEFAULT_BRANCH_PREFIX } from './branch';
 import { type AgentExecution, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
@@ -438,6 +439,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         body,
         source: header.source,
         ticketSource: opened.adapters.ticketSource,
+        codeHost: opened.adapters.codeHost,
+        workspace: { port: opened.adapters.workspace, path: opened.workspace.path },
+        branchPrefix: opened.config.branchPrefix ?? DEFAULT_BRANCH_PREFIX,
         try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
         ...(signal === undefined ? {} : { signal }),
         emit: bus.emit,
@@ -449,8 +453,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       running = undefined;
       options.onCall?.(intake);
     } else if (intake.key !== INTAKE_KEY) {
-      const { ticketKey } = header.source;
-      const message = `the journal of a run from ticket ${ticketKey} starts with '${intake.key}', not '${INTAKE_KEY}'`;
+      const { source } = header;
+      const from = source.kind === 'ticket' ? `ticket ${source.ticketKey}` : `pull request #${source.number}`;
+      const message = `the journal of a run from ${from} starts with '${intake.key}', not '${INTAKE_KEY}'`;
       return await failed('determinism_violation', message);
     }
     // Checked on every start, not only when the intake just ran: a crash between the journal line and STATUS must

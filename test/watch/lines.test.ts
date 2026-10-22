@@ -179,3 +179,43 @@ test('a settled item prints done or when it is due again, and a parked one leave
     undefined,
   ]);
 });
+
+test('a pull-request item is named #<number>@<sha7> on its lines, and a ticket keeps its key', () => {
+  const key = 'pr:12@abc1234';
+  const source = { kind: 'pr' as const, number: 12, headSha: `abc1234${'0'.repeat(33)}`, branch: 'sail/FAKE-1-x' };
+  const lines = [
+    queueLine({ ...envelope, type: 'queue:item_added', dedupKey: key, source, title: 'Add a greeting' }),
+    queueLine({
+      ...envelope,
+      type: 'queue:dispatched',
+      dedupKey: key,
+      run: 'pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      attempt: 1,
+      pid: 42,
+    }),
+    queueLine({ ...envelope, type: 'queue:skipped_leased', dedupKey: key, branch: 'sail/FAKE-1-x', heldBy: RUN }),
+  ];
+  expect(lines.map((line) => line?.text)).toEqual([
+    '#12@abc1234 queued: Add a greeting',
+    '#12@abc1234 dispatched as run pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N, attempt 1, pid 42',
+    `#12@abc1234 waits: its branch sail/FAKE-1-x is leased by run ${RUN}`,
+  ]);
+});
+
+test('a settled pull-request item is named #<number>@<sha7>: done, or when it is due again', () => {
+  const base = {
+    dedupKey: 'pr:12@abc1234',
+    pr: { number: 12, headSha: `abc1234${'0'.repeat(33)}` },
+    runId: 'pr-12-run',
+  };
+  const done = settledLine('r', { ...base, outcome: 'done' }, AT);
+  const retry = settledLine(
+    'r',
+    { ...base, outcome: 'retry', reason: 'the host is down', retryAt: '2026-10-15T08:14:10.000Z' },
+    AT,
+  );
+  expect([done && utc(done), retry && utc(retry)]).toEqual([
+    '08:09:10 r  #12@abc1234 done: run pr-12-run completed\n',
+    '08:09:10 r  #12@abc1234 failed: the host is down; due again in 5m 0s\n',
+  ]);
+});

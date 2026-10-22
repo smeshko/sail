@@ -25,7 +25,7 @@ import { isAlive as processIsAlive } from '../../adapters/leases';
 import type { ProjectConfig } from '../../engine/config';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { dropCommand } from '../../watch/inbox';
-import { readWatch, systemTimers, type Timers } from '../../watch/poll';
+import { readWatch, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
 import { QUEUE_DIR } from '../../watch/queue-store';
 import {
   findHolder,
@@ -169,14 +169,24 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       const { pid } = live.watcher;
       const watched = liveSet(sailDir, pid);
       const known = [...watched];
+      const kinds = new Map<string, WatchDeclaration>();
       for (const name of names) {
         const watch = await readWatch({ sailDir, config, name });
         if ('refused' in watch) return refuse(watch.refused);
         if (known.some((each) => each.workflow === name)) continue;
-        const other = known.find((each) => each.label === watch.label);
+        // One label per kind (14.2's D9): a ticket workflow and a pull-request workflow may both poll `sail`.
+        let other: (typeof known)[number] | undefined;
+        for (const each of known.filter((each) => each.label === watch.label)) {
+          const theirs = kinds.get(each.workflow) ?? (await readWatch({ sailDir, config, name: each.workflow }));
+          if ('refused' in theirs || theirs.kind === watch.kind) {
+            other = each;
+            break;
+          }
+        }
         if (other !== undefined) {
           return refuse(`workflows '${other.workflow}' and '${name}' both poll the label '${watch.label}'`);
         }
+        kinds.set(name, watch);
         known.push({ workflow: name, label: watch.label, seq: 0, ts: '' });
       }
       const watcher = `the watcher of '${entry.name}' (pid ${pid})`;

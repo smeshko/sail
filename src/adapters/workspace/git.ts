@@ -266,9 +266,36 @@ export function stripUserinfo(url: string): string {
   return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@/i, '$1');
 }
 
+/** How many times a fetch is tried when it keeps losing git's ref lock to another fetch. */
+export const FETCH_TRIES = 4;
+
+/** The waits between those tries, in order. */
+export const FETCH_RETRY_WAITS_MS: readonly number[] = [250, 500, 1_000];
+
+/** What git says when another process holds a lock the fetch needs: two runs fetching into one clone at once. */
+const LOST_LOCK = /cannot lock ref|Unable to create '[^']*\.lock': File exists/;
+
+/** Whether `signal` has aborted, read afresh at each call. */
+const stopped = (signal: AbortSignal | undefined): boolean => signal?.aborted === true;
+
+/** Waits `ms`, or less when `signal` aborts. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((done) => {
+    const timer = setTimeout(finish, ms);
+    function finish(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      done();
+    }
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
+
 /**
  * `git fetch --no-tags <remote>` in `repo`, as a process group killed at `timeoutMs` or when `signal` aborts. Any end
- * but a clean exit is `unavailable`, with what git wrote to stderr.
+ * but a clean exit is `unavailable`, with what git wrote to stderr. A fetch that lost git's ref lock to another run's
+ * fetch in the same clone is tried again, up to `FETCH_TRIES` times with `FETCH_RETRY_WAITS_MS` between them: the
+ * winner has usually updated the ref by then. A timeout, an abort and every other failure end it at once.
  */
 export async function fetchRemote(
   repo: string,
@@ -279,27 +306,37 @@ export async function fetchRemote(
 ): Promise<void> {
   const logs = mkdtempSync(join(tmpdir(), 'sail-fetch-'));
   try {
-    const stderr = join(logs, 'stderr');
-    const end = await runProcess({
-      command: ['git', 'fetch', '--no-tags', remote],
-      cwd: repo,
-      env: nonInteractive(env ?? inherited()),
-      stdout: join(logs, 'stdout'),
-      stderr,
-      timeoutMs,
-      graceMs: 1_000,
-      ...(signal === undefined ? {} : { signal }),
-    });
-    if (end.started && end.code === 0) return;
-    const said = existsSync(stderr) ? readFileSync(stderr, 'utf8').trim() : '';
-    const how = !end.started
-      ? end.message
-      : end.timedOut
-        ? `timed out after ${timeoutMs} ms`
-        : end.aborted
-          ? 'stopped'
-          : `exited ${end.code ?? end.signal}`;
-    throw new PortError('workspace', 'create', 'unavailable', `git fetch ${remote} ${how}: ${said}`.trim());
+    for (let attempt = 1; ; attempt++) {
+      const stderr = join(logs, 'stderr');
+      const end = await runProcess({
+        command: ['git', 'fetch', '--no-tags', remote],
+        cwd: repo,
+        env: nonInteractive(env ?? inherited()),
+        stdout: join(logs, 'stdout'),
+        stderr,
+        timeoutMs,
+        graceMs: 1_000,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (end.started && end.code === 0) return;
+      const said = existsSync(stderr) ? readFileSync(stderr, 'utf8').trim() : '';
+      const lost = end.started && !end.timedOut && !end.aborted && LOST_LOCK.test(said);
+      let stoppedWaiting = false;
+      if (lost && attempt < FETCH_TRIES && !stopped(signal)) {
+        await pause(FETCH_RETRY_WAITS_MS[attempt - 1] ?? 1_000, signal);
+        // An abort during the wait ends it here, with this try's message: no further git is started only to be stopped.
+        if (!stopped(signal)) continue;
+        stoppedWaiting = true;
+      }
+      const how = !end.started
+        ? end.message
+        : end.timedOut
+          ? `timed out after ${timeoutMs} ms`
+          : end.aborted || stoppedWaiting
+            ? 'stopped'
+            : `exited ${end.code ?? end.signal}${attempt > 1 ? ` after ${attempt} tries` : ''}`;
+      throw new PortError('workspace', 'create', 'unavailable', `git fetch ${remote} ${how}: ${said}`.trim());
+    }
   } finally {
     rmSync(logs, { recursive: true, force: true });
   }

@@ -6,6 +6,7 @@ import type { Port } from '../../engine/config';
 import type { AdapterContext, AdapterDefinition, AdapterOptions, Env, PortAdapters } from '../../ports/adapter';
 import { createFakeCodeHost } from './code-host';
 import { createFakeHarness } from './harness';
+import { createPlaybackHarness } from './playback';
 import { createFakeTicketSource } from './ticket-source';
 import { createFakeWorkspace } from './workspace';
 
@@ -52,7 +53,24 @@ export const fakeAdapters: { [P in Port]: AdapterDefinition<PortAdapters[P]> } =
   },
   harness: {
     create(options, context) {
-      const { script } = parse('harness', { script: z.string().optional() }, options);
+      const shape = {
+        script: z.string().optional(),
+        playback: z.string().optional(),
+        onPromptMismatch: z.enum(['fail', 'warn']).optional(),
+      };
+      const { script, playback, onPromptMismatch } = parse('harness', shape, options);
+      if (playback !== undefined && script !== undefined) {
+        throw new Error('fake harness: option playback: can not be combined with option script');
+      }
+      if (playback === undefined && onPromptMismatch !== undefined) {
+        throw new Error('fake harness: option onPromptMismatch: needs option playback');
+      }
+      if (playback !== undefined) {
+        return createPlaybackHarness({
+          dir: resolve(context.sailDir, playback),
+          ...(onPromptMismatch === undefined ? {} : { onPromptMismatch }),
+        });
+      }
       return createFakeHarness({ script: resolve(context.sailDir, script ?? 'fake/harness.json') });
     },
   },

@@ -20,8 +20,8 @@ export interface WatchLine {
   alert?: boolean;
 }
 
-/** The ticket key of a dedup key: `ticket:FAKE-1` is `FAKE-1`. */
-const keyOf = (dedupKey: string) => dedupKey.replace(/^ticket:/, '');
+/** What a dedup key names an item as: `ticket:FAKE-1` is `FAKE-1`, and `pr:12@abc1234` is `#12@abc1234`. */
+const keyOf = (dedupKey: string) => dedupKey.replace(/^ticket:/, '').replace(/^pr:/, '#');
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
@@ -38,7 +38,7 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
       if (event.found === 0 && event.added === 0 && !afterError) return undefined;
       return { text: `polled ${event.label}: ${event.found} found, ${event.added} queued` };
     case 'queue:item_added':
-      return { text: `${event.source.ticketKey} queued: ${event.title}` };
+      return { text: `${keyOf(event.dedupKey)} queued: ${event.title}` };
     case 'queue:dispatched':
       return {
         text: `${keyOf(event.dedupKey)} dispatched as run ${event.run}, attempt ${event.attempt}, pid ${event.pid}`,
@@ -81,7 +81,9 @@ export function queueLine(event: QueueEvent, afterError = false): WatchLine | un
 
 /** The line of an item the dispatch settled. A parked item has none: its `queue:parked` says so. */
 export function settledLine(workflow: string, settled: Settled, at: Date): WatchLine | undefined {
-  const { ticketKey, runId } = settled;
+  const { runId } = settled;
+  const { pr } = settled;
+  const ticketKey = pr === undefined ? settled.ticketKey : `#${pr.number}@${pr.headSha.slice(0, 7)}`;
   if (settled.outcome === 'done') return { at, workflow, text: `${ticketKey} done: run ${runId} completed` };
   if (settled.outcome === 'parked') return undefined;
   const due = settled.retryAt === undefined ? 0 : Math.max(0, Date.parse(settled.retryAt) - at.getTime());

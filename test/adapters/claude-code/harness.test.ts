@@ -922,3 +922,60 @@ test('a session that submits while its tree still runs leaves none of it behind 
     gone: true,
   });
 }, 30_000);
+
+describe('onRaw: the provider messages, handed on for a recording', () => {
+  const answer: SDKMessage = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: 't1', content: 'hello from the tool', is_error: false }],
+    },
+    parent_tool_use_id: null,
+    session_id: SESSION_ID,
+  };
+  const stream = (): Stream => [
+    init(),
+    assistantToolUse('m1', 't1', 'Read', { file_path: 'brief.md' }),
+    answer,
+    resultSuccess({ structured: done(SPEC) }),
+  ];
+
+  test('onRaw gets each SDK message, in order and as the same objects', async () => {
+    const messages = stream() as SDKMessage[];
+    const got: unknown[] = [];
+    await play(messages, { onRaw: (raw) => got.push(raw) });
+    expect(got.length).toBe(4);
+    messages.forEach((message, index) => {
+      expect(got[index]).toBe(message);
+    });
+    const block = (got[2] as { message: { content: { content: string }[] } }).message.content[0];
+    expect(block?.content).toBe('hello from the tool');
+  });
+
+  test('an onRaw that throws on every call changes nothing', async () => {
+    const plain = await play(stream());
+    const throwing = await play(stream(), {
+      onRaw: () => {
+        throw new Error('disk full');
+      },
+    });
+    expect(throwing.capture.events).toEqual(plain.capture.events);
+    expect(throwing.result.outcome).toBe('done');
+    expect({
+      outcome: throwing.result.outcome,
+      output: summary(throwing.result),
+      usage: throwing.result.usage,
+      transcript: throwing.result.transcript,
+    }).toEqual({
+      outcome: plain.result.outcome,
+      output: summary(plain.result),
+      usage: plain.result.usage,
+      transcript: plain.result.transcript,
+    });
+  });
+
+  test('a request without onRaw runs as it did', async () => {
+    const { result } = await play(stream());
+    expect(summary(result)).toEqual(SPEC);
+  });
+});
