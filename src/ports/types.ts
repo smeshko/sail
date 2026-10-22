@@ -105,6 +105,13 @@ export const MergeRequest = z.object({
 });
 export type MergeRequest = z.infer<typeof MergeRequest>;
 
+/** Why `request` is no MergeRequest: a method that isn't one, or an expected head that is no sha. */
+export function mergeRequestIssue(request: unknown): string {
+  const { method, expectedHeadSha } = (request ?? {}) as { method?: unknown; expectedHeadSha?: unknown };
+  if (!MergeMethod.safeParse(method).success) return `${String(method)} is not a merge method`;
+  return `expectedHeadSha ${JSON.stringify(expectedHeadSha) ?? 'undefined'} is not a 40-character hex sha`;
+}
+
 /** A merge counts once the host reports it (D4): `pending` and `refused` say why it hasn't happened. */
 export const MergeResult = z.discriminatedUnion('state', [
   z.object({ state: z.literal('merged'), sha: z.string(), raw: Raw }),

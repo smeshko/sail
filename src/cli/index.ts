@@ -204,6 +204,7 @@ const commands = new Map<string, CommandSpec>([
         ticket: { type: 'string' },
         label: { type: 'string', multiple: true },
         method: { type: 'string' },
+        'expected-head-sha': { type: 'string' },
       },
       positionals: 4,
       command: port,

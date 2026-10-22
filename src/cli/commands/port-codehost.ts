@@ -8,19 +8,20 @@
 //   get-pull-request <pr>
 //   list-designated <label>
 //   checks <pr>
-//   merge <pr> --method <merge|squash|rebase>
+//   merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
 //   add-label <pr> <label>
 //   remove-label <pr> <label>
 //   comment <pr> [--body-file <path>]
 //
 // `<pr>` goes through the adapter's `parseRef`: a number, `#12`, or a pull-request URL the host owns. `--ticket` is
 // passed on as given: only the code host is resolved, so no ticket source parses it. `--method` too, and the port
-// refuses one it doesn't know. A merge the host answers `pending` or `refused` is a printed result: its state is in
-// the JSON, and exit code 1 means the port call itself failed.
+// refuses one it doesn't know, and `--expected-head-sha` as well: the head the workflow checked, which the pull request
+// must still be at. A merge answered `pending` or `refused`, a moved head among them, is a printed result: its state is
+// in the JSON. A merge the host rejects exits 1, as any port call that fails does.
 import { z } from 'zod';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
-import { Checks, Labelled, type MergeMethod, MergeResult, Posted, PullRequest, Pushed } from '../../ports/types';
+import { Checks, Labelled, type MergeRequest, MergeResult, Posted, PullRequest, Pushed } from '../../ports/types';
 import type { PortCall, PortOperation, PortTable } from './port';
 
 /**
@@ -103,15 +104,18 @@ export const CODEHOST: PortTable<'codeHost'> = {
       answered('checks', 'Checks', Checks, await host.checks(number)),
     ),
     merge: onPullRequest(
-      { positionals: ['pr'], options: { method: { value: 'merge|squash|rebase', required: true } } },
-      // The method as given: the port refuses one it doesn't know.
-      async (host, number, { values }) =>
-        answered(
-          'merge',
-          'MergeResult',
-          MergeResult,
-          await host.merge(number, { method: text(values.method) as MergeMethod, expectedHeadSha: '' }),
-        ),
+      {
+        positionals: ['pr'],
+        options: {
+          method: { value: 'merge|squash|rebase', required: true },
+          'expected-head-sha': { value: 'sha', required: true },
+        },
+      },
+      // The values as given: the port refuses a method it doesn't know, and an expected head that is no sha.
+      async (host, number, { values }) => {
+        const request = { method: text(values.method), expectedHeadSha: text(values['expected-head-sha']) };
+        return answered('merge', 'MergeResult', MergeResult, await host.merge(number, request as MergeRequest));
+      },
     ),
     'add-label': onPullRequest(
       { positionals: ['pr', 'label'] },

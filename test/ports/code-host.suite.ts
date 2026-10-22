@@ -298,9 +298,7 @@ export function codeHostSuite(
     },
   );
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test.skipIf(
-    true || // TDD-PENDING TASK-001
     lacks('merge'),
   )(
     `${label}: a merge whose expected head isn't the pull request's head is refused, naming both, it stays open, and nothing is emitted (needs merge)`,
@@ -320,9 +318,7 @@ export function codeHostSuite(
     },
   );
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test.skipIf(
-    true || // TDD-PENDING TASK-001
     lacks('merge'),
   )(
     `${label}: a merge by a method that isn't one, or with an expected head that is no sha, rejects as invalid, merges nothing, and emits nothing (needs merge)`,
@@ -344,9 +340,7 @@ export function codeHostSuite(
     },
   );
 
-  // biome-ignore format: TDD-PENDING TASK-001
   test.skipIf(
-    true || // TDD-PENDING TASK-001
     unarranged.includes('rejectedMerge') || lacks('merge'),
   )(
     `${label}: a merge the host rejects is a PortError of code conflict, it stays open, and nothing is emitted (needs merge)`,

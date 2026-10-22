@@ -405,6 +405,10 @@ _Avoid_: git provider, repo host, SCM, VCS
 The status checks the code host reports for a pull request's head sha: the repository's CI. A workflow reads them through CodeHost. They are distinct from any tests a workflow runs itself.
 _Avoid_: CI (ambiguous), tests, status
 
+**Expected head**:
+The head sha a merge names: the one the workflow checked. The host merges the pull request only while it is still at that head, and refuses it, with nothing sent, once it has moved.
+_Avoid_: base sha, review sha
+
 **Harness**:
 The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. v1 adapter: Claude Code.
 _Avoid_: agent provider, runner, executor, model

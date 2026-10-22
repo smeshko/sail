@@ -101,9 +101,7 @@ test('a merge scripted pending or refused says so, leaves the pull request open,
   expect(capture.events).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
 test
-  .skip // TDD-PENDING TASK-001
   ('a stale or malformed expected head leaves the state file with nothing merged and the merge script unread, and a rejected merge reads it once and merges nothing', async () => {
   const world = files(rejecting);
   const capture = captureEvents();

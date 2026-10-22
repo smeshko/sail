@@ -42,7 +42,11 @@ export interface CodeHost {
   getPullRequest(number: number): Promise<PullRequest>;
   /** The checks on the pull request's head sha. Emits `codehost:checks`. */
   checks(number: number): Promise<Checks>;
-  /** Emits `codehost:merged` only when the host reports the merge. */
+  /**
+   * Merges the pull request by `request.method`, only while its head is `request.expectedHeadSha`. It is `refused`, with
+   * nothing sent, when the pull request is closed, a draft, or at another head. A rejection by the host is a PortError.
+   * Emits `codehost:merged` only when the host reports the merge.
+   */
   merge(number: number, request: MergeRequest): Promise<MergeResult>;
   /** Emits `codehost:labelled` only when the labels changed. */
   addLabel(number: number, label: string): Promise<Labelled>;
