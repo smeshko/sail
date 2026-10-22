@@ -9,6 +9,7 @@
 // - Items are known by their dedup key. A ticket key whose item is done may be queued again: the ticket system is the
 //   memory of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run. A pull request's
 //   key carries its head sha, so a done one stays taken while the item is kept: the same sha is never reviewed twice.
+//   Only the same full sha keeps it: a done item at another sha that shares its first 7 is replaced.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
 //   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
 //   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
@@ -337,7 +338,12 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         for (const pr of pullRequests) {
           const source = { kind: 'pr' as const, number: pr.number, headSha: pr.headSha, branch: pr.head };
           const key = dedupKey(source);
-          if (next.items.some((item) => item.dedupKey === key)) continue;
+          const taken = next.items.find((item) => item.dedupKey === key);
+          // A key is the sha's first 7, so another sha can share it: a done item at another sha gives way to the new
+          // one, and one not done holds the key until it is (a queued one is dropped at dispatch as moved).
+          const same = taken?.source.kind === 'pr' && taken.source.headSha === pr.headSha;
+          if (taken !== undefined && (same || taken.state !== 'done')) continue;
+          if (taken !== undefined) next.items.splice(next.items.indexOf(taken), 1);
           const item: QueueItem = {
             dedupKey: key,
             source,
