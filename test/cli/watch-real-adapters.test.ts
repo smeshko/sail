@@ -20,7 +20,16 @@ import { createGitHubWorld, type GitHubWorld } from '../helpers/github-world';
 import { createLinearWorld, DEFAULT_STATES, type LinearWorld } from '../helpers/linear-world';
 import { withOrigin } from '../helpers/origin';
 import { queueEventIssues, queueEvents } from '../helpers/queue';
-import { alive, killOne, type RunOnDisk, runsIn, type SailProcess, sailProcess, until } from '../helpers/sail-process';
+import {
+  alive,
+  gone,
+  killOne,
+  type RunOnDisk,
+  runsIn,
+  type SailProcess,
+  sailProcess,
+  until,
+} from '../helpers/sail-process';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const LINEAR_KEY = 'lin_api_MARKER_watch_5e92d0a7';
@@ -171,6 +180,8 @@ const exitOf = (child: SailProcess) =>
 
 let release = (): void => {};
 let shared: Promise<Watched> | undefined;
+/** The scenario's own end: its runs stopped, its servers stopped and its clone removed. */
+let torndown: Promise<unknown> = Promise.resolve();
 
 /**
  * `sail watch ticket-to-pr`, stopped with a SIGINT once both runs are in flight, then started again until both runs
@@ -178,7 +189,7 @@ let shared: Promise<Watched> | undefined;
  */
 function scenario(): Promise<Watched> {
   shared ??= new Promise<Watched>((resolve, reject) => {
-    withClone(async (clone) => {
+    torndown = withClone(async (clone) => {
       const { repo, env, runs } = clone;
       const waits: string[] = [];
       const wait = async (what: string, ready: () => boolean) => {
@@ -236,12 +247,28 @@ function scenario(): Promise<Watched> {
         });
       } finally {
         for (const watcher of watchers) if (watcher.exitCode === null) killOne(watcher.pid, 'SIGKILL');
+        // A dispatched run leads a session of its own, so it outlives its watcher. One whose item is not done, when the
+        // scenario failed midway or a wait ran out, is stopped with its group before its clone and HOME are removed.
+        const left = (queueOf(runs)?.items ?? []).flatMap((item) =>
+          item.state === 'done' || item.pid === undefined ? [] : [item.pid],
+        );
+        for (const pid of left) {
+          try {
+            process.kill(-pid, 'SIGKILL');
+          } catch {
+            // Gone already, or its group is exiting.
+          }
+        }
+        for (const pid of left) await gone(pid);
       }
     }).catch(reject);
   });
   return shared;
 }
-afterAll(() => release());
+afterAll(async () => {
+  release();
+  await torndown;
+});
 
 /** The scenario, whose waits all happened. */
 async function watched(): Promise<Watched> {
