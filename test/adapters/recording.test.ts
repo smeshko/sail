@@ -500,6 +500,52 @@ describe('masking machine paths', () => {
     }
   });
 
+  test('a temp path and a machine path outside every root keep only their last segment, and portable paths stay', () => {
+    const top = ['Applications', 'dev', 'etc', 'opt', 'private', 'tmp', 'Users', 'usr', 'var'];
+    const mask = maskPaths({ $WORKSPACE: '/w/x' }, {}, top);
+    expect(
+      mask({
+        reason: 'write /tmp/commit-msg-1.txt → /private/tmp/commit-msg-1.txt: outside the workspace and $STAGE_OUT',
+        messaging_socket_path: '/tmp/cc-socks/87516.sock',
+        temps:
+          '/var/folders/ab/cd12_x/T/x.txt, /private/var/folders/ab/cd12_x/C/y, /var/folders/ab/cd12_x, /tmp, /tmp/',
+        trace:
+          'stack: /Applications/Xcode-26.4.0.app/Contents/Developer/usr/bin/git\n14:14 dir: /Applications/Xcode-26.4.0.app/Contents/Developer/usr/bin',
+        json: '{"bun":"/opt/homebrew/bin/bun","log":"a\\n/opt/tool/x","home":"/Users/someone/notes.md"}',
+        kept: 'x 2>/dev/null; #!/usr/bin/env bun; /etc/hosts; </untrusted-input>; $STAGE_IN/tickets/FAKE-1; /tickets/FAKE-1; src/tmp/a; https://example.com/tmp/a; /Applications; /w/x/tmp/a',
+      }),
+    ).toEqual({
+      reason: 'write $TMP/commit-msg-1.txt → $TMP/commit-msg-1.txt: outside the workspace and $STAGE_OUT',
+      messaging_socket_path: '$TMP/87516.sock',
+      temps: '$TMP/x.txt, $TMP/y, $TMP, $TMP, $TMP/',
+      trace: 'stack: $MACHINE/git\n14:14 dir: $MACHINE/bin',
+      json: '{"bun":"$MACHINE/bun","log":"a\\n$MACHINE/x","home":"$MACHINE/notes.md"}',
+      kept: 'x 2>/dev/null; #!/usr/bin/env bun; /etc/hosts; </untrusted-input>; $STAGE_IN/tickets/FAKE-1; /tickets/FAKE-1; src/tmp/a; https://example.com/tmp/a; /Applications; $WORKSPACE/tmp/a',
+    });
+  });
+
+  test('a recording holds no system temp path: not in an event, a raw message, nor a produced file (live run)', async () => {
+    const req = request();
+    const events: HarnessEvent[] = [
+      START,
+      SAID('write /tmp/commit-msg-1.txt → /private/tmp/commit-msg-1.txt: outside the workspace and $STAGE_OUT'),
+    ];
+    const raw = [{ type: 'system', messaging_socket_path: '/tmp/cc-socks/87516.sock' }];
+    const files = { 'notes.md': 'scratch in /private/var/folders/ab/cd12_x/T/n.txt and /tmp/m.txt\n' };
+    const { dir, harness } = recorder(standIn({ events, raw, files }));
+    await harness.run(req);
+    const recorded = read(dir, 'spec#1').tries[0];
+    expect(recorded?.events[1]).toEqual(
+      SAID('write $TMP/commit-msg-1.txt → $TMP/commit-msg-1.txt: outside the workspace and $STAGE_OUT'),
+    );
+    expect(recorded?.raw).toEqual([{ type: 'system', messaging_socket_path: '$TMP/87516.sock' }]);
+    expect(recorded?.files['notes.md']).toEqual({
+      encoding: 'utf8',
+      content: 'scratch in $TMP/n.txt and $TMP/m.txt\n',
+    });
+    for (const form of ['/tmp/', '/private/', '/var/folders', 'cc-socks']) expect(bytes(dir)).not.toContain(form);
+  });
+
   test('the realpath form of a symlinked root is replaced too', () => {
     const real = tempDir();
     const link = join(tempDir(), 'link');

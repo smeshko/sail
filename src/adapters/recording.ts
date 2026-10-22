@@ -74,16 +74,55 @@ function pathForms(path: string): string[] {
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
+ * An absolute path that starts a token: after the start, a character no path holds, or a JSON text's `\n`, `\r` or `\t`.
+ * Never inside a relative path, a URL or a path a word already stands for (`$STAGE_IN/tickets`).
+ */
+const ABSOLUTE = /(?<=^|[^A-Za-z0-9._~$@%+/\\-]|\\[nrt])(?:\/[A-Za-z0-9._@+~-]+)+/g;
+
+/** The top-level directories every Unix has, whose paths name no machine: `/dev/null`, `/usr/bin/env`, `/etc/hosts`. */
+const PORTABLE = new Set(['bin', 'dev', 'etc', 'lib', 'lib32', 'lib64', 'proc', 'sbin', 'sys', 'usr']);
+
+/** The names in this machine's filesystem root, or none when it can't be listed. */
+function topLevelDirectories(): string[] {
+  try {
+    return readdirSync('/');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * An absolute path outside every root, as a recording holds it. A system temp path, `/tmp` or macOS's per-user
+ * `/var/folders/<a>/<b>`, each also under `/private`, is `$TMP` and its last segment. A path of two segments or more
+ * under another of the machine's top-level directories (`/Applications`, `/opt`, `/home`) is `$MACHINE` and its last
+ * segment. Anything else is left as written: a portable path, or one whose first segment the machine doesn't have, which
+ * is the fixture's own text, not a place on the machine.
+ */
+function machinePath(path: string, top: ReadonlySet<string>): string {
+  const parts = path.split('/').slice(1);
+  const local = parts[0] === 'private' ? parts.slice(1) : parts;
+  const last = parts[parts.length - 1];
+  if (local[0] === 'tmp') return local.length === 1 ? '$TMP' : `$TMP/${last}`;
+  if (local[0] === 'var' && local[1] === 'folders') return local.length <= 4 ? '$TMP' : `$TMP/${last}`;
+  const [first = ''] = parts;
+  return parts.length >= 2 && top.has(first) && !PORTABLE.has(first) ? `$MACHINE/${last}` : path;
+}
+
+/**
  * A function that replaces each root with its word in every string of a value: longest first, realpath forms too, each
  * also URL-encoded and dashed (`pathForms()`). Each of `names`, such as the user's login, is then replaced in any case
  * where a path or a listing carries it and no root did: a path segment (`/Users/<login>/`), a dashed one
  * (`-Users-<login>-`), and the owner and group columns of `ls -l` (`1 <login> <login>`). Only there: a login can be a
- * word the recording itself uses, such as `agent`, `model` or `user`, in an event's type or a request's field.
+ * word the recording itself uses, such as `agent`, `model` or `user`, in an event's type or a request's field. Last, an
+ * absolute path still left keeps only its last segment when it is a temp path or a place on this machine
+ * (`machinePath()`), `top` being the names in the machine's filesystem root.
  */
 export function maskPaths(
   roots: Readonly<Record<string, string>>,
   names: Readonly<Record<string, string>> = {},
+  top: readonly string[] = topLevelDirectories(),
 ): <T>(value: T) => T {
+  const machine = new Set(top);
   const pairs: [string, string][] = [];
   for (const [word, path] of Object.entries(roots)) {
     const bare = trimmed(path);
@@ -105,10 +144,12 @@ export function maskPaths(
       return [new RegExp(`(?<=[/-]|\\d\\s+|${login}\\s+)${login}(?![A-Za-z0-9_])`, 'gi'), word] as const;
     });
   const text = (input: string): string =>
-    words.reduce(
-      (out, [name, word]) => out.replace(name, word),
-      pairs.reduce((out, [path, word]) => out.split(path).join(word), input),
-    );
+    words
+      .reduce(
+        (out, [name, word]) => out.replace(name, word),
+        pairs.reduce((out, [path, word]) => out.split(path).join(word), input),
+      )
+      .replace(ABSOLUTE, (path) => machinePath(path, machine));
   const value = <T>(input: T): T => {
     if (typeof input === 'string') return text(input) as T;
     if (Array.isArray(input)) return input.map((each) => value(each)) as T;
