@@ -73,10 +73,7 @@ function ported(events: readonly SailEvent[]): string[] {
 const fakeMergeSha = (number: number, headSha: string) =>
   new Bun.CryptoHasher('sha1').update(`merge #${number}\n${headSha}`).digest('hex');
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('land opens pull request 5, hands FAKE-1 over for review, reads its checks, swaps sail for sail-landed and merges it at the head it opened, each step through sail port, every event valid', async () => {
+test('land opens pull request 5, hands FAKE-1 over for review, reads its checks, swaps sail for sail-landed and merges it at the head it opened, each step through sail port, every event valid', async () => {
   const run = await land();
   expect({ code: run.code, stderr: run.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
   const pushed = run.events.find((event) => event.type === 'codehost:pushed') as { headSha: string } | undefined;
@@ -111,10 +108,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a merge the fake code host rejects fails the run with stage_error at merge#1, leaves an error:port with its message there, and records no codehost:merged', async () => {
+test('a merge the fake code host rejects fails the run with stage_error at merge#1, leaves an error:port with its message there, and records no codehost:merged', async () => {
   const run = await land({ merges: ['rejected'] });
   const end = run.events.at(-1) as Record<string, unknown> | undefined;
   expect({
@@ -132,10 +126,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a failed check fails the run with the reason checks failed, and merge never runs', async () => {
+test('a failed check fails the run with the reason checks failed, and merge never runs', async () => {
   const run = await land({ checks: [{ name: 'ci', statuses: ['failed'] }] });
   const end = run.events.at(-1) as Record<string, unknown> | undefined;
   expect({

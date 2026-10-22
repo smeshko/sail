@@ -26,6 +26,9 @@ export interface FakeCodeHostOptions extends ProviderOptions {
   readonly env?: Readonly<Record<string, string>>;
 }
 
+const CheckScripts = z.array(z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1) }));
+const MergeScripts = z.array(z.enum(['merged', 'pending', 'refused', 'rejected'])).min(1);
+
 /** A pull request as the seed holds it, with its scripts and how far each has been read. */
 const StoredPullRequest = z.object({
   number: z.number().int().positive(),
@@ -39,12 +42,9 @@ const StoredPullRequest = z.object({
   labels: z.array(z.string()),
   ticketKey: z.string().optional(),
   /** Each check's status on every read, the last repeating. */
-  checks: z.array(z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1) })).default([]),
+  checks: CheckScripts.default([]),
   /** What each merge call is answered, the last repeating: `rejected` is the host refusing it, a PortError. */
-  merges: z
-    .array(z.enum(['merged', 'pending', 'refused', 'rejected']))
-    .min(1)
-    .default(['merged']),
+  merges: MergeScripts.default(['merged']),
   reads: z.object({ checks: z.number().int(), merges: z.number().int() }).default({ checks: 0, merges: 0 }),
   comments: z.array(Comment).default([]),
 });
@@ -57,6 +57,8 @@ const World = z.object({
   /** Each pushed branch's head sha. */
   branches: z.record(z.string(), z.string()),
   pullRequests: z.array(StoredPullRequest),
+  /** The scripts a pull request `openPullRequest` opens starts with. Left out, it has no checks and merges at once. */
+  opened: z.object({ checks: CheckScripts.optional(), merges: MergeScripts.optional() }).optional(),
 });
 type World = z.infer<typeof World>;
 
@@ -167,6 +169,8 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
           state: 'open',
           labels: [...(request.labels ?? [])],
           ...(request.ticketKey === undefined ? {} : { ticketKey: request.ticketKey }),
+          ...(world.opened?.checks === undefined ? {} : { checks: world.opened.checks }),
+          ...(world.opened?.merges === undefined ? {} : { merges: world.opened.merges }),
         });
         world.pullRequests.push(stored);
         return { pr: toPullRequest(world, stored), added: undefined };

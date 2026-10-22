@@ -79,10 +79,7 @@ const bodiesOf = (world: GitHubWorld, route: string) =>
     )
     .map((request) => request.body ?? null);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("land on GitHub removes sail with a DELETE, adds sail-landed with a POST of only that label, merges with a PUT of only the method and the head, and its codehost:merged holds GitHub's merge commit", async () => {
+test("land on GitHub removes sail with a DELETE, adds sail-landed with a POST of only that label, merges with a PUT of only the method and the head, and its codehost:merged holds GitHub's merge commit", async () => {
   const run = await landOnGitHub();
   const pr = run.world.pullRequests[0];
   const merged = run.events.filter((event) => event.type === 'codehost:merged');
@@ -102,10 +99,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a merge GitHub rejects with a 405 fails the run at merge#1 with an error:port holding GitHub's message, records no codehost:merged, and the pull request stays open", async () => {
+test("a merge GitHub rejects with a 405 fails the run at merge#1 with an error:port holding GitHub's message, records no codehost:merged, and the pull request stays open", async () => {
   const run = await landOnGitHub((world) =>
     world.inject('PUT /pulls/1/merge', { status: 405, body: { message: 'Pull Request is not mergeable' } }),
   );
