@@ -41,6 +41,7 @@
     "types": "bun scripts/types.ts",
     "golden": "bun scripts/golden.ts",
     "verify": "bun run typecheck && bun run lint && bun run test --coverage",
+    "gate": "bun run typecheck && bun run lint && bun scripts/affected-tests.ts",
     "prepare": "git config core.hooksPath .githooks || true",
     "pack": "bun scripts/pack.ts",
     "prepublishOnly": "echo 'sail: publish the tarball bun run pack makes: bun publish <tarball>' >&2 && exit 1"
