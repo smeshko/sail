@@ -153,7 +153,12 @@ function reasonOf(result: Record<string, unknown>): string | null {
 }
 
 /** The journal entry of a call that ran, from its `result.json`. */
-function entryFrom(runDir: string, result: Record<string, unknown>, paths: CallPaths): NewJournalEntry {
+function entryFrom(
+  runDir: string,
+  result: Record<string, unknown>,
+  paths: CallPaths,
+  group?: string[],
+): NewJournalEntry {
   const files = result.files as Record<string, { path: string }>;
   return {
     key: result.key as string,
@@ -164,6 +169,7 @@ function entryFrom(runDir: string, result: Record<string, unknown>, paths: CallP
     reason: reasonOf(result),
     files: Object.fromEntries(Object.entries(files).map(([name, file]) => [name, file.path])),
     resultPath: runRelative(runDir, paths.result),
+    ...(group === undefined ? {} : { group }),
   };
 }
 
@@ -334,6 +340,48 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     if (request === 'stopped') return failed('stopped', `stopped by sail stop before ${key}`);
     return undefined;
   };
+  /** A call whose preconditions hold: what it is supplied with, and what an agent runs on. */
+  interface Ready {
+    call: PendingCall;
+    supplied: Record<string, Supplied>;
+    agent: AgentExecution | undefined;
+  }
+  /** The call's agent execution, its gitDiff patches and its contract's check, or why it can't run. */
+  const prepare = async (call: PendingCall): Promise<Ready | { failed: string }> => {
+    const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
+    const diffs = await gitDiffs(opened, call);
+    if ('failed' in diffs) return diffs;
+    const supplied = { ...call.supplied, ...diffs.supplied };
+    const problems = callProblems(call.definition, supplied, agent);
+    return problems.length > 0 ? { failed: problems.join('; ') } : { call, supplied, agent };
+  };
+  /** Runs the call's next try. */
+  const launch = ({ call, supplied, agent }: Ready, callSignal: AbortSignal | undefined) =>
+    runCall({
+      runDir: dir,
+      runId,
+      stageIndex: call.stageIndex,
+      call: call.call,
+      try: nextTry(dir, call.stageIndex, call.stage, call.call),
+      definition: call.definition,
+      stageFile: call.stageFile,
+      workspace: opened.workspace.path,
+      root,
+      branch: opened.workspace.branch,
+      config: join(sailDir, 'project.yaml'),
+      supplied,
+      ...(callSignal === undefined ? {} : { signal: callSignal }),
+      ...(agent === undefined ? {} : { agent }),
+      emit: bus.emit,
+      clock,
+    });
+  /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
+  const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
+    const journaled = appendJournal(dir, entryFrom(dir, result, paths, group), clock());
+    bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
+    reached ||= journaled.key === last;
+    return journaled;
+  };
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
   let reached = false;
@@ -437,47 +485,69 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       }
       if (end.kind === 'completed') return await finish({ runId, dir, status: 'completed', result: end.result });
       if (end.kind === 'failed') return await failed(end.stopReason, end.message);
-      if (end.kind === 'group')
-        return await failed('workflow_failed', `the group ${end.keys.join(', ')} can't run yet`);
-
-      const { call } = end;
+      const first = end.kind === 'call' ? end.call.key : (end.keys[0] as string);
       // Ahead of an abort seen at the same moment: the run stopped where it was asked to, whatever else stops it. A
       // control request goes first: a stop asked during the call `--until` names ends the run, not waits with it.
-      if (reached) return await (controlled(call.key) ?? suspended('until', `stopped after ${last}, as --until asked`));
-      running = call.key;
-      const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
-      const diffs = await gitDiffs(opened, call);
-      if ('failed' in diffs) return await failed('workflow_failed', `${call.key} can't run: ${diffs.failed}`);
-      const supplied = { ...call.supplied, ...diffs.supplied };
-      const problems = callProblems(call.definition, supplied, agent);
-      if (problems.length > 0) return await failed('workflow_failed', `${call.key} can't run: ${problems.join('; ')}`);
-      if (signal?.aborted) return await interrupted(`stopped before ${call.key}`);
-      const beforeCall = controlled(call.key);
+      if (reached) return await (controlled(first) ?? suspended('until', `stopped after ${last}, as --until asked`));
+      const calls = end.kind === 'call' ? [end.call] : end.calls;
+      if (end.kind === 'call') running = first;
+      // Every call's preconditions before any starts: a group that can't run starts nothing.
+      const ready: Ready[] = [];
+      for (const call of calls) {
+        const checked = await prepare(call);
+        if ('failed' in checked) return await failed('workflow_failed', `${call.key} can't run: ${checked.failed}`);
+        ready.push(checked);
+      }
+      const what = end.kind === 'call' ? first : `the group ${end.keys.join(', ')}`;
+      if (signal?.aborted) return await interrupted(`stopped before ${what}`);
+      const beforeCall = controlled(first);
       if (beforeCall !== undefined) return await beforeCall;
-      const { result, paths } = await runCall({
-        runDir: dir,
-        runId,
-        stageIndex: call.stageIndex,
-        call: call.call,
-        try: nextTry(dir, call.stageIndex, call.stage, call.call),
-        definition: call.definition,
-        stageFile: call.stageFile,
-        workspace: opened.workspace.path,
-        root,
-        branch: opened.workspace.branch,
-        config: join(sailDir, 'project.yaml'),
-        supplied,
-        ...(signal === undefined ? {} : { signal }),
-        ...(agent === undefined ? {} : { agent }),
-        emit: bus.emit,
-        clock,
-      });
-      if (signal?.aborted) return await interrupted(`stopped during ${call.key}`);
-      const journaled = appendJournal(dir, entryFrom(dir, result, paths), clock());
-      bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
+      if (end.kind === 'call') {
+        const [one] = ready as [Ready];
+        const { result, paths } = await launch(one, signal);
+        if (signal?.aborted) return await interrupted(`stopped during ${first}`);
+        const journaled = journal(result, paths);
+        running = undefined;
+        options.onCall?.(journaled);
+        continue;
+      }
+      const { keys } = end;
+      bus.emit({ type: 'all:start', keys, running: calls.map((call) => call.key) });
+      const startedAt = clock().getTime();
+      // A call that throws, a bug in sail, stops its siblings: the error goes on once every one of them has settled.
+      const crash = new AbortController();
+      const groupSignal = signal === undefined ? crash.signal : AbortSignal.any([signal, crash.signal]);
+      const live = new Set(calls.map((call) => call.key));
+      running = live.size === 1 ? first : undefined;
+      /** The relay's key is the running call's while exactly one of the group's runs, and none otherwise. */
+      const settle = (each: Ready) => {
+        live.delete(each.call.key);
+        running = live.size === 1 ? [...live][0] : undefined;
+      };
+      const settled = await Promise.allSettled(
+        ready.map(async (each) => {
+          try {
+            const { result, paths } = await launch(each, groupSignal);
+            // A call that returns once the run is stopping isn't journaled: a resume runs it again.
+            if (groupSignal.aborted) return;
+            const journaled = journal(result, paths, keys);
+            settle(each);
+            options.onCall?.(journaled);
+          } catch (error) {
+            crash.abort();
+            throw error;
+          } finally {
+            settle(each);
+          }
+        }),
+      );
       running = undefined;
-      reached ||= journaled.key === last;
-      options.onCall?.(journaled);
+      const rejected = settled.find((each): each is PromiseRejectedResult => each.status === 'rejected');
+      if (rejected !== undefined) throw rejected.reason;
+      if (signal?.aborted) return await interrupted(`stopped during ${what}`);
+      const journaled = new Map(readJournal(dir).entries.map((entry) => [entry.key, entry.outcome]));
+      const outcomes = Object.fromEntries(keys.map((key) => [key, journaled.get(key) as JournalEntry['outcome']]));
+      bus.emit({ type: 'all:end', keys, outcomes, durationMs: Math.max(0, clock().getTime() - startedAt) });
     }
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });

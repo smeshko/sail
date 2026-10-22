@@ -2033,10 +2033,7 @@ const ofType = <T extends SailEvent['type']>(list: readonly SailEvent[], type: T
 /** The events a group's calls emit: those carrying one of its keys. */
 const CALL_TYPES = ['stage:', 'harness:', 'agent:', 'usage:', 'prompt:', 'input:', 'output:', 'file:'];
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a group's calls run at once and are journaled as each completes, the workflow gets their results in the order given, and all:start and all:end bracket them", async () => {
+test("a group's calls run at once and are journaled as each completes, the workflow gets their results in the order given, and all:start and all:end bracket them", async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
     const end = await ranTrio(repo.dir);
@@ -2075,10 +2072,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a call of a group that ends in error lets its siblings end and be journaled, then fails the run with stage_error, and all:end carries every call's outcome", async () => {
+test("a call of a group that ends in error lets its siblings end and be journaled, then fails the run with stage_error, and all:end carries every call's outcome", async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 300, b: 100, c: 200 }, { b: [{ outcome: 'error', message: 'b broke' }] });
     const end = await ranTrio(repo.dir);
@@ -2094,10 +2088,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an abort after a call of a group completes suspends the run with that call journaled and no all:end, and a resume runs only the others', async () => {
+test('an abort after a call of a group completes suspends the run with that call journaled and no all:end, and a resume runs only the others', async () => {
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeTrio(from.dir, { a: 20_000, b: 100, c: 20_000 });
@@ -2139,10 +2130,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a group whose third call can't run fails the run with workflow_failed before any of its calls starts", async () => {
+test("a group whose third call can't run fails the run with workflow_failed before any of its calls starts", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeTrio(repo.dir, { a: 0, b: 0, c: 0 });
     edit(
@@ -2163,10 +2151,7 @@ test
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a call of a group that throws inside sail stops its siblings, and the error goes on once they have settled: no all:end, and STATUS stays running', async () => {
+test('a call of a group that throws inside sail stops its siblings, and the error goes on once they have settled: no all:end, and STATUS stays running', async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 20_000, b: 100, c: 20_000 });
     const crashed = ranTrio(repo.dir, {
