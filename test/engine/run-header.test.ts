@@ -171,10 +171,7 @@ test("the fixture's header validates, with the workflow's folder, the adapters a
   expect(header.intake.name).toBe('ticket');
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("a workflow's budget overrides project.yaml's field by field, and stands alone without one: the header validates and holds the merged budget a dry run prints", async () => {
+test("a workflow's budget overrides project.yaml's field by field, and stands alone without one: the header validates and holds the merged budget a dry run prints", async () => {
   const headerOf = (change: (sail: string) => void) =>
     withTempRepo(async (repo) => {
       const sail = copyFixture(repo.dir);

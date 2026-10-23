@@ -225,10 +225,7 @@ test('a workflow whose imports are gone is refused, naming each file that no lon
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('a workflow whose budget is negative, not a number or holds another field is refused, naming its file, budget and the field', async () => {
+test('a workflow whose budget is negative, not a number or holds another field is refused, naming its file, budget and the field', async () => {
   const refusal = (budget: string) =>
     withTempRepo(async (repo) => {
       const sail = copyFixture(repo.dir);

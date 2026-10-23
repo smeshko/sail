@@ -51,10 +51,7 @@ const events = (...list: [number, NewEvent][]): SailEvent[] => stamp(...list);
 /** spec's session in the fixture, ended at $0.3125, after the run's start. */
 const SPEC_SPENT = events([0, runStart({ maxUsd: 0.5 })], [0, started('spec#1')], [0, ended('spec#1', 0.3125)]);
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ("runBudgetOf gives the workflow's budget over the project's field by field, keeps only the fields given, and nothing when none is", () => {
+test("runBudgetOf gives the workflow's budget over the project's field by field, keeps only the fields given, and nothing when none is", () => {
   expect([
     runBudgetOf({ maxUsd: 25, maxMinutes: 90 }, { maxUsd: 0.5 }),
     runBudgetOf(undefined, { maxMinutes: 30 }),
@@ -64,10 +61,7 @@ test
   ]).toEqual([{ maxUsd: 0.5, maxMinutes: 90 }, { maxMinutes: 30 }, { maxUsd: 25 }, undefined, undefined]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-002
-test
-  .skip // TDD-PENDING TASK-002
-  ('workflowBudgetProblem takes a left-out budget, an empty one and numbers of 0 or more, and names an infinite one', () => {
+test('workflowBudgetProblem takes a left-out budget, an empty one and numbers of 0 or more, and names an infinite one', () => {
   expect([
     workflowBudgetProblem(undefined),
     workflowBudgetProblem({}),

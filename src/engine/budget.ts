@@ -12,13 +12,30 @@ export type RunBudget = NonNullable<RunHeader['budget']>;
 /** The share of a budget at which its warning fires. */
 export const WARN_AT = 0.8;
 
-/** `workflow`'s budget over `project`'s, field by field. TDD stub: `project`'s alone, as before. */
-export function runBudgetOf(project: RunBudget | undefined, _workflow: RunBudget | undefined): RunBudget | undefined {
-  return project !== undefined && Object.keys(project).length > 0 ? project : undefined;
+const FIELDS = ['maxUsd', 'maxMinutes'] as const;
+
+/** `workflow`'s budget over `project`'s, field by field, keeping only the fields given: undefined when none is. */
+export function runBudgetOf(project: RunBudget | undefined, workflow: RunBudget | undefined): RunBudget | undefined {
+  const merged: { maxUsd?: number; maxMinutes?: number } = {};
+  for (const field of FIELDS) {
+    const value = workflow?.[field] ?? project?.[field];
+    if (value !== undefined) merged[field] = value;
+  }
+  return Object.keys(merged).length === 0 ? undefined : merged;
 }
 
-/** What is wrong with a workflow's `budget`. TDD stub: nothing. */
-export function workflowBudgetProblem(_value: unknown): string | undefined {
+/** What is wrong with a workflow's `budget`, or undefined when it is left out or sound. */
+export function workflowBudgetProblem(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'must be an object of maxUsd and maxMinutes';
+  }
+  for (const [field, given] of Object.entries(value)) {
+    if (!(FIELDS as readonly string[]).includes(field)) return `has ${field}, which no run budget has`;
+    if (typeof given !== 'number' || !Number.isFinite(given) || given < 0) {
+      return `${field} must be a number of 0 or more: ${typeof given === 'number' ? given : JSON.stringify(given)}`;
+    }
+  }
   return undefined;
 }
 
