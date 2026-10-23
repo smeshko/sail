@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -12,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
-import { callPaths, createCallDir } from '../../src/engine/call-dir';
+import { callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import { validateDocument } from '../../src/engine/schemas';
 import type { CallEvent } from '../../src/events/types';
 import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
@@ -846,3 +847,26 @@ test('a port events file of a million lines that are no events ends the step in 
     { reason: 'port', message: 'port-events.ndjson line 1000000 is not a provider event: it is not JSON' },
   ]);
 }, 30_000);
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a step of a multi-step call leaves its produced files in its call's $STAGE_OUT, and its logs and port events beside its own $STAGE_IN", async () => {
+  const s = setup();
+  const paths = stepPaths(s.context.runDir, 5, 'publish', 1, 2, 'open');
+  createCallDir(paths);
+  s.run(`${JUNIT}\necho '${PASSING}'`);
+  const run = await scriptKind.run(tests(), { ...s.context, stage: 'publish', key: 'publish#1/open', paths });
+
+  const call = join('.sail-runs', RUN_ID, '05-publish', 'call-1');
+  expect([run.outcome, run.files['junit.xml']?.path]).toEqual(['passed', '05-publish/call-1/junit.xml']);
+  expect(run.record.env).toMatchObject({
+    STAGE_IN: join(call, 'steps', '2-open', 'in'),
+    STAGE_OUT: call,
+    SAIL_EVENTS: join(call, 'steps', '2-open', PORT_EVENTS),
+  });
+  expect([readdirSync(paths.out ?? '').sort(), readdirSync(paths.dir).sort()]).toEqual([
+    ['junit.xml', 'steps'],
+    ['in', 'stderr.log', 'stdout.log'],
+  ]);
+});

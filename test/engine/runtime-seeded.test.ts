@@ -5,16 +5,18 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../../src/engine/journal';
-import { type RunEnd, resumeWorkflow, runSeededWorkflow } from '../../src/engine/runtime';
+import { type RunEnd, resumeWorkflow, runSeededWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import type { Summary } from '../../src/events/summary';
 import { fakeAdapters } from '../helpers/adapters';
+import { AGENT_WORKFLOW } from '../helpers/agent-fixture';
 import { edit } from '../helpers/fixture';
 import { TRIO, TRIO_GROUP, TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
 import { SOURCE_BRANCH, SOURCE_JOURNAL, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { writeTwoStep } from '../helpers/two-step';
 
 const source = sharedSource();
 afterAll(() => source.release());
@@ -226,3 +228,50 @@ test('a seeded run whose workflow now asks for a group without the stage it was 
     expect(journaled(dirOf(end))).toEqual(['intake#1 passed']);
   });
 }, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("a run seeded for the stage after a two-step call reuses the call's step lines with its own, as reused calls, and validates", async () => {
+  await withTempRepo(async (repo) => {
+    const fromRun = await withTempRepo(async (from) => {
+      writeTwoStep(from.dir);
+      const end = await runWorkflow({
+        cwd: from.dir,
+        adapters: await fakeAdapters(from.dir),
+        workflow: AGENT_WORKFLOW,
+        ticket: 'FAKE-1',
+      });
+      if ('refused' in end) throw new Error(end.refused);
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+    // notify is the workflow's last call, so the run ends once it has run.
+    const end = await seeded(repo, fromRun, 'notify');
+    expect(endOf(end)).toEqual({ status: 'completed', stopReason: undefined });
+    const dir = dirOf(end);
+    const reused = readEvents(dir).flatMap((event) =>
+      event.type === 'journal:append' && event.fromRun !== undefined ? [event.key] : [],
+    );
+    const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+    expect({
+      journal: journaled(dir),
+      reused,
+      calls: summary.calls.map(({ key, fromRun }) => (fromRun === undefined ? key : `${key} reused`)),
+      issues: issuesOf(dir),
+    }).toEqual({
+      journal: [
+        'intake#1 passed',
+        'brief#1 passed',
+        'spec#1 done',
+        'publish#1/describe done',
+        'publish#1/open passed',
+        'publish#1 passed',
+        'notify#1 passed',
+      ],
+      reused: ['intake#1', 'brief#1', 'spec#1', 'publish#1/describe', 'publish#1/open', 'publish#1'],
+      calls: ['intake#1 reused', 'brief#1 reused', 'spec#1 reused', 'publish#1 reused', 'notify#1'],
+      issues: [],
+    });
+  });
+}, 90_000);

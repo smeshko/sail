@@ -589,3 +589,85 @@ test('a run from a pull request names its source by its number and head sha, and
   const summary = folded(stamp([0, { ...runStart(), source } as NewEvent], [100, INTAKE_START]));
   expect([summary?.source, summary?.ticket]).toEqual([{ kind: 'pr', number: 12, headSha, via: 'watch' }, undefined]);
 });
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("a multi-step call a resume started again between its steps keeps the steps it ended before: one call, both steps, the first step's cost", () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [200, stepStart('publish#1/describe', 1, 2, 'agent')],
+      [300, session('publish#1/describe', { turns: 2, toolCalls: 1, denials: 0, usage: { costUsd: 0.25 } })],
+      [310, produced('publish#1/describe', 'pr-body.md')],
+      [1200, stepEnd('publish#1/describe', 1, 'done')],
+      [1210, journal('publish#1/describe', 3, 'done')],
+      [1300, runEnd('suspended', 1, { stopReason: 'interrupted' })],
+      [5000, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [5100, stepStart('publish#1/open', 2, 2, 'script')],
+      [5600, stepEnd('publish#1/open', 2, 'passed')],
+      [5610, journal('publish#1/open', 4, 'passed')],
+      [5700, end('publish#1', 'passed', 1500)],
+      [5710, journal('publish#1', 5, 'passed')],
+      [5800, runEnd('completed', 1)],
+    ),
+  );
+  expect([summary?.calls, summary?.totals.steps]).toEqual([
+    [
+      {
+        key: 'publish#1',
+        outcome: 'passed',
+        durationMs: 1500,
+        costUsd: 0.25,
+        files: ['pr-body.md'],
+        resultPath: 'publish/call-1/result.json',
+        steps: [
+          {
+            key: 'publish#1/describe',
+            kind: 'agent',
+            outcome: 'done',
+            durationMs: 1000,
+            turns: 2,
+            toolCalls: 1,
+            costUsd: 0.25,
+            files: ['pr-body.md'],
+          },
+          { key: 'publish#1/open', kind: 'script', outcome: 'passed', durationMs: 500 },
+        ],
+      },
+    ],
+    2,
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-006
+test
+  .skip // TDD-PENDING TASK-006
+  ("a seeded run's reused step lines add no call: its reused multi-step call is listed once, by its own line", () => {
+  const source = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
+  const reused = (key: string, line: number, outcome: 'passed' | 'done'): [number, NewEvent] => [
+    line * 10,
+    { type: 'journal:append', key, line, outcome, fromRun: source },
+  ];
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      reused('intake#1', 1, 'passed'),
+      reused('publish#1/describe', 2, 'done'),
+      reused('publish#1/open', 3, 'passed'),
+      reused('publish#1', 4, 'passed'),
+      [100, start('notify#1')],
+      [300, end('notify#1', 'passed', 180)],
+      [310, journal('notify#1', 5, 'passed')],
+    ),
+  );
+  expect([summary?.calls.map(({ key, fromRun }) => [key, fromRun]), summary?.totals.stageCalls]).toEqual([
+    [
+      ['intake#1', source],
+      ['publish#1', source],
+      ['notify#1', undefined],
+    ],
+    1,
+  ]);
+});

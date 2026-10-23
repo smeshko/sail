@@ -5,13 +5,17 @@ import { join } from 'node:path';
 import {
   callPaths,
   createCallDir,
+  existingStepTries,
   existingTries,
   isPlainName,
+  nextStepTry,
   nextTry,
   RESERVED_NAMES,
   runRelative,
   stageDirName,
+  stepPaths,
 } from '../../src/engine/call-dir';
+import { syncedDirs } from '../helpers/synced-dirs';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -138,4 +142,81 @@ test('createCallDir leaves in/ out when told to, for a first try and a durable l
   const step = callPaths(dir, 1, 'spec', 1);
   createCallDir(step);
   expect(readdirSync(step.dir)).toEqual(['in']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ below them, and its $STAGE_OUT is call-N/", () => {
+  expect(stepPaths('/r', 5, 'publish', 1, 1, 'describe')).toEqual({
+    dir: '/r/05-publish/call-1/steps/1-describe',
+    out: '/r/05-publish/call-1',
+    stageIn: '/r/05-publish/call-1/steps/1-describe/in',
+    stdout: '/r/05-publish/call-1/steps/1-describe/stdout.log',
+    stderr: '/r/05-publish/call-1/steps/1-describe/stderr.log',
+    result: '/r/05-publish/call-1/steps/1-describe/result.json',
+  });
+  expect(stepPaths('/r', 5, 'publish', 2, 2, 'open', 3)).toEqual({
+    dir: '/r/05-publish/call-2/steps/2-open/try-3',
+    out: '/r/05-publish/call-2',
+    stageIn: '/r/05-publish/call-2/steps/2-open/try-3/in',
+    stdout: '/r/05-publish/call-2/steps/2-open/try-3/stdout.log',
+    stderr: '/r/05-publish/call-2/steps/2-open/try-3/stderr.log',
+    result: '/r/05-publish/call-2/steps/2-open/try-3/result.json',
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a step's tries are numbered from its own directory: none before it exists, then try-2 and up, each once", () => {
+  const runDir = tempDir();
+  const stepDir = join(runDir, '05-publish', 'call-1', 'steps', '2-open');
+  // The call's own later tries are no step's.
+  mkdirSync(join(runDir, '05-publish', 'call-1', 'try-2'), { recursive: true });
+  expect([
+    existingStepTries(runDir, 5, 'publish', 1, 2, 'open'),
+    nextStepTry(runDir, 5, 'publish', 1, 2, 'open'),
+  ]).toEqual([[], 1]);
+  mkdirSync(join(stepDir, 'in'), { recursive: true });
+  mkdirSync(join(stepDir, 'try-3'));
+  mkdirSync(join(stepDir, 'try-x'));
+  expect(existingStepTries(runDir, 5, 'publish', 1, 2, 'open')).toEqual([1, 3]);
+  expect(nextStepTry(runDir, 5, 'publish', 1, 2, 'open')).toBe(4);
+  expect(nextStepTry(runDir, 5, 'publish', 1, 1, 'describe')).toBe(1);
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("createCallDir makes a step's directory and in/ inside its call's $STAGE_OUT, which the step before it may have made, and refuses to reuse the step's", () => {
+  const runDir = tempDir();
+  const describe = stepPaths(runDir, 5, 'publish', 1, 1, 'describe');
+  createCallDir(describe);
+  expect(readdirSync(join(runDir, '05-publish', 'call-1'))).toEqual(['steps']);
+  expect(readdirSync(describe.dir)).toEqual(['in']);
+  const open = stepPaths(runDir, 5, 'publish', 1, 2, 'open');
+  createCallDir(open);
+  expect(readdirSync(join(runDir, '05-publish', 'call-1', 'steps')).sort()).toEqual(['1-describe', '2-open']);
+  expect(readdirSync(open.dir)).toEqual(['in']);
+  expect(() => createCallDir(open)).toThrow('EEXIST');
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("a durable step directory is synced into each directory it was made in, from the stage's down", () => {
+  const runDir = tempDir();
+  const describe = stepPaths(runDir, 5, 'publish', 1, 1, 'describe');
+  const call = join(runDir, '05-publish', 'call-1');
+  expect(syncedDirs(() => createCallDir(describe, { durable: true }))).toEqual([
+    runDir,
+    join(runDir, '05-publish'),
+    call,
+    join(call, 'steps'),
+    describe.dir,
+  ]);
+  const retry = stepPaths(runDir, 5, 'publish', 1, 1, 'describe', 2);
+  expect(syncedDirs(() => createCallDir(retry, { durable: true }))).toEqual([describe.dir, retry.dir]);
+  expect(readdirSync(retry.dir)).toEqual(['in']);
 });

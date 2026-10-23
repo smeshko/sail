@@ -105,6 +105,15 @@ test("producesProblems refuses try-<n>, the name of a later try's directory", ()
   ]);
 });
 
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("producesProblems refuses steps, where a multi-step call's steps keep their own directories", () => {
+  expect(producesProblems({ steps: 'file', 'steps.md': 'file' })).toEqual([
+    "'steps' can't be produced: the engine writes it in $STAGE_OUT",
+  ]);
+});
+
 test('a declared file named __proto__ is recorded, and survives JSON', () => {
   const { runDir, outDir } = callDir();
   writeFileSync(join(outDir, '__proto__'), 'x');

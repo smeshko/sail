@@ -638,3 +638,64 @@ test('an isolated agent stage needs its harness and nothing else: a ticket sourc
     expect(result).toMatchObject({ outcome: 'error', try: 2, harness: { adapter: 'echo', sessionId: 'echo-1' } });
   });
 }, 40_000);
+
+const PUBLISH_DIR = '.sail/workflows/ticket-to-pr/stages/publish';
+/** `publish`'s bindings on the command line: the ticket, the spec `fixtureCopy()` writes, and the ticket key. */
+const PUBLISH_BINDS = [
+  '--bind',
+  `ticket=${JSON.stringify(TICKET)}`,
+  '--bind',
+  'spec=docs/spec.md',
+  '--bind',
+  'ticketKey="FAKE-1"',
+];
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ("a multi-step stage whose describe is blocked prints the call's line and describe's reason, exits 1, and never starts open", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureCopy(repo);
+    const harness = join(sail, 'fake', 'harness.json');
+    const script = JSON.parse(readFileSync(harness, 'utf8'));
+    writeFileSync(
+      harness,
+      JSON.stringify({
+        ...script,
+        'publish/describe': [{ outcome: 'blocked', reason: 'the spec and the diff disagree' }],
+      }),
+    );
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', PUBLISH_DIR, ...PUBLISH_BINDS], repo.dir, {
+      env: repo.env,
+    });
+    expect([code, stderr]).toEqual([EXIT_FAILED, '']);
+    expect(stdout).toMatch(
+      /^publish#1 blocked {2}\.sail-runs\/publish-[0-9A-Z]{26}\/00-publish\/call-1\n {2}the spec and the diff disagree\n$/,
+    );
+    const call = callDirOf(stdout, repo.dir);
+    expect([existsSync(join(call, 'steps', '1-describe')), existsSync(join(call, 'steps', '2-open'))]).toEqual([
+      true,
+      false,
+    ]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-008
+test
+  .skip // TDD-PENDING TASK-008
+  ("a multi-step stage whose open picks an output key describe's schema doesn't have is refused before anything is written, naming the step and the binding", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureCopy(repo);
+    const stage = join(sail, 'workflows', 'ticket-to-pr', 'stages', 'publish', 'stage.ts');
+    expect(existsSync(stage) && readFileSync(stage, 'utf8').includes(".output('title')")).toBe(true);
+    edit(sail, 'workflows/ticket-to-pr/stages/publish/stage.ts', ".output('title')", ".output('titel')");
+    expect(await runCaptured(['stage', 'run', PUBLISH_DIR, ...PUBLISH_BINDS], repo.dir, { env: repo.env })).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        `sail stage run: ${PUBLISH_DIR}/stage.ts: stage 'publish': step 'open' binds 'title' to ` +
+        "fromStep('describe')'s output key 'titel', which its output doesn't have\n",
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+}, 60_000);

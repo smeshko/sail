@@ -62,6 +62,28 @@ export function holdAfterOpen(sail: string): string {
   return file;
 }
 
+const PUBLISH_OPEN = 'workflows/ticket-to-pr/stages/publish/open.sh';
+const STRICT = 'set -euo pipefail\n';
+
+/**
+ * Makes a copy's `publish` stage hold as its `open` step starts, before it pushes, in a run whose environment sets
+ * `HOLD_BEFORE_OPEN` to a file: the script writes its pid there, which leads its process group, and sleeps a minute.
+ * `describe` is journaled by then, so a test that waits for the file and kills the run there resumes it between the
+ * two steps. Without the variable the step runs as it was.
+ */
+export function holdBeforeOpen(sail: string): string {
+  const file = join(sail, PUBLISH_OPEN);
+  const text = readFileSync(file, 'utf8');
+  if (text.split(STRICT).length !== 2) throw new Error(`${PUBLISH_OPEN} has no single ${STRICT.trim()}`);
+  // Spliced in with a function, not through edit(): a replacement string would read the shell's `$$` as one `$`.
+  const hold = `if [ -n "\${HOLD_BEFORE_OPEN:-}" ]; then echo "$$" >"$HOLD_BEFORE_OPEN"; exec sleep 60; fi\n`;
+  writeFileSync(
+    file,
+    text.replace(STRICT, () => `${STRICT}${hold}`),
+  );
+  return file;
+}
+
 /**
  * Waits for the pid `holdAfterOpen()`'s step writes to `file`, then SIGKILLs `child`, the run, and that step's process
  * group, and waits for `child` to end. Answers whether the step was held: false when `child` ended first, or nothing

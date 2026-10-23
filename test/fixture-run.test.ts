@@ -15,7 +15,7 @@ import { validateRunDir } from '../src/engine/schemas';
 import { readEvents } from '../src/events/consumers/ndjson';
 import type { SailEvent } from '../src/events/types';
 import { interruptInSession, journaled, writeHarnessScript } from './helpers/agent-fixture';
-import { copyFixture, FIXTURE_SAIL, holdAfterOpen, killWhenHeld } from './helpers/fixture';
+import { copyFixture, FIXTURE_SAIL, holdAfterOpen, holdBeforeOpen, killWhenHeld } from './helpers/fixture';
 import { fakeInterrupts, runCaptured } from './helpers/run-captured';
 import { copyRun } from './helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from './helpers/temp-repo';
@@ -428,6 +428,114 @@ test('a spec without its Requirements section in both tries ends spec#1 in error
         message: "spec.md: hasSections(Requirements, Tasks): has no 'Requirements' section",
       },
     ]);
+    expect(validateRunDir(dir).issues).toEqual([]);
+  });
+}, 60_000);
+
+// publish: describe then open, one stage of two steps, journaled step by step.
+
+const PUBLISHED = [
+  'intake#1 passed',
+  'spec#1 done',
+  'implement#1 done',
+  'tests#1 failed',
+  'implement#2 done',
+  'tests#2 passed',
+  'self-review#1 done',
+  'publish#1/describe done',
+  'publish#1/open passed',
+  'publish#1 passed',
+];
+const PUBLISH = '05-publish/call-1';
+const DESCRIBED_TITLE = 'Add a --shout flag to the greet command (FAKE-1)';
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ("sail FAKE-1 runs publish as describe, then open, each journaled as it finishes: open's $STAGE_IN holds describe's title and body, its result says where they came from, and the summary lists both steps under publish#1", async () => {
+  const ran = await fixtureRun();
+  expect([ran.code, journalOf(ran.dir)]).toEqual([EXIT_OK, PUBLISHED]);
+  expect(readdirSync(join(ran.dir, PUBLISH, 'steps')).sort()).toEqual(['1-describe', '2-open']);
+  expect(readFileSync(join(ran.dir, PUBLISH, 'steps', '2-open', 'in', 'title.txt'), 'utf8')).toBe(DESCRIBED_TITLE);
+  expect(json(ran.dir, PUBLISH, 'steps', '2-open', 'result.json').consumed).toEqual({
+    title: `${PUBLISH}/steps/1-describe/result.json#/output/title`,
+    body: `${PUBLISH}/pr-body.md`,
+    ticketKey: 'workflow',
+  });
+  expect(json(ran.dir, PUBLISH, 'result.json')).toMatchObject({
+    key: 'publish#1',
+    outcome: 'passed',
+    output: PR,
+    steps: [
+      { step: 'describe', kind: 'agent', outcome: 'done', resultPath: `${PUBLISH}/steps/1-describe/result.json` },
+      { step: 'open', kind: 'script', outcome: 'passed', resultPath: `${PUBLISH}/steps/2-open/result.json` },
+    ],
+  });
+  const publish = json(ran.dir, 'summary.json').calls.find((call: { key: string }) => call.key === 'publish#1');
+  expect(publish?.steps?.map((step: { key: string }) => step.key)).toEqual(['publish#1/describe', 'publish#1/open']);
+  expect(validateRunDir(ran.dir).issues).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('a run killed as open starts, with describe journaled, resumes and runs only open: each key is journaled once, and describe has one try and one session', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    // The fixture's publish stage, whose open step holds: a fixture that has none has nothing to hold.
+    expect(existsSync(join(sail, 'workflows', 'ticket-to-pr', 'stages', 'publish', 'open.sh'))).toBe(true);
+    holdBeforeOpen(sail);
+    const held = join(repo.home, 'open.pid');
+    const child = Bun.spawn([process.execPath, MAIN, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: { ...repo.env, HOLD_BEFORE_OPEN: held },
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    expect(await killWhenHeld(held, child)).toBe(true);
+    const dir = latestRun(repo.dir);
+    const runId = dir.split('/').at(-1) ?? '';
+    expect(journalOf(dir)).toEqual(PUBLISHED.slice(0, 8));
+    const resumed = Bun.spawnSync([process.execPath, MAIN, 'resume', runId], { cwd: repo.dir, env: repo.env });
+    expect([resumed.exitCode, resumed.stderr.toString(), journalOf(dir)]).toEqual([EXIT_OK, '', PUBLISHED]);
+    expect(readdirSync(join(dir, PUBLISH, 'steps', '1-describe')).filter((name) => name.startsWith('try-'))).toEqual(
+      [],
+    );
+    const events = readEvents(dir);
+    const describe = (type: SailEvent['type']) =>
+      events.filter((event) => event.type === type && 'key' in event && event.key === 'publish#1/describe').length;
+    expect([describe('step:start'), describe('harness:session_start')]).toEqual([1, 1]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-007
+test
+  .skip // TDD-PENDING TASK-007
+  ('describe scripted blocked ends publish blocked before open starts, and the run fails with the reason the workflow gives', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const script: HarnessScript = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
+    writeHarnessScript(repo.dir, {
+      ...script,
+      'publish/describe': [{ outcome: 'blocked', reason: 'the spec and the diff disagree' }],
+    });
+    const ran = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    const dir = latestRun(repo.dir);
+    expect([ran.code, journalOf(dir).slice(-2)]).toEqual([
+      EXIT_FAILED,
+      ['publish#1/describe blocked', 'publish#1 blocked'],
+    ]);
+    expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('failed workflow_failed\n');
+    const end = readEvents(dir).findLast((event) => event.type === 'run:end');
+    expect(end).toMatchObject({ message: 'publish blocked: the spec and the diff disagree' });
+    expect(existsSync(join(dir, PUBLISH, 'steps', '2-open'))).toBe(false);
+    expect(json(dir, PUBLISH, 'result.json')).toMatchObject({
+      outcome: 'blocked',
+      reason: 'the spec and the diff disagree',
+      output: null,
+      steps: [{ step: 'describe', outcome: 'blocked' }],
+    });
     expect(validateRunDir(dir).issues).toEqual([]);
   });
 }, 60_000);

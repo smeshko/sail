@@ -12,6 +12,7 @@ import {
   validateRunDir,
 } from '../../src/engine/schemas';
 import type { NewEvent, NewQueueEvent } from '../../src/events/types';
+import { stepEnd as stepEndEvent, stepStart as stepStartEvent } from '../helpers/events';
 import { writeTwoStepRun } from '../helpers/run-dir';
 
 const root = join(import.meta.dir, '..', '..');
@@ -292,12 +293,14 @@ const CLOSED: NewEvent[] = [
     index: 2,
     of: 2,
     kind: 'script',
+    try: 1,
     command: '.sail/workflows/ticket-to-pr/stages/publish/open.sh',
   },
   {
     type: 'step:end',
     key: 'publish#1/open',
     step: 'open',
+    try: 1,
     outcome: 'passed',
     resultPath: '05-publish/call-1/steps/2-open/result.json',
   },
@@ -654,7 +657,7 @@ test('result: dispatch reports only the branch the document claims to be', () =>
     { schema: 'sail.result.v1', path: '/outcome', message: 'must be equal to one of the allowed values' },
   ]);
   expect(paths('sail.result.v1', { ...agentResult, outcome: 'passed' })).toEqual(['/outcome']);
-  expect(paths('sail.result.v1', { ...multiStepResult, steps: [describeStep] })).toEqual(['/steps']);
+  expect(paths('sail.result.v1', { ...multiStepResult, steps: [] })).toEqual(['/steps']);
 });
 
 test('result: a script result declares no codeHost, which nothing writes: one that carries it is refused, naming it', () => {
@@ -760,8 +763,43 @@ test("result: a multi-step call's outcome must be its last step's", () => {
     { schema: 'sail.result.v1', path: '/outcome', message: "must equal the last step's outcome (blocked)" },
   ]);
   expect(
-    validateDocument('sail.result.v1', { ...multiStepResult, outcome: 'blocked', steps: [openStep, blockedLast] }),
+    validateDocument('sail.result.v1', {
+      ...multiStepResult,
+      outcome: 'blocked',
+      reason: 'nothing to finish',
+      steps: [openStep, blockedLast],
+    }),
   ).toEqual([]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('result: a multi-step call lists the steps that ran, at least one: a call its first step stopped validates, and one with no steps does not', () => {
+  const stopped = {
+    ...multiStepResult,
+    outcome: 'blocked',
+    reason: 'the spec names no change to describe',
+    output: null,
+    steps: [{ ...describeStep, outcome: 'blocked' }],
+  };
+  expect(validateDocument('sail.result.v1', stopped)).toEqual([]);
+  expect(paths('sail.result.v1', { ...stopped, steps: [] })).toEqual(['/steps']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('result: a blocked multi-step call gives its reason, and one that is not blocked gives none', () => {
+  const blocked = {
+    ...multiStepResult,
+    outcome: 'blocked',
+    output: null,
+    steps: [{ ...describeStep, outcome: 'blocked' }],
+  };
+  expect(paths('sail.result.v1', blocked)).toEqual(['/reason']);
+  expect(paths('sail.result.v1', { ...blocked, reason: ' ' })).toEqual(['/reason']);
+  expect(paths('sail.result.v1', { ...multiStepResult, reason: 'no reason to give' })).toEqual(['/reason']);
 });
 
 test('journal: an unknown outcome names the field', () => {
@@ -1107,9 +1145,45 @@ test('event: intake:start takes the kind builtin, and neither a stage nor a step
   const stageStart = { ...envelope, type: 'stage:start', key: KEY, stage: 'tests', call: 1, try: 1, consumed: {} };
   expect(paths('sail.event.v1', { ...stageStart, kind: 'script' })).toEqual([]);
   expect(paths('sail.event.v1', { ...stageStart, kind: 'builtin' })).toEqual(['/kind']);
-  const stepStart = { ...envelope, type: 'step:start', key: OPEN, stage: 'publish', step: 'open', index: 2, of: 2 };
+  const stepStart = {
+    ...envelope,
+    type: 'step:start',
+    key: OPEN,
+    stage: 'publish',
+    step: 'open',
+    index: 2,
+    of: 2,
+    try: 1,
+  };
   expect(paths('sail.event.v1', { ...stepStart, kind: 'script' })).toEqual([]);
   expect(paths('sail.event.v1', { ...stepStart, kind: 'builtin' })).toEqual(['/kind']);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ("event: a step's start and end carry its try, as a call's do", () => {
+  const start = stamped(stepStartEvent(OPEN, 2, 2, 'script', 2));
+  const end = stamped(stepEndEvent(OPEN, 2, 'passed', 2));
+  expect([validateDocument('sail.event.v1', start), validateDocument('sail.event.v1', end)]).toEqual([[], []]);
+  expect(validateDocument('sail.event.v1', omit(start, 'try'))).toEqual([
+    { schema: 'sail.event.v1', path: '/try', message: 'is required' },
+  ]);
+  expect(validateDocument('sail.event.v1', omit(end, 'try'))).toEqual([
+    { schema: 'sail.event.v1', path: '/try', message: 'is required' },
+  ]);
+});
+
+// biome-ignore format: TDD-PENDING TASK-001
+test
+  .skip // TDD-PENDING TASK-001
+  ('event: a step:end carries its errors exactly when the step ended in error', () => {
+  const failed = stamped(stepEndEvent(OPEN, 2, 'error'));
+  expect(validateDocument('sail.event.v1', { ...failed, errors: [portError] })).toEqual([]);
+  expect(paths('sail.event.v1', failed)).toEqual(['/errors']);
+  expect(paths('sail.event.v1', { ...stamped(stepEndEvent(OPEN, 2, 'passed')), errors: [portError] })).toEqual([
+    '/errors',
+  ]);
 });
 
 test('event: stage:end takes the reason port in its errors, and every other reason a result may give', () => {

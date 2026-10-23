@@ -1,7 +1,7 @@
 // Declaration-level type cases: what agent(), script() and stage() refuse. test/types/expect-error.test.ts proves
 // that each directive's line fails with the code it names. Cases import only from `sail`, because the harness checks
 // a copy of this file in a temp directory.
-import { agent, file, gitDiff, intake, type OutcomeOf, type ScriptOutcome, script, stage, z } from 'sail';
+import { agent, file, fromStep, gitDiff, intake, type OutcomeOf, type ScriptOutcome, script, stage, z } from 'sail';
 
 const Output = z.object({ ok: z.boolean() });
 const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] };
@@ -93,6 +93,47 @@ declare const outcome: OutcomeOf<typeof publish>;
 export const settled: ScriptOutcome | 'blocked' = outcome;
 // @ts-expect-error TS2367: a stage that ends in a script step can't end done
 export const done = outcome === 'done';
+
+// A step's fromStep() names a step before it in its stage: one the stage doesn't have, a later one or the step itself
+// is refused where the binding is declared.
+const Title = z.object({ title: z.string() });
+stage('described', {
+  output: Output,
+  steps: [
+    agent('describe', { prompt: './describe.md', output: Title, permissions, budget }),
+    script('open', { run: './open.sh', consumes: { title: fromStep('describe').output('title') }, output: Output }),
+  ],
+});
+stage('unknown-step', {
+  output: Output,
+  steps: [
+    agent('describe', { prompt: './describe.md', output: Title, permissions, budget }),
+    // @ts-expect-error TS2375: no step of the stage is named nope
+    script('open', { run: './open.sh', consumes: { title: fromStep('nope').output('title') }, output: Output }),
+  ],
+});
+stage('later-step', {
+  output: Output,
+  steps: [
+    // @ts-expect-error TS2375: open comes after describe, so describe can't read it
+    agent('describe', {
+      prompt: './describe.md',
+      consumes: { url: fromStep('open').output('url') },
+      output: Title,
+      permissions,
+      budget,
+    }),
+    script('open', { run: './open.sh', output: Output }),
+  ],
+});
+stage('own-step', {
+  output: Output,
+  steps: [
+    agent('describe', { prompt: './describe.md', output: Title, permissions, budget }),
+    // @ts-expect-error TS2375: a step can't read its own output
+    script('open', { run: './open.sh', consumes: { pr: fromStep('open').output() }, output: Output }),
+  ],
+});
 
 // Documents: only an agent step completes one, from its template, checked by validators a repository may write.
 import { countItems, doc, hasSections, noPlaceholders, type Validator } from 'sail';

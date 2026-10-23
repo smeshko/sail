@@ -204,3 +204,50 @@ test('an append over a torn tail leaves the tail alone when the entry is refused
   expect(() => appendJournal(dir, { ...entry('spec'), key: 'Spec#2' }, at(2))).toThrow();
   expect(text(dir)).toBe(before);
 });
+
+/** A step of `publish#1`, as the engine journals one: its key, then its stage, call and step agreeing. */
+const stepLine = (step: string): NewJournalEntry => ({
+  key: `publish#1/${step}`,
+  stage: 'publish',
+  call: 1,
+  step,
+  outcome: 'done',
+  output: { title: 'Add --shout' },
+  reason: null,
+  files: {},
+  resultPath: `05-publish/call-1/steps/1-${step}/result.json`,
+});
+
+const DISAGREEING: [string, NewJournalEntry, string][] = [
+  [
+    "a step's key naming another step",
+    { ...stepLine('describe'), key: 'publish#1/open' },
+    "has the key 'publish#1/open', where its stage, call and step say 'publish#1/describe'",
+  ],
+  [
+    "a call's key on a step's line",
+    { ...stepLine('open'), key: 'publish#1' },
+    "has the key 'publish#1', where its stage, call and step say 'publish#1/open'",
+  ],
+];
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  .each(DISAGREEING)('a journal holding %s is refused where it is read, naming its line', (_, bad, why) => {
+  const dir = runDir();
+  createJournal(dir);
+  appendJournal(dir, entry('spec'), at(1));
+  appendFileSync(join(dir, JOURNAL_FILE), `${JSON.stringify({ seq: 2, ...bad, recordedAt: at(2).toISOString() })}\n`);
+  expect(() => readJournal(dir)).toThrow(`${join(dir, JOURNAL_FILE)}:2 ${why}`);
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  .each(DISAGREEING)('an append refuses %s, a bug in sail, and writes nothing', (_, bad, why) => {
+  const dir = runDir();
+  createJournal(dir);
+  expect(() => appendJournal(dir, bad, at(1))).toThrow(`a journal entry ${why}, a bug in sail`);
+  expect(text(dir)).toBe('');
+});

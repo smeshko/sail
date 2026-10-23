@@ -151,6 +151,48 @@ export const compiles = workflow('compiles', { intake: ticket }, async (run) => 
   return p.output.url;
 });
 
+// A stage an earlier step can stop: a script step that fails ends it with its own output, and with the files the steps
+// so far left; an agent step that blocks ends it blocked, with its reason.
+const LintReport = z.object({ problems: z.array(z.string()) });
+const checked = stage('checked', {
+  consumes: { spec: file('spec.md') },
+  output: Findings,
+  steps: [
+    script('lint', { run: './lint.sh', produces: { 'lint.txt': 'file' }, output: LintReport }),
+    agent('review', {
+      prompt,
+      consumes: { spec: file('spec.md'), lint: fromStep('lint').file('lint.txt') },
+      produces: { 'review.md': 'file' },
+      output: Findings,
+      permissions,
+      budget,
+    }),
+  ],
+});
+
+export const stopped = workflow('stopped', { intake: ticket }, async (run) => {
+  const c = await run.stage(checked, { spec: run.intake.files['brief.md'] });
+  if (c.outcome === 'failed') {
+    const problems: string[] = c.output.problems;
+    read(problems, c.files['lint.txt']);
+    // @ts-expect-error TS2339: lint stopped the stage, so its result holds lint's report, not review's findings
+    read(c.output.findings);
+    return run.fail('lint failed');
+  }
+  if (c.outcome === 'blocked') return run.fail(`review blocked: ${c.reason}`);
+  const findings: string[] = c.output.findings;
+  read(findings, c.files['review.md'], c.files['lint.txt']);
+
+  const p = await run.stage(publish, { ticket: run.input, spec: c.files['review.md'] });
+  // @ts-expect-error TS2339: describe may have blocked the stage, so its output can't be read until that is ruled out
+  read(p.output);
+  if (p.outcome === 'passed') {
+    const url: string = p.output.url;
+    read(url);
+  }
+  return undefined;
+});
+
 export const refuses = workflow('refuses', { intake: ticket }, async (run) => {
   const s = await run.stage(spec, { brief: run.intake.files['brief.md'] });
   const t = await run.stage(tests);

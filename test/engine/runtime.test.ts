@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
 import { type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
@@ -63,6 +64,15 @@ import {
   writeStub,
 } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
+import {
+  DESCRIBED,
+  GROUP_CALLS,
+  PR_TITLE,
+  PUBLISH_CALL,
+  PUBLISH_STAGE,
+  sessionsOf,
+  writeTwoStep,
+} from '../helpers/two-step';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 
@@ -2250,3 +2260,279 @@ test('an abort as the last call of a group is journaled still ends the group wit
     expect(typed(list).indexOf('all:end')).toBeLessThan(typed(list).indexOf('run:end'));
   });
 }, 30_000);
+
+// Multi-step calls in a run: brief-to-spec with publish a stage of two steps, describe on the fake harness, then open.
+
+const STEP_JOURNAL = [
+  'intake#1 passed',
+  'brief#1 passed',
+  'spec#1 done',
+  'publish#1/describe done',
+  'publish#1/open passed',
+  'publish#1 passed',
+  'notify#1 passed',
+];
+
+/** Aborts the run as soon as `key` is journaled: between that step and the next, or before the call's own line. */
+function abortOnAppend(controller: AbortController, key: string): Consumer {
+  return {
+    name: 'abort',
+    onEvent: (event) => {
+      if (event.type === 'journal:append' && event.key === key) controller.abort();
+    },
+  };
+}
+
+/**
+ * The two-step run, written by `write` into a repository of its own and stopped by the abort `stop` arranges, then
+ * copied into `to`: how it ended.
+ */
+function stoppedTwoStep(
+  to: string,
+  stop: (repoDir: string, controller: AbortController) => Partial<RunWorkflowOptions>,
+  write: (repoDir: string) => void = (repoDir) => writeTwoStep(repoDir),
+): Promise<RunEnd> {
+  return withTempRepo(async (from) => {
+    write(from.dir);
+    const controller = new AbortController();
+    const end = await ranAgent(from.dir, { signal: controller.signal, ...stop(from.dir, controller) });
+    copyRun(from.dir, to);
+    return { ...end, dir: join(to, '.sail-runs', end.runId) };
+  });
+}
+
+/** Stops the run after describe is journaled, before open starts. */
+const afterDescribe = (_: string, controller: AbortController) => ({
+  consumers: [abortOnAppend(controller, 'publish#1/describe')],
+});
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a two-step stage journals each step as it finishes, then its call, and runs its agent step on the model the roster froze for it', async () => {
+  await withTempRepo(async (repo) => {
+    writeTwoStep(repo.dir);
+    const end = await ranAgent(repo.dir);
+    expect(end).toMatchObject({ status: 'completed', result: { outcome: 'passed', output: { sent: true } } });
+    expect(journaled(end.dir)).toEqual(STEP_JOURNAL);
+    const list = events(end.dir);
+    expect(ofType(list, 'journal:append').map((event) => event.key)).toEqual(
+      STEP_JOURNAL.map((line) => line.split(' ')[0] ?? ''),
+    );
+    expect(ofType(list, 'step:start').map((event) => [event.key, event.model ?? event.command])).toEqual([
+      ['publish#1/describe', 'claude-sonnet-5'],
+      ['publish#1/open', `.sail/workflows/${AGENT_WORKFLOW}/stages/publish/open.sh`],
+    ]);
+    expect(entryOf(end.dir, 'publish#1/open')).toMatchObject({
+      step: 'open',
+      resultPath: `${PUBLISH_CALL}/steps/2-open/result.json`,
+    });
+    expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('an abort during open suspends the run with describe journaled, and the resume runs open as its second try without asking for describe again', async () => {
+  await withTempRepo(async (repo) => {
+    const { runId } = await withTempRepo(async (from) => {
+      writeTwoStep(from.dir);
+      setSleepAt(from.dir, 'publish#1');
+      const controller = new AbortController();
+      const running = ranAgent(from.dir, { signal: controller.signal });
+      const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort());
+      expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted' });
+      expect(journaled(end.dir)).toEqual(STEP_JOURNAL.slice(0, 4));
+      copyRun(from.dir, repo.dir);
+      return end;
+    });
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(journaled(dir)).toEqual(STEP_JOURNAL);
+    expect(entryOf(dir, 'publish#1/open')?.resultPath).toBe(`${PUBLISH_CALL}/steps/2-open/try-2/result.json`);
+    expect(sessionsOf(events(dir), 'publish#1/describe')).toBe(1);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1', 'publish#1', 'notify#1']);
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("an abort after describe is journaled leaves no stage result, and the resume runs only open, with the title describe's journal line holds, whatever its result.json says by then", async () => {
+  await withTempRepo(async (repo) => {
+    const stopped = await stoppedTwoStep(repo.dir, afterDescribe);
+    expect(stopped).toMatchObject({ status: 'suspended', stopReason: 'interrupted' });
+    expect(journaled(stopped.dir)).toEqual(STEP_JOURNAL.slice(0, 4));
+    const call = join(stopped.dir, PUBLISH_CALL);
+    expect([existsSync(join(call, 'result.json')), existsSync(join(call, 'steps', '2-open'))]).toEqual([false, false]);
+    const described = join(call, 'steps', '1-describe', 'result.json');
+    const planted = JSON.parse(readFileSync(described, 'utf8'));
+    writeFileSync(described, JSON.stringify({ ...planted, output: { title: 'Planted', bodyFile: 'pr-body.md' } }));
+
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(journaled(stopped.dir)).toEqual(STEP_JOURNAL);
+    expect(readFileSync(join(call, 'steps', '2-open', 'in', 'title.txt'), 'utf8')).toBe(PR_TITLE);
+    expect(sessionsOf(events(stopped.dir), 'publish#1/describe')).toBe(1);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1', 'notify#1']);
+  });
+}, 60_000);
+
+const PUBLISH_FILE = `${PUBLISH_STAGE}/stage.ts`;
+/** Replaces every `from` with `to` in a file under `sail`, which must hold it. */
+function replaceAll(sail: string, path: string, from: string, to: string): void {
+  const file = join(sail, path);
+  const text = readFileSync(file, 'utf8');
+  if (!text.includes(from)) throw new Error(`${path} has no ${from}`);
+  writeFileSync(file, text.replaceAll(from, to));
+}
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  .each<[string, (sail: string) => void, string]>([
+  [
+    "publish's first step renamed",
+    (sail) => replaceAll(sail, PUBLISH_FILE, "'describe'", "'draft'"),
+    "the journal has 'publish#1/describe' where publish's step 1 is 'draft'",
+  ],
+  [
+    "publish's steps reordered",
+    (sail) => {
+      replaceAll(
+        sail,
+        PUBLISH_FILE,
+        "  consumes: { title: fromStep('describe').output('title'), body: fromStep('describe').file('pr-body.md') },\n",
+        '',
+      );
+      replaceAll(
+        sail,
+        PUBLISH_FILE,
+        'output: PrInfo, steps: [describe, open]',
+        'output: PrInfo, steps: [open, describe]',
+      );
+      replaceAll(sail, PUBLISH_FILE, '  output: PrDescription,\n', '  output: PrInfo,\n');
+    },
+    "the journal has 'publish#1/describe' where publish's step 1 is 'open'",
+  ],
+  [
+    'a workflow that no longer reaches publish',
+    (sail) =>
+      edit(
+        sail,
+        WORKFLOW_FILE,
+        "  const p = await run.stage(publish, { spec: s.files['spec.md'] });\n",
+        "  if (s.outcome === 'done') return { skipped: true };\n  const p = await run.stage(publish, { spec: s.files['spec.md'] });\n",
+      ),
+    "the journal holds 'publish#1/describe' of a call the workflow didn't ask for",
+  ],
+])(
+  'a resume with %s, after describe is journaled, fails with determinism_violation and runs nothing',
+  async (_, change, message) => {
+    await withTempRepo(async (repo) => {
+      const stopped = await stoppedTwoStep(repo.dir, afterDescribe);
+      change(join(repo.dir, '.sail'));
+      const before = readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8');
+      const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+      expect(end).toMatchObject({ status: 'failed', stopReason: 'determinism_violation', message });
+      expect(readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8')).toBe(before);
+      expect(stubExecutions(repo.dir)).toEqual(['brief#1']);
+      expect(sessionsOf(events(stopped.dir), 'publish#1/describe')).toBe(1);
+    });
+  },
+  60_000,
+);
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ('a call whose every step is journaled, but not itself, is journaled on resume from its steps: its result is written, and no step runs again', async () => {
+  await withTempRepo(async (repo) => {
+    const stopped = await stoppedTwoStep(repo.dir, (_, controller) => ({
+      consumers: [abortOnAppend(controller, 'publish#1/open')],
+    }));
+    expect(journaled(stopped.dir)).toEqual(STEP_JOURNAL.slice(0, 5));
+    const result = join(stopped.dir, PUBLISH_CALL, 'result.json');
+    expect(existsSync(result)).toBe(false);
+
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(journaled(stopped.dir)).toEqual(STEP_JOURNAL);
+    expect(JSON.parse(readFileSync(result, 'utf8'))).toMatchObject({
+      key: 'publish#1',
+      outcome: 'passed',
+      steps: [
+        { step: 'describe', outcome: 'done' },
+        { step: 'open', outcome: 'passed' },
+      ],
+    });
+    expect(ofType(events(stopped.dir), 'step:start').map((event) => event.key)).toEqual([
+      'publish#1/describe',
+      'publish#1/open',
+    ]);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1', 'notify#1']);
+    expect(validateRunDir(stopped.dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 60_000);
+
+// biome-ignore format: TDD-PENDING TASK-005
+test
+  .skip // TDD-PENDING TASK-005
+  ("a two-step stage in a group: its step lines interleave with its sibling's call line, its call line carries the group, and a resume after an abort runs only what isn't journaled; a reordered group is still a change", async () => {
+  await withTempRepo(async (repo) => {
+    const slow: ScriptedAnswer = { ...DESCRIBED, delayMs: 1500 } as ScriptedAnswer;
+    const stopped = await withTempRepo(async (from) => {
+      writeTwoStep(from.dir, { grouped: true, describe: [slow] });
+      setSleepAt(from.dir, 'publish#1');
+      const controller = new AbortController();
+      const running = ranAgent(from.dir, { signal: controller.signal });
+      const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort(), 30_000);
+      copyRun(from.dir, repo.dir);
+      return end;
+    });
+    const dir = join(repo.dir, '.sail-runs', stopped.runId);
+    const group = ['publish#1', 'notify#1'];
+    expect(
+      readJournal(dir)
+        .entries.slice(3)
+        .map(({ key, group }) => ({ key, group })),
+    ).toEqual([
+      { key: 'notify#1', group },
+      { key: 'publish#1/describe', group: undefined },
+    ]);
+
+    await withTempRepo(async (reordered) => {
+      copyRun(repo.dir, reordered.dir);
+      edit(
+        join(reordered.dir, '.sail'),
+        WORKFLOW_FILE,
+        GROUP_CALLS,
+        `    [notify, { url: 'fake://codehost/pull/0' }],\n    [publish, { spec: s.files['spec.md'] }],\n`,
+      );
+      const changed = await resumeWorkflow({
+        cwd: reordered.dir,
+        adapters: await fakeAdapters(reordered.dir),
+        runId: stopped.runId,
+      });
+      expect(changed).toMatchObject({ status: 'failed', stopReason: 'determinism_violation' });
+    });
+
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+    expect(end).toMatchObject({ status: 'completed', result: { publish: 'passed', notify: 'passed' } });
+    expect(
+      readJournal(dir)
+        .entries.slice(3)
+        .map(({ key, group }) => ({ key, group })),
+    ).toEqual([
+      { key: 'notify#1', group },
+      { key: 'publish#1/describe', group: undefined },
+      { key: 'publish#1/open', group: undefined },
+      { key: 'publish#1', group },
+    ]);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'notify#1', 'publish#1', 'publish#1']);
+    expect(sessionsOf(events(dir), 'publish#1/describe')).toBe(1);
+  });
+}, 90_000);

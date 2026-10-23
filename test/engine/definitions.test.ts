@@ -301,3 +301,94 @@ test('a stage.ts that throws on import is a problem', async () => {
     expect(await loadStageFile(boom)).toEqual({ problem: 'boom' });
   });
 });
+
+/** A `.sail/` holding one shared stage, `publish`, whose steps are `steps` and whose own bindings are `consumes`. */
+function publishWith(repoDir: string, steps: string, consumes = '{}'): string {
+  const sail = join(repoDir, '.sail');
+  const file = join(sail, 'stages', 'publish', 'stage.ts');
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(
+    file,
+    `import { agent, fromStep, gitDiff, script, stage, z } from 'sail';
+const Description = z.object({ title: z.string(), bodyFile: z.string() });
+const Pr = z.object({ url: z.string() });
+const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] };
+const budget = { maxTurns: 5, maxUsd: 1, maxMinutes: 5 };
+const describe = (name: string, more = {}) =>
+  agent(name, { prompt: './describe.md', produces: { 'pr-body.md': 'file' }, output: Description, permissions, budget, ...more });
+const open = (consumes = {}, more = {}) => script('open', { run: './open.sh', consumes, output: Pr, ...more });
+export const publish = stage('publish', { consumes: ${consumes}, output: Pr, steps: [${steps}] } as never);
+`,
+  );
+  return sail;
+}
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  .each([
+  [
+    'a fromStep naming no step of the stage',
+    "describe('describe'), open({ title: fromStep('nope').output('title') })",
+    "stage 'publish': step 'open' binds 'title' to fromStep('nope'), which names no step of the stage",
+  ],
+  [
+    'a fromStep naming a later step',
+    "describe('describe', { consumes: { url: fromStep('open').output('url') } }), open()",
+    "stage 'publish': step 'describe' binds 'url' to fromStep('open'), a step that runs after it",
+  ],
+  [
+    'a fromStep naming its own step',
+    "describe('describe'), open({ pr: fromStep('open').output() })",
+    "stage 'publish': step 'open' binds 'pr' to fromStep('open'), its own step",
+  ],
+  [
+    "a file the named step doesn't produce",
+    "describe('describe'), open({ body: fromStep('describe').file('x.md') })",
+    "stage 'publish': step 'open' binds 'body' to fromStep('describe')'s file 'x.md', which it doesn't produce",
+  ],
+  [
+    "an output key the named step's schema doesn't have",
+    "describe('describe'), open({ title: fromStep('describe').output('titel') })",
+    "stage 'publish': step 'open' binds 'title' to fromStep('describe')'s output key 'titel', which its output doesn't have",
+  ],
+  [
+    'two steps of one name',
+    "describe('describe'), describe('describe', { produces: {} }), open()",
+    "stage 'publish': two steps are named 'describe'",
+  ],
+  [
+    'a step named outside [a-z0-9-]+',
+    "describe('Describe'), open()",
+    "stage 'publish': step 'Describe' has a name outside [a-z0-9-]+",
+  ],
+  [
+    'two steps producing one file',
+    "describe('describe'), open({}, { produces: { 'pr-body.md': 'file' } })",
+    "stage 'publish': steps 'describe' and 'open' both produce 'pr-body.md'",
+  ],
+])(
+  'a stage wiring its steps with %s is refused at load, naming the stage, the step and the binding, and lists no stage',
+  async (_, steps, message) => {
+    await withTempRepo(async (repo) => {
+      const sail = publishWith(repo.dir, steps);
+      const found = await loadDefinitions(sail);
+      expect(found.problems).toEqual([{ file: join(sail, 'stages', 'publish', 'stage.ts'), message }]);
+      expect(found.stages).toEqual([]);
+    });
+  },
+);
+
+// biome-ignore format: TDD-PENDING TASK-004
+test
+  .skip // TDD-PENDING TASK-004
+  ('a gitDiff the stage declares on itself, rather than on the step that reads it, is refused at load', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = publishWith(repo.dir, "describe('describe'), open()", "{ diff: gitDiff('origin/main...HEAD') }");
+    const found = await loadDefinitions(sail);
+    expect(found.problems.map((problem) => problem.message)).toEqual([
+      "stage 'publish': 'diff' is a gitDiff binding of the stage itself, which only a step can take",
+    ]);
+    expect(found.stages).toEqual([]);
+  });
+});
