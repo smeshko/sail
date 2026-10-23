@@ -464,10 +464,7 @@ test.each([
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('the fake declares structured output, usage, abort and a turns, dollar and minute budget, and no permissions', () => {
+test('the fake declares structured output, usage, abort and a turns, dollar and minute budget, and no permissions', () => {
   expect(createFakeHarness({ script: {} }).capabilities()).toEqual({
     structuredOutput: true,
     permissions: false,
@@ -494,10 +491,7 @@ async function ranWith(answer: ScriptedAnswer, budget: Partial<HarnessRequest['b
   return { result, events: capture.events };
 }
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a session handed $0.1875 ends after the turn that reaches it: budget_exceeded, two usage updates, $0.1904 spent, and a usd budget:exceeded', async () => {
+test('a session handed $0.1875 ends after the turn that reaches it: budget_exceeded, two usage updates, $0.1904 spent, and a usd budget:exceeded', async () => {
   const { result, events } = await ranWith(IMPLEMENT, { maxUsd: 0.1875 });
   expect({
     result: summary(result),
@@ -532,10 +526,7 @@ test('a session whose last turn reaches maxUsd completes: the last turn may pass
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('with maxUsd 0, a one-turn answer completes and a two-turn one ends after its first turn', async () => {
+test('with maxUsd 0, a one-turn answer completes and a two-turn one ends after its first turn', async () => {
   const one = await ranWith({ ...IMPLEMENT, turns: 1 }, { maxUsd: 0 });
   const two = await ranWith({ ...IMPLEMENT, turns: 2 }, { maxUsd: 0 });
   expect([
@@ -545,10 +536,7 @@ test
   ]).toEqual([{}, 'error: budget exceeded: maxUsd 0', ['usage:update 1']]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ('a delay longer than maxMinutes ends the session at maxMinutes, budget_exceeded with a minutes budget:exceeded, and one with a minute to spare completes', async () => {
+test('a delay longer than maxMinutes ends the session at maxMinutes, budget_exceeded with a minutes budget:exceeded, and one with a minute to spare completes', async () => {
   const slow: ScriptedAnswer = { outcome: 'done', output: {}, delayMs: 1000 };
   const started = performance.now();
   const over = await ranWith(slow, { maxMinutes: 50 / 60_000 });
