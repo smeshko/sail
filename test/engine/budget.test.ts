@@ -464,6 +464,21 @@ test("recordIn confirms an event that later lines follow, as a consumer's error:
   }
 });
 
+test('raiseProblem refuses a raise too large for its budget to be a finite number, in dollars and in minutes, which would be written as null (review R1-3)', () => {
+  const id = 'FAKE-1-1';
+  const spent = events([0, runStart({ maxUsd: 0.5, maxMinutes: 90 })], [MINUTE, ended('spec#1', 0.5029)]);
+  const budget = { maxUsd: 0.5, maxMinutes: 90 };
+  expect([
+    raiseProblem(id, budget, spent, { usd: 1e303 }),
+    raiseProblem(id, budget, spent, { usd: 5, minutes: 1e303 }),
+    raiseProblem(id, budget, spent, { usd: 1e12 }),
+  ]).toEqual([
+    "run FAKE-1-1 can't take that raise: its dollar budget would be more than a number holds",
+    "run FAKE-1-1 can't take that raise: its minute budget would be more than a number holds",
+    undefined,
+  ]);
+});
+
 test('suspension() gives the run:suspended and the message of a run over its dollars, and over its minutes', () => {
   expect([
     suspension({ budget: 'usd', limit: 0.5, used: 0.5029 }, 'implement#1'),
