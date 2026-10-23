@@ -15,3 +15,5 @@ coverage/
 .linear
 .DS_Store
 *.tgz
+.sail/sail.d.ts
+.sail/sail-intakes.d.ts

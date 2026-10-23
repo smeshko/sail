@@ -1,0 +1,9 @@
+[
+  {
+    "exit": 0,
+    "output": {
+      "ok": true,
+      "tail": "1210 packages installed"
+    }
+  }
+]
