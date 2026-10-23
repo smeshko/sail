@@ -450,6 +450,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     // What opening the run did, before this stream existed to hear it: the lease and the workspace, then what the claim
     // did to the ticket. No call was running, so no key.
     for (const event of opened.started) bus.emit(event);
+    if (opened.raise !== undefined) tracker?.raise(opened.raise);
     for (const event of opened.claimed) bus.emit(event);
     // A seeded run's reused calls, each once: they were journaled as the run opened, with no stream to hear them.
     if (opened.seeded !== undefined) {

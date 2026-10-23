@@ -362,10 +362,7 @@ test("a session's end that can't be confirmed on disk crashes the run before its
 
 // The resume after a raise (TASK-005).
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a resume raised by $5 records budget:raised right after its renewed lease, runs implement#1 again as its second try, completes, and leaves run.json byte for byte', async () => {
+test('a resume raised by $5 records budget:raised right after its renewed lease, runs implement#1 again as its second try, completes, and leaves run.json byte for byte', async () => {
   await withTempRepo(async (repo) => {
     const runId = await suspendedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -394,10 +391,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a resume with no raise, or one too small, of a run over its budget is refused, and STATUS and the events file stay as they were', async () => {
+test('a resume with no raise, or one too small, of a run over its budget is refused, and STATUS and the events file stay as they were', async () => {
   await withTempRepo(async (repo) => {
     const runId = await suspendedCopy(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -413,10 +407,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a raise of minutes for a run with no minute budget is refused, and STATUS stays as it was', async () => {
+test('a raise of minutes for a run with no minute budget is refused, and STATUS stays as it was', async () => {
   await withTempRepo(async (repo) => {
     const runId = await suspendedCopy(repo.dir, '{ maxUsd: 0 }');
     const dir = join(repo.dir, '.sail-runs', runId);

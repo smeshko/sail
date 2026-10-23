@@ -441,10 +441,7 @@ test('suspension() gives the run:suspended and the message of a run over its dol
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("raiseProblem refuses a raise of a budget the run doesn't have, and a resume still at or over its budget once raised, and lets one through that a raise takes back under", () => {
+test("raiseProblem refuses a raise of a budget the run doesn't have, and a resume still at or over its budget once raised, and lets one through that a raise takes back under", () => {
   const id = 'FAKE-1-1';
   const spent = events(
     [0, runStart({ maxUsd: 0.5 })],

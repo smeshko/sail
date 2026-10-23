@@ -55,10 +55,7 @@ async function raisedResume(): Promise<{ code: number; stdout: string; stderr: s
   return resumedOnce;
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('sail FAKE-1 over its budget exits 2 and names the flag that raises it, and while it is suspended a forced second run on its branch is refused, naming the run that holds it', async () => {
+test('sail FAKE-1 over its budget exits 2 and names the flag that raises it, and while it is suspended a forced second run on its branch is refused, naming the run that holds it', async () => {
   const { repo, runId, code, stdout } = await suspendedRun();
   const second = await sail(repo.dir, repo.env, ['FAKE-1', '--force']);
   expect({
@@ -74,10 +71,7 @@ test
   });
 }, 120_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('sail resume refuses a raise that is not a positive number of dollars with exit 3, and leaves STATUS as it was', async () => {
+test('sail resume refuses a raise that is not a positive number of dollars with exit 3, and leaves STATUS as it was', async () => {
   const { repo, runId, dir } = await suspendedRun();
   const refusals = [];
   for (const value of ['x', '-1', '0']) {
@@ -94,10 +88,7 @@ test
   });
 }, 120_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('sail resume --raise-budget 5 exits 0, with the raise in the events once', async () => {
+test('sail resume --raise-budget 5 exits 0, with the raise in the events once', async () => {
   const { dir } = await suspendedRun();
   const resumed = await raisedResume();
   expect({

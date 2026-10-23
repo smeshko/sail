@@ -25,8 +25,10 @@
 //
 // A resume reads the branch and the base from `run.json`, never deriving them again (D8). It renews the lease with this
 // process's pid, which a run that is still alive in another process refuses, and so does a lease another run has taken
-// over. It then reopens the workspace, which must still be there and still descend from its base. A run from before
-// workspaces existed has no workspace to resume in, and is refused.
+// over. It then reopens the workspace, which must still be there and still descend from its base. A raise of the run's
+// budget is checked with the refusals, right after the run is found: one of a budget the run doesn't have is refused,
+// and so is a resume, raised or not, of a run still at or over its budget. A run from before workspaces existed has no
+// workspace to resume in, and is refused.
 //
 // A dispatched start (`dispatch`) is the run the watcher started: it runs under the run id the watcher minted and named
 // in its queue, and records `via: 'watch'`. It takes every step above, the claim included, in this order: the watcher
@@ -42,7 +44,7 @@
 // start one run per process.
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { createEventsFile, nextSeq } from '../events/consumers/ndjson';
+import { createEventsFile, nextSeq, readEvents } from '../events/consumers/ndjson';
 import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import { PortError } from '../ports/errors';
@@ -51,7 +53,7 @@ import type { RunRef, WorkspacePort } from '../ports/workspace';
 import type { SourceKind } from '../sdk/intake';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { branchFor, DEFAULT_BRANCH_PREFIX } from './branch';
-import type { Raise } from './budget';
+import { type Raise, raiseProblem } from './budget';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
@@ -571,7 +573,7 @@ export interface ReopenRunOptions {
   adapters: ResolvedAdapters;
   /** The clock everything the resume records is read from. The system's by default. */
   clock?: Clock;
-  /** What to add to the run's budget. TDD stub: not checked, nor handed on. */
+  /** What to add to the run's budget: refused when the run has no such budget, or is still over it once added. */
   raise?: Raise;
 }
 
@@ -669,6 +671,8 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in found) return found;
   const run = findRun(found.dir, runId);
   if ('refused' in run) return run;
+  const budget = raiseProblem(runId, run.header.budget, readEvents(run.dir), options.raise);
+  if (budget !== undefined) return { refused: budget };
   const changed = changedAdapters(run.header, options.adapters.entries);
   if (changed.length > 0) return { refused: `run ${runId} can't resume on different adapters:\n${changed.join('\n')}` };
   claim(found.dir);
@@ -701,5 +705,6 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     started,
     claimed: [],
     firstSeq,
+    ...(options.raise === undefined ? {} : { raise: options.raise }),
   };
 }

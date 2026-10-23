@@ -191,14 +191,24 @@ export function suspension(over: Over, before: string): { event: NewEvent; messa
   };
 }
 
-/** Why run `runId` can't resume with `raise`. TDD stub: it always can. */
+/**
+ * Why run `runId` can't resume with `raise`, from its header's budget and its events, or undefined when it can: a raise
+ * of a budget the run doesn't have, or a run still at or over its budget once the raise is added. A resume with no
+ * raise is held to the second.
+ */
 export function raiseProblem(
-  _runId: string,
-  _budget: RunBudget | undefined,
-  _events: readonly SailEvent[],
-  _raise: Raise = {},
+  runId: string,
+  budget: RunBudget | undefined,
+  events: readonly SailEvent[],
+  raise: Raise = {},
 ): string | undefined {
-  return undefined;
+  const now = budgetAfterRaises(budget, events);
+  if (raise.usd !== undefined && now?.maxUsd === undefined) return `run ${runId} has no dollar budget to raise`;
+  if (raise.minutes !== undefined && now?.maxMinutes === undefined) return `run ${runId} has no minute budget to raise`;
+  if (now === undefined) return undefined;
+  const over = overOf(raised(now, raise), usedOf(events));
+  if (over === undefined) return undefined;
+  return `run ${runId} has used ${usedText(over)}: resume it with ${raiseFlag(over.budget)}`;
 }
 
 export interface BudgetOptions {
