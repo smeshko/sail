@@ -15,7 +15,7 @@ import { workflow } from 'sail';
 import { pr } from 'sail/intakes';
 import { architecture } from './stages/architecture/stage';
 import { checks } from './stages/checks/stage';
-import { coverage } from './stages/coverage/stage';
+import { coverageCheck } from './stages/coverage-check/stage';
 import { done } from './stages/done/stage';
 import { Feedback, fix } from './stages/fix/stage';
 import { gate } from './stages/gate/stage';
@@ -39,7 +39,7 @@ export default workflow(
   async (run) => {
     const { number, url, ticketKey } = run.input;
     const brief = run.intake.files['brief.md'];
-    const reviewers = [style, architecture, sideEffects, performance, security, coverage];
+    const reviewers = [style, architecture, sideEffects, performance, security, coverageCheck];
 
     /** Hands the pull request back, and fails the run. */
     const giveUp = async (reason: string, details: string) => {

@@ -15,7 +15,7 @@ import { EXIT_FAILED, EXIT_OK } from '../../src/cli/exit-codes';
 import { type Observed, observe, removeLabelAtAllStart } from '../helpers/chain';
 import { worldMergeSha } from '../helpers/github-world';
 
-const REVIEWERS = ['style', 'architecture', 'side-effects', 'performance', 'security', 'coverage'];
+const REVIEWERS = ['style', 'architecture', 'side-effects', 'performance', 'security', 'coverage-check'];
 
 /** The keys the first `all:start` of each pass lists, in order. */
 const groups = (run: Observed): string[][] =>
@@ -367,7 +367,7 @@ test('a label removed before the gate stops the merge: one comment on the pull r
       pulls: [{ number: 7, branch: 'sail/ADW-1-stop', ticket: 'ADW-1' }],
       // The last reviewer takes a moment, so the label is gone minutes before the gate, as a person would remove it.
       harness: (answers) => {
-        const [coverage] = answers.coverage ?? [];
+        const [coverage] = answers['coverage-check'] ?? [];
         if (coverage !== undefined) coverage.delayMs = 1500;
       },
     },

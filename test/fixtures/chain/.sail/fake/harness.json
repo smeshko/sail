@@ -120,7 +120,24 @@
       }
     }
   ],
-  "coverage": [
+  "fix": [
+    {
+      "outcome": "done",
+      "output": {
+        "commits": [],
+        "files": [],
+        "notes": "Nothing to change: the fake harness can't commit."
+      },
+      "messages": ["fix done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 900,
+        "outputTokens": 100,
+        "costUsd": 0.03
+      }
+    }
+  ],
+  "coverage-check": [
     {
       "outcome": "done",
       "output": {
@@ -136,23 +153,6 @@
         "inputTokens": 1200,
         "outputTokens": 200,
         "costUsd": 0.02
-      }
-    }
-  ],
-  "fix": [
-    {
-      "outcome": "done",
-      "output": {
-        "commits": [],
-        "files": [],
-        "notes": "Nothing to change: the fake harness can't commit."
-      },
-      "messages": ["fix done."],
-      "turns": 1,
-      "usage": {
-        "inputTokens": 900,
-        "outputTokens": 100,
-        "costUsd": 0.03
       }
     }
   ]
