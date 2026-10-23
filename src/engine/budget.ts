@@ -15,9 +15,9 @@
 //   Harness wrapper, and the harness ends a session that reaches it, as it ends one at its step's own budget. A share is
 //   what is left less what the other open requests hold of theirs, so sessions that run at once can't each use the
 //   whole remainder. Minutes are not reserved: sessions that run at once use the same minutes.
-// - A session's end and a raise are confirmed on disk: `events.ndjson` must end with that event, and is then synced. The
-//   bus swallows a consumer's failure, so one that can't be confirmed is latched, and the runtime crashes the run with
-//   it before anything else is journaled.
+// - A session's end and a raise are confirmed on disk: `events.ndjson` must hold that event's line, later lines allowed,
+//   and is then synced. The bus swallows a consumer's failure, so one that can't be confirmed is latched, and the
+//   runtime crashes the run with it before anything else is journaled.
 // - `budget:warning` fires once per budget and limit at 80% of it, and `budget:exceeded` once at the limit. Both are the
 //   run's, with no key: a step's own carry their call's.
 import { join } from 'node:path';
