@@ -369,18 +369,26 @@ test.each([
   });
 });
 
-test('a multi-step stage is refused before anything is written: one can not run yet', async () => {
+test('a multi-step stage runs both steps', async () => {
   await withTempRepo(async (repo) => {
     fixtureCopy(repo);
-    const argv = ['stage', 'run', '.sail/workflows/ticket-to-pr/stages/publish'];
-    expect(await runCaptured(argv, repo.dir)).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr: "sail stage run: publish can't run:\n  multi-step stages can't run yet\n",
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', PUBLISH_DIR, ...PUBLISH_BINDS], repo.dir, {
+      env: repo.env,
     });
-    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+    expect([code, stderr]).toEqual([EXIT_OK, '']);
+    expect(stdout).toMatch(/^publish#1 passed {2}\.sail-runs\/publish-[0-9A-Z]{26}\/00-publish\/call-1\n$/);
+    const call = callDirOf(stdout, repo.dir);
+    expect([existsSync(join(call, 'steps', '1-describe')), existsSync(join(call, 'steps', '2-open'))]).toEqual([
+      true,
+      true,
+    ]);
+    expect(JSON.parse(readFileSync(join(call, 'result.json'), 'utf8'))).toMatchObject({
+      key: 'publish#1',
+      outcome: 'passed',
+      steps: [{ step: 'describe' }, { step: 'open' }],
+    });
   });
-});
+}, 60_000);
 
 test.each([['docs'], ['.sail'], ['.sail/workflows/ticket-to-pr'], ['.sail/misc/x']])(
   '%s, holding a stage.ts, is refused as not a stage folder',
