@@ -162,6 +162,13 @@ test('prose, CI and hook changes select no test', async () => {
   ).toEqual(some());
 });
 
+test("sail's own .sail/ selects no test, while the fixture repository's .sail/ still reaches the tests naming it", async () => {
+  expect(await select('.sail/project.yaml', '.sail/workflows/factory/workflow.ts', '.sail/fake/harness.json')).toEqual(
+    some(),
+  );
+  expect(await select('test/fixtures/repo/.sail/project.yaml')).not.toEqual(some());
+});
+
 test('a toolchain change, or one no rule places, selects every test', async () => {
   for (const path of ['package.json', 'bun.lock', 'bunfig.toml', 'tsconfig.json', 'scripts/test.ts', 'test/setup.ts']) {
     expect(await select('src/engine/a.ts', path)).toEqual({ kind: 'all', reason: `${path} changed` });
@@ -222,8 +229,8 @@ test('affectedTests selects from the branch, and every test when there is no mer
   });
 });
 
-test('testArgs runs the selection with a generous timeout, and nothing when it is empty', () => {
-  expect(testArgs({ kind: 'all', reason: 'x' })).toEqual(['--timeout', '60000']);
+test('testArgs runs the selection with a generous timeout, every test only under test/, and nothing when empty', () => {
+  expect(testArgs({ kind: 'all', reason: 'x' })).toEqual(['--timeout', '60000', './test']);
   expect(testArgs(some('test/a.test.ts', 'test/b.test.ts'))).toEqual([
     '--timeout',
     '60000',

@@ -22,9 +22,13 @@ export const EVERYTHING = [
   'test/coverage-census.test.ts',
 ];
 
-/** Changes no test reads: prose, CI and hook config, and the linter's config, which `bun run lint` checks. */
+/**
+ * Changes no test reads: prose, CI and hook config, the linter's config, which `bun run lint` checks, and sail's own
+ * `.sail/`, which `sail check` checks. The tests' repositories live under test/fixtures/.
+ */
 const UNTESTED = [
   /^docs\//,
+  /^\.sail\//,
   /^\.github\//,
   /^\.githooks\//,
   /^[^/]+\.md$/,
@@ -183,10 +187,14 @@ export function allTests(root: string): string[] {
     .sort();
 }
 
-/** The arguments for scripts/test.ts that run `selection` with a generous timeout: undefined when it's empty. */
+/**
+ * The arguments for scripts/test.ts that run `selection` with a generous timeout: undefined when it's empty. Every test
+ * means every test under test/: left without a path, Bun runs any `*.test.ts` in the checkout, the ignored plan drafts
+ * under docs/ included.
+ */
 export function testArgs(selection: Selection): string[] | undefined {
   const timeout = ['--timeout', '60000'];
-  if (selection.kind === 'all') return timeout;
+  if (selection.kind === 'all') return [...timeout, './test'];
   if (selection.tests.length === 0) return undefined;
   return [...timeout, ...selection.tests.map((path) => `./${path}`)];
 }
