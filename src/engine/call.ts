@@ -83,8 +83,19 @@ const UNRESOLVED = "agent steps need a harness and a model, which weren't resolv
 export function asStep(stage: Stage): AgentStep | ScriptStep | undefined {
   const [only, ...more] = stage.steps;
   if (more.length > 0) return undefined;
-  const as = { ...only, name: stage.name, consumes: stage.consumes, produces: { ...only.produces, ...stage.produces } };
-  return as as AgentStep | ScriptStep;
+  return { ...withStageProduces(only, stage), name: stage.name, consumes: stage.consumes } as AgentStep | ScriptStep;
+}
+
+/**
+ * The last step of `stage` as it runs: recording the stage's own `produces` beside its own (D9). A name both declare
+ * keeps the step's document: the stage's plain `'file'` would drop its template and validators.
+ */
+export function withStageProduces<S extends AgentStep | ScriptStep>(step: S, stage: Stage): S {
+  const produces: Record<string, unknown> = { ...step.produces };
+  for (const [name, declared] of Object.entries(stage.produces)) {
+    if (!Object.hasOwn(produces, name) || produces[name] === 'file') produces[name] = declared;
+  }
+  return { ...step, produces };
 }
 
 /** Why the definition can't run with what is supplied, found before anything is written. */
@@ -96,7 +107,9 @@ export function callProblems(
   if (definition.kind === 'stage') {
     const one = asStep(definition);
     if (one !== undefined) return callProblems(one, supplied, agent);
-    const steps = definition.steps;
+    const last = definition.steps.length - 1;
+    // The last step is checked as it runs: with the stage's own produces.
+    const steps = definition.steps.map((step, index) => (index === last ? withStageProduces(step, definition) : step));
     if (agent === undefined && steps.some((step) => step.kind === 'agent')) return [UNRESOLVED];
     const own = steps.flatMap((step) =>
       (step.kind === 'agent' ? KINDS.agent.problems(step) : KINDS.script.problems(step)).map(

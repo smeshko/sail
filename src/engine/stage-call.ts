@@ -21,7 +21,15 @@ import type { CallEvent, NewEvent } from '../events/types';
 import type { FromStepBinding } from '../sdk/bindings';
 import type { AgentStep, ScriptStep, Stage, Step } from '../sdk/steps';
 import type { Supplied } from './bindings';
-import { type AgentExecution, type CallRequest, type Ran, runAgentTries, runScriptTry, type TrySite } from './call';
+import {
+  type AgentExecution,
+  type CallRequest,
+  type Ran,
+  runAgentTries,
+  runScriptTry,
+  type TrySite,
+  withStageProduces,
+} from './call';
 import {
   type CallPaths,
   callPaths,
@@ -292,8 +300,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
   const lastIndex = of;
   for (const [offset, declared] of stage.steps.entries()) {
     const index = offset + 1;
-    const step: Step =
-      index === lastIndex ? ({ ...declared, produces: { ...declared.produces, ...stage.produces } } as Step) : declared;
+    const step: Step = index === lastIndex ? withStageProduces(declared, stage) : declared;
     const entry = finished[offset];
     if (entry !== undefined) {
       done.push(journaledStep(request, step, index, entry));
