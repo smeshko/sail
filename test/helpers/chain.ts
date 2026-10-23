@@ -7,8 +7,8 @@
 // pull requests the test asks for, each on a branch of its own cut from `main`. Every pull request is behind `main`:
 // `main` moves once after the branches are cut, so a run has to merge it in. The GitHub world follows pushes
 // (`followHeads`) and answers checks for any head (`checksFor`): the check `test` is pending on its first read of a head,
-// then failed while the pull request carries `ci-red` and passed otherwise, as the sandbox's CI behaves. A pull request
-// listed in `silent` never registers `test`, so its checks read as an empty list.
+// then failed while the pull request carries `ci-red`, skipped while it carries `ci-skipped`, and passed otherwise, as the
+// sandbox's CI behaves. A pull request listed in `silent` never registers `test`, so its checks read as an empty list.
 //
 // The levers a test pulls are options, not edits to the fixture: a pull request's labels, `conflict`, `testsFail`, a
 // `silent` check, an edit of the copied `harness.json`, and `removeLabelAtAllStart()`. Every `sail` is a process of its own,
@@ -110,6 +110,7 @@ function checkRunsOf(pull: WorldPull, read: number): WorldChecks {
     checkRuns: [{ name: 'test', status, ...(conclusion === undefined ? {} : { conclusion }) }],
   });
   if (read <= 1) return check('in_progress');
+  if (pull.labels.includes('ci-skipped')) return check('completed', 'skipped');
   return pull.labels.includes('ci-red') ? check('completed', 'failure') : check('completed', 'success');
 }
 
