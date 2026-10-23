@@ -1,0 +1,23 @@
+# sail's own config: sail runs its factory workflow on its own tickets, from Linear team ADW, and opens its pull
+# requests on GitHub. Set every port back to `fake` to run on the seeds under .sail/fake/ at no cost.
+
+# The repository's name, unique among this machine's watchers.
+name: sail
+# The sail versions this .sail/ runs on.
+sail: ">=0.0.0 <1"
+# The label that designates a ticket for sail.
+label: factory
+# The workflow `sail <ticket>` runs when --workflow is left out.
+defaultWorkflow: factory
+
+# Which adapter fills each port.
+adapters:
+  ticketSource: { use: linear, team: ADW }
+  codeHost: { use: github }
+  harness: { use: claude-code }
+  workspace: { use: git-worktree }
+
+models: { default: claude-sonnet-5-5, deep: claude-opus-5-5 }
+budgets: { run: { maxUsd: 25, maxMinutes: 120 } }
+# AGENTS.md carries the conventions, and CONTEXT.md the vocabulary every identifier and commit message uses.
+conventions: [AGENTS.md, CONTEXT.md]
