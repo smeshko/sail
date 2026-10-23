@@ -2434,6 +2434,52 @@ test.each<[string, (sail: string) => void, string]>([
   60_000,
 );
 
+test("a resume with publish's first step renamed after publish#1 is journaled whole fails with determinism_violation and runs nothing (review R1-2)", async () => {
+  await withTempRepo(async (repo) => {
+    const stopped = await stoppedTwoStep(repo.dir, (_, controller) => ({
+      consumers: [abortOnAppend(controller, 'publish#1')],
+    }));
+    expect(journaled(stopped.dir)).toEqual(STEP_JOURNAL.slice(0, 6));
+    replaceAll(join(repo.dir, '.sail'), PUBLISH_FILE, "'describe'", "'draft'");
+    const before = readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8');
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'determinism_violation',
+      message: "the journal has 'publish#1/describe' where publish's step 1 is 'draft'",
+    });
+    expect(readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8')).toBe(before);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1']);
+  });
+}, 60_000);
+
+test('a resume whose journal holds a step line after one that blocked the stage fails with determinism_violation and runs nothing (review R1-2)', async () => {
+  await withTempRepo(async (repo) => {
+    const stopped = await stoppedTwoStep(repo.dir, (_, controller) => ({
+      consumers: [abortOnAppend(controller, 'publish#1/open')],
+    }));
+    expect(journaled(stopped.dir)).toEqual(STEP_JOURNAL.slice(0, 5));
+    // describe's line says it blocked, and open's line follows it all the same.
+    const path = join(stopped.dir, 'journal.ndjson');
+    const lines = readFileSync(path, 'utf8').trimEnd().split('\n');
+    const at = lines.findIndex((line) => JSON.parse(line).key === 'publish#1/describe');
+    lines[at] = JSON.stringify({
+      ...JSON.parse(lines[at] ?? '{}'),
+      outcome: 'blocked',
+      output: null,
+      reason: 'unsure',
+    });
+    writeFileSync(path, `${lines.join('\n')}\n`);
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'determinism_violation',
+      message: "the journal has 'publish#1/open' after 'publish#1/describe', which ended publish blocked",
+    });
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1']);
+  });
+}, 60_000);
+
 test('a call whose every step is journaled, but not itself, is journaled on resume from its steps: its result is written, and no step runs again', async () => {
   await withTempRepo(async (repo) => {
     const stopped = await stoppedTwoStep(repo.dir, (_, controller) => ({
