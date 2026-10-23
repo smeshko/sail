@@ -72,6 +72,8 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
       }
       continue;
     }
+    // An optional fromStep the earlier step had nothing for is bound to nothing, as an optional value left out is.
+    if (binding.kind === 'fromStep' && given === undefined && binding.isOptional) continue;
     if (binding.kind === 'gitDiff' || binding.kind === 'fromStep') {
       problems.push(`'${key}' is a ${binding.kind} binding, which can't be supplied here`);
       continue;
