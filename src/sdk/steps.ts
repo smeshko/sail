@@ -2,7 +2,7 @@
 // engine reads. A stage is one or more steps run in order. Its outcome is its last step's.
 
 import type { z } from 'zod';
-import type { Consumes, FileBinding, ValueBinding } from './bindings';
+import type { Consumes, FileBinding, FromStepBinding, ValueBinding } from './bindings';
 import type { Document } from './documents';
 
 /** How a script step ended. The engine maps the exit code through `exitCodes`, and anything unmapped is `error`. */
@@ -98,9 +98,11 @@ export interface AgentStep<
   C extends Consumes = Consumes,
   P extends AgentProduces = AgentProduces,
   O extends z.ZodType = z.ZodType,
+  N extends string = string,
 > extends Omit<AgentOptions<C, P, O>, 'consumes' | 'produces'> {
   readonly kind: 'agent';
-  readonly name: string;
+  /** The step's name, as its literal type: a later step's `fromStep()` names it. */
+  readonly name: N;
   readonly consumes: C;
   readonly produces: P;
 }
@@ -109,9 +111,11 @@ export interface ScriptStep<
   C extends Consumes = Consumes,
   P extends Produces = Produces,
   O extends z.ZodType = z.ZodType,
+  N extends string = string,
 > extends Omit<ScriptOptions<C, P, O>, 'consumes' | 'produces'> {
   readonly kind: 'script';
-  readonly name: string;
+  /** The step's name, as its literal type: a later step's `fromStep()` names it. */
+  readonly name: N;
   readonly consumes: C;
   readonly produces: P;
 }
@@ -143,14 +147,35 @@ export type KindOf<S extends StageDefinition> = S extends Stage
     : never
   : S['kind'];
 
-/** The outcomes a definition can end in, `error` included, as its result records them. */
-export type OutcomeOf<S extends StageDefinition> = { agent: AgentOutcome; script: ScriptOutcome }[KindOf<S>];
+/** The steps of a stage before its last one: those that can stop it early. */
+export type EarlierSteps<S extends StageDefinition> = S extends Stage
+  ? S['steps'] extends readonly [...infer Earlier extends readonly Step[], Step]
+    ? Earlier[number]
+    : never
+  : never;
+
+/** What an earlier step can end its stage in: `blocked` for an agent step, `failed` for a script step. */
+type StopsWith<E> = E extends { readonly kind: 'agent' }
+  ? 'blocked'
+  : E extends { readonly kind: 'script' }
+    ? 'failed'
+    : never;
+
+/**
+ * The outcomes a definition can end in, `error` included, as its result records them: its last step's, and for a
+ * stage what an earlier step can end it in, since a step that doesn't pass ends its stage.
+ */
+export type OutcomeOf<S extends StageDefinition> =
+  | { agent: AgentOutcome; script: ScriptOutcome }[KindOf<S>]
+  | StopsWith<EarlierSteps<S>>;
 
 /** Declares an agent step: the agent works to its prompt within its permissions and budget, then submits `output`. */
-export function agent<C extends Consumes = None, P extends AgentProduces = None, O extends z.ZodType = z.ZodType>(
-  name: string,
-  options: AgentOptions<C, P, O>,
-): AgentStep<C, P, O> {
+export function agent<
+  const N extends string,
+  C extends Consumes = None,
+  P extends AgentProduces = None,
+  O extends z.ZodType = z.ZodType,
+>(name: N, options: AgentOptions<C, P, O>): AgentStep<C, P, O, N> {
   return {
     kind: 'agent',
     name,
@@ -161,10 +186,12 @@ export function agent<C extends Consumes = None, P extends AgentProduces = None,
 }
 
 /** Declares a script step: any executable, whose exit code decides `passed` or `failed`. */
-export function script<C extends Consumes = None, P extends Produces = None, O extends z.ZodType = z.ZodType>(
-  name: string,
-  options: ScriptOptions<C, P, O>,
-): ScriptStep<C, P, O> {
+export function script<
+  const N extends string,
+  C extends Consumes = None,
+  P extends Produces = None,
+  O extends z.ZodType = z.ZodType,
+>(name: N, options: ScriptOptions<C, P, O>): ScriptStep<C, P, O, N> {
   return {
     kind: 'script',
     name,
@@ -229,6 +256,38 @@ export type CoversSteps<C extends Consumes, Steps extends StepList> = [
   ? unknown
   : { readonly consumes: { readonly [K in Exclude<keyof StepNeeds<Steps>, keyof C>]: StepNeeds<Steps>[K] } };
 
+/** The steps the `fromStep()` bindings of `C` name. */
+type NamedSteps<C extends Consumes> = {
+  [K in keyof C]: C[K] extends FromStepBinding<infer N> ? N : never;
+}[keyof C];
+
+/**
+ * A step, unless a `fromStep()` binding of its names a step outside `Seen`, the steps before it. Each such binding is
+ * then required to name one of them, so the diagnostic points at the binding.
+ */
+type InPlace<S extends Step, Seen extends string> = [Exclude<NamedSteps<S['consumes']>, Seen>] extends [never]
+  ? S
+  : S & {
+      readonly consumes: {
+        readonly [K in keyof S['consumes'] as S['consumes'][K] extends FromStepBinding<infer N>
+          ? N extends Seen
+            ? never
+            : K
+          : never]: FromStepBinding<Seen>;
+      };
+    };
+
+/**
+ * A stage's steps, each checked against the names of the steps before it: a `fromStep()` may name only an earlier
+ * step, never a later one, itself or one the stage doesn't have.
+ */
+export type InOrder<Steps extends readonly Step[], Seen extends string = never> = Steps extends readonly [
+  infer First extends Step,
+  ...infer Rest extends readonly Step[],
+]
+  ? readonly [InPlace<First, Seen>, ...InOrder<Rest, Seen | First['name']>]
+  : readonly [];
+
 /** Declares a stage of several steps, run in order. The workflow supplies `consumes` and gets `output` back. */
 export function stage<
   C extends Consumes & FitsSteps<Steps> = None,
@@ -237,7 +296,7 @@ export function stage<
   const Steps extends StepList = StepList,
 >(
   name: string,
-  options: StageOptions<C, P, O, Steps> & { readonly steps: EndsIn<O> } & CoversSteps<C, Steps>,
+  options: StageOptions<C, P, O, Steps> & { readonly steps: EndsIn<O> & InOrder<Steps> } & CoversSteps<C, Steps>,
 ): Stage<C, P, O, Steps> {
   assertEndsIn(`stage '${name}'`, options.steps, options.output);
   // The types check each binding the steps take from the workflow, except the refinements of a value's schema.

@@ -145,6 +145,11 @@ export interface RenderDocumentsOptions {
   values: RenderValues;
   /** The try's `$STAGE_OUT`. */
   outDir: string;
+  /**
+   * Replaces a file already there: a step's `$STAGE_OUT` is its call's, which an earlier try of the step wrote to. A
+   * one-step call's try writes into a new directory, where any file already there is a bug.
+   */
+  replace?: boolean;
 }
 
 /**

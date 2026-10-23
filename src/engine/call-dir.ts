@@ -18,8 +18,10 @@ import { createDir, syncDir } from './durable';
 
 /** The absolute paths of one call's directory and what the engine writes in it. */
 export interface CallPaths {
-  /** `$STAGE_OUT`. */
+  /** Where the engine writes the try's own files: its `$STAGE_IN`, logs, prompt, transcript and `result.json`. */
   dir: string;
+  /** `$STAGE_OUT`, when it isn't `dir`: a step's, which is its call's `call-N/`. */
+  out?: string;
   /** `$STAGE_IN`: `<dir>/in`. */
   stageIn: string;
   stdout: string;
@@ -51,6 +53,11 @@ export function stageDirName(index: number, stage: string): string {
 /** `try-M`: the directory of a call's try M ≥ 2, inside `call-N/`. */
 export function isTryName(name: string): boolean {
   return /^try-[0-9]+$/.test(name);
+}
+
+/** `$STAGE_OUT` of the try `paths` are for: its `out`, or its own directory. TDD stub (ADW-112): always `dir`. */
+export function stageOut(paths: CallPaths): string {
+  return paths.dir;
 }
 
 /** The paths of a call's try: try 1 is `call-N/` itself, and try M ≥ 2 is `call-N/try-M/`. */
@@ -85,6 +92,47 @@ export function existingTries(runDir: string, index: number, stage: string, call
 /** The try a call runs as next: 1 when `call-N/` doesn't exist, else one more than its highest try. */
 export function nextTry(runDir: string, index: number, stage: string, call: number): number {
   return (existingTries(runDir, index, stage, call).at(-1) ?? 0) + 1;
+}
+
+/**
+ * The paths of a try of step `stepIndex`, named `step`, of a multi-step call: its own files in
+ * `call-N/steps/<stepIndex>-<step>/`, and try M ≥ 2 in `try-M/` below that. Its `$STAGE_OUT` is `call-N/`.
+ * TDD stub (ADW-112): the call's own paths.
+ */
+export function stepPaths(
+  runDir: string,
+  index: number,
+  stage: string,
+  call: number,
+  _stepIndex: number,
+  _step: string,
+  tryNumber = 1,
+): CallPaths {
+  return callPaths(runDir, index, stage, call, tryNumber);
+}
+
+/** The tries a step of a multi-step call has a directory for, in order. TDD stub (ADW-112): none. */
+export function existingStepTries(
+  _runDir: string,
+  _index: number,
+  _stage: string,
+  _call: number,
+  _stepIndex: number,
+  _step: string,
+): number[] {
+  return [];
+}
+
+/** The try a step runs as next. TDD stub (ADW-112): always 1. */
+export function nextStepTry(
+  _runDir: string,
+  _index: number,
+  _stage: string,
+  _call: number,
+  _stepIndex: number,
+  _step: string,
+): number {
+  return 1;
 }
 
 /**

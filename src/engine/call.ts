@@ -27,6 +27,11 @@ export interface AgentExecution {
   harness: Harness;
   /** The model id the step's alias resolved to. A resumed run passes the one its roster froze. */
   model: string;
+  /**
+   * A multi-step stage's: the model id of each agent step, by step name, as its roster froze them. A step it doesn't
+   * name runs on `model`.
+   */
+  models?: Readonly<Record<string, string>>;
   /** `project.yaml`'s `conventions`. Left out, the defaults are appended. */
   conventions?: readonly string[];
 }
@@ -79,7 +84,8 @@ export function callProblems(
   return [...own, ...bindingProblems(definition.consumes, supplied)];
 }
 
-type Ran = { result: Record<string, unknown>; paths: CallPaths };
+/** What a call left: its `result.json` and where it is. `stopped` when a multi-step call stopped short of one. */
+export type Ran = { result: Record<string, unknown>; paths: CallPaths; stopped?: true };
 
 /** Which try of which call. */
 interface TryOf {

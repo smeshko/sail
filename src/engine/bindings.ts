@@ -15,7 +15,11 @@ import { isPlainName } from './call-dir';
 export type Supplied =
   | { kind: 'file'; path: string; from: string }
   | { kind: 'value'; value: unknown; from: string }
-  | { kind: 'gitDiff'; patch: string; from: string };
+  | { kind: 'gitDiff'; patch: string; from: string }
+  /** An earlier step's output, or a field of it: no schema checks it, since the step's own already did. */
+  | { kind: 'fromStep'; value: unknown; from: string }
+  /** A file an earlier step produced. */
+  | { kind: 'fromStep'; path: string; from: string };
 
 /** `INPUT_` and the binding's name, upper-cased, with anything outside `[A-Z0-9]` turned into `_`. */
 export function inputVar(name: string): string {

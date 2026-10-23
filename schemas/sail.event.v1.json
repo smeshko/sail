@@ -675,6 +675,7 @@
         "index": { "type": "integer", "minimum": 1 },
         "of": { "type": "integer", "minimum": 2 },
         "kind": { "enum": ["agent", "script"] },
+        "try": { "type": "integer", "minimum": 1 },
         "model": { "type": "string" },
         "command": { "type": "string" }
       },
@@ -686,8 +687,10 @@
       "$ref": "#/$defs/callEnvelope",
       "properties": {
         "step": { "type": "string" },
+        "try": { "type": "integer", "minimum": 1 },
         "outcome": { "$ref": "#/$defs/outcome" },
-        "resultPath": { "$ref": "#/$defs/resultPath" }
+        "resultPath": { "$ref": "#/$defs/resultPath" },
+        "errors": { "$ref": "#/$defs/errors" }
       },
       "required": ["step", "outcome", "resultPath"],
       "unevaluatedProperties": false
