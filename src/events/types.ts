@@ -19,6 +19,7 @@ import type { Budget, Permissions } from '../sdk/steps';
 export const EVENT_TYPES = [
   'run:start',
   'run:end',
+  'run:suspended',
   'intake:start',
   'intake:end',
   'stage:start',
@@ -49,6 +50,7 @@ export const EVENT_TYPES = [
   'usage:update',
   'budget:warning',
   'budget:exceeded',
+  'budget:raised',
   'ticket:fetched',
   'ticket:claimed',
   'ticket:updated',
@@ -69,8 +71,7 @@ export const EVENT_TYPES = [
   'error:consumer',
   'error:port',
 ] as const;
-// TDD stub: the two types are typed, but not yet in EVENT_TYPES.
-export type EventType = (typeof EVENT_TYPES)[number] | 'run:suspended' | 'budget:raised';
+export type EventType = (typeof EVENT_TYPES)[number];
 
 /** What the bus stamps on every event. */
 export interface Envelope {

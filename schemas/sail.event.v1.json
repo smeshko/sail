@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.event.v1.json",
   "title": "sail event: one line of a run's or a queue's event stream",
   "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. A watched workflow's queue event stream, .sail-runs/queue/<workflow>/events.ndjson, uses the same envelope without runId or key, with the workflow it belongs to: its watch set changes, polls, items and dispatches, and the runs the watcher adopted or resumed.",
-  "$comment": "Closed: every type of a run's stream: run:start, run:end, intake:*, stage:*, step:*, input:materialised, prompt:rendered, script:*, output:*, file:*, journal:append, loop:*, all:*, workflow:route, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:*, error:*, ticket:*, codehost:* and workspace:*. The queue family follows error:port in the enum, alone may leave out runId, and is closed: watch:*, queue:polled, queue:item_added, queue:dispatched, queue:skipped_leased, queue:dropped, queue:parked, queue:error, run:adopted, run:resumed and queue:requeued. The root validates the envelope and allows additional properties, which each closed payload then refuses. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
+  "$comment": "Closed: every type of a run's stream: run:start, run:end, run:suspended, intake:*, stage:*, step:*, input:materialised, prompt:rendered, script:*, output:*, file:*, journal:append, loop:*, all:*, workflow:route, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* (budget:raised among them), error:*, ticket:*, codehost:* and workspace:*. The queue family follows error:port in the enum, alone may leave out runId, and is closed: watch:*, queue:polled, queue:item_added, queue:dispatched, queue:skipped_leased, queue:dropped, queue:parked, queue:error, run:adopted, run:resumed and queue:requeued. The root validates the envelope and allows additional properties, which each closed payload then refuses. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -12,6 +12,7 @@
       "enum": [
         "run:start",
         "run:end",
+        "run:suspended",
         "intake:start",
         "intake:end",
         "stage:start",
@@ -42,6 +43,7 @@
         "usage:update",
         "budget:warning",
         "budget:exceeded",
+        "budget:raised",
         "ticket:fetched",
         "ticket:claimed",
         "ticket:updated",
@@ -88,6 +90,10 @@
     {
       "if": { "properties": { "type": { "const": "run:end" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/runEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "run:suspended" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/runSuspended" }
     },
     {
       "if": { "properties": { "type": { "const": "intake:start" } }, "required": ["type"] },
@@ -280,6 +286,10 @@
     {
       "if": { "properties": { "type": { "const": "budget:exceeded" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/budgetEvent" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "budget:raised" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/budgetRaised" }
     },
     {
       "if": { "properties": { "type": { "const": "error:harness" } }, "required": ["type"] },
@@ -601,6 +611,19 @@
           "else": { "properties": { "stopReason": false } }
         }
       ],
+      "unevaluatedProperties": false
+    },
+    "runSuspended": {
+      "description": "a run suspended on its budget, right before its run:end: which budget it used up, its limit and what was used; the run's, so no key",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "stopReason": { "enum": ["budget_exceeded"] },
+        "budget": { "enum": ["usd", "minutes"] },
+        "limit": { "type": "number", "minimum": 0 },
+        "used": { "type": "number", "minimum": 0 }
+      },
+      "required": ["stopReason", "budget", "limit", "used"],
       "unevaluatedProperties": false
     },
     "intakeStart": {
@@ -1256,6 +1279,26 @@
         "used": { "type": "number", "minimum": 0 }
       },
       "required": ["budget", "limit", "used"],
+      "unevaluatedProperties": false
+    },
+    "budgetRaised": {
+      "description": "a raise of the run's budget, given to sail resume: what it added, at least one of usd and minutes, and the run's budget after it; the run's, so no key",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "usd": { "type": "number", "exclusiveMinimum": 0 },
+        "minutes": { "type": "number", "exclusiveMinimum": 0 },
+        "budget": { "$ref": "#/$defs/runBudget" }
+      },
+      "required": ["budget"],
+      "allOf": [
+        {
+          "anyOf": [
+            { "properties": { "usd": true }, "required": ["usd"] },
+            { "properties": { "minutes": true }, "required": ["minutes"] }
+          ]
+        }
+      ],
       "unevaluatedProperties": false
     },
     "errorHarness": {

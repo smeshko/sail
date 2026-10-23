@@ -23,10 +23,7 @@ function typeEnum(schema: unknown): unknown {
   return undefined;
 }
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("EVENT_TYPES holds a run's 53 types, error:consumer, error:port, prompt:rendered, run:suspended and budget:raised included", () => {
+test("EVENT_TYPES holds a run's 53 types, error:consumer, error:port, prompt:rendered, run:suspended and budget:raised included", () => {
   expect(EVENT_TYPES).toHaveLength(53);
   const types: readonly string[] = EVENT_TYPES;
   expect(types.indexOf('run:suspended')).toBe(types.indexOf('run:end') + 1);

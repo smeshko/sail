@@ -25,10 +25,7 @@ function omit(data: Record<string, unknown>, key: string): Record<string, unknow
   return rest;
 }
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a run:suspended with its stop reason, budget, limit and use validates, and one with a key, another stop reason or no use is refused naming the field', () => {
+test('a run:suspended with its stop reason, budget, limit and use validates, and one with a key, another stop reason or no use is refused naming the field', () => {
   expect({
     valid: paths(suspended),
     minutes: paths({ ...suspended, budget: 'minutes', limit: 90, used: 90.2 }),
@@ -46,10 +43,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('a budget:raised of dollars, of minutes or of both validates with the budget after it, and one with neither, a zero raise or another field is refused naming it', () => {
+test('a budget:raised of dollars, of minutes or of both validates with the budget after it, and one with neither, a zero raise or another field is refused naming it', () => {
   expect({
     usd: paths(raised),
     minutes: paths({ ...omit(raised, 'usd'), minutes: 30, budget: { maxMinutes: 120 } }),
