@@ -35,6 +35,13 @@
 // workspace and lease, and `stopped` fails it with that stop reason, releasing both. An abort seen at the same boundary
 // goes first, and leaves the request for the next boundary that runs. A request goes ahead of `until`'s suspension.
 //
+// A multi-step call journals each step as it finishes, as `stage#call/step`, then the call itself once its last step
+// has run or one has stopped it. The replay is handed the call lines only, so it goes by position over calls as it
+// always has. A resume hands a call its step lines, and the call runs only the steps after them, or none when every
+// step is journaled and only the call line is missing. A call's step lines must be its stage's first steps in order,
+// and every step line must belong to a call the journal holds or the workflow asks for now: anything else fails the
+// run with `determinism_violation`, before anything runs.
+//
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
 // Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
@@ -66,6 +73,7 @@ import { ndjsonConsumer } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
+import type { StageDefinition } from '../sdk/steps';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
 import { type AgentExecution, callProblems, runCall } from './call';
@@ -160,7 +168,7 @@ function reasonOf(result: Record<string, unknown>): string | null {
   return errors.map(({ reason, message }) => `${reason}: ${message}`).join('; ');
 }
 
-/** The journal entry of a call that ran, from its `result.json`. */
+/** The journal entry of a call or a step that ran, from its `result.json`. */
 function entryFrom(
   runDir: string,
   result: Record<string, unknown>,
@@ -172,6 +180,7 @@ function entryFrom(
     key: result.key as string,
     stage: result.stage as string,
     call: result.call as number,
+    ...(typeof result.step === 'string' ? { step: result.step } : {}),
     outcome: result.outcome as JournalEntry['outcome'],
     output: result.output,
     reason: reasonOf(result),
@@ -186,10 +195,48 @@ function entryFrom(
  * roster froze at its start, which a resume keeps whatever the alias names by then.
  */
 function executionOf(opened: OpenedRun, stage: string): AgentExecution {
-  const model = opened.header.stages[stage]?.model;
-  if (model === undefined) throw new Error(`run.json's roster holds no model for the agent stage '${stage}'`);
+  const entry = opened.header.stages[stage];
   const { conventions } = opened.config;
-  return { harness: opened.adapters.harness, model, ...(conventions === undefined ? {} : { conventions }) };
+  const on = { harness: opened.adapters.harness, ...(conventions === undefined ? {} : { conventions }) };
+  if (entry?.steps !== undefined) {
+    // A multi-step stage's roster holds each step's own model.
+    const models = Object.fromEntries(
+      entry.steps.flatMap((step) => (step.model === undefined ? [] : [[step.step, step.model] as const])),
+    );
+    const [first] = Object.values(models);
+    if (first === undefined) throw new Error(`run.json's roster holds no model for an agent step of '${stage}'`);
+    return { ...on, model: first, models };
+  }
+  const model = entry?.model;
+  if (model === undefined) throw new Error(`run.json's roster holds no model for the agent stage '${stage}'`);
+  return { ...on, model };
+}
+
+/** Whether a definition runs an agent anywhere: as itself, or as a step of its stage. */
+const runsAgent = (definition: StageDefinition): boolean =>
+  definition.kind === 'agent' ||
+  (definition.kind === 'stage' && definition.steps.some((step) => step.kind === 'agent'));
+
+/** The call key a step line's key belongs to: `publish#1` for `publish#1/describe`. */
+const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
+
+/**
+ * The step lines of `call` the journal holds, which must be its stage's first steps in order, or why they aren't. A
+ * one-step definition has none, and any line of one is a change.
+ */
+function finishedSteps(call: PendingCall, entries: readonly JournalEntry[]): JournalEntry[] | { failed: string } {
+  const lines = entries.filter((entry) => entry.step !== undefined && callKeyOf(entry.key) === call.key);
+  const steps = call.definition.kind === 'stage' && call.definition.steps.length > 1 ? call.definition.steps : [];
+  for (const [index, line] of lines.entries()) {
+    const step = steps[index];
+    if (step === undefined) {
+      return { failed: `the journal has '${line.key}' where ${call.stage} has no step ${index + 1}` };
+    }
+    if (line.step !== step.name) {
+      return { failed: `the journal has '${line.key}' where ${call.stage}'s step ${index + 1} is '${step.name}'` };
+    }
+  }
+  return lines;
 }
 
 /**
@@ -348,41 +395,54 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     if (request === 'stopped') return failed('stopped', `stopped by sail stop before ${key}`);
     return undefined;
   };
-  /** A call whose preconditions hold: what it is supplied with, and what an agent runs on. */
+  /** A call whose preconditions hold: what it is supplied with, what an agent runs on, and its steps journaled. */
   interface Ready {
     call: PendingCall;
     supplied: Record<string, Supplied>;
     agent: AgentExecution | undefined;
+    finished: JournalEntry[];
   }
   /** The call's agent execution, its gitDiff patches and its contract's check, or why it can't run. */
-  const prepare = async (call: PendingCall): Promise<Ready | { failed: string }> => {
-    const agent = call.definition.kind === 'agent' ? executionOf(opened, call.stage) : undefined;
+  const prepare = async (call: PendingCall, finished: JournalEntry[]): Promise<Ready | { failed: string }> => {
+    const agent = runsAgent(call.definition) ? executionOf(opened, call.stage) : undefined;
     const diffs = await gitDiffs(opened, call);
     if ('failed' in diffs) return diffs;
     const supplied = { ...call.supplied, ...diffs.supplied };
     const problems = callProblems(call.definition, supplied, agent);
-    return problems.length > 0 ? { failed: problems.join('; ') } : { call, supplied, agent };
+    return problems.length > 0 ? { failed: problems.join('; ') } : { call, supplied, agent, finished };
   };
-  /** Runs the call's next try. */
-  const launch = ({ call, supplied, agent }: Ready, callSignal: AbortSignal | undefined) =>
-    runCall({
-      runDir: dir,
-      runId,
-      stageIndex: call.stageIndex,
-      call: call.call,
-      try: nextTry(dir, call.stageIndex, call.stage, call.call),
-      definition: call.definition,
-      stageFile: call.stageFile,
-      workspace: opened.workspace.path,
-      root,
-      branch: opened.workspace.branch,
-      config: join(sailDir, 'project.yaml'),
-      supplied,
-      ...(callSignal === undefined ? {} : { signal: callSignal }),
-      ...(agent === undefined ? {} : { agent }),
-      emit: bus.emit,
-      clock,
-    });
+  /** Runs the call's next try: a multi-step call from the first step not journaled, journaling each as it ends. */
+  const launch = ({ call, supplied, agent, finished }: Ready, callSignal: AbortSignal | undefined) =>
+    runCall(
+      {
+        runDir: dir,
+        runId,
+        stageIndex: call.stageIndex,
+        call: call.call,
+        try: nextTry(dir, call.stageIndex, call.stage, call.call),
+        definition: call.definition,
+        stageFile: call.stageFile,
+        workspace: opened.workspace.path,
+        root,
+        branch: opened.workspace.branch,
+        config: join(sailDir, 'project.yaml'),
+        supplied,
+        ...(callSignal === undefined ? {} : { signal: callSignal }),
+        ...(agent === undefined ? {} : { agent }),
+        emit: bus.emit,
+        clock,
+      },
+      {
+        finished,
+        // A step that ends once the run is stopping isn't journaled: a resume runs it again.
+        onStep: (result, paths) => {
+          if (callSignal?.aborted) return false;
+          journal(result, paths);
+          return callSignal?.aborted !== true;
+        },
+        diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch,
+      },
+    );
   /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
   const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
     const journaled = appendJournal(dir, entryFrom(dir, result, paths, group), clock());
@@ -468,11 +528,13 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       // The input is the journal's first line as read back, for a fresh run and a resume alike: the intake's output in
       // memory may hold what JSON drops, and a resume would then replay on another object than the run that wrote it.
       // Nothing stands in for that line: a journal that has lost it can't be trusted.
-      const [journaledIntake, ...entries] = readJournal(dir).entries;
+      const [journaledIntake, ...lines] = readJournal(dir).entries;
       if (journaledIntake?.key !== INTAKE_KEY) {
         const why = `is no longer ${INTAKE_KEY}: the journal changed under the run`;
         throw new JournalError(join(dir, JOURNAL_FILE), 1, why);
       }
+      // The replay goes by position over calls: a step's line is its call's to read, never the replay's.
+      const entries = lines.filter((line) => line.step === undefined);
       const replaying = replay({
         workflow: loaded.workflow,
         stages: loaded.stages,
@@ -483,6 +545,16 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       });
       const end = await unlessAborted(replaying, signal);
       if (end === undefined) return await interrupted('stopped during the replay');
+      // Every step line belongs to a call the journal holds, or to one the workflow asks for now.
+      const asked = new Set(end.kind === 'call' ? [end.call.key] : end.kind === 'group' ? end.keys : []);
+      const held = new Set(entries.map((entry) => entry.key));
+      const stray = lines.find(
+        (line) => line.step !== undefined && !held.has(callKeyOf(line.key)) && !asked.has(callKeyOf(line.key)),
+      );
+      if (stray !== undefined) {
+        const message = `the journal holds '${stray.key}' of a call the workflow didn't ask for`;
+        return await failed('determinism_violation', message);
+      }
       // A seeded run's first call of its own is the stage it was seeded for: an edited workflow that asks for another
       // first, or ends, would run what nobody asked for.
       if (seededFor !== undefined) {
@@ -513,7 +585,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       // Every call's preconditions before any starts: a group that can't run starts nothing.
       const ready: Ready[] = [];
       for (const call of calls) {
-        const checked = await prepare(call);
+        const finished = finishedSteps(call, lines);
+        if ('failed' in finished) return await failed('determinism_violation', finished.failed);
+        const checked = await prepare(call, finished);
         if ('failed' in checked) return await failed('workflow_failed', `${call.key} can't run: ${checked.failed}`);
         ready.push(checked);
       }

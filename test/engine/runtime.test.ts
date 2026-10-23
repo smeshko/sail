@@ -2306,10 +2306,7 @@ const afterDescribe = (_: string, controller: AbortController) => ({
   consumers: [abortOnAppend(controller, 'publish#1/describe')],
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a two-step stage journals each step as it finishes, then its call, and runs its agent step on the model the roster froze for it', async () => {
+test('a two-step stage journals each step as it finishes, then its call, and runs its agent step on the model the roster froze for it', async () => {
   await withTempRepo(async (repo) => {
     writeTwoStep(repo.dir);
     const end = await ranAgent(repo.dir);
@@ -2331,10 +2328,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('an abort during open suspends the run with describe journaled, and the resume runs open as its second try without asking for describe again', async () => {
+test('an abort during open suspends the run with describe journaled, and the resume runs open as its second try without asking for describe again', async () => {
   await withTempRepo(async (repo) => {
     const { runId } = await withTempRepo(async (from) => {
       writeTwoStep(from.dir);
@@ -2358,10 +2352,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("an abort after describe is journaled leaves no stage result, and the resume runs only open, with the title describe's journal line holds, whatever its result.json says by then", async () => {
+test("an abort after describe is journaled leaves no stage result, and the resume runs only open, with the title describe's journal line holds, whatever its result.json says by then", async () => {
   await withTempRepo(async (repo) => {
     const stopped = await stoppedTwoStep(repo.dir, afterDescribe);
     expect(stopped).toMatchObject({ status: 'suspended', stopReason: 'interrupted' });
@@ -2390,10 +2381,7 @@ function replaceAll(sail: string, path: string, from: string, to: string): void 
   writeFileSync(file, text.replaceAll(from, to));
 }
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each<[string, (sail: string) => void, string]>([
+test.each<[string, (sail: string) => void, string]>([
   [
     "publish's first step renamed",
     (sail) => replaceAll(sail, PUBLISH_FILE, "'describe'", "'draft'"),
@@ -2446,10 +2434,7 @@ test
   60_000,
 );
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ('a call whose every step is journaled, but not itself, is journaled on resume from its steps: its result is written, and no step runs again', async () => {
+test('a call whose every step is journaled, but not itself, is journaled on resume from its steps: its result is written, and no step runs again', async () => {
   await withTempRepo(async (repo) => {
     const stopped = await stoppedTwoStep(repo.dir, (_, controller) => ({
       consumers: [abortOnAppend(controller, 'publish#1/open')],
@@ -2478,10 +2463,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  ("a two-step stage in a group: its step lines interleave with its sibling's call line, its call line carries the group, and a resume after an abort runs only what isn't journaled; a reordered group is still a change", async () => {
+test("a two-step stage in a group: its step lines interleave with its sibling's call line, its call line carries the group, and a resume after an abort runs only what isn't journaled; a reordered group is still a change", async () => {
   await withTempRepo(async (repo) => {
     const slow: ScriptedAnswer = { ...DESCRIBED, delayMs: 1500 } as ScriptedAnswer;
     const stopped = await withTempRepo(async (from) => {

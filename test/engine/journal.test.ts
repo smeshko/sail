@@ -231,10 +231,7 @@ const DISAGREEING: [string, NewJournalEntry, string][] = [
   ],
 ];
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each(DISAGREEING)('a journal holding %s is refused where it is read, naming its line', (_, bad, why) => {
+test.each(DISAGREEING)('a journal holding %s is refused where it is read, naming its line', (_, bad, why) => {
   const dir = runDir();
   createJournal(dir);
   appendJournal(dir, entry('spec'), at(1));
@@ -242,10 +239,7 @@ test
   expect(() => readJournal(dir)).toThrow(`${join(dir, JOURNAL_FILE)}:2 ${why}`);
 });
 
-// biome-ignore format: TDD-PENDING TASK-005
-test
-  .skip // TDD-PENDING TASK-005
-  .each(DISAGREEING)('an append refuses %s, a bug in sail, and writes nothing', (_, bad, why) => {
+test.each(DISAGREEING)('an append refuses %s, a bug in sail, and writes nothing', (_, bad, why) => {
   const dir = runDir();
   createJournal(dir);
   expect(() => appendJournal(dir, bad, at(1))).toThrow(`a journal entry ${why}, a bug in sail`);
