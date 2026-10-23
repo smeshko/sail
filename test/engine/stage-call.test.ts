@@ -621,3 +621,19 @@ test("an optional fromStep() the earlier step's output leaves out is bound to no
     });
   });
 });
+
+test('runCall refuses a multi-step stage with problems before anything is written: no call directory (review R1-9)', async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const broken = stage('publish', {
+      consumes: { ticketKey: value(TicketKey) },
+      output: PrInfo,
+      steps: [describe, script('open', { run: './open.sh', output: PrInfo, timeoutSeconds: -1 })],
+    });
+    await expect(runCall(s.request(broken))).rejects.toThrow(
+      "step 'open': timeoutSeconds must be a positive number: -1",
+    );
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+    expect(s.events).toEqual([]);
+  });
+});
