@@ -93,12 +93,17 @@ export default workflow(
         continue;
       }
 
-      const read = (
-        await run.stage(checks, { pr: number, headSha: head, required: ['test'], tries: 4, intervalSeconds: 1 })
-      ).output;
+      // A wait the step can't finish, killed at its timeout or broken by the host, hands back like one that ran out.
+      const waited = await run.stage(
+        checks,
+        { pr: number, headSha: head, required: ['test'], tries: 4, intervalSeconds: 1 },
+        { onError: 'return' },
+      );
+      if (waited.outcome === 'error') return giveUp('checks unreadable', waited.reason);
+      const read = waited.output;
       const bad = read.checks.filter((check) => check.status !== 'passed' && check.status !== 'skipped');
       if (read.verdict === 'pending') {
-        return giveUp('checks still pending', bad.length === 0 ? 'no check ran' : listChecks(bad));
+        return giveUp('checks still pending', read.checks.length === 0 ? 'no check ran' : listChecks(read.checks));
       }
       if (read.verdict === 'failed') {
         if (last) return giveUp('checks failed', listChecks(bad));

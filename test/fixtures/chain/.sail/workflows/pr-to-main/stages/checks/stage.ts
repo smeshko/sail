@@ -1,6 +1,6 @@
 // checks: waits for the required checks on the head the branch was pushed at, and gives a verdict. `failed` when any
-// check failed, `passed` once every required name is present and none is pending, `pending` otherwise: an empty read,
-// before any check registered, is pending, never passed.
+// check failed, `passed` once every required name has passed and none is pending, `pending` otherwise: an empty read,
+// before any check registered, is pending, never passed, and so is a required check that was skipped.
 import { script, value, z } from 'sail';
 
 export const CheckRead = z.object({ name: z.string(), status: z.enum(['pending', 'passed', 'failed', 'skipped']) });
