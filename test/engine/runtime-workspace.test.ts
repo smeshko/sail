@@ -487,6 +487,33 @@ test("a stage consuming gitDiff('main...HEAD') finds the run's patch in $STAGE_I
   });
 });
 
+test("a stage of one step whose step consumes gitDiff('main...HEAD') finds the run's patch in $STAGE_IN, as the step alone does (review R1-6)", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = stubConsumingDiff(repo);
+    edit(
+      sail,
+      'stages/tests/stage.ts',
+      "import { gitDiff, script, z } from 'sail';",
+      "import { gitDiff, script, stage, z } from 'sail';",
+    );
+    edit(sail, 'stages/tests/stage.ts', "export const tests = script('tests', {", "const run = script('run', {");
+    writeFileSync(
+      join(sail, 'stages/tests/stage.ts'),
+      `${textOf(join(sail, 'stages/tests/stage.ts'))}\nexport const tests = stage('tests', { produces: { 'junit.xml': 'file' }, output: TestReport, steps: [run] });\n`,
+    );
+    const end = await ran(repo.dir, { until: 'tests' });
+    const result = resultOf(end.dir, '03-tests/call-1');
+    expect([result.key, result.consumed]).toEqual([
+      'tests#1',
+      { diff: 'gitDiff(main...HEAD)', since: 'gitDiff(main)' },
+    ]);
+    expect(patched(textOf(join(end.dir, '03-tests', 'call-1', 'in', 'diff.patch')))).toEqual([
+      'README.md',
+      'src/made.ts',
+    ]);
+  });
+});
+
 test('a gitDiff range the workspace refuses fails the run with workflow_failed, naming the binding, and the call is never written', async () => {
   await withTempRepo(async (repo) => {
     stubConsumingDiff(repo, 'main..HEAD');
