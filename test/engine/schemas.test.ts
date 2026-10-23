@@ -772,10 +772,7 @@ test("result: a multi-step call's outcome must be its last step's", () => {
   ).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('result: a multi-step call lists the steps that ran, at least one: a call its first step stopped validates, and one with no steps does not', () => {
+test('result: a multi-step call lists the steps that ran, at least one: a call its first step stopped validates, and one with no steps does not', () => {
   const stopped = {
     ...multiStepResult,
     outcome: 'blocked',
@@ -787,10 +784,7 @@ test
   expect(paths('sail.result.v1', { ...stopped, steps: [] })).toEqual(['/steps']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('result: a blocked multi-step call gives its reason, and one that is not blocked gives none', () => {
+test('result: a blocked multi-step call gives its reason, and one that is not blocked gives none', () => {
   const blocked = {
     ...multiStepResult,
     outcome: 'blocked',
@@ -1159,10 +1153,7 @@ test('event: intake:start takes the kind builtin, and neither a stage nor a step
   expect(paths('sail.event.v1', { ...stepStart, kind: 'builtin' })).toEqual(['/kind']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ("event: a step's start and end carry its try, as a call's do", () => {
+test("event: a step's start and end carry its try, as a call's do", () => {
   const start = stamped(stepStartEvent(OPEN, 2, 2, 'script', 2));
   const end = stamped(stepEndEvent(OPEN, 2, 'passed', 2));
   expect([validateDocument('sail.event.v1', start), validateDocument('sail.event.v1', end)]).toEqual([[], []]);
@@ -1174,10 +1165,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-001
-test
-  .skip // TDD-PENDING TASK-001
-  ('event: a step:end carries its errors exactly when the step ended in error', () => {
+test('event: a step:end carries its errors exactly when the step ended in error', () => {
   const failed = stamped(stepEndEvent(OPEN, 2, 'error'));
   expect(validateDocument('sail.event.v1', { ...failed, errors: [portError] })).toEqual([]);
   expect(paths('sail.event.v1', failed)).toEqual(['/errors']);

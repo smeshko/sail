@@ -667,6 +667,7 @@
       "unevaluatedProperties": false
     },
     "stepStart": {
+      "description": "a try of one step of a multi-step call starting, under the step's key",
       "type": "object",
       "$ref": "#/$defs/callEnvelope",
       "properties": {
@@ -679,10 +680,11 @@
         "model": { "type": "string" },
         "command": { "type": "string" }
       },
-      "required": ["stage", "step", "index", "of", "kind"],
+      "required": ["stage", "step", "index", "of", "kind", "try"],
       "unevaluatedProperties": false
     },
     "stepEnd": {
+      "description": "a try of one step ending, with the result it wrote; errors exactly when the outcome is error",
       "type": "object",
       "$ref": "#/$defs/callEnvelope",
       "properties": {
@@ -692,7 +694,14 @@
         "resultPath": { "$ref": "#/$defs/resultPath" },
         "errors": { "$ref": "#/$defs/errors" }
       },
-      "required": ["step", "outcome", "resultPath"],
+      "required": ["step", "try", "outcome", "resultPath"],
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+          "then": { "properties": { "errors": true }, "required": ["errors"] },
+          "else": { "properties": { "errors": false } }
+        }
+      ],
       "unevaluatedProperties": false
     },
     "loopIteration": {

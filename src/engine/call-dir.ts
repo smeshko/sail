@@ -9,6 +9,8 @@
 //   NN-<stage>/call-N/session.log an agent step's transcript
 //   NN-<stage>/call-N/try-M/      a later try of the same call, after an interruption or to correct an agent step's
 //                                 output, with its own in/, logs and result.json
+//   NN-<stage>/call-N/steps/      a multi-step call's steps: `<i>-<step>/` each, with the step's own in/, logs and
+//                                 result.json, and its later tries in try-M/ below it
 //
 // $STAGE_OUT is the call directory itself, not an `out/` below it, because the golden run directory records produced
 // files beside the logs (`03-tests/call-1/junit.xml`). So the engine's own names are reserved there.
@@ -37,6 +39,7 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'result.json',
   'prompt.md',
   'session.log',
+  'steps',
 ]);
 
 /** A name that stays directly inside the directory it is joined to: no separator, and not `.` or `..`. */
