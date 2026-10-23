@@ -144,6 +144,8 @@ export const compiles = workflow('compiles', { intake: ticket }, async (run) => 
   read(none);
 
   const p = await run.stage(publish, { ticket: run.input, spec: s.files['spec.md'] });
+  // describe, an agent step before open, may block the stage: blocked is ruled out before the output is read.
+  if (p.outcome === 'blocked') return run.fail(`publish blocked: ${p.reason}`);
   const settled: 'passed' | 'failed' = p.outcome;
   read(settled, p.files['pr-body.md']);
   return p.output.url;

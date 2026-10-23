@@ -87,9 +87,10 @@ const describe = agent('describe', { prompt: './describe.md', output: Output, pe
 const open = script('open', { run: './open.sh', output: Output });
 const publish = stage('publish', { output: Output, steps: [describe, open] });
 
-// A stage's outcome is its last step's: this one ends in a script, so it passes or fails, and is never done.
+// A stage's outcome is its last step's, or the one an earlier step stopped it with: this one ends in a script, after an
+// agent that may block, so it passes, fails or is blocked, and is never done.
 declare const outcome: OutcomeOf<typeof publish>;
-export const settled: ScriptOutcome = outcome;
+export const settled: ScriptOutcome | 'blocked' = outcome;
 // @ts-expect-error TS2367: a stage that ends in a script step can't end done
 export const done = outcome === 'done';
 
