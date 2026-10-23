@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# The open stage: pushes HEAD as the run's branch, $BRANCH, and opens the pull request into main, labelled sail, through
-# `sail port codehost`. It then comments the pull request's link on the ticket, through `sail port ticket-source`. A
-# comment that fails is tried again, three tries a second apart, since a failed step fails the run for good once its
-# pull request is open; a third failure fails the step. Its last stdout line is the pull request as the code host gave
-# it.
+# The open step of publish: pushes HEAD as the run's branch, $BRANCH, and opens the pull request into main, labelled
+# sail, through `sail port codehost`, with the title and the body describe left. It then comments the pull request's
+# link on the ticket, through `sail port ticket-source`. A comment that fails is tried again, three tries a second
+# apart, since a failed step fails the run for good once its pull request is open; a third failure fails the step. Its
+# last stdout line is the pull request as the code host gave it.
 set -euo pipefail
 
 ticket=$(cat "$INPUT_TICKETKEY")

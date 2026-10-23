@@ -22,7 +22,7 @@ const PROMPT = 'workflows/ticket-to-pr/stages/spec/prompt.md';
 const EDIT = 'Keep the spec to one page.';
 const SUMMARY = 'Add --shout to greet() and the CLI, upper-casing the whole line.';
 const USAGE = 'sail run: usage: sail run --from-run <run> --stage <stage> [--continue]\n';
-const STAGES = 'describe, implement, open, self-review, spec, tests';
+const STAGES = 'implement, publish, self-review, spec, tests';
 
 const sha256 = (path: string) => new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
 const json = (...path: string[]) => JSON.parse(readFileSync(join(...path), 'utf8'));
@@ -112,9 +112,9 @@ test.each<[string, (runId: string) => string[], (dir: string) => void, (runId: s
   ],
   [
     'a stage the source never ran',
-    (runId) => ['--from-run', runId, '--stage', 'describe'],
+    (runId) => ['--from-run', runId, '--stage', 'publish'],
     (dir) => cutJournal(dir, 2),
-    (runId) => `sail run: run ${runId} never ran 'describe': sail resume ${runId} continues it\n`,
+    (runId) => `sail run: run ${runId} never ran 'publish': sail resume ${runId} continues it\n`,
   ],
 ])(
   'sail run with %s is refused with exit 3, and starts no run',

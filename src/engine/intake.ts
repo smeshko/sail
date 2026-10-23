@@ -12,7 +12,7 @@ import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
-import { type CallPaths, callPaths, createCallDir, runRelative } from './call-dir';
+import { type CallPaths, callPaths, createCallDir, runRelative, stageOut } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { type ContractError, recordFiles, validateOutput } from './contract';
 import type { LoadedIntake } from './load-workflow';
@@ -133,7 +133,7 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
       ...(request.codeHost === undefined ? {} : { codeHost: request.codeHost }),
       ...(request.workspace === undefined ? {} : { workspace: request.workspace }),
       ...(request.branchPrefix === undefined ? {} : { branchPrefix: request.branchPrefix }),
-      out: paths.dir,
+      out: stageOut(paths),
       ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
   } catch (error) {
@@ -143,7 +143,7 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
   }
   const run: StepRun =
     failure === undefined
-      ? recordTry(intake, returned, paths.dir, runDir, emit)
+      ? recordTry(intake, returned, stageOut(paths), runDir, emit)
       : { outcome: 'error', output: null, files: {}, errors: [failure], record: {} };
   const finishedAt = clock();
 

@@ -33,16 +33,16 @@ function groups(markup: string): string[] {
     });
 }
 
-test("the golden run's nine cards are grouped: intake and spec, then fix's iteration 1 and iteration 2, then describe and open", () => {
+test("the golden run's eight cards are grouped: intake and spec, then fix's iteration 1 and iteration 2, then publish", () => {
   const markup = renderRun(foldRun(readEvents(GOLDEN_RUN)), summaryOf(GOLDEN_RUN), initialUi(0), NOW).value;
   expect(groups(markup)).toEqual([
     '-: intake#1 spec#1',
     'fix · iteration 1 of 3: implement#1 tests#1',
     'fix · iteration 2 of 3: implement#2 tests#2 self-review#1',
-    '-: describe#1 open#1',
+    '-: publish#1',
   ]);
   expect(markup).toContain('<span class="pill p-fail">failed</span>');
-  expect(markup.match(/data-action="select-card"/g)?.length).toBe(9);
+  expect(markup.match(/data-action="select-card"/g)?.length).toBe(8);
 });
 
 test('the golden run view shows its loop, its eight routes, $1.35 of its $25.00 budget, its PR and sail show', () => {
@@ -54,13 +54,12 @@ test('the golden run view shows its loop, its eight routes, $1.35 of its $25.00 
     'tests#1 failed → implement#2',
     'implement#2 done → tests#2',
     'tests#2 passed → self-review#1',
-    'self-review#1 done → describe#1',
-    'describe#1 done → open#1',
-    'open#1 passed → end',
+    'self-review#1 done → publish#1',
+    'publish#1 passed → end',
   ]);
   expect(markup).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
-  expect(markup).toContain('<div class="stat"><b>16.1s</b><span>of 90m</span></div>');
-  expect(markup).toContain('<div class="stat"><b>9/9</b><span>calls settled</span></div>');
+  expect(markup).toContain('<div class="stat"><b>16.4s</b><span>of 90m</span></div>');
+  expect(markup).toContain('<div class="stat"><b>8/8</b><span>calls settled</span></div>');
   expect(markup).toContain(
     `<code>sail show ${GOLDEN_RUN_ID}</code><button class="btn" data-action="copy" data-text="sail show ${GOLDEN_RUN_ID}">copy</button>`,
   );

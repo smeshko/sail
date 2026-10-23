@@ -222,14 +222,14 @@ test('in Linear ADW-1 is In Progress, moved once, and its comments end with the 
   ]);
 }, 90_000);
 
-test('the claim and its comment come before the intake, the push, the pull request and the link comment are under open#1, and the worktree and the lease are released before run:end', async () => {
+test('the claim and its comment come before the intake, the push, the pull request and the link comment are under publish#1/open, and the worktree and the lease are released before run:end', async () => {
   const run = await completed();
   const types = run.events.map((event) => event.type);
   const intake = types.indexOf('intake:start');
   expect(types.indexOf('ticket:claimed')).toBeGreaterThan(-1);
   expect(types.indexOf('ticket:claimed')).toBeLessThan(intake);
   expect(types.indexOf('ticket:commented')).toBeLessThan(intake);
-  const own = run.events.filter((event) => 'key' in event && event.key === 'open#1').map((event) => event.type);
+  const own = run.events.filter((event) => 'key' in event && event.key === 'publish#1/open').map((event) => event.type);
   expect(own.filter((type) => /^(codehost|ticket):/.test(type))).toEqual([
     'codehost:pushed',
     'codehost:pr_opened',

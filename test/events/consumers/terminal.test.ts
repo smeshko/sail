@@ -505,11 +505,21 @@ test('in a terminal, the live line names the running call and its elapsed second
   const t = inTerminal();
   const [start, stepStart, stepEnd, end] = stream([
     stageStart('publish#1', 'stage', { steps: ['open'] }),
-    { type: 'step:start', key: 'publish#1/open', stage: 'publish', step: 'open', index: 1, of: 1, kind: 'script' },
+    {
+      type: 'step:start',
+      key: 'publish#1/open',
+      stage: 'publish',
+      step: 'open',
+      index: 1,
+      of: 1,
+      kind: 'script',
+      try: 1,
+    },
     {
       type: 'step:end',
       key: 'publish#1/open',
       step: 'open',
+      try: 1,
       outcome: 'passed',
       resultPath: '05-publish/call-1/steps/1-open/result.json',
     },
@@ -565,7 +575,16 @@ test('in a terminal, a stage that ends while a step of its own runs takes the st
   const t = inTerminal();
   const events = stream([
     stageStart('publish#1', 'stage', { steps: ['open'] }),
-    { type: 'step:start', key: 'publish#1/open', stage: 'publish', step: 'open', index: 1, of: 1, kind: 'script' },
+    {
+      type: 'step:start',
+      key: 'publish#1/open',
+      stage: 'publish',
+      step: 'open',
+      index: 1,
+      of: 1,
+      kind: 'script',
+      try: 1,
+    },
     stageEnd('publish#1', 'error', 900, '05-publish/call-1/result.json'),
   ]);
   for (const event of events) t.terminal.onEvent(event);
@@ -607,7 +626,16 @@ test('at trace, an event of every type prints a line of its own', () => {
     [stageStart('tests#1'), head('tests#1', '▶ tests · script', w)],
     [stageEnd('tests#1', 'done', 2500, '03-tests/call-1/result.json'), head('tests#1', '✓ done · 2.5s', w)],
     [
-      { type: 'step:start', key: 'publish#1/open', stage: 'publish', step: 'open', index: 2, of: 2, kind: 'script' },
+      {
+        type: 'step:start',
+        key: 'publish#1/open',
+        stage: 'publish',
+        step: 'open',
+        index: 2,
+        of: 2,
+        kind: 'script',
+        try: 1,
+      },
       head('publish#1/open', '▶ open · step 2/2 · script', w),
     ],
     [
@@ -615,6 +643,7 @@ test('at trace, an event of every type prints a line of its own', () => {
         type: 'step:end',
         key: 'publish#1/open',
         step: 'open',
+        try: 1,
         outcome: 'failed',
         resultPath: '05-publish/call-1/steps/2-open/result.json',
       },
@@ -1046,6 +1075,7 @@ const TWO_STEP_CALL: NewEvent[] = [
     index: 1,
     of: 2,
     kind: 'agent',
+    try: 1,
     model: 'claude-sonnet-5',
   },
   { type: 'agent:thinking', key: DESCRIBE, text: 'Summarise the change for a reviewer.' },
@@ -1076,16 +1106,18 @@ const TWO_STEP_CALL: NewEvent[] = [
     type: 'step:end',
     key: DESCRIBE,
     step: 'describe',
+    try: 1,
     outcome: 'done',
     resultPath: '05-publish/call-1/steps/1-describe/result.json',
   },
-  { type: 'step:start', key: OPEN, stage: 'publish', step: 'open', index: 2, of: 2, kind: 'script' },
+  { type: 'step:start', key: OPEN, stage: 'publish', step: 'open', index: 2, of: 2, kind: 'script', try: 1 },
   { type: 'script:exit', key: OPEN, code: 0, outcome: 'passed', durationMs: 1900, stdoutBytes: 66 },
   { type: 'output:validated', key: OPEN },
   {
     type: 'step:end',
     key: OPEN,
     step: 'open',
+    try: 1,
     outcome: 'passed',
     resultPath: '05-publish/call-1/steps/2-open/result.json',
   },
@@ -1216,5 +1248,40 @@ test("in a terminal, the live line counts a group's running calls, never naming 
     'all 0/3 running · 7s',
     undefined,
     'describe#1 running · 1s',
+  ]);
+});
+
+test("at normal, a step that ends in error prints each of its errors under the step's key, as a call's end does", () => {
+  const w = 18;
+  const events = stream([
+    stageStart('publish#1', 'stage', { steps: ['describe', 'open'] }),
+    {
+      type: 'step:start',
+      key: 'publish#1/describe',
+      stage: 'publish',
+      step: 'describe',
+      index: 1,
+      of: 2,
+      kind: 'agent',
+      try: 1,
+    },
+    {
+      type: 'step:end',
+      key: 'publish#1/describe',
+      step: 'describe',
+      try: 1,
+      outcome: 'error',
+      resultPath: '05-publish/call-1/steps/1-describe/result.json',
+      errors: [
+        { reason: 'invalid_output', message: "the output doesn't match its schema:\n→ at title" },
+        { reason: 'missing_file', message: "'pr-body.md' was not produced in $STAGE_OUT" },
+      ],
+    },
+  ]);
+  expect(render(events, 'normal').trimEnd().split('\n').slice(-4)).toEqual([
+    head('publish#1/describe', '✗ error', w),
+    detail('publish#1/describe', "invalid_output: the output doesn't match its schema:", w),
+    detail('publish#1/describe', '  → at title', w),
+    detail('publish#1/describe', "missing_file: 'pr-body.md' was not produced in $STAGE_OUT", w),
   ]);
 });

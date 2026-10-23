@@ -45,7 +45,7 @@ test('the shim runs check: 0 on a fixture copy, 3 once a binding is wrongly wire
     const check = () => Bun.spawnSync([process.execPath, shim, 'check'], { cwd: repo.dir, env: repo.env });
 
     const passing = check();
-    expect(passing.stdout.toString()).toBe('.sail/ checked: 2 workflows, 12 stages\n');
+    expect(passing.stdout.toString()).toBe('.sail/ checked: 2 workflows, 11 stages\n');
     expect(passing.exitCode).toBe(0);
 
     const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');

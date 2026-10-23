@@ -2,7 +2,7 @@
 // before the session, and each produced document read with `Bun.markdown` and checked by its validators after it. A
 // validator is a repository's code, so whatever it does, throwing included, becomes a problem of the try, never a crash
 // and never a `result.json` its schema refuses.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type {
   DerivedValue,
@@ -145,6 +145,11 @@ export interface RenderDocumentsOptions {
   values: RenderValues;
   /** The try's `$STAGE_OUT`. */
   outDir: string;
+  /**
+   * Replaces a file already there: a step's `$STAGE_OUT` is its call's, which an earlier try of the step wrote to. A
+   * one-step call's try writes into a new directory, where any file already there is a bug.
+   */
+  replace?: boolean;
 }
 
 /**
@@ -167,8 +172,11 @@ export function renderDocuments(options: RenderDocumentsOptions): { ok: true } |
       return { ok: false, message: `${of}: ${messageOf(error)}` };
     }
     try {
-      // A try's directory is new, so a file already there is a bug.
-      writeFileSync(join(options.outDir, name), text, { flag: 'wx' });
+      // A try's directory is new, so a file already there is a bug, unless `$STAGE_OUT` is shared and an earlier try
+      // of the step left it: that one is replaced, never written through.
+      const path = join(options.outDir, name);
+      if (options.replace) rmSync(path, { force: true, recursive: true });
+      writeFileSync(path, text, { flag: 'wx' });
     } catch (error) {
       return { ok: false, message: `${of} can't be written to $STAGE_OUT (${codeOf(error)})` };
     }

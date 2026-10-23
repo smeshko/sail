@@ -8,6 +8,9 @@
 // A call of a group carries `group`, the group's keys in declaration order, which the determinism guard compares with
 // the keys the workflow asks for. A `group` that doesn't hold its own line's key was written by something else, or by a
 // bug in sail: reading it throws, and so does appending it.
+//
+// A step of a multi-step call is journaled as it finishes, under `stage#call/step`, before its call's own line. A line's
+// key is what its `stage`, `call` and `step` say: one that isn't throws, read or appended.
 import { readFileSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { appendLine, createFileOnce } from './durable';
@@ -59,6 +62,15 @@ interface Scanned {
 const outsideGroup = (entry: Pick<JournalEntry, 'key' | 'group'>): boolean =>
   entry.group !== undefined && !entry.group.includes(entry.key);
 
+/**
+ * Why the entry's key isn't what its stage, call and step say, or undefined when it is. A step's line can't carry a
+ * group: `sail.journal.v1` takes only call keys in one, and a group must hold its line's own key.
+ */
+function keyProblem(entry: Pick<JournalEntry, 'key' | 'stage' | 'call' | 'step'>): string | undefined {
+  const own = `${entry.stage}#${entry.call}${entry.step === undefined ? '' : `/${entry.step}`}`;
+  return entry.key === own ? undefined : `has the key '${entry.key}', where its stage, call and step say '${own}'`;
+}
+
 function scan(path: string): Scanned {
   const text = readFileSync(path, 'utf8');
   const end = text.lastIndexOf('\n') + 1;
@@ -83,6 +95,8 @@ function scan(path: string): Scanned {
       if (issues.length > 0) throw fail(`breaks sail.journal.v1: ${issues.map(formatIssue).join('; ')}`);
       const entry = data as JournalEntry;
       if (outsideGroup(entry)) throw fail(`has a group that doesn't hold its key '${entry.key}'`);
+      const disagrees = keyProblem(entry);
+      if (disagrees !== undefined) throw fail(disagrees);
       if (entry.seq !== at) throw fail(`has seq ${entry.seq}, and its place in the journal is ${at}`);
       const first = lines.get(entry.key);
       if (first !== undefined) throw fail(`repeats key '${entry.key}', journaled at line ${first}`);
@@ -127,6 +141,8 @@ export function appendJournal(runDir: string, entry: NewJournalEntry, now: Date 
   if (issues.length > 0) {
     throw new Error(`a journal entry breaks sail.journal.v1, a bug in sail:\n${issues.map(formatIssue).join('\n')}`);
   }
+  const disagrees = keyProblem(entry);
+  if (disagrees !== undefined) throw new Error(`a journal entry ${disagrees}, a bug in sail`);
   if (torn) truncateSync(path, complete);
   appendLine(path, JSON.stringify(full));
   return full;

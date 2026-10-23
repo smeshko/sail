@@ -1,12 +1,21 @@
 // The agent kind: one try of an agent step. A scripted harness stands in for the port, so each test says what the
 // session reports and returns, and reads back what the try sent it, emitted, recorded and left in its call directory.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createFakeHarness } from '../../src/adapters/fake/harness';
-import { materialisePrepared, prepareBindings, type Supplied } from '../../src/engine/bindings';
-import { type CallPaths, callPaths, createCallDir } from '../../src/engine/call-dir';
+import { materialisePrepared, type PreparedBindings, prepareBindings, type Supplied } from '../../src/engine/bindings';
+import { type CallPaths, callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import type { ContractError } from '../../src/engine/contract';
 import { buildResult } from '../../src/engine/result';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
@@ -27,7 +36,7 @@ import {
   value,
   z,
 } from '../../src/sdk/index';
-import { recording, scripted, throwing } from '../helpers/scripted-harness';
+import { type Recorded, recording, scripted, throwing } from '../helpers/scripted-harness';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -894,5 +903,35 @@ test('only a document the session left is validated: one it removed is a missing
   expect(s.events.filter((event) => event.type.startsWith('file:')).map((event) => event.type)).toEqual([
     'file:produced',
     'file:validated',
+  ]);
+});
+
+test("a step of a multi-step call renders and records its document in its call's $STAGE_OUT, keeps its prompt and transcript beside its own $STAGE_IN, and asks under the step's key", async () => {
+  const step = documented();
+  const s = documentSetup(step);
+  const runDir = dirname(dirname(s.paths.dir));
+  const paths = stepPaths(runDir, 5, 'publish', 1, 1, 'describe');
+  createCallDir(paths);
+  const { harness, seen } = noting(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } }));
+  const base = s.context(harness);
+  const { inputs } = materialisePrepared(base.agent?.bindings as PreparedBindings, paths.stageIn);
+  const run = await agentKind.run(step, { ...base, stage: 'publish', key: 'publish#1/describe', paths, inputs });
+
+  const call = join(runDir, '05-publish', 'call-1');
+  const [request] = (harness as Recorded).requests;
+  expect([request?.key, request?.env.STAGE_OUT, request?.env.STAGE_IN]).toEqual([
+    'publish#1/describe',
+    call,
+    join(call, 'steps', '1-describe', 'in'),
+  ]);
+  expect(seen).toEqual([RENDERED]);
+  expect([run.outcome, run.files['spec.md']?.path, run.record.prompt]).toEqual([
+    'done',
+    '05-publish/call-1/spec.md',
+    expect.objectContaining({ path: '05-publish/call-1/steps/1-describe/prompt.md' }),
+  ]);
+  expect([readdirSync(call).sort(), readdirSync(paths.dir).sort()]).toEqual([
+    ['spec.md', 'steps'],
+    ['in', 'prompt.md', 'session.log'],
   ]);
 });

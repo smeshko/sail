@@ -89,7 +89,7 @@ async function bootHeadless(dashboard: Dashboard) {
   return { ids, text, click };
 }
 
-test("the real bundle boots headless: both repositories, the golden run's nine cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
+test("the real bundle boots headless: both repositories, the golden run's eight cards and its $1.35, then FAKE-2's denial on the permissions tab", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
@@ -98,7 +98,7 @@ test("the real bundle boots headless: both repositories, the golden run's nine c
   expect(page.ids).toEqual(expect.arrayContaining(['rail', 'attention', 'queues', 'main', 'inspector', 'status']));
   expect(await until(() => page.text('rail').includes('<span class="nm">beta</span>'))).toBe(true);
   expect(page.text('rail')).toContain('<span class="nm">alpha</span>');
-  expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 9)).toBe(true);
+  expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(await until(() => page.text('queues').includes('<span class="pill p-pass">watched</span>'))).toBe(true);
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });

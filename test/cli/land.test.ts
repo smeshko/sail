@@ -148,7 +148,7 @@ test('sail check type-checks the fixture with land added, and lists its five pri
       code: EXIT_OK,
       stderr: '',
       head: [
-        '.sail/ checked: 3 workflows, 17 stages',
+        '.sail/ checked: 3 workflows, 16 stages',
         '',
         'workflows',
         '  land          intake ticket  .sail/workflows/land/workflow.ts',

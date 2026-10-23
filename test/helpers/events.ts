@@ -79,8 +79,14 @@ export const end = (key: string, outcome: Outcome, durationMs: number, tryNumber
   ...(outcome === 'error' ? { errors: [{ reason: 'exit_code' as const, message: 'interrupted' }] } : {}),
 });
 
-/** The step `<stage>#<call>/<step>`'s `step:start`, the `index`th of `of`. */
-export const stepStart = (key: string, index: number, of: number, kind: 'agent' | 'script'): NewEvent => ({
+/** The step `<stage>#<call>/<step>`'s `step:start`, the `index`th of `of`, as its try `tryNumber`. */
+export const stepStart = (
+  key: string,
+  index: number,
+  of: number,
+  kind: 'agent' | 'script',
+  tryNumber = 1,
+): NewEvent => ({
   type: 'step:start',
   key,
   stage: stageOf(key),
@@ -88,15 +94,17 @@ export const stepStart = (key: string, index: number, of: number, kind: 'agent' 
   index,
   of,
   kind,
+  try: tryNumber,
 });
 
-/** A step's `step:end`. */
-export const stepEnd = (key: string, index: number, outcome: Outcome): NewEvent => ({
+/** A step's `step:end`, as its try `tryNumber`: a later try's result sits in `try-M/` below the step's directory. */
+export const stepEnd = (key: string, index: number, outcome: Outcome, tryNumber = 1): NewEvent => ({
   type: 'step:end',
   key,
   step: key.split('/')[1] ?? '',
+  try: tryNumber,
   outcome,
-  resultPath: `${stageOf(key)}/call-${callOf(key)}/steps/${index}-${key.split('/')[1]}/result.json`,
+  resultPath: `${stageOf(key)}/call-${callOf(key)}/steps/${index}-${key.split('/')[1]}/${tryNumber > 1 ? `try-${tryNumber}/` : ''}result.json`,
 });
 
 export const journal = (key: string, line: number, outcome: Outcome): NewEvent => ({

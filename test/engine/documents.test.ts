@@ -1,7 +1,17 @@
 // The engine's side of documents: a step's declaration checked, a template rendered into `$STAGE_OUT`, a produced
 // document read with Bun.markdown, and its validators run, guarded, with each problem named after its file and check.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FileEntry } from '../../src/engine/contract';
@@ -423,4 +433,21 @@ test("readDocument reads 1,000 random documents' sections as Bun's HTML holds th
       sections: sectionsFromHtml(text),
     });
   }
+});
+
+test("renderDocuments told to replace writes the template afresh over what an earlier try of a step left in its call's $STAGE_OUT, through no link", () => {
+  const stageDir = tempDir();
+  writeFileSync(join(stageDir, 'plan.md'), '# Plan\n\n{{steps: the steps}}\n');
+  const outDir = tempDir();
+  const elsewhere = join(tempDir(), 'kept.md');
+  writeFileSync(elsewhere, 'kept\n');
+  writeFileSync(join(outDir, 'plan.md'), '# Plan\n\n1. half done\n');
+  symlinkSync(elsewhere, join(outDir, 'linked.md'));
+  const produces = { 'plan.md': doc('plan.md'), 'linked.md': doc('plan.md') };
+  expect(renderDocuments({ produces, stageDir, values: {}, outDir, replace: true })).toEqual({ ok: true });
+  expect(readFileSync(join(outDir, 'plan.md'), 'utf8')).toBe('# Plan\n\n{{steps: the steps}}\n');
+  expect([lstatSync(join(outDir, 'linked.md')).isSymbolicLink(), readFileSync(elsewhere, 'utf8')]).toEqual([
+    false,
+    'kept\n',
+  ]);
 });

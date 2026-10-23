@@ -235,3 +235,41 @@ test("the engine's patch for a gitDiff binding is written to $STAGE_IN as <name>
     patch,
   });
 });
+
+test("a fromStep binding the engine supplies is written as an earlier step left it: its output's field as <name>.txt, the whole output as <name>.json, and a file it produced under that file's name", () => {
+  const s = scratch();
+  const body = s.source('pr-body.md', '## Summary\n');
+  const consumes: Consumes = {
+    title: fromStep('describe').output('title'),
+    description: fromStep('describe').output(),
+    body: fromStep('describe').file('pr-body.md'),
+  };
+  const result = '05-publish/call-1/steps/1-describe/result.json';
+  const supplied: Record<string, Supplied> = {
+    title: { kind: 'fromStep', value: 'Add --shout', from: `${result}#/output/title` },
+    description: {
+      kind: 'fromStep',
+      value: { title: 'Add --shout', bodyFile: 'pr-body.md' },
+      from: `${result}#/output`,
+    },
+    body: { kind: 'fromStep', path: body, from: '05-publish/call-1/pr-body.md' },
+  };
+  expect(bindingProblems(consumes, supplied)).toEqual([]);
+  const { inputs, consumed } = materialise(consumes, supplied, s.stageIn);
+  expect(readdirSync(s.stageIn).sort()).toEqual(['description.json', 'pr-body.md', 'title.txt']);
+  expect([
+    readFileSync(join(s.stageIn, 'title.txt'), 'utf8'),
+    JSON.parse(readFileSync(join(s.stageIn, 'description.json'), 'utf8')),
+    readFileSync(join(s.stageIn, 'pr-body.md'), 'utf8'),
+  ]).toEqual(['Add --shout', { title: 'Add --shout', bodyFile: 'pr-body.md' }, '## Summary\n']);
+  expect(inputs).toEqual({
+    INPUT_TITLE: join(s.stageIn, 'title.txt'),
+    INPUT_DESCRIPTION: join(s.stageIn, 'description.json'),
+    INPUT_BODY: join(s.stageIn, 'pr-body.md'),
+  });
+  expect(consumed).toEqual({
+    title: `${result}#/output/title`,
+    description: `${result}#/output`,
+    body: '05-publish/call-1/pr-body.md',
+  });
+});

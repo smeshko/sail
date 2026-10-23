@@ -21,8 +21,9 @@ export const SOURCE_JOURNAL = [
   'implement#2 done',
   'tests#2 passed',
   'self-review#1 done',
-  'describe#1 done',
-  'open#1 passed',
+  'publish#1/describe done',
+  'publish#1/open passed',
+  'publish#1 passed',
 ];
 
 /** The runs in a repository's `.sail-runs/`, sorted: every entry but `fake/`, where the fakes keep their state. */

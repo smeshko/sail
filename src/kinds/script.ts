@@ -12,6 +12,7 @@
 // with the reason `port`. The variable is this kind's, not the preamble's: an agent step gets none.
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { delimiter, join, relative, resolve } from 'node:path';
+import { stageOut } from '../engine/call-dir';
 import { systemClock } from '../engine/clock';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { withoutRepositoryVariables } from '../engine/git-env';
@@ -198,7 +199,8 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   if (!end.started) return ended({ reason: 'not_started', message: end.message }, recorded);
 
   // What the script's port commands reported, now that no child can still be writing. The call's emit adds the key.
-  const ported = readPortEvents(portEvents, { runId: context.runId, key: `${context.stage}#${context.call}` });
+  const key = context.key ?? `${context.stage}#${context.call}`;
+  const ported = readPortEvents(portEvents, { runId: context.runId, key });
   for (const event of ported.events) emit(event);
   // One at a time: a file of a million bad lines is a million problems, more than a call takes as arguments.
   for (const message of ported.problems) unported.push({ reason: 'port', message });
@@ -251,7 +253,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     emit({ type: 'output:invalid', message: output.error.message });
     errors.push(output.error);
   }
-  const produced = recordFiles(step.produces, context.paths.dir, context.runDir);
+  const produced = recordFiles(step.produces, stageOut(context.paths), context.runDir);
   for (const [name, { path, bytes, sha256 }] of Object.entries(produced.files)) {
     emit({ type: 'file:produced', name, path, bytes, sha256 });
   }

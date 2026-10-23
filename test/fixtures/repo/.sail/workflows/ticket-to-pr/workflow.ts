@@ -3,8 +3,7 @@ import { workflow } from 'sail';
 import { ticket } from 'sail/intakes';
 import { Feedback, implement } from '../../stages/implement/stage';
 import { tests } from '../../stages/tests/stage';
-import { describe } from './stages/describe/stage';
-import { open } from './stages/open/stage';
+import { publish } from './stages/publish/stage';
 import { selfReview } from './stages/self-review/stage';
 import { spec } from './stages/spec/stage';
 
@@ -31,13 +30,9 @@ export default workflow(
       iteration.fail({ findings });
     }
 
-    const d = await run.stage(describe, { ticket: run.input, spec: s.files['spec.md'] });
-    if (d.outcome === 'blocked') return run.fail(`describe blocked: ${d.reason}`);
-    const pr = await run.stage(open, {
-      title: d.output.title,
-      body: d.files['pr-body.md'],
-      ticketKey: run.input.ticketKey,
-    });
-    return { pr: pr.output };
+    // describe, then open: a stage of two steps, which describe can stop blocked.
+    const p = await run.stage(publish, { ticket: run.input, spec: s.files['spec.md'], ticketKey: run.input.ticketKey });
+    if (p.outcome === 'blocked') return run.fail(`publish blocked: ${p.reason}`);
+    return { pr: p.output };
   },
 );

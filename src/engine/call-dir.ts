@@ -9,17 +9,23 @@
 //   NN-<stage>/call-N/session.log an agent step's transcript
 //   NN-<stage>/call-N/try-M/      a later try of the same call, after an interruption or to correct an agent step's
 //                                 output, with its own in/, logs and result.json
+//   NN-<stage>/call-N/steps/      a multi-step call's steps: `<i>-<step>/` each, with the step's own in/, logs and
+//                                 result.json, and its later tries in try-M/ below it
 //
 // $STAGE_OUT is the call directory itself, not an `out/` below it, because the golden run directory records produced
-// files beside the logs (`03-tests/call-1/junit.xml`). So the engine's own names are reserved there.
+// files beside the logs (`03-tests/call-1/junit.xml`). So the engine's own names are reserved there. A one-step call's
+// try writes its own files where it writes its produced ones. A step of a multi-step call writes its produced files
+// into the call's `call-N/`, which its steps share, and its own files into its step directory: `dir` and `out` differ.
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { createDir, syncDir } from './durable';
 
 /** The absolute paths of one call's directory and what the engine writes in it. */
 export interface CallPaths {
-  /** `$STAGE_OUT`. */
+  /** Where the engine writes the try's own files: its `$STAGE_IN`, logs, prompt, transcript and `result.json`. */
   dir: string;
+  /** `$STAGE_OUT`, when it isn't `dir`: a step's, which is its call's `call-N/`. */
+  out?: string;
   /** `$STAGE_IN`: `<dir>/in`. */
   stageIn: string;
   stdout: string;
@@ -35,6 +41,7 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'result.json',
   'prompt.md',
   'session.log',
+  'steps',
 ]);
 
 /** A name that stays directly inside the directory it is joined to: no separator, and not `.` or `..`. */
@@ -51,6 +58,11 @@ export function stageDirName(index: number, stage: string): string {
 /** `try-M`: the directory of a call's try M ≥ 2, inside `call-N/`. */
 export function isTryName(name: string): boolean {
   return /^try-[0-9]+$/.test(name);
+}
+
+/** `$STAGE_OUT` of the try `paths` are for: its `out`, or its own directory. */
+export function stageOut(paths: CallPaths): string {
+  return paths.out ?? paths.dir;
 }
 
 /** The paths of a call's try: try 1 is `call-N/` itself, and try M ≥ 2 is `call-N/try-M/`. */
@@ -88,14 +100,90 @@ export function nextTry(runDir: string, index: number, stage: string, call: numb
 }
 
 /**
+ * The paths of a try of step `stepIndex`, named `step`, of a multi-step call: its own files in
+ * `call-N/steps/<stepIndex>-<step>/`, and try M ≥ 2 in `try-M/` below that. Its `$STAGE_OUT` is `call-N/`.
+ */
+export function stepPaths(
+  runDir: string,
+  index: number,
+  stage: string,
+  call: number,
+  stepIndex: number,
+  step: string,
+  tryNumber = 1,
+): CallPaths {
+  if (!Number.isInteger(stepIndex) || stepIndex < 1) throw new Error(`step must be a whole number ≥ 1: ${stepIndex}`);
+  if (!Number.isInteger(tryNumber) || tryNumber < 1) throw new Error(`try must be a whole number ≥ 1: ${tryNumber}`);
+  const out = callPaths(runDir, index, stage, call).dir;
+  const stepDir = join(out, 'steps', `${stepIndex}-${step}`);
+  const dir = tryNumber === 1 ? stepDir : join(stepDir, `try-${tryNumber}`);
+  return {
+    dir,
+    out,
+    stageIn: join(dir, 'in'),
+    stdout: join(dir, 'stdout.log'),
+    stderr: join(dir, 'stderr.log'),
+    result: join(dir, 'result.json'),
+  };
+}
+
+/** The tries a step of a multi-step call has a directory for, in order, each once: none when its directory is missing. */
+export function existingStepTries(
+  runDir: string,
+  index: number,
+  stage: string,
+  call: number,
+  stepIndex: number,
+  step: string,
+): number[] {
+  const stepDir = stepPaths(runDir, index, stage, call, stepIndex, step).dir;
+  if (!existsSync(stepDir)) return [];
+  const later = readdirSync(stepDir)
+    .filter(isTryName)
+    .map((name) => Number(name.slice('try-'.length)))
+    .filter((tryNumber) => tryNumber >= 2);
+  return [1, ...[...new Set(later)].sort((a, b) => a - b)];
+}
+
+/** The try a step runs as next: 1 when its directory doesn't exist, else one more than its highest try. */
+export function nextStepTry(
+  runDir: string,
+  index: number,
+  stage: string,
+  call: number,
+  stepIndex: number,
+  step: string,
+): number {
+  return (existingStepTries(runDir, index, stage, call, stepIndex, step).at(-1) ?? 0) + 1;
+}
+
+/**
  * Creates the call directory and `$STAGE_IN`. A call directory is written once, so an existing one throws. A `durable`
  * one has its entries synced before this returns: the tries an agent call has on disk are where a resume reads how far
  * the call got. `stageIn: false` leaves `$STAGE_IN` out, for a call with no bindings to materialise: a built-in intake's.
+ *
+ * A step's directory sits inside its call's `$STAGE_OUT`, which the step before it may have made: `call-N/` and
+ * `steps/` are made when missing, and the step's own directory once.
  */
 export function createCallDir(paths: CallPaths, options: { durable?: boolean; stageIn?: boolean } = {}): void {
+  const stageIn = options.stageIn ?? true;
+  const out = paths.out;
+  if (out !== undefined && out !== paths.dir) {
+    if (!options.durable) {
+      mkdirSync(dirname(paths.dir), { recursive: true });
+      mkdirSync(paths.dir);
+      if (stageIn) mkdirSync(paths.stageIn);
+      return;
+    }
+    // Each one synced into its parent, from the stage's directory down: the call's first step may be the one to make it.
+    mkdirSync(dirname(dirname(out)), { recursive: true });
+    for (const dir of missing(dirname(paths.dir), dirname(out))) createDir(dir);
+    createDir(paths.dir);
+    if (stageIn) createDir(paths.stageIn);
+    return;
+  }
   const parent = dirname(paths.dir);
   mkdirSync(parent, { recursive: true });
-  const stageIn = options.stageIn ?? true;
   if (!options.durable) {
     mkdirSync(paths.dir);
     if (stageIn) mkdirSync(paths.stageIn);
@@ -105,6 +193,16 @@ export function createCallDir(paths: CallPaths, options: { durable?: boolean; st
   syncDir(dirname(parent));
   createDir(paths.dir);
   if (stageIn) createDir(paths.stageIn);
+}
+
+/** The directories from `top` down to `dir` that don't exist yet, outermost first, `top` included. */
+function missing(dir: string, top: string): string[] {
+  const absent: string[] = [];
+  for (let at = dir; !existsSync(at); at = dirname(at)) {
+    absent.unshift(at);
+    if (at === top) break;
+  }
+  return absent;
 }
 
 /**
