@@ -1,0 +1,159 @@
+{
+  "style": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The change reads like the code around it.",
+        "findings": []
+      },
+      "files": {
+        "review.md": "# style\n\nThe change reads like the code around it.\n"
+      },
+      "messages": ["style review done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      }
+    }
+  ],
+  "architecture": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The change sits where its neighbours do.",
+        "findings": []
+      },
+      "files": {
+        "review.md": "# architecture\n\nThe change sits where its neighbours do.\n"
+      },
+      "messages": ["architecture review done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      }
+    }
+  ],
+  "side-effects": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Nothing outside the change moves.",
+        "findings": []
+      },
+      "files": {
+        "review.md": "# side-effects\n\nNothing outside the change moves.\n"
+      },
+      "messages": ["side-effects review done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      }
+    }
+  ],
+  "performance": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Nothing here costs more than it must.",
+        "findings": []
+      },
+      "files": {
+        "review.md": "# performance\n\nNothing here costs more than it must.\n"
+      },
+      "messages": ["performance review done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      }
+    }
+  ],
+  "security#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "One finding must be fixed before the merge.",
+        "findings": [
+          {
+            "severity": "high",
+            "file": "chain/change.md",
+            "title": "Unchecked input",
+            "detail": "The change trusts a value it should check."
+          }
+        ]
+      },
+      "files": {
+        "review.md": "# security\n\nOne finding must be fixed before the merge.\n"
+      },
+      "messages": ["security review done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      }
+    }
+  ],
+  "security": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The change takes no input of its own.",
+        "findings": []
+      },
+      "files": {
+        "review.md": "# security\n\nThe change takes no input of its own.\n"
+      },
+      "messages": ["security review done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      }
+    }
+  ],
+  "coverage": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The change is covered.",
+        "findings": []
+      },
+      "files": {
+        "review.md": "# coverage\n\nThe change is covered.\n"
+      },
+      "messages": ["coverage review done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 1200,
+        "outputTokens": 200,
+        "costUsd": 0.02
+      }
+    }
+  ],
+  "fix": [
+    {
+      "outcome": "done",
+      "output": {
+        "commits": [],
+        "files": [],
+        "notes": "Nothing to change: the fake harness can't commit."
+      },
+      "messages": ["fix done."],
+      "turns": 1,
+      "usage": {
+        "inputTokens": 900,
+        "outputTokens": 100,
+        "costUsd": 0.03
+      }
+    }
+  ]
+}

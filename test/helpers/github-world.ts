@@ -5,6 +5,10 @@
 // pages them, 30 to a page unless asked. A fork's head names another repository, or none once the fork is deleted. Any
 // other route answers 404, so an unplanned call shows up. A missing or wrong bearer token
 // answers 401 `Bad credentials`. Each request is recorded with whether its token matched: the token is never kept.
+//
+// Two opt-in seed options let a world follow a run that pushes (ADW-109): `followHeads`, so an open pull request's head
+// moves with its branch, and `checksFor`, so a head the seed never listed still has check runs. A seed with neither
+// answers exactly as it always has.
 
 export interface WorldPull {
   readonly number: number;
@@ -72,6 +76,12 @@ export interface WorldSeedPull {
   readonly headSha?: string;
 }
 
+/** What `checksFor` answers for one head: check runs, commit statuses, or both. */
+export interface WorldChecks {
+  readonly checkRuns?: readonly WorldCheckRun[];
+  readonly statuses?: readonly WorldStatus[];
+}
+
 export interface GitHubWorldSeed {
   readonly owner: string;
   readonly repo: string;
@@ -89,6 +99,19 @@ export interface GitHubWorldSeed {
   readonly missingLabels?: 'create' | 'drop';
   /** The labels the repository has, for `missingLabels: 'drop'`. */
   readonly repositoryLabels?: readonly string[];
+  /**
+   * Whether an open pull request's head follows its branch in the bare repository: its `headSha` is read from there on
+   * every request, so a push moves it, and GitHub's merge check (409 for a head that moved) sees the new head. A pull
+   * request seeded with a `headSha` or as a fork keeps the head it was given. Off unless set.
+   */
+  readonly followHeads?: boolean;
+  /**
+   * The check runs and statuses of a head sha the seed doesn't list, as a pull request stands: `pull` is the pull
+   * request whose head it is, and `read` counts the check-run reads of that sha, this one included, from 1. Undefined
+   * answers no checks, as for a head with none. Called for every read of such a sha, so it may change its answer by
+   * `read`.
+   */
+  readonly checksFor?: (pull: WorldPull, headSha: string, read: number) => WorldChecks | undefined;
 }
 
 /** A canned answer for failure injection. */
@@ -193,6 +216,31 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     user: pr.user ?? 'sail-bot',
     fork: pr.fork ?? false,
   }));
+  /** The pull requests whose head follows their branch (`followHeads`). */
+  const followed = new Set<number>(
+    seed.followHeads === true
+      ? (seed.pullRequests ?? []).filter((pr) => pr.headSha === undefined && !pr.fork).map((pr) => pr.number)
+      : [],
+  );
+  /** Moves each followed open pull request's head to where its branch is now. */
+  const follow = () => {
+    for (const pr of pullRequests) {
+      if (!followed.has(pr.number) || pr.state !== 'open') continue;
+      const now = headOf(pr.head);
+      if (now !== undefined) pr.headSha = now;
+    }
+  };
+  /** How many times each head sha's check runs have been read, for `checksFor`. */
+  const reads = new Map<string, number>();
+  /** The checks of `sha`: the seed's, else what `checksFor` answers for the pull request at that head. */
+  const checksOf = (sha: string, counted: boolean): WorldChecks | undefined => {
+    const listed = checksBySha.get(sha);
+    if (listed !== undefined || seed.checksFor === undefined) return listed;
+    const read = (reads.get(sha) ?? 0) + (counted ? 1 : 0);
+    if (counted) reads.set(sha, read);
+    const pull = pullRequests.find((pr) => pr.headSha === sha);
+    return pull === undefined ? undefined : seed.checksFor(pull, sha, read);
+  };
   /** The check runs and statuses by head sha, from the seed. */
   const checksBySha = new Map<string, { checkRuns: readonly WorldCheckRun[]; statuses: readonly WorldStatus[] }>();
   for (const [i, pr] of (seed.pullRequests ?? []).entries()) {
@@ -233,6 +281,7 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
   const nextNumber = () => Math.max(0, ...pullRequests.map((pr) => pr.number), ...(seed.issues ?? [])) + 1;
 
   function route(method: string, path: string, query: URLSearchParams, body: unknown): WorldResponse {
+    follow();
     if (method === 'GET' && path === '') {
       return json(200, { full_name: `${owner}/${repo}`, default_branch: seed.defaultBranch, private: true });
     }
@@ -298,6 +347,7 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
         nullBody: false,
       };
       pullRequests.push(pr);
+      if (seed.followHeads === true) followed.add(pr.number);
       return json(201, node(pr));
     }
     const pull = /^\/pulls\/(\d+)$/.exec(path);
@@ -368,13 +418,13 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     }
     const checkRuns = /^\/commits\/([^/]+)\/check-runs$/.exec(path);
     if (method === 'GET' && checkRuns !== null) {
-      const runs = checksBySha.get(String(checkRuns[1]))?.checkRuns ?? [];
+      const runs = checksOf(String(checkRuns[1]), true)?.checkRuns ?? [];
       return json(200, { total_count: runs.length, check_runs: page(runs, query) });
     }
     const status = /^\/commits\/([^/]+)\/status$/.exec(path);
     if (method === 'GET' && status !== null) {
       const sha = String(status[1]);
-      const statuses = checksBySha.get(sha)?.statuses ?? [];
+      const statuses = checksOf(sha, false)?.statuses ?? [];
       const state = statuses.some((each) => each.state !== 'success')
         ? statuses.some((each) => each.state === 'failure' || each.state === 'error')
           ? 'failure'
