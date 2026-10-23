@@ -179,9 +179,10 @@ function pick(runDir: string, source: Done, binding: FromStepBinding): Supplied 
 }
 
 /**
- * A step journaled before this process, as the stage's result lists it: the journal line says what later steps read,
- * and its `result.json`, when it is one, what it spent and when it ran. One a session rewrote past reading is listed
- * with its files hashed afresh, nothing spent and the journal's time.
+ * A step journaled before this process, as the stage's result lists it. The journal line says what later steps read
+ * and what the stage records of it: its outcome, output, reason and files, hashed afresh where the journal puts them.
+ * Its `result.json`, when it is one, says only what it spent and when it ran, since a later session may have rewritten
+ * it. One rewritten past reading is listed with nothing spent and the journal's time.
  */
 function journaledStep(request: CallRequest, step: Step, index: number, entry: JournalEntry): Done {
   const path = join(request.runDir, entry.resultPath);
@@ -195,17 +196,13 @@ function journaledStep(request: CallRequest, step: Step, index: number, entry: J
   const out = stageOut(
     stepPaths(request.runDir, request.stageIndex, request.definition.name, request.call, index, step.name),
   );
-  const result = read ?? {
-    outcome: entry.outcome,
-    output: entry.output,
-    files: recordFiles(Object.fromEntries(Object.keys(entry.files).map((name) => [name, 'file'])), out, request.runDir)
-      .files,
+  const { reason: _rewritten, ...spent } = read ?? {
     usage: { costUsd: 0 },
     startedAt: entry.recordedAt,
     finishedAt: entry.recordedAt,
     durationMs: 0,
-    ...(entry.outcome === 'blocked' ? { reason: entry.reason } : {}),
   };
+  const produced = Object.fromEntries(Object.keys(entry.files).map((name) => [name, 'file']));
   return {
     step,
     index,
@@ -213,7 +210,13 @@ function journaledStep(request: CallRequest, step: Step, index: number, entry: J
     output: entry.output,
     files: entry.files,
     resultPath: entry.resultPath,
-    result: { ...result, outcome: entry.outcome, output: entry.output },
+    result: {
+      ...spent,
+      outcome: entry.outcome,
+      output: entry.output,
+      files: recordFiles(produced, out, request.runDir).files,
+      ...(entry.outcome === 'blocked' ? { reason: entry.reason } : {}),
+    },
   };
 }
 
