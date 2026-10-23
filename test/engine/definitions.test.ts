@@ -307,7 +307,7 @@ function publishWith(repoDir: string, steps: string, consumes = '{}'): string {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(
     file,
-    `import { agent, fromStep, gitDiff, script, stage, z } from 'sail';
+    `import { agent, file, fromStep, gitDiff, script, stage, z } from 'sail';
 const Description = z.object({ title: z.string(), bodyFile: z.string() });
 const Pr = z.object({ url: z.string() });
 const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] };
@@ -361,6 +361,16 @@ test.each([
     'two steps producing one file',
     "describe('describe'), open({}, { produces: { 'pr-body.md': 'file' } })",
     "stage 'publish': steps 'describe' and 'open' both produce 'pr-body.md'",
+  ],
+  [
+    'two bindings of a step that give one INPUT_ variable (review R1-8)',
+    "describe('describe'), open({ title: fromStep('describe').output('title'), Title: fromStep('describe').output('bodyFile') })",
+    "stage 'publish': step 'open': 'title' and 'Title' both give INPUT_TITLE",
+  ],
+  [
+    'two bindings of a step written to $STAGE_IN under one name (review R1-8)',
+    "describe('describe'), open({ body: fromStep('describe').file('pr-body.md'), notes: file('pr-body.md') })",
+    "stage 'publish': step 'open': 'body' and 'notes' are both written to $STAGE_IN as 'pr-body.md'",
   ],
 ])(
   'a stage wiring its steps with %s is refused at load, naming the stage, the step and the binding, and lists no stage',
