@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { bindingValues, prepareAgentPrompt } from '../engine/agent-prompt';
-import { runRelative, writeOwnFile } from '../engine/call-dir';
+import { runRelative, stageOut, writeOwnFile } from '../engine/call-dir';
 import { type ContractError, type FileEntry, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { documentProblems, renderDocuments, validateDocuments } from '../engine/documents';
 import { preamble } from '../engine/preamble';
@@ -197,7 +197,7 @@ async function ask(harness: Harness, request: HarnessRequest): Promise<Answer> {
 async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
   const emit: CallEmit = (event) => context.emit?.(event);
   const { agent } = context;
-  const key = `${context.stage}#${context.call}`;
+  const key = context.key ?? `${context.stage}#${context.call}`;
   // Its call checks both before anything is written, so either is a bug in sail.
   if (agent === undefined) throw new Error(`${key}: an agent step ran with no harness`);
   const submission = submissionSchema(step);
@@ -233,12 +233,14 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     });
   };
   if (!prompt.ok) return unstarted(prompt.message);
-  // Each document starts the session as its template, rendered fresh into this try's own directory.
+  // Each document starts the session as its template, rendered fresh into `$STAGE_OUT`: this try's own directory, or
+  // the one a multi-step call's steps share, where an earlier try of the step may have left it.
   const templates = renderDocuments({
     produces: step.produces,
     stageDir: context.stageDir,
     values: bindingValues(agent.bindings, context.inputs),
-    outDir: context.paths.dir,
+    outDir: stageOut(context.paths),
+    replace: context.paths.out !== undefined,
   });
   if (!templates.ok) return unstarted(templates.message);
   const promptPath = join(context.paths.dir, 'prompt.md');
@@ -342,8 +344,9 @@ function checkFiles(
   emit: CallEmit,
   errors: ContractError[],
 ): { files: Record<string, FileEntry>; derived: Record<string, unknown> } {
-  const produced = recordFiles(step.produces, context.paths.dir, context.runDir);
-  const checked = validateDocuments({ produces: step.produces, files: produced.files, outDir: context.paths.dir });
+  const out = stageOut(context.paths);
+  const produced = recordFiles(step.produces, out, context.runDir);
+  const checked = validateDocuments({ produces: step.produces, files: produced.files, outDir: out });
   const files: [string, FileEntry][] = [];
   for (const [name, entry] of Object.entries(produced.files)) {
     emit({ type: 'file:produced', name, path: entry.path, bytes: entry.bytes, sha256: entry.sha256 });

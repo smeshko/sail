@@ -848,10 +848,7 @@ test('a port events file of a million lines that are no events ends the step in 
   ]);
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a step of a multi-step call leaves its produced files in its call's $STAGE_OUT, and its logs and port events beside its own $STAGE_IN", async () => {
+test("a step of a multi-step call leaves its produced files in its call's $STAGE_OUT, and its logs and port events beside its own $STAGE_IN", async () => {
   const s = setup();
   const paths = stepPaths(s.context.runDir, 5, 'publish', 1, 2, 'open');
   createCallDir(paths);

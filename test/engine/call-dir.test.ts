@@ -145,10 +145,7 @@ test('createCallDir leaves in/ out when told to, for a first try and a durable l
   expect(readdirSync(step.dir)).toEqual(['in']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ below them, and its $STAGE_OUT is call-N/", () => {
+test("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ below them, and its $STAGE_OUT is call-N/", () => {
   expect(stepPaths('/r', 5, 'publish', 1, 1, 'describe')).toEqual({
     dir: '/r/05-publish/call-1/steps/1-describe',
     out: '/r/05-publish/call-1',
@@ -167,10 +164,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a step's tries are numbered from its own directory: none before it exists, then try-2 and up, each once", () => {
+test("a step's tries are numbered from its own directory: none before it exists, then try-2 and up, each once", () => {
   const runDir = tempDir();
   const stepDir = join(runDir, '05-publish', 'call-1', 'steps', '2-open');
   // The call's own later tries are no step's.
@@ -187,10 +181,7 @@ test
   expect(nextStepTry(runDir, 5, 'publish', 1, 1, 'describe')).toBe(1);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("createCallDir makes a step's directory and in/ inside its call's $STAGE_OUT, which the step before it may have made, and refuses to reuse the step's", () => {
+test("createCallDir makes a step's directory and in/ inside its call's $STAGE_OUT, which the step before it may have made, and refuses to reuse the step's", () => {
   const runDir = tempDir();
   const describe = stepPaths(runDir, 5, 'publish', 1, 1, 'describe');
   createCallDir(describe);
@@ -203,10 +194,7 @@ test
   expect(() => createCallDir(open)).toThrow('EEXIST');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a durable step directory is synced into each directory it was made in, from the stage's down", () => {
+test("a durable step directory is synced into each directory it was made in, from the stage's down", () => {
   const runDir = tempDir();
   const describe = stepPaths(runDir, 5, 'publish', 1, 1, 'describe');
   const call = join(runDir, '05-publish', 'call-1');

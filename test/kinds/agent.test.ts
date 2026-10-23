@@ -906,10 +906,7 @@ test('only a document the session left is validated: one it removed is a missing
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a step of a multi-step call renders and records its document in its call's $STAGE_OUT, keeps its prompt and transcript beside its own $STAGE_IN, and asks under the step's key", async () => {
+test("a step of a multi-step call renders and records its document in its call's $STAGE_OUT, keeps its prompt and transcript beside its own $STAGE_IN, and asks under the step's key", async () => {
   const step = documented();
   const s = documentSetup(step);
   const runDir = dirname(dirname(s.paths.dir));

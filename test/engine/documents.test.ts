@@ -435,10 +435,7 @@ test("readDocument reads 1,000 random documents' sections as Bun's HTML holds th
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("renderDocuments told to replace writes the template afresh over what an earlier try of a step left in its call's $STAGE_OUT, through no link", () => {
+test("renderDocuments told to replace writes the template afresh over what an earlier try of a step left in its call's $STAGE_OUT, through no link", () => {
   const stageDir = tempDir();
   writeFileSync(join(stageDir, 'plan.md'), '# Plan\n\n{{steps: the steps}}\n');
   const outDir = tempDir();
