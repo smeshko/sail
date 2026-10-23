@@ -1,0 +1,14 @@
+# The chain fixture's config: ticket-to-pr and pr-to-main on the real Linear, GitHub and git-worktree adapters, with the
+# fake harness. A test copies this folder whole into a temporary repository, so it needs nothing of the fixture
+# repository's.
+name: chain
+sail: ">=0.0.0 <1"
+label: sail
+defaultWorkflow: ticket-to-pr
+adapters:
+  ticketSource: { use: linear, team: ADW, inReview: In Review }
+  codeHost: { use: github, repository: o/r }
+  harness: { use: fake }
+  workspace: { use: git-worktree }
+models: { default: claude-sonnet-5, deep: claude-opus-5-5 }
+budgets: { run: { maxUsd: 25, maxMinutes: 90 } }
