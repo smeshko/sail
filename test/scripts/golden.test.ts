@@ -114,10 +114,7 @@ test.each<[string, (dir: string) => void, string]>([
   expect(stale(fresh, changedCopy(how.replaceAll(' ', '-'), change))).toEqual([`${problem}: ${REGENERATE}`]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each(VERBOSITIES.map((verbosity) => [verbosity] as const))(
+test.each(VERBOSITIES.map((verbosity) => [verbosity] as const))(
   "the committed %s view is the golden run's events rendered afresh, byte for byte",
   (verbosity) => {
     const view = readFileSync(join(fixtures, 'terminal', `${verbosity}.txt`), 'utf8');
@@ -126,10 +123,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a view rendered from a changed stream differs from the committed one: a stale view fails this test', () => {
+test('a view rendered from a changed stream differs from the committed one: a stale view fails this test', () => {
   const events = readEvents(committed).filter((event) => event.type !== 'loop:exit');
   const committedView = readFileSync(join(fixtures, 'terminal', 'normal.txt'), 'utf8');
   const rendered = renderView(events, 'normal');

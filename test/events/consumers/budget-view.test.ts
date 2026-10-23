@@ -13,10 +13,7 @@ const one = <T extends SailEvent['type']>(event: NewEvent & { type: T }): Of<T> 
 const ended = (key: string, costUsd: number): NewEvent =>
   session(key, { turns: 1, toolCalls: 0, denials: 0, usage: { costUsd } });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the run's warning and its exceeded budget print what was used of the limit, in dollars or in minutes", () => {
+test("the run's warning and its exceeded budget print what was used of the limit, in dollars or in minutes", () => {
   expect([
     budgetText(one({ type: 'budget:warning', budget: 'usd', limit: 0.5, used: 0.4077 })),
     budgetText(one({ type: 'budget:warning', budget: 'minutes', limit: 90, used: 72 })),
@@ -24,10 +21,7 @@ test
   ]).toEqual(['budget usd at $0.41 of $0.50', 'budget minutes at 72 of 90 min', 'budget usd exceeded: $0.50 of $0.50']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a raise prints what it added and the budget after it: dollars, minutes, or both', () => {
+test('a raise prints what it added and the budget after it: dollars, minutes, or both', () => {
   expect([
     raisedText(one({ type: 'budget:raised', usd: 5, budget: { maxUsd: 5.5, maxMinutes: 90 } })),
     raisedText(one({ type: 'budget:raised', minutes: 30, budget: { maxMinutes: 120 } })),
@@ -39,10 +33,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the cost row is what the sessions spent against the run's dollar budget, as raised, or alone with no budget, and absent while nothing was spent", () => {
+test("the cost row is what the sessions spent against the run's dollar budget, as raised, or alone with no budget, and absent while nothing was spent", () => {
   const rowAfter = (...list: NewEvent[]) => {
     const view = createBudgetView();
     for (const event of stamp(...list.map((event, i): [number, NewEvent] => [i, event]))) view.update(event);

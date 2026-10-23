@@ -5,10 +5,7 @@ import { emptyState, foldEvent, toSummary } from '../../src/events/summary';
 import type { NewEvent } from '../../src/events/types';
 import { end, runEnd, runStart, session, stamp, start } from '../helpers/events';
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a summary folded from a run with a $0.50 budget raised to $5.50 holds the raised budget and what was used of it, and validates as sail.summary.v1', () => {
+test('a summary folded from a run with a $0.50 budget raised to $5.50 holds the raised budget and what was used of it, and validates as sail.summary.v1', () => {
   const list: NewEvent[] = [
     runStart({ maxUsd: 0.5, maxMinutes: 90 }),
     start('spec#1', { kind: 'agent' }),

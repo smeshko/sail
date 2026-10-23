@@ -379,10 +379,7 @@ test('sail show --events prints exactly what sail FAKE-1 printed for a completed
   });
 }, 30_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each<[string[], string]>([
+test.each<[string[], string]>([
   [[], 'normal'],
   [['-q'], 'quiet'],
   [['-v'], 'verbose'],
@@ -425,10 +422,7 @@ test("sail show --events of a resumed run prints both processes' events in order
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail show --follow on a running run prints events as they are appended, and exits 0 once the run ends', async () => {
+test('sail show --follow on a running run prints events as they are appended, and exits 0 once the run ends', async () => {
   await withTempRepo(async (repo) => {
     emptySailDir(repo.dir);
     const dir = runningRun(repo.dir);
@@ -444,10 +438,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each([[['--follow']], [['--events', '--follow']]])(
+test.each([[['--follow']], [['--events', '--follow']]])(
   'sail show %p on a finished run prints the whole stream and exits 0',
   async (flags) => {
     await withTempRepo(async (repo) => {

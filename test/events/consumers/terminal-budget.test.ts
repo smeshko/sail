@@ -63,10 +63,7 @@ const RESUMED: NewEvent[] = [
 const linesOf = (out: string, ...starts: string[]) =>
   out.split('\n').filter((line) => starts.some((text) => line.trimStart().startsWith(text)));
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("the run's warning and exceeded budget print from normal and not at quiet, a step's own only at trace, and the final block's cost row is against the budget", () => {
+test("the run's warning and exceeded budget print from normal and not at quiet, a step's own only at trace, and the final block's cost row is against the budget", () => {
   const list = at(SUSPENDED);
   const trace = render(list, 'trace');
   expect({
@@ -85,10 +82,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('a resume prints its raise, and its final block has the cost of the whole run against the raised budget', () => {
+test('a resume prints its raise, and its final block has the cost of the whole run against the raised budget', () => {
   const prior = at(SUSPENDED);
   const out = render(at(RESUMED, prior.length), 'normal', { prior });
   expect(linesOf(out, '$ budget', 'cost')).toEqual([
@@ -97,10 +91,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('at trace, run:suspended prints its generic line, and budget:raised its own', () => {
+test('at trace, run:suspended prints its generic line, and budget:raised its own', () => {
   const prior = at(SUSPENDED);
   const suspended = render(prior, 'trace');
   const resumed = render(at(RESUMED, prior.length), 'trace', { prior });

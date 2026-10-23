@@ -266,6 +266,10 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
     case 'journal:append':
       state.journaledSinceRoute = true;
       if (event.fromRun !== undefined) reuseCall(state, event, event.fromRun);
+      break;
+    case 'budget:raised':
+      // The budget is the raised one from here on: `totals.budget` follows it.
+      if (state.run !== undefined && event.budget.maxUsd !== undefined) state.run.maxUsd = event.budget.maxUsd;
   }
 }
 

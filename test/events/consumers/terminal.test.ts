@@ -205,10 +205,7 @@ function visibleLive(out: string): string | undefined {
 
 // TASK-003: quiet and normal.
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  .each(['quiet', 'normal', 'verbose', 'trace'] as const)(
+test.each(['quiet', 'normal', 'verbose', 'trace'] as const)(
   'FAKE-1 at %s equals its golden view, byte for byte',
   (verbosity) => {
     expect(renderView(fake1(), verbosity)).toBe(golden(verbosity));
@@ -943,10 +940,7 @@ test('verbose shows the tail of a script that passed, and none for an agent call
 /** The `seq` of the golden run's `journal:append` for tests#1: the last event of the process a resume takes over from. */
 const RESUMED_AFTER = 52;
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then opens with the resume line and ends with the whole run', () => {
+test('FAKE-1 resumed after tests#1 prints nothing for its earlier events, then opens with the resume line and ends with the whole run', () => {
   const events = fake1();
   let out = '';
   const terminal = terminalConsumer({

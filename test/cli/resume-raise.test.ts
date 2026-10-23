@@ -98,10 +98,7 @@ test('sail resume --raise-budget 5 exits 0, with the raise in the events once', 
   }).toEqual({ code: 0, raised: 1, status: 'completed\n' });
 }, 120_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ('sail show after the raised resume prints the cost against the raised budget', async () => {
+test('sail show after the raised resume prints the cost against the raised budget', async () => {
   const { repo, runId } = await suspendedRun();
   await raisedResume();
   const shown = await sail(repo.dir, repo.env, ['show', runId]);
