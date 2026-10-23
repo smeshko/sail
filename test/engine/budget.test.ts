@@ -441,6 +441,29 @@ test("recordIn confirms an event that ends the run's events file, and throws for
   }
 });
 
+test("recordIn confirms an event that later lines follow, as a consumer's error:consumer does in the same emit, and throws for one missing among them (review R1-2)", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-budget-'));
+  try {
+    const consumerError: NewEvent = {
+      type: 'error:consumer',
+      consumer: 'terminal',
+      failed: { seq: 2, type: 'harness:session_end' },
+      message: 'boom',
+    };
+    const list = events([0, runStart()], [10, ended('spec#1', 0.3)], [10, consumerError]);
+    const file = join(dir, 'events.ndjson');
+    writeFileSync(file, list.map((event) => `${JSON.stringify(event)}\n`).join(''));
+    const record = recordIn(dir);
+    const end = list[1] as SailEvent;
+    expect(() => record(end)).not.toThrow();
+    // The session's end never reached the file, though a later line did.
+    writeFileSync(file, [list[0], list[2]].map((event) => `${JSON.stringify(event)}\n`).join(''));
+    expect(() => record(end)).toThrow('not on disk');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('suspension() gives the run:suspended and the message of a run over its dollars, and over its minutes', () => {
   expect([
     suspension({ budget: 'usd', limit: 0.5, used: 0.5029 }, 'implement#1'),
