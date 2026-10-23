@@ -105,16 +105,16 @@ test("callFile finds a stage call through stage:end, a script call's log, and a 
     step: 'describe',
     try: 1,
     outcome: 'done',
-    resultPath: '05-describe/call-1/result.json',
+    resultPath: '05-publish/call-1/steps/1-describe/result.json',
   });
   appendEvent(run, 'step:end', {
     key: 'publish#1',
     step: 'open',
     try: 1,
     outcome: 'passed',
-    resultPath: '06-open/call-1/result.json',
+    resultPath: '05-publish/call-1/steps/2-open/result.json',
   });
-  expect(callFile(run, 'publish#1', 'stderr.log')).toBe(join(run, '06-open/call-1/stderr.log'));
+  expect(callFile(run, 'publish#1', 'stderr.log')).toBe(join(run, '05-publish/call-1/steps/2-open/stderr.log'));
 });
 
 test.each([

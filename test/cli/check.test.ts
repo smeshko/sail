@@ -18,7 +18,6 @@ import { dirname, join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { editorDeclarations } from '../../src/engine/editor';
-import { writePublish } from '../helpers/fixture';
 import { dropReview } from '../helpers/review-fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { copyRun, writeStub } from '../helpers/stub-workflow';
@@ -61,7 +60,7 @@ test('check --list in the in-repo fixture groups its stages under its workflow, 
   expect(await runCaptured(['check', '--list'], inRepoFixture)).toEqual({
     code: EXIT_OK,
     stdout: [
-      '.sail/ checked: 2 workflows, 12 stages',
+      '.sail/ checked: 2 workflows, 11 stages',
       '',
       'workflows',
       '  review        intake ticket  .sail/workflows/review/workflow.ts',
@@ -74,8 +73,7 @@ test('check --list in the in-repo fixture groups its stages under its workflow, 
       '      style         agent',
       '  ticket-to-pr  intake ticket  .sail/workflows/ticket-to-pr/workflow.ts',
       '    private',
-      '      describe      agent',
-      '      open          script',
+      '      publish       stage   describe (agent), open (script)',
       '      self-review   agent',
       '      spec          agent',
       '    shared',
@@ -95,7 +93,6 @@ test('check --list orders private stages by folder, intake first, lists a multi-
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     dropReview(sail);
-    writePublish(sail);
     const write = (path: string, text: string) => {
       mkdirSync(dirname(join(sail, path)), { recursive: true });
       writeFileSync(join(sail, path), text);
@@ -159,7 +156,7 @@ test('check --list orders private stages by folder, intake first, lists a multi-
 test('check without --list prints only the summary', async () => {
   expect(await runCaptured(['check'], inRepoFixture)).toEqual({
     code: EXIT_OK,
-    stdout: '.sail/ checked: 2 workflows, 12 stages\n',
+    stdout: '.sail/ checked: 2 workflows, 11 stages\n',
     stderr: '',
   });
 });
@@ -170,7 +167,7 @@ test('a copy of the fixture checks from a subdirectory with no node_modules in r
     const { code, stdout, stderr } = await runCaptured(['check', '--list'], subdirectory(repo.dir));
     expect(stderr).toBe('');
     expect(code).toBe(EXIT_OK);
-    expect(stdout).toStartWith('../../.sail/ checked: 2 workflows, 12 stages\n');
+    expect(stdout).toStartWith('../../.sail/ checked: 2 workflows, 11 stages\n');
     expect(stdout).toContain('  ../../.sail/workflows/ticket-to-pr/workflow.ts\n');
     expect(stdout).toContain('used by ticket-to-pr  ../../.sail/stages/tests/stage.ts\n');
     expect(stdout).not.toContain(repo.dir);
@@ -505,7 +502,7 @@ test('with --list, the line that says what it wrote comes first, then the checke
     const lines = stdout.split('\n');
     expect(lines.slice(0, 4)).toEqual([
       WROTE_BOTH.trimEnd(),
-      '.sail/ checked: 2 workflows, 12 stages',
+      '.sail/ checked: 2 workflows, 11 stages',
       '',
       'workflows',
     ]);

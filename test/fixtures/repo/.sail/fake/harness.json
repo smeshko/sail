@@ -121,7 +121,7 @@
       }
     }
   ],
-  "describe": [
+  "publish/describe": [
     {
       "outcome": "done",
       "output": {

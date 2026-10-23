@@ -112,7 +112,7 @@ test("the overview shows the call's facts, output, consumed bindings, errors and
   }).value;
   expect(unread).toContain('<div class="hint">this call has no result.json yet: shown from its events</div>');
   expect(unread).toContain('<div class="code bad"><b>harness</b> the session ended before it submitted a result</div>');
-  const open = foldRun(readEvents(GOLDEN_RUN)).cards.find((entry) => entry.key === 'open#1');
+  const open = foldRun(readEvents(GOLDEN_RUN)).cards.find((entry) => entry.key === 'publish#1');
   expect(renderInspector(open, undefined, { state: 'loading' }, undefined, initialUi(0)).value).toContain(
     '<ul class="polylist"><li>codehost:pushed × 1</li><li>codehost:labelled × 1</li></ul>',
   );

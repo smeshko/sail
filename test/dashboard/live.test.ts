@@ -66,8 +66,7 @@ test('a live run shows each card appear and settle in the golden order, the fix 
     'implement#2',
     'tests#2',
     'self-review#1',
-    'describe#1',
-    'open#1',
+    'publish#1',
   ]);
   // Each card appears running, and has settled by the frame where the next one appears.
   for (const [i, key] of order.entries()) {
@@ -76,6 +75,6 @@ test('a live run shows each card appear and settle in the golden order, the fix 
     const next = frames.findIndex((frame) => frame.length === i + 2);
     if (next >= 0) expect(frames[next - 1]?.[i]).toBe(`${key}:settled`);
   }
-  expect(model.cards.map((card) => card.iteration?.iteration ?? 0)).toEqual([0, 0, 1, 1, 2, 2, 2, 0, 0]);
+  expect(model.cards.map((card) => card.iteration?.iteration ?? 0)).toEqual([0, 0, 1, 1, 2, 2, 2, 0]);
   expect(model.end).toEqual({ status: 'completed' });
 }, 30_000);

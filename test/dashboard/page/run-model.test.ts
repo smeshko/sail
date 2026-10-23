@@ -21,12 +21,11 @@ const GOLDEN_KEYS = [
   'implement#2',
   'tests#2',
   'self-review#1',
-  'describe#1',
-  'open#1',
+  'publish#1',
 ];
 const STAGE_NAMES = ['spec', 'implement', 'tests', 'self-review', 'describe', 'open', 'lint', 'intake', 'ticket'];
 
-test("the golden run folds into nine settled cards with its summary's outcomes, durations and costs, its routes, its PR and no pending card", () => {
+test("the golden run folds into eight settled cards with its summary's outcomes, durations and costs, its routes, its PR and no pending card", () => {
   const model = foldRun(golden());
   const summary = JSON.parse(readFileSync(join(GOLDEN_RUN, 'summary.json'), 'utf8')) as Summary;
   expect(model.cards.map((card) => card.key)).toEqual(GOLDEN_KEYS);
@@ -46,7 +45,6 @@ test("the golden run folds into nine settled cards with its summary's outcomes, 
     'claude-sonnet-5',
     undefined,
     'claude-opus-5-5',
-    'claude-sonnet-5',
     undefined,
   ]);
   expect(model.routes).toEqual(summary.routes as never);
@@ -69,7 +67,7 @@ test("each card records the loop iteration open when its call started: fix 1 of 
   const iterations = foldRun(golden()).cards.map((card) =>
     card.iteration === undefined ? '-' : `${card.iteration.loop} ${card.iteration.iteration}/${card.iteration.max}`,
   );
-  expect(iterations).toEqual(['-', '-', 'fix 1/3', 'fix 1/3', 'fix 2/3', 'fix 2/3', 'fix 2/3', '-', '-']);
+  expect(iterations).toEqual(['-', '-', 'fix 1/3', 'fix 1/3', 'fix 2/3', 'fix 2/3', 'fix 2/3', '-']);
 });
 
 test('folded event by event, tests#1 runs from its stage:start with no card after it, and settles failed at its stage:end', () => {
@@ -88,7 +86,7 @@ test('folded event by event, tests#1 runs from its stage:start with no card afte
   ]);
   const startedAt = Date.parse(events[start]?.ts ?? '');
   expect(card && elapsedMs(card, startedAt + 2500)).toBe(2500);
-  expect(model.pending.map((pending) => pending.stage)).toEqual(['describe', 'open', 'self-review']);
+  expect(model.pending.map((pending) => pending.stage)).toEqual(['publish', 'self-review']);
   for (const event of events.slice(start + 1, end + 1)) applyEvent(model, event);
   expect([card?.state, card?.outcome, card?.durationMs, card && elapsedMs(card, startedAt + 99_999)]).toEqual([
     'settled',

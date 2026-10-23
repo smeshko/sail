@@ -1,6 +1,6 @@
 {
   "recording": 1,
-  "key": "describe#1",
+  "key": "publish#1/describe",
   "tries": [
     {
       "try": 1,
@@ -17,7 +17,7 @@
         {
           "type": "harness:session_start",
           "adapter": "fake",
-          "sessionId": "fake-session-describe-1",
+          "sessionId": "fake-session-publish-1-describe",
           "model": "claude-sonnet-5"
         },
         {
@@ -70,7 +70,7 @@
         },
         {
           "type": "harness:session_end",
-          "sessionId": "fake-session-describe-1",
+          "sessionId": "fake-session-publish-1-describe",
           "outcome": "done",
           "reason": "submitted",
           "turns": 4,
@@ -91,7 +91,7 @@
           "title": "Add a --shout flag to the greet command (FAKE-1)",
           "bodyFile": "pr-body.md"
         },
-        "sessionId": "fake-session-describe-1",
+        "sessionId": "fake-session-publish-1-describe",
         "usage": {
           "inputTokens": 3000,
           "cacheReadTokens": 12500,

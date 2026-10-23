@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { fakeAdapters } from '../helpers/adapters';
-import { copyFixture, edit, writePublish } from '../helpers/fixture';
+import { copyFixture, edit } from '../helpers/fixture';
 import { type Captured, runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -24,13 +24,6 @@ const ROSTER = [
   '  budget    run $25, 90 min',
   'intake ticket  builtin',
   '  produces  ticket.json, brief.md',
-  'stage describe  agent  repo:.sail/workflows/ticket-to-pr/stages/describe',
-  '  model     claude-sonnet-5',
-  '  budget    20 turns, $1, 5 min',
-  '  produces  pr-body.md',
-  '  read      **',
-  '  write     $STAGE_OUT/**',
-  '  commands  git log *, git diff *',
   'stage implement  agent  repo:.sail/stages/implement',
   '  model     claude-sonnet-5',
   '  budget    60 turns, $5, 20 min',
@@ -38,8 +31,15 @@ const ROSTER = [
   '  read      **',
   '  write     src/**, test/**, $STAGE_OUT/**',
   '  commands  bun test*, git add *, git commit *, git diff *',
-  'stage open  script  repo:.sail/workflows/ticket-to-pr/stages/open',
-  '  exit      passed 0',
+  'stage publish  steps  repo:.sail/workflows/ticket-to-pr/stages/publish',
+  '  step describe  agent',
+  '    model     claude-sonnet-5',
+  '    budget    20 turns, $1, 5 min',
+  '    produces  pr-body.md',
+  '    read      **',
+  '    write     $STAGE_OUT/**',
+  '    commands  git log *, git diff *',
+  '  step open  script',
   'stage self-review  agent  repo:.sail/workflows/ticket-to-pr/stages/self-review',
   '  model     claude-opus-5-5',
   '  budget    30 turns, $2, 10 min',
@@ -179,7 +179,7 @@ test('--dry-run --until spec exits 0 with the roster, and --until naming no stag
     code: EXIT_REFUSED,
     stdout: '',
     stderr:
-      "sail FAKE-1: --until names 'nope', which is no stage of workflow 'ticket-to-pr': its stages are describe, implement, open, self-review, spec, tests\n",
+      "sail FAKE-1: --until names 'nope', which is no stage of workflow 'ticket-to-pr': its stages are implement, publish, self-review, spec, tests\n",
   });
   expect(unfit.after).toEqual(unfit.before);
 }, 60_000);
@@ -200,7 +200,7 @@ test('--dry-run with --dispatch is refused with exit 3, and writes nothing', asy
 }, 60_000);
 
 test('--dry-run prints a stage of several steps as its steps, each with what it declares', async () => {
-  const { code, stdout } = await dryIn(['FAKE-1', '--dry-run'], (repo) => writePublish(join(repo.dir, '.sail')));
+  const { code, stdout } = await dryIn(['FAKE-1', '--dry-run']);
   const lines = stdout.split('\n');
   const from = lines.indexOf('stage publish  steps  repo:.sail/workflows/ticket-to-pr/stages/publish');
   const to = lines.findIndex((line, i) => i > from && line.startsWith('stage '));

@@ -148,13 +148,13 @@ test('a seeded run whose edited workflow asks for another call before the stage 
     edit(
       join(repo.dir, '.sail'),
       WORKFLOW,
-      '    const d = await run.stage(describe',
-      '    await run.stage(tests);\n    const d = await run.stage(describe',
+      '    const p = await run.stage(publish',
+      '    await run.stage(tests);\n    const p = await run.stage(publish',
     );
-    const end = await seeded(repo, from.runId, 'describe', { continue: true });
+    const end = await seeded(repo, from.runId, 'publish', { continue: true });
     expect([endOf(end), 'refused' in end ? '' : end.message, journaled(dirOf(end)).at(-1)]).toEqual([
       { status: 'failed', stopReason: 'determinism_violation' },
-      `the workflow asks for tests#3 after the calls reused from run ${from.runId}, not describe#1: it changed since that run`,
+      `the workflow asks for tests#3 after the calls reused from run ${from.runId}, not publish#1: it changed since that run`,
       'self-review#1 done',
     ]);
   });

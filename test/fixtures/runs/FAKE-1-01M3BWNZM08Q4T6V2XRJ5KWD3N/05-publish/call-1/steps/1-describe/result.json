@@ -1,9 +1,10 @@
 {
   "schema": "sail.result.v1",
   "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
-  "stage": "describe",
+  "stage": "publish",
   "call": 1,
-  "key": "describe#1",
+  "step": "describe",
+  "key": "publish#1/describe",
   "kind": "agent",
   "outcome": "done",
   "output": {
@@ -12,7 +13,7 @@
   },
   "files": {
     "pr-body.md": {
-      "path": "05-describe/call-1/pr-body.md",
+      "path": "05-publish/call-1/pr-body.md",
       "bytes": 349,
       "sha256": "d6aa2aea3928fdb5e4ff4a8c407d03898d1aa62393fd142e063f18560ecfedba"
     }
@@ -21,13 +22,13 @@
     "ticket": "00-intake/call-1/result.json#/output",
     "spec": "01-spec/call-1/spec.md"
   },
-  "startedAt": "2026-09-25T09:00:13.100Z",
-  "finishedAt": "2026-09-25T09:00:14.200Z",
+  "startedAt": "2026-09-25T09:00:13.200Z",
+  "finishedAt": "2026-09-25T09:00:14.300Z",
   "durationMs": 1100,
   "try": 1,
   "validationTry": 1,
   "prompt": {
-    "path": "05-describe/call-1/prompt.md",
+    "path": "05-publish/call-1/steps/1-describe/prompt.md",
     "untrusted": 0,
     "fragments": [
       {
@@ -44,7 +45,7 @@
   "harness": {
     "adapter": "fake",
     "model": "claude-sonnet-5",
-    "sessionId": "fake-session-describe-1",
+    "sessionId": "fake-session-publish-1-describe",
     "turns": 4,
     "toolCalls": 0,
     "denials": 0

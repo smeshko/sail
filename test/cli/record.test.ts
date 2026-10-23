@@ -29,7 +29,9 @@ import { withTempRepo } from '../helpers/temp-repo';
 
 /** The OAuth token of the test: 40 characters of the shapes a real one has, which the scripted sessions echo. */
 const TOKEN = 'sk-ant-oat01-Tq7Zk3b9QfVwX7mLp2RtYh8N';
-const KEYS = ['spec#1', 'implement#1', 'implement#2', 'self-review#1', 'describe#1'];
+const KEYS = ['spec#1', 'implement#1', 'implement#2', 'self-review#1', 'publish#1/describe'];
+/** A recording's file name: its key, with the step's `/` as `+`. */
+const fileOf = (key: string): string => `${key.replace('/', '+')}.json`;
 /** The fake harness's script for the fixture: the answers the scripted sessions submit, in the order the run asks. */
 const SCRIPT = JSON.parse(readFileSync(join(FIXTURE_SAIL, 'fake', 'harness.json'), 'utf8')) as Record<
   string,
@@ -147,14 +149,14 @@ function scenario(): Promise<Scenario> {
 test('sail FAKE-1 --record rec completes and writes one recording per agent call key, plus journal.txt', async () => {
   const { record } = await scenario();
   expect({ code: record.code, stderr: record.stderr }).toEqual({ code: 0, stderr: '' });
-  expect(Object.keys(record.files).sort()).toEqual([...KEYS.map((key) => `${key}.json`), 'journal.txt'].sort());
+  expect(Object.keys(record.files).sort()).toEqual([...KEYS.map(fileOf), 'journal.txt'].sort());
   expect(record.files['journal.txt']).toBe(record.journal);
 });
 
 test('each recording holds the events, the provider messages with a tool result, the output, usage and produced files', async () => {
   const { record } = await scenario();
   for (const [index, key] of KEYS.entries()) {
-    const recording = Recording.parse(JSON.parse(record.files[`${key}.json`] ?? 'null'));
+    const recording = Recording.parse(JSON.parse(record.files[fileOf(key)] ?? 'null'));
     const [recorded] = recording.tries;
     expect(recording.key).toBe(key);
     expect(recorded?.events.map((event) => event.type)).toContain('harness:session_start');
@@ -194,7 +196,7 @@ test('no form of the token and no temp path is left in any recorded byte', async
 
 test('recording changes no run file: the recorded run has the unrecorded run keys, outcomes, outputs and files', async () => {
   const { recordedRun, plain } = await scenario();
-  expect(recordedRun.map(({ key, outcome }) => `${key} ${outcome}`)).toContain('describe#1 done');
+  expect(recordedRun.map(({ key, outcome }) => `${key} ${outcome}`)).toContain('publish#1/describe done');
   expect(recordedRun).toEqual(plain);
 });
 
@@ -245,7 +247,7 @@ test('sail resume --record keeps spec#1.json from the suspended run, records the
     });
     expect({ code: resumed.code, stderr: resumed.stderr }).toEqual({ code: 0, stderr: '' });
     const after = filesOf(rec);
-    expect(Object.keys(after).sort()).toEqual([...KEYS.map((key) => `${key}.json`), 'journal.txt'].sort());
+    expect(Object.keys(after).sort()).toEqual([...KEYS.map(fileOf), 'journal.txt'].sort());
     expect(after['spec#1.json']).toBe(afterFirst['spec#1.json']);
     expect(after['journal.txt']).toBe(resumed.journal);
   });

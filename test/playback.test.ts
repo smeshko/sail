@@ -78,7 +78,7 @@ test('the committed scripted set is what a fresh recording of the scripted run w
   expect(unmade.record).toBeUndefined();
   expect(staleSet(freshSet, join(SESSIONS, SCRIPTED_SET))).toEqual([]);
   expect(filesIn(join(SESSIONS, SCRIPTED_SET))).toEqual(
-    ['describe#1', 'implement#1', 'implement#2', 'self-review#1', 'spec#1']
+    ['implement#1', 'implement#2', 'publish#1+describe', 'self-review#1', 'spec#1']
       .map((key) => `${key}.json`)
       .concat('journal.txt')
       .sort(),
@@ -89,9 +89,9 @@ test('recording the scripted run changes nothing it writes: the recorded run is 
   expect(runDirDiff(recordedRun, committedRun)).toBe('');
 });
 
-test('playing the scripted set back writes the committed golden run, all 50 files, byte for byte', () => {
+test('playing the scripted set back writes the committed golden run, all 51 files, byte for byte', () => {
   expect(unmade[SCRIPTED_SET]).toBeUndefined();
-  expect(filesIn(committedRun)).toHaveLength(50);
+  expect(filesIn(committedRun)).toHaveLength(51);
   expect(runDirDiff(scriptedPlayback, committedRun)).toBe('');
 });
 
@@ -120,8 +120,8 @@ test('a golden changed in one field fails with a diff naming the file, the line 
 test('a played-back set with one recording removed fails by naming it', () => {
   const missing = join(temp, 'missing-set');
   cpSync(join(SESSIONS, SCRIPTED_SET), missing, { recursive: true });
-  rmSync(join(missing, 'describe#1.json'));
-  expect(staleSet(freshSet, missing)).toEqual(['describe#1.json is missing: run bun run golden']);
+  rmSync(join(missing, 'publish#1+describe.json'));
+  expect(staleSet(freshSet, missing)).toEqual(['publish#1+describe.json is missing: run bun run golden']);
 });
 
 // One plain test per recorded set, so none run while the list is empty.

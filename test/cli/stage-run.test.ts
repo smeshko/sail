@@ -18,7 +18,7 @@ import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import { SPEC, SPEC_STAGE, submits, TICKET, writeAgentFixture } from '../helpers/agent-fixture';
-import { edit, write, writePublish } from '../helpers/fixture';
+import { edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -371,7 +371,7 @@ test.each([
 
 test('a multi-step stage is refused before anything is written: one can not run yet', async () => {
   await withTempRepo(async (repo) => {
-    writePublish(fixtureCopy(repo));
+    fixtureCopy(repo);
     const argv = ['stage', 'run', '.sail/workflows/ticket-to-pr/stages/publish'];
     expect(await runCaptured(argv, repo.dir)).toEqual({
       code: EXIT_REFUSED,

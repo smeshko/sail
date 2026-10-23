@@ -185,7 +185,7 @@ const cards = (region: string | undefined) => [...(region ?? '').matchAll(/data-
 const runQuery = (repo: string, runId: string) => `run=${encodeURIComponent(`${repo}/${runId}`)}`;
 const GOLDEN = () => m.alpha.runDir;
 
-test('boot renders the rail with alpha and beta from the first index, opens the newest run, and renders its nine cards, each region once a flush', () => {
+test('boot renders the rail with alpha and beta from the first index, opens the newest run, and renders its eight cards, each region once a flush', () => {
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
@@ -211,8 +211,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
     'implement#2',
     'tests#2',
     'self-review#1',
-    'describe#1',
-    'open#1',
+    'publish#1',
   ]);
   expect(host.regions.status).toContain('<span>ended completed</span>');
   expect(host.regions.attention).toContain('needs attention · 6');
@@ -288,7 +287,7 @@ test('a run socket closed without end reconnects after 2 s into a fresh model, o
   expect(cards(host.regions.main)).toEqual([]);
   replay(second, GOLDEN());
   host.advance(100);
-  expect(cards(host.regions.main)).toHaveLength(9);
+  expect(cards(host.regions.main)).toHaveLength(8);
   host.drop(second);
   host.advance(5000);
   expect(host.sockets.filter((socket) => socket.query.startsWith('run='))).toHaveLength(2);
@@ -328,7 +327,7 @@ test("a run stream's error is shown in the main region, and a message or a resul
   expect(host.regions.inspector).toContain(
     '<div class="hint">this call has no result.json yet: shown from its events</div>',
   );
-  expect(host.regions.main).toContain('data-key="open#1"');
+  expect(host.regions.main).toContain('data-key="publish#1"');
 });
 
 test('a result that arrives after the selection changed is not rendered', async () => {
@@ -407,7 +406,7 @@ test('keys move the cursor, Enter selects, ] and [ step, Escape deselects, i tog
   expect(host.inspector).toBe(true);
   for (let i = 0; i < 20; i++) host.press('ArrowRight');
   host.advance(100);
-  expect(cursor()).toBe('open#1');
+  expect(cursor()).toBe('publish#1');
 });
 
 test('the theme cycles and is saved, a section toggles, copy copies, follow toggles, and the stream buttons read that stream', async () => {
@@ -529,7 +528,7 @@ test("a region whose draw throws shows that it couldn't be drawn, and every othe
   expect(() => host.advance(100)).not.toThrow();
   expect(host.renders.sort()).toEqual(['attention', 'main', 'queues', 'rail', 'status']);
   expect(host.regions.rail).toContain('this part of the page could not be drawn');
-  expect(cards(host.regions.main)).toHaveLength(9);
+  expect(cards(host.regions.main)).toHaveLength(8);
 });
 
 test("a corrective try's end reads the call's result.json again though the first try's was loaded (review R2-2)", async () => {

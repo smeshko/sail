@@ -1,0 +1,50 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "publish",
+  "call": 1,
+  "key": "publish#1",
+  "outcome": "passed",
+  "output": {
+    "number": 5,
+    "url": "fake://codehost/fixture/pull/5",
+    "draft": false
+  },
+  "files": {
+    "pr-body.md": {
+      "path": "05-publish/call-1/pr-body.md",
+      "bytes": 349,
+      "sha256": "d6aa2aea3928fdb5e4ff4a8c407d03898d1aa62393fd142e063f18560ecfedba"
+    }
+  },
+  "consumed": {
+    "ticket": "00-intake/call-1/result.json#/output",
+    "spec": "01-spec/call-1/spec.md",
+    "ticketKey": "workflow"
+  },
+  "steps": [
+    {
+      "step": "describe",
+      "kind": "agent",
+      "outcome": "done",
+      "resultPath": "05-publish/call-1/steps/1-describe/result.json",
+      "costUsd": 0.101
+    },
+    {
+      "step": "open",
+      "kind": "script",
+      "outcome": "passed",
+      "resultPath": "05-publish/call-1/steps/2-open/result.json"
+    }
+  ],
+  "usage": {
+    "costUsd": 0.101,
+    "inputTokens": 3000,
+    "cacheReadTokens": 12500,
+    "cacheWriteTokens": 900,
+    "outputTokens": 800
+  },
+  "startedAt": "2026-09-25T09:00:13.200Z",
+  "finishedAt": "2026-09-25T09:00:16.100Z",
+  "durationMs": 2100
+}

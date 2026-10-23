@@ -78,7 +78,7 @@ test('the typecheck includes every fixture .ts file, though tsc skips dot-direct
   );
   expect(tsc.exitCode).toBe(0);
   const listed = new Set(tsc.stdout.toString().split('\n'));
-  expect(sources.length).toBe(15);
+  expect(sources.length).toBe(14);
   expect(sources.filter((path) => !listed.has(join(sail, path)))).toEqual([]);
 });
 
@@ -151,7 +151,7 @@ test('every golden output parses with the matching fixture schema', async () => 
   }
   console.log(`${checked.length} golden outputs parse: ${checked.join(', ')}`);
   expect(checked.length).toBe(results.length);
-  expect(checked.slice(-2)).toEqual(['describe#1', 'open#1']);
+  expect(checked.slice(-2)).toEqual(['publish#1/describe', 'publish#1/open']);
 });
 
 /** `publish#1/describe` → `['publish', 'describe']`, and `spec#1` → `['spec', undefined]`. */
@@ -161,7 +161,7 @@ function parseKey(key: string): [string, string | undefined] {
 }
 
 test('no prompt asks the model for a count: a count a validator can derive is derived, never asked for', () => {
-  const prompts = [...new Bun.Glob('**/prompt.md').scanSync({ cwd: sail, dot: true })].sort();
+  const prompts = [...new Bun.Glob('**/{prompt,describe}.md').scanSync({ cwd: sail, dot: true })].sort();
   expect(prompts).toEqual([
     'stages/implement/prompt.md',
     'workflows/review/stages/architecture/prompt.md',
@@ -170,7 +170,7 @@ test('no prompt asks the model for a count: a count a validator can derive is de
     'workflows/review/stages/security/prompt.md',
     'workflows/review/stages/side-effects/prompt.md',
     'workflows/review/stages/style/prompt.md',
-    'workflows/ticket-to-pr/stages/describe/prompt.md',
+    'workflows/ticket-to-pr/stages/publish/describe.md',
     'workflows/ticket-to-pr/stages/self-review/prompt.md',
     'workflows/ticket-to-pr/stages/spec/prompt.md',
   ]);

@@ -13,7 +13,7 @@ import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 const BRANCH = 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command';
 const HOLDER = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const NO_STAGE =
-  "which is no stage of workflow 'ticket-to-pr': its stages are describe, implement, open, self-review, spec, tests";
+  "which is no stage of workflow 'ticket-to-pr': its stages are implement, publish, self-review, spec, tests";
 
 /** Every file under the repository but its `.git/`, and its worktrees: what a dry run must leave as it was. */
 function traces(repo: TempRepo): { files: string[]; worktrees: string; status: string } {

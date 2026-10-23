@@ -28,8 +28,9 @@ const JOURNAL = [
   'implement#2 done',
   'tests#2 passed',
   'self-review#1 done',
-  'describe#1 done',
-  'open#1 passed',
+  'publish#1/describe done',
+  'publish#1/open passed',
+  'publish#1 passed',
 ];
 const PR = { number: 5, url: 'fake://codehost/fixture/pull/5', draft: false };
 const BRANCH = 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command';
@@ -84,26 +85,17 @@ async function completed(): Promise<Ran & { events: SailEvent[]; runId: string }
   return { ...ran, events: readEvents(ran.dir), runId: ran.dir.split('/').at(-1) ?? '' };
 }
 
-test('sail FAKE-1 takes ticket-to-pr from its ticket to a pull request: it exits 0 with nine journal lines, in call directories 00-intake to 06-open, where implement and tests each ran twice', async () => {
+test('sail FAKE-1 takes ticket-to-pr from its ticket to a pull request: it exits 0 with ten journal lines, in call directories 00-intake to 05-publish, where implement and tests each ran twice', async () => {
   const { dir, stderr, stdout } = await completed();
   expect(stderr).toBe('');
   expect(stdout).toContain('\ncompleted · ');
   const stages = readdirSync(dir).filter((name) => /^\d\d-/.test(name));
-  expect(stages.sort()).toEqual([
-    '00-intake',
-    '01-spec',
-    '02-implement',
-    '03-tests',
-    '04-self-review',
-    '05-describe',
-    '06-open',
-  ]);
+  expect(stages.sort()).toEqual(['00-intake', '01-spec', '02-implement', '03-tests', '04-self-review', '05-publish']);
   expect(stages.sort().map((stage) => readdirSync(join(dir, stage)).sort())).toEqual([
     ['call-1'],
     ['call-1'],
     ['call-1', 'call-2'],
     ['call-1', 'call-2'],
-    ['call-1'],
     ['call-1'],
     ['call-1'],
   ]);
@@ -127,13 +119,13 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
   const { dir, repo } = await completed();
   const { pullRequests, branches } = fakeState(repo.dir, 'prs.json');
   expect(pullRequests.map((pr: { number: number }) => pr.number)).toEqual([1, 2, 3, 4, 5]);
-  const described = json(dir, '05-describe', 'call-1', 'result.json').output;
+  const described = json(dir, '05-publish', 'call-1', 'steps', '1-describe', 'result.json').output;
   expect(described).toEqual({ title: 'Add a --shout flag to the greet command (FAKE-1)', bodyFile: 'pr-body.md' });
   const headSha = repo.git('rev-parse', 'HEAD');
   expect(pullRequests[4]).toMatchObject({
     number: 5,
     title: described.title,
-    body: readFileSync(join(dir, '05-describe', 'call-1', 'pr-body.md'), 'utf8'),
+    body: readFileSync(join(dir, '05-publish', 'call-1', 'pr-body.md'), 'utf8'),
     base: 'main',
     head: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
     headSha,
@@ -146,20 +138,26 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
   expect(branches['sail/FAKE-1-add-a-shout-flag-to-the-greet-command']).toBe(headSha);
 });
 
-test("open#1's output is the pull request's number, URL and draft flag, kept from the code host's whole answer, and run:end's result is { pr: that }", async () => {
+test("publish#1/open's output is the pull request's number, URL and draft flag, kept from the code host's whole answer, and run:end's result is { pr: that }", async () => {
   const { dir, events } = await completed();
-  const result = json(dir, '06-open', 'call-1', 'result.json');
+  const result = json(dir, '05-publish', 'call-1', 'steps', '2-open', 'result.json');
   expect([result.outcome, result.output]).toEqual(['passed', PR]);
   // The script's last stdout line is the whole PullRequest: the stage's schema keeps three of its fields.
-  const printed = JSON.parse(readFileSync(join(dir, '06-open', 'call-1', 'stdout.log'), 'utf8').trimEnd());
+  const printed = JSON.parse(
+    readFileSync(join(dir, '05-publish', 'call-1', 'steps', '2-open', 'stdout.log'), 'utf8').trimEnd(),
+  );
   expect(Object.keys(printed)).toContain('headSha');
   expect(events.at(-1)).toMatchObject({ type: 'run:end', status: 'completed', result: { pr: PR } });
-  expect(result.consumed).toEqual({ title: 'workflow', body: '05-describe/call-1/pr-body.md', ticketKey: 'workflow' });
+  expect(result.consumed).toEqual({
+    title: '05-publish/call-1/steps/1-describe/result.json#/output/title',
+    body: '05-publish/call-1/pr-body.md',
+    ticketKey: 'workflow',
+  });
 });
 
-test("the events hold codehost:pushed, codehost:pr_opened, codehost:labelled and ticket:commented under the key open#1, after open#1's script:exec and before its script:exit, and the call directory keeps them in its port events file", async () => {
+test('the events hold codehost:pushed, codehost:pr_opened, codehost:labelled and ticket:commented under the key publish#1/open, after its script:exec and before its script:exit, and the call directory keeps them in its port events file', async () => {
   const { dir, events, repo, runId } = await completed();
-  const own = events.filter((event) => 'key' in event && event.key === 'open#1');
+  const own = events.filter((event) => 'key' in event && event.key === 'publish#1/open');
   const from = own.findIndex((event) => event.type === 'script:exec');
   const first = own[from]?.seq ?? 0;
   expect(own.slice(from, from + 6).map((event) => [event.type, event.seq - first])).toEqual([
@@ -188,7 +186,7 @@ test("the events hold codehost:pushed, codehost:pr_opened, codehost:labelled and
     { type: 'codehost:labelled', number: 5, label: 'sail', change: 'added' },
     { type: 'ticket:commented', ticketKey: 'FAKE-1', body: `sail run ${runId} opened ${PR.url}` },
   ]);
-  const file = readFileSync(join(dir, '06-open', 'call-1', 'port-events.ndjson'), 'utf8');
+  const file = readFileSync(join(dir, '05-publish', 'call-1', 'steps', '2-open', 'port-events.ndjson'), 'utf8');
   expect(
     file
       .split('\n')
@@ -208,13 +206,13 @@ test("the fake's FAKE-1 is In Progress, with the comment that names the run and 
   ]);
 });
 
-test('the run directory validates against the five sail.*.v1 schemas: one header, nine journal lines, nine results and one summary, with no issue', async () => {
+test('the run directory validates against the five sail.*.v1 schemas: one header, ten journal lines, ten results and one summary, with no issue', async () => {
   const { dir, events } = await completed();
   expect(validateRunDir(dir)).toEqual({
     counts: {
       'sail.run.v1': 1,
-      'sail.journal.v1': 9,
-      'sail.result.v1': 9,
+      'sail.journal.v1': 10,
+      'sail.result.v1': 10,
       'sail.event.v1': events.length,
       'sail.summary.v1': 1,
     },
@@ -228,8 +226,9 @@ test('the run directory validates against the five sail.*.v1 schemas: one header
     '02-implement',
     '03-tests',
     '04-self-review',
-    '05-describe',
-    '06-open',
+    '05-publish',
+    '05-publish',
+    '05-publish',
   ]);
 });
 
@@ -252,7 +251,7 @@ test('summary.json says completed, names the ticket with its title and URL, list
     },
     loops: { fix: { iterations: 2, max: 3 } },
     costUsd: 1.35,
-    calls: 9,
+    calls: 8,
     result: { pr: PR },
   });
 });
@@ -274,7 +273,7 @@ function delayingImplement2(): HarnessScript {
   return { ...script, 'implement#2': [{ ...answer, delayMs: 10_000 }, answer] };
 }
 
-test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that ends at tests#1, and sail resume then runs implement#2 as its second try and finishes with the same nine journal lines', async () => {
+test('Ctrl-C during implement#2 exits 2 with the resume hint and a journal that ends at tests#1, and sail resume then runs implement#2 as its second try and finishes with the same ten journal lines', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     writeHarnessScript(repo.dir, delayingImplement2());
@@ -316,7 +315,7 @@ test('a second run of FAKE-1, forced, in a copy of a repository whose first run 
     const dir = latestRun(other.dir);
     expect(dir).not.toBe(join(other.dir, '.sail-runs', first.runId));
     expect([second.code, second.stderr, journalOf(dir)]).toEqual([EXIT_OK, '', JOURNAL]);
-    expect(json(dir, '06-open', 'call-1', 'result.json')).toMatchObject({ outcome: 'passed', output: PR });
+    expect(json(dir, '05-publish', 'call-1', 'result.json')).toMatchObject({ outcome: 'passed', output: PR });
     expect(readFileSync(join(dir, 'STATUS'), 'utf8')).toBe('completed\n');
     // The push went through, and the pull request already open from the branch was answered: none was announced.
     const hosted = readEvents(dir).flatMap((event) => (event.type.startsWith('codehost:') ? [event.type] : []));
@@ -343,8 +342,8 @@ test('a run killed after open-pull-request answered resumes and completes with t
     const resumed = Bun.spawnSync([process.execPath, MAIN, 'resume', runId], { cwd: repo.dir, env: repo.env });
     expect([resumed.exitCode, resumed.stderr.toString(), journalOf(dir)]).toEqual([EXIT_OK, '', JOURNAL]);
     // The open step ran again, as its second try.
-    const open = readJournal(dir).entries.at(-1);
-    expect(open?.resultPath).toBe('06-open/call-1/try-2/result.json');
+    const open = readJournal(dir).entries.at(-2);
+    expect(open?.resultPath).toBe('05-publish/call-1/steps/2-open/try-2/result.json');
     expect(json(dir, open?.resultPath ?? '')).toMatchObject({ outcome: 'passed', output: PR });
     const fromBranch = fakeState(repo.dir, 'prs.json').pullRequests.filter(
       (pr: { head: string }) => pr.head === BRANCH,
@@ -449,10 +448,7 @@ const PUBLISHED = [
 const PUBLISH = '05-publish/call-1';
 const DESCRIBED_TITLE = 'Add a --shout flag to the greet command (FAKE-1)';
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ("sail FAKE-1 runs publish as describe, then open, each journaled as it finishes: open's $STAGE_IN holds describe's title and body, its result says where they came from, and the summary lists both steps under publish#1", async () => {
+test("sail FAKE-1 runs publish as describe, then open, each journaled as it finishes: open's $STAGE_IN holds describe's title and body, its result says where they came from, and the summary lists both steps under publish#1", async () => {
   const ran = await fixtureRun();
   expect([ran.code, journalOf(ran.dir)]).toEqual([EXIT_OK, PUBLISHED]);
   expect(readdirSync(join(ran.dir, PUBLISH, 'steps')).sort()).toEqual(['1-describe', '2-open']);
@@ -476,10 +472,7 @@ test
   expect(validateRunDir(ran.dir).issues).toEqual([]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('a run killed as open starts, with describe journaled, resumes and runs only open: each key is journaled once, and describe has one try and one session', async () => {
+test('a run killed as open starts, with describe journaled, resumes and runs only open: each key is journaled once, and describe has one try and one session', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     // The fixture's publish stage, whose open step holds: a fixture that has none has nothing to hold.
@@ -509,10 +502,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-007
-test
-  .skip // TDD-PENDING TASK-007
-  ('describe scripted blocked ends publish blocked before open starts, and the run fails with the reason the workflow gives', async () => {
+test('describe scripted blocked ends publish blocked before open starts, and the run fails with the reason the workflow gives', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const script: HarnessScript = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
