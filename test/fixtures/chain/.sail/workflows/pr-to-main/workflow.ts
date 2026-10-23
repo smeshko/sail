@@ -6,7 +6,8 @@
 //   4. `update` merges main in when it isn't an ancestor, and pushes; a conflict hands the pull request back;
 //   5. `tests`, then `checks`, which waits for the required check on the pushed head; a failure is feedback;
 //   6. `gate` reads the pull request again: the label gone stops the run, anything else wrong hands it back;
-//   7. `merge` squashes at the head the gate read, then the ticket moves to done.
+//   7. `merge` reads the pull request and main once more, and squashes at the head the gate read, then the ticket
+//      moves to done; a refusal hands back, or stops when the label is gone.
 // A loop asked for a fourth pass halts the run, so a failure on the third pass hands back instead of failing the pass.
 // A hand-back comments, swaps `sail` for `sail-blocked`, comments on the ticket and fails the run. A stop, because the
 // label was removed, comments and fails the run, and adds no `sail-blocked`. Composition only: every contract lives on
@@ -40,6 +41,12 @@ export default workflow(
     const { number, url, ticketKey } = run.input;
     const brief = run.intake.files['brief.md'];
     const reviewers = [style, architecture, sideEffects, performance, security, coverageCheck];
+
+    /** The designation label is gone: a person took the pull request. Says so, and fails the run. */
+    const halt = async () => {
+      await run.stage(stop, { pr: number, ticketKey });
+      return run.fail('the designation label was removed before the merge');
+    };
 
     /** Hands the pull request back, and fails the run. */
     const giveUp = async (reason: string, details: string) => {
@@ -112,10 +119,7 @@ export default workflow(
       }
 
       const gated = (await run.stage(gate, { pr: number })).output;
-      if (!gated.labelled) {
-        await run.stage(stop, { pr: number, ticketKey });
-        return run.fail('the designation label was removed before the merge');
-      }
+      if (!gated.labelled) return halt();
       if (!gated.open || gated.base !== 'main' || gated.headSha !== head) {
         return giveUp(
           'the pull request changed before the merge',
@@ -125,6 +129,7 @@ export default workflow(
 
       const merged = await run.stage(merge, { pr: number, headSha: gated.headSha }, { onError: 'return' });
       if (merged.outcome === 'error') return giveUp('merge failed', merged.reason);
+      if (merged.output.labelled === false) return halt();
       if (merged.output.state !== 'merged') return giveUp(`merge ${merged.output.state}`, merged.output.reason ?? '');
       if (ticketKey !== undefined) await run.stage(done, { ticketKey, url, sha: merged.output.sha ?? '' });
       return { merged: merged.output.sha, passes: pass };
