@@ -323,10 +323,7 @@ export const publish = stage('publish', { consumes: ${consumes}, output: Pr, ste
   return sail;
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each([
+test.each([
   [
     'a fromStep naming no step of the stage',
     "describe('describe'), open({ title: fromStep('nope').output('title') })",
@@ -379,10 +376,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a gitDiff the stage declares on itself, rather than on the step that reads it, is refused at load', async () => {
+test('a gitDiff the stage declares on itself, rather than on the step that reads it, is refused at load', async () => {
   await withTempRepo(async (repo) => {
     const sail = publishWith(repo.dir, "describe('describe'), open()", "{ diff: gitDiff('origin/main...HEAD') }");
     const found = await loadDefinitions(sail);

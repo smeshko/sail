@@ -176,6 +176,7 @@ export function createCallDir(paths: CallPaths, options: { durable?: boolean; st
       return;
     }
     // Each one synced into its parent, from the stage's directory down: the call's first step may be the one to make it.
+    mkdirSync(dirname(dirname(out)), { recursive: true });
     for (const dir of missing(dirname(paths.dir), dirname(out))) createDir(dir);
     createDir(paths.dir);
     if (stageIn) createDir(paths.stageIn);

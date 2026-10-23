@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, sep } from 'node:path';
 import type { Intake, StageDefinition, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
 import * as intakes from '../sdk/intakes';
+import { stepProblems } from './stage-call';
 import { watchProblem } from './watchable';
 
 let registered = false;
@@ -202,6 +203,12 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
       return;
     }
     for (const definition of definitions) {
+      // A stage that wires its steps wrongly never runs: each problem names the stage, the step and the binding.
+      const wiring = definition.kind === 'stage' ? stepProblems(definition) : [];
+      if (wiring.length > 0) {
+        for (const message of wiring) found.problems.push({ file, message });
+        continue;
+      }
       const steps = definition.kind === 'stage' ? definition.steps.map(({ name, kind }) => ({ name, kind })) : [];
       found.stages.push({ name: definition.name, kind: definition.kind, steps, workflow, file });
     }

@@ -236,10 +236,7 @@ test("the engine's patch for a gitDiff binding is written to $STAGE_IN as <name>
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a fromStep binding the engine supplies is written as an earlier step left it: its output's field as <name>.txt, the whole output as <name>.json, and a file it produced under that file's name", () => {
+test("a fromStep binding the engine supplies is written as an earlier step left it: its output's field as <name>.txt, the whole output as <name>.json, and a file it produced under that file's name", () => {
   const s = scratch();
   const body = s.source('pr-body.md', '## Summary\n');
   const consumes: Consumes = {

@@ -133,10 +133,7 @@ function resultIssues(s: Setup): Record<string, string[]> {
 const stepStarts = (events: readonly NewEvent[]) =>
   events.flatMap((event) => (event.type === 'step:start' ? [`${event.key} ${event.try}`] : []));
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("describe then open: open's $STAGE_IN holds the title and the body describe left in the shared $STAGE_OUT, and the stage's result lists both steps", async () => {
+test("describe then open: open's $STAGE_IN holds the title and the body describe left in the shared $STAGE_OUT, and the stage's result lists both steps", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     const { result } = await runStageCall(s.request(), publish);
@@ -193,10 +190,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the call's events: its stage:start with its steps, each step's start and end under the step's key, then its stage:end, all valid under sail.event.v1", async () => {
+test("the call's events: its stage:start with its steps, each step's start and end under the step's key, then its stage:end, all valid under sail.event.v1", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     await runStageCall(s.request(), publish);
@@ -282,10 +276,7 @@ const linted = stage('linted', {
   steps: [lint, script('open', { run: './open.sh', consumes: { ticketKey: value(TicketKey) }, output: PrInfo })],
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  .each<[string, Stage, ScriptedAnswer[], string, Record<string, unknown>]>([
+test.each<[string, Stage, ScriptedAnswer[], string, Record<string, unknown>]>([
   [
     'describe blocked',
     publish,
@@ -342,10 +333,7 @@ test
   },
 );
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("describe's invalid output is corrected once inside its step: try-2 runs in its own step directory, told the problem, and open then runs once", async () => {
+test("describe's invalid output is corrected once inside its step: try-2 runs in its own step directory, told the problem, and open then runs once", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo, [UNTITLED, DESCRIBED]);
     const { result } = await runStageCall(s.request(), publish);
@@ -365,10 +353,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('describe invalid in both tries ends the stage in error, and open never starts', async () => {
+test('describe invalid in both tries ends the stage in error, and open never starts', async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo, [UNTITLED, UNTITLED]);
     const { result } = await runStageCall(s.request(), publish);
@@ -378,10 +363,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a step already journaled is not run again: open takes describe's title from its journal line, not from the result.json a session may rewrite", async () => {
+test("a step already journaled is not run again: open takes describe's title from its journal line, not from the result.json a session may rewrite", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     // A first process: describe runs and is journaled, then the call stops before open.
@@ -431,10 +413,7 @@ const review = script('review', {
 });
 const reviewed = stage('reviewed', { output: review.output, steps: [commit, review] });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a step's gitDiff is taken just before it starts, after the step before it committed, and one that fails ends that step in error, not_started", async () => {
+test("a step's gitDiff is taken just before it starts, after the step before it committed, and one that fails ends that step in error, not_started", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     s.script(
@@ -469,10 +448,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('an abort between steps starts no further step and writes no stage result: only the step before it was heard', async () => {
+test('an abort between steps starts no further step and writes no stage result: only the step before it was heard', async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     const controller = new AbortController();
@@ -493,10 +469,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a stage of one step runs as that step, under the stage's name: call-1/result.json is the step's, and there is no steps/", async () => {
+test("a stage of one step runs as that step, under the stage's name: call-1/result.json is the step's, and there is no steps/", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);
     const alone = stage('alone', {
@@ -517,10 +490,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("callProblems of a multi-step stage lists each step's own problems by step, then the stage's bindings', and an agent step with nothing to run on", () => {
+test("callProblems of a multi-step stage lists each step's own problems by step, then the stage's bindings', and an agent step with nothing to run on", () => {
   const broken = stage('broken', {
     consumes: { ticketKey: value(TicketKey) },
     output: PrInfo,

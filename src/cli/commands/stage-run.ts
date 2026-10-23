@@ -143,6 +143,9 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   const problem = stageFileProblem(stageFile, loaded.definitions);
   const [definition] = loaded.definitions;
   if (problem !== undefined || definition === undefined) return refuse(`${at(stageFile)}: ${problem}`);
+  if (definition.kind === 'stage' && definition.steps.length > 1) {
+    return refuse(`${definition.name} can't run:\n  multi-step stages can't run yet`);
+  }
 
   const agent = definition.kind === 'agent' ? await executionOf(definition, found.dir, config, io.env) : undefined;
   if (agent !== undefined && 'refused' in agent) return refuse(agent.refused);
