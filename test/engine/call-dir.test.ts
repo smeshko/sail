@@ -112,6 +112,7 @@ test('no produced file may take the name of what the engine writes beside it, th
     'session.log',
     'stderr.log',
     'stdout.log',
+    'steps',
   ]);
 });
 
