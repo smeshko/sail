@@ -1,6 +1,7 @@
 // pr-to-main, the chain fixture's test version: a designated pull request in, a squash merge out, or the pull request
 // handed back. One pass of `run.loop('review', { max: 3 })`:
-//   1. after a failed pass, `fix` answers its feedback and `push` sends the result;
+//   1. after a failed pass, `fix` answers its feedback and `push` sends the result, unless a commit of it changed a
+//      file outside src/ and test/, which hands back;
 //   2. six read-only reviewers read the change at once, unless the head is the one the last pass's clean review saw;
 //   3. any `high` finding is must-fix, in code: the pass fails with the findings;
 //   4. `update` merges main in when it isn't an ancestor, and pushes; a conflict hands the pull request back;
@@ -59,6 +60,8 @@ export default workflow(
     let pass = 0;
     // The head the last pass ended at, once its review was clean: the next pass reads no code it hasn't seen.
     let reviewed: string | undefined;
+    // The head the workspace is at: the run's own to start with, then each push's and each update's.
+    let at = run.input.headSha;
     for (const iteration of run.loop('review', { max: MAX_PASSES, feedback: Feedback })) {
       pass++;
       const last = pass === MAX_PASSES;
@@ -67,7 +70,15 @@ export default workflow(
       if (iteration.previous !== undefined) {
         const fixed = await run.stage(fix, { brief, feedback: iteration.previous });
         if (fixed.outcome === 'blocked') return run.fail(`fix blocked: ${fixed.reason}`);
-        pushed = (await run.stage(push)).output.headSha;
+        const sent = await run.stage(push, { since: at });
+        if (sent.outcome === 'failed') {
+          return giveUp(
+            'fix changed files outside src/ and test/',
+            (sent.output.files ?? []).map((file) => `- ${file}`).join('\n'),
+          );
+        }
+        pushed = sent.output.headSha;
+        at = pushed;
       }
 
       const findings: { severity: string; file: string; title: string; detail: string }[] = [];
@@ -94,6 +105,7 @@ export default workflow(
       }
       const head = updated.output.headSha;
       reviewed = head;
+      at = head;
 
       const tested = await run.stage(tests);
       if (tested.outcome === 'failed') {
