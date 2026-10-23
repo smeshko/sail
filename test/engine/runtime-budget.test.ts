@@ -35,8 +35,9 @@ const FIXTURE_JOURNAL = [
   'implement#2',
   'tests#2',
   'self-review#1',
-  'describe#1',
-  'open#1',
+  'publish#1/describe',
+  'publish#1/open',
+  'publish#1',
 ];
 
 /** The fixture's `.sail/` in `repoDir`, its run budget set to `budget`. */
