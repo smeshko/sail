@@ -1,9 +1,30 @@
 // A run's budget: the most one run may use, in dollars and in minutes, and what it has used of it.
 //
-// TDD stub (run-budgets-and-suspension): every symbol with its final signature and a wrong value. A run keeps its
-// header's budget as project.yaml gave it, and has no tracker, so it runs as before.
+// - The budget is `project.yaml`'s `budgets.run`, which a workflow's own `budget` overrides field by field, frozen in
+//   `run.json` at the start. A raise given to `sail resume` adds to it, and is recorded as a `budget:raised` event:
+//   `run.json` keeps the budget the run started with (ADR-0002).
+// - What a run has used is folded from its own events, never kept in a file of its own. Its dollars are each session's
+//   `harness:session_end`, and an open session's last `usage:update`. A session is open from its `session_start` to
+//   its `session_end`, and a new `session_start` under a key that is still open settles the old one at its last
+//   reading, so no session counts twice.
+// - Its minutes are its active time: each process's segment of the events' `ts`, from `run:start` or a resume's
+//   key-less `workspace:leased` to that process's `run:end` or `error:crash`, or else its last event. So the days a
+//   run spends suspended, or dead after a crash, aren't counted. The running process's own minutes come from a
+//   monotonic `elapsed()`, never from the run's clock, so tracking a budget moves no `ts`.
+// - The tracker never aborts a call. Each agent request is handed its share of what the run has left, through a
+//   Harness wrapper, and the harness ends a session that reaches it, as it ends one at its step's own budget. A share is
+//   what is left less what the other open requests hold of theirs, so sessions that run at once can't each use the
+//   whole remainder. Minutes are not reserved: sessions that run at once use the same minutes.
+// - A session's end and a raise are confirmed on disk: `events.ndjson` must end with that event, and is then synced. The
+//   bus swallows a consumer's failure, so one that can't be confirmed is latched, and the runtime crashes the run with
+//   it before anything else is journaled.
+// - `budget:warning` fires once per budget and limit at 80% of it, and `budget:exceeded` once at the limit. Both are the
+//   run's, with no key: a step's own carry their call's.
+import { join } from 'node:path';
+import { EVENTS_FILE, lastSeq } from '../events/consumers/ndjson';
 import type { NewEvent, SailEvent } from '../events/types';
 import type { Harness } from '../ports/harness';
+import { syncFile } from './durable';
 import type { RunHeader } from './run-header';
 
 /** The most one run may use: dollars, minutes, or both. */
@@ -52,14 +73,76 @@ export interface Over {
   used: number;
 }
 
-/** What the run whose events these are has used. TDD stub: nothing. */
-export function usedOf(_events: readonly SailEvent[]): RunUsed {
-  return { usd: 0, minutes: 0 };
+/** Summed dollars and minutes without the float noise, to 6 decimals. */
+const round = (value: number): number => Math.round(value * 1e6) / 1e6;
+
+/** The dollars fold: what settled sessions spent, and each open session's last reading by key. */
+interface Dollars {
+  settled: number;
+  open: Map<string, number>;
 }
 
-/** The run's budget now, with the last raise over it. TDD stub: the header's. */
-export function budgetAfterRaises(budget: RunBudget | undefined, _events: readonly SailEvent[]): RunBudget | undefined {
-  return budget;
+function foldDollars(dollars: Dollars, event: SailEvent): void {
+  switch (event.type) {
+    case 'harness:session_start': {
+      const last = dollars.open.get(event.key);
+      if (last !== undefined) dollars.settled += last;
+      dollars.open.set(event.key, 0);
+      return;
+    }
+    case 'usage:update':
+      dollars.open.set(event.key, event.costUsdSoFar);
+      return;
+    case 'harness:session_end':
+      dollars.settled += event.usage.costUsd;
+      dollars.open.delete(event.key);
+  }
+}
+
+const dollarsOf = (dollars: Dollars): number => {
+  let sum = dollars.settled;
+  for (const reading of dollars.open.values()) sum += reading;
+  return round(sum);
+};
+
+/** Opens a process's segment: `run:start`, or a key-less `workspace:leased` that doesn't follow one, as a resume's. */
+const opensSegment = (event: SailEvent, previous: SailEvent | undefined): boolean =>
+  event.type === 'run:start' ||
+  (event.type === 'workspace:leased' && !('key' in event) && previous?.type !== 'run:start');
+
+/** The minutes of active time `events` hold: each segment from its start to its end, or else its last event. */
+function minutesOf(events: readonly SailEvent[]): number {
+  let ms = 0;
+  let from: number | undefined;
+  let last: number | undefined;
+  for (const [index, event] of events.entries()) {
+    const at = Date.parse(event.ts);
+    if (opensSegment(event, events[index - 1])) {
+      if (from !== undefined && last !== undefined) ms += last - from;
+      from = at;
+    }
+    if (from === undefined) continue;
+    last = at;
+    if (event.type === 'run:end' || event.type === 'error:crash') {
+      ms += last - from;
+      from = undefined;
+    }
+  }
+  if (from !== undefined && last !== undefined) ms += last - from;
+  return ms / 60_000;
+}
+
+/** What the run whose events these are has used. */
+export function usedOf(events: readonly SailEvent[]): RunUsed {
+  const dollars: Dollars = { settled: 0, open: new Map() };
+  for (const event of events) foldDollars(dollars, event);
+  return { usd: dollarsOf(dollars), minutes: round(minutesOf(events)) };
+}
+
+/** The run's budget now: the header's, with the last raise's budget over it. */
+export function budgetAfterRaises(budget: RunBudget | undefined, events: readonly SailEvent[]): RunBudget | undefined {
+  const raised = events.findLast((event) => event.type === 'budget:raised');
+  return raised === undefined ? budget : { ...budget, ...raised.budget };
 }
 
 /** What a raise adds: dollars, minutes, or both. */
@@ -68,14 +151,43 @@ export interface Raise {
   minutes?: number;
 }
 
-/** The flag that raises a budget. TDD stub: none. */
-export const raiseFlag = (_budget: Over['budget']): string => '';
+/** `budget` with `raise` added to it. */
+function raised(budget: RunBudget, raise: Raise): RunBudget {
+  const after: { maxUsd?: number; maxMinutes?: number } = { ...budget };
+  if (raise.usd !== undefined && after.maxUsd !== undefined) after.maxUsd = round(after.maxUsd + raise.usd);
+  if (raise.minutes !== undefined && after.maxMinutes !== undefined) {
+    after.maxMinutes = round(after.maxMinutes + raise.minutes);
+  }
+  return after;
+}
 
-/** A run suspended on its budget before `before`. TDD stub: an empty one. */
-export function suspension(_over: Over, _before: string): { event: NewEvent; message: string } {
+/** The budget `budget` has used up, given what was used: dollars first. */
+function overOf(budget: RunBudget, used: RunUsed): Over | undefined {
+  if (budget.maxUsd !== undefined && used.usd >= budget.maxUsd) {
+    return { budget: 'usd', limit: budget.maxUsd, used: used.usd };
+  }
+  if (budget.maxMinutes !== undefined && used.minutes >= budget.maxMinutes) {
+    return { budget: 'minutes', limit: budget.maxMinutes, used: used.minutes };
+  }
+  return undefined;
+}
+
+const usd = (value: number): string => `$${value.toFixed(2)}`;
+const minutes = (value: number): string => String(Math.round(value * 100) / 100);
+
+/** What was used of a budget, for people: `$0.50 of its $0.50`, `90 of its 90 minutes`. */
+const usedText = ({ budget, limit, used }: Over): string =>
+  budget === 'usd' ? `${usd(used)} of its ${usd(limit)}` : `${minutes(used)} of its ${minutes(limit)} minutes`;
+
+/** The flag that raises a budget, with its value's name. */
+export const raiseFlag = (budget: Over['budget']): string =>
+  budget === 'usd' ? '--raise-budget <usd>' : '--raise-minutes <minutes>';
+
+/** A run suspended on its budget before `before`: its `run:suspended`, and why, for people. */
+export function suspension(over: Over, before: string): { event: NewEvent; message: string } {
   return {
-    event: { type: 'run:suspended', stopReason: 'budget_exceeded', budget: 'usd', limit: 0, used: 0 },
-    message: '',
+    event: { type: 'run:suspended', stopReason: 'budget_exceeded', ...over },
+    message: `${usedText(over)} used before ${before}: raise it with ${raiseFlag(over.budget)}`,
   };
 }
 
@@ -120,12 +232,129 @@ export interface BudgetTracker {
   raise(raise: Raise): void;
 }
 
-/** The tracker of a run's budget. TDD stub: none, for any run. */
-export function trackBudget(_options: BudgetOptions): BudgetTracker | undefined {
-  return undefined;
+/** The tracker of a run's budget, or undefined for a run that has none. */
+export function trackBudget(options: BudgetOptions): BudgetTracker | undefined {
+  const { prior, emit, record, elapsed } = options;
+  const initial = budgetAfterRaises(options.budget, prior);
+  if (initial === undefined) return undefined;
+  let budget: RunBudget = initial;
+  const dollars: Dollars = { settled: 0, open: new Map() };
+  for (const event of prior) foldDollars(dollars, event);
+  const earlier = minutesOf(prior);
+  const since = elapsed();
+  /** The run-level warnings and exceeded given, as `<event type> <budget> <limit>`. */
+  const given = new Set<string>();
+  for (const event of prior) {
+    if ((event.type === 'budget:warning' || event.type === 'budget:exceeded') && event.key === undefined) {
+      given.add(`${event.type} ${event.budget} ${event.limit}`);
+    }
+  }
+  /** What each open request was handed, by key. */
+  const shares = new Map<string, number>();
+  /** The budgets each key's last request was narrowed in, and the one its session said it exceeded. */
+  const narrowedIn = new Map<string, Over['budget'][]>();
+  const exceededIn = new Map<string, string>();
+  let unrecorded: unknown;
+
+  const used = (): RunUsed => ({ usd: dollarsOf(dollars), minutes: round(earlier + (elapsed() - since) / 60_000) });
+
+  /** Emits a run-level budget event once per type, budget and limit. */
+  const once = (type: 'budget:warning' | 'budget:exceeded', of: Over['budget'], limit: number, value: number) => {
+    const id = `${type} ${of} ${limit}`;
+    if (given.has(id)) return;
+    given.add(id);
+    emit({ type, budget: of, limit, used: value });
+  };
+  /** Emits each warning and exceeded that has come due, and answers with what was used. */
+  const due = (): RunUsed => {
+    const now = used();
+    const each: [Over['budget'], number | undefined, number][] = [
+      ['usd', budget.maxUsd, now.usd],
+      ['minutes', budget.maxMinutes, now.minutes],
+    ];
+    for (const [of, limit, value] of each) {
+      if (limit === undefined) continue;
+      if (value >= WARN_AT * limit) once('budget:warning', of, limit, value);
+      if (value >= limit) once('budget:exceeded', of, limit, value);
+    }
+    return now;
+  };
+
+  /** The dollars `key`'s request may be handed: what is left less what the other open requests still hold. */
+  const leftFor = (key: string, maxUsd: number): number => {
+    let held = 0;
+    for (const [other, share] of shares) {
+      if (other !== key) held += Math.max(0, share - (dollars.open.get(other) ?? 0));
+    }
+    return Math.max(0, round(maxUsd - dollarsOf(dollars) - held));
+  };
+
+  return {
+    observe(event) {
+      if (event.type === 'budget:exceeded' && event.key !== undefined) exceededIn.set(event.key, event.budget);
+      foldDollars(dollars, event);
+      if (event.type === 'harness:session_end' && unrecorded === undefined) {
+        try {
+          record(event);
+        } catch (error) {
+          unrecorded = error;
+        }
+      }
+      due();
+    },
+    over: () => overOf(budget, due()),
+    assertRecorded() {
+      if (unrecorded !== undefined) throw unrecorded;
+    },
+    narrowed(key) {
+      const narrowed = narrowedIn.get(key) ?? [];
+      const exceeded = exceededIn.get(key);
+      return exceeded === undefined ? narrowed.length > 0 : (narrowed as string[]).includes(exceeded);
+    },
+    harness(inner) {
+      return {
+        name: inner.name,
+        capabilities: () => inner.capabilities(),
+        async run(request) {
+          const { key } = request;
+          const own = request.budget;
+          let { maxUsd, maxMinutes } = own;
+          if (budget.maxUsd !== undefined) maxUsd = Math.min(own.maxUsd, leftFor(key, budget.maxUsd));
+          if (budget.maxMinutes !== undefined) {
+            const left = budget.maxMinutes - used().minutes;
+            maxMinutes = Math.max(Number.EPSILON, Math.min(own.maxMinutes, left));
+          }
+          shares.set(key, maxUsd);
+          narrowedIn.set(key, [
+            ...(maxUsd < own.maxUsd ? ['usd' as const] : []),
+            ...(maxMinutes < own.maxMinutes ? ['minutes' as const] : []),
+          ]);
+          exceededIn.delete(key);
+          try {
+            return await inner.run({ ...request, budget: { ...own, maxUsd, maxMinutes } });
+          } finally {
+            shares.delete(key);
+          }
+        },
+      };
+    },
+    raise(given) {
+      const after = raised(budget, given);
+      const stamped = emit({ type: 'budget:raised', ...given, budget: after });
+      budget = after;
+      record(stamped);
+    },
+  };
 }
 
-/** Confirms an event of the run in `runDir` reached the disk. TDD stub: confirms nothing. */
-export function recordIn(_runDir: string): (event: SailEvent) => void {
-  return () => {};
+/** Confirms an event of the run in `runDir` reached the disk: its events file must end with it, and is then synced. */
+export function recordIn(runDir: string): (event: SailEvent) => void {
+  return (event) => {
+    const last = lastSeq(runDir);
+    if (last !== event.seq) {
+      const why = last === undefined ? 'ends with no event' : `ends with event ${last}`;
+      throw new Error(`${EVENTS_FILE} ${why}, not ${event.type} ${event.seq}: it is not on disk`);
+    }
+    syncFile(join(runDir, EVENTS_FILE));
+  };
 }

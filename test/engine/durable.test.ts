@@ -106,10 +106,7 @@ test('syncDir syncs a directory, and throws for one that is missing', () => {
   expect(() => syncDir(join(dir, 'missing'))).toThrow(expect.objectContaining({ code: 'ENOENT' }));
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('syncFile syncs the descriptor it opened on the file, and throws for a file that is missing', () => {
+test('syncFile syncs the descriptor it opened on the file, and throws for a file that is missing', () => {
   const dir = tempDir();
   const path = join(dir, 'events.ndjson');
   writeFileSync(path, '{"seq":1}\n');

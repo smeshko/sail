@@ -71,10 +71,7 @@ test('workflowBudgetProblem takes a left-out budget, an empty one and numbers of
   ]).toEqual([undefined, undefined, undefined, undefined, 'maxUsd must be a number of 0 or more: Infinity']);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("usedOf adds what settled sessions spent to an open session's last reading", () => {
+test("usedOf adds what settled sessions spent to an open session's last reading", () => {
   const list = events(
     [0, runStart({ maxUsd: 0.5 })],
     [10, started('spec#1')],
@@ -87,10 +84,7 @@ test
   expect(usedOf(list).usd).toBe(0.5029);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a session started again under a key still open is settled at its last reading, and each session counts once', () => {
+test('a session started again under a key still open is settled at its last reading, and each session counts once', () => {
   const list = events(
     [0, runStart()],
     [10, started('spec#1')],
@@ -102,10 +96,7 @@ test
   expect(usedOf(list).usd).toBe(0.15);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('an interrupted session that a resume ends later, as reconcile() does, counts once, beside the try that runs next', () => {
+test('an interrupted session that a resume ends later, as reconcile() does, counts once, beside the try that runs next', () => {
   const list = events(
     [0, runStart()],
     [10, started('implement#1')],
@@ -119,10 +110,7 @@ test
   expect(usedOf(list).usd).toBe(0.3);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("minutes are each process's active time: the days a run waits suspended, or dead after a crash, aren't counted", () => {
+test("minutes are each process's active time: the days a run waits suspended, or dead after a crash, aren't counted", () => {
   const list = events(
     // The start: run:start, then its lease, which opens no segment of its own. Suspended after 10 minutes.
     [0, runStart({ maxMinutes: 90 })],
@@ -141,10 +129,7 @@ test
   expect(usedOf(list).minutes).toBe(20);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the budget after raises is the header's, with the last raise's budget over it", () => {
+test("the budget after raises is the header's, with the last raise's budget over it", () => {
   const header = { maxUsd: 0.5, maxMinutes: 90 };
   expect([
     budgetAfterRaises(header, SPEC_SPENT),
@@ -203,10 +188,7 @@ function observe(tracker: BudgetTracker, from: number, ...list: NewEvent[]): voi
   }
 }
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a run with no budget gets no tracker, and a run with one does', () => {
+test('a run with no budget gets no tracker, and a run with one does', () => {
   const options = { prior: [], emit: (event: NewEvent) => event as SailEvent, record: () => {}, elapsed: () => 0 };
   expect([trackBudget({ ...options, budget: undefined }), trackBudget({ ...options, budget: { maxUsd: 1 } })]).toEqual([
     undefined,
@@ -214,19 +196,13 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("the run's budget:warning fires once at 80% of it, with no key, and not again on a later event under the limit", () => {
+test("the run's budget:warning fires once at 80% of it, with no key, and not again on a later event under the limit", () => {
   const { tracker, world } = tracked({ maxUsd: 0.5 }, SPEC_SPENT);
   observe(tracker, 4, started('implement#1'), update('implement#1', 1, 0.0952), update('implement#1', 2, 0.15));
   expect(payloads(world.emitted)).toEqual([{ type: 'budget:warning', budget: 'usd', limit: 0.5, used: 0.4077 }]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a raise re-arms the warning: the raised budget warns again at 80% of it', () => {
+test('a raise re-arms the warning: the raised budget warns again at 80% of it', () => {
   const { tracker, world } = tracked({ maxUsd: 0.5 }, SPEC_SPENT);
   observe(tracker, 4, started('implement#1'), update('implement#1', 1, 0.0952));
   tracker.raise({ usd: 1 });
@@ -238,10 +214,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a warning and an exceeded budget the prior events hold are not given again, and a step's own are not the run's", () => {
+test("a warning and an exceeded budget the prior events hold are not given again, and a step's own are not the run's", () => {
   const prior = events(
     [0, runStart({ maxUsd: 0.5 })],
     [10, started('spec#1')],
@@ -260,10 +233,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('budget:exceeded fires once as the run reaches its limit, and over() names the budget, its limit and the use; under it, over() is undefined', () => {
+test('budget:exceeded fires once as the run reaches its limit, and over() names the budget, its limit and the use; under it, over() is undefined', () => {
   const { tracker, world } = tracked({ maxUsd: 0.5 }, SPEC_SPENT);
   const before = tracker.over();
   observe(tracker, 4, started('implement#1'), update('implement#1', 1, 0.0952), update('implement#1', 2, 0.1904));
@@ -278,10 +248,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("minutes are the earlier processes' and this one's elapsed() since the tracker was made: past the limit, over() says so with no event in between", () => {
+test("minutes are the earlier processes' and this one's elapsed() since the tracker was made: past the limit, over() says so with no event in between", () => {
   const prior = events(
     [0, runStart({ maxMinutes: 31 })],
     [30 * MINUTE, runEnd('suspended', 1, { stopReason: 'interrupted' })],
@@ -343,10 +310,7 @@ const ask = (key: string, budget: HarnessRequest['budget']): HarnessRequest => (
   outputSchema: {},
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("each request is handed what the run has left, its turns kept and a step budget smaller than what is left kept, and the harness's name and capabilities pass through", async () => {
+test("each request is handed what the run has left, its turns kept and a step budget smaller than what is left kept, and the harness's name and capabilities pass through", async () => {
   const { tracker } = tracked({ maxUsd: 0.5, maxMinutes: 90 }, SPEC_SPENT);
   const inner = heldHarness();
   const harness = tracker.harness(inner);
@@ -370,10 +334,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('requests open at once share what is left: each is handed what the others hold less, and a share goes back when its run() settles, a rejected one too', async () => {
+test('requests open at once share what is left: each is handed what the others hold less, and a share goes back when its run() settles, a rejected one too', async () => {
   const { tracker } = tracked({ maxUsd: 1 });
   const inner = heldHarness();
   const harness = tracker.harness(inner);
@@ -392,10 +353,7 @@ test
   }).toEqual({ handed: [0.7, 0.3, 1], settled: ['fulfilled', 'rejected'] });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('narrowed() holds for a request the run narrowed in the budget its session exceeded, or in any when it named none, and not for one over a budget of its own', async () => {
+test('narrowed() holds for a request the run narrowed in the budget its session exceeded, or in any when it named none, and not for one over a budget of its own', async () => {
   const { tracker } = tracked({ maxUsd: 0.5 });
   const inner = heldHarness();
   const harness = tracker.harness(inner);
@@ -418,10 +376,7 @@ test
   expect([...keys, 'own#1'].map((key) => tracker.narrowed(key))).toEqual([true, false, true, false]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("a session's end is confirmed on disk once it is folded, and a confirmation that throws is held for assertRecorded()", () => {
+test("a session's end is confirmed on disk once it is folded, and a confirmation that throws is held for assertRecorded()", () => {
   const failure = new Error('events.ndjson ends with event 6, not harness:session_end 7: it is not on disk');
   const recorded: number[] = [];
   const { tracker } = tracked({ maxUsd: 5 }, [], (event) => {
@@ -438,10 +393,7 @@ test
   expect({ recorded, thrown }).toEqual({ recorded: [6, 7], thrown: failure });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('a raise emits budget:raised with what it added and the budget after it, and is confirmed on disk; a confirmation that fails throws from raise()', () => {
+test('a raise emits budget:raised with what it added and the budget after it, and is confirmed on disk; a confirmation that fails throws from raise()', () => {
   const { tracker, world } = tracked({ maxUsd: 0.5, maxMinutes: 90 }, SPEC_SPENT);
   tracker.raise({ usd: 5, minutes: 30 });
   const failing = tracked({ maxUsd: 0.5 }, SPEC_SPENT, () => {
@@ -457,10 +409,7 @@ test
   expect(() => failing.tracker.raise({ usd: 1 })).toThrow('not on disk');
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("recordIn confirms an event that ends the run's events file, and throws for one that doesn't", () => {
+test("recordIn confirms an event that ends the run's events file, and throws for one that doesn't", () => {
   const dir = mkdtempSync(join(tmpdir(), 'sail-budget-'));
   try {
     const list = events([0, runStart()], [10, started('spec#1')]);
@@ -476,10 +425,7 @@ test
   }
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ('suspension() gives the run:suspended and the message of a run over its dollars, and over its minutes', () => {
+test('suspension() gives the run:suspended and the message of a run over its dollars, and over its minutes', () => {
   expect([
     suspension({ budget: 'usd', limit: 0.5, used: 0.5029 }, 'implement#1'),
     suspension({ budget: 'minutes', limit: 90, used: 90.42 }, 'tests#1'),

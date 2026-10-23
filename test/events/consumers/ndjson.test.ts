@@ -240,10 +240,7 @@ test.each<[string, string]>([
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-003
-test
-  .skip // TDD-PENDING TASK-003
-  ("lastSeq is the last whole line's seq, read from the file's tail: a torn tail is no line, and a missing or empty file has none", () => {
+test("lastSeq is the last whole line's seq, read from the file's tail: a torn tail is no line, and a missing or empty file has none", () => {
   const dir = runDir();
   const path = join(dir, 'events.ndjson');
   const missing = lastSeq(dir);
