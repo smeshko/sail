@@ -8,7 +8,9 @@
 //   6. `gate` reads the pull request again: the label gone stops the run, anything else wrong hands it back;
 //   7. `merge` squashes at the head the gate read, then the ticket moves to done.
 // A loop asked for a fourth pass halts the run, so a failure on the third pass hands back instead of failing the pass.
-// Giving up fails the run with its reason. Composition only: every contract lives on its stage.
+// A hand-back comments, swaps `sail` for `sail-blocked`, comments on the ticket and fails the run. A stop, because the
+// label was removed, comments and fails the run, and adds no `sail-blocked`. Composition only: every contract lives on
+// its stage.
 import { workflow } from 'sail';
 import { pr } from 'sail/intakes';
 import { architecture } from './stages/architecture/stage';
@@ -17,11 +19,13 @@ import { coverage } from './stages/coverage/stage';
 import { done } from './stages/done/stage';
 import { Feedback, fix } from './stages/fix/stage';
 import { gate } from './stages/gate/stage';
+import { handBack } from './stages/hand-back/stage';
 import { merge } from './stages/merge/stage';
 import { performance } from './stages/performance/stage';
 import { push } from './stages/push/stage';
 import { security } from './stages/security/stage';
 import { sideEffects } from './stages/side-effects/stage';
+import { stop } from './stages/stop/stage';
 import { style } from './stages/style/stage';
 import { tests } from './stages/tests/stage';
 import { update } from './stages/update/stage';
@@ -37,8 +41,11 @@ export default workflow(
     const brief = run.intake.files['brief.md'];
     const reviewers = [style, architecture, sideEffects, performance, security, coverage];
 
-    /** Gives up on the pull request: for now it fails the run with the reason. */
-    const giveUp = async (reason: string, _details: string) => run.fail(reason);
+    /** Hands the pull request back, and fails the run. */
+    const giveUp = async (reason: string, details: string) => {
+      await run.stage(handBack, { pr: number, ticketKey, reason, details });
+      return run.fail(`handed back: ${reason}`);
+    };
 
     let pass = 0;
     // The head the last pass ended at, once its review was clean: the next pass reads no code it hasn't seen.
@@ -101,6 +108,7 @@ export default workflow(
 
       const gated = (await run.stage(gate, { pr: number })).output;
       if (!gated.labelled) {
+        await run.stage(stop, { pr: number, ticketKey });
         return run.fail('the designation label was removed before the merge');
       }
       if (!gated.open || gated.base !== 'main' || gated.headSha !== head) {

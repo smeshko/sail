@@ -72,6 +72,8 @@ export interface ChainOptions {
   readonly harness?: (answers: Record<string, Record<string, unknown>[]>) => void;
   /** The copy of the fixture's `.sail/`, after `harness` has changed it. */
   readonly prepare?: (sail: string) => void;
+  /** Names of files a call leaves in its directory that `observe()` reads, by `<call key>/<name>`. */
+  readonly capture?: readonly string[];
   /** Extra environment for every `sail` process: what the watcher's runs and their script steps inherit. */
   readonly env?: Readonly<Record<string, string>>;
 }
@@ -281,6 +283,8 @@ export interface Observed {
   readonly end: { status?: string; stopReason?: string; message?: string; result?: unknown };
   /** Each call's result, by key (`checks#1`). */
   readonly results: Record<string, CallResult>;
+  /** The files `capture` named that calls left, by `<call key>/<name>`. */
+  readonly captured: Record<string, string>;
   /** The feedback each `fix` call was given, by key (`fix#1`). */
   readonly feedback: Record<string, unknown>;
   /** What the GitHub world was asked, `<METHOD> <path>` in order, and the requests themselves. */
@@ -322,6 +326,7 @@ export async function observe(
     const events = existsSync(dir) ? chain.eventsOf(name) : [];
     const results: Record<string, CallResult> = {};
     const feedback: Record<string, unknown> = {};
+    const captured: Record<string, string> = {};
     for (const event of events) {
       if (event.type !== 'stage:end') continue;
       const { key, stage, call } = event as unknown as { key: string; stage: string; call: number };
@@ -329,6 +334,9 @@ export async function observe(
       if (where === undefined) continue;
       results[key] = JSON.parse(readFileSync(join(where, 'result.json'), 'utf8'));
       const given = join(where, 'in', 'feedback.json');
+      for (const name of options.capture ?? []) {
+        if (existsSync(join(where, name))) captured[`${key}/${name}`] = readFileSync(join(where, name), 'utf8');
+      }
       if (stage === 'fix' && existsSync(given)) feedback[key] = JSON.parse(readFileSync(given, 'utf8'));
     }
     const leases = join(chain.repo.home, '.sail', 'leases');
@@ -341,6 +349,7 @@ export async function observe(
       events,
       end: end ?? {},
       results,
+      captured,
       feedback,
       routes: chain.github.routes(),
       requests: [...chain.github.requests],
