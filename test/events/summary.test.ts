@@ -425,7 +425,7 @@ test("each loop's iterations are the highest its loop:iteration and loop:exit ev
   expect(Object.keys(summary?.loops ?? {})).toEqual(['review', 'fix']);
 });
 
-test('a route repeated with no journal:append between is dropped, and the same move after one is kept', () => {
+test("a route repeated with no call's journal:append between is dropped, and the same move after one is kept", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -439,7 +439,7 @@ test('a route repeated with no journal:append between is dropped, and the same m
       [600, end('implement#1', 'passed', 100)],
       [610, journal('implement#1', 2, 'passed')],
       [620, route('implement#1', 'passed', 'tests#1')],
-      [630, journal('implement#1/check', 3, 'passed')],
+      [630, journal('tests#1', 3, 'passed')],
       [640, route('implement#1', 'passed', 'tests#1')],
     ),
   );
@@ -448,6 +448,22 @@ test('a route repeated with no journal:append between is dropped, and the same m
     { at: 'implement#1', value: 'passed', took: 'tests#1' },
     { at: 'implement#1', value: 'passed', took: 'tests#1' },
   ]);
+});
+
+test("a route the resume reports again after a step line of the call it took is dropped: a step's line is its call's, not a move (review R1-7)", () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('self-review#1')],
+      [200, end('self-review#1', 'done', 100)],
+      [210, journal('self-review#1', 1, 'done')],
+      [220, route('self-review#1', 'done', 'publish#1')],
+      [300, journal('publish#1/describe', 2, 'done')],
+      [400, runEnd('suspended', 1, { stopReason: 'interrupted', message: 'stopped during publish#1' })],
+      [500, route('self-review#1', 'done', 'publish#1')],
+    ),
+  );
+  expect(summary?.routes).toEqual([{ at: 'self-review#1', value: 'done', took: 'publish#1' }]);
 });
 
 test('events with no run:start give no summary', () => {
