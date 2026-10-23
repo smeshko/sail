@@ -1,10 +1,12 @@
-// `sail stage run <stage-dir> [--bind name=value]...`: runs one one-step stage in isolation, with its whole contract
-// enforced, into `.sail-runs/<stage>-<ulid>/00-<stage>/call-1/` beside its `.sail/`. Every refusal comes before anything
-// is written. This module parses, prints and maps the outcome to an exit code; the work is the engine's.
+// `sail stage run <stage-dir> [--bind name=value]...`: runs one stage in isolation, with its whole contract enforced,
+// into `.sail-runs/<stage>-<ulid>/00-<stage>/call-1/` beside its `.sail/`. Every refusal comes before anything is
+// written. This module parses, prints and maps the outcome to an exit code; the work is the engine's.
 //
-// An agent stage runs on the harness `project.yaml` names, with the model its alias names there. Only the harness is
-// resolved: a stage in isolation reaches no ticket source, code host or workspace, so it needs none of their
-// credentials. A script stage resolves no adapter at all.
+// An agent stage runs on the harness `project.yaml` names, with the model its alias names there, and each agent step of
+// a multi-step stage on its own. Only the harness is resolved: a stage in isolation reaches no ticket source, code host
+// or workspace, so it needs none of their credentials. A script stage resolves no adapter at all. A multi-step stage
+// runs its steps in order, with no journal and no resume, and a step that declares a `gitDiff()` can't start: a stage
+// in isolation has no workspace to take one from.
 import { existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
@@ -18,8 +20,9 @@ import { runsDir } from '../../engine/run-dir';
 import { newRunId } from '../../engine/run-id';
 import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue, type SchemaIssue } from '../../engine/schemas';
+import { stepProblems } from '../../engine/stage-call';
 import { typecheck } from '../../engine/typecheck';
-import type { AgentStep, StageDefinition } from '../../sdk/steps';
+import type { AgentStep, StageDefinition, Step } from '../../sdk/steps';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
@@ -66,17 +69,23 @@ function supply(
 }
 
 /**
- * What an agent stage run in isolation runs on, resolved before anything is written: the model its alias names in
- * `project.yaml`, then the harness alone. An alias `models` doesn't define refuses, and so does a harness with issues.
+ * What a stage with an agent step, run in isolation, runs on, resolved before anything is written: the model each agent
+ * step's alias names in `project.yaml`, then the harness alone. An alias `models` doesn't define refuses, and so does
+ * a harness with issues.
  */
 async function executionOf(
-  definition: AgentStep,
+  definition: StageDefinition,
   sailDir: string,
   config: ProjectConfig,
   env: Io['env'],
 ): Promise<AgentExecution | { refused: string } | { issues: SchemaIssue[] }> {
   const undefinedAlias = modelProblemsOf(`stage '${definition.name}'`, definition, config);
   if (undefinedAlias.length > 0) return { refused: undefinedAlias.join('\n') };
+  const steps: readonly Step[] = definition.kind === 'stage' ? definition.steps : [definition];
+  const agents = steps.filter((step): step is AgentStep => step.kind === 'agent');
+  const models = Object.fromEntries(
+    agents.map((step) => [step.name, config.models[step.model ?? 'default'] as string]),
+  );
   const adapters = await resolveAdapters({
     sailDir,
     config,
@@ -88,7 +97,8 @@ async function executionOf(
   const { conventions } = config;
   return {
     harness: adapters.ports.harness,
-    model: config.models[definition.model ?? 'default'] as string,
+    model: Object.values(models)[0] as string,
+    ...(definition.kind === 'stage' && definition.steps.length > 1 ? { models } : {}),
     ...(conventions === undefined ? {} : { conventions }),
   };
 }
@@ -143,11 +153,14 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   const problem = stageFileProblem(stageFile, loaded.definitions);
   const [definition] = loaded.definitions;
   if (problem !== undefined || definition === undefined) return refuse(`${at(stageFile)}: ${problem}`);
-  if (definition.kind === 'stage' && definition.steps.length > 1) {
-    return refuse(`${definition.name} can't run:\n  multi-step stages can't run yet`);
-  }
+  // The same wiring rules as loading: a stage whose steps are wired wrongly never runs.
+  const wiring = definition.kind === 'stage' ? stepProblems(definition) : [];
+  if (wiring.length > 0) return refuse(`${at(stageFile)}: ${wiring.join(`\n  `)}`);
 
-  const agent = definition.kind === 'agent' ? await executionOf(definition, found.dir, config, io.env) : undefined;
+  const runsAgent = (definition.kind === 'stage' ? definition.steps : [definition]).some(
+    (step) => step.kind === 'agent',
+  );
+  const agent = runsAgent ? await executionOf(definition, found.dir, config, io.env) : undefined;
   if (agent !== undefined && 'refused' in agent) return refuse(agent.refused);
   if (agent !== undefined && 'issues' in agent) return refuseConfig(agent.issues);
 

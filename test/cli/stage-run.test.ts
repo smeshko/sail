@@ -650,10 +650,7 @@ const PUBLISH_BINDS = [
   'ticketKey="FAKE-1"',
 ];
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a multi-step stage whose describe is blocked prints the call's line and describe's reason, exits 1, and never starts open", async () => {
+test("a multi-step stage whose describe is blocked prints the call's line and describe's reason, exits 1, and never starts open", async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);
     const harness = join(sail, 'fake', 'harness.json');
@@ -680,10 +677,7 @@ test
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-008
-test
-  .skip // TDD-PENDING TASK-008
-  ("a multi-step stage whose open picks an output key describe's schema doesn't have is refused before anything is written, naming the step and the binding", async () => {
+test("a multi-step stage whose open picks an output key describe's schema doesn't have is refused before anything is written, naming the step and the binding", async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);
     const stage = join(sail, 'workflows', 'ticket-to-pr', 'stages', 'publish', 'stage.ts');
