@@ -593,3 +593,31 @@ test("callProblems of a multi-step stage checks the stage's own produces with it
     "step 'b': '../outside.txt' can't be produced: it is not a plain file name",
   ]);
 });
+
+test("an optional fromStep() the earlier step's output leaves out is bound to nothing: the step runs, and its result consumed it as null (review R1-5)", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const Noted = z.object({ title: z.string(), bodyFile: z.string(), note: z.string().optional() });
+    const noted = stage('publish', {
+      consumes: { ticketKey: value(TicketKey) },
+      output: PrInfo,
+      steps: [
+        agent('describe', { ...describe, output: Noted }),
+        script('open', {
+          run: './open.sh',
+          consumes: {
+            title: fromStep('describe').output('title'),
+            note: fromStep('describe').output('note').optional(),
+          },
+          output: PrInfo,
+        }),
+      ],
+    });
+    const { result } = await runStageCall(s.request(noted), noted);
+    expect(result).toMatchObject({ outcome: 'passed', steps: [{ step: 'describe' }, { step: 'open' }] });
+    expect(json(s, `${CALL}/steps/2-open/result.json`).consumed).toEqual({
+      title: `${CALL}/steps/1-describe/result.json#/output/title`,
+      note: null,
+    });
+  });
+});
