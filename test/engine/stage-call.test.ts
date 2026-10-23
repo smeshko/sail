@@ -405,6 +405,43 @@ test("a step already journaled is not run again: open takes describe's title fro
   });
 });
 
+test("a journaled step's files come from its journal line on a resume, not from the result.json a later session rewrote (review R1-1)", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    let heard: Record<string, unknown> | undefined;
+    await runStageCall(s.request(), publish, {
+      onStep: (result) => {
+        heard = result;
+        return false;
+      },
+    });
+    const entry: JournalEntry = {
+      seq: 3,
+      key: 'publish#1/describe',
+      stage: 'publish',
+      call: 1,
+      step: 'describe',
+      outcome: 'done',
+      output: heard?.output,
+      reason: null,
+      files: { 'pr-body.md': `${CALL}/pr-body.md` },
+      resultPath: `${CALL}/steps/1-describe/result.json`,
+      recordedAt: TS,
+    };
+    // Valid under sail.result.v1 and under the step's key, with a file path and a file the journal never held.
+    const path = join(s.runDir, entry.resultPath);
+    const rewritten = JSON.parse(readFileSync(path, 'utf8'));
+    rewritten.files['pr-body.md'].path = `${CALL}/planted.md`;
+    rewritten.files['planted.md'] = { path: `${CALL}/planted.md`, bytes: 1, sha256: 'a'.repeat(64) };
+    writeFileSync(path, JSON.stringify(rewritten));
+
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    expect(result).toMatchObject({ outcome: 'passed' });
+    expect(Object.keys(result.files as object)).toEqual(['pr-body.md']);
+    expect((result.files as Record<string, { path: string }>)['pr-body.md']?.path).toBe(`${CALL}/pr-body.md`);
+  });
+});
+
 const commit = script('commit', { run: './commit.sh', output: z.object({ sha: z.string() }) });
 const review = script('review', {
   run: './review.sh',
