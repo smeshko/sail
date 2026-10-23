@@ -11,7 +11,7 @@ import type { JournalEntry } from '../../src/engine/journal';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
 import { runStageCall, type StageHooks } from '../../src/engine/stage-call';
 import type { NewEvent } from '../../src/events/types';
-import { agent, fromStep, gitDiff, type Stage, script, stage, value, z } from '../../src/sdk/index';
+import { agent, doc, fromStep, gitDiff, type Stage, script, stage, value, z } from '../../src/sdk/index';
 import { type Recorded, recording } from '../helpers/scripted-harness';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -549,4 +549,47 @@ test("callProblems of a multi-step stage lists each step's own problems by step,
   expect(
     callProblems(publish, { ticketKey: { kind: 'value', value: 'FAKE-1', from: 'x' } }, { harness, model: MODEL }),
   ).toEqual([]);
+});
+
+/** A validator no document passes. */
+const never = { check: 'never', derives: [], validate: () => ({ problems: ['is never valid'] }) };
+
+test("the stage's own produces don't replace the last step's document of the same name: its validators still run (review R1-3)", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    writeFileSync(join(repo.dir, '.sail', 'workflows', 'ticket-to-pr', 'stages', 'publish', 'body.md'), 'Body.\n');
+    s.script('prep.sh', `echo '{}'`);
+    const documented = stage('publish', {
+      consumes: { ticketKey: value(TicketKey) },
+      produces: { 'pr-body.md': 'file' },
+      output: PrDescription,
+      steps: [
+        script('prep', { run: './prep.sh', output: z.object({}) }),
+        agent('describe', {
+          ...describe,
+          produces: { 'pr-body.md': doc('./body.md', [never]) },
+          onInvalidOutput: 'fail',
+        }),
+      ],
+    });
+    const { result } = await runStageCall(s.request(documented), documented);
+    expect(result).toMatchObject({
+      outcome: 'error',
+      steps: [{ step: 'prep' }, { step: 'describe', outcome: 'error' }],
+    });
+    expect(JSON.stringify(result.errors)).toContain('is never valid');
+  });
+});
+
+test("callProblems of a multi-step stage checks the stage's own produces with its last step's (review R1-4)", () => {
+  const harness = createFakeHarness({ script: {} });
+  const reserved = stage('reserved', {
+    produces: { 'result.json': 'file', '../outside.txt': 'file' },
+    output: PrInfo,
+    steps: [script('a', { run: './a.sh', output: z.object({}) }), script('b', { run: './b.sh', output: PrInfo })],
+  });
+  expect(callProblems(reserved, {}, { harness, model: MODEL })).toEqual([
+    "step 'b': 'result.json' can't be produced: the engine writes it in $STAGE_OUT",
+    "step 'b': '../outside.txt' can't be produced: it is not a plain file name",
+  ]);
 });
