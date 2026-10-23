@@ -76,6 +76,12 @@ export interface Over {
 /** Summed dollars and minutes without the float noise, to 6 decimals. */
 const round = (value: number): number => Math.round(value * 1e6) / 1e6;
 
+/**
+ * The least dollars a request is handed, the rounding's unit: `claude-code`'s CLI refuses `--max-budget-usd 0`, so a
+ * request the others' shares leave nothing still runs its one turn, as a share of 0 would on the fake (D12, D13).
+ */
+const LEAST_SHARE_USD = 0.000001;
+
 /** The dollars fold: what settled sessions spent, and each open session's last reading by key. */
 interface Dollars {
   settled: number;
@@ -296,7 +302,7 @@ export function trackBudget(options: BudgetOptions): BudgetTracker | undefined {
     for (const [other, share] of shares) {
       if (other !== key) held += Math.max(0, share - (dollars.open.get(other) ?? 0));
     }
-    return Math.max(0, round(maxUsd - dollarsOf(dollars) - held));
+    return Math.max(LEAST_SHARE_USD, round(maxUsd - dollarsOf(dollars) - held));
   };
 
   return {
