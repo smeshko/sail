@@ -77,13 +77,16 @@ export interface CallRequest {
 const UNRESOLVED = "agent steps need a harness and a model, which weren't resolved";
 
 /**
- * A stage of one step as that step: under the stage's name, with the stage's bindings and, beside its own, the stage's
- * `produces`. It runs and records as the step would, and writes no `steps/` (D12).
+ * A stage of one step as that step: under the stage's name, with the stage's bindings, the step's `gitDiff()`s, which
+ * only a step can take, and, beside its own, the stage's `produces`. It runs and records as the step would, and writes
+ * no `steps/` (D12).
  */
 export function asStep(stage: Stage): AgentStep | ScriptStep | undefined {
   const [only, ...more] = stage.steps;
   if (more.length > 0) return undefined;
-  return { ...withStageProduces(only, stage), name: stage.name, consumes: stage.consumes } as AgentStep | ScriptStep;
+  const diffs = Object.entries(only.consumes).filter(([, binding]) => binding.kind === 'gitDiff');
+  const consumes = { ...Object.fromEntries(diffs), ...stage.consumes };
+  return { ...withStageProduces(only, stage), name: stage.name, consumes } as AgentStep | ScriptStep;
 }
 
 /**

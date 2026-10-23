@@ -76,7 +76,7 @@ import { PortError } from '../ports/errors';
 import type { StageDefinition } from '../sdk/steps';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
-import { type AgentExecution, callProblems, runCall } from './call';
+import { type AgentExecution, asStep, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { takeControl } from './control';
@@ -294,7 +294,9 @@ async function gitDiffs(
   call: PendingCall,
 ): Promise<{ supplied: Record<string, Supplied> } | { failed: string }> {
   const supplied: Record<string, Supplied> = {};
-  for (const [key, binding] of Object.entries(call.definition.consumes)) {
+  // A stage of one step runs as that step, with its gitDiffs. A multi-step call takes each step's as the step starts.
+  const definition = call.definition.kind === 'stage' ? (asStep(call.definition) ?? call.definition) : call.definition;
+  for (const [key, binding] of Object.entries(definition.consumes)) {
     if (binding.kind !== 'gitDiff') continue;
     try {
       const { patch } = await opened.adapters.workspace.diff(opened.workspace.path, binding.range);
