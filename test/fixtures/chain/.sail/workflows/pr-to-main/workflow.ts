@@ -50,7 +50,9 @@ export default workflow(
 
     /** Hands the pull request back, and fails the run. */
     const giveUp = async (reason: string, details: string) => {
-      await run.stage(handBack, { pr: number, ticketKey, reason, details });
+      const handed = await run.stage(handBack, { pr: number, ticketKey, reason, details });
+      // The label went during the run: the stage said so as a stop does, and swapped nothing.
+      if (!handed.output.labelled) return run.fail('the designation label was removed before the merge');
       return run.fail(`handed back: ${reason}`);
     };
 

@@ -1,8 +1,10 @@
 // hand-back: gives the pull request back to a person. It stays open, with a comment that says why, its designation
 // label swapped for sail-blocked so that no later poll lists it, and a comment on its ticket, whose state it leaves.
+// When a person removed the label during the run, it only comments that the run didn't merge, as the stop stage does.
 import { script, value, z } from 'sail';
 
-export const HandedBack = z.object({ number: z.number().int(), labels: z.array(z.string()) });
+/** `labelled: false` when the designation label was already gone: then nothing was handed back, and no label changed. */
+export const HandedBack = z.object({ number: z.number().int(), labels: z.array(z.string()), labelled: z.boolean() });
 
 export const handBack = script('hand-back', {
   run: './run.sh',
