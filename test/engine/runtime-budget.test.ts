@@ -421,3 +421,69 @@ test('a raise of minutes for a run with no minute budget is refused, and STATUS 
     });
   });
 });
+
+// A multi-step stage under the run's budget: the fixture's publish, describe (an agent step) then open (a script step).
+// The calls before it spend $1.249, and describe spends $0.02525 a turn over four turns.
+
+/** Each step's start, as `<key> try <n>`, in order. */
+const stepStarts = (list: readonly SailEvent[]) =>
+  list.flatMap((event) => (event.type === 'step:start' ? [`${event.key} try ${event.try}`] : []));
+
+/** A keyed `budget:exceeded`, without its envelope. */
+const exceededOf = (list: readonly SailEvent[], key: string) =>
+  budgetTrail(list).find((event) => event.type === 'budget:exceeded' && 'key' in event && event.key === key);
+
+test("an agent step that runs out of the run's budget is left unjournaled with its call, the run is suspended before the call, and a raised resume runs the call again from that step", async () => {
+  await withTempRepo(async (repo) => {
+    // describe is handed the $0.051 left of $1.30, not its own $1, and its third turn reaches $0.07575.
+    const runId = await suspendedCopy(repo.dir, '{ maxUsd: 1.3 }');
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const first = readEvents(dir);
+    const suspendedWith = { journal: keys(dir), status: status(dir) };
+    const end = await resumed(repo.dir, runId, { raise: { usd: 1 } });
+    const list = readEvents(dir);
+    expect({
+      suspendedWith,
+      describe: exceededOf(first, 'publish#1/describe'),
+      message: first.findLast((event) => event.type === 'run:end')?.message,
+      status: 'status' in end ? end.status : end.refused,
+      journal: keys(dir),
+      steps: stepStarts(list),
+    }).toEqual({
+      suspendedWith: { journal: FIXTURE_JOURNAL.slice(0, 7), status: 'suspended budget_exceeded\n' },
+      describe: { type: 'budget:exceeded', key: 'publish#1/describe', budget: 'usd', limit: 0.051, used: 0.07575 },
+      message: '$1.32 of its $1.30 used before publish#1: raise it with --raise-budget <usd>',
+      status: 'completed',
+      journal: FIXTURE_JOURNAL,
+      steps: ['publish#1/describe try 1', 'publish#1/describe try 2', 'publish#1/open try 1'],
+    });
+  });
+});
+
+test("once a step uses up the run's budget no further step of its call starts: the run is suspended before the call with that step journaled, and a raised resume runs only the steps after it", async () => {
+  await withTempRepo(async (repo) => {
+    // describe is handed $0.081 of $1.33, finishes done at $0.101, and the run has then used $1.35.
+    const runId = await suspendedCopy(repo.dir, '{ maxUsd: 1.33 }');
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const first = readEvents(dir);
+    const suspendedWith = { journal: keys(dir), steps: stepStarts(first) };
+    const end = await resumed(repo.dir, runId, { raise: { usd: 1 } });
+    const list = readEvents(dir);
+    expect({
+      suspendedWith,
+      message: first.findLast((event) => event.type === 'run:end')?.message,
+      status: 'status' in end ? end.status : end.refused,
+      journal: keys(dir),
+      steps: stepStarts(list),
+      sessions: list.filter((event) => event.type === 'harness:session_start' && event.key === 'publish#1/describe')
+        .length,
+    }).toEqual({
+      suspendedWith: { journal: FIXTURE_JOURNAL.slice(0, 8), steps: ['publish#1/describe try 1'] },
+      message: '$1.35 of its $1.33 used before publish#1: raise it with --raise-budget <usd>',
+      status: 'completed',
+      journal: FIXTURE_JOURNAL,
+      steps: ['publish#1/describe try 1', 'publish#1/open try 1'],
+      sessions: 1,
+    });
+  });
+});

@@ -45,9 +45,11 @@
 // A run with a budget is driven under its tracker (`budget.ts`). Each agent request is handed the run's share of what it
 // has left, and the harness ends a session that reaches it. A call that ran out of the run's budget, an `error` with
 // `budget_exceeded` whose request the run's budget narrowed, is left unjournaled, so the next replay asks for it again.
-// The budget is checked before the intake and before each call, after the abort and the control file: a run that has
-// used it up is suspended with `budget_exceeded`, `run:suspended` then STATUS then `run:end`, keeping its workspace and
-// lease. A resume given a raise records it as `budget:raised` before anything runs.
+// So is a step of a multi-step call, with its call. The budget is checked before the intake and before each call, after
+// the abort and the control file: a run that has used it up is suspended with `budget_exceeded`, `run:suspended` then
+// STATUS then `run:end`, keeping its workspace and lease. Within a multi-step call it is checked again after each step
+// that passed with another to follow: once used up, the call stops there unjournaled, and the check before it suspends
+// the run. A resume given a raise records it as `budget:raised` before anything runs.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
@@ -228,6 +230,16 @@ function executionOf(opened: OpenedRun, stage: string, tracker: BudgetTracker | 
 const runsAgent = (definition: StageDefinition): boolean =>
   definition.kind === 'agent' ||
   (definition.kind === 'stage' && definition.steps.some((step) => step.kind === 'agent'));
+
+/** The outcomes a step passes with, so the next step of its call runs. */
+const PASSED = new Set(['done', 'passed']);
+
+/** Whether `call`'s stage has a step after `step`. */
+const stepFollows = (call: PendingCall, step: unknown): boolean => {
+  const steps = call.definition.kind === 'stage' ? call.definition.steps : [];
+  const index = steps.findIndex((each) => each.name === step);
+  return index >= 0 && index < steps.length - 1;
+};
 
 /** The call key a step line's key belongs to: `publish#1` for `publish#1/describe`. */
 const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
@@ -484,11 +496,19 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       },
       {
         finished,
-        // A step that ends once the run is stopping isn't journaled: a resume runs it again.
+        // A step that ends once the run is stopping isn't journaled: a resume runs it again. Nor is one that ran out of
+        // the run's budget, which stops its call as a call is left: the next replay asks for the call again, and it runs
+        // from that step. The budget is checked before each further step as before each call: once a step that passed
+        // has used it up, the next doesn't start, and the boundary before the call suspends the run.
         onStep: (result, paths) => {
-          if (callSignal?.aborted) return false;
+          if (callSignal?.aborted || ranOut(result)) return false;
           journal(result, paths);
-          return callSignal?.aborted !== true;
+          if (callSignal?.aborted) return false;
+          return !(
+            PASSED.has(String(result.outcome)) &&
+            stepFollows(call, result.step) &&
+            tracker?.over() !== undefined
+          );
         },
         diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch,
       },
@@ -656,9 +676,10 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       if (beforeCall !== undefined) return await beforeCall;
       if (end.kind === 'call') {
         const [one] = ready as [Ready];
-        const { result, paths } = await launch(one, signal);
+        const { result, paths, stopped } = await launch(one, signal);
         if (signal?.aborted) return await interrupted(`stopped during ${first}`);
-        if (ranOut(result)) {
+        // Stopped short of its last step, the call is left for the next replay to ask for again.
+        if (stopped === true || ranOut(result)) {
           running = undefined;
           continue;
         }
@@ -686,9 +707,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const settled = await Promise.allSettled(
         ready.map(async (each) => {
           try {
-            const { result, paths } = await launch(each, groupSignal);
+            const { result, paths, stopped } = await launch(each, groupSignal);
             // A call that returns once the run is stopping isn't journaled: a resume runs it again.
-            if (groupSignal.aborted || ranOut(result)) return;
+            if (groupSignal.aborted || stopped === true || ranOut(result)) return;
             const journaled = journal(result, paths, keys);
             journaledNow++;
             settle(each);
