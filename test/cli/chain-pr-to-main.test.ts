@@ -573,3 +573,29 @@ test('details made of one long run of backticks still give a comment under the h
   expect(comment).toContain('(the details are cut at 60,000 bytes)');
   expect(issueCalls(run, 7)).toEqual(['POST /comments', ...SWAP]);
 });
+
+// Round 3's regression case.
+
+test('details cut inside a multi-byte character still hand back under a UTF-8 locale: the comment is posted and the label swapped', async () => {
+  const run = await observe(
+    {
+      pulls: [{ number: 7, branch: 'sail/ADW-1-multibyte', ticket: 'ADW-1' }],
+      // The details open with `- high chain/change.md: Unchecked input. `, 41 bytes, so the emoji spans bytes 59,998 to
+      // 60,001 and the cut at 60,000 splits it. macOS awk refuses a split character under a UTF-8 locale; Linux awk
+      // reads bytes, so the case was red only on macOS.
+      env: { LC_ALL: 'en_US.UTF-8' },
+      harness: (answers) => {
+        securityAlwaysHigh(answers);
+        for (const answer of answers.security ?? []) {
+          const output = answer.output as { findings?: { detail: string }[] } | undefined;
+          for (const finding of output?.findings ?? []) finding.detail = `${'a'.repeat(59_957)}\u{1F600} and after`;
+        }
+      },
+    },
+    ['#7', '--workflow', 'pr-to-main'],
+  );
+  expectGivenUp(run, 7);
+  expect(run.end.message).toBe('handed back: must-fix findings remain');
+  expect(commentsOn(run, 7)[0]).toContain('(the details are cut at 60,000 bytes)');
+  expect(issueCalls(run, 7)).toEqual(['POST /comments', ...SWAP]);
+});
