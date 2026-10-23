@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   createEventsFile,
   type EventCursor,
+  lastSeq,
   ndjsonConsumer,
   nextSeq,
   readEvents,
@@ -236,5 +237,31 @@ test.each<[string, string]>([
   appendFileSync(join(dir, 'events.ndjson'), `${bad}\n`);
   expect(readEventsFrom(dir, nextOf(first))).toEqual({
     refused: expect.stringMatching(/^events\.ndjson:3 can't be read: ./),
+  });
+});
+
+// biome-ignore format: TDD-PENDING TASK-003
+test
+  .skip // TDD-PENDING TASK-003
+  ("lastSeq is the last whole line's seq, read from the file's tail: a torn tail is no line, and a missing or empty file has none", () => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  const missing = lastSeq(dir);
+  writeFileSync(path, '');
+  const empty = lastSeq(dir);
+  // Longer than one read of the tail, so the last line is found across reads.
+  const long = { ...event(3), consumed: { note: 'x'.repeat(10_000) } };
+  writeFileSync(path, `${lines(1, 2)}${JSON.stringify(long)}\n`);
+  const whole = lastSeq(dir);
+  appendFileSync(path, JSON.stringify(event(4)).slice(0, 40));
+  const torn = lastSeq(dir);
+  writeFileSync(path, lines(7));
+  const one = lastSeq(dir);
+  expect({ missing, empty, whole, torn, one }).toEqual({
+    missing: undefined,
+    empty: undefined,
+    whole: 3,
+    torn: 3,
+    one: 7,
   });
 });

@@ -767,7 +767,13 @@ test('sail FAKE-1 takes a script-to-agent workflow to its end on the fake harnes
       'spec#1       output valid',
     ]);
     expect(view).toContain('expected array to have >=1 items');
-    expect(view.split('\n').slice(-5)).toEqual([
+    // The final block's cost row is terminal-budget.test.ts's: its rows here are the rest.
+    expect(
+      view
+        .split('\n')
+        .filter((line) => !line.startsWith('  cost '))
+        .slice(-5),
+    ).toEqual([
       'completed · <t>',
       '  calls    4 · 3 passed, 1 done',
       expect.stringMatching(/^ {2}replays {2}\d+$/),
