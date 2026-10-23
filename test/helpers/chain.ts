@@ -15,7 +15,7 @@
 // spawned with the clone's env: its script steps' `sail port` reach the worlds over HTTP. Both keys are markers.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { validateRunDir } from '../../src/engine/schemas';
+import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../src/events/types';
 import {
@@ -225,7 +225,7 @@ export async function withChain<T>(options: ChainOptions, fn: (chain: Chain) => 
         runDirs: () =>
           existsSync(runs)
             ? readdirSync(runs)
-                .filter((name) => name !== 'fake')
+                .filter((name) => existsSync(join(runs, name, 'run.json')))
                 .sort()
             : [],
         eventsOf: (dir) => readEvents(join(runs, dir)),
@@ -355,7 +355,7 @@ export async function observe(
       requests: [...chain.github.requests],
       pulls: structuredClone(chain.github.pullRequests),
       tickets: Object.fromEntries(numbers.map((number) => [number, structuredClone(chain.linear.ticket(number))])),
-      issues: existsSync(dir) ? validateRunDir(dir).issues.map(String) : ['no run directory'],
+      issues: existsSync(dir) ? validateRunDir(dir).issues.map(formatIssue) : ['no run directory'],
       leases: existsSync(leases) ? readdirSync(leases) : [],
       worktrees: chain.repo
         .git('worktree', 'list', '--porcelain')
