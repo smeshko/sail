@@ -531,3 +531,45 @@ test('a label removed during a run that then gives up is a stop, not a hand-back
   expect(issueCalls(run, 7)).toEqual(['POST /comments']);
   expect(run.pulls.find((each) => each.number === 7)?.labels).toEqual(['ci-red']);
 });
+
+// Round 2's regression cases.
+
+test('a fix that moves a file from outside src/ into it is refused too: the move deletes the outside file, which push names', async () => {
+  const run = await observe(
+    {
+      pulls: [{ number: 7, branch: 'sail/ADW-1-moved-in', ticket: 'ADW-1' }],
+      prepare: addTo(
+        'push',
+        'start',
+        "mkdir -p src && git mv chain/7.md src/7.md && git commit -q -m 'a move into src'",
+      ),
+    },
+    ['#7', '--workflow', 'pr-to-main'],
+  );
+  expectGivenUp(run, 7);
+  expect(run.end.message).toBe('handed back: fix changed files outside src/ and test/');
+  expect(run.results['push#1']).toMatchObject({ outcome: 'failed', output: { files: ['chain/7.md'] } });
+  expect(run.events.filter((event) => event.type === 'codehost:pushed')).toEqual([]);
+});
+
+test('details made of one long run of backticks still give a comment under the host limit, and the hand-back swaps the label', async () => {
+  const run = await observe(
+    {
+      pulls: [{ number: 7, branch: 'sail/ADW-1-backticks', ticket: 'ADW-1' }],
+      harness: (answers) => {
+        securityAlwaysHigh(answers);
+        for (const answer of answers.security ?? []) {
+          const output = answer.output as { findings?: { detail: string }[] } | undefined;
+          for (const finding of output?.findings ?? []) finding.detail = '`'.repeat(70_000);
+        }
+      },
+    },
+    ['#7', '--workflow', 'pr-to-main'],
+  );
+  expectGivenUp(run, 7);
+  expect(run.end.message).toBe('handed back: must-fix findings remain');
+  const [comment = ''] = commentsOn(run, 7);
+  expect(Buffer.byteLength(comment)).toBeLessThan(65_536);
+  expect(comment).toContain('(the details are cut at 60,000 bytes)');
+  expect(issueCalls(run, 7)).toEqual(['POST /comments', ...SWAP]);
+});
