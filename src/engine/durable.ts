@@ -14,6 +14,9 @@ export function syncDir(dir: string): void {
   }
 }
 
+/** Syncs the file `path`, which must exist. TDD stub: syncs nothing. */
+export function syncFile(_path: string): void {}
+
 /**
  * Creates the directory `path`, then syncs the directory holding it, whose entry names it. An existing `path` throws
  * `EEXIST`, unless `mayExist` says others create it too, as every run does `.sail-runs/`. Its parent is synced all the

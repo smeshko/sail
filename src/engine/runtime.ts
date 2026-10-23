@@ -111,6 +111,8 @@ export interface RunEnd {
   message?: string;
   /** What the workflow returned, when it completed. */
   result?: unknown;
+  /** The budget a run suspended with `budget_exceeded` used up. */
+  budget?: 'usd' | 'minutes';
 }
 
 export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {

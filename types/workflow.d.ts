@@ -154,6 +154,11 @@ export interface WorkflowOptions<In extends Intake = Intake> {
     readonly watch?: Watch;
     /** How many runs of a watched workflow may be in flight at once. */
     readonly maxConcurrentRuns?: number;
+    /** The most one run may use, field by field over `project.yaml`'s `budgets.run`. */
+    readonly budget?: {
+        readonly maxUsd?: number;
+        readonly maxMinutes?: number;
+    };
 }
 /**
  * A watched workflow declares both `watch` and `maxConcurrentRuns`, and an unwatched one neither. A union of the two

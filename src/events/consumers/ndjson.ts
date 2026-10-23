@@ -103,6 +103,11 @@ export function createEventsFile(runDir: string): void {
   createFileOnce(join(runDir, EVENTS_FILE), '');
 }
 
+/** The `seq` of the last whole line of the run's events file. TDD stub: none. */
+export function lastSeq(_runDir: string): number | undefined {
+  return undefined;
+}
+
 /**
  * The `seq` a resumed run continues from: 1 for a missing or empty file, else one past the last complete line's. A torn
  * tail is cut first. A last line that can't be read refuses, and leaves the file as it was.

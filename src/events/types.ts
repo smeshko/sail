@@ -69,7 +69,8 @@ export const EVENT_TYPES = [
   'error:consumer',
   'error:port',
 ] as const;
-export type EventType = (typeof EVENT_TYPES)[number];
+// TDD stub: the two types are typed, but not yet in EVENT_TYPES.
+export type EventType = (typeof EVENT_TYPES)[number] | 'run:suspended' | 'budget:raised';
 
 /** What the bus stamps on every event. */
 export interface Envelope {
@@ -106,6 +107,8 @@ interface Payloads {
     /** The replays this process ran. */
     replays: number;
   };
+  /** A run suspended on its budget, right before its `run:end`: which budget, its limit and what was used. */
+  'run:suspended': { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number };
   'stage:start': {
     key: string;
     stage: string;
@@ -236,6 +239,8 @@ interface Payloads {
   /** A step's budget carries its call's key, and the run's carries none. */
   'budget:warning': { key?: string; budget: 'turns' | 'usd' | 'minutes'; limit: number; used: number };
   'budget:exceeded': { key?: string; budget: 'turns' | 'usd' | 'minutes'; limit: number; used: number };
+  /** A raise given to `sail resume`: what it added, at least one of the two, and the run's budget after it. */
+  'budget:raised': { usd?: number; minutes?: number; budget: NonNullable<RunHeader['budget']> };
   'error:harness': { key: string; message: string };
   'error:timeout': { key: string; message: string; timeoutSeconds: number };
   'error:crash': { message: string; key?: string };

@@ -51,6 +51,7 @@ import type { RunRef, WorkspacePort } from '../ports/workspace';
 import type { SourceKind } from '../sdk/intake';
 import type { ProviderRelay, ResolvedAdapters } from './adapters';
 import { branchFor, DEFAULT_BRANCH_PREFIX } from './branch';
+import type { Raise } from './budget';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
@@ -113,6 +114,8 @@ export interface OpenedRun {
   firstSeq: number;
   /** A seeded run's reused calls, as its journal holds them, the run they were taken from, and the stage it runs. */
   seeded?: { fromRun: string; stage: string; entries: readonly JournalEntry[] };
+  /** What a resume adds to the run's budget, recorded before anything runs. */
+  raise?: Raise;
 }
 
 /** Where a run works, and what holds it there. */
@@ -568,6 +571,8 @@ export interface ReopenRunOptions {
   adapters: ResolvedAdapters;
   /** The clock everything the resume records is read from. The system's by default. */
   clock?: Clock;
+  /** What to add to the run's budget. TDD stub: not checked, nor handed on. */
+  raise?: Raise;
 }
 
 /**
