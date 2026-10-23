@@ -5,8 +5,8 @@
 # label sail, then adds sail-blocked, so a poll between the two calls can't list the pull request; a read that failed
 # counts as labelled, so the swap still happens. With a ticket it comments there too, and leaves the ticket's state
 # alone. The details hold agent-written text: they go into a fenced block, longer than any run of backticks they hold,
-# through --body-file, cut to 60,000 bytes so the comment stays under the host's limit, and nothing of them is
-# evaluated. Its last stdout line is the labels after the swap, and whether the label was still there.
+# through --body-file, cut to 60,000 bytes, with any run of four or more backticks cut to three so the fence stays four
+# long, which keeps the whole comment under the host's limit; nothing of them is evaluated. Its last stdout line is the labels after the swap, and whether the label was still there.
 set -euo pipefail
 
 pr=$(cat "$INPUT_PR")
@@ -26,7 +26,7 @@ if [ "$(printf '%s' "$labels" | "$bun" -e 'console.log(JSON.parse(await Bun.stdi
   printf '{"number":%s,"labels":%s,"labelled":false}\n' "$pr" "$labels"
   exit 0
 fi
-head -c 60000 "$INPUT_DETAILS" >"$details"
+head -c 60000 "$INPUT_DETAILS" | LC_ALL=C sed -E 's/`{4,}/```/g' >"$details"
 # The longest run of backticks in the details, so the fence can be one longer (at least three).
 longest=$(awk '{ s = $0; while (match(s, /`+/)) { if (RLENGTH > m) m = RLENGTH; s = substr(s, RSTART + RLENGTH) } } END { print m + 0 }' "$details")
 fence=$(printf '%*s' "$((longest < 3 ? 3 : longest + 1))" '' | tr ' ' '`')
