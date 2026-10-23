@@ -111,10 +111,7 @@ function suspendedCopy(to: string, budget = '{ maxUsd: 0.5, maxMinutes: 90 }'): 
   });
 }
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a run whose budget is below its needs is suspended with budget_exceeded before its next call: STATUS says so, and the journal ends at the last call that completed', async () => {
+test('a run whose budget is below its needs is suspended with budget_exceeded before its next call: STATUS says so, and the journal ends at the last call that completed', async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 0.5, maxMinutes: 90 }');
     const end = await ran(repo.dir);
@@ -138,10 +135,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("the run's warning at 80%, its exceeded budget, the session's own and run:suspended come in that order, and the sessions spent the budget plus one turn", async () => {
+test("the run's warning at 80%, its exceeded budget, the session's own and run:suspended come in that order, and the sessions spent the budget plus one turn", async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 0.5, maxMinutes: 90 }');
     const end = await ran(repo.dir);
@@ -165,10 +159,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("each agent request is narrowed to what the run has left, keeping its step's own budget where that is smaller", async () => {
+test("each agent request is narrowed to what the run has left, keeping its step's own budget where that is smaller", async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 0.5, maxMinutes: 90 }');
     const requests: HarnessRequest[] = [];
@@ -180,10 +171,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a run with maxUsd 0 is suspended before intake#1, with nothing journaled', async () => {
+test('a run with maxUsd 0 is suspended before intake#1, with nothing journaled', async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 0 }');
     const end = await ran(repo.dir);
@@ -201,10 +189,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a session that finishes done as it crosses the budget, reporting its dollars only at its end, is journaled, and the run is suspended before the next call', async () => {
+test('a session that finishes done as it crosses the budget, reporting its dollars only at its end, is journaled, and the run is suspended before the next call', async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 0.5 }');
     const script = scriptIn(repo.dir);
@@ -242,10 +227,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('reviewers that run at once share what the run has left: the one handed it is journaled, those it starved are not, and the run is suspended before asking for them again', async () => {
+test('reviewers that run at once share what the run has left: the one handed it is journaled, those it starved are not, and the run is suspended before asking for them again', async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 0.1 }');
     const script = scriptIn(repo.dir);
@@ -276,10 +258,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a sibling starved by the shares of the others while the run is under its budget is asked for again, not journaled as an error, and the run completes', async () => {
+test('a sibling starved by the shares of the others while the run is under its budget is asked for again, not journaled as an error, and the run completes', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeTrio(repo.dir, { a: 300, b: 300, c: 300 });
     edit(sail, 'project.yaml', BUDGET, 'budgets: { run: { maxUsd: 2 } }');
@@ -309,10 +288,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ('a session handed less time than it needs ends over the minutes, and the run is suspended over its minutes with that call unjournaled', async () => {
+test('a session handed less time than it needs ends over the minutes, and the run is suspended over its minutes with that call unjournaled', async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxMinutes: 0.05 }');
     const script = scriptIn(repo.dir);
@@ -323,10 +299,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a workflow that waits past the run's minutes before its first stage is suspended before that stage starts", async () => {
+test("a workflow that waits past the run's minutes before its first stage is suspended before that stage starts", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(sail, 'project.yaml', BUDGET, 'budgets: { run: { maxMinutes: 0.03 } }');
@@ -355,10 +328,7 @@ test
   });
 });
 
-// biome-ignore format: TDD-PENDING TASK-004
-test
-  .skip // TDD-PENDING TASK-004
-  ("a session's end that can't be confirmed on disk crashes the run before its call is journaled, and STATUS stays running", async () => {
+test("a session's end that can't be confirmed on disk crashes the run before its call is journaled, and STATUS stays running", async () => {
   await withTempRepo(async (repo) => {
     fixtureWith(repo.dir, '{ maxUsd: 25 }');
     const events = join(repo.dir, '.sail-runs');
