@@ -18,7 +18,7 @@
     "name": "ticket-to-pr",
     "version": 1,
     "origin": "repo:.sail/workflows/ticket-to-pr",
-    "sha256": "f94d30a42e726ec2271de2f0b28f759a04ea9c90dc2ca1ccc68c83c564c50edc"
+    "sha256": "0b905ea5df4ad806133032782852a348e5bda6740aaf04f7b7eeac35c0bdceb9"
   },
   "sail": {
     "version": "0.0.0",
@@ -52,32 +52,6 @@
     ]
   },
   "stages": {
-    "describe": {
-      "kind": "agent",
-      "origin": "repo:.sail/workflows/ticket-to-pr/stages/describe",
-      "model": "claude-sonnet-5",
-      "output": "PrDescription",
-      "produces": [
-        "pr-body.md"
-      ],
-      "permissions": {
-        "read": [
-          "**"
-        ],
-        "write": [
-          "$STAGE_OUT/**"
-        ],
-        "commands": [
-          "git log *",
-          "git diff *"
-        ]
-      },
-      "budget": {
-        "maxTurns": 20,
-        "maxUsd": 1,
-        "maxMinutes": 5
-      }
-    },
     "implement": {
       "kind": "agent",
       "origin": "repo:.sail/stages/implement",
@@ -108,16 +82,42 @@
         "maxMinutes": 20
       }
     },
-    "open": {
-      "kind": "script",
-      "origin": "repo:.sail/workflows/ticket-to-pr/stages/open",
+    "publish": {
+      "origin": "repo:.sail/workflows/ticket-to-pr/stages/publish",
       "output": "PrInfo",
-      "exitCodes": {
-        "passed": [
-          0
-        ],
-        "failed": []
-      }
+      "steps": [
+        {
+          "step": "describe",
+          "kind": "agent",
+          "model": "claude-sonnet-5",
+          "output": "PrDescription",
+          "produces": [
+            "pr-body.md"
+          ],
+          "permissions": {
+            "read": [
+              "**"
+            ],
+            "write": [
+              "$STAGE_OUT/**"
+            ],
+            "commands": [
+              "git log *",
+              "git diff *"
+            ]
+          },
+          "budget": {
+            "maxTurns": 20,
+            "maxUsd": 1,
+            "maxMinutes": 5
+          }
+        },
+        {
+          "step": "open",
+          "kind": "script",
+          "output": "PrInfo"
+        }
+      ]
     },
     "self-review": {
       "kind": "agent",

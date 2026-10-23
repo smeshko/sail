@@ -314,7 +314,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     const [mark, style] = END_MARKS[event.outcome];
     const duration = event.type === 'stage:end' ? ` · ${formatDuration(event.durationMs)}` : '';
     const lines: Line[] = [[column(event.key), '  ', [style, `${mark} ${event.outcome}`], duration]];
-    for (const error of event.type === 'stage:end' ? (event.errors ?? []) : []) {
+    for (const error of event.type === 'stage:end' || event.type === 'step:end' ? (event.errors ?? []) : []) {
       lines.push(...message(event.key, `${error.reason}: ${error.message}`, (line) => detail(event.key, line)));
     }
     const tailed = level >= LEVEL.verbose || event.outcome === 'failed' || event.outcome === 'error';

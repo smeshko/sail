@@ -1,0 +1,44 @@
+{
+  "schema": "sail.result.v1",
+  "runId": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+  "stage": "publish",
+  "call": 1,
+  "step": "open",
+  "key": "publish#1/open",
+  "kind": "script",
+  "outcome": "passed",
+  "output": {
+    "number": 5,
+    "url": "fake://codehost/fixture/pull/5",
+    "draft": false
+  },
+  "files": {},
+  "consumed": {
+    "title": "05-publish/call-1/steps/1-describe/result.json#/output/title",
+    "body": "05-publish/call-1/pr-body.md",
+    "ticketKey": "workflow"
+  },
+  "startedAt": "2026-09-25T09:00:15.100Z",
+  "finishedAt": "2026-09-25T09:00:16.100Z",
+  "durationMs": 1000,
+  "exit": {
+    "code": 0,
+    "mapped": "passed"
+  },
+  "command": ".sail/workflows/ticket-to-pr/stages/publish/open.sh",
+  "env": {
+    "RUN_ID": "FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N",
+    "STAGE": "publish",
+    "CALL": "1",
+    "TRY": "1",
+    "STAGE_IN": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open/in",
+    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1",
+    "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace",
+    "BRANCH": "sail/FAKE-1-add-a-shout-flag-to-the-greet-command",
+    "SAIL_CONFIG": ".sail/project.yaml",
+    "INPUT_TITLE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open/in/title.txt",
+    "INPUT_BODY": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open/in/pr-body.md",
+    "INPUT_TICKETKEY": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open/in/ticketKey.txt",
+    "SAIL_EVENTS": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/05-publish/call-1/steps/2-open/port-events.ndjson"
+  }
+}

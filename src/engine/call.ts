@@ -1,11 +1,14 @@
 // One call of a stage, start to finish: create its call directory, materialise its bindings into `$STAGE_IN`, run its
 // step through the kind the definition names, then validate and write `result.json`. `sail stage run` calls it for a
-// stage in isolation, and Epic 03's replay loop for each call of a run.
+// stage in isolation, and Epic 03's replay loop for each call of a run. A multi-step stage's call is `stage-call.ts`'s
+// to sequence: this module runs one step's tries, whether the step is a call's only one or one of a stage's.
 //
 // An agent call may take two tries of its own: when the agent's output breaks its schema or leaves a declared file out,
 // a second try runs with the problems appended to its prompt, once. That one correction belongs to the call, not to the
 // process: the tries a call has already made are read back from their `result.json`s, so a resume neither loses the
-// correction nor gets another. What a crash left unsaid of those tries in the events is said first.
+// correction nor gets another. What a crash left unsaid of those tries in the events is said first. An agent step of a
+// multi-step call gets the same: its tries sit in its own step directory, and its events are `step:start` and
+// `step:end` under its key.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { readEvents } from '../events/consumers/ndjson';
@@ -13,20 +16,26 @@ import type { CallEmit, CallEvent, Emit, NewEvent, SailEvent } from '../events/t
 import { KINDS, type StepRun } from '../kinds/index';
 import type { Harness } from '../ports/harness';
 import type { Usage } from '../ports/types';
-import type { AgentStep, StageDefinition } from '../sdk/steps';
+import type { AgentStep, ScriptStep, Stage, StageDefinition } from '../sdk/steps';
 import { bindingProblems, materialise, materialisePrepared, prepareBindings, type Supplied } from './bindings';
-import { type CallPaths, callPaths, createCallDir, existingTries, nextTry, runRelative } from './call-dir';
+import { type CallPaths, callPaths, createCallDir, existingTries, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import type { ContractError } from './contract';
 import type { JournalEntry } from './journal';
 import { buildResult, writeResult } from './result';
 import { formatIssue, validateDocument } from './schemas';
+import { runStageCall, type StageHooks } from './stage-call';
 
 /** What an agent call runs on, resolved by its caller before anything is written. */
 export interface AgentExecution {
   harness: Harness;
   /** The model id the step's alias resolved to. A resumed run passes the one its roster froze. */
   model: string;
+  /**
+   * A multi-step stage's: the model id of each agent step, by step name, as its roster froze them. A step it doesn't
+   * name runs on `model`.
+   */
+  models?: Readonly<Record<string, string>>;
   /** `project.yaml`'s `conventions`. Left out, the defaults are appended. */
   conventions?: readonly string[];
 }
@@ -67,19 +76,58 @@ export interface CallRequest {
 /** Why an agent call with no `AgentExecution` can't run: its caller resolved no harness and no model for it. */
 const UNRESOLVED = "agent steps need a harness and a model, which weren't resolved";
 
+/**
+ * A stage of one step as that step: under the stage's name, with the stage's bindings, the step's `gitDiff()`s, which
+ * only a step can take, and, beside its own, the stage's `produces`. It runs and records as the step would, and writes
+ * no `steps/` (D12).
+ */
+export function asStep(stage: Stage): AgentStep | ScriptStep | undefined {
+  const [only, ...more] = stage.steps;
+  if (more.length > 0) return undefined;
+  const diffs = Object.entries(only.consumes).filter(([, binding]) => binding.kind === 'gitDiff');
+  const consumes = { ...Object.fromEntries(diffs), ...stage.consumes };
+  return { ...withStageProduces(only, stage), name: stage.name, consumes } as AgentStep | ScriptStep;
+}
+
+/**
+ * The last step of `stage` as it runs: recording the stage's own `produces` beside its own (D9). A name both declare
+ * keeps the step's document: the stage's plain `'file'` would drop its template and validators.
+ */
+export function withStageProduces<S extends AgentStep | ScriptStep>(step: S, stage: Stage): S {
+  const produces: Record<string, unknown> = { ...step.produces };
+  for (const [name, declared] of Object.entries(stage.produces)) {
+    if (!Object.hasOwn(produces, name) || produces[name] === 'file') produces[name] = declared;
+  }
+  return { ...step, produces };
+}
+
 /** Why the definition can't run with what is supplied, found before anything is written. */
 export function callProblems(
   definition: StageDefinition,
   supplied: Readonly<Record<string, Supplied>>,
   agent?: AgentExecution,
 ): string[] {
-  if (definition.kind === 'stage') return ["multi-step stages can't run yet"];
+  if (definition.kind === 'stage') {
+    const one = asStep(definition);
+    if (one !== undefined) return callProblems(one, supplied, agent);
+    const last = definition.steps.length - 1;
+    // The last step is checked as it runs: with the stage's own produces.
+    const steps = definition.steps.map((step, index) => (index === last ? withStageProduces(step, definition) : step));
+    if (agent === undefined && steps.some((step) => step.kind === 'agent')) return [UNRESOLVED];
+    const own = steps.flatMap((step) =>
+      (step.kind === 'agent' ? KINDS.agent.problems(step) : KINDS.script.problems(step)).map(
+        (problem) => `step '${step.name}': ${problem}`,
+      ),
+    );
+    return [...own, ...bindingProblems(definition.consumes, supplied)];
+  }
   if (definition.kind === 'agent' && agent === undefined) return [UNRESOLVED];
   const own = definition.kind === 'agent' ? KINDS.agent.problems(definition) : KINDS.script.problems(definition);
   return [...own, ...bindingProblems(definition.consumes, supplied)];
 }
 
-type Ran = { result: Record<string, unknown>; paths: CallPaths };
+/** What a call left: its `result.json` and where it is. `stopped` when a multi-step call stopped short of one. */
+export type Ran = { result: Record<string, unknown>; paths: CallPaths; stopped?: true };
 
 /** Which try of which call. */
 interface TryOf {
@@ -109,27 +157,53 @@ function stageEnd(of: TryOf, result: Record<string, unknown>, resultPath: string
 }
 
 /** Runs one call and writes its `result.json`. Callers check `callProblems` first: any problem throws here. */
-export async function runCall(request: CallRequest): Promise<Ran> {
-  const { definition } = request;
-  const problems = callProblems(definition, request.supplied, request.agent);
-  if (problems.length > 0 || definition.kind === 'stage') throw new Error(problems.join('\n'));
-  if (definition.kind === 'agent') return runAgentCall(request, definition, request.agent as AgentExecution);
-
-  const { runDir, runId, call } = request;
+export async function runCall(request: CallRequest, hooks: StageHooks = {}): Promise<Ran> {
+  const problems = callProblems(request.definition, request.supplied, request.agent);
+  if (problems.length > 0) throw new Error(problems.join('\n'));
+  const definition = request.definition.kind === 'stage' ? asStep(request.definition) : request.definition;
+  if (definition === undefined) return runStageCall(request, request.definition as Stage, hooks);
+  const one = { ...request, definition };
+  if (definition.kind === 'agent') {
+    const agent = request.agent as AgentExecution;
+    return runAgentTries(one, definition, agent, callSite(one, definition), request.supplied);
+  }
+  const { call } = request;
   const tryNumber = request.try ?? 1;
-  const key = `${definition.name}#${call}`;
-  const emit: CallEmit = (event) => request.emit?.({ ...event, key } as NewEvent);
   const stage = { stage: definition.name, call, try: tryNumber };
-  // Before the call directory exists, so a call that crashes creating it still shows it started.
-  emit({
-    type: 'stage:start',
-    ...stage,
-    kind: definition.kind,
-    consumed: suppliedFrom(definition, request.supplied),
+  return runScriptTry(one, definition, request.supplied, {
+    key: `${definition.name}#${call}`,
+    paths: callPaths(request.runDir, request.stageIndex, definition.name, call, tryNumber),
+    try: tryNumber,
+    start: { type: 'stage:start', ...stage, kind: 'script', consumed: suppliedFrom(definition, request.supplied) },
+    end: (result, resultPath) => stageEnd(stage, result, resultPath),
   });
-  const paths = callPaths(runDir, request.stageIndex, definition.name, call, tryNumber);
+}
+
+/** Where a script step's one try runs, and how it is reported: a one-step call's, or a step's of a multi-step call. */
+export interface ScriptTry {
+  key: string;
+  /** The step's name, which its result records, for a step of a multi-step call. */
+  step?: string;
+  paths: CallPaths;
+  try: number;
+  start: CallEvent;
+  end(result: Record<string, unknown>, resultPath: string): CallEvent;
+}
+
+/** Runs one try of a script step, with `supplied` for its bindings, and writes its `result.json`. */
+export async function runScriptTry(
+  request: CallRequest,
+  definition: ScriptStep,
+  supplied: Readonly<Record<string, Supplied>>,
+  at: ScriptTry,
+): Promise<Ran> {
+  const { runDir, runId, call } = request;
+  const { key, paths } = at;
+  const emit: CallEmit = (event) => request.emit?.({ ...event, key } as NewEvent);
+  // Before the call directory exists, so a call that crashes creating it still shows it started.
+  emit(at.start);
   createCallDir(paths);
-  const { inputs, consumed } = materialise(definition.consumes, request.supplied, paths.stageIn);
+  const { inputs, consumed } = materialise(definition.consumes, supplied, paths.stageIn);
   for (const [binding, from] of Object.entries(consumed)) {
     if (from !== null) emit({ type: 'input:materialised', binding, from });
   }
@@ -138,9 +212,10 @@ export async function runCall(request: CallRequest): Promise<Ran> {
   const run = await KINDS.script.run(definition, {
     runId,
     runDir,
-    stage: definition.name,
+    stage: request.definition.name,
     call,
-    try: tryNumber,
+    key,
+    try: at.try,
     stageDir: dirname(request.stageFile),
     workspace: request.workspace,
     root: request.root,
@@ -156,17 +231,63 @@ export async function runCall(request: CallRequest): Promise<Ran> {
   const finishedAt = clock();
   const result = buildResult({
     runId,
-    stage: definition.name,
+    stage: request.definition.name,
     call,
-    kind: definition.kind,
+    ...(at.step === undefined ? {} : { step: at.step }),
+    kind: 'script',
     run,
     consumed,
     startedAt,
     finishedAt,
   });
   writeResult(paths.result, result);
-  emit(stageEnd(stage, result, runRelative(runDir, paths.result)));
+  emit(at.end(result, runRelative(runDir, paths.result)));
   return { result, paths };
+}
+
+/**
+ * Where an agent step's tries run and how they are reported: a one-step call's, in `call-N/` and its `try-M/`s under
+ * `stage:start` and `stage:end`, or a step's of a multi-step call, in its step directory under `step:start` and
+ * `step:end`. Its key is what every event of a try, and its harness request, carries.
+ */
+export interface TrySite {
+  key: string;
+  /** The step's name, which its result records, for a step of a multi-step call. */
+  step?: string;
+  paths(tryNumber: number): CallPaths;
+  /** The tries on disk, in order. */
+  tries(): number[];
+  /** The event that starts a try: what it runs on, and what it consumes. */
+  start(tryNumber: number): CallEvent;
+  /** The event that ends a try, from its result: one just written, or one a recovered call found on disk. */
+  end(tryNumber: number, result: Record<string, unknown>, resultPath: string): CallEvent;
+  /** The type of `start`'s and `end`'s events, which recovery reads a try's events by. */
+  starts: 'stage:start' | 'step:start';
+}
+
+/** A one-step agent call's site: its tries in `call-N/`, under `stage:start` and `stage:end`. */
+function callSite(request: CallRequest, definition: AgentStep): TrySite {
+  const { runDir, stageIndex, call } = request;
+  const stage = definition.name;
+  const model = (request.agent as AgentExecution).model;
+  return {
+    key: `${stage}#${call}`,
+    paths: (tryNumber) => callPaths(runDir, stageIndex, stage, call, tryNumber),
+    tries: () => existingTries(runDir, stageIndex, stage, call),
+    start: (tryNumber) => ({
+      type: 'stage:start',
+      stage,
+      call,
+      try: tryNumber,
+      kind: 'agent',
+      model,
+      consumed: suppliedFrom(definition, request.supplied),
+      permissions: definition.permissions,
+      budget: definition.budget,
+    }),
+    end: (tryNumber, result, resultPath) => stageEnd({ stage, call, try: tryNumber }, result, resultPath),
+    starts: 'stage:start',
+  };
 }
 
 /** A try an agent call has already made: its directory, and its result when it wrote one. */
@@ -180,10 +301,9 @@ interface PriorTry {
  * The tries a call has made, in order, each with the result it left. A result that can't be read, or isn't an agent
  * step's, throws: its try may have used the call's one correction, and nothing else says so.
  */
-function priorTries(request: CallRequest, stage: string): PriorTry[] {
-  const { runDir, stageIndex, call } = request;
-  return existingTries(runDir, stageIndex, stage, call).map((tryNumber) => {
-    const paths = callPaths(runDir, stageIndex, stage, call, tryNumber);
+function priorTries(runDir: string, site: TrySite): PriorTry[] {
+  return site.tries().map((tryNumber) => {
+    const paths = site.paths(tryNumber);
     if (!existsSync(paths.result)) return { try: tryNumber, paths };
     const refused = (why: string) => new Error(`${runRelative(runDir, paths.result)} ${why}, so its call can't go on`);
     let result: unknown;
@@ -270,32 +390,26 @@ function interruptedEnd(sessionId: string, own: readonly SailEvent[]): CallEvent
 }
 
 /**
- * Says what a crash left unsaid of the tries already made: the end of a session that never ended, the `stage:end` of a
- * result that has none, and the `stage:start` of a try whose events were lost whole. The events file is never synced,
- * so a result on disk is the authority on its try, whatever the events kept of it, and a session's last usage update
- * stands in only for a try that left no result. Each event is emitted once: the next recovery finds it in the events,
- * after the start of its try.
+ * Says what a crash left unsaid of the tries already made: the end of a session that never ended, the end of a result
+ * that has none, and the start of a try whose events were lost whole. The events file is never synced, so a result on
+ * disk is the authority on its try, whatever the events kept of it, and a session's last usage update stands in only
+ * for a try that left no result. Each event is emitted once: the next recovery finds it in the events, after the start
+ * of its try.
  */
-function reconcile(
-  request: CallRequest,
-  stage: string,
-  tries: readonly PriorTry[],
-  start: (tryNumber: number) => CallEvent,
-  emit: CallEmit,
-): void {
-  const key = `${stage}#${request.call}`;
-  const events = readEvents(request.runDir).filter((event) => 'key' in event && event.key === key);
+function reconcile(runDir: string, site: TrySite, tries: readonly PriorTry[], emit: CallEmit): void {
+  const ends = site.starts === 'stage:start' ? 'stage:end' : 'step:end';
+  const events = readEvents(runDir).filter((event) => 'key' in event && event.key === site.key);
   for (const prior of tries) {
     const { result } = prior;
-    // A try's events run from its `stage:start` to the next. The last one for the try: an earlier one is what a crash
-    // left before the try had a directory.
-    const from = events.findLastIndex((event) => event.type === 'stage:start' && event.try === prior.try);
-    const next = events.findIndex((event, index) => index > from && event.type === 'stage:start');
+    // A try's events run from its start to the next. The last one for the try: an earlier one is what a crash left
+    // before the try had a directory.
+    const from = events.findLastIndex((event) => event.type === site.starts && event.try === prior.try);
+    const next = events.findIndex((event, index) => index > from && event.type === site.starts);
     const own = from < 0 ? [] : events.slice(from, next < 0 ? undefined : next);
     if (from < 0) {
       // Nothing in the events, and nothing on disk to say what the try did.
       if (result === undefined) continue;
-      emit(start(prior.try));
+      emit(site.start(prior.try));
     }
     const started = own.findLast((event) => event.type === 'harness:session_start');
     if (!own.some((event) => event.type === 'harness:session_end')) {
@@ -304,38 +418,33 @@ function reconcile(
         if (started !== undefined) emit(interruptedEnd(started.sessionId, own));
       } else if (result.prompt !== undefined || started !== undefined) emit(sessionEndOf(result));
     }
-    if (result !== undefined && !own.some((event) => event.type === 'stage:end')) {
-      const of = { stage, call: request.call, try: prior.try };
-      emit(stageEnd(of, result, runRelative(request.runDir, prior.paths.result)));
+    if (result !== undefined && !own.some((event) => event.type === ends)) {
+      emit(site.end(prior.try, result, runRelative(runDir, prior.paths.result)));
     }
   }
 }
 
 /**
- * Runs an agent call: one try, and a second when the first's output was checked and found wanting, unless the step
- * says `fail`. It takes up where the call's earlier tries left it.
+ * Runs an agent step's tries: one, and a second when the first's output was checked and found wanting, unless the step
+ * says `fail`. It takes up where the step's earlier tries left it, at `site`: a one-step call's, or a step's of a
+ * multi-step call, whose bindings `supplied` holds.
  */
-async function runAgentCall(request: CallRequest, definition: AgentStep, agent: AgentExecution): Promise<Ran> {
+export async function runAgentTries(
+  request: CallRequest,
+  definition: AgentStep,
+  agent: AgentExecution,
+  site: TrySite,
+  supplied: Readonly<Record<string, Supplied>>,
+): Promise<Ran> {
   const { runDir, runId, call } = request;
-  const key = `${definition.name}#${call}`;
+  const stage = request.definition.name;
+  const { key } = site;
   const emit: CallEmit = (event) => request.emit?.({ ...event, key } as NewEvent);
   const clock = request.clock ?? systemClock;
   const corrects = (definition.onInvalidOutput ?? 'retry-once') === 'retry-once';
-  /** A try's `stage:start`: what it runs on, and what it consumes. */
-  const start = (tryNumber: number): CallEvent => ({
-    type: 'stage:start',
-    stage: definition.name,
-    call,
-    try: tryNumber,
-    kind: 'agent',
-    model: agent.model,
-    consumed: suppliedFrom(definition, request.supplied),
-    permissions: definition.permissions,
-    budget: definition.budget,
-  });
-  const tries = priorTries(request, definition.name);
+  const tries = priorTries(runDir, site);
   // A call with nowhere to emit has no events to set right.
-  if (tries.length > 0 && request.emit !== undefined) reconcile(request, definition.name, tries, start, emit);
+  if (tries.length > 0 && request.emit !== undefined) reconcile(runDir, site, tries, emit);
 
   /** The problems of the try whose output was checked and found wanting, which the next try is told. */
   let found: ContractError[] | undefined;
@@ -347,13 +456,13 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
   }
 
   // Parsed once for the call: each try gets a `$STAGE_IN` of its own, and the same values.
-  const bindings = prepareBindings(definition.consumes, request.supplied);
-  let tryNumber = Math.max(request.try ?? 1, (tries.at(-1)?.try ?? 0) + 1);
+  const bindings = prepareBindings(definition.consumes, supplied);
+  const nextOnDisk = () => (site.tries().at(-1) ?? 0) + 1;
+  let tryNumber = Math.max(site.step === undefined ? (request.try ?? 1) : 1, (tries.at(-1)?.try ?? 0) + 1);
   while (true) {
-    const stage = { stage: definition.name, call, try: tryNumber };
-    // Before the call directory exists, so a call that crashes creating it still shows it started.
-    emit(start(tryNumber));
-    const paths = callPaths(runDir, request.stageIndex, definition.name, call, tryNumber);
+    // Before the try's directory exists, so a try that crashes creating it still shows it started.
+    emit(site.start(tryNumber));
+    const paths = site.paths(tryNumber);
     createCallDir(paths, { durable: true });
     const { inputs, consumed } = materialisePrepared(bindings, paths.stageIn);
     for (const [binding, from] of Object.entries(consumed)) {
@@ -363,8 +472,9 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
     const ran = await KINDS.agent.run(definition, {
       runId,
       runDir,
-      stage: definition.name,
+      stage,
       call,
+      key,
       try: tryNumber,
       stageDir: dirname(request.stageFile),
       workspace: request.workspace,
@@ -394,8 +504,9 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
     const run: StepRun = ran.outcome === 'error' ? { ...ran, errors } : ran;
     const result = buildResult({
       runId,
-      stage: definition.name,
+      stage,
       call,
+      ...(site.step === undefined ? {} : { step: site.step }),
       kind: 'agent',
       run,
       consumed,
@@ -404,11 +515,11 @@ async function runAgentCall(request: CallRequest, definition: AgentStep, agent: 
     });
     // On disk, whole and synced, before another session starts: it is what a resume reads the call's place from.
     writeResult(paths.result, result, { durable: true });
-    emit(stageEnd(stage, result, runRelative(runDir, paths.result)));
+    emit(site.end(tryNumber, result, runRelative(runDir, paths.result)));
     // Checked again now that the try has ended: whoever heard its end may have aborted the call.
     if (!corrected || request.signal?.aborted === true) return { result, paths };
     found = ran.errors;
     // From disk, not the try after this one: a session may have left a directory of that name in its `$STAGE_OUT`.
-    tryNumber = nextTry(runDir, request.stageIndex, definition.name, call);
+    tryNumber = nextOnDisk();
   }
 }

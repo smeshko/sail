@@ -1,7 +1,7 @@
 // The golden run directory: a complete sail run, validated against every sail.*.v1 schema. It is generated: the run the
 // engine makes of the fixture repository's ticket-to-pr on FAKE-1, written by `bun run golden`, which
 // test/scripts/golden.test.ts holds it equal to. So it shows what a run writes today, its workspace included, and
-// nothing a run can't write yet: no tool call and no multi-step call.
+// nothing a run can't write yet: no tool call. Its last stage is a multi-step call, with a journal line for each step.
 import { afterEach, expect, test } from 'bun:test';
 import { accessSync, constants, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,10 +51,10 @@ test('the golden run directory is valid against every run-directory schema', () 
   console.log(`${basename(fixture)}: ${total} documents valid (${perSchema})`);
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
-    'sail.journal.v1': 9,
-    'sail.event.v1': 127,
+    'sail.journal.v1': 10,
+    'sail.event.v1': 129,
     'sail.summary.v1': 1,
-    'sail.result.v1': 9,
+    'sail.result.v1': 10,
   });
 });
 
@@ -79,7 +79,7 @@ test('an unknown outcome in a mutated copy names the file, line and field', () =
   ]);
 });
 
-test("the golden run is the fixture's: its id, its startedAt the clock's first reading, and its journal the nine calls of ticket-to-pr with their outcomes", () => {
+test("the golden run is the fixture's: its id, its startedAt the clock's first reading, and its journal the seven calls of ticket-to-pr and the two steps of its last, with their outcomes", () => {
   const header = JSON.parse(text('run.json'));
   expect([header.runId, header.startedAt]).toEqual([RUN_ID, '2026-09-25T09:00:00.000Z']);
   expect(lines('journal.ndjson').map((line) => `${line.key} ${line.outcome}`)).toEqual([
@@ -90,15 +90,16 @@ test("the golden run is the fixture's: its id, its startedAt the clock's first r
     'implement#2 done',
     'tests#2 passed',
     'self-review#1 done',
-    'describe#1 done',
-    'open#1 passed',
+    'publish#1/describe done',
+    'publish#1/open passed',
+    'publish#1 passed',
   ]);
 });
 
-test('it holds nothing a run cannot write yet: no tool, thinking, denial or step event, no ticket:updated, and no publish in its roster; its workspace is in run.json and in the stream', () => {
+test('it holds nothing a run cannot write yet: no tool, thinking or denial event and no ticket:updated; its workspace is in run.json and in the stream', () => {
   const types = new Set(lines('events.ndjson').map((event) => String(event.type)));
   const absent = [...types].filter(
-    (type) => /^(tool|step):/.test(type) || ['agent:thinking', 'permission:denied', 'ticket:updated'].includes(type),
+    (type) => /^tool:/.test(type) || ['agent:thinking', 'permission:denied', 'ticket:updated'].includes(type),
   );
   expect(absent).toEqual([]);
   expect([...types].filter((type) => type.startsWith('workspace:')).sort()).toEqual([
@@ -107,7 +108,7 @@ test('it holds nothing a run cannot write yet: no tool, thinking, denial or step
     'workspace:leased',
     'workspace:released',
   ]);
-  expect(types.size).toBe(31);
+  expect(types.size).toBe(33);
   const header = JSON.parse(text('run.json'));
   expect(Object.keys(header)).toEqual([
     'schema',
@@ -125,11 +126,11 @@ test('it holds nothing a run cannot write yet: no tool, thinking, denial or step
     'repository',
     'workspace',
   ]);
-  expect(Object.keys(header.stages)).toEqual(['describe', 'implement', 'open', 'self-review', 'spec', 'tests']);
+  expect(Object.keys(header.stages)).toEqual(['implement', 'publish', 'self-review', 'spec', 'tests']);
 });
 
-test("open#1's provider events are codehost:pushed, codehost:pr_opened, codehost:labelled and ticket:commented, between its script:exec and script:exit, and its port events file holds the same four without an envelope", () => {
-  const own = lines('events.ndjson').filter((event) => event.key === 'open#1');
+test("publish#1/open's provider events are codehost:pushed, codehost:pr_opened, codehost:labelled and ticket:commented, between its script:exec and script:exit, and its port events file holds the same four without an envelope", () => {
+  const own = lines('events.ndjson').filter((event) => event.key === 'publish#1/open');
   const from = own.findIndex((event) => event.type === 'script:exec');
   const provider = own.slice(from + 1, from + 5);
   expect(own.slice(from, from + 6).map((event) => event.type)).toEqual([
@@ -140,7 +141,7 @@ test("open#1's provider events are codehost:pushed, codehost:pr_opened, codehost
     'ticket:commented',
     'script:exit',
   ]);
-  expect(lines('06-open/call-1/port-events.ndjson')).toEqual(
+  expect(lines('05-publish/call-1/steps/2-open/port-events.ndjson')).toEqual(
     provider.map(({ seq: _seq, ts: _ts, runId: _runId, key: _key, ...event }) => event),
   );
   expect(provider[1]).toMatchObject({
@@ -153,7 +154,7 @@ test("open#1's provider events are codehost:pushed, codehost:pr_opened, codehost
 
 test('no file of the golden run holds a path of the machine that generated it, and every file in it is writable', () => {
   const files = [...new Bun.Glob('**/*').scanSync({ cwd: fixture })].sort();
-  expect(files).toHaveLength(50);
+  expect(files).toHaveLength(51);
   const machine = /\/(Users|home|private|var|tmp|runner|root)\//;
   expect(files.filter((file) => machine.test(text(file)))).toEqual([]);
   for (const file of files) expect(() => accessSync(join(fixture, file), constants.W_OK)).not.toThrow();
@@ -222,9 +223,8 @@ const MOVES = [
   ['tests#1', 'failed', 'implement#2'],
   ['implement#2', 'done', 'tests#2'],
   ['tests#2', 'passed', 'self-review#1'],
-  ['self-review#1', 'done', 'describe#1'],
-  ['describe#1', 'done', 'open#1'],
-  ['open#1', 'passed', 'end'],
+  ['self-review#1', 'done', 'publish#1'],
+  ['publish#1', 'passed', 'end'],
 ];
 
 test("the golden run's routes are the moves after each stage call", () => {
@@ -270,10 +270,17 @@ test("the golden run's summary is its events folded, byte for byte, with nothing
 
 test('every result records its files by size and hash, and its duration by its timestamps', () => {
   const results = resultFiles();
-  expect(results).toHaveLength(9);
+  expect(results).toHaveLength(10);
   for (const path of results) {
     const result = JSON.parse(text(path));
-    expect(Date.parse(result.finishedAt) - Date.parse(result.startedAt)).toBe(result.durationMs);
+    // A multi-step call's duration is its steps' working time: a suspension between steps is not counted.
+    const worked = result.steps
+      ? result.steps.reduce(
+          (sum: number, step: { resultPath: string }) => sum + JSON.parse(text(step.resultPath)).durationMs,
+          0,
+        )
+      : Date.parse(result.finishedAt) - Date.parse(result.startedAt);
+    expect(worked).toBe(result.durationMs);
     for (const entry of Object.values<FileEntry>(result.files)) {
       expect(existsSync(join(fixture, entry.path))).toBe(true);
       const bytes = readFileSync(join(fixture, entry.path));

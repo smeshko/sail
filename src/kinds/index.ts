@@ -31,6 +31,11 @@ export interface StepContext {
   runDir: string;
   stage: string;
   call: number;
+  /**
+   * The key the step's events, its harness request and its port events are stamped with: the call's, or a step's of a
+   * multi-step call. `<stage>#<call>` when left out.
+   */
+  key?: string;
   /** The call's try, 1 unless an earlier try was interrupted. */
   try: number;
   /** The directory of the `stage.ts` that declared the step: its `run` and `prompt` are relative to it. */

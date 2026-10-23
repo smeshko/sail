@@ -66,8 +66,7 @@ test("the fixture's graph holds exactly the imports its files make within .sail/
       'workflows/ticket-to-pr/workflow.ts': [
         'stages/implement/stage.ts',
         'stages/tests/stage.ts',
-        'workflows/ticket-to-pr/stages/describe/stage.ts',
-        'workflows/ticket-to-pr/stages/open/stage.ts',
+        'workflows/ticket-to-pr/stages/publish/stage.ts',
         'workflows/ticket-to-pr/stages/self-review/stage.ts',
         'workflows/ticket-to-pr/stages/spec/stage.ts',
       ],

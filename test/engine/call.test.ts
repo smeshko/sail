@@ -34,7 +34,6 @@ import {
   noPlaceholders,
   type StageDefinition,
   script,
-  stage,
   value,
   z,
 } from '../../src/sdk/index';
@@ -229,21 +228,6 @@ test('a later try writes into call-N/try-M/, and its script sees TRY as M', asyn
 const budget = { maxTurns: 1, maxUsd: 1, maxMinutes: 1 };
 const permissions = { read: [], write: [], commands: [] };
 const spec = agent('spec', { prompt: './prompt.md', output: z.object({}), permissions, budget });
-const Out = z.object({ ok: z.boolean() });
-const twoSteps = stage('two', {
-  output: Out,
-  steps: [script('a', { run: './a.sh', output: z.object({}) }), script('b', { run: './b.sh', output: Out })],
-});
-
-test('a multi-step stage is refused, and gets no call directory', async () => {
-  await withTempRepo(async (repo) => {
-    const s = tests(repo);
-    expect(callProblems(twoSteps, {})).toEqual(["multi-step stages can't run yet"]);
-    await expect(runCall(s.request(twoSteps))).rejects.toThrow("multi-step stages can't run yet");
-    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
-  });
-});
-
 const UNRESOLVED = "agent steps need a harness and a model, which weren't resolved";
 
 test('an agent call with no harness and model resolved is refused, and gets no call directory; with them, its problems are its step and its bindings', async () => {

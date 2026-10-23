@@ -14,8 +14,8 @@
   },
   "status": "completed",
   "startedAt": "2026-09-25T09:00:00.700Z",
-  "endedAt": "2026-09-25T09:00:16.800Z",
-  "durationMs": 16100,
+  "endedAt": "2026-09-25T09:00:17.100Z",
+  "durationMs": 16400,
   "result": {
     "pr": {
       "number": 5,
@@ -113,25 +113,34 @@
       "resultPath": "04-self-review/call-1/result.json"
     },
     {
-      "key": "describe#1",
-      "kind": "agent",
-      "outcome": "done",
-      "durationMs": 1100,
-      "turns": 4,
-      "toolCalls": 0,
-      "denials": 0,
+      "key": "publish#1",
+      "outcome": "passed",
+      "durationMs": 2100,
       "costUsd": 0.101,
       "files": [
         "pr-body.md"
       ],
-      "resultPath": "05-describe/call-1/result.json"
-    },
-    {
-      "key": "open#1",
-      "kind": "script",
-      "outcome": "passed",
-      "durationMs": 1000,
-      "resultPath": "06-open/call-1/result.json"
+      "resultPath": "05-publish/call-1/result.json",
+      "steps": [
+        {
+          "key": "publish#1/describe",
+          "kind": "agent",
+          "outcome": "done",
+          "durationMs": 1500,
+          "turns": 4,
+          "toolCalls": 0,
+          "costUsd": 0.101,
+          "files": [
+            "pr-body.md"
+          ]
+        },
+        {
+          "key": "publish#1/open",
+          "kind": "script",
+          "outcome": "passed",
+          "durationMs": 1500
+        }
+      ]
     }
   ],
   "loops": {
@@ -169,25 +178,20 @@
     {
       "at": "self-review#1",
       "value": "done",
-      "took": "describe#1"
+      "took": "publish#1"
     },
     {
-      "at": "describe#1",
-      "value": "done",
-      "took": "open#1"
-    },
-    {
-      "at": "open#1",
+      "at": "publish#1",
       "value": "passed",
       "took": "end"
     }
   ],
   "totals": {
-    "stageCalls": 9,
+    "stageCalls": 8,
     "steps": 9,
     "toolCalls": 0,
     "denials": 0,
-    "replays": 9,
+    "replays": 8,
     "usage": {
       "inputTokens": 28400,
       "cacheReadTokens": 189200,

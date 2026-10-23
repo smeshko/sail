@@ -35,9 +35,8 @@ test('ticket-to-pr loads with its private and shared stages, the built-in intake
     expect(workflow.workflow.kind).toBe('workflow');
     expect(workflow.dir).toBe(join(sail, 'workflows', 'ticket-to-pr'));
     expect(workflow.stages.map((stage) => [stage.definition.name, relative(sail, stage.dir)])).toEqual([
-      ['describe', 'workflows/ticket-to-pr/stages/describe'],
       ['implement', 'stages/implement'],
-      ['open', 'workflows/ticket-to-pr/stages/open'],
+      ['publish', 'workflows/ticket-to-pr/stages/publish'],
       ['self-review', 'workflows/ticket-to-pr/stages/self-review'],
       ['spec', 'workflows/ticket-to-pr/stages/spec'],
       ['tests', 'stages/tests'],
@@ -51,8 +50,7 @@ test('ticket-to-pr loads with its private and shared stages, the built-in intake
     expect(workflow.files.map((file) => relative(sail, file))).toEqual([
       'stages/implement/stage.ts',
       'stages/tests/stage.ts',
-      'workflows/ticket-to-pr/stages/describe/stage.ts',
-      'workflows/ticket-to-pr/stages/open/stage.ts',
+      'workflows/ticket-to-pr/stages/publish/stage.ts',
       'workflows/ticket-to-pr/stages/self-review/stage.ts',
       'workflows/ticket-to-pr/stages/spec/stage.ts',
       'workflows/ticket-to-pr/workflow.ts',
@@ -151,7 +149,7 @@ test('a reached stage with a problem refuses the run, and a problem elsewhere do
       "import { spec } from '../ticket-to-pr/stages/spec/stage';\nexport const s = spec;\n",
     );
     write(sail, 'workflows/broken/workflow.ts', "throw new Error('broken');\n");
-    expect((await loaded(sail)).stages).toHaveLength(6);
+    expect((await loaded(sail)).stages).toHaveLength(5);
     expect(await refused(sail, 'other')).toBe(
       '.sail/workflows/other/workflow.ts: default-exports no workflow\n' +
         '.sail/workflows/other/workflow.ts: imports workflows/ticket-to-pr/stages/spec/stage.ts, ' +

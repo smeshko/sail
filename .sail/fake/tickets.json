@@ -1,0 +1,17 @@
+{
+  "tickets": [
+    {
+      "ticketKey": "FAKE-1",
+      "title": "Print the run's cost in sail show's footer",
+      "description": "`sail show <run>` lists each call's cost but never the total. Add a footer line with the run's total cost.\n\n## Acceptance criteria\n\n- `sail show <run>` ends with `total $<cost>`, the sum of every call's cost, to two decimals\n- A run with no agent calls prints `total $0.00`",
+      "state": {
+        "type": "unstarted",
+        "name": "Todo"
+      },
+      "labels": ["factory"],
+      "comments": [],
+      "links": [],
+      "attachments": []
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "remote": "fake://codehost/sail",
+  "defaultBranch": "staging",
+  "branches": {},
+  "pullRequests": []
+}

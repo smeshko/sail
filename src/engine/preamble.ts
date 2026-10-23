@@ -1,6 +1,7 @@
 // The environment preamble: the variables every step gets, whatever its kind. A script finds them in its environment,
 // and an agent step's harness in its request.
 import type { StepContext } from '../kinds/index';
+import { stageOut } from './call-dir';
 
 export interface PreambleVariable {
   name: string;
@@ -17,7 +18,7 @@ export function preamble(context: StepContext): PreambleVariable[] {
     { name: 'CALL', value: String(context.call), path: false },
     { name: 'TRY', value: String(context.try), path: false },
     { name: 'STAGE_IN', value: context.paths.stageIn, path: true },
-    { name: 'STAGE_OUT', value: context.paths.dir, path: true },
+    { name: 'STAGE_OUT', value: stageOut(context.paths), path: true },
     { name: 'WORKSPACE', value: context.workspace, path: true },
     { name: 'BRANCH', value: context.branch, path: false },
     { name: 'SAIL_CONFIG', value: context.config, path: true },

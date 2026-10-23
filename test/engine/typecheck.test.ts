@@ -31,7 +31,7 @@ test('a copy of the fixture .sail/ checks ok with no node_modules in reach', asy
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     expect(nodeModulesAbove(repo.dir)).toEqual([]);
-    expect(await typecheck(sail)).toEqual({ ok: true, files: 15 });
+    expect(await typecheck(sail)).toEqual({ ok: true, files: 14 });
     expect(nodeModulesWithin(repo.dir)).toEqual([]);
   });
 });

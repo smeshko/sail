@@ -22,21 +22,22 @@ const text = (...lines: string[]) => lines.map((line) => `${line}\n`).join('');
 
 /** What `sail show` prints for the golden run. */
 const GOLDEN = text(
-  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 16.1s`,
+  `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 16.4s`,
   '',
-  'key            kind     outcome  duration  cost   next',
-  'intake#1       builtin  passed   900ms',
-  'spec#1         agent    done     1.2s      $0.31  implement#1',
-  'implement#1    agent    done     1.2s      $0.48  tests#1',
-  'tests#1        script   failed   700ms            implement#2',
-  'implement#2    agent    done     1.1s      $0.24  tests#2',
-  'tests#2        script   passed   700ms            self-review#1',
-  'self-review#1  agent    done     1.1s      $0.22  describe#1',
-  'describe#1     agent    done     1.1s      $0.10  open#1',
-  'open#1         script   passed   1.0s             end',
+  'key                   kind     outcome  duration  cost   next',
+  'intake#1              builtin  passed   900ms',
+  'spec#1                agent    done     1.2s      $0.31  implement#1',
+  'implement#1           agent    done     1.2s      $0.48  tests#1',
+  'tests#1               script   failed   700ms            implement#2',
+  'implement#2           agent    done     1.1s      $0.24  tests#2',
+  'tests#2               script   passed   700ms            self-review#1',
+  'self-review#1         agent    done     1.1s      $0.22  publish#1',
+  'publish#1                      passed   2.1s      $0.10  end',
+  '  publish#1/describe  agent    done     1.5s      $0.10',
+  '  publish#1/open      script   passed   1.5s',
   '',
   'loops   fix 2/3',
-  'totals  9 calls · 9 steps · 0 tool calls · 0 denials · 9 replays',
+  'totals  8 calls · 9 steps · 0 tool calls · 0 denials · 8 replays',
   'cost    $1.35 of $25.00 (5.4%)',
 );
 
@@ -458,7 +459,7 @@ test('sail show --follow stopped by Ctrl-C exits 0 with what it printed so far, 
     emptySailDir(repo.dir);
     const dir = runningRun(repo.dir);
     const sofar = await runCaptured(['show', GOLDEN_RUN_ID, '--events'], repo.dir);
-    expect(sofar.stdout).toContain('implement#2    ▶ implement');
+    expect(sofar.stdout).toContain('implement#2         ▶ implement');
     const interrupts = fakeInterrupts();
     const following = started(['show', GOLDEN_RUN_ID, '--follow'], repo.dir, interrupts);
     await until(() => following.printed() !== '');

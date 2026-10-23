@@ -27,7 +27,7 @@ import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 const source = sharedSource();
 afterAll(() => source.release());
 
-const STAGES = 'describe, implement, open, self-review, spec, tests';
+const STAGES = 'implement, publish, self-review, spec, tests';
 
 const sha256 = (path: string) => new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
 
@@ -150,8 +150,8 @@ test.each<[string, (dir: string) => void, (runId: string) => Partial<SeededRunOp
   [
     'a stage the source never ran',
     (dir) => cutJournal(dir, 2),
-    () => ({ stage: 'describe' }),
-    (runId) => `run ${runId} never ran 'describe': sail resume ${runId} continues it`,
+    () => ({ stage: 'publish' }),
+    (runId) => `run ${runId} never ran 'publish': sail resume ${runId} continues it`,
   ],
   [
     'a source whose intake failed',

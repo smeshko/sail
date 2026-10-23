@@ -1,0 +1,204 @@
+{
+  "plan": [
+    {
+      "outcome": "done",
+      "output": {
+        "slug": "show-total-cost",
+        "scope": "cli",
+        "risk": "large",
+        "tasks": [
+          {
+            "id": "TASK-001",
+            "title": "Print the total cost in the footer",
+            "type": "impl",
+            "commit": "feat(cli): print the run's total cost in sail show's footer"
+          }
+        ]
+      },
+      "files": {
+        "plan.md": "# Plan: Total cost in sail show's footer\n\nRisk: large\n\n## Goal\n\n`sail show <run>` ends with the run's total cost, so a reader sees what a run spent without adding the calls up.\n\n## Scope\n\n- A footer line in `src/cli/commands/show.ts`, summed from each call's `costUsd`\n\n## Out of Scope\n\n- The dashboard's run view, which already shows a total\n\n## Research Summary\n\n`src/cli/commands/show.ts` renders one row per call from `summary.json`; each call carries `usage.costUsd`.\n\n## Decisions\n\n- Sum the calls' costs rather than read a run-level field: `summary.json` has none.\n\n## Risks\n\n- Floating-point sums print long decimals: round to two places when printing.\n\n## Acceptance Criteria\n\n- [ ] `sail show <run>` ends with `total $<cost>`\n- [ ] A run with no agent calls prints `total $0.00`\n\n## Tasks\n\n- [ ] TASK-001: Print the total cost in the footer\n\n## Task details\n\n### TASK-001: Print the total cost in the footer\n\nType: impl\nDepends on: none\nSuggested commit: feat(cli): print the run's total cost in sail show's footer\n\nGoal: the footer line.\n\nFiles: `src/cli/commands/show.ts`, the footer.\n\nAcceptance:\n\n- [ ] `sail show` ends with `total $<cost>`\n\nEvidence: `test/cli/show.test.ts` passing.\n"
+      },
+      "messages": ["Plan written: one task, risk large."],
+      "turns": 12,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 0.9
+      }
+    }
+  ],
+  "write-tests": [
+    {
+      "outcome": "done",
+      "output": {
+        "cases": [
+          {
+            "task": "TASK-001",
+            "file": "test/cli/show.test.ts",
+            "name": "ends with the run's total cost"
+          },
+          {
+            "task": "TASK-001",
+            "file": "test/cli/show.test.ts",
+            "name": "prints a zero total for a run with no agent calls"
+          }
+        ],
+        "none": null
+      },
+      "messages": ["Two pending tests and a stub footer."],
+      "turns": 20,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 1.4
+      }
+    }
+  ],
+  "implement": [
+    {
+      "outcome": "done",
+      "output": {
+        "tasks": [
+          {
+            "id": "TASK-001",
+            "commit": "89541459e5b0696a12a6adb712334ea24cff1a31",
+            "evidence": "bun run test test/cli/show.test.ts: 2 pass"
+          }
+        ],
+        "notes": "As planned."
+      },
+      "messages": ["TASK-001 committed."],
+      "turns": 30,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 2.1
+      }
+    }
+  ],
+  "review#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "One real bug in the rounding.",
+        "findings": [
+          {
+            "severity": "high",
+            "file": "src/cli/commands/show.ts",
+            "title": "A cost of 0.005 prints as $0.00",
+            "detail": "toFixed rounds half to even on binary floats, so 0.005 shows as 0.00."
+          }
+        ]
+      },
+      "messages": ["bugs lens: one finding."],
+      "turns": 15,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review#2": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The tests prove the behaviour.",
+        "findings": [
+          {
+            "severity": "low",
+            "file": "test/cli/show.test.ts",
+            "title": "The zero-total test could also cover a script-only run",
+            "detail": "A run with only script calls takes the same path, but no test names it."
+          }
+        ]
+      },
+      "messages": ["tests lens: one finding."],
+      "turns": 12,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 0.7
+      }
+    }
+  ],
+  "review#3": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The fix holds, and the deferral is reasonable.",
+        "findings": []
+      },
+      "messages": ["Round 2: nothing new."],
+      "turns": 10,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 0.6
+      }
+    }
+  ],
+  "fix": [
+    {
+      "outcome": "done",
+      "output": {
+        "triage": [
+          {
+            "finding": "R1-1",
+            "verdict": "fix",
+            "rationale": "A real rounding bug in the printed total.",
+            "commit": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b"
+          },
+          {
+            "finding": "R1-2",
+            "verdict": "defer",
+            "rationale": "The same code path; a test of its own is a follow-up.",
+            "commit": null
+          }
+        ]
+      },
+      "messages": ["Fixed R1-1, deferred R1-2."],
+      "turns": 18,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 1.1
+      }
+    }
+  ],
+  "describe": [
+    {
+      "outcome": "done",
+      "output": {
+        "title": "feat(cli): print the run's total cost in sail show's footer (FAKE-1)",
+        "bodyFile": "pr-body.md"
+      },
+      "files": {
+        "pr-body.md": "## Summary\n\n`sail show` ends with the run's total cost.\n\n## Changes\n\n- The footer line.\n\n## Testing\n\nTwo tests; `bun run verify` passes.\n\nCloses FAKE-1\n"
+      },
+      "messages": ["PR described."],
+      "turns": 4,
+      "usage": {
+        "inputTokens": 4000,
+        "cacheReadTokens": 20000,
+        "cacheWriteTokens": 2000,
+        "outputTokens": 1500,
+        "costUsd": 0.1
+      }
+    }
+  ]
+}

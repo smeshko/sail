@@ -303,7 +303,7 @@
       "additionalProperties": false
     },
     "multiStepStageResult": {
-      "description": "A multi-step stage's call: steps[] and no kind. Its outcome is its last step's.",
+      "description": "A multi-step stage's call: steps[] and no kind. steps[] lists the steps that ran, in order, and the outcome is the last listed step's: the step that ended the stage, by passing as its last step or by ending blocked, failed or error. A blocked one carries that step's reason.",
       "type": "object",
       "properties": {
         "schema": { "const": "sail.result.v1" },
@@ -313,12 +313,13 @@
         "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+$" },
         "outcome": { "enum": ["passed", "failed", "done", "blocked", "error"] },
         "errors": { "$ref": "#/$defs/errors" },
+        "reason": { "type": "string" },
         "output": true,
         "files": { "$ref": "#/$defs/files" },
         "consumed": { "$ref": "#/$defs/consumed" },
         "steps": {
           "type": "array",
-          "minItems": 2,
+          "minItems": 1,
           "items": {
             "type": "object",
             "properties": {
@@ -353,9 +354,18 @@
         "finishedAt",
         "durationMs"
       ],
-      "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
-      "then": { "properties": { "errors": true }, "required": ["errors"] },
-      "else": { "properties": { "errors": false } },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "error" } }, "required": ["outcome"] },
+          "then": { "properties": { "errors": true }, "required": ["errors"] },
+          "else": { "properties": { "errors": false } }
+        },
+        {
+          "if": { "properties": { "outcome": { "const": "blocked" } }, "required": ["outcome"] },
+          "then": { "properties": { "reason": { "type": "string", "pattern": "\\S" } }, "required": ["reason"] },
+          "else": { "properties": { "reason": false } }
+        }
+      ],
       "additionalProperties": false
     }
   }

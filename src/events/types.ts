@@ -149,10 +149,21 @@ interface Payloads {
     index: number;
     of: number;
     kind: 'agent' | 'script';
+    /** The step's try: 1, unless an interruption or a correction gave it a later one. */
+    try: number;
     model?: string;
     command?: string;
   };
-  'step:end': { key: string; step: string; outcome: Outcome; resultPath: string };
+  'step:end': {
+    key: string;
+    step: string;
+    try: number;
+    outcome: Outcome;
+    /** Relative to the run directory. */
+    resultPath: string;
+    /** Exactly when the outcome is `error`. */
+    errors?: ContractError[];
+  };
   'input:materialised': { key: string; binding: string; from: string };
   'prompt:rendered': {
     key: string;

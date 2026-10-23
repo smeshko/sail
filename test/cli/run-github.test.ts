@@ -163,7 +163,7 @@ test("sail FAKE-1 on github pushes the run's branch to the origin and opens one 
     title: pr?.title.includes('FAKE-1'),
     links: pr?.body.includes('Ticket: [FAKE-1](fake://tickets/FAKE-1)'),
     marker: pr?.body.endsWith('\n\n<!-- sail:ticket FAKE-1 -->'),
-    output: json(run.dir, '06-open', 'call-1', 'result.json').output,
+    output: json(run.dir, '05-publish', 'call-1', 'steps', '2-open', 'result.json').output,
   }).toEqual({
     origin: headSha,
     pulls: [[BRANCH, 'main', ['sail'], false, headSha]],
@@ -174,13 +174,13 @@ test("sail FAKE-1 on github pushes the run's branch to the origin and opens one 
   });
 }, 60_000);
 
-test('the events hold codehost:pushed, codehost:pr_opened and codehost:labelled under the key open#1, and nothing else of the code host', async () => {
+test('the events hold codehost:pushed, codehost:pr_opened and codehost:labelled under the key publish#1/open, and nothing else of the code host', async () => {
   const run = await completed();
   const hosted = run.events.filter((event) => event.type.startsWith('codehost:'));
   expect(hosted.map((event) => [event.type, 'key' in event ? event.key : undefined])).toEqual([
-    ['codehost:pushed', 'open#1'],
-    ['codehost:pr_opened', 'open#1'],
-    ['codehost:labelled', 'open#1'],
+    ['codehost:pushed', 'publish#1/open'],
+    ['codehost:pr_opened', 'publish#1/open'],
+    ['codehost:labelled', 'publish#1/open'],
   ]);
 }, 60_000);
 
@@ -201,7 +201,9 @@ test("with draft: true in the code host's options, the pull request opens as a d
       code: ran.code,
       drafts: clone.world.pullRequests.map((pr) => pr.draft),
       output:
-        runId === '' ? null : json(clone.repo.dir, '.sail-runs', runId, '06-open', 'call-1', 'result.json').output,
+        runId === ''
+          ? null
+          : json(clone.repo.dir, '.sail-runs', runId, '05-publish', 'call-1', 'steps', '2-open', 'result.json').output,
     }).toEqual({
       code: EXIT_OK,
       drafts: [true],
@@ -227,7 +229,7 @@ test('a run killed after open-pull-request answered resumes to completed with th
     const dir = join(clone.repo.dir, '.sail-runs', runId);
     const killed = markerIn(clone);
     const resumed = await sail(clone, ['resume', runId]);
-    const open = readJournal(dir).entries.at(-1);
+    const open = readJournal(dir).entries.at(-2);
     expect({
       resumed: [resumed.code, resumed.stderr, readFileSync(join(dir, 'STATUS'), 'utf8')],
       open: [open?.key, open?.resultPath],
@@ -238,7 +240,7 @@ test('a run killed after open-pull-request answered resumes to completed with th
       after: markerIn(clone),
     }).toEqual({
       resumed: [EXIT_OK, '', 'completed\n'],
-      open: ['open#1', '06-open/call-1/try-2/result.json'],
+      open: ['publish#1/open', '05-publish/call-1/steps/2-open/try-2/result.json'],
       output: { number: 1, url: 'https://github.com/o/r/pull/1', draft: false },
       creates: 1,
       pulls: [[1, BRANCH]],

@@ -67,7 +67,7 @@ function changedCopy(name: string, change: (dir: string) => void): string {
 test('the committed golden run is what a fresh run of the fixture writes: the same files, each byte for byte', () => {
   expect(unmade).toBe('');
   expect(stale(fresh, committed)).toEqual([]);
-  expect(filesIn(committed)).toHaveLength(50);
+  expect(filesIn(committed)).toHaveLength(51);
 });
 
 test("run.json's sail.runtime is the one field compared apart: a fresh run names the running Bun, and the committed one a Bun", () => {
@@ -102,13 +102,13 @@ test.each<[string, (dir: string) => void, string]>([
   ],
   [
     'one file removed',
-    (dir) => rmSync(join(dir, '06-open', 'call-1', 'port-events.ndjson')),
-    '06-open/call-1/port-events.ndjson is missing',
+    (dir) => rmSync(join(dir, '05-publish', 'call-1', 'steps', '2-open', 'port-events.ndjson')),
+    '05-publish/call-1/steps/2-open/port-events.ndjson is missing',
   ],
   [
     'one file added',
-    (dir) => writeFileSync(join(dir, '06-open', 'call-1', 'notes.md'), ''),
-    '06-open/call-1/notes.md is no file of a fresh run',
+    (dir) => writeFileSync(join(dir, '05-publish', 'call-1', 'notes.md'), ''),
+    '05-publish/call-1/notes.md is no file of a fresh run',
   ],
 ])('a golden run with %s is stale: the comparison names the file and says to regenerate', (how, change, problem) => {
   expect(stale(fresh, changedCopy(how.replaceAll(' ', '-'), change))).toEqual([`${problem}: ${REGENERATE}`]);
@@ -128,12 +128,12 @@ test('a view rendered from a changed stream differs from the committed one: a st
   const committedView = readFileSync(join(fixtures, 'terminal', 'normal.txt'), 'utf8');
   const rendered = renderView(events, 'normal');
   expect(rendered).not.toBe(committedView);
-  expect(committedView.replace('fix            ↻ break after 2/3\n', '')).toBe(rendered);
+  expect(committedView.replace('fix                 ↻ break after 2/3\n', '')).toBe(rendered);
 });
 
 test('no file of a fresh run holds the path of the temporary repository it ran in, or of this checkout', () => {
   const files = filesIn(fresh);
-  expect(files).toHaveLength(50);
+  expect(files).toHaveLength(51);
   const machine = [tmpdir(), 'sail-golden-', join(import.meta.dir, '..', '..')];
   const holding = files.filter((file) =>
     machine.some((path) => readFileSync(join(fresh, file), 'utf8').includes(path)),
@@ -143,6 +143,6 @@ test('no file of a fresh run holds the path of the temporary repository it ran i
 
 test('every file of a fresh run is an ordinary, writable file: run.json too, which the run itself leaves read-only', () => {
   const files = filesIn(fresh);
-  expect(files).toHaveLength(50);
+  expect(files).toHaveLength(51);
   expect(files.filter((file) => (statSync(join(fresh, file)).mode & 0o200) === 0)).toEqual([]);
 });

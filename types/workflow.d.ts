@@ -2,7 +2,7 @@
 import type { z } from 'zod';
 import type { Consumes, FileBinding, ProducedFile, ValueBinding } from './bindings';
 import type { Intake } from './intake';
-import type { KindOf, Produces, Stage, StageDefinition, Step } from './steps';
+import type { EarlierSteps, KindOf, Produces, Stage, StageDefinition, Step } from './steps';
 declare const noBindings: unique symbol;
 /**
  * The value the workflow supplies for one binding: a produced file for `file()`, and for `value()` what its schema
@@ -60,10 +60,28 @@ export interface BlockedResult {
 /** An agent's result, or a stage's that ends in an agent step. Rule out `blocked` before reading the output. */
 export type AgentResult<O, F extends PropertyKey> = DoneResult<O, F> | BlockedResult;
 /**
- * What `run.stage()` returns, by the kind of the definition's last step. `error` reaches the workflow only through
- * `{ onError: 'return' }`: by default the engine fails the run with `stage_error`.
+ * A stage that an earlier script step ended `failed`: that step's output, and the files the steps so far left. The
+ * later steps' files don't exist.
  */
-export type Result<S extends StageDefinition> = KindOf<S> extends 'script' ? ScriptResult<z.infer<S['output']>, FileNames<S>> : AgentResult<z.infer<S['output']>, FileNames<S>>;
+export interface StoppedResult<O, F extends PropertyKey> {
+    readonly outcome: 'failed';
+    /** Frozen, as the call's `result.json` holds it. */
+    readonly output: O;
+    readonly files: Partial<ProducedFiles<F>>;
+}
+/** What an earlier step can end a stage in: blocked for an agent step, failed with its own output for a script step. */
+type StoppedBy<E, F extends PropertyKey> = E extends {
+    readonly kind: 'agent';
+} ? BlockedResult : E extends {
+    readonly kind: 'script';
+    readonly output: infer O extends z.ZodType;
+} ? StoppedResult<z.infer<O>, F> : never;
+/**
+ * What `run.stage()` returns, by the kind of the definition's last step, and for a stage what an earlier step can end
+ * it in. `error` reaches the workflow only through `{ onError: 'return' }`: by default the engine fails the run with
+ * `stage_error`.
+ */
+export type Result<S extends StageDefinition> = (KindOf<S> extends 'script' ? ScriptResult<z.infer<S['output']>, FileNames<S>> : AgentResult<z.infer<S['output']>, FileNames<S>>) | StoppedBy<EarlierSteps<S>, FileNames<S>>;
 /** A call that broke its contract, handed back because the call passed `{ onError: 'return' }`. */
 export interface ErrorResult {
     readonly outcome: 'error';

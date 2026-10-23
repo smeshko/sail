@@ -1,0 +1,113 @@
+{
+  "recording": 1,
+  "key": "publish#1/describe",
+  "tries": [
+    {
+      "try": 1,
+      "request": {
+        "model": "claude-sonnet-5",
+        "budget": {
+          "maxTurns": 20,
+          "maxUsd": 1,
+          "maxMinutes": 5
+        },
+        "promptSha256": "c26cb6347e090cb3082d9782b632deb878b84920764b0dc1d9f4eecaea291f11"
+      },
+      "events": [
+        {
+          "type": "harness:session_start",
+          "adapter": "fake",
+          "sessionId": "fake-session-publish-1-describe",
+          "model": "claude-sonnet-5"
+        },
+        {
+          "type": "agent:message",
+          "text": "PR description written."
+        },
+        {
+          "type": "usage:update",
+          "turn": 1,
+          "tokens": {
+            "input": 750,
+            "cacheRead": 3125,
+            "cacheWrite": 225,
+            "output": 200
+          },
+          "costUsdSoFar": 0.02525
+        },
+        {
+          "type": "usage:update",
+          "turn": 2,
+          "tokens": {
+            "input": 1500,
+            "cacheRead": 6250,
+            "cacheWrite": 450,
+            "output": 400
+          },
+          "costUsdSoFar": 0.0505
+        },
+        {
+          "type": "usage:update",
+          "turn": 3,
+          "tokens": {
+            "input": 2250,
+            "cacheRead": 9375,
+            "cacheWrite": 675,
+            "output": 600
+          },
+          "costUsdSoFar": 0.07575000000000001
+        },
+        {
+          "type": "usage:update",
+          "turn": 4,
+          "tokens": {
+            "input": 3000,
+            "cacheRead": 12500,
+            "cacheWrite": 900,
+            "output": 800
+          },
+          "costUsdSoFar": 0.101
+        },
+        {
+          "type": "harness:session_end",
+          "sessionId": "fake-session-publish-1-describe",
+          "outcome": "done",
+          "reason": "submitted",
+          "turns": 4,
+          "toolCalls": 0,
+          "denials": 0,
+          "usage": {
+            "inputTokens": 3000,
+            "cacheReadTokens": 12500,
+            "cacheWriteTokens": 900,
+            "outputTokens": 800,
+            "costUsd": 0.101
+          }
+        }
+      ],
+      "result": {
+        "outcome": "done",
+        "output": {
+          "title": "Add a --shout flag to the greet command (FAKE-1)",
+          "bodyFile": "pr-body.md"
+        },
+        "sessionId": "fake-session-publish-1-describe",
+        "usage": {
+          "inputTokens": 3000,
+          "cacheReadTokens": 12500,
+          "cacheWriteTokens": 900,
+          "outputTokens": 800,
+          "costUsd": 0.101
+        },
+        "transcript": "assistant: PR description written."
+      },
+      "files": {
+        "pr-body.md": {
+          "encoding": "utf8",
+          "content": "## Summary\n\nAdds `--shout` to the `greet` command: with it, the whole greeting is printed in upper case.\n\n## Changes\n\n- `greet()` takes `{ shout }` and upper-cases the whole line.\n- The CLI reads `--shout`, and `--help` lists it.\n- Tests cover both, plus the help text.\n\n## Testing\n\n`bun test`: 7 of 7 pass.\n\nTicket: [FAKE-1](fake://tickets/FAKE-1)\n"
+        }
+      },
+      "raw": []
+    }
+  ]
+}

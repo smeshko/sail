@@ -1,7 +1,9 @@
 // Bindings, from what a caller supplies to what a call reads: each is checked against the step's `consumes`, then
 // materialised into `$STAGE_IN`. A file is copied under its declared name, and a value is written as `<name>.json`, or
 // as `<name>.txt` when it is a string. A gitDiff binding is the run's patch, which only the engine supplies, from the
-// run's workspace: it is written as `<name>.patch`. The script finds each one through its `INPUT_<NAME>` variable.
+// run's workspace: it is written as `<name>.patch`. A fromStep binding is what an earlier step of the same stage left,
+// which only the engine supplies too: its output, or a field of it, written as a value is, or a file it produced,
+// copied under that file's name. The script finds each one through its `INPUT_<NAME>` variable.
 import { copyFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -15,11 +17,44 @@ import { isPlainName } from './call-dir';
 export type Supplied =
   | { kind: 'file'; path: string; from: string }
   | { kind: 'value'; value: unknown; from: string }
-  | { kind: 'gitDiff'; patch: string; from: string };
+  | { kind: 'gitDiff'; patch: string; from: string }
+  /** An earlier step's output, or a field of it: no schema checks it, since the step's own already did. */
+  | { kind: 'fromStep'; value: unknown; from: string }
+  /** A file an earlier step produced. */
+  | { kind: 'fromStep'; path: string; from: string };
 
 /** `INPUT_` and the binding's name, upper-cased, with anything outside `[A-Z0-9]` turned into `_`. */
 export function inputVar(name: string): string {
   return `INPUT_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+}
+
+/** The names a binding may be written under in `$STAGE_IN`: a value's depends on its data, so it may take either. */
+function namesOf(key: string, binding: Binding): string[] {
+  if (binding.kind === 'file') return [binding.name];
+  if (binding.kind === 'gitDiff') return [`${key}.patch`];
+  if (binding.kind === 'fromStep' && binding.file !== undefined) return [binding.file];
+  return [`${key}.txt`, `${key}.json`];
+}
+
+/**
+ * What would collide when `consumes` is materialised, whatever is supplied: two bindings giving one `INPUT_` variable,
+ * or two that may be written under one name. A step of a multi-step stage is checked with it at load, before it runs.
+ */
+export function collisionProblems(consumes: Consumes): string[] {
+  const problems: string[] = [];
+  const byVar = new Map<string, string>();
+  const byName = new Map<string, string>();
+  for (const [key, binding] of Object.entries(consumes)) {
+    const first = byVar.get(inputVar(key));
+    if (first === undefined) byVar.set(inputVar(key), key);
+    else problems.push(`'${first}' and '${key}' both give ${inputVar(key)}`);
+    for (const name of namesOf(key, binding)) {
+      const taken = byName.get(name);
+      if (taken === undefined) byName.set(name, key);
+      else if (taken !== key) problems.push(`'${taken}' and '${key}' are both written to $STAGE_IN as '${name}'`);
+    }
+  }
+  return problems;
 }
 
 type Checked = { ok: true; data: unknown } | { ok: false; message: string };
@@ -37,6 +72,12 @@ interface Planned {
   write: { copy: string } | { text: string };
 }
 
+/** A value as `$STAGE_IN` holds it: `<key>.txt` for a string, `<key>.json` for anything else. */
+function asText(key: string, data: unknown): Omit<Planned, 'key'> {
+  if (typeof data === 'string') return { name: `${key}.txt`, write: { text: data } };
+  return { name: `${key}.json`, write: { text: `${JSON.stringify(data, null, 2)}\n` } };
+}
+
 /** Checks every binding and plans what each writes, without writing anything. `values` holds each parsed value. */
 function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) {
   const problems: string[] = [];
@@ -52,6 +93,16 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
       planned.push({ key, name: `${key}.patch`, write: { text: given.patch } });
       continue;
     }
+    if (binding.kind === 'fromStep' && given?.kind === 'fromStep') {
+      if ('path' in given) planned.push({ key, name: binding.file ?? key, write: { copy: given.path } });
+      else {
+        values.push([key, given.value]);
+        planned.push({ key, ...asText(key, given.value) });
+      }
+      continue;
+    }
+    // An optional fromStep the earlier step had nothing for is bound to nothing, as an optional value left out is.
+    if (binding.kind === 'fromStep' && given === undefined && binding.isOptional) continue;
     if (binding.kind === 'gitDiff' || binding.kind === 'fromStep') {
       problems.push(`'${key}' is a ${binding.kind} binding, which can't be supplied here`);
       continue;
@@ -76,8 +127,7 @@ function plan(consumes: Consumes, supplied: Readonly<Record<string, Supplied>>) 
         continue;
       }
       values.push([key, checked.data]);
-      if (typeof checked.data === 'string') planned.push({ key, name: `${key}.txt`, write: { text: checked.data } });
-      else planned.push({ key, name: `${key}.json`, write: { text: `${JSON.stringify(checked.data, null, 2)}\n` } });
+      planned.push({ key, ...asText(key, checked.data) });
     }
   }
 

@@ -83,7 +83,7 @@ A stage in `.sail/stages/<stage>/`, which any workflow may import. A private sta
 _Avoid_: global stage, common stage, public stage
 
 **Step**:
-One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step.
+One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step. The steps of a stage share its `$STAGE_OUT`, and each step of a multi-step stage is journaled under `stage#call/step` as it finishes, so a resume runs only the steps after it.
 _Avoid_: sub-stage, action, unit
 
 **Kind**:
@@ -111,7 +111,7 @@ The calls one `run.all()` makes at once. Their keys are assigned in the order gi
 _Avoid_: batch, fan-out, parallel block
 
 **Try**:
-One execution of a call's body, in a directory of its own. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects.
+One execution of a call's body, in a directory of its own. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `$STAGE_OUT`.
 _Avoid_: attempt, retry (as a noun)
 
 **Key**:
@@ -135,7 +135,7 @@ How a call or step ended, from a fixed set per kind:
 - script: `passed`, `failed` or `error`, a verdict the engine maps from the exit code
 - agent: `done`, `blocked` or `error`, completion the agent declares; its judgments travel in the output
 
-The workflow routes on the outcome. An `error` fails the run with stop reason `stage_error`, unless the call passes `{ onError: 'return' }` to receive it. A multi-step stage's outcome is its last step's.
+The workflow routes on the outcome. An `error` fails the run with stop reason `stage_error`, unless the call passes `{ onError: 'return' }` to receive it. A multi-step stage's outcome is its last step's, or the outcome of the step that stopped it: a step that ends `blocked`, `failed` or `error` ends its stage, and the steps after it don't run.
 _Avoid_: status (the run's word), result, state, verdict
 
 **Blocked**:
