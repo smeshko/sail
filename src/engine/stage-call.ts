@@ -20,7 +20,7 @@ import { z } from 'zod';
 import type { CallEvent, NewEvent } from '../events/types';
 import type { FromStepBinding } from '../sdk/bindings';
 import type { AgentStep, ScriptStep, Stage, Step } from '../sdk/steps';
-import type { Supplied } from './bindings';
+import { collisionProblems, type Supplied } from './bindings';
 import {
   type AgentExecution,
   type CallRequest,
@@ -103,6 +103,8 @@ export function stepProblems(stage: Stage): string[] {
       if (first === undefined) producer.set(name, step.name);
       else found.push(`${at}: steps '${first}' and '${step.name}' both produce '${name}'`);
     }
+    // A step's own $STAGE_IN is materialised only as it starts: what would collide there is refused now.
+    for (const problem of collisionProblems(step.consumes)) found.push(`${at}: step '${step.name}': ${problem}`);
     for (const [key, binding] of Object.entries(step.consumes)) {
       if (binding.kind !== 'fromStep') continue;
       const named = stage.steps.findIndex((each) => each.name === binding.step);

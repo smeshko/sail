@@ -28,6 +28,35 @@ export function inputVar(name: string): string {
   return `INPUT_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
 }
 
+/** The names a binding may be written under in `$STAGE_IN`: a value's depends on its data, so it may take either. */
+function namesOf(key: string, binding: Binding): string[] {
+  if (binding.kind === 'file') return [binding.name];
+  if (binding.kind === 'gitDiff') return [`${key}.patch`];
+  if (binding.kind === 'fromStep' && binding.file !== undefined) return [binding.file];
+  return [`${key}.txt`, `${key}.json`];
+}
+
+/**
+ * What would collide when `consumes` is materialised, whatever is supplied: two bindings giving one `INPUT_` variable,
+ * or two that may be written under one name. A step of a multi-step stage is checked with it at load, before it runs.
+ */
+export function collisionProblems(consumes: Consumes): string[] {
+  const problems: string[] = [];
+  const byVar = new Map<string, string>();
+  const byName = new Map<string, string>();
+  for (const [key, binding] of Object.entries(consumes)) {
+    const first = byVar.get(inputVar(key));
+    if (first === undefined) byVar.set(inputVar(key), key);
+    else problems.push(`'${first}' and '${key}' both give ${inputVar(key)}`);
+    for (const name of namesOf(key, binding)) {
+      const taken = byName.get(name);
+      if (taken === undefined) byName.set(name, key);
+      else if (taken !== key) problems.push(`'${taken}' and '${key}' are both written to $STAGE_IN as '${name}'`);
+    }
+  }
+  return problems;
+}
+
 type Checked = { ok: true; data: unknown } | { ok: false; message: string };
 
 /** Parses a supplied value with its binding's schema. The parsed value, defaults and transforms applied, is written. */
