@@ -353,6 +353,22 @@ test('requests open at once share what is left: each is handed what the others h
   }).toEqual({ handed: [0.7, 0.3, 1], settled: ['fulfilled', 'rejected'] });
 });
 
+test("a request the others' shares leave nothing is handed $0.000001, never $0, which claude-code refuses, and counts as narrowed (review R1-1)", async () => {
+  const { tracker } = tracked({ maxUsd: 1 });
+  const inner = heldHarness();
+  const harness = tracker.harness(inner);
+  const own = { maxTurns: 10, maxUsd: 2, maxMinutes: 5 };
+  const first = harness.run(ask('a#1', own));
+  const second = harness.run(ask('b#1', own));
+  inner.release('a#1');
+  inner.release('b#1');
+  await Promise.all([first, second]);
+  expect({
+    handed: inner.requests.map((request) => request.budget.maxUsd),
+    narrowed: tracker.narrowed('b#1'),
+  }).toEqual({ handed: [1, 0.000001], narrowed: true });
+});
+
 test('narrowed() holds for a request the run narrowed in the budget its session exceeded, or in any when it named none, and not for one over a budget of its own', async () => {
   const { tracker } = tracked({ maxUsd: 0.5 });
   const inner = heldHarness();

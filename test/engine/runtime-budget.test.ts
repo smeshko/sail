@@ -251,7 +251,8 @@ test('reviewers that run at once share what the run has left: the one handed it 
     }).toEqual({
       stopReason: 'budget_exceeded',
       journaled: 1,
-      starved: Array(5).fill([{ reason: 'budget_exceeded', message: 'budget exceeded: maxUsd 0' }]),
+      // Each starved reviewer is handed the least share, $0.000001, never $0, which claude-code refuses.
+      starved: Array(5).fill([{ reason: 'budget_exceeded', message: 'budget exceeded: maxUsd 0.000001' }]),
       // The budget, and one turn for each of the five it starved: within the budget plus a turn per session.
       spent: 0.14,
       message: `$0.14 of its $0.10 used before the group ${REVIEW_KEYS.join(', ')}: raise it with --raise-budget <usd>`,
@@ -284,7 +285,7 @@ test('a sibling starved by the shares of the others while the run is under its b
       status: 'completed',
       journal: ['a#1 done', 'b#1 done', 'c#1 done', 'd#1 done', 'intake#1 passed'],
       retried: 1,
-      firstTry: [[{ reason: 'budget_exceeded', message: 'budget exceeded: maxUsd 0' }]],
+      firstTry: [[{ reason: 'budget_exceeded', message: 'budget exceeded: maxUsd 0.000001' }]],
     });
   });
 });
