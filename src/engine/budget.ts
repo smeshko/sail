@@ -199,8 +199,9 @@ export function suspension(over: Over, before: string): { event: NewEvent; messa
 
 /**
  * Why run `runId` can't resume with `raise`, from its header's budget and its events, or undefined when it can: a raise
- * of a budget the run doesn't have, or a run still at or over its budget once the raise is added. A resume with no
- * raise is held to the second.
+ * of a budget the run doesn't have, one too large for the budget after it to be a finite number, which the events file
+ * would hold as `null`, or a run still at or over its budget once the raise is added. A resume with no raise is held to
+ * the last.
  */
 export function raiseProblem(
   runId: string,
@@ -212,7 +213,17 @@ export function raiseProblem(
   if (raise.usd !== undefined && now?.maxUsd === undefined) return `run ${runId} has no dollar budget to raise`;
   if (raise.minutes !== undefined && now?.maxMinutes === undefined) return `run ${runId} has no minute budget to raise`;
   if (now === undefined) return undefined;
-  const over = overOf(raised(now, raise), usedOf(events));
+  const after = raised(now, raise);
+  for (const [field, name] of [
+    ['maxUsd', 'dollar'],
+    ['maxMinutes', 'minute'],
+  ] as const) {
+    const value = after[field];
+    if (value !== undefined && !Number.isFinite(value)) {
+      return `run ${runId} can't take that raise: its ${name} budget would be more than a number holds`;
+    }
+  }
+  const over = overOf(after, usedOf(events));
   if (over === undefined) return undefined;
   return `run ${runId} has used ${usedText(over)}: resume it with ${raiseFlag(over.budget)}`;
 }
