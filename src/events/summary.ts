@@ -6,7 +6,11 @@
 // try, takes each loop's highest iteration, and drops a route the resume reported again.
 //
 // A seeded run's reused calls arrive as `journal:append` events carrying `fromRun`. Each is listed among the calls, in
-// event order, with that `fromRun` and no duration, and counts in no total: the totals are this run's own work.
+// event order, with that `fromRun` and no duration, and counts in no total: the totals are this run's own work. A
+// reused step's line is its call's, and lists nothing of its own.
+//
+// A multi-step call a resume starts again keeps the steps it ended before: they are journaled and don't run again, so
+// their facts would otherwise be lost with the earlier process's `stage:start`.
 //
 // A group's calls are listed among the calls like any other, in `stage:start` order, and the group itself in `groups`:
 // its keys in declaration order from its `all:start`, and its duration once its `all:end` came. A resume that runs the
@@ -297,14 +301,16 @@ function foldRunEnd(state: SummaryState, event: EventOf<'run:end'>): void {
 function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf<'stage:start'>): void {
   const held = new Set(state.feedback.values());
   const feedback = Object.values(event.consumed).find((from): from is string => from !== null && held.has(from));
+  const earlier = event.type === 'stage:start' && event.kind === 'stage' ? state.calls.get(event.key) : undefined;
+  const kept = earlier === undefined ? [] : [...earlier.steps].filter(([, step]) => step.end !== undefined);
   state.calls.set(event.key, {
     key: event.key,
     kind: event.kind,
     startedAt: event.ts,
     facts: {},
     ...(feedback === undefined ? {} : { feedback }),
-    files: [],
-    steps: new Map(),
+    files: [...new Set(kept.flatMap(([, step]) => step.files))],
+    steps: new Map(kept),
   });
 }
 
@@ -330,6 +336,7 @@ function endCall(state: SummaryState, event: EventOf<'intake:end'> | EventOf<'st
 
 /** A reused call: listed as it ended in the run it came from, with no duration of this run's. */
 function reuseCall(state: SummaryState, event: EventOf<'journal:append'>, fromRun: string): void {
+  if (event.key.includes('/')) return;
   state.calls.set(event.key, {
     key: event.key,
     kind: 'builtin',

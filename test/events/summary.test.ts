@@ -590,10 +590,7 @@ test('a run from a pull request names its source by its number and head sha, and
   expect([summary?.source, summary?.ticket]).toEqual([{ kind: 'pr', number: 12, headSha, via: 'watch' }, undefined]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a multi-step call a resume started again between its steps keeps the steps it ended before: one call, both steps, the first step's cost", () => {
+test("a multi-step call a resume started again between its steps keeps the steps it ended before: one call, both steps, the first step's cost", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -641,10 +638,7 @@ test
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a seeded run's reused step lines add no call: its reused multi-step call is listed once, by its own line", () => {
+test("a seeded run's reused step lines add no call: its reused multi-step call is listed once, by its own line", () => {
   const source = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
   const reused = (key: string, line: number, outcome: 'passed' | 'done'): [number, NewEvent] => [
     line * 10,

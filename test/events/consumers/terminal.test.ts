@@ -1251,10 +1251,7 @@ test("in a terminal, the live line counts a group's running calls, never naming 
   ]);
 });
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("at normal, a step that ends in error prints each of its errors under the step's key, as a call's end does", () => {
+test("at normal, a step that ends in error prints each of its errors under the step's key, as a call's end does", () => {
   const w = 18;
   const events = stream([
     stageStart('publish#1', 'stage', { steps: ['describe', 'open'] }),

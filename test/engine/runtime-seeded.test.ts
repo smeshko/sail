@@ -229,10 +229,7 @@ test('a seeded run whose workflow now asks for a group without the stage it was 
   });
 }, 60_000);
 
-// biome-ignore format: TDD-PENDING TASK-006
-test
-  .skip // TDD-PENDING TASK-006
-  ("a run seeded for the stage after a two-step call reuses the call's step lines with its own, as reused calls, and validates", async () => {
+test("a run seeded for the stage after a two-step call reuses the call's step lines with its own, as reused calls, and validates", async () => {
   await withTempRepo(async (repo) => {
     const fromRun = await withTempRepo(async (from) => {
       writeTwoStep(from.dir);
