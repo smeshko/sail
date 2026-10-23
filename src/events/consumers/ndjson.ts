@@ -11,7 +11,8 @@
 // - `readEventsFrom()` reads it from a cursor, a complete line at a time, so a viewer can replay the file and then follow
 //   it. A torn tail waits for the next read. `readEvents()` reads the same lines, and keeps only the valid events.
 // - Two types are confirmed and synced by the run's budget tracker: a session's `harness:session_end`, and a
-//   `budget:raised`. `lastSeq()` reads the last whole line's `seq` from the file's tail for it.
+//   `budget:raised`. `holdsSeq()` looks for the event's line back from the file's tail for it, and `lastSeq()` reads
+//   the last whole line's `seq`.
 import {
   appendFileSync,
   closeSync,
@@ -105,8 +106,47 @@ export function createEventsFile(runDir: string): void {
   createFileOnce(join(runDir, EVENTS_FILE), '');
 }
 
-/** How much of the file's end `lastSeq()` reads at a time. */
+/** How much of the file's end `linesFromTail()` reads at a time. */
 const TAIL_CHUNK = 4096;
+
+/** The whole lines of the file `path`, last first, read back from its tail a chunk at a time. A torn tail is no line. */
+function* linesFromTail(path: string): Generator<string> {
+  const fd = openSync(path, 'r');
+  try {
+    let from = fstatSync(fd).size;
+    /** The bytes read from `from` on, up to the newline that ends the last whole line not given yet. */
+    let pending = Buffer.alloc(0);
+    let torn = true;
+    while (from > 0 || pending.length > 0) {
+      if (from > 0) {
+        const start = Math.max(0, from - TAIL_CHUNK);
+        const chunk = Buffer.alloc(from - start);
+        readSync(fd, chunk, 0, chunk.length, start);
+        pending = Buffer.concat([chunk, pending]);
+        from = start;
+      }
+      if (torn) {
+        const last = pending.lastIndexOf(0x0a);
+        if (last === -1) {
+          if (from === 0) return;
+          continue;
+        }
+        pending = pending.subarray(0, last + 1);
+        torn = false;
+      }
+      // Each line whose start has been read: the newline before it, or the file's start.
+      while (pending.length > 0) {
+        const end = pending.length - 1;
+        const before = end === 0 ? -1 : pending.lastIndexOf(0x0a, end - 1);
+        if (before === -1 && from > 0) break;
+        yield pending.subarray(before + 1, end).toString('utf8');
+        pending = pending.subarray(0, before + 1);
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
 
 /**
  * The `seq` of the last whole line of the run's events file, read from its tail: undefined for a missing or empty file,
@@ -115,31 +155,26 @@ const TAIL_CHUNK = 4096;
 export function lastSeq(runDir: string): number | undefined {
   const path = join(runDir, EVENTS_FILE);
   if (!existsSync(path)) return undefined;
-  const fd = openSync(path, 'r');
-  try {
-    let tail = Buffer.alloc(0);
-    let from = fstatSync(fd).size;
-    /** The newline that ends the last whole line, and the one before it: -1 for the file's start. */
-    const bounds = (): [number, number] => {
-      const end = tail.lastIndexOf(0x0a);
-      return [end, end <= 0 ? -1 : tail.lastIndexOf(0x0a, end - 1)];
-    };
-    // Back from the end a chunk at a time, until the bytes read hold the start of the last whole line.
-    while (from > 0 && bounds()[1] === -1) {
-      const start = Math.max(0, from - TAIL_CHUNK);
-      const chunk = Buffer.alloc(from - start);
-      readSync(fd, chunk, 0, chunk.length, start);
-      tail = Buffer.concat([chunk, tail]);
-      from = start;
-    }
-    const [end, before] = bounds();
-    if (end === -1) return undefined;
-    const line = tail.subarray(before + 1, end).toString('utf8');
+  for (const line of linesFromTail(path)) {
     const event = parseEvent(line);
     return typeof event === 'string' ? undefined : event.seq;
-  } finally {
-    closeSync(fd);
   }
+  return undefined;
+}
+
+/**
+ * Whether the run's events file holds a whole line of event `seq`, looked for back from its tail. Lines after it may
+ * follow it, as an `error:consumer` that the bus appends within the same emit does.
+ */
+export function holdsSeq(runDir: string, seq: number): boolean {
+  const path = join(runDir, EVENTS_FILE);
+  if (!existsSync(path)) return false;
+  for (const line of linesFromTail(path)) {
+    const event = parseEvent(line);
+    if (typeof event === 'string') continue;
+    if (event.seq <= seq) return event.seq === seq;
+  }
+  return false;
 }
 
 /**

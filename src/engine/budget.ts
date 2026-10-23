@@ -21,7 +21,7 @@
 // - `budget:warning` fires once per budget and limit at 80% of it, and `budget:exceeded` once at the limit. Both are the
 //   run's, with no key: a step's own carry their call's.
 import { join } from 'node:path';
-import { EVENTS_FILE, lastSeq } from '../events/consumers/ndjson';
+import { EVENTS_FILE, holdsSeq, lastSeq } from '../events/consumers/ndjson';
 import type { NewEvent, SailEvent } from '../events/types';
 import type { Harness } from '../ports/harness';
 import { syncFile } from './durable';
@@ -363,11 +363,14 @@ export function trackBudget(options: BudgetOptions): BudgetTracker | undefined {
   };
 }
 
-/** Confirms an event of the run in `runDir` reached the disk: its events file must end with it, and is then synced. */
+/**
+ * Confirms an event of the run in `runDir` reached the disk: its events file must hold its line, and is then synced.
+ * Lines after it are no failure: the bus appends a consumer's `error:consumer` within the same emit.
+ */
 export function recordIn(runDir: string): (event: SailEvent) => void {
   return (event) => {
-    const last = lastSeq(runDir);
-    if (last !== event.seq) {
+    if (!holdsSeq(runDir, event.seq)) {
+      const last = lastSeq(runDir);
       const why = last === undefined ? 'ends with no event' : `ends with event ${last}`;
       throw new Error(`${EVENTS_FILE} ${why}, not ${event.type} ${event.seq}: it is not on disk`);
     }
