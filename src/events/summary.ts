@@ -268,7 +268,8 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
       break;
     }
     case 'journal:append':
-      state.journaledSinceRoute = true;
+      // A step's line is its call's: the replay makes no move after it, so a route the resume reports again repeats.
+      if (!event.key.includes('/')) state.journaledSinceRoute = true;
       if (event.fromRun !== undefined) reuseCall(state, event, event.fromRun);
   }
 }
