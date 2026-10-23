@@ -221,19 +221,29 @@ const runsAgent = (definition: StageDefinition): boolean =>
 const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
 
 /**
- * The step lines of `call` the journal holds, which must be its stage's first steps in order, or why they aren't. A
- * one-step definition has none, and any line of one is a change.
+ * The step lines of `call` the journal holds, which must be its stage's first steps in order, none after one that
+ * stopped the stage, or why they aren't. A one-step definition has none, and any line of one is a change. A call the
+ * journal holds is checked as one still to run is: its stage may have changed since.
  */
-function finishedSteps(call: PendingCall, entries: readonly JournalEntry[]): JournalEntry[] | { failed: string } {
+function finishedSteps(
+  call: Pick<PendingCall, 'key' | 'stage' | 'definition'>,
+  entries: readonly JournalEntry[],
+): JournalEntry[] | { failed: string } {
   const lines = entries.filter((entry) => entry.step !== undefined && callKeyOf(entry.key) === call.key);
   const steps = call.definition.kind === 'stage' && call.definition.steps.length > 1 ? call.definition.steps : [];
   for (const [index, line] of lines.entries()) {
     const step = steps[index];
+    const before = lines[index - 1];
     if (step === undefined) {
       return { failed: `the journal has '${line.key}' where ${call.stage} has no step ${index + 1}` };
     }
     if (line.step !== step.name) {
       return { failed: `the journal has '${line.key}' where ${call.stage}'s step ${index + 1} is '${step.name}'` };
+    }
+    if (before !== undefined && before.outcome !== 'done' && before.outcome !== 'passed') {
+      return {
+        failed: `the journal has '${line.key}' after '${before.key}', which ended ${call.stage} ${before.outcome}`,
+      };
     }
   }
   return lines;
@@ -554,6 +564,13 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       if (stray !== undefined) {
         const message = `the journal holds '${stray.key}' of a call the workflow didn't ask for`;
         return await failed('determinism_violation', message);
+      }
+      // A call the journal holds keeps the steps it ran with: one whose stage renamed, reordered or dropped them since
+      // replays against lines its stage no longer has.
+      for (const entry of entries) {
+        const definition = loaded.stages.find((each) => each.definition.name === entry.stage)?.definition;
+        const checked = definition === undefined ? [] : finishedSteps({ ...entry, definition }, lines);
+        if ('failed' in checked) return await failed('determinism_violation', checked.failed);
       }
       // A seeded run's first call of its own is the stage it was seeded for: an edited workflow that asks for another
       // first, or ends, would run what nobody asked for.
