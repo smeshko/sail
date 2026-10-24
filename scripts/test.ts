@@ -9,9 +9,10 @@ import { join } from 'node:path';
 const home = realpathSync(mkdtempSync(join(tmpdir(), 'sail-test-home-')));
 
 // Git exports GIT_DIR and friends to hooks; inherited, they would point a test's git calls at the real checkout.
+// A script step exports SAIL_CONFIG; inherited, it would point the CLI under test at that run's config.
 const env: Record<string, string> = {};
 for (const [key, value] of Object.entries(process.env)) {
-  if (value !== undefined && !key.startsWith('GIT_')) env[key] = value;
+  if (value !== undefined && !key.startsWith('GIT_') && key !== 'SAIL_CONFIG') env[key] = value;
 }
 Object.assign(env, {
   HOME: home,
