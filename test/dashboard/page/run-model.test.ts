@@ -266,7 +266,7 @@ test('an unknown type counts on its card, an event that does not fit counts as u
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x' };
   const model = foldRun([
     ...events.slice(0, 14),
-    { ...at, seq: 901, type: 'agent:thinking', key: 'spec#1', text: 'hm' },
+    { ...at, seq: 901, type: 'budget:warning', key: 'spec#1' },
     { ...at, seq: 902, type: 'stage:end', key: 'nope#1', stage: 'nope', outcome: 'done', durationMs: 1 },
     { ...at, seq: 903, type: 'stage:start', key: 7, stage: 'spec', call: 2, try: 1, kind: 'agent' },
     { ...at, seq: 904, type: 'stage:start', key: 'spec#2', stage: 'spec', call: '2', try: 1, kind: 'agent' },
@@ -275,7 +275,7 @@ test('an unknown type counts on its card, an event that does not fit counts as u
     { seq: 905 },
   ]);
   expect(model.cards.map((card) => card.key)).toEqual(['intake#1', 'spec#1']);
-  expect(model.cards[1]?.other).toEqual({ 'agent:thinking': 1 });
+  expect(model.cards[1]?.other).toEqual({ 'budget:warning': 1 });
   expect(model.unreadable).toBe(6);
 
   const next = random(42);
@@ -326,4 +326,100 @@ test("a group's all:start lists it once, though a resume reports it again, its a
   expect(
     [model.other, ...model.cards.map((card) => card.other)].filter((other) => Object.keys(other).length > 0),
   ).toEqual([]);
+});
+
+test("a card's timeline holds its messages, steps and script commands with their exits, in order: the golden run's", () => {
+  const model = foldRun(golden());
+  const timeline = (key: string) => model.cards.find((card) => card.key === key)?.timeline;
+  expect(timeline('intake#1')).toEqual([]);
+  expect(timeline('spec#1')).toEqual([
+    {
+      kind: 'message',
+      ts: '2026-09-25T09:00:02.900Z',
+      text: 'Spec written: two tasks, greet() and the CLI first, then the tests.',
+    },
+  ]);
+  expect(timeline('tests#1')).toEqual([
+    {
+      kind: 'script',
+      ts: '2026-09-25T09:00:06.500Z',
+      command: '.sail/stages/tests/run.sh',
+      durationMs: 100,
+      code: 1,
+      outcome: 'failed',
+    },
+  ]);
+  expect(timeline('publish#1')?.map((entry) => (entry.kind === 'step' ? `step ${entry.step}` : entry.kind))).toEqual([
+    'step describe',
+    'message',
+    'step open',
+    'script',
+  ]);
+});
+
+test("a tool call is one timeline entry: started running, given its denial, and ended with its status, duration and result; an id another card used is that card's own (ADW-260)", () => {
+  const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x' };
+  const spec = { ...at, key: 'spec#1' };
+  const implement = { ...at, key: 'implement#1' };
+  const denied = { type: 'permission:denied', callId: 'c1', permissions: {} };
+  const model = foldRun([
+    ...golden().slice(0, 14),
+    { ...spec, seq: 901, type: 'agent:thinking', text: '' },
+    { ...spec, seq: 902, type: 'agent:thinking', text: 'Read the brief first.' },
+    { ...spec, seq: 903, type: 'tool:start', callId: 'c1', tool: 'Bash', input: { command: 'git push' } },
+    // A call running beside spec#1 starts a tool with the same id before spec#1's is denied.
+    { ...implement, seq: 904, type: 'stage:start', stage: 'implement', call: 1, try: 1, kind: 'agent' },
+    { ...implement, seq: 905, type: 'tool:start', callId: 'c1', tool: 'Read', input: { file_path: 'a.ts' } },
+    { ...spec, ...denied, seq: 906, tool: 'Bash', rule: 'commands', reason: 'no' },
+    { ...spec, seq: 907, type: 'tool:end', callId: 'c1', status: 'denied', durationMs: 3, result: 'refused' },
+    { ...spec, seq: 908, type: 'tool:end', callId: 'never-started', status: 'completed', durationMs: 1 },
+    { ...spec, seq: 909, type: 'tool:end', callId: 'c1', status: 'exploded', durationMs: 1 },
+    { ...implement, ...denied, seq: 910, tool: 'Read', rule: 'read', reason: 'out' },
+  ]);
+  const [, spec1, implement1] = model.cards;
+  expect(spec1?.timeline).toEqual([
+    { kind: 'thinking', ts: at.ts, text: 'Read the brief first.' },
+    {
+      kind: 'tool',
+      ts: at.ts,
+      callId: 'c1',
+      tool: 'Bash',
+      input: { command: 'git push' },
+      status: 'denied',
+      durationMs: 3,
+      result: 'refused',
+      denial: { rule: 'commands', reason: 'no' },
+    },
+  ]);
+  expect(implement1?.timeline).toEqual([
+    {
+      kind: 'tool',
+      ts: at.ts,
+      callId: 'c1',
+      tool: 'Read',
+      input: { file_path: 'a.ts' },
+      status: 'running',
+      denial: { rule: 'read', reason: 'out' },
+    },
+  ]);
+  expect([spec1?.denials[0]?.command, implement1?.denials[0]?.command]).toEqual(['git push', '{"file_path":"a.ts"}']);
+  expect(model.unreadable).toBe(1);
+});
+
+test('a later try is a timeline entry, and a script exit ends the open script with its code or signal, passes over one with none open, and is unreadable without a duration', () => {
+  const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
+  const model = foldRun([
+    ...golden().slice(0, 14),
+    { ...at, seq: 901, type: 'script:exit', code: 0, durationMs: 1, stdoutBytes: 0 },
+    { ...at, seq: 902, type: 'stage:start', stage: 'spec', call: 1, try: 2, kind: 'agent' },
+    { ...at, seq: 903, type: 'script:exec', command: 'sleep 9', cwd: '.', envKeys: [] },
+    { ...at, seq: 904, type: 'script:exit', code: 1, stdoutBytes: 0 },
+    { ...at, seq: 905, type: 'script:exit', code: null, signal: 'SIGTERM', durationMs: 9000, stdoutBytes: 0 },
+    { ...at, seq: 906, type: 'script:exec', cwd: '.', envKeys: [] },
+  ]);
+  expect(model.cards[1]?.timeline).toEqual([
+    { kind: 'try', ts: at.ts, try: 2 },
+    { kind: 'script', ts: at.ts, command: 'sleep 9', durationMs: 9000, signal: 'SIGTERM' },
+  ]);
+  expect(model.unreadable).toBe(2);
 });

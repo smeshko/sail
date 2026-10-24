@@ -41,6 +41,8 @@ test('the committed dashboard views are what the fixtures render now', () => {
     'inspector-golden-implement-2-overview.html',
     'inspector-golden-implement-2-files.html',
     'inspector-golden-tests-1-log.html',
+    'timeline-golden-publish-1.html',
+    'timeline-claude-code-implement-1.html',
   ]);
   expect(stale(fresh, COMMITTED)).toEqual([]);
 });

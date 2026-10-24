@@ -9,6 +9,9 @@
 //
 // A group's `all:start` lists it in `groups`, once however often a resume reports it, and each call that starts while it
 // is open and is one of its keys carries its index, so the view can put the group's cards side by side.
+//
+// Each card keeps its timeline: its thinking, messages, steps, later tries, script commands and tool calls, in order. A
+// tool call's end and denial find their start on the same card, so calls running side by side may share an id.
 import type { RosterEntry } from '../../engine/roster';
 import type { SailEvent } from '../../events/types';
 import { text } from './html';
@@ -45,6 +48,38 @@ export interface CardStep {
   kind: string;
   outcome?: string;
 }
+
+/** A tool call on a timeline: running until its `tool:end`, which says how it ended and what it returned. */
+export interface TimelineTool {
+  kind: 'tool';
+  ts: string;
+  callId: string;
+  tool: string;
+  input: unknown;
+  status: 'running' | 'completed' | 'failed' | 'denied';
+  durationMs?: number;
+  result?: string;
+  denial?: { rule: string; reason: string };
+}
+
+/** A script's command on a timeline, with its exit once it has one: its duration, and its code or the signal that ended it. */
+export interface TimelineScript {
+  kind: 'script';
+  ts: string;
+  command: string;
+  durationMs?: number;
+  code?: number;
+  signal?: string;
+  outcome?: string;
+}
+
+/** One entry of a call's timeline, in the order its events came. */
+export type TimelineEntry =
+  | { kind: 'thinking' | 'message'; ts: string; text: string }
+  | { kind: 'try'; ts: string; try: number }
+  | { kind: 'step'; ts: string; step: string; index: number; of: number }
+  | TimelineTool
+  | TimelineScript;
 
 /** What a call's harness sessions have spent: the ended ones in all, and the one still going. */
 interface Sessions {
@@ -84,6 +119,8 @@ export interface StageCard {
   resultPath?: string;
   /** The call's last agent message. */
   message?: string;
+  /** What the call did, in order: its thinking, messages, steps, tries, tool calls and script commands. */
+  timeline: TimelineEntry[];
   /** How many events carried its key. */
   events: number;
   /** Event types the fold doesn't handle, by type. */
@@ -129,8 +166,6 @@ export interface RunModel {
   pr?: { number: number; url: string };
   /** The intake's key, once its call started. */
   intakeKey?: string;
-  /** Each tool call's input, by call id, so a denial can name its command. */
-  toolInputs: Record<string, unknown>;
   lastSeq: number;
   /** Events whose fields don't fit their type. */
   unreadable: number;
@@ -152,7 +187,6 @@ export function emptyRun(): RunModel {
     openLoops: [],
     groups: [],
     routes: [],
-    toolInputs: dict(),
     lastSeq: 0,
     unreadable: 0,
     other: dict(),
@@ -180,8 +214,6 @@ const PASSED_OVER = new Set([
   'input:materialised',
   'prompt:rendered',
   'output:validated',
-  'script:exec',
-  'script:exit',
   'workspace:leased',
   'workspace:lease_released',
   'workspace:created',
@@ -216,6 +248,7 @@ function newCard(
     denials: [],
     files: [],
     steps: [],
+    timeline: [],
     events: 0,
     other: dict(),
     sessions: { costEnded: 0, costLive: 0, turnsEnded: 0, turnLive: 0, toolsEnded: 0, toolsLive: 0, seen: false },
@@ -264,6 +297,12 @@ function pendingOf(model: RunModel): PendingCard[] {
       return stageModel === undefined ? { stage, kind } : { stage, kind, model: stageModel };
     });
 }
+
+/** The card's tool call with `callId`, the latest when a resumed session reused it. */
+const toolOf = (card: StageCard, callId: string): TimelineTool | undefined =>
+  card.timeline.findLast((entry): entry is TimelineTool => entry.kind === 'tool' && entry.callId === callId);
+
+const TOOL_ENDS = new Set(['completed', 'failed', 'denied']);
 
 const count = (counts: Record<string, number>, type: string) => {
   counts[type] = (counts[type] ?? 0) + 1;
@@ -355,6 +394,7 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       const group = model.groups.findIndex((each) => !each.ended && each.keys.includes(key));
       if (group !== -1) started.group ??= group;
       started.state = 'running';
+      if (tryNumber > started.tries) started.timeline.push({ kind: 'try', ts, try: tryNumber });
       started.tries = Math.max(started.tries, tryNumber);
       const stageModel = str(e.model) ?? model.roster?.stages[stage]?.model;
       if (stageModel !== undefined) started.model = stageModel;
@@ -385,6 +425,7 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       const fields = { step, index, of, kind: str(e.kind) ?? '' };
       if (existing === undefined) card.steps.push(fields);
       else Object.assign(existing, fields);
+      card.timeline.push({ kind: 'step', ts, step, index, of });
       return true;
     }
     case 'step:end': {
@@ -460,13 +501,54 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
     case 'tool:start': {
       const callId = str(e.callId);
       if (card === undefined || callId === undefined) return false;
-      model.toolInputs[callId] = e.input;
+      card.timeline.push({ kind: 'tool', ts, callId, tool: str(e.tool) ?? '?', input: e.input, status: 'running' });
       card.sessions.toolsLive++;
       meter(card);
       return true;
     }
-    case 'tool:end':
-      return card !== undefined;
+    case 'tool:end': {
+      const callId = str(e.callId);
+      const status = str(e.status);
+      if (card === undefined || callId === undefined || status === undefined || !TOOL_ENDS.has(status)) return false;
+      const tool = toolOf(card, callId);
+      if (tool === undefined) return true;
+      tool.status = status as TimelineTool['status'];
+      const durationMs = num(e.durationMs);
+      const result = str(e.result);
+      if (durationMs !== undefined) tool.durationMs = durationMs;
+      if (result !== undefined) tool.result = result;
+      return true;
+    }
+    case 'agent:thinking': {
+      const text = str(e.text);
+      if (card === undefined || text === undefined) return false;
+      // A model whose thinking is not summarized sends blocks with no text: there is nothing of them to show.
+      if (text !== '') card.timeline.push({ kind: 'thinking', ts, text });
+      return true;
+    }
+    case 'script:exec': {
+      const command = str(e.command);
+      if (card === undefined || command === undefined) return false;
+      card.timeline.push({ kind: 'script', ts, command });
+      return true;
+    }
+    case 'script:exit': {
+      if (card === undefined) return false;
+      const durationMs = num(e.durationMs);
+      if (durationMs === undefined) return false;
+      const script = card.timeline.findLast(
+        (entry): entry is TimelineScript => entry.kind === 'script' && entry.durationMs === undefined,
+      );
+      if (script === undefined) return true;
+      script.durationMs = durationMs;
+      const code = num(e.code);
+      const signal = str(e.signal);
+      const outcome = str(e.outcome);
+      if (code !== undefined) script.code = code;
+      if (signal !== undefined) script.signal = signal;
+      if (outcome !== undefined) script.outcome = outcome;
+      return true;
+    }
     case 'permission:denied': {
       const callId = str(e.callId);
       const tool = str(e.tool);
@@ -481,9 +563,11 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
         permissions: obj(e.permissions) ?? {},
         reason: str(e.reason) ?? '',
       };
-      const command = commandOf(model.toolInputs[callId]);
+      const asked = toolOf(card, callId);
+      const command = commandOf(asked?.input);
       if (command !== undefined) denial.command = command;
       card.denials.push(denial);
+      if (asked !== undefined) asked.denial = { rule, reason: denial.reason };
       return true;
     }
     case 'file:produced': {
@@ -510,6 +594,7 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       const text = str(e.text);
       if (card === undefined || text === undefined) return false;
       card.message = text;
+      card.timeline.push({ kind: 'message', ts, text });
       return true;
     }
     case 'ticket:fetched': {

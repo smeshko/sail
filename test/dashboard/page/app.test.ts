@@ -60,6 +60,11 @@ class FakeHost implements PageHost {
     this.regions[region] = html;
     this.renders.push(region);
   }
+  /** The regions scrolled to their end, in order. */
+  scrolls: Region[] = [];
+  scrollToEnd(region: Region) {
+    this.scrolls.push(region);
+  }
   onAction(handler: (action: string, data: Record<string, string>) => void) {
     this.action = handler;
   }
@@ -268,8 +273,71 @@ test("live: events pushed one by one show tests#1 running, then settled, and a r
   const end = lines.findIndex((event) => event.type === 'stage:end' && event.key === 'tests#1');
   for (const event of lines.slice(start + 3, end + 1)) host.push(socket, { kind: 'event', event });
   host.advance(100);
-  expect(host.regions.main).toMatch(/<span class="c-name">tests#1<\/span><span class="pill p-fail">failed<\/span>/);
+  expect(host.regions.main).toMatch(/<span class="d-title">tests#1<\/span><span class="pill p-fail">failed<\/span>/);
   expect(host.regions.status).toContain('<span>● live</span>');
+});
+
+test('live: opening a running card shows its timeline in the centre, which grows with each event, keeps an opened tool call open, follows its tail until follow is off, and closes back to the cards with the selection kept', () => {
+  const { dir, rest } = runningCopy(m, 1);
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  const lines = rest.map((line) => JSON.parse(line));
+  const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'implement#1');
+  for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.advance(100);
+  expect(host.regions.main).toContain('nothing yet: the timeline fills as the call works');
+  expect(host.regions.main).toContain('<div class="streaming"><i></i>implement#1 is working…</div>');
+  expect(host.regions.inspector).toContain('<span>implement#1</span>');
+
+  const at = { runId: RUNNING_ID, key: 'implement#1', ts: '2026-09-25T09:00:04.500Z' };
+  const push = (event: Record<string, unknown>) => host.push(socket, { kind: 'event', event: { ...at, ...event } });
+  push({ seq: 1001, type: 'agent:thinking', text: 'The <spec> asks for a flag.' });
+  push({ seq: 1002, type: 'tool:start', callId: 'c1', tool: 'Bash', input: { command: 'bun test\nsecond line' } });
+  host.scrolls = [];
+  host.advance(100);
+  expect(host.scrolls).toEqual(['main']);
+  expect(host.regions.main).toContain(
+    '<div class="ev tht"><span class="ts">09:00:04</span><div class="col"><p>The &lt;spec&gt; asks for a flag.</p>',
+  );
+  expect(host.regions.main).toContain(
+    '<button class="trow" data-action="toggle-tool" data-call="c1"><span class="tname">Bash</span><span class="tdet">bun test</span><span class="tmeta"><span class="mark">…</span>',
+  );
+  host.click({ action: 'toggle-tool', call: 'c1' });
+  push({ seq: 1003, type: 'tool:end', callId: 'c1', status: 'failed', durationMs: 1500, result: '1 fail' });
+  push({ seq: 1004, type: 'agent:message', text: 'Fixing the test.' });
+  host.advance(100);
+  expect(host.regions.main).toContain('<div class="tcall t-failed open">');
+  expect(host.regions.main).toContain('<span class="tmeta">1.5s<span class="mark">✗</span>');
+  expect(host.regions.main).toContain('<div class="grp-t">result</div><pre class="code bad">1 fail</pre>');
+  expect(host.regions.main).toContain(
+    '<div class="ev msg"><span class="ts">09:00:04</span><div class="col"><p>Fixing the test.</p>',
+  );
+
+  host.click({ action: 'toggle-follow' });
+  host.scrolls = [];
+  push({ seq: 1005, type: 'agent:thinking', text: 'again' });
+  host.advance(100);
+  expect(host.scrolls).toEqual([]);
+  expect(host.regions.main).toContain('<button class="tog" data-action="toggle-follow">follow</button>');
+
+  host.click({ action: 'toggle-tool', call: 'c1' });
+  host.advance(100);
+  expect(host.regions.main).toContain('<div class="tcall t-failed">');
+  host.click({ action: 'step-card', by: '-1' });
+  host.advance(100);
+  expect([page.ui.key, page.ui.timeline]).toEqual(['spec#1', true]);
+  expect(host.regions.main).toContain('<span class="d-title">spec#1</span>');
+  host.click({ action: 'step-card', by: '1' });
+  host.click({ action: 'close-timeline' });
+  host.advance(100);
+  expect([page.ui.key, page.ui.timeline]).toEqual(['implement#1', false]);
+  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+  expect(host.regions.inspector).toContain('<span>implement#1</span>');
+  host.click({ action: 'open', repo: 'alpha', run: RUNNING_ID, key: 'spec#1', tab: 'files' });
+  expect([page.ui.key, page.ui.timeline, page.ui.tab]).toEqual(['spec#1', false, 'files']);
 });
 
 test('a run socket closed without end reconnects after 2 s into a fresh model, one closed after end stays closed, and the index socket reconnects', () => {
@@ -327,7 +395,7 @@ test("a run stream's error is shown in the main region, and a message or a resul
   expect(host.regions.inspector).toContain(
     '<div class="hint">this call has no result.json yet: shown from its events</div>',
   );
-  expect(host.regions.main).toContain('data-key="publish#1"');
+  expect(host.regions.main).toContain('<span class="d-title">spec#1</span><span class="pill p-pass">done</span>');
 });
 
 test('a result that arrives after the selection changed is not rendered', async () => {
@@ -379,7 +447,7 @@ test("with no queue the queues region is empty and no queue socket opens; with b
   expect([sockets[0]?.closed, host.open('queue=')]).toEqual([true, []]);
 });
 
-test('keys move the cursor, Enter selects, ] and [ step, Escape deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
+test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN());
@@ -392,12 +460,18 @@ test('keys move the cursor, Enter selects, ] and [ step, Escape deselects, i tog
   expect(cursor()).toBe('implement#1');
   host.press('k');
   host.press('Enter');
-  expect(page.ui.key).toBe('spec#1');
+  expect([page.ui.key, page.ui.timeline]).toEqual(['spec#1', true]);
   host.press(']');
   host.press(']');
   expect(page.ui.key).toBe('tests#1');
   host.press('[');
-  expect(page.ui.key).toBe('implement#1');
+  host.advance(100);
+  expect([page.ui.key, page.ui.timeline]).toEqual(['implement#1', true]);
+  expect(host.regions.main).toContain('<span class="d-title">implement#1</span>');
+  host.press('Escape');
+  host.advance(100);
+  expect([page.ui.key, page.ui.timeline]).toEqual(['implement#1', false]);
+  expect(cursor()).toBe('implement#1');
   host.press('Escape');
   expect(page.ui.key).toBeUndefined();
   host.press('i');

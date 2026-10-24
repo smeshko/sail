@@ -57,7 +57,8 @@
           "type": "tool:end",
           "callId": "toolu_0134wuni8P6vfZFNpGs6wnyu",
           "status": "denied",
-          "durationMs": 9
+          "durationMs": 9,
+          "result": "PreToolUse:Bash hook error: `cat \"$INPUT_SPEC\"` matches none of the step's commands"
         },
         {
           "type": "tool:start",
@@ -82,7 +83,8 @@
           "type": "tool:end",
           "callId": "toolu_01FJbniwEuZqfN4owm3Qn335",
           "status": "completed",
-          "durationMs": 11
+          "durationMs": 11,
+          "result": "1\t# Spec\n2\t\n3\t## Requirements\n4\t\n5\t- `bun src/cli.ts Ada --shout` prints `HELLO, ADA!` followed by a newline. The whole greeting is upper-cased, the name included, and the flag is accepted before or after the name (`greet --shout Ada` prints the same).\n6\t- `bun src/cli.ts Ada` without the flag still prints `Hello, Ada!` followed by a newline, and the existing behaviour (trimming, `Hello, world!` for a blank or missing name) is unchanged.\n7\t- `bun src/cli.ts --help` prints a usage line that lists `--shout`, for example `usage: greet [name] [--shout]`.\n8\t\n9\t## Tasks\n10\t\n11\t1. Add an optional `shout` option to `greet()` that upper-cases the whole greeting, defaulting to off so current callers are unaffected. Add unit tests for `greet('Ada', { shout: true })` returning `HELLO, ADA!`, for the blank-name case returning `HELLO, WORLD!`, and for the default staying `Hello, Ada!`. Files: `src/greet.ts`, `test/greet.test.ts`.\n12\t2. Make the CLI recognise `--shout` anywhere in the arguments, take the first remaining argument that isn't a flag as the name, and pass `shout` through to `greet()`. Add CLI tests for `Ada --shout` → `HELLO, ADA!\\n`, `--shout Ada` → `HELLO, ADA!\\n` and `Ada` → `Hello, Ada!\\n`. Files: `src/cli.ts`, `test/cli.test.ts`.\n13\t3. Change the `--help` usage text to list `--shout` (`usage: greet [name] [--shout]`) and update the existing help test to match. Files: `src/cli.ts`, `test/cli.test.ts`.\n14"
         },
         {
           "type": "tool:start",
@@ -108,7 +110,8 @@
           "type": "tool:end",
           "callId": "toolu_01U69z7rcu1vVi2V52DjXzXS",
           "status": "completed",
-          "durationMs": 176
+          "durationMs": 176,
+          "result": "diff --git a/src/cli.ts b/src/cli.ts\nindex 8a71c9f..2adce7b 100644\n--- a/src/cli.ts\n+++ b/src/cli.ts\n@@ -1,8 +1,10 @@\n import { greet } from './greet.ts';\n \n-const arg = process.argv[2];\n-if (arg === '--help') {\n-  console.log('usage: greet [name]');\n+const args = process.argv.slice(2);\n+if (args.includes('--help')) {\n+  console.log('usage: greet [name] [--shout]');\n } else {\n-  console.log(greet(arg ?? ''));\n+  const shout = args.includes('--shout');\n+  const name = args.find((arg) => arg !== '--shout') ?? '';\n+  console.log(greet(name, { shout }));\n }\ndiff --git a/src/greet.ts b/src/greet.ts\nindex 97f0574..c1bcd2c 100644\n--- a/src/greet.ts\n+++ b/src/greet.ts\n@@ -1,4 +1,5 @@\n /** Greets a name, or the world when the name is blank. */\n-export function greet(name: string): string {\n-  return `Hello, ${name.trim() || 'world'}!`;\n+export function greet(name: string, options: { shout?: boolean } = {}): string {\n+  const greeting = `Hello, ${name.trim() || 'world'}!`;\n+  return options.shout ? greeting.toUpperCase() : greeting;\n }\ndiff --git a/test/cli.test.ts b/test/cli.test.ts\nindex c502138..82735ea 100644\n--- a/test/cli.test.ts\n+++ b/test/cli.test.ts\n@@ -2,5 +2,20 @@ import { expect, test } from 'bun:test';\n \n test('prints the usage for --help', () => {\n   const out = Bun.spawnSync(['bun', 'src/cli.ts', '--help']).stdout.toString();\n-  expect(out).toBe('usage: greet [name]\\n');\n+  expect(out).toBe('usage: greet [name] [--shout]\\n');\n+});\n+\n+test('shouts when --shout follows the name', () => {\n+  const out = Bun.spawnSync(['bun', 'src/cli.ts', 'Ada', '--shout']).stdout.toString();\n+  expect(out).toBe('HELLO, ADA!\\n');\n+});\n+\n+test('shouts when --shout precedes the name', () => {\n+  const out = Bun.spawnSync(['bun', 'src/cli.ts', '--shout', 'Ada']).stdout.toString();\n+  expect(out).toBe('HELLO, ADA!\\n');\n+});\n+\n+test('greets normally without --shout', () => {\n+  const out = Bun.spawnSync(['bun', 'src/cli.ts', 'Ada']).stdout.toString();\n+  expect(out).toBe('Hello, Ada!\\n…"
         },
         {
           "type": "agent:thinking",
@@ -137,7 +140,8 @@
           "type": "tool:end",
           "callId": "toolu_01BkfFzLJamVoLrtoYUpsznQ",
           "status": "completed",
-          "durationMs": 8
+          "durationMs": 8,
+          "result": "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>"
         },
         {
           "type": "tool:start",
@@ -176,7 +180,8 @@
           "type": "tool:end",
           "callId": "toolu_01JuM2xDerwN4ckkCvbVnnjp",
           "status": "denied",
-          "durationMs": 4
+          "durationMs": 4,
+          "result": "PreToolUse:Bash hook error: `bun test` matches none of the step's commands"
         },
         {
           "type": "agent:thinking",
@@ -206,7 +211,8 @@
           "type": "tool:end",
           "callId": "toolu_01HmMCLcV5gduGpqcwXph4xn",
           "status": "completed",
-          "durationMs": 11
+          "durationMs": 11,
+          "result": "File created successfully at: $STAGE_OUT/review.md (file state is current in your context — no need to Read it back)"
         },
         {
           "type": "tool:start",
@@ -260,7 +266,8 @@
           "type": "tool:end",
           "callId": "toolu_01AgSNycYkym43qwZ94yQvzK",
           "status": "completed",
-          "durationMs": 6
+          "durationMs": 6,
+          "result": "Structured output provided successfully"
         },
         {
           "type": "usage:update",
