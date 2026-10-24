@@ -414,7 +414,7 @@ The engine's contract with one kind of external system, stated in sail's languag
 _Avoid_: interface (the TypeScript keyword), SPI, abstraction
 
 **TicketSource**:
-The port to the ticket system: fetch a ticket with its comments, links and attachments; update it; comment on it. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear.
+The port to the ticket system: fetch a ticket with its comments, links and attachments; update it; comment on it; file a new one with its labels. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear.
 _Avoid_: tracker, task manager, board, issue source
 
 **CodeHost**:

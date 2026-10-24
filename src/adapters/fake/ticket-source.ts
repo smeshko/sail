@@ -119,6 +119,25 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       emit({ type: 'ticket:commented', ticketKey, body });
       return posted;
     },
+    async create({ title, description, labels }) {
+      const created = store.change((world) => {
+        const highest = Math.max(0, ...world.tickets.map((ticket) => ticketNumber(ticket.ticketKey)));
+        const ticket: StoredTicket = {
+          ticketKey: `FAKE-${highest + 1}`,
+          title,
+          description,
+          state: { ...STATES.unstarted },
+          labels: [...labels],
+          comments: [],
+          links: [],
+          attachments: [],
+        };
+        world.tickets.push(ticket);
+        return { ticketKey: ticket.ticketKey, url: `fake://tickets/${ticket.ticketKey}`, raw: structuredClone(ticket) };
+      });
+      emit({ type: 'ticket:created', ticketKey: created.ticketKey, title, url: created.url });
+      return created;
+    },
     capabilities: () => ({
       comments: true,
       links: true,

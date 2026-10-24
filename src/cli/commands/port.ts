@@ -5,6 +5,8 @@
 //   sail port ticket-source attachments <ticket>    its attachments
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
+//   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
+//                                                   files a new ticket: its description from the file or stdin
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
 //   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
 //
@@ -36,7 +38,7 @@ import type { PortErrorEvent, ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
-import { Moved, Posted, type Ticket, type TicketMove } from '../../ports/types';
+import { Created, Moved, Posted, type Ticket, type TicketMove } from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { CODEHOST } from './port-codehost';
@@ -54,6 +56,8 @@ export interface OptionUse {
   value?: string;
   /** Refused when missing. */
   required?: boolean;
+  /** Refused when given empty, too. */
+  filled?: boolean;
   /** May be given more than once. */
   repeats?: boolean;
 }
@@ -154,6 +158,30 @@ const updateOperation: PortOperation<TicketSource> = {
   },
 };
 
+/** A new ticket, its description the body: the port's `Created`, parsed before it is printed. */
+const createOperation: PortOperation<TicketSource> = {
+  positionals: [],
+  options: {
+    title: { value: 'text', required: true, filled: true },
+    label: { value: 'name', repeats: true },
+    'body-file': { value: 'path' },
+  },
+  body: true,
+  async run(source, { values, body }) {
+    const created = Created.safeParse(
+      await source.create({
+        title: typeof values.title === 'string' ? values.title : '',
+        description: await body(),
+        labels: Array.isArray(values.label) ? values.label.filter((label) => typeof label === 'string') : [],
+      }),
+    );
+    if (created.success) return { value: created.data };
+    const [issue] = created.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'create', 'invalid', `its answer is not a Created: ${where}`);
+  },
+};
+
 /** `links` and `attachments` are no operations of the port: they read `get`'s answer. */
 const TICKET_SOURCE: PortTable<'ticketSource'> = {
   port: 'ticketSource',
@@ -163,6 +191,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     attachments: ticketOperation((ticket) => ticket.attachments),
     comment: commentOperation,
     update: updateOperation,
+    create: createOperation,
   },
 };
 
@@ -281,7 +310,8 @@ async function render(args: Parsed, io: Io, usage: (message: string) => ExitCode
 
 /**
  * Why the command line doesn't fit the operation's row, as a usage error: an option that is another operation's, a
- * positional missing or one too many, or a required option left out. Undefined when it fits.
+ * positional missing or one too many, or a required option left out, or given empty when it must be filled. Undefined
+ * when it fits.
  */
 function misfit(
   at: string,
@@ -296,7 +326,9 @@ function misfit(
   if (missing !== undefined) return `${at} needs ${POSITIONALS[missing]}`;
   const extra = given[operation.positionals.length];
   if (extra !== undefined) return `unknown argument '${extra}'`;
-  const [left] = Object.entries(options).filter(([name, use]) => use.required && values[name] === undefined);
+  const [left] = Object.entries(options).filter(
+    ([name, use]) => use.required && (values[name] === undefined || (use.filled && values[name] === '')),
+  );
   if (left !== undefined) return `${at} needs --${left[0]} <${left[1].value}>`;
   return undefined;
 }
