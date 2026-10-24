@@ -30,6 +30,10 @@ Risk: {{risk: tiny, small, medium, large or high, by the table in the prompt}}
 
 {{criteria: one `- [ ]` item per criterion, each one demonstrable at runtime}}
 
+## Demonstration
+
+{{demonstration: the surface (engine, cli, dashboard or none), then one bullet per acceptance criterion: the scenario to set up and what to observe, exactly enough to check; for none, why nothing can be shown}}
+
 ## Tasks
 
 {{tasks: one `- [ ] TASK-001: <title>` item per task, in order}}
