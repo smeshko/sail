@@ -41,7 +41,9 @@ Break the work into tasks, numbered `TASK-001`, `TASK-002`, … in order:
   a named test passing, a command transcript, a log excerpt.
 - A task's suggested commit is a Conventional Commits subject, `feat(<scope>): <what it does>`, with no ticket
   reference: the workflow appends it.
-- Final validation is not a task: the workflow runs `bun run gate` and the test check after the last task.
+- A task's tests are part of the task: implement writes them first, in the task's own commit. Never plan a task that
+  only writes tests, or one that only makes earlier tests pass.
+- Final validation is not a task: the workflow runs `bun run gate` after the last task.
 
 ## 4. Submit
 

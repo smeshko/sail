@@ -112,6 +112,17 @@ test("a click on a child of a data-action element is delegated once, with the el
   expect(got).toEqual([['open', { action: 'open', repo: 'alpha', run: 'FAKE-2', key: 'implement#1' }]]);
 });
 
+test('scrollToEnd scrolls the element holding a region to its height, and does nothing for a region with no element or no parent', () => {
+  const fake = fakeWindow();
+  const box = element({ scrollTop: 0, scrollHeight: 900 });
+  fake.elements.main = element({ parentElement: box });
+  const host = browserHost(fake.win);
+  host.scrollToEnd('main');
+  host.scrollToEnd('rail');
+  host.scrollToEnd('status');
+  expect(box.scrollTop).toBe(900);
+});
+
 test('get sends X-Sail-Dashboard: 1 and gives the status and body, or status 0 when the request fails', async () => {
   const fake = fakeWindow();
   expect(await browserHost(fake.win).get('/api/repos')).toEqual({ status: 200, body: 'body of /api/repos' });

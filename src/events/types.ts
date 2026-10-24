@@ -55,6 +55,7 @@ export const EVENT_TYPES = [
   'ticket:claimed',
   'ticket:updated',
   'ticket:commented',
+  'ticket:created',
   'codehost:pushed',
   'codehost:pr_opened',
   'codehost:checks',
@@ -230,7 +231,14 @@ interface Payloads {
   'agent:message': { key: string; text: string };
   'agent:thinking': { key: string; text: string };
   'tool:start': { key: string; callId: string; tool: string; input: unknown };
-  'tool:end': { key: string; callId: string; status: 'completed' | 'denied' | 'failed'; durationMs: number };
+  'tool:end': {
+    key: string;
+    callId: string;
+    status: 'completed' | 'denied' | 'failed';
+    durationMs: number;
+    /** The start of the text the tool returned, when it returned any. */
+    result?: string;
+  };
   'permission:denied': {
     key: string;
     callId: string;
@@ -275,6 +283,8 @@ interface Payloads {
   'ticket:claimed': { key?: string; ticketKey: string; state: TicketState };
   'ticket:updated': { key?: string; ticketKey: string; change: { state: TicketMove }; state: TicketState };
   'ticket:commented': { key?: string; ticketKey: string; body: string };
+  /** A ticket `create` filed. Its title is the workflow's own text. */
+  'ticket:created': { key?: string; ticketKey: string; title: string; url: string };
   'codehost:pushed': { key?: string; branch: string; headSha: string };
   'codehost:pr_opened': {
     key?: string;

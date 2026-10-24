@@ -1,4 +1,4 @@
-// createLinearWorld(): a scripted Linear for the linear TicketSource's tests. One team with its workflow states, and its
+// createLinearWorld(): a scripted Linear for the linear TicketSource's tests. One team with its workflow states and labels, and its
 // tickets with labels, comments, relations and attachments, answering the adapter's GraphQL operations by
 // `operationName` and `variables`, either as an injected `fetch` or served on 127.0.0.1 for the CLI.
 //
@@ -42,8 +42,19 @@ export interface WorldTicket {
   readonly assignee?: { readonly name: string; readonly email: string } | null;
 }
 
+/** An issue label the team can apply. */
+export interface WorldLabel {
+  readonly id: string;
+  readonly name: string;
+}
+
 export interface LinearWorldSeed {
-  readonly team: { readonly key: string; readonly states: readonly WorldState[] };
+  readonly team: {
+    readonly key: string;
+    readonly states: readonly WorldState[];
+    /** The labels its tickets can carry, the team's own and the workspace's alike. None unless given. */
+    readonly labels?: readonly WorldLabel[];
+  };
   readonly tickets: readonly WorldTicket[];
   /** The most nodes a page holds, whatever `first` asks for. 250 unless given. */
   readonly pageSize?: number;
@@ -105,6 +116,8 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'teams',
   'issueUpdate',
   'commentCreate',
+  'issueCreate',
+  'issueLabels',
   // Arguments and filters.
   'filter',
   'first',
@@ -113,8 +126,13 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'eq',
   'in',
   'some',
+  'or',
+  'null',
+  'true',
   'stateId',
   'issueId',
+  'teamId',
+  'labelIds',
   // Connections.
   'nodes',
   'pageInfo',
@@ -153,7 +171,7 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'comment',
 ]);
 
-const MUTATIONS = new Set(['SailMove', 'SailComment']);
+const MUTATIONS = new Set(['SailMove', 'SailComment', 'SailCreate']);
 
 /** Linear's answer to a GraphQL error: status 400 and one error with its code. */
 const graphqlError = (status: number, code: string, message: string): WorldResponse => ({
@@ -180,7 +198,11 @@ function queryProblem(operationName: string, query: string, variables: Record<st
 }
 
 export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
-  const team = { key: seed.team.key, states: seed.team.states.map((state) => ({ ...state })) };
+  const team = {
+    key: seed.team.key,
+    states: seed.team.states.map((state) => ({ ...state })),
+    labels: (seed.team.labels ?? []).map((label) => ({ ...label })),
+  };
   const tickets: WorldTicket[] = seed.tickets.map((ticket) => ({
     ...ticket,
     comments: (ticket.comments ?? []).map((comment) => ({ ...comment })),
@@ -298,6 +320,38 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
               : [],
         },
       }),
+    SailTeamLabels: ({ team: key, after }) =>
+      ok({
+        teams: { nodes: key === team.key ? [{ id: `team-${team.key}` }] : [] },
+        issueLabels: page(key === team.key ? team.labels.map((label) => ({ ...label })) : [], 250, after),
+      }),
+    SailCreate: ({ teamId, title, description, labelIds }) => {
+      const ids = Array.isArray(labelIds) ? labelIds : [];
+      const labels = ids.map((id) => team.labels.find((label) => label.id === id));
+      if (teamId !== `team-${team.key}` || labels.includes(undefined)) {
+        return graphqlError(
+          400,
+          'INPUT_ERROR',
+          `Entity not found: ${teamId === `team-${team.key}` ? 'IssueLabel' : 'Team'}`,
+        );
+      }
+      const number = Math.max(0, ...tickets.map((ticket) => ticket.number)) + 1;
+      const [first] = team.states.filter((state) => state.type === 'unstarted').sort((a, b) => a.position - b.position);
+      tickets.push({
+        number,
+        title: String(title),
+        description: String(description),
+        state: first?.name ?? '',
+        labels: labels.map((label) => label?.name ?? ''),
+        comments: [],
+      });
+      return ok({
+        issueCreate: {
+          success: true,
+          issue: { id: `issue-${number}`, identifier: identifier(number), url: urlOf(number) },
+        },
+      });
+    },
     SailMove: ({ id, stateId }) => {
       const ticket = byId(id);
       const state = team.states.find((candidate) => candidate.id === stateId);

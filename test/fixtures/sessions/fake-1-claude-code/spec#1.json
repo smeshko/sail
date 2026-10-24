@@ -57,7 +57,8 @@
           "type": "tool:end",
           "callId": "toolu_01T8zbCikUF5LmvZt58YA4Ks",
           "status": "denied",
-          "durationMs": 10
+          "durationMs": 10,
+          "result": "PreToolUse:Bash hook error: `cat \"$INPUT_BRIEF\"` matches none of the step's commands"
         },
         {
           "type": "tool:start",
@@ -82,7 +83,8 @@
           "type": "tool:end",
           "callId": "toolu_01JNCEhNT8tfuDt6CHY6fFnw",
           "status": "completed",
-          "durationMs": 12
+          "durationMs": 12,
+          "result": "1\t# Brief: FAKE-1\n2\t\n3\t## Request\n4\t\n5\t<untrusted-input source=\"ticket FAKE-1, title\">\n6\tAdd a --shout flag to the greet command\n7\t</untrusted-input>\n8\t\n9\t<untrusted-input source=\"ticket FAKE-1, description\">\n10\tAdd a `--shout` flag to the `greet` command. With the flag, the whole greeting is printed in upper case.\n11\t</untrusted-input>\n12\t\n13\t## Acceptance criteria\n14\t\n15\t- <untrusted-input source=\"ticket FAKE-1, acceptance criterion 1\">`greet Ada --shout` prints `HELLO, ADA!`</untrusted-input>\n16\t- <untrusted-input source=\"ticket FAKE-1, acceptance criterion 2\">`greet Ada` still prints `Hello, Ada!`</untrusted-input>\n17\t- <untrusted-input source=\"ticket FAKE-1, acceptance criterion 3\">`greet --help` lists `--shout`</untrusted-input>\n18\t\n19\t## Context\n20\t\n21\t- Ticket: FAKE-1\n22\t- URL: <untrusted-input source=\"ticket FAKE-1, url\">fake://tickets/FAKE-1</untrusted-input>\n23\t- State: started\n24\t- Labels:\n25\t  - <untrusted-input source=\"ticket FAKE-1, label 1\">sail</untrusted-input>\n26\t\n27\t### Comments\n28\t\n29\t<untrusted-input source=\"ticket FAKE-1, comment 1 author\">fixture-user</untrusted-input> wrote:\n30\t\n31\t<untrusted-input source=\"ticket FAKE-1, comment 1\">\n32\tUpper-case the whole line, the name included.\n33\t</untrusted-input>\n34\t\n35\t<untrusted-input source=\"ticket FAKE-1, comment 2 author\">sail</untrusted-input> wrote:\n36\t\n37\t<untrusted-input source=\"ticket FAKE-1, comment 2\">\n38\tsail run FAKE-1-01M5HMKE13C3GPQKX12V8W2TA4 started\n39\t</untrusted-input>\n40"
         },
         {
           "type": "tool:start",
@@ -107,7 +109,8 @@
           "type": "tool:end",
           "callId": "toolu_01F9DpoAE7KK5pAXPCmiEVDu",
           "status": "completed",
-          "durationMs": 8
+          "durationMs": 8,
+          "result": "1\t# Spec\n2\t\n3\t## Requirements\n4\t\n5\t{{requirements: one bullet per acceptance criterion, each one testable}}\n6\t\n7\t## Tasks\n8\t\n9\t{{tasks: one list item per task, in order, each naming the files it touches and small enough to implement and test alone}}\n10"
         },
         {
           "type": "tool:start",
@@ -132,7 +135,8 @@
           "type": "tool:end",
           "callId": "toolu_01VgQxnLJbQJMRAk2UNJJWKV",
           "status": "completed",
-          "durationMs": 26
+          "durationMs": 26,
+          "result": ".git\n.gitignore\n.sail/adapters/echo-harness.ts\n.sail/fake/prs.json\n.sail/fake/tickets.json\n.sail/project.yaml\n.sail/stages/implement/prompt.md\n.sail/stages/implement/stage.ts\n.sail/stages/tests/run.sh\n.sail/stages/tests/stage.ts\n.sail/workflows/ticket-to-pr/stages/describe/prompt.md\n.sail/workflows/ticket-to-pr/stages/describe/stage.ts\n.sail/workflows/ticket-to-pr/stages/open/run.sh\n.sail/workflows/ticket-to-pr/stages/open/stage.ts\n.sail/workflows/ticket-to-pr/stages/self-review/prompt.md\n.sail/workflows/ticket-to-pr/stages/self-review/stage.ts\n.sail/workflows/ticket-to-pr/stages/spec/prompt.md\n.sail/workflows/ticket-to-pr/stages/spec/stage.ts\n.sail/workflows/ticket-to-pr/stages/spec/templates/spec.md\n.sail/workflows/ticket-to-pr/workflow.ts\nREADME.md\npackage.json\nsrc/cli.ts\nsrc/greet.ts\ntest/cli.test.ts\ntest/greet.test.ts"
         },
         {
           "type": "tool:start",
@@ -157,7 +161,8 @@
           "type": "tool:end",
           "callId": "toolu_01NfKLgwPGrrBux6azQDTNdv",
           "status": "completed",
-          "durationMs": 8
+          "durationMs": 8,
+          "result": "1\timport { greet } from './greet.ts';\n2\t\n3\tconst arg = process.argv[2];\n4\tif (arg === '--help') {\n5\t  console.log('usage: greet [name]');\n6\t} else {\n7\t  console.log(greet(arg ?? ''));\n8\t}\n9"
         },
         {
           "type": "tool:start",
@@ -182,7 +187,8 @@
           "type": "tool:end",
           "callId": "toolu_01C3WokvbesAn3cgau8Wu88n",
           "status": "completed",
-          "durationMs": 7
+          "durationMs": 7,
+          "result": "1\t/** Greets a name, or the world when the name is blank. */\n2\texport function greet(name: string): string {\n3\t  return `Hello, ${name.trim() || 'world'}!`;\n4\t}\n5"
         },
         {
           "type": "tool:start",
@@ -207,7 +213,8 @@
           "type": "tool:end",
           "callId": "toolu_01BLhc4ekh5Mu1z5ZQcZF3rY",
           "status": "completed",
-          "durationMs": 8
+          "durationMs": 8,
+          "result": "1\timport { expect, test } from 'bun:test';\n2\t\n3\ttest('prints the usage for --help', () => {\n4\t  const out = Bun.spawnSync(['bun', 'src/cli.ts', '--help']).stdout.toString();\n5\t  expect(out).toBe('usage: greet [name]\\n');\n6\t});\n7"
         },
         {
           "type": "tool:start",
@@ -232,7 +239,8 @@
           "type": "tool:end",
           "callId": "toolu_01FUycfVxbvWhyFqtdfXGfuh",
           "status": "completed",
-          "durationMs": 8
+          "durationMs": 8,
+          "result": "1\timport { expect, test } from 'bun:test';\n2\timport { greet } from '../src/greet.ts';\n3\t\n4\ttest('greets a name', () => expect(greet('Ada')).toBe('Hello, Ada!'));\n5\ttest('trims the name', () => expect(greet('  Ada ')).toBe('Hello, Ada!'));\n6\ttest('greets the world when blank', () => expect(greet('  ')).toBe('Hello, world!'));\n7"
         },
         {
           "type": "agent:thinking",
@@ -262,7 +270,8 @@
           "type": "tool:end",
           "callId": "toolu_01M2roKUZVWV7mduiLtztj4m",
           "status": "completed",
-          "durationMs": 25
+          "durationMs": 25,
+          "result": "The file $STAGE_OUT/spec.md has been updated successfully. (file state is current in your context — no need to Read it back)"
         },
         {
           "type": "tool:start",
@@ -313,7 +322,8 @@
           "type": "tool:end",
           "callId": "toolu_014upvqvyEGzmkrAAJraLUgJ",
           "status": "completed",
-          "durationMs": 5
+          "durationMs": 5,
+          "result": "Structured output provided successfully"
         },
         {
           "type": "usage:update",

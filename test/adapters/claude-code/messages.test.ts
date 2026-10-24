@@ -2,7 +2,7 @@
 // turn, deduplicated by message id, and the result's own update at the end (D3, D4, D13, D14).
 import { expect, test } from 'bun:test';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { createSessionReader, type SessionReader } from '../../../src/adapters/claude-code/messages';
+import { createSessionReader, RESULT_LENGTH, type SessionReader } from '../../../src/adapters/claude-code/messages';
 import type { Denial } from '../../../src/adapters/claude-code/tool-call';
 import type { HarnessEvent } from '../../../src/ports/harness';
 import {
@@ -90,11 +90,41 @@ test('a tool use starts a tool call, and its result ends it completed, failed or
     { type: 'tool:start', callId: 't3', tool: 'Edit', input: { file_path: 'c.ts' } },
   ]);
   expect(ended.filter((event) => event.type === 'tool:end')).toEqual([
-    { type: 'tool:end', callId: 't1', status: 'completed', durationMs: 250 },
-    { type: 'tool:end', callId: 't2', status: 'failed', durationMs: 250 },
-    { type: 'tool:end', callId: 't3', status: 'denied', durationMs: 250 },
+    { type: 'tool:end', callId: 't1', status: 'completed', durationMs: 250, result: 'ok' },
+    { type: 'tool:end', callId: 't2', status: 'failed', durationMs: 250, result: 'ok' },
+    { type: 'tool:end', callId: 't3', status: 'denied', durationMs: 250, result: 'ok' },
   ]);
   expect({ toolCalls: r.state().toolCalls, denials: r.state().denials }).toEqual({ toolCalls: 3, denials: 1 });
+});
+
+test("a tool's end carries the start of its result: text blocks joined, images left out, the end trimmed, cut at RESULT_LENGTH, and none when empty", () => {
+  const { reader: r } = reader();
+  const ids = ['t1', 't2', 't3', 't4', 't5'];
+  readAll(
+    r,
+    ids.map((id) => assistantToolUse('m1', id, 'Read', { file_path: `${id}.ts` })),
+  );
+  const long = 'x'.repeat(RESULT_LENGTH + 5);
+  const ended = readAll(r, [
+    toolResult('t1', { content: '     1\tline one\n\n' }),
+    toolResult('t2', {
+      content: [
+        { type: 'text', text: 'first' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+        { type: 'text', text: 'second' },
+      ],
+    }),
+    toolResult('t3', { content: long }),
+    toolResult('t4', { content: [] }),
+    toolResult('t5', { content: null }),
+  ]).filter((event) => event.type === 'tool:end');
+  expect(ended.map((event) => (event.type === 'tool:end' ? event.result : undefined))).toEqual([
+    '     1\tline one',
+    'first\nsecond',
+    `${'x'.repeat(RESULT_LENGTH)}…`,
+    undefined,
+    undefined,
+  ]);
 });
 
 test('the messages of one turn share an id: the turn is counted once, when the next id comes, with the last usage it carried', () => {
@@ -350,7 +380,7 @@ test('a denied call emits permission:denied with its denial just before its tool
     { type: 'tool:start', callId: 't1', tool: 'Bash', input: { command: 'tail README.md' } },
     { type: 'usage:update', turn: 1, tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }, costUsdSoFar: 0 },
     { type: 'permission:denied', callId: 't1', ...DENIAL },
-    { type: 'tool:end', callId: 't1', status: 'denied', durationMs: 30 },
+    { type: 'tool:end', callId: 't1', status: 'denied', durationMs: 30, result: 'ok' },
   ]);
   expect(r.state().denials).toBe(1);
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);

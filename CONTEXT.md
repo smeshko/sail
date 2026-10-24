@@ -396,7 +396,7 @@ The commands no step's permissions can allow: `rm -rf`, a forced push, `git rese
 _Avoid_: blocklist, denylist, banned commands, safe commands
 
 **Tool call**:
-One action an agent asks its harness for (read, write, edit, execute a command, call an MCP server's tool, or another tool) in sail's harness-neutral form: the tool, its kind, the paths it touches, its command or server. Every tool call is decided against its step's permissions before it runs.
+One action an agent asks its harness for (read, write, edit, execute a command, call an MCP server's tool, or another tool) in sail's harness-neutral form: the tool, its kind, the paths it touches, its command or server. Every tool call is decided against its step's permissions before it runs, and its `tool:end` carries the start of what it returned.
 _Avoid_: tool use, action, request, invocation
 
 **Denial**:
@@ -414,7 +414,7 @@ The engine's contract with one kind of external system, stated in sail's languag
 _Avoid_: interface (the TypeScript keyword), SPI, abstraction
 
 **TicketSource**:
-The port to the ticket system: fetch a ticket with its comments, links and attachments; update it; comment on it. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear.
+The port to the ticket system: fetch a ticket with its comments, links and attachments; update it; comment on it; file a new one with its labels. It reports a ticket's state by type (unstarted, started, completed or canceled) and moves it to unstarted, in progress, in review or done (ADR-0015). v1 adapter: Linear.
 _Avoid_: tracker, task manager, board, issue source
 
 **CodeHost**:
@@ -530,6 +530,10 @@ _Avoid_: UI, console, monitor, board
 **Stage card**:
 One call's card in the dashboard's run view, with its outcome, tries, duration, cost and denials, or a pending card for a roster stage the run hasn't called yet. Cards come from the run's events and its roster alone, so a new stage shows with no dashboard change.
 _Avoid_: tile, step card, job
+
+**Timeline**:
+One call's events in order, drawn where the run view's cards were when a stage card is opened, and followed live while the call runs. It shows thinking, messages, steps, tries, script commands, and each tool call: its input, and once it ends, its status, duration, the start of its result and any denial. It comes from the run's events alone, so a running call shows one before its transcript is written.
+_Avoid_: feed, activity, live log, stream (the event stream's word)
 
 **Inspector**:
 The dashboard's panel for one call, with its overview, files, permissions and log tabs. It explains a denial from the run's files alone: the command, the rule, and the step's permissions under it.

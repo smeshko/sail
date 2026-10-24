@@ -48,6 +48,7 @@
         "ticket:claimed",
         "ticket:updated",
         "ticket:commented",
+        "ticket:created",
         "codehost:pushed",
         "codehost:pr_opened",
         "codehost:checks",
@@ -202,6 +203,10 @@
     {
       "if": { "properties": { "type": { "const": "ticket:commented" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/ticketCommented" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:created" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketCreated" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:pushed" } }, "required": ["type"] },
@@ -1026,6 +1031,18 @@
       "required": ["ticketKey", "body"],
       "unevaluatedProperties": false
     },
+    "ticketCreated": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "title": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "required": ["ticketKey", "title", "url"],
+      "unevaluatedProperties": false
+    },
     "codehostPushed": {
       "type": "object",
       "$ref": "#/$defs/envelope",
@@ -1239,7 +1256,8 @@
       "properties": {
         "callId": { "type": "string" },
         "status": { "enum": ["completed", "denied", "failed"] },
-        "durationMs": { "type": "number", "minimum": 0 }
+        "durationMs": { "type": "number", "minimum": 0 },
+        "result": { "description": "the start of the text the tool returned, when it returned any", "type": "string" }
       },
       "required": ["callId", "status", "durationMs"],
       "unevaluatedProperties": false

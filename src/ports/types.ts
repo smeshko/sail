@@ -56,6 +56,10 @@ export type Moved = z.infer<typeof Moved>;
 export const Posted = z.object({ id: z.string(), url: z.string().optional(), raw: Raw });
 export type Posted = z.infer<typeof Posted>;
 
+/** A ticket `create` filed: its ticket key and URL. */
+export const Created = z.object({ ticketKey: z.string(), url: z.string(), raw: Raw });
+export type Created = z.infer<typeof Created>;
+
 // Pull requests
 
 export const PullRequest = z.object({

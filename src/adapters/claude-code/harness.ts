@@ -171,6 +171,9 @@ export function sessionOptions(
     mcpServers: {},
     persistSession: false,
     includePartialMessages: false,
+    // Adaptive is the default; summarized display makes a thinking block carry its text, which the dashboard's timeline
+    // shows, where the default omits it.
+    thinking: { type: 'adaptive', display: 'summarized' },
     ...sessionTools(request.permissions),
     permissionMode: 'default',
     hooks: { PreToolUse: [{ hooks: [gate.preToolUse] }] },

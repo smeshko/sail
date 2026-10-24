@@ -99,6 +99,25 @@ const textOf = (message: SDKAssistantMessage): string =>
     .join('\n')
     .trim();
 
+/** The longest a tool's result runs on its `tool:end`. */
+export const RESULT_LENGTH = 2000;
+
+/** A tool result's content, as a user message carries it. */
+type ToolResultContent = Extract<
+  Exclude<Extract<SDKMessage, { type: 'user' }>['message']['content'], string>[number],
+  { type: 'tool_result' }
+>['content'];
+
+/** The text a tool result carries, its text blocks joined and cut to `RESULT_LENGTH`. An image or other block adds none. */
+function resultOf(content: ToolResultContent): string {
+  const texts =
+    typeof content === 'string'
+      ? [content]
+      : (content ?? []).flatMap((block) => (block.type === 'text' ? [block.text] : []));
+  const found = texts.join('\n').trimEnd();
+  return found.length > RESULT_LENGTH ? `${found.slice(0, RESULT_LENGTH)}…` : found;
+}
+
 export function createSessionReader(options: SessionReaderOptions): SessionReader {
   const now = () => options.now?.() ?? Date.now();
   const events: HarnessEvent[] = [];
@@ -141,7 +160,7 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     return [{ type: 'permission:denied', callId, ...denial }];
   };
 
-  const endTool = (callId: string, status: 'completed' | 'failed'): HarnessEvent[] => {
+  const endTool = (callId: string, status: 'completed' | 'failed', result = ''): HarnessEvent[] => {
     const started = open.get(callId) ?? now();
     open.delete(callId);
     return [
@@ -151,6 +170,7 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
         callId,
         status: denied.has(callId) ? 'denied' : status,
         durationMs: Math.max(0, now() - started),
+        ...(result === '' ? {} : { result }),
       },
     ];
   };
@@ -192,7 +212,9 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     for (const block of content) {
       if (block.type !== 'tool_result' || !open.has(block.tool_use_id)) continue;
       if (message.parent_tool_use_id === null) found.push(...closeTurn());
-      found.push(...endTool(block.tool_use_id, block.is_error === true ? 'failed' : 'completed'));
+      found.push(
+        ...endTool(block.tool_use_id, block.is_error === true ? 'failed' : 'completed', resultOf(block.content)),
+      );
     }
     return found;
   }
