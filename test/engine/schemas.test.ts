@@ -543,6 +543,13 @@ const PROVIDER: NewEvent[] = [
     ticketKey: 'FAKE-1',
     body: 'Pull request opened: fake://codehost/fixture/pull/1',
   },
+  {
+    type: 'ticket:created',
+    key: OPEN,
+    ticketKey: 'FAKE-2',
+    title: 'Follow up on the --shout flag',
+    url: 'fake://tickets/FAKE-2',
+  },
   { type: 'codehost:pushed', key: OPEN, branch: 'sail/FAKE-1', headSha: SHA },
   {
     type: 'codehost:pr_opened',

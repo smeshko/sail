@@ -4,8 +4,8 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeTicketSource } from '../../../src/adapters/fake/ticket-source';
-import type { Ticket, TicketMove, TicketState } from '../../../src/ports/types';
-import { messageOf, portFailure, rejection } from '../../helpers/ports';
+import { Created, type Ticket, type TicketMove, type TicketState } from '../../../src/ports/types';
+import { captureEvents, eventIssues, messageOf, parseIssues, portFailure, rejection } from '../../helpers/ports';
 import { ticketSourceSuite } from '../../ports/ticket-source.suite';
 
 const FIXTURES = join(import.meta.dir, '..', '..', 'fixtures');
@@ -169,4 +169,51 @@ test('parseKey takes a FAKE ticket key or its fake:// URL, whole, and nothing el
     undefined,
     undefined,
   ]);
+});
+
+test('create files a ticket keyed one past the highest FAKE number, unstarted in Todo with its labels and nothing else, and emits ticket:created', async () => {
+  const todo: TicketState = { type: 'unstarted', name: 'Todo' };
+  const seed = seedOf([
+    { ticketKey: 'FAKE-2', state: todo, labels: [] },
+    { ticketKey: 'FAKE-10', state: { type: 'completed', name: 'Done' }, labels: ['sail'] },
+  ]);
+  const state = join(tempDir(), 'state.json');
+  const capture = captureEvents();
+  const source = createFakeTicketSource({ seed, state, emit: capture.emit });
+  const created = await source.create({ title: 'Follow up', description: 'Do the rest.', labels: ['sail', 'bug'] });
+  expect(parseIssues(Created, created)).toEqual([]);
+  expect({ ticketKey: created.ticketKey, url: created.url }).toEqual({
+    ticketKey: 'FAKE-11',
+    url: 'fake://tickets/FAKE-11',
+  });
+  const { raw: _, ...ticket } = await createFakeTicketSource({ seed, state }).get('FAKE-11');
+  expect(ticket).toEqual({
+    ticketKey: 'FAKE-11',
+    title: 'Follow up',
+    url: 'fake://tickets/FAKE-11',
+    description: 'Do the rest.',
+    state: todo,
+    labels: ['sail', 'bug'],
+    comments: [],
+    links: [],
+    attachments: [],
+  });
+  expect(capture.events).toEqual([
+    { type: 'ticket:created', ticketKey: 'FAKE-11', title: 'Follow up', url: 'fake://tickets/FAKE-11' },
+  ]);
+  expect(eventIssues(capture.stamped('publish#1/open'))).toEqual([]);
+  expect(eventIssues(capture.stamped())).toEqual([]);
+});
+
+test('a second create on a new instance numbers after the first, and a create in an empty world is FAKE-1', async () => {
+  const world = {
+    seed: seedOf([{ ticketKey: 'FAKE-3', state: { type: 'unstarted', name: 'Todo' }, labels: [] }]),
+    state: join(tempDir(), 'state.json'),
+  };
+  await createFakeTicketSource(world).create({ title: 'One', description: 'a', labels: [] });
+  const second = await createFakeTicketSource(world).create({ title: 'Two', description: 'b', labels: [] });
+  expect(second.ticketKey).toBe('FAKE-5');
+
+  const empty = createFakeTicketSource({ seed: seedOf([]), state: join(tempDir(), 'state.json') });
+  expect((await empty.create({ title: 'First', description: 'c', labels: [] })).ticketKey).toBe('FAKE-1');
 });

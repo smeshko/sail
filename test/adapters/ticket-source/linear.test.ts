@@ -12,7 +12,7 @@ import { type Fetch, LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source
 import type { ProviderEmit, ProviderEvent } from '../../../src/events/types';
 import type { AdapterContext, Env } from '../../../src/ports/adapter';
 import type { TicketSource } from '../../../src/ports/ticket-source';
-import { Ticket, type TicketMove } from '../../../src/ports/types';
+import { Created, Ticket, type TicketMove } from '../../../src/ports/types';
 import {
   createLinearWorld,
   type LinearWorld,
@@ -24,6 +24,7 @@ import {
 import {
   type Captured,
   captureEvents,
+  eventIssues,
   messageOf,
   parseIssues,
   portFailure,
@@ -44,10 +45,18 @@ const RATE_LIMITED = {
 /**
  * Team ADW, its states renamed from Linear's defaults. ADW-1 is designated and Ready, with a comment, a relation and an
  * attachment. ADW-2 is designated and Building. ADW-3 is Ready without the label. ADW-8 is designated and in Icebox, a
- * backlog-type state, and ADW-9 designated and Shipped.
+ * backlog-type state, and ADW-9 designated and Shipped. The team has the labels sail, cli and Bug.
  */
 const SEED: LinearWorldSeed = {
-  team: { key: 'ADW', states: RENAMED_STATES },
+  team: {
+    key: 'ADW',
+    states: RENAMED_STATES,
+    labels: [
+      { id: 'label-sail', name: 'sail' },
+      { id: 'label-cli', name: 'cli' },
+      { id: 'label-bug', name: 'Bug' },
+    ],
+  },
   apiKey: KEY,
   tickets: [
     {
@@ -460,12 +469,15 @@ test('every document the adapter sends stays under Linear’s complexity limit o
   await adapter.claim('ADW-1');
   await adapter.update('ADW-1', { state: 'in-review' });
   await adapter.comment('ADW-1', 'Done.');
+  await adapter.create({ title: 'Follow up', description: 'More.', labels: [] });
   const sent = world.requests.map((request) => [request.operationName, complexity(request.query)] as const);
   expect([...new Set(sent.map(([name]) => name))].sort()).toEqual([
     'SailComment',
+    'SailCreate',
     'SailDesignated',
     'SailMove',
     'SailTeam',
+    'SailTeamLabels',
     'SailTicket',
     'SailTicketComments',
   ]);
@@ -610,6 +622,81 @@ test('Linear answering success: false to the move or the comment is a conflict, 
       { port: 'ticketSource', op: 'update', code: 'conflict' },
       { port: 'ticketSource', op: 'comment', code: 'conflict' },
     ],
+    [],
+  ]);
+});
+
+test('create sends one SailCreate in the team’s id with the ids of its labels, matched by name whatever their case, answers the new ticket’s key and URL, and emits ticket:created', async () => {
+  const { world, adapter, capture } = linear();
+  const created = await adapter.create({ title: 'Follow up', description: 'Do the rest.', labels: ['SAIL', 'bug'] });
+  expect(parseIssues(Created, created)).toEqual([]);
+  expect({ ticketKey: created.ticketKey, url: created.url }).toEqual({ ticketKey: 'ADW-10', url: URL_OF('ADW-10') });
+  expect(world.operations()).toEqual(['SailTeamLabels', 'SailCreate']);
+  expect(world.requests[1]?.variables).toEqual({
+    teamId: 'team-ADW',
+    title: 'Follow up',
+    description: 'Do the rest.',
+    labelIds: ['label-sail', 'label-bug'],
+  });
+  expect(capture.events).toEqual([
+    { type: 'ticket:created', ticketKey: 'ADW-10', title: 'Follow up', url: URL_OF('ADW-10') },
+  ]);
+  expect(eventIssues(capture.stamped('publish#1/open'))).toEqual([]);
+  // The ticket is the team's now: get reads it back, unstarted, with its labels under the team's names.
+  const read = await adapter.get('ADW-10');
+  expect([read.title, read.description, read.state.type, read.labels]).toEqual([
+    'Follow up',
+    'Do the rest.',
+    'unstarted',
+    ['sail', 'Bug'],
+  ]);
+});
+
+test('create reads the labels across pages, one SailTeamLabels request per page, and finds a label on the last', async () => {
+  const labels = ['a', 'b', 'c', 'd', 'e'].map((name) => ({ id: `label-${name}`, name }));
+  const { world, adapter } = linear({
+    ...seedOf(RENAMED_STATES, [], 2),
+    team: { key: 'ADW', states: RENAMED_STATES, labels },
+  });
+  await adapter.create({ title: 'Last', description: 'x', labels: ['e'] });
+  expect(world.operations()).toEqual(['SailTeamLabels', 'SailTeamLabels', 'SailTeamLabels', 'SailCreate']);
+  expect(world.requests.at(-1)?.variables.labelIds).toEqual(['label-e']);
+});
+
+test('create with a label the team lacks is invalid, naming it and the team, and files nothing: no SailCreate is sent and nothing is emitted', async () => {
+  const { world, adapter, capture } = linear();
+  const error = await rejection(adapter.create({ title: 'Follow up', description: 'x', labels: ['sail', 'urgent'] }));
+  expect(failure(error)).toEqual([
+    { port: 'ticketSource', op: 'create', code: 'invalid' },
+    'ticketSource.create: team ADW has no label urgent',
+  ]);
+  expect([world.operations(), capture.events]).toEqual([['SailTeamLabels'], []]);
+});
+
+test('create in a team Linear doesn’t have is not_found, and Linear answering success: false to it is a conflict; neither emits', async () => {
+  const missing = linear(seedOf(RENAMED_STATES, []));
+  const other = createLinearTicketSource({
+    team: 'XYZ',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    fetch: missing.world.fetch,
+    emit: missing.capture.emit,
+  });
+  const { world, adapter, capture } = linear();
+  world.failNext('SailCreate', { status: 200, body: { data: { issueCreate: { success: false, issue: null } } } });
+  const errors = [
+    await rejection(other.create({ title: 'a', description: 'b', labels: [] })),
+    await rejection(adapter.create({ title: 'a', description: 'b', labels: [] })),
+  ];
+  expect([errors.map(failure), missing.capture.events, capture.events]).toEqual([
+    [
+      [{ port: 'ticketSource', op: 'create', code: 'not_found' }, 'ticketSource.create: Linear has no team XYZ'],
+      [
+        { port: 'ticketSource', op: 'create', code: 'conflict' },
+        'ticketSource.create: Linear did not create the ticket in team ADW',
+      ],
+    ],
+    [],
     [],
   ]);
 });

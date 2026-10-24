@@ -1,7 +1,7 @@
 // The Linear TicketSource: tickets of one Linear team, read with their comments, relations and attachments, claimed and
-// moved by state type (DECISIONS D4), whatever the team calls its states. Every request goes through the GraphQL client,
-// so each failure keeps Linear's message. The definition reads the API key, and the endpoint, from the operator's
-// environment alone (D3).
+// moved by state type (DECISIONS D4), whatever the team calls its states, and filed in it with the labels it and the
+// workspace hold. Every request goes through the GraphQL client, so each failure keeps Linear's message. The definition
+// reads the API key, and the endpoint, from the operator's environment alone (D3).
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
@@ -49,6 +49,23 @@ const MOVE = `mutation SailMove($id: String!, $stateId: String!) {
 
 const COMMENT = `mutation SailComment($id: String!, $body: String!) {
   commentCreate(input: { issueId: $id, body: $body }) { success comment { id url } }
+}`;
+
+// The team's id, and the labels its tickets can carry: the team's own and the workspace's, read on each create.
+const TEAM_LABELS = `query SailTeamLabels($team: String!, $after: String) {
+  teams(filter: { key: { eq: $team } }, first: 1) { nodes { id } }
+  issueLabels(
+    filter: { or: [{ team: { key: { eq: $team } } }, { team: { null: true } }] }
+    first: 250
+    after: $after
+  ) { nodes { id name } pageInfo { hasNextPage endCursor } }
+}`;
+
+const CREATE = `mutation SailCreate($teamId: String!, $title: String!, $description: String!, $labelIds: [String!]!) {
+  issueCreate(input: { teamId: $teamId, title: $title, description: $description, labelIds: $labelIds }) {
+    success
+    issue { id identifier url }
+  }
 }`;
 
 /** The Linear state types a designated ticket may be in to be listed: those sail reads as unstarted. */
@@ -308,6 +325,46 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       }
       emit({ type: 'ticket:commented', ticketKey, body });
       return { id: data.commentCreate.comment.id, url: data.commentCreate.comment.url, raw: data };
+    },
+    async create({ title, description, labels }) {
+      // Every label is resolved before anything is filed: a name the team lacks files no ticket.
+      const known: { id: string; name: string }[] = [];
+      const seen = new Set<string>();
+      let teamId: string | undefined;
+      let after: string | null = null;
+      do {
+        const read: { teams: { nodes: { id: string }[] }; issueLabels: Page<{ id: string; name: string }> } =
+          await client.request('create', 'SailTeamLabels', TEAM_LABELS, { team, after });
+        const [found] = read.teams.nodes;
+        if (found === undefined) {
+          throw new PortError('ticketSource', 'create', 'not_found', `Linear has no team ${team}`);
+        }
+        teamId = found.id;
+        known.push(...read.issueLabels.nodes);
+        after = nextCursor('create', `the labels of team ${team}`, read.issueLabels, seen);
+      } while (after !== null);
+      const labelIds = labels.map((name) => {
+        const label = known.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+        if (label === undefined) {
+          throw new PortError('ticketSource', 'create', 'invalid', `team ${team} has no label ${name}`);
+        }
+        return label.id;
+      });
+      const data = await client.request<{
+        issueCreate: { success: boolean; issue: { id: string; identifier: string; url: string } | null };
+      }>('create', 'SailCreate', CREATE, { teamId, title, description, labelIds });
+      if (!data.issueCreate.success || data.issueCreate.issue === null) {
+        throw new PortError(
+          'ticketSource',
+          'create',
+          'conflict',
+          `Linear did not create the ticket in team ${team}`,
+          data,
+        );
+      }
+      const { identifier: ticketKey, url } = data.issueCreate.issue;
+      emit({ type: 'ticket:created', ticketKey, title, url });
+      return { ticketKey, url, raw: data };
     },
     capabilities: () => ({
       comments: true,
