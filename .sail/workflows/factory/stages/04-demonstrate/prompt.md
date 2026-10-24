@@ -30,7 +30,13 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
   in `events.ndjson` and their fields, `summary.json`, the call results.
 - `cli`: run the command with the arguments the plan names, and compare its output, line by line, with the plan's.
   Output is not a terminal, so a command that draws for one prints its plain form.
-- `dashboard`: the harness can't show a dashboard yet. End the step **blocked**, saying so.
+- `dashboard`: make runs for the view to show, as for `engine`, then capture the view:
+  `.sail/lib/demo.sh dashboard $STAGE_OUT/demo <name> repo=<project.yaml's name> run=<run id> key=<call key> tab=<tab>`
+  serves the demo repository's runs with this branch's `sail dashboard`, opens it in headless Chrome on the run, call
+  (`implement#1`) and inspector tab (`overview`, `files`, `permissions` or `log`) you name, each optional, waits for
+  the page to settle, and writes `$STAGE_OUT/demo/<name>.png` and the page's DOM to `$STAGE_OUT/demo/<name>.html`.
+  Without a run it opens the newest. Read the PNG to see what a user sees, and `grep` the DOM for the elements and
+  text the plan names: the DOM is the evidence, the screenshot is what you looked at.
 
 ## Report what you saw
 
