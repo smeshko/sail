@@ -1,5 +1,6 @@
 // Validates the branch in the workspace and prints the Validation: what is uncommitted, how the tests differ from their
-// lock, and how `bun run verify` ended.
+// lock, and how `bun run gate` ended: typecheck, lint and the affected tests. The full suite with its coverage gate is
+// CI's `verify` check on the pull request, which the run doesn't wait for.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,14 +24,14 @@ if (testsCommit !== null) {
   else ({ violations, amendments } = JSON.parse(checked.stdout.trim().split('\n').at(-1)));
 }
 
-const verified = spawnSync(bun, ['run', 'verify'], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+const verified = spawnSync(bun, ['run', 'gate'], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
 const log = `${verified.stdout}${verified.stderr}`;
 process.stderr.write(log);
 const verify = { ok: verified.status === 0, exitCode: verified.status ?? -1, tail: failures(log) ?? tail(log) };
 
 /**
  * Each failing test with the error lines Bun printed above it, then the counts: what the implementer needs, which the
- * plain tail, all coverage table, leaves out. Undefined when no test failed, as when typecheck or lint stopped verify.
+ * plain tail leaves out. Undefined when no test failed, as when typecheck or lint stopped the gate.
  */
 function failures(text) {
   const lines = text.split('\n');
