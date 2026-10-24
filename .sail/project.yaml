@@ -12,7 +12,8 @@ defaultWorkflow: factory
 
 # Which adapter fills each port.
 adapters:
-  ticketSource: { use: linear, team: ADW }
+  # Open moves the ticket to In Review once its pull request is up.
+  ticketSource: { use: linear, team: ADW, inReview: In Review }
   codeHost: { use: github }
   harness: { use: claude-code }
   workspace: { use: git-worktree }
