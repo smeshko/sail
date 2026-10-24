@@ -54,6 +54,9 @@ const PAGE = 100;
 const MAX_PAGES = 10;
 
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+// GitHub's label names are case-insensitive.
+const sameLabel = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const holds = (labels: readonly string[], label: string) => labels.some((each) => sameLabel(each, label));
 
 export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
   const { owner, repo } = options;
@@ -125,14 +128,17 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
     labels: readonly string[],
     current: readonly string[],
   ): Promise<{ labels: string[]; raw: { name: string }[] | null }> => {
-    const missing = [...new Set(labels)].filter((label) => !current.includes(label));
+    const missing = labels.filter(
+      (label, i) => labels.findIndex((each) => sameLabel(each, label)) === i && !holds(current, label),
+    );
     if (missing.length === 0) return { labels: [...current], raw: null };
     const answer = await client.request<{ name: string }[]>(op, 'POST', client.repoPath('issues', number, 'labels'), {
       labels: missing,
     });
     const after = answer.map((label) => label.name);
-    for (const label of missing) {
-      if (after.includes(label)) emit({ type: 'codehost:labelled', number, label, change: 'added' });
+    for (const asked of missing) {
+      const label = after.find((name) => sameLabel(name, asked));
+      if (label !== undefined) emit({ type: 'codehost:labelled', number, label, change: 'added' });
     }
     return { labels: after, raw: answer };
   };
@@ -280,20 +286,21 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
     addLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
         const pr = await read('addLabel', number);
-        if (pr.labels.includes(label)) return { number, labels: pr.labels, raw: pr.raw };
+        if (holds(pr.labels, label)) return { number, labels: pr.labels, raw: pr.raw };
         const added = await addLabels('addLabel', number, [label], pr.labels);
         return { number, labels: added.labels, raw: added.raw };
       }),
     removeLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
         const pr = await read('removeLabel', number);
-        if (!pr.labels.includes(label)) return { number, labels: pr.labels, raw: pr.raw };
+        const held = pr.labels.find((each) => sameLabel(each, label));
+        if (held === undefined) return { number, labels: pr.labels, raw: pr.raw };
         let answer: { name: string }[];
         try {
           answer = await client.request<{ name: string }[]>(
             'removeLabel',
             'DELETE',
-            client.repoPath('issues', number, 'labels', label),
+            client.repoPath('issues', number, 'labels', held),
           );
         } catch (error) {
           // The label went in a race: the labels as they are now are the answer, and nothing changed here.
@@ -302,7 +309,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
           return { number, labels: now.labels, raw: now.raw };
         }
         const labels = answer.map((each) => each.name);
-        if (!labels.includes(label)) emit({ type: 'codehost:labelled', number, label, change: 'removed' });
+        if (!holds(labels, held)) emit({ type: 'codehost:labelled', number, label: held, change: 'removed' });
         return { number, labels, raw: answer };
       }),
     comment: (number, text) =>
