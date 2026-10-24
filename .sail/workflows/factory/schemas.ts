@@ -1,5 +1,5 @@
-// The factory's contracts, shared by its stages and the workflow: what a plan, a test proof, a validation and a review
-// round carry.
+// The factory's contracts, shared by its stages and the workflow: what a plan, a validation, a review round and a
+// follow-up carry.
 import { z } from 'sail';
 
 export const Risk = z.enum(['tiny', 'small', 'medium', 'large', 'high']);
@@ -24,34 +24,10 @@ export const PlanOutput = z.object({
 /** What every committing stage needs to write a commit subject the way this repository does. */
 export const CommitInfo = z.object({ ticketKey: z.string(), slug: z.string(), scope: z.string() });
 
-/** One pending test, as the agent that wrote it names it. */
-export const PendingTest = z.object({ task: z.string(), file: z.string(), name: z.string() });
-
-export const TestsWritten = z.object({
-  cases: z.array(PendingTest),
-  /** Why the plan needs no new test, when `cases` is empty: a pure refactor the existing suite covers. */
-  none: z.string().nullable(),
-});
-
-/** What proving the pending tests found: each problem, and each test's red failure. */
-export const Proof = z.object({
-  ok: z.boolean(),
-  problems: z.array(z.string()),
-  red: z.array(z.object({ task: z.string(), file: z.string(), name: z.string(), message: z.string() })),
-});
-
-export const TestsCommitted = z.object({ stubsCommit: z.string().nullable(), testsCommit: z.string() });
-
-/** The lock the validation checks the tests against: none when the plan wrote no tests. */
-export const Lock = z.object({ testsCommit: z.string().nullable() });
-
 export const Validation = z.object({
   ok: z.boolean(),
   /** Paths left uncommitted. */
   uncommitted: z.array(z.string()),
-  /** Tests changed beyond their stickers, and stickers left. */
-  violations: z.array(z.string()),
-  amendments: z.array(z.string()),
   /** How `bun run gate` ended. */
   verify: z.object({ ok: z.boolean(), exitCode: z.number().int(), tail: z.string() }),
 });
@@ -86,3 +62,14 @@ export const Round = z.object({
 export const History = z.object({ rounds: z.array(Round) });
 
 export const ReviewLens = z.enum(['bugs', 'tests', 'all']);
+
+/** Work a run found and left for later: filed as a ticket of its own once the pull request is open. */
+export const FollowUp = z.object({
+  title: z.string().max(120),
+  description: z.string(),
+  type: z.enum(['bug', 'feature', 'refactoring']),
+  /** True for a deferred review finding: its ticket also gets the `code-review` label. */
+  fromReview: z.boolean(),
+});
+
+export const FollowUps = z.object({ followUps: z.array(FollowUp) });

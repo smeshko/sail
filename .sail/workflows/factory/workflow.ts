@@ -1,26 +1,25 @@
-// factory: a ticket in, a pull request out, along the plan lifecycle: plan the change, write its tests first and prove
-// them red, implement the plan task by task, validate, then review adversarially in rounds before the pull request.
+// factory: a ticket in, a pull request out, along the plan lifecycle: plan the change, implement it task by task, test
+// first, validate, then review adversarially in rounds before the pull request. The follow-ups the run found are filed
+// as tickets of their own once the pull request is open.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
-import { type ProducedFile, workflow, type z } from 'sail';
+import { workflow, type z } from 'sail';
 import { ticket } from 'sail/intakes';
-import type { NumberedFinding, Round } from './schemas';
-import { Proof, Validation } from './schemas';
+import type { FollowUp, NumberedFinding, Round } from './schemas';
+import { Validation } from './schemas';
 import { setup } from './stages/00-setup/stage';
 import { plan } from './stages/01-plan/stage';
-import { writeTests } from './stages/02-write-tests/stage';
-import { proveTests } from './stages/03-prove-tests/stage';
-import { commitTests } from './stages/04-commit-tests/stage';
-import { implement } from './stages/05-implement/stage';
-import { validate } from './stages/06-validate/stage';
-import { review } from './stages/07-review/stage';
-import { fix } from './stages/08-fix/stage';
-import { recordReview } from './stages/09-record-review/stage';
-import { describe } from './stages/10-describe/stage';
-import { open } from './stages/11-open/stage';
+import { implement } from './stages/02-implement/stage';
+import { validate } from './stages/03-validate/stage';
+import { review } from './stages/04-review/stage';
+import { fix } from './stages/05-fix/stage';
+import { recordReview } from './stages/06-record-review/stage';
+import { describe } from './stages/07-describe/stage';
+import { open } from './stages/08-open/stage';
+import { fileFollowUps } from './stages/09-file-follow-ups/stage';
 
 export default workflow(
   'factory',
-  { intake: ticket, version: 1, description: 'plan, tests first, implement, review, pull request' },
+  { intake: ticket, version: 2, description: 'plan, implement test first, review, pull request, follow-ups' },
   async (run) => {
     await run.stage(setup);
 
@@ -30,38 +29,12 @@ export default workflow(
     const planFile = p.files['plan.md'];
     const commit = { ticketKey: run.input.ticketKey, slug: p.output.slug, scope: p.output.scope };
 
-    // tdd-plan: tests that fail their proof go back to write-tests, with what the proof found.
-    let lock: { testsCommit: string | null } = { testsCommit: null };
-    let red: ProducedFile | undefined;
-    if (p.output.tasks.some((task) => task.type === 'impl')) {
-      let settled = false;
-      for (const iteration of run.loop('tdd', { max: 3, feedback: Proof })) {
-        const written = await run.stage(writeTests, { plan: planFile, feedback: iteration.previous });
-        if (written.outcome === 'blocked') return run.fail(`write-tests blocked: ${written.reason}`);
-        if (written.output.cases.length === 0) {
-          settled = true;
-          break;
-        }
-        const proof = await run.stage(proveTests, { written: written.output });
-        if (proof.outcome === 'failed') {
-          iteration.fail(proof.output);
-          continue;
-        }
-        const committed = await run.stage(commitTests, { commit });
-        lock = { testsCommit: committed.output.testsCommit };
-        red = proof.files['red.txt'];
-        settled = true;
-        break;
-      }
-      if (!settled) return run.fail('write-tests: the tests failed their proof three times');
-    }
-
     // implement-plan, and its final validation: a failed validation goes back to implement.
     let validated = false;
     for (const iteration of run.loop('implement', { max: 3, feedback: Validation })) {
-      const impl = await run.stage(implement, { plan: planFile, red, lock, commit, feedback: iteration.previous });
+      const impl = await run.stage(implement, { plan: planFile, commit, feedback: iteration.previous });
       if (impl.outcome === 'blocked') return run.fail(`implement blocked: ${impl.reason}`);
-      const v = await run.stage(validate, { lock });
+      const v = await run.stage(validate);
       if (v.outcome === 'failed') {
         iteration.fail(v.output);
         continue;
@@ -97,7 +70,7 @@ export default workflow(
       iteration.fail();
     }
     if (rounds.some((round) => round.triage.some((each) => each.verdict === 'fix'))) {
-      const v = await run.stage(validate, { lock });
+      const v = await run.stage(validate);
       if (v.outcome === 'failed') return run.fail(`validate after review: ${v.output.verify.tail}`);
     }
     const recorded = await run.stage(recordReview, { history: { rounds } });
@@ -114,6 +87,20 @@ export default workflow(
       body: d.files['pr-body.md'],
       ticketKey: run.input.ticketKey,
     });
+
+    // The deferred findings, then what describe found beside them: each a ticket, listed on the pull request.
+    const deferred: z.infer<typeof FollowUp>[] = rounds.flatMap((round) =>
+      round.triage.flatMap((each) => {
+        const finding = round.findings.find((one) => one.id === each.finding);
+        if (each.verdict !== 'defer' || finding === undefined) return [];
+        const description = `${finding.detail}\n\nDeferred in review (${finding.id}, ${finding.severity}, \`${finding.file}\`): ${each.rationale}`;
+        return [{ title: finding.title, description, type: 'bug', fromReview: true }];
+      }),
+    );
+    const followUps = [...deferred, ...d.output.followUps.map((each) => ({ ...each, fromReview: false }))];
+    if (followUps.length > 0) {
+      await run.stage(fileFollowUps, { followUps: { followUps }, pr: pr.output, ticketKey: run.input.ticketKey });
+    }
     return { pr: pr.output };
   },
 );
