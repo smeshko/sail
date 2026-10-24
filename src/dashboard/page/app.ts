@@ -5,6 +5,8 @@
 // - One run socket is open at a time, for the open run, and its events are folded into the run model. A socket that
 //   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything.
 // - One queue socket per watched workflow in the index feeds its recent events and its watch state.
+// - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
+//   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry.
 // - The inspector reads a call's `result.json` and log over REST. A response for a selection that has changed since is
 //   dropped, and a running call's log is read again at most once a second.
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
@@ -25,6 +27,7 @@ import { type QueueStream, queueId, renderQueues } from './queue-view';
 import { renderRail } from './rail-view';
 import { applyEvent, emptyRun, type RunModel } from './run-model';
 import { renderRun, renderStatus } from './run-view';
+import { renderTimeline } from './timeline-view';
 import { type InspectorTab, initialUi, TABS, THEMES, type Theme, type UiState } from './ui-state';
 
 export const THEME_KEY = 'sail-dashboard-theme';
@@ -103,6 +106,10 @@ export function boot(host: PageHost): Page {
   const summaryOf = (open: OpenRun | undefined) =>
     index?.find((repo) => repo.name === open?.repo)?.runs.find((item) => item.runId === open?.runId)?.summary;
 
+  const selected = () => run?.model.cards.find((entry) => entry.key === ui.key);
+  /** The card whose timeline the centre shows, when it shows one: a card selected before it exists shows the run. */
+  const opened = () => (ui.timeline ? selected() : undefined);
+
   const draw: Record<Region, () => string> = {
     rail: () =>
       index === undefined
@@ -116,12 +123,14 @@ export function boot(host: PageHost): Page {
     main: () => {
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = run.error === undefined ? '' : html`<div class="code bad">${run.error}</div>`;
-      return html`${error}${renderRun(run.model, summaryOf(run), ui, host.now())}`.value;
+      const card = opened();
+      const view =
+        card === undefined
+          ? renderRun(run.model, summaryOf(run), ui, host.now())
+          : renderTimeline(card, ui, host.now());
+      return html`${error}${view}`.value;
     },
-    inspector: () => {
-      const card = run?.model.cards.find((entry) => entry.key === ui.key);
-      return renderInspector(card, run?.model.roster, result, log, ui).value;
-    },
+    inspector: () => renderInspector(selected(), run?.model.roster, result, log, ui).value,
     status: () => (run === undefined ? '' : renderStatus(run.model, summaryOf(run)).value),
   };
 
@@ -138,6 +147,8 @@ export function boot(host: PageHost): Page {
         markup = html`<div class="code bad">this part of the page could not be drawn</div>`.value;
       }
       host.render(region, markup);
+      // A running call's timeline, followed, shows its newest entry.
+      if (region === 'main' && ui.follow && opened()?.state === 'running') host.scrollToEnd(region);
     }
   };
 
@@ -207,12 +218,16 @@ export function boot(host: PageHost): Page {
     logTimer = undefined;
   };
 
-  const selectCard = (key: string | undefined, tab?: InspectorTab) => {
+  /** Selects the call `key`, or none. `timeline` opens its timeline, or goes back to the cards; left out, keeps either. */
+  const selectCard = (key: string | undefined, tab?: InspectorTab, timeline?: boolean) => {
     clearCall();
     if (key === undefined) delete ui.key;
     else ui.key = key;
     delete ui.stream;
+    ui.opened = [];
     if (tab !== undefined) ui.tab = tab;
+    if (timeline !== undefined) ui.timeline = timeline;
+    if (key === undefined) ui.timeline = false;
     const place = run?.model.cards.findIndex((entry) => entry.key === key) ?? -1;
     if (place >= 0) ui.cursor = place;
     cursorPending = key !== undefined && place < 0;
@@ -325,6 +340,8 @@ export function boot(host: PageHost): Page {
     ui.repo = repo;
     ui.runId = runId;
     delete ui.key;
+    ui.timeline = false;
+    ui.opened = [];
     ui.cursor = 0;
     run = { repo, runId, model: emptyRun(), ended: false };
     openRunSocket(run);
@@ -421,12 +438,23 @@ export function boot(host: PageHost): Page {
     'select-run': (data) => {
       if (data.repo !== undefined && data.run !== undefined) selectRun(data.repo, data.run);
     },
-    'select-card': (data) => selectCard(data.key),
+    'select-card': (data) => selectCard(data.key, undefined, true),
     open: (data) => {
       if (data.repo === undefined || data.run === undefined) return;
       selectRun(data.repo, data.run);
       const tab = (TABS as readonly string[]).includes(data.tab ?? '') ? (data.tab as InspectorTab) : 'overview';
-      if (data.key !== undefined) selectCard(data.key, tab);
+      if (data.key !== undefined) selectCard(data.key, tab, false);
+    },
+    'close-timeline': () => {
+      ui.timeline = false;
+      mark('main');
+    },
+    'step-card': (data) => step(Number(data.by) < 0 ? -1 : 1),
+    'toggle-tool': (data) => {
+      const call = data.call;
+      if (call === undefined) return;
+      ui.opened = ui.opened.includes(call) ? ui.opened.filter((each) => each !== call) : [...ui.opened, call];
+      mark('main');
     },
     tab: (data) => {
       if (!(TABS as readonly string[]).includes(data.tab ?? '')) return;
@@ -457,7 +485,7 @@ export function boot(host: PageHost): Page {
     },
     'toggle-follow': () => {
       ui.follow = !ui.follow;
-      mark('inspector');
+      mark('main', 'inspector');
     },
     copy: (data) => {
       if (data.text !== undefined) void host.copy(data.text);
@@ -467,9 +495,10 @@ export function boot(host: PageHost): Page {
   const keys: Record<string, () => void> = {
     Enter: () => {
       const card = run?.model.cards[ui.cursor];
-      if (card !== undefined) selectCard(card.key);
+      if (card !== undefined) selectCard(card.key, undefined, true);
     },
-    Escape: () => selectCard(undefined),
+    // Back to the cards from a timeline, keeping the selection; from the cards, no selection.
+    Escape: () => (ui.timeline ? actions['close-timeline']?.({}) : selectCard(undefined)),
     ']': () => step(1),
     '[': () => step(-1),
     i: () => actions['toggle-inspector']?.({}),

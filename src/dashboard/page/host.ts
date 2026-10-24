@@ -19,6 +19,8 @@ export interface ConnectHandlers {
 
 export interface PageHost {
   render(region: Region, html: string): void;
+  /** Scrolls what holds `region` to its end. */
+  scrollToEnd(region: Region): void;
   onAction(handler: (action: string, data: Record<string, string>) => void): void;
   onKey(handler: (key: string, inInput: boolean) => void): void;
   /** A GET of `path` on the dashboard, with the client header. A failed request answers status 0. */
@@ -43,6 +45,8 @@ export interface PageHost {
 /** The members of an element the page uses. */
 export interface ElementLike {
   innerHTML: string;
+  scrollTop?: number;
+  scrollHeight?: number;
   dataset: Record<string, string | undefined>;
   parentElement: ElementLike | null;
   tagName?: string;
@@ -132,6 +136,10 @@ export function browserHost(win: BrowserWindow): PageHost {
     render(region, markup) {
       const element = doc.getElementById(region);
       if (element !== null) element.innerHTML = markup;
+    },
+    scrollToEnd(region) {
+      const box = doc.getElementById(region)?.parentElement;
+      if (box !== null && box !== undefined) box.scrollTop = box.scrollHeight ?? 0;
     },
     onAction(handler) {
       doc.addEventListener('click', (event) => {

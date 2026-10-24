@@ -1239,7 +1239,8 @@
       "properties": {
         "callId": { "type": "string" },
         "status": { "enum": ["completed", "denied", "failed"] },
-        "durationMs": { "type": "number", "minimum": 0 }
+        "durationMs": { "type": "number", "minimum": 0 },
+        "result": { "description": "the start of the text the tool returned, when it returned any", "type": "string" }
       },
       "required": ["callId", "status", "durationMs"],
       "unevaluatedProperties": false
