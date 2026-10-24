@@ -29,35 +29,6 @@
       }
     }
   ],
-  "write-tests": [
-    {
-      "outcome": "done",
-      "output": {
-        "cases": [
-          {
-            "task": "TASK-001",
-            "file": "test/cli/show.test.ts",
-            "name": "ends with the run's total cost"
-          },
-          {
-            "task": "TASK-001",
-            "file": "test/cli/show.test.ts",
-            "name": "prints a zero total for a run with no agent calls"
-          }
-        ],
-        "none": null
-      },
-      "messages": ["Two pending tests and a stub footer."],
-      "turns": 20,
-      "usage": {
-        "inputTokens": 4000,
-        "cacheReadTokens": 20000,
-        "cacheWriteTokens": 2000,
-        "outputTokens": 1500,
-        "costUsd": 1.4
-      }
-    }
-  ],
   "implement": [
     {
       "outcome": "done",
@@ -185,7 +156,14 @@
       "outcome": "done",
       "output": {
         "title": "feat(cli): print the run's total cost in sail show's footer (FAKE-1)",
-        "bodyFile": "pr-body.md"
+        "bodyFile": "pr-body.md",
+        "followUps": [
+          {
+            "title": "sail show's footer ignores calls replayed from a seeded run",
+            "description": "`src/cli/commands/show.ts` sums `costUsd` over the calls this run made, so a run seeded with `--from-run` prints a total without the replayed calls' cost. Left out: the plan scoped the footer to this run's own calls.",
+            "type": "bug"
+          }
+        ]
       },
       "files": {
         "pr-body.md": "## Summary\n\n`sail show` ends with the run's total cost.\n\n## Changes\n\n- The footer line.\n\n## Testing\n\nTwo tests; `bun run verify` passes.\n\nCloses FAKE-1\n"

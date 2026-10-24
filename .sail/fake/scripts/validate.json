@@ -4,12 +4,10 @@
     "output": {
       "ok": false,
       "uncommitted": [],
-      "violations": ["pending: test/cli/show.test.ts:41:  .skip // TDD-PENDING TASK-001"],
-      "amendments": [],
       "verify": {
         "ok": false,
         "exitCode": 1,
-        "tail": "(skip) prints a zero total for a run with no agent calls\n1989 pass\n1 skip"
+        "tail": "1 failing test:\n\n(fail) sail show prints a zero total for a run with no agent calls\n\n 1989 pass\n 1 fail"
       }
     }
   },
@@ -18,12 +16,10 @@
     "output": {
       "ok": true,
       "uncommitted": [],
-      "violations": [],
-      "amendments": [],
       "verify": {
         "ok": true,
         "exitCode": 0,
-        "tail": "1990 pass\n0 fail"
+        "tail": " 1990 pass\n 0 fail"
       }
     }
   }
