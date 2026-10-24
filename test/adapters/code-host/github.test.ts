@@ -595,6 +595,95 @@ test('a 404 on the DELETE, the label gone in a race, answers a fresh read of the
   });
 });
 
+test('adding a label the pull request holds in other case sends only the read, answers its labels, and emits nothing', async () => {
+  const on = world();
+  const capture = captureEvents();
+  const added = await host(on, capture.emit).addLabel(7, 'SAIL');
+  expect({ sent: sentSince(on, 0), labels: added.labels, events: capture.events }).toEqual({
+    sent: [['GET', '/repos/o/r/pulls/7']],
+    labels: ['sail'],
+    events: [],
+  });
+});
+
+test('removing a label the pull request holds in other case deletes the held name and emits codehost:labelled naming it', async () => {
+  const on = world();
+  const capture = captureEvents();
+  const removed = await host(on, capture.emit).removeLabel(7, 'SAIL');
+  expect({
+    sent: sentSince(on, 0),
+    labels: removed.labels,
+    held: on.pullRequests.find((pr) => pr.number === 7)?.labels,
+    events: capture.events,
+  }).toEqual({
+    sent: [
+      ['GET', '/repos/o/r/pulls/7'],
+      ['DELETE', '/repos/o/r/issues/7/labels/sail'],
+    ],
+    labels: [],
+    held: [],
+    events: [{ type: 'codehost:labelled', number: 7, label: 'sail', change: 'removed' }],
+  });
+});
+
+test('opening again with a label the pull request holds in other case asks for no label and emits nothing', async () => {
+  const on = world();
+  const capture = captureEvents();
+  const pr = await host(on, capture.emit).openPullRequest({
+    base: 'main',
+    head: 'sail/designated',
+    title: 'T',
+    body: '',
+    labels: ['Sail'],
+  });
+  expect({
+    number: pr.number,
+    labels: pr.labels,
+    routes: on.routes().map((route) => route.split('?')[0]),
+    events: capture.events,
+  }).toEqual({
+    number: 7,
+    labels: ['sail'],
+    routes: ['GET /repos/o/r/pulls', 'GET /repos/o/r/pulls/7'],
+    events: [],
+  });
+});
+
+test("a label the repository has in other case is answered and announced under the repository's name", async () => {
+  const on = world({ repositoryLabels: ['sail', 'Needs-Review'] });
+  const capture = captureEvents();
+  const added = await host(on, capture.emit).addLabel(7, 'needs-review');
+  expect({ sent: sentSince(on, 0), labels: added.labels, events: capture.events }).toEqual({
+    sent: [
+      ['GET', '/repos/o/r/pulls/7'],
+      ['POST', '/repos/o/r/issues/7/labels', { labels: ['needs-review'] }],
+    ],
+    labels: ['sail', 'Needs-Review'],
+    events: [{ type: 'codehost:labelled', number: 7, label: 'Needs-Review', change: 'added' }],
+  });
+});
+
+test('labels asked twice in different case are sent once', async () => {
+  const on = world();
+  const capture = captureEvents();
+  const pr = await host(on, capture.emit).openPullRequest({
+    base: 'main',
+    head: 'sail/designated',
+    title: 'T',
+    body: '',
+    labels: ['needs-review', 'NEEDS-REVIEW'],
+  });
+  expect({
+    labels: pr.labels,
+    asked: on.requests.flatMap((request) => (request.body === undefined ? [] : [request.body])),
+    events: capture.events,
+  }).toEqual({
+    labels: ['sail', 'needs-review'],
+    asked: [{ labels: ['needs-review'] }],
+    events: [{ type: 'codehost:labelled', number: 7, label: 'needs-review', change: 'added' }],
+  });
+});
+
 /** Pull request 7's head sha in `on`. */
 const headOf7 = (on: GitHubWorld): string => on.pullRequests.find((pr) => pr.number === 7)?.headSha ?? '';
 
