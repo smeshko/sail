@@ -13,11 +13,21 @@ export const Task = z.object({
   commit: z.string(),
 });
 
+/** Where a change shows at runtime: what the demonstrate stage runs to show it working. */
+export const Surface = z.enum(['engine', 'cli', 'dashboard']);
+
+/** How the plan's Demonstration section shows the change, or why nothing can: a refactor, prose. */
+export const DemonstrationPlan = z.union([
+  z.object({ surface: Surface }),
+  z.object({ surface: z.literal('none'), reason: z.string().min(1) }),
+]);
+
 export const PlanOutput = z.object({
   slug: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/),
   /** The Conventional Commits scope the plan's commits share. */
   scope: z.string(),
   risk: Risk,
+  demonstration: DemonstrationPlan,
   tasks: z.array(Task).min(1),
 });
 
