@@ -19,7 +19,18 @@ export const plan = agent('plan', {
   permissions: {
     read: ['**'],
     write: ['$STAGE_OUT/**'],
-    commands: ['git log *', 'git diff *', 'git show *', 'git grep *', 'ls *'],
+    commands: [
+      'cat *',
+      'grep *',
+      'head *',
+      'tail *',
+      'wc *',
+      'git log *',
+      'git diff *',
+      'git show *',
+      'git grep *',
+      'ls *',
+    ],
   },
   budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 15 },
 });

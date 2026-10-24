@@ -13,7 +13,19 @@ export const review = agent('review', {
   permissions: {
     read: ['**'],
     write: ['$STAGE_OUT/**'],
-    commands: ['git log *', 'git diff *', 'git show *', 'git grep *', 'bun run test *', 'bun run typecheck'],
+    commands: [
+      'cat *',
+      'grep *',
+      'head *',
+      'tail *',
+      'wc *',
+      'git log *',
+      'git diff *',
+      'git show *',
+      'git grep *',
+      'bun run test *',
+      'bun run typecheck',
+    ],
   },
   budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 15 },
 });

@@ -32,6 +32,11 @@ export const implement = agent('implement', {
     read: ['**'],
     write: ['src/**', 'test/**', 'types/**', 'schemas/**', 'bin/**', 'scripts/**', 'CONTEXT.md', '$STAGE_OUT/**'],
     commands: [
+      'cat *',
+      'grep *',
+      'head *',
+      'tail *',
+      'wc *',
       'bun run test *',
       'bun run typecheck',
       'bun run lint',
