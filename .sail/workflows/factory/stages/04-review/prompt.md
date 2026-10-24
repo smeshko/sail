@@ -9,8 +9,8 @@ You review only. Don't change any file.
 - `bugs`: correctness, regressions, security, performance cliffs, missing edge cases and error paths, races, and
   anything that breaks a contract another module relies on.
 - `tests`: production code shaped to its tests rather than to the behaviour (special-cased test inputs, hardcoded
-  expected values), tests that would stay green with the behaviour broken, and test changes that weaken an assertion,
-  `test(...): amend` commits included.
+  expected values), tests that would stay green with the behaviour broken, and test changes that weaken an
+  assertion.
 - `all`: both.
 
 {{#if history}}
