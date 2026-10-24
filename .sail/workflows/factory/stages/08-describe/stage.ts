@@ -1,8 +1,9 @@
-// describe: writes the pull request's title and body from the ticket, the plan and the review, as create-pr does, and
-// names the follow-up work the run found beside the deferred review findings, which the workflow files itself.
+// describe: writes the pull request's title and body from the ticket, the plan, the demonstration and the review, as
+// create-pr does, and names the follow-up work the run found beside the deferred review findings, which the workflow
+// files itself.
 import { agent, file, value, z } from 'sail';
 import { TicketInput } from 'sail/intakes';
-import { FollowUp } from '../../schemas';
+import { Demonstrated, FollowUp } from '../../schemas';
 
 export const PrDescription = z.object({
   title: z.string().max(120),
@@ -13,7 +14,12 @@ export const PrDescription = z.object({
 
 export const describe = agent('describe', {
   prompt: './prompt.md',
-  consumes: { ticket: value(TicketInput), plan: file('plan.md'), review: file('REVIEW.md') },
+  consumes: {
+    ticket: value(TicketInput),
+    plan: file('plan.md'),
+    review: file('REVIEW.md'),
+    demonstration: value(Demonstrated).optional(),
+  },
   produces: { 'pr-body.md': 'file' },
   output: PrDescription,
   model: 'default',

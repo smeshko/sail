@@ -1,6 +1,6 @@
 // implement: walks the plan's tasks in order, test first, one commit per task: red, green, refactor, commit.
 import { agent, file, value, z } from 'sail';
-import { CommitInfo, Validation } from '../../schemas';
+import { CommitInfo, PassFeedback } from '../../schemas';
 
 export const Implemented = z.object({
   tasks: z.array(
@@ -21,7 +21,7 @@ export const implement = agent('implement', {
   consumes: {
     plan: file('plan.md'),
     commit: value(CommitInfo),
-    feedback: value(Validation).optional(),
+    feedback: value(PassFeedback).optional(),
   },
   output: Implemented,
   model: 'default',

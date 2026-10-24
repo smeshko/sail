@@ -1,5 +1,5 @@
 Describe the change on this branch for its pull request into `staging`, from the ticket, the plan at `{{plan}}`, the
-review at `{{review}}`, and the commits (`git log origin/staging..HEAD`).
+demonstration, the review at `{{review}}`, and the commits (`git log origin/staging..HEAD`).
 
 Write `pr-body.md` with these sections:
 
@@ -7,6 +7,12 @@ Write `pr-body.md` with these sections:
 - **Changes**: one bullet per commit or group of related commits.
 - **Testing**: the tests the plan added and what they prove, and `bun run gate` passing. CI runs the full
   `bun run verify`.
+{{#if demonstration}}
+- **Demonstration**: the change shown at runtime, from `$STAGE_IN/demonstration.json`: one bullet per acceptance
+  criterion with the evidence that showed it, then its `transcript` in a fenced block, as it is.
+{{else}}
+- **Demonstration**: the plan's Demonstration section says why nothing could be shown: say so in one line.
+{{/if}}
 - **Review**: `REVIEW.md` as it is.
 - **Follow-ups**: each deferred finding, and each follow-up you submit, one bullet each, or leave the section out when
   there is none. Each is filed as a ticket once the pull request is open.
