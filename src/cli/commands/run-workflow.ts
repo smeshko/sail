@@ -22,6 +22,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
 import { recordingHarness, writeJournalKeys } from '../../adapters/recording';
 import { type ResolvedAdapters, resolveAdapters } from '../../engine/adapters';
+import { raiseFlag } from '../../engine/budget';
 import { type Port, type ProjectConfig, readConfig } from '../../engine/config';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { runsDir } from '../../engine/run-dir';
@@ -232,7 +233,10 @@ export function recorded(
 
 /** After the terminal view's final block, prints how to resume a suspended run. Returns the status's exit code. */
 export function printEnd(end: RunEnd, io: Io): ExitCode {
-  if (end.status === 'suspended') io.stdout(`resume it with: sail resume ${end.runId}\n`);
+  if (end.status === 'suspended') {
+    const raise = end.budget === undefined ? '' : ` ${raiseFlag(end.budget)}`;
+    io.stdout(`resume it with: sail resume ${end.runId}${raise}\n`);
+  }
   return exitCodeFor(end.status);
 }
 

@@ -464,12 +464,95 @@ test.each([
   },
 );
 
-test('the fake declares structured output, usage, abort and a turns budget, and no permissions', () => {
+test('the fake declares structured output, usage, abort and a turns, dollar and minute budget, and no permissions', () => {
   expect(createFakeHarness({ script: {} }).capabilities()).toEqual({
     structuredOutput: true,
     permissions: false,
     usage: true,
     abort: true,
-    budgets: ['turns'],
+    budgets: ['turns', 'usd', 'minutes'],
+  });
+});
+
+// The dollar and minute budgets (D13): as claude-code does, the fake ends a session once a turn before its last has
+// spent maxUsd, and ends a scripted delay at maxMinutes.
+
+/** implement#1's answer in the fixture: five turns that spend $0.476 in all, $0.0952 each. */
+const IMPLEMENT: ScriptedAnswer = { outcome: 'done', output: {}, turns: 5, usage: { costUsd: 0.476 } };
+
+const dollarsOf = (usage: { costUsd: number }) => Math.round(usage.costUsd * 1e6) / 1e6;
+
+/** Runs `answer` as implement#1 with `budget` over the request's own, and what it emitted. */
+async function ranWith(answer: ScriptedAnswer, budget: Partial<HarnessRequest['budget']>) {
+  const harness = createFakeHarness({ script: { implement: [answer] } });
+  const capture = captureEvents<HarnessEvent>();
+  const base = request('implement#1');
+  const result = await harness.run({ ...base, budget: { ...base.budget, ...budget }, onEvent: capture.emit });
+  return { result, events: capture.events };
+}
+
+test('a session handed $0.1875 ends after the turn that reaches it: budget_exceeded, two usage updates, $0.1904 spent, and a usd budget:exceeded', async () => {
+  const { result, events } = await ranWith(IMPLEMENT, { maxUsd: 0.1875 });
+  expect({
+    result: summary(result),
+    reason: result.outcome === 'error' ? result.reason : undefined,
+    usage: dollarsOf(result.usage),
+    events: labels(events),
+    exceeded: events.flatMap((event) =>
+      event.type === 'budget:exceeded' ? [{ ...event, used: dollarsOf({ costUsd: event.used }) }] : [],
+    ),
+  }).toEqual({
+    result: 'error: budget exceeded: maxUsd 0.1875',
+    reason: 'budget_exceeded',
+    usage: 0.1904,
+    events: [
+      'harness:session_start',
+      'usage:update 1',
+      'usage:update 2',
+      'budget:exceeded',
+      'error:harness',
+      'harness:session_end',
+    ],
+    exceeded: [{ type: 'budget:exceeded', budget: 'usd', limit: 0.1875, used: 0.1904 }],
+  });
+});
+
+test('a session whose last turn reaches maxUsd completes: the last turn may pass it', async () => {
+  const { result, events } = await ranWith(IMPLEMENT, { maxUsd: 0.476 });
+  expect({ outcome: result.outcome, usage: dollarsOf(result.usage), turns: labels(events).length }).toEqual({
+    outcome: 'done',
+    usage: 0.476,
+    turns: 7,
+  });
+});
+
+test('with maxUsd 0, a one-turn answer completes and a two-turn one ends after its first turn', async () => {
+  const one = await ranWith({ ...IMPLEMENT, turns: 1 }, { maxUsd: 0 });
+  const two = await ranWith({ ...IMPLEMENT, turns: 2 }, { maxUsd: 0 });
+  expect([
+    summary(one.result),
+    summary(two.result),
+    labels(two.events).filter((label) => label.startsWith('usage')),
+  ]).toEqual([{}, 'error: budget exceeded: maxUsd 0', ['usage:update 1']]);
+});
+
+test('a delay longer than maxMinutes ends the session at maxMinutes, budget_exceeded with a minutes budget:exceeded, and one with a minute to spare completes', async () => {
+  const slow: ScriptedAnswer = { outcome: 'done', output: {}, delayMs: 1000 };
+  const started = performance.now();
+  const over = await ranWith(slow, { maxMinutes: 50 / 60_000 });
+  const took = performance.now() - started;
+  const spare = await ranWith(slow, { maxMinutes: 1 });
+  expect({
+    over: summary(over.result),
+    reason: over.result.outcome === 'error' ? over.result.reason : undefined,
+    exceeded: over.events.filter((event) => event.type === 'budget:exceeded'),
+    early: took < 800,
+    spare: spare.result.outcome,
+  }).toEqual({
+    over: `error: budget exceeded: maxMinutes ${50 / 60_000}`,
+    reason: 'budget_exceeded',
+    exceeded: [{ type: 'budget:exceeded', budget: 'minutes', limit: 50 / 60_000, used: 50 / 60_000 }],
+    early: true,
+    spare: 'done',
   });
 });

@@ -222,3 +222,26 @@ test('a workflow whose imports are gone is refused, naming each file that no lon
     expect(lines[1]).toContain("Cannot find module '../../stages/implement/stage'");
   });
 });
+
+test('a workflow whose budget is negative, not a number or holds another field is refused, naming its file, budget and the field', async () => {
+  const refusal = (budget: string) =>
+    withTempRepo(async (repo) => {
+      const sail = copyFixture(repo.dir);
+      edit(sail, WORKFLOW, ' version: 1,', ` version: 1, budget: ${budget},`);
+      const result = await loadWorkflow(sail, 'ticket-to-pr');
+      return 'refused' in result ? result.refused : `loaded ${result.name}`;
+    });
+  expect([
+    await refusal('{ maxUsd: -1 }'),
+    await refusal('{ maxMinutes: Number.NaN }'),
+    await refusal("{ maxUsd: '5' } as never"),
+    await refusal('{ maxTurns: 3 } as never'),
+    await refusal('[] as never'),
+  ]).toEqual([
+    `.sail/${WORKFLOW}: its budget maxUsd must be a number of 0 or more: -1`,
+    `.sail/${WORKFLOW}: its budget maxMinutes must be a number of 0 or more: NaN`,
+    `.sail/${WORKFLOW}: its budget maxUsd must be a number of 0 or more: "5"`,
+    `.sail/${WORKFLOW}: its budget has maxTurns, which no run budget has`,
+    `.sail/${WORKFLOW}: its budget must be an object of maxUsd and maxMinutes`,
+  ]);
+});

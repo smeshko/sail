@@ -767,10 +767,12 @@ test('sail FAKE-1 takes a script-to-agent workflow to its end on the fake harnes
       'spec#1       output valid',
     ]);
     expect(view).toContain('expected array to have >=1 items');
-    expect(view.split('\n').slice(-5)).toEqual([
+    // The two sessions' $0.125 and $0.25, against the fixture's run budget, sit between the replays and the run.
+    expect(view.split('\n').slice(-6)).toEqual([
       'completed · <t>',
       '  calls    4 · 3 passed, 1 done',
       expect.stringMatching(/^ {2}replays {2}\d+$/),
+      '  cost     $0.38 of $25.00 (1.5%)',
       `  run      .sail-runs/${runId}`,
       '',
     ]);

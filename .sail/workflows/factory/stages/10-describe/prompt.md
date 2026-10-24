@@ -5,7 +5,8 @@ Write `pr-body.md` with these sections:
 
 - **Summary**: what changes and why, in two or three sentences, in `CONTEXT.md`'s terms.
 - **Changes**: one bullet per commit or group of related commits.
-- **Testing**: the tests the plan added and what they prove, and `bun run verify` passing.
+- **Testing**: the tests the plan added and what they prove, and `bun run gate` passing. CI runs the full
+  `bun run verify`.
 - **Review**: `REVIEW.md` as it is.
 - **Follow-ups**: each deferred finding, one bullet each, or leave the section out when there is none.
 

@@ -10,6 +10,10 @@ export const describe = agent('describe', {
   produces: { 'pr-body.md': 'file' },
   output: PrDescription,
   model: 'default',
-  permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git log *', 'git diff *', 'git show *'] },
+  permissions: {
+    read: ['**'],
+    write: ['$STAGE_OUT/**'],
+    commands: ['cat *', 'grep *', 'head *', 'tail *', 'wc *', 'git log *', 'git diff *', 'git show *'],
+  },
   budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 5 },
 });

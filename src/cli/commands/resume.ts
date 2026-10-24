@@ -1,13 +1,17 @@
-// `sail resume <run> [-q|-v|-vv]`: resumes a suspended or crashed run of the repository sail is run from, and runs it to
-// its end from its journal. It takes `sail <ticket>`'s steps: the run's workflow is type-checked first, so a wrongly
-// wired stage never runs, and every refusal comes before the run's STATUS changes. A workflow changed since the run
-// started isn't refused: the determinism guard decides whether the journal still fits it. It asks nothing of the
-// ticket and claims nothing: the run's input is in its journal.
+// `sail resume <run> [--raise-budget <usd>] [--raise-minutes <minutes>] [-q|-v|-vv]`: resumes a suspended or crashed
+// run of the repository sail is run from, and runs it to its end from its journal. It takes `sail <ticket>`'s steps:
+// the run's workflow is type-checked first, so a wrongly wired stage never runs, and every refusal comes before the
+// run's STATUS changes. A workflow changed since the run started isn't refused: the determinism guard decides whether
+// the journal still fits it. It asks nothing of the ticket and claims nothing: the run's input is in its journal.
+//
+// A raise adds to the run's budget, and is recorded in its events before anything runs: a run suspended over its budget
+// resumes only with one that takes it back under, and a raise of a budget the run doesn't have is refused.
 //
 // Ctrl-C or SIGTERM suspends the run again, as it does during `sail <ticket>`, and the command prints how to resume it.
 //
 // The terminal view shows the whole run: it reads the run's earlier events first, prints nothing for them, and opens
 // with what already ran once the resume's first event arrives. A resume refused before then prints nothing.
+import type { Raise } from '../../engine/budget';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { findRun } from '../../engine/open-run';
 import { resumeWorkflow } from '../../engine/runtime';
@@ -28,10 +32,31 @@ import {
 
 const COMMAND = 'sail resume';
 
+/** The raise the flags ask for, or why one of them isn't a positive number. */
+function raiseOf(args: Parsed): Raise | { refused: string } {
+  const raise: Raise = {};
+  const flags = [
+    ['raise-budget', 'usd', 'dollars'],
+    ['raise-minutes', 'minutes', 'minutes'],
+  ] as const;
+  for (const [flag, field, unit] of flags) {
+    const given = args.values[flag];
+    if (typeof given !== 'string') continue;
+    const value = Number(given);
+    if (given.trim() === '' || !Number.isFinite(value) || value <= 0) {
+      return { refused: `--${flag} takes a positive number of ${unit}: '${given}'` };
+    }
+    raise[field] = value;
+  }
+  return raise;
+}
+
 export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   const refuse = refuseAs(io, COMMAND);
   const [runId] = args.positionals;
   if (runId === undefined) return refuse('usage: sail resume <run>');
+  const raise = raiseOf(args);
+  if ('refused' in raise) return refuse(raise.refused);
   const verbosity = verbosityOf(args, io, COMMAND);
   if (typeof verbosity === 'number') return verbosity;
   const project = await findProject(io, COMMAND);
@@ -52,6 +77,7 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
     resumeWorkflow({
       cwd: io.cwd,
       runId,
+      ...(Object.keys(raise).length === 0 ? {} : { raise }),
       adapters: recording?.adapters ?? project.adapters,
       signal,
       consumers: [terminal],

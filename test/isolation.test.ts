@@ -30,3 +30,9 @@ test('inherited git location variables are stripped', () => {
   expect(process.env.GIT_DIR).toBeUndefined();
   expect(process.env.GIT_WORK_TREE).toBeUndefined();
 });
+
+test("a sail step's variables are stripped, so a test's sail reads its own repository and not the run's", () => {
+  expect(process.env.SAIL_CONFIG).toBeUndefined();
+  expect(process.env.SAIL_EVENTS).toBeUndefined();
+  expect(process.env.SAIL_BUN).toBeUndefined();
+});

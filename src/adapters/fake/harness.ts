@@ -1,6 +1,8 @@
 // The fake Harness: answers scripted per call key and try, keeping no state, so a resume, a parallel call or a new
-// process gets the same answer (D2). It writes an answer's files into `$STAGE_OUT`, honours `maxTurns` and an abort,
-// and never rejects. It never checks `output` against the schema: invalid output is scripted as a `done` answer whose
+// process gets the same answer (D2). It writes an answer's files into `$STAGE_OUT`, honours `maxTurns`, `maxUsd`,
+// `maxMinutes` and an abort, and never rejects. As `claude-code` does, it ends a session once a turn before its last
+// has spent `maxUsd`, so a session's last turn may pass it, and it ends a scripted delay at `maxMinutes`. It never
+// checks `output` against the schema: invalid output is scripted as a `done` answer whose
 // output doesn't conform, which the agent kind rejects. Every session that starts ends once, with its id, the turns it
 // ran and what it spent.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -169,7 +171,13 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     }
     const usage = answer.usage ?? { costUsd: 0 };
     const wanted = answer.turns ?? 1;
-    const { maxTurns } = request.budget;
+    const { maxTurns, maxUsd, maxMinutes } = request.budget;
+    /** Ends the session over one of its budgets. */
+    const exceeded = (budget: 'turns' | 'usd' | 'minutes', limit: number, used: number) => {
+      emit({ type: 'budget:exceeded', budget, limit, used });
+      const name = { turns: 'maxTurns', usd: 'maxUsd', minutes: 'maxMinutes' }[budget];
+      return failed(`budget exceeded: ${name} ${limit}`, 'budget_exceeded');
+    };
     for (let turn = 1; turn <= Math.min(wanted, maxTurns); turn++) {
       const soFar = spentBy(usage, turn, wanted);
       progress.spent = soFar;
@@ -186,16 +194,16 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
         costUsdSoFar: soFar.costUsd,
       });
       if (stopped()) return failed('aborted');
+      if (turn < wanted && soFar.costUsd >= maxUsd) return exceeded('usd', maxUsd, soFar.costUsd);
     }
-    if (wanted > maxTurns) {
-      emit({ type: 'budget:exceeded', budget: 'turns', limit: maxTurns, used: progress.turns });
-      return failed(`budget exceeded: maxTurns ${maxTurns}`, 'budget_exceeded');
-    }
+    if (wanted > maxTurns) return exceeded('turns', maxTurns, progress.turns);
     // Every turn ran, so all of it is spent, exactly as scripted.
     progress.spent = usage;
 
-    if (answer.outcome === 'done' && answer.delayMs !== undefined && (await wait(answer.delayMs, request.signal))) {
-      return failed('aborted');
+    if (answer.outcome === 'done' && answer.delayMs !== undefined) {
+      const allowed = maxMinutes * 60_000;
+      if (await wait(Math.min(answer.delayMs, allowed), request.signal)) return failed('aborted');
+      if (answer.delayMs > allowed) return exceeded('minutes', maxMinutes, maxMinutes);
     }
     if (answer.outcome === 'done' && answer.files !== undefined) {
       const out = request.env.STAGE_OUT;
@@ -238,6 +246,12 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
         return { outcome: 'error', message, sessionId, usage: progress.spent, transcript, raw: null };
       }
     },
-    capabilities: () => ({ structuredOutput: true, permissions: false, usage: true, abort: true, budgets: ['turns'] }),
+    capabilities: () => ({
+      structuredOutput: true,
+      permissions: false,
+      usage: true,
+      abort: true,
+      budgets: ['turns', 'usd', 'minutes'],
+    }),
   };
 }

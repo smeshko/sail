@@ -19,6 +19,7 @@ import type { Budget, Permissions } from '../sdk/steps';
 export const EVENT_TYPES = [
   'run:start',
   'run:end',
+  'run:suspended',
   'intake:start',
   'intake:end',
   'stage:start',
@@ -49,6 +50,7 @@ export const EVENT_TYPES = [
   'usage:update',
   'budget:warning',
   'budget:exceeded',
+  'budget:raised',
   'ticket:fetched',
   'ticket:claimed',
   'ticket:updated',
@@ -106,6 +108,8 @@ interface Payloads {
     /** The replays this process ran. */
     replays: number;
   };
+  /** A run suspended on its budget, right before its `run:end`: which budget, its limit and what was used. */
+  'run:suspended': { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number };
   'stage:start': {
     key: string;
     stage: string;
@@ -247,6 +251,8 @@ interface Payloads {
   /** A step's budget carries its call's key, and the run's carries none. */
   'budget:warning': { key?: string; budget: 'turns' | 'usd' | 'minutes'; limit: number; used: number };
   'budget:exceeded': { key?: string; budget: 'turns' | 'usd' | 'minutes'; limit: number; used: number };
+  /** A raise given to `sail resume`: what it added, at least one of the two, and the run's budget after it. */
+  'budget:raised': { usd?: number; minutes?: number; budget: NonNullable<RunHeader['budget']> };
   'error:harness': { key: string; message: string };
   'error:timeout': { key: string; message: string; timeoutSeconds: number };
   'error:crash': { message: string; key?: string };

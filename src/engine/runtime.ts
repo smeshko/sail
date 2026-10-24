@@ -42,6 +42,15 @@
 // and every step line must belong to a call the journal holds or the workflow asks for now: anything else fails the
 // run with `determinism_violation`, before anything runs.
 //
+// A run with a budget is driven under its tracker (`budget.ts`). Each agent request is handed the run's share of what it
+// has left, and the harness ends a session that reaches it. A call that ran out of the run's budget, an `error` with
+// `budget_exceeded` whose request the run's budget narrowed, is left unjournaled, so the next replay asks for it again.
+// So is a step of a multi-step call, with its call. The budget is checked before the intake and before each call, after
+// the abort and the control file: a run that has used it up is suspended with `budget_exceeded`, `run:suspended` then
+// STATUS then `run:end`, keeping its workspace and lease. Within a multi-step call it is checked again after each step
+// that passed with another to follow: once used up, the call stops there unjournaled, and the check before it suspends
+// the run. A resume given a raise records it as `budget:raised` before anything runs.
+//
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
 // Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
@@ -69,13 +78,14 @@
 // only sets an exit code, but nothing it reports after that is emitted.
 import { dirname, join, relative } from 'node:path';
 import { createBus } from '../events/bus';
-import { ndjsonConsumer } from '../events/consumers/ndjson';
+import { ndjsonConsumer, readEvents } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
 import type { StageDefinition } from '../sdk/steps';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
+import { type BudgetTracker, recordIn, suspension, trackBudget } from './budget';
 import { type AgentExecution, asStep, callProblems, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
@@ -119,6 +129,8 @@ export interface RunEnd {
   message?: string;
   /** What the workflow returned, when it completed. */
   result?: unknown;
+  /** The budget a run suspended with `budget_exceeded` used up. */
+  budget?: 'usd' | 'minutes';
 }
 
 export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
@@ -194,10 +206,12 @@ function entryFrom(
  * What an agent call runs on: the run's harness, the conventions `project.yaml` lists now, and the model the run's
  * roster froze at its start, which a resume keeps whatever the alias names by then.
  */
-function executionOf(opened: OpenedRun, stage: string): AgentExecution {
+function executionOf(opened: OpenedRun, stage: string, tracker: BudgetTracker | undefined): AgentExecution {
   const entry = opened.header.stages[stage];
   const { conventions } = opened.config;
-  const on = { harness: opened.adapters.harness, ...(conventions === undefined ? {} : { conventions }) };
+  // A multi-step stage's agent steps run on this harness too, so each of their requests is narrowed as a call's is.
+  const harness = tracker === undefined ? opened.adapters.harness : tracker.harness(opened.adapters.harness);
+  const on = { harness, ...(conventions === undefined ? {} : { conventions }) };
   if (entry?.steps !== undefined) {
     // A multi-step stage's roster holds each step's own model.
     const models = Object.fromEntries(
@@ -216,6 +230,16 @@ function executionOf(opened: OpenedRun, stage: string): AgentExecution {
 const runsAgent = (definition: StageDefinition): boolean =>
   definition.kind === 'agent' ||
   (definition.kind === 'stage' && definition.steps.some((step) => step.kind === 'agent'));
+
+/** The outcomes a step passes with, so the next step of its call runs. */
+const PASSED = new Set(['done', 'passed']);
+
+/** Whether `call`'s stage has a step after `step`. */
+const stepFollows = (call: PendingCall, step: unknown): boolean => {
+  const steps = call.definition.kind === 'stage' ? call.definition.steps : [];
+  const index = steps.findIndex((each) => each.name === step);
+  return index >= 0 && index < steps.length - 1;
+};
 
 /** The call key a step line's key belongs to: `publish#1` for `publish#1/describe`. */
 const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
@@ -343,6 +367,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   const replayEmit: Emit = (event) => {
     if (!ended) bus.emit(event);
   };
+  const tracker = trackBudget({
+    budget: header.budget,
+    prior: start ? [] : readEvents(dir),
+    emit: bus.emit,
+    record: recordIn(dir),
+    elapsed: () => performance.now(),
+  });
+  /** A call's events, folded into the run's budget as they go out. */
+  const tapped: Emit = (event) => {
+    const stamped = bus.emit(event);
+    tracker?.observe(stamped);
+  };
   const root = dirname(sailDir);
   /**
    * Emits what an adapter emitted, under the running call's key. A workspace event has none, nor one between calls, and
@@ -399,6 +435,20 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     finish({ runId, dir, status: 'failed', stopReason, message });
   const suspended = (stopReason: 'interrupted' | 'until' | 'unwatched', message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'suspended', stopReason, message });
+  /** How the run ends at the boundary before `key` once it has used up its budget, or undefined to go on. */
+  const overBudget = (key: string): Promise<RunEnd> | undefined => {
+    tracker?.assertRecorded();
+    const over = tracker?.over();
+    if (over === undefined) return undefined;
+    const { event, message } = suspension(over, key);
+    bus.emit(event);
+    return finish({ runId, dir, status: 'suspended', stopReason: 'budget_exceeded', message, budget: over.budget });
+  };
+  /** A call that ran out of the run's budget: an error over a budget the run narrowed. It is left unjournaled. */
+  const ranOut = (result: Record<string, unknown>): boolean =>
+    tracker?.narrowed(result.key as string) === true &&
+    result.outcome === 'error' &&
+    ((result.errors ?? []) as { reason: string }[]).some((error) => error.reason === 'budget_exceeded');
   const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
   /** How the run ends at the boundary before `key`, when its control file asks it to, or undefined to go on. */
   const controlled = (key: string): Promise<RunEnd> | undefined => {
@@ -416,7 +466,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
   }
   /** The call's agent execution, its gitDiff patches and its contract's check, or why it can't run. */
   const prepare = async (call: PendingCall, finished: JournalEntry[]): Promise<Ready | { failed: string }> => {
-    const agent = runsAgent(call.definition) ? executionOf(opened, call.stage) : undefined;
+    const agent = runsAgent(call.definition) ? executionOf(opened, call.stage, tracker) : undefined;
     const diffs = await gitDiffs(opened, call);
     if ('failed' in diffs) return diffs;
     const supplied = { ...call.supplied, ...diffs.supplied };
@@ -441,22 +491,31 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         supplied,
         ...(callSignal === undefined ? {} : { signal: callSignal }),
         ...(agent === undefined ? {} : { agent }),
-        emit: bus.emit,
+        emit: tapped,
         clock,
       },
       {
         finished,
-        // A step that ends once the run is stopping isn't journaled: a resume runs it again.
+        // A step that ends once the run is stopping isn't journaled: a resume runs it again. Nor is one that ran out of
+        // the run's budget, which stops its call as a call is left: the next replay asks for the call again, and it runs
+        // from that step. The budget is checked before each further step as before each call: once a step that passed
+        // has used it up, the next doesn't start, and the boundary before the call suspends the run.
         onStep: (result, paths) => {
-          if (callSignal?.aborted) return false;
+          if (callSignal?.aborted || ranOut(result)) return false;
           journal(result, paths);
-          return callSignal?.aborted !== true;
+          if (callSignal?.aborted) return false;
+          return !(
+            PASSED.has(String(result.outcome)) &&
+            stepFollows(call, result.step) &&
+            tracker?.over() !== undefined
+          );
         },
         diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch,
       },
     );
   /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
   const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
+    tracker?.assertRecorded();
     const journaled = appendJournal(dir, entryFrom(dir, result, paths, group), clock());
     bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
     reached ||= journaled.key === last;
@@ -484,6 +543,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     // What opening the run did, before this stream existed to hear it: the lease and the workspace, then what the claim
     // did to the ticket. No call was running, so no key.
     for (const event of opened.started) bus.emit(event);
+    if (opened.raise !== undefined) tracker?.raise(opened.raise);
     for (const event of opened.claimed) bus.emit(event);
     // A seeded run's reused calls, each once: they were journaled as the run opened, with no stream to hear them.
     if (opened.seeded !== undefined) {
@@ -501,7 +561,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         return await failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
       }
       if (signal?.aborted) return await interrupted(`stopped before ${INTAKE_KEY}`);
-      const beforeIntake = controlled(INTAKE_KEY);
+      const beforeIntake = controlled(INTAKE_KEY) ?? overBudget(INTAKE_KEY);
       if (beforeIntake !== undefined) return await beforeIntake;
       running = INTAKE_KEY;
       const { result, paths } = await runIntake({
@@ -612,12 +672,17 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       }
       const what = end.kind === 'call' ? first : `the group ${end.keys.join(', ')}`;
       if (signal?.aborted) return await interrupted(`stopped before ${what}`);
-      const beforeCall = controlled(first);
+      const beforeCall = controlled(first) ?? overBudget(what);
       if (beforeCall !== undefined) return await beforeCall;
       if (end.kind === 'call') {
         const [one] = ready as [Ready];
-        const { result, paths } = await launch(one, signal);
+        const { result, paths, stopped } = await launch(one, signal);
         if (signal?.aborted) return await interrupted(`stopped during ${first}`);
+        // Stopped short of its last step, the call is left for the next replay to ask for again.
+        if (stopped === true || ranOut(result)) {
+          running = undefined;
+          continue;
+        }
         const journaled = journal(result, paths);
         running = undefined;
         options.onCall?.(journaled);
@@ -642,9 +707,9 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const settled = await Promise.allSettled(
         ready.map(async (each) => {
           try {
-            const { result, paths } = await launch(each, groupSignal);
+            const { result, paths, stopped } = await launch(each, groupSignal);
             // A call that returns once the run is stopping isn't journaled: a resume runs it again.
-            if (groupSignal.aborted) return;
+            if (groupSignal.aborted || stopped === true || ranOut(result)) return;
             const journaled = journal(result, paths, keys);
             journaledNow++;
             settle(each);
