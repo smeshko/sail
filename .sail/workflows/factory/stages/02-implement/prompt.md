@@ -2,12 +2,24 @@ Implement the plan at `{{plan}}`: walk its tasks in order, test first, and make 
 plan end to end first: its Goal, Scope, Decisions and Acceptance Criteria bound everything you do.
 
 {{#if feedback}}
+{{#if feedback.validation}}
 ## The last pass failed validation
 
-`$STAGE_IN/feedback.json` holds what validation found: paths left uncommitted, and how `bun run gate` ended, each
-failing test named with its error. Your commits from that pass are on the branch. Fix what it reports first, in commits
-of their own (`fix(<scope>): …`), then carry on with any task not yet committed.
+`$STAGE_IN/feedback.json` holds, under `validation`, what validation found: paths left uncommitted, and how
+`bun run gate` ended, each failing test named with its error. Your commits from that pass are on the branch. Fix what
+it reports first, in commits of their own (`fix(<scope>): …`), then carry on with any task not yet committed.
 
+{{/if}}
+{{#if feedback.demonstration}}
+## The last pass couldn't be demonstrated
+
+Validation passed, but running the change the way a user would didn't show what the plan's Demonstration section
+expects. `$STAGE_IN/feedback.json` holds, under `demonstration`, each acceptance criterion with whether it was shown
+and what was seen instead, and the transcript of the commands run. Your commits from that pass are on the branch. Find
+why the behaviour differs, in the code or in a test that passed without proving it, and fix it in commits of their own
+(`fix(<scope>): …`), each with a test that fails without the fix. Then carry on with any task not yet committed.
+
+{{/if}}
 {{/if}}
 ## For each task, in order
 

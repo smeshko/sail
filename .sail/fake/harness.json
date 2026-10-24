@@ -56,6 +56,64 @@
       }
     }
   ],
+  "demonstrate#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "criteria": [
+          {
+            "criterion": "`sail show <run>` ends with `total $<cost>`",
+            "shown": true,
+            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`, the sum of the calls' costUsd in summary.json"
+          },
+          {
+            "criterion": "A run with no agent calls prints `total $0.00`",
+            "shown": false,
+            "evidence": "a run of a one-script workflow: `sail show` ended with `total $` and nothing after it, not `total $0.00`"
+          }
+        ],
+        "transcript": "$ sail FAKE-1\n…\ncompleted · 1.8s\nexit 0\n$ sail show FAKE-1-01M5PXSR234D2RJBV32YSAZDP3\n…\ntotal $1.35\nexit 0\n$ sail FAKE-2\n…\ncompleted · 0.4s\nexit 0\n$ sail show FAKE-2-01M5PY0000000000000000000\n…\ntotal $\nexit 0"
+      },
+      "messages": ["One of two criteria shown: the no-agent run prints an empty total."],
+      "turns": 18,
+      "usage": {
+        "inputTokens": 3000,
+        "cacheReadTokens": 12000,
+        "cacheWriteTokens": 1000,
+        "outputTokens": 900,
+        "costUsd": 0.6
+      }
+    }
+  ],
+  "demonstrate": [
+    {
+      "outcome": "done",
+      "output": {
+        "criteria": [
+          {
+            "criterion": "`sail show <run>` ends with `total $<cost>`",
+            "shown": true,
+            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`, the sum of the calls' costUsd in summary.json"
+          },
+          {
+            "criterion": "A run with no agent calls prints `total $0.00`",
+            "shown": true,
+            "evidence": "a run of a one-script workflow: `sail show` ended with `total $0.00`"
+          }
+        ],
+        "transcript": "$ sail FAKE-1\n…\ncompleted · 1.8s\nexit 0\n$ sail show FAKE-1-01M5PXSR234D2RJBV32YSAZDP3\n…\ntotal $1.35\nexit 0\n$ sail FAKE-2\n…\ncompleted · 0.4s\nexit 0\n$ sail show FAKE-2-01M5PY0000000000000000000\n…\ntotal $0.00\nexit 0"
+      },
+      "messages": ["Both criteria shown."],
+      "turns": 14,
+      "usage": {
+        "inputTokens": 3000,
+        "cacheReadTokens": 12000,
+        "cacheWriteTokens": 1000,
+        "outputTokens": 900,
+        "costUsd": 0.5
+      }
+    }
+  ],
   "review#1": [
     {
       "outcome": "done",

@@ -3,9 +3,9 @@
 // Usage: bun .sail/lib/demo.mjs <command> …, or .sail/lib/demo.sh <command> …
 //   new <dir> [--from <sail-dir>]  a git repository at <dir>/repo holding a copy of <sail-dir>, the fixture
 //                                  repository's .sail/ when left out, and the HOME its commands get, at <dir>/home
-//   run <dir> <command> [args…]    commits what changed in <dir>/repo, runs the command there with this checkout's
-//                                  sail first on its PATH, prints what it printed and appends it to
-//                                  <dir>/transcript.txt; exits with the command's code
+//   run <dir> sail [args…]         commits what changed in <dir>/repo, runs this checkout's sail there, prints what
+//                                  it printed and appends it to <dir>/transcript.txt; exits with sail's code. Only
+//                                  sail runs, so a stage allowed this harness runs nothing else through it
 // The environment a command gets is built from nothing: no SAIL_CONFIG, SAIL_EVENTS or SAIL_BUN from a step around
 // it, no keys, and a HOME, SAIL_HOME and git identity of its own. A repository whose ports aren't all fake is refused.
 import { spawn, spawnSync } from 'node:child_process';
@@ -117,14 +117,14 @@ async function runIn(dir, argv) {
 }
 
 const [command, target, ...rest] = process.argv.slice(2);
-if (target === undefined) refuse('usage: demo.sh new <dir> [--from <sail-dir>] | demo.sh run <dir> <command> [args…]');
+if (target === undefined) refuse('usage: demo.sh new <dir> [--from <sail-dir>] | demo.sh run <dir> sail [args…]');
 const dir = resolve(target);
 if (command === 'new') {
   if (rest.length !== 0 && (rest.length !== 2 || rest[0] !== '--from'))
     refuse('usage: demo.sh new <dir> [--from <sail-dir>]');
   create(dir, resolve(rest[1] ?? FIXTURE_SAIL));
 } else if (command === 'run') {
-  if (rest.length === 0) refuse('usage: demo.sh run <dir> <command> [args…]');
+  if (rest[0] !== 'sail') refuse('usage: demo.sh run <dir> sail [args…]: only sail runs here');
   await runIn(dir, rest);
 } else {
   refuse(`no command ${command}: new or run`);
