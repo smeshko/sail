@@ -12,6 +12,11 @@ export const writeTests = agent('write-tests', {
     read: ['**'],
     write: ['src/**', 'test/**', 'types/**', 'schemas/**', '$STAGE_OUT/**'],
     commands: [
+      'cat *',
+      'grep *',
+      'head *',
+      'tail *',
+      'wc *',
       'bun run test *',
       'bun run typecheck',
       'bun run lint',

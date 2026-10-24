@@ -52,6 +52,7 @@ export const Validation = z.object({
   /** Tests changed beyond their stickers, and stickers left. */
   violations: z.array(z.string()),
   amendments: z.array(z.string()),
+  /** How `bun run gate` ended. */
   verify: z.object({ ok: z.boolean(), exitCode: z.number().int(), tail: z.string() }),
 });
 
