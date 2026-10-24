@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
 import {
   existsSync,
   mkdirSync,
@@ -11,7 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendLine, createDir, createFileOnce, replaceFile, syncDir } from '../../src/engine/durable';
+import { appendLine, createDir, createFileOnce, replaceFile, syncDir, syncFile } from '../../src/engine/durable';
 import { syncedDirs } from '../helpers/synced-dirs';
 
 const dirs: string[] = [];
@@ -103,4 +104,22 @@ test('syncDir syncs a directory, and throws for one that is missing', () => {
   const dir = tempDir();
   expect(() => syncDir(dir)).not.toThrow();
   expect(() => syncDir(join(dir, 'missing'))).toThrow(expect.objectContaining({ code: 'ENOENT' }));
+});
+
+test('syncFile syncs the descriptor it opened on the file, and throws for a file that is missing', () => {
+  const dir = tempDir();
+  const path = join(dir, 'events.ndjson');
+  writeFileSync(path, '{"seq":1}\n');
+  const open = spyOn(fs, 'openSync');
+  const fsync = spyOn(fs, 'fsyncSync');
+  try {
+    syncFile(path);
+    const opened = open.mock.calls.map(([at], i) => [String(at), open.mock.results[i]?.value]);
+    const synced = fsync.mock.calls.map(([fd]) => opened.find(([, each]) => each === fd)?.[0]);
+    expect(synced).toEqual([path]);
+  } finally {
+    open.mockRestore();
+    fsync.mockRestore();
+  }
+  expect(() => syncFile(join(dir, 'missing'))).toThrow(expect.objectContaining({ code: 'ENOENT' }));
 });

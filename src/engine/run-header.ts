@@ -5,6 +5,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import type { TicketState } from '../ports/types';
+import { runBudgetOf } from './budget';
 import type { Port, ProjectConfig } from './config';
 import { createFileOnce } from './durable';
 import type { LoadedWorkflow } from './load-workflow';
@@ -120,7 +121,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
   const { runId, source, claim, fromRun, sailDir, loaded, config, adapters, now } = fields;
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
-  const budget = config.budgets.run;
+  const budget = runBudgetOf(config.budgets.run, loaded.workflow.budget);
   return {
     schema: 'sail.run.v1',
     runId,
@@ -137,7 +138,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
     adapters,
     intake,
     stages,
-    ...(budget !== undefined && Object.keys(budget).length > 0 ? { budget } : {}),
+    ...(budget === undefined ? {} : { budget }),
     startedAt: now.toISOString(),
     ...(fields.workspace === undefined ? {} : workspaceFields(fields.workspace)),
   };

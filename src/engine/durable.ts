@@ -1,12 +1,22 @@
-// The fsync discipline for the files a run directory keeps: the journal, STATUS, run.json and summary.json. A write is
-// durable once its bytes are synced and so is the directory entry that names them, so every helper here syncs both
-// before it returns.
+// The fsync discipline for the files a run directory keeps: the journal, STATUS, run.json and summary.json, and the
+// events the run's budget tracker confirms. A write is durable once its bytes are synced and so is the directory entry
+// that names them, so every helper here syncs both before it returns, apart from `syncFile()`, whose file exists.
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /** Syncs `dir` itself, so the entries created, renamed or removed in it survive a crash. */
 export function syncDir(dir: string): void {
   const fd = openSync(dir, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Syncs the file `path`, which must exist: what was appended to it without a sync survives a crash once this returns. */
+export function syncFile(path: string): void {
+  const fd = openSync(path, 'r');
   try {
     fsyncSync(fd);
   } finally {

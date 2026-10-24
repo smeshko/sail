@@ -11,10 +11,15 @@
 // A group's calls print their lines as they come, interleaved, between a header and a closing line keyed `all`: lines
 // are never held back, so `sail show --follow` prints what the run printed. While a group runs, the live line counts
 // its running calls instead of naming one of them.
+//
+// The run's own budget events print from normal, a warning in yellow and an exceeded budget in red, and so does a raise
+// (`budget-view.ts`). A step's, which carry their call's key, print only at trace. The final block has a `cost` row once
+// the run has used anything, against its budget as raised.
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { JournalEntry } from '../../engine/journal';
 import type { Consumer, EventType, SailEvent } from '../types';
+import { budgetText, createBudgetView, raisedText } from './budget-view';
 import { clean, createScreen, type Every, type Line, type Segment, type Style, type Tty } from './screen';
 
 export const VERBOSITIES = ['quiet', 'normal', 'verbose', 'trace'] as const;
@@ -50,6 +55,7 @@ const SHOWN_FROM: Partial<Record<EventType, Verbosity>> = {
   'all:end': 'normal',
   'workflow:route': 'verbose',
   'journal:append': 'trace',
+  'budget:raised': 'normal',
   'run:end': 'quiet',
 };
 
@@ -131,6 +137,10 @@ export interface TerminalConsumer extends Consumer {
 type EndEvent = Extract<SailEvent, { type: 'intake:end' | 'stage:end' | 'step:end' }>;
 type RunEnd = Extract<SailEvent, { type: 'run:end' }>;
 
+/** A budget event of the run's own, which carries no key: a step's carries its call's. */
+const isRunBudget = (event: SailEvent): event is Extract<SailEvent, { type: 'budget:warning' | 'budget:exceeded' }> =>
+  (event.type === 'budget:warning' || event.type === 'budget:exceeded') && event.key === undefined;
+
 const isEnd = (event: SailEvent): event is EndEvent =>
   event.type === 'intake:end' || event.type === 'stage:end' || event.type === 'step:end';
 
@@ -190,6 +200,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   let group: { keys: string[]; since: number } | undefined;
   /** Set by `prior` until the first live event, which prints the resume line first. */
   let resuming = false;
+  const budgetView = createBudgetView();
 
   /** The group's running calls of all its calls: `2/3`. */
   const groupCount = ({ keys }: { keys: string[] }): string =>
@@ -225,6 +236,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
 
   function shows(event: SailEvent): boolean {
     if (isReported(event.type) || (isEnd(event) && event.outcome === 'error')) return true;
+    if (isRunBudget(event)) return level >= LEVEL.normal;
     return level >= LEVEL[SHOWN_FROM[event.type] ?? 'trace'];
   }
 
@@ -232,6 +244,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   function update(event: SailEvent): void {
     const at = Date.parse(event.ts);
     firstAt ??= at;
+    budgetView.update(event);
     switch (event.type) {
       case 'run:start': {
         startedAt ??= at;
@@ -338,7 +351,10 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     if (loops.size > 0) {
       rows.push(['loops', [...loops].map(([name, loop]) => `${name} ${loop.iteration}/${loop.max}`).join(', ')]);
     }
-    rows.push(['replays', String(replays)], ['run', `${options.shownRunsDir}/${event.runId}`]);
+    rows.push(['replays', String(replays)]);
+    const cost = budgetView.costRow();
+    if (cost !== undefined) rows.push(cost);
+    rows.push(['run', `${options.shownRunsDir}/${event.runId}`]);
     const at = Date.parse(event.ts);
     const duration = formatDuration(at - (startedAt ?? firstAt ?? at));
     return [
@@ -419,6 +435,12 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         return event.reason === 'break'
           ? [head(event.loop, '↻', `break after ${event.iterations}/${event.max}`)]
           : [head(event.loop, ['red', '✗ exceeded'], `${event.iterations}/${event.max}`)];
+      case 'budget:warning':
+      case 'budget:exceeded':
+        if (!isRunBudget(event)) return otherLines(event);
+        return [head(undefined, [event.type === 'budget:warning' ? 'yellow' : 'red', '$'], budgetText(event))];
+      case 'budget:raised':
+        return [head(undefined, '$', raisedText(event))];
       case 'error:crash':
         return message(event.key, `crash: ${event.message}`, (line) => head(event.key, ['red', '✗'], line));
       case 'error:consumer': {

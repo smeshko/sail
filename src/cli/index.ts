@@ -67,6 +67,10 @@ Starting a run from a ticket:
   --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
   --record <dir>   Writes each agent session to <dir> as a recording; sail resume takes it too
 
+Resuming a run:
+  --raise-budget <usd>       Adds that many dollars to the run's budget, for a run suspended over it
+  --raise-minutes <minutes>  Adds that many minutes to the run's budget
+
 A seeded run:
   --continue  Runs the rest of the workflow after the stage, not just the stage
 
@@ -164,7 +168,19 @@ const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
   ['dashboard', { options: { port: { type: 'string' } }, positionals: 0, command: dashboard }],
   ['init', bare(init)],
-  ['resume', { options: { ...VERBOSITY_OPTIONS, record: { type: 'string' } }, positionals: 1, command: resume }],
+  [
+    'resume',
+    {
+      options: {
+        ...VERBOSITY_OPTIONS,
+        record: { type: 'string' },
+        'raise-budget': { type: 'string' },
+        'raise-minutes': { type: 'string' },
+      },
+      positionals: 1,
+      command: resume,
+    },
+  ],
   [
     'run',
     {

@@ -271,6 +271,10 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
       // A step's line is its call's: the replay makes no move after it, so a route the resume reports again repeats.
       if (!event.key.includes('/')) state.journaledSinceRoute = true;
       if (event.fromRun !== undefined) reuseCall(state, event, event.fromRun);
+      break;
+    case 'budget:raised':
+      // The budget is the raised one from here on: `totals.budget` follows it.
+      if (state.run !== undefined && event.budget.maxUsd !== undefined) state.run.maxUsd = event.budget.maxUsd;
   }
 }
 

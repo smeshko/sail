@@ -171,6 +171,35 @@ test("the fixture's header validates, with the workflow's folder, the adapters a
   expect(header.intake.name).toBe('ticket');
 });
 
+test("a workflow's budget overrides project.yaml's field by field, and stands alone without one: the header validates and holds the merged budget a dry run prints", async () => {
+  const headerOf = (change: (sail: string) => void) =>
+    withTempRepo(async (repo) => {
+      const sail = copyFixture(repo.dir);
+      edit(sail, WORKFLOW, ' version: 1,', ' version: 1, budget: { maxUsd: 0.5 },');
+      change(sail);
+      const { loaded, config } = await load(sail);
+      return buildRunHeader({
+        runId: RUN_ID,
+        source: FAKE_1,
+        claim: CLAIMED,
+        sailDir: sail,
+        loaded,
+        config,
+        adapters: FAKE_ENTRIES,
+        now: NOW,
+      });
+    });
+  const merged = await headerOf(() => {});
+  const alone = await headerOf((sail) =>
+    edit(sail, 'project.yaml', 'budgets: { run: { maxUsd: 25, maxMinutes: 90 } }', 'budgets: { run: {} }'),
+  );
+  expect({
+    merged: merged.budget,
+    alone: alone.budget,
+    issues: [...validateRunHeader(merged), ...validateRunHeader(alone)],
+  }).toEqual({ merged: { maxUsd: 0.5, maxMinutes: 90 }, alone: { maxUsd: 0.5 }, issues: [] });
+});
+
 test('a workflow without a version is version 1, and a config without a run budget leaves budget out', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);

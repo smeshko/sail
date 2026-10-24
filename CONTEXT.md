@@ -278,6 +278,10 @@ _Avoid_: signal file, kill file, flag
 Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs.
 _Avoid_: restart, rerun, retry, continue
 
+**Raise**:
+What is added to a suspended run's budget, in dollars or minutes, given to `sail resume` and recorded as a `budget:raised` event. `run.json` keeps the budget the run started with.
+_Avoid_: top-up, extension, bump
+
 **Seeded run**:
 A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun`. It claims nothing, and works on a branch of its own.
 _Avoid_: rerun, fork, clone, replay
@@ -400,7 +404,7 @@ A tool call refused for falling outside the step's permissions, recorded with th
 _Avoid_: block, violation, rejection
 
 **Budget**:
-The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended.
+The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
 _Avoid_: limit, quota, cap, allowance
 
 ### Ports

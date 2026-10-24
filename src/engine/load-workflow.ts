@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { Intake, StageDefinition, Workflow } from '../sdk/index';
 import * as intakes from '../sdk/intakes';
+import { workflowBudgetProblem } from './budget';
 import { byFile, type Definitions, isStageDefinition, loadDefinitions } from './definitions';
 import { type ImportGraph, importGraph } from './imports';
 import { layoutProblems, reach } from './layout';
@@ -115,6 +116,8 @@ export async function loadWorkflow(sailDir: string, name: string): Promise<Loade
     const definition = Object.values(module).find(isStageDefinition) as StageDefinition;
     stages.push({ definition, dir: dirname(stage.file), module });
   }
+  const budget = workflowBudgetProblem(workflow.budget);
+  if (budget !== undefined) return { refused: `${at(file)}: its budget ${budget}` };
   const intake = await findIntake(workflow.intake, definitions, inGraph);
   if (intake === undefined) {
     const why = 'is neither built in nor exported by an intake.ts it imports';
