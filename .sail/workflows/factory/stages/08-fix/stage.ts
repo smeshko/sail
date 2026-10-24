@@ -30,7 +30,6 @@ export const fix = agent('fix', {
       'bun run typecheck',
       'bun run lint',
       'bun run fix',
-      'bun run gate',
       'bun run types',
       'bun run golden',
       'git add *',

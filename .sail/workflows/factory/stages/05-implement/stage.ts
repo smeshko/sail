@@ -41,7 +41,6 @@ export const implement = agent('implement', {
       'bun run typecheck',
       'bun run lint',
       'bun run fix',
-      'bun run gate',
       'bun run types',
       'bun run golden',
       'bun .sail/lib/strip-stickers.mjs *',

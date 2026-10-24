@@ -13,9 +13,9 @@ tight (one per acceptance behaviour, asserting the exact value), then implement.
 {{#if feedback}}
 ## The last pass failed validation
 
-`$STAGE_IN/feedback.json` holds what validation found: paths left uncommitted, test violations, and the tail of
-`bun run verify`. Your commits from that pass are on the branch. Fix what it reports first, in commits of their own
-(`fix(<scope>): …`), then carry on with any task not yet committed.
+`$STAGE_IN/feedback.json` holds what validation found: paths left uncommitted, test violations, and how
+`bun run gate` ended, each failing test named with its error. Your commits from that pass are on the branch. Fix what
+it reports first, in commits of their own (`fix(<scope>): …`), then carry on with any task not yet committed.
 
 {{/if}}
 ## For each task, in order
@@ -27,12 +27,14 @@ tight (one per acceptance behaviour, asserting the exact value), then implement.
    bun run fix
    bun run test <the task's test files>
    ```
-3. **Green**: change production code until the task's tests and the rest of the suite pass. **Refactor**: production
-   code only, the tests staying green.
+3. **Green**: change production code until the task's tests pass, and the test files beside the code you changed.
+   **Refactor**: production code only, the tests staying green.
 4. **Checklist** tasks are non-code work, such as `bun run types` or `bun run golden`: run their steps in order.
 5. **Verify the acceptance** with the evidence the task names: run the tests and keep the output. Code that compiles or
    looks right is not evidence. Don't commit a task whose acceptance fails.
-6. Run `bun run gate`.{{#if lock.testsCommit}} Then run `bun .sail/lib/check-tests.mjs {{lock.testsCommit}}`: its
+6. Run `bun run typecheck` and `bun run lint`. Run test files by name, never a folder or the whole suite, and never
+   `bun run gate`: a broad run outlasts your 10-minute command limit, and validation runs the affected tests after
+   the last task.{{#if lock.testsCommit}} Then run `bun .sail/lib/check-tests.mjs {{lock.testsCommit}}`: its
    `violations` must list only the stickers of later tasks.{{/if}}
 7. **Commit**: stage every path the task changed by name (`git add <paths>`, never `-A` or `.`), and commit with the
    task's suggested subject, its type or scope changed only if the diff demands it, ending with the ticket:

@@ -29,7 +29,8 @@ For each, in order:
 3. A test proves the fix: a regression case that fails before the fix and passes after it. The tests are locked, so it
    lands in a commit of its own, `test({{commit.scope}}): amend: a regression case for <what> (review <id>)
    ({{commit.ticketKey}})`, and changes no existing assertion.
-4. Run `bun run gate`. The full suite runs once the rounds are done.
+4. Run the fix's test files by name, then `bun run typecheck` and `bun run lint`. Never run a folder, the whole suite
+   or `bun run gate`: validation runs the affected tests once the rounds are done.
 
 ## Submit
 
