@@ -97,7 +97,10 @@ export interface GitHubWorldSeed {
   readonly issues?: readonly number[];
   /** What adding a label the repository doesn't have does: GitHub creates it unless told to drop it. */
   readonly missingLabels?: 'create' | 'drop';
-  /** The labels the repository has, for `missingLabels: 'drop'`. */
+  /**
+   * The labels the repository has, for `missingLabels: 'drop'`. GitHub's label names are case-insensitive: a label asked
+   * for in other case is one of these, applied under the repository's name.
+   */
   readonly repositoryLabels?: readonly string[];
   /**
    * Whether an open pull request's head follows its branch in the bare repository: its `headSha` is read from there on
@@ -180,7 +183,9 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
   const prefix = `/repos/${owner}/${repo}`;
   const requests: WorldRequest[] = [];
   const injected: Injected[] = [];
-  const known = new Set(seed.repositoryLabels ?? []);
+  const known = seed.repositoryLabels ?? [];
+  /** Whether two label names are one label, as GitHub matches them: without regard to case. */
+  const sameLabel = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
   /** The head sha of `branch` in the bare repository, or undefined when it has no such branch. */
   const headOf = (branch: string): string | undefined => {
@@ -360,11 +365,14 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
       const number = Number(labels[1]);
       const pr = find(number);
       if (pr === undefined && !isIssue(number)) return notFound();
-      const asked = ((body as { labels?: string[] }).labels ?? []).filter(
-        (name) => seed.missingLabels !== 'drop' || known.has(name),
-      );
+      // A name the repository has in any case is that label, and one the pull request holds in any case adds nothing.
+      const asked = ((body as { labels?: string[] }).labels ?? [])
+        .map(
+          (name) => known.find((each) => sameLabel(each, name)) ?? (seed.missingLabels === 'drop' ? undefined : name),
+        )
+        .filter((name) => name !== undefined);
       const held = pr?.labels ?? [];
-      for (const name of asked) if (!held.includes(name)) held.push(name);
+      for (const name of asked) if (!held.some((each) => sameLabel(each, name))) held.push(name);
       return json(
         200,
         held.map((name, i) => ({ id: i + 1, name })),
@@ -406,11 +414,12 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
       const number = Number(label[1]);
       const pr = find(number);
       const name = decodeURIComponent(String(label[2]));
-      // An issue's labels aren't kept: one never has the label asked for.
-      if (pr === undefined || !pr.labels.includes(name)) {
+      // An issue's labels aren't kept: one never has the label asked for. A held label matches in any case.
+      const held = pr?.labels.find((each) => sameLabel(each, name));
+      if (pr === undefined || held === undefined) {
         return json(404, { message: 'Label does not exist', documentation_url: 'https://docs.github.com/rest' });
       }
-      pr.labels = pr.labels.filter((each) => each !== name);
+      pr.labels = pr.labels.filter((each) => each !== held);
       return json(
         200,
         pr.labels.map((each, i) => ({ id: i + 1, name: each })),
