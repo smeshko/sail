@@ -1,7 +1,8 @@
 // The page's shell. `boot(host)` holds what is on screen and keeps it live:
 //
 // - One index socket feeds the rail, needs attention, the queues and the open run's summary. The first index opens the
-//   newest running run, else the newest run, and a selection is kept while its run is still listed.
+//   newest running run, else the newest run, unless the URL names a run it lists, and a selection is kept while its
+//   run is still listed.
 // - One run socket is open at a time, for the open run, and its events are folded into the run model. A socket that
 //   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything.
 // - One queue socket per watched workflow in the index feeds its recent events and its watch state.
@@ -94,6 +95,8 @@ export function boot(host: PageHost): Page {
   let lastLogRead = Number.NEGATIVE_INFINITY;
   /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
   let cursorPending = false;
+  /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
+  let start: Record<string, string> | undefined = host.start();
   let logTimer: number | undefined;
   const queues = new Map<string, OpenQueue>();
   let indexConnection: { close(): void } | undefined;
@@ -403,11 +406,16 @@ export function boot(host: PageHost): Page {
   const onIndex = (text: string) => {
     const message = parse(text);
     if (message?.kind !== 'index') return;
-    index = message.repos;
-    syncQueues(index);
-    const listed = index.some((repo) => repo.name === ui.repo && repo.runs.some((entry) => entry.runId === ui.runId));
-    if (!listed) {
-      const first = firstRun(index);
+    const repos = message.repos;
+    index = repos;
+    syncQueues(repos);
+    const lists = (name?: string, runId?: string) =>
+      repos.some((repo) => repo.name === name && repo.runs.some((entry) => entry.runId === runId));
+    const asked = start;
+    start = undefined;
+    if (asked !== undefined && lists(asked.repo, asked.run)) actions.open?.(asked);
+    else if (!lists(ui.repo, ui.runId)) {
+      const first = firstRun(repos);
       if (first !== undefined) selectRun(first.repo, first.runId);
     }
     if (run !== undefined) followAgain(run, true);

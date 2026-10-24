@@ -48,6 +48,8 @@ class FakeHost implements PageHost {
   copied: string[] = [];
   theme = '';
   inspector = true;
+  /** The query the page's URL holds, as start() gives it. */
+  startAt: Record<string, string> = {};
   clock = Date.parse('2026-10-01T12:00:00.000Z');
   private timers = new Map<number, { at: number; fn: () => void }>();
   private next = 1;
@@ -131,6 +133,9 @@ class FakeHost implements PageHost {
   }
   offset() {
     return 0;
+  }
+  start() {
+    return this.startAt;
   }
 
   /** Moves the clock on by `ms`, running every timer that falls due, in order. */
@@ -242,6 +247,40 @@ test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, re
   expect(host.regions.inspector).toContain('<dt>command</dt><dd><code>git push --force origin HEAD</code></dd>');
   expect(host.regions.inspector).toContain('<dt>rule</dt><dd>commands</dd>');
   expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+});
+
+test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on the first index, not the newest run", async () => {
+  host.startAt = { repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' };
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+  expect(host.reads.map((read) => read.path)).toEqual([
+    `/api/repos/alpha/runs/${FAKE_2_ID}/calls/implement%231/result`,
+  ]);
+  replay(host.open('run=')[0], fake2Dir(m));
+  await settle();
+  host.advance(100);
+  expect(host.regions.inspector).toContain(
+    '<button class="tab on" data-action="tab" data-tab="permissions">permissions</button>',
+  );
+  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+});
+
+test('a URL naming a run no repository lists opens the newest run instead', () => {
+  host.startAt = { repo: 'alpha', run: 'FAKE-9-01M5PY0000000000000000000' };
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
+});
+
+test('the URL is read on the first index only: a run picked since stays open through the next index', () => {
+  host.startAt = { repo: 'alpha', run: FAKE_2_ID };
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
 });
 
 test("live: events pushed one by one show tests#1 running, then settled, and a running call's log is read again at most once a second", async () => {
