@@ -1,8 +1,8 @@
-// scripts/test.ts runs the tests in a throwaway HOME, and refuses the whole suite outside CI: it takes about ten
+// scripts/full-suite.ts says when a run is the whole suite, which scripts/test.ts refuses outside CI: it takes about ten
 // minutes, and CI's verify runs it on every pull request.
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { fullSuiteAllowed, wholeSuite } from '../../scripts/test';
+import { fullSuiteAllowed, wholeSuite } from '../../scripts/full-suite';
 
 const LAUNCHER = join(import.meta.dir, '..', '..', 'scripts', 'test.ts');
 

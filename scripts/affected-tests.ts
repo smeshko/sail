@@ -8,7 +8,7 @@
 //   --base <ref>                            the base branch, `origin/staging` by default
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
-import { fullSuiteAllowed } from './test';
+import { fullSuiteAllowed } from './full-suite';
 
 const checkout = join(import.meta.dir, '..');
 
