@@ -18,7 +18,7 @@ import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { wrapUntrusted } from '../../src/engine/render';
-import { Posted, Ticket } from '../../src/ports/types';
+import { Created, Posted, Ticket } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -550,6 +550,159 @@ export default {
     });
     expect({ code, stdout }).toEqual({ code: EXIT_FAILED, stdout: '' });
     expect(stderr).toStartWith('sail port: ticketSource.comment: its answer is not a Posted: id ');
+    expect(stderr).toEndWith(' (invalid)\n');
+  });
+});
+
+// `sail port ticket-source create`: a new ticket, its description from --body-file or stdin, the port's Created as one
+// line.
+
+const CREATE_USAGE = 'sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]';
+
+/** The ticket the fake ticket source holds under `ticketKey` now. */
+const fakeTicket = (repoDir: string, ticketKey: string) =>
+  fakeWorld(repoDir).tickets.find((ticket: { ticketKey: string }) => ticket.ticketKey === ticketKey);
+
+test("create files a ticket with the description of --body-file, or of stdin without it, and its labels, and prints the port's Created with its ticket key and URL", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureWithLinked(repo.dir);
+    const seed = readFileSync(join(sail, 'fake', 'tickets.json'), 'utf8');
+    writeFileSync(join(repo.dir, 'follow-up.md'), 'From the file.\n');
+    const fromFile = await runCaptured(
+      [
+        'port',
+        'ticket-source',
+        'create',
+        '--title',
+        'Follow up',
+        '--label',
+        'sail',
+        '--label',
+        'bug',
+        '--body-file',
+        'follow-up.md',
+      ],
+      repo.dir,
+    );
+    expect({ code: fromFile.code, stderr: fromFile.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const first = Created.parse(oneLine(fromFile.stdout));
+    expect({ ticketKey: first.ticketKey, url: first.url }).toEqual({
+      ticketKey: 'FAKE-6',
+      url: 'fake://tickets/FAKE-6',
+    });
+
+    const fromStdin = await runCaptured(['port', 'ticket-source', 'create', '--title', 'Another'], repo.dir, {
+      stdin: 'From stdin.\n',
+    });
+    expect({ code: fromStdin.code, stderr: fromStdin.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(Created.parse(oneLine(fromStdin.stdout)).ticketKey).toBe('FAKE-7');
+
+    const pick = ({ title, description, labels, state }: Record<string, unknown>) => ({
+      title,
+      description,
+      labels,
+      state,
+    });
+    expect([pick(fakeTicket(repo.dir, 'FAKE-6')), pick(fakeTicket(repo.dir, 'FAKE-7'))]).toEqual([
+      {
+        title: 'Follow up',
+        description: 'From the file.\n',
+        labels: ['sail', 'bug'],
+        state: { type: 'unstarted', name: 'Todo' },
+      },
+      { title: 'Another', description: 'From stdin.\n', labels: [], state: { type: 'unstarted', name: 'Todo' } },
+    ]);
+    // The committed seed is the fake's input, and stays as it was.
+    expect(readFileSync(join(sail, 'fake', 'tickets.json'), 'utf8')).toBe(seed);
+  });
+});
+
+test.each<[string, string[], string | undefined, string]>([
+  ['an empty --body-file', ['--body-file', 'empty.md'], undefined, '--body-file empty.md'],
+  ['a blank stdin', [], ' \n\n', 'stdin'],
+  ['an empty stdin', [], '', 'stdin'],
+])('create with %s exits 3 before the port is called, and files nothing', async (_, flags, stdin, where) => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    writeFileSync(join(repo.dir, 'empty.md'), '\n');
+    const refused = await runCaptured(['port', 'ticket-source', 'create', '--title', 'Follow up', ...flags], repo.dir, {
+      ...(stdin === undefined ? {} : { stdin }),
+    });
+    expect(refused).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `sail port: ticket-source create needs a body, and ${where} is empty\n`,
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+  });
+});
+
+test.each<[string, string[]]>([
+  ['without --title', []],
+  ['with an empty --title', ['--title', '']],
+])(
+  'create %s exits 3 with the usage, which lists create, before stdin is read or the port is called',
+  async (_, flags) => {
+    await withTempRepo(async (repo) => {
+      fixtureWithLinked(repo.dir);
+      const refused = await runCaptured(['port', 'ticket-source', 'create', ...flags], repo.dir, {
+        stdin: 'A description.\n',
+      });
+      expect({ code: refused.code, stdout: refused.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+      expect(refused.stderr).toStartWith(`sail port: ticket-source create needs --title <text>\n${USAGE}\n`);
+      expect(refused.stderr).toContain(`\n       ${CREATE_USAGE}\n`);
+      expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+    });
+  },
+);
+
+test('with SAIL_EVENTS set, a create appends one ticket:created with the ticket key, the title and the URL and no envelope, and without it no file is written', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const file = join(repo.dir, 'out', 'port-events.ndjson');
+    mkdirSync(join(repo.dir, 'out'));
+    const create = ['port', 'ticket-source', 'create', '--title', 'Follow up'];
+    const created = await runCaptured(create, repo.dir, { env: { SAIL_EVENTS: file }, stdin: 'Do the rest.\n' });
+    expect(created.code).toBe(EXIT_OK);
+    await runCaptured(create, repo.dir, { stdin: 'No events file.\n' });
+
+    const lines = readFileSync(file, 'utf8').split('\n').slice(0, -1);
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      { type: 'ticket:created', ticketKey: 'FAKE-6', title: 'Follow up', url: 'fake://tickets/FAKE-6' },
+    ]);
+    expect(readdirSync(join(repo.dir, 'out'))).toEqual(['port-events.ndjson']);
+  });
+});
+
+test("an answer that is no Created, from a repository's own adapter, exits 1 naming the port and the operation", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureWithLinked(repo.dir);
+    const fake = join(import.meta.dir, '..', '..', 'src', 'adapters', 'fake', 'ticket-source');
+    write(
+      sail,
+      'adapters/odd-tickets.ts',
+      `import { createFakeTicketSource } from '${fake}';
+export default {
+  create(_options, context) {
+    const fake = createFakeTicketSource({ seed: \`\${context.sailDir}/fake/tickets.json\`, state: \`\${context.runsDir}/fake/tickets.json\` });
+    return { ...fake, name: 'odd', create: async () => ({ ticketKey: 7 }) };
+  },
+};
+`,
+    );
+    edit(
+      sail,
+      'project.yaml',
+      'ticketSource: { use: fake, seed: ./fake/tickets.json }',
+      'ticketSource: { use: ./adapters/odd-tickets.ts }',
+    );
+    const { code, stdout, stderr } = await runCaptured(
+      ['port', 'ticket-source', 'create', '--title', 'Follow up'],
+      repo.dir,
+      { stdin: 'Hello\n' },
+    );
+    expect({ code, stdout }).toEqual({ code: EXIT_FAILED, stdout: '' });
+    expect(stderr).toStartWith('sail port: ticketSource.create: its answer is not a Created: ticketKey ');
     expect(stderr).toEndWith(' (invalid)\n');
   });
 });

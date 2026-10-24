@@ -179,6 +179,7 @@ test("the session's options are the step's model, workspace, envelope and budget
     mcpServers: {},
     persistSession: false,
     includePartialMessages: false,
+    thinking: { type: 'adaptive', display: 'summarized' },
     permissionMode: 'default',
     outputFormat: { type: 'json_schema', schema: submissionEnvelope(req.outputSchema) },
     systemPrompt: { type: 'preset', preset: 'claude_code', append: appended(req) },
@@ -410,7 +411,7 @@ test('a call that reaches the fallback is denied and recorded, its tool ends den
     denials: end?.type === 'harness:session_end' ? end.denials : undefined,
     outcome: result.outcome,
   }).toEqual({
-    toolEnd: { type: 'tool:end', callId: 't1', status: 'denied', durationMs: 5 },
+    toolEnd: { type: 'tool:end', callId: 't1', status: 'denied', durationMs: 5, result: 'ok' },
     denials: 1,
     outcome: 'done',
   });

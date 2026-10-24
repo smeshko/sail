@@ -126,16 +126,26 @@ export const assistantToolUse = (
   options: AssistantOptions = {},
 ): SDKAssistantMessage => assistant(id, [{ type: 'tool_use', id: callId, name, input }], options);
 
-/** The user message that answers tool call `callId`. */
+type ToolResultBlock = Extract<Exclude<SDKUserMessage['message']['content'], string>[number], { type: 'tool_result' }>;
+
+/** The user message that answers tool call `callId`, with `content`, `ok` unless given, and none when given as null. */
 export function toolResult(
   callId: string,
-  options: { isError?: boolean; parent?: string | null } = {},
+  options: { isError?: boolean; parent?: string | null; content?: ToolResultBlock['content'] | null } = {},
 ): SDKUserMessage {
+  const content = options.content === undefined ? 'ok' : options.content;
   return {
     type: 'user',
     message: {
       role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: callId, content: 'ok', is_error: options.isError ?? false }],
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: callId,
+          ...(content === null ? {} : { content }),
+          is_error: options.isError ?? false,
+        },
+      ],
     },
     parent_tool_use_id: options.parent ?? null,
     session_id: SESSION_ID,

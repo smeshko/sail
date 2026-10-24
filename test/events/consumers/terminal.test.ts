@@ -808,6 +808,10 @@ test('at trace, an event of every type prints a line of its own', () => {
       head('', '· ticket:commented {"ticketKey":"FAKE-1","body":"hi"}', w),
     ],
     [
+      { type: 'ticket:created', ticketKey: 'FAKE-2', title: 'Follow up', url: 'fake://tickets/FAKE-2' },
+      head('', '· ticket:created {"ticketKey":"FAKE-2","title":"Follow up","url":"fake://tickets/FAKE-2"}', w),
+    ],
+    [
       { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'b4efb0c' },
       head('', '· codehost:pushed {"branch":"sail/FAKE-1","headSha":"b4efb0c"}', w),
     ],

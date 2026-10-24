@@ -67,6 +67,7 @@ export const PORT_OPERATIONS = {
     'claim',
     'update',
     'comment',
+    'create',
     'capabilities',
   ]),
   codeHost: operations<CodeHost>()([

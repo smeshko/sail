@@ -56,6 +56,8 @@ Usage:
                                                              Comment on a ticket, the body from the file or stdin
   sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>
                                                              Move a ticket to that state
+  sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
+                                                             File a new ticket, the description from the file or stdin
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version

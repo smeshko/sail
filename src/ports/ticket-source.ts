@@ -4,6 +4,7 @@ import type { ProviderEmit } from '../events/types';
 import { PortError } from './errors';
 import {
   type ClaimResult,
+  type Created,
   type Moved,
   type Posted,
   Ticket,
@@ -17,6 +18,13 @@ export interface ProviderOptions {
   readonly emit?: ProviderEmit;
   /** The clock behind durations and timestamps. */
   readonly now?: () => Date;
+}
+
+/** A ticket `create` files: its labels by name. */
+export interface NewTicket {
+  readonly title: string;
+  readonly description: string;
+  readonly labels: readonly string[];
 }
 
 export interface TicketSource {
@@ -34,6 +42,8 @@ export interface TicketSource {
   update(ticketKey: string, change: { readonly state: TicketMove }): Promise<Moved>;
   /** Emits `ticket:commented`. */
   comment(ticketKey: string, body: string): Promise<Posted>;
+  /** Files a new ticket with these labels, in whatever state the provider starts one in. Emits `ticket:created`. */
+  create(ticket: NewTicket): Promise<Created>;
   capabilities(): TicketSourceCapabilities;
 }
 

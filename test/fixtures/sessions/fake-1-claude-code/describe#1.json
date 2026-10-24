@@ -47,7 +47,8 @@
           "type": "tool:end",
           "callId": "toolu_01C7eknAGspYyNXhFLDHZVaR",
           "status": "completed",
-          "durationMs": 15
+          "durationMs": 15,
+          "result": "1\t{\n2\t  \"ticketKey\": \"FAKE-1\",\n3\t  \"title\": \"Add a --shout flag to the greet command\",\n4\t  \"url\": \"fake://tickets/FAKE-1\",\n5\t  \"acceptanceCriteria\": [\n6\t    \"`greet Ada --shout` prints `HELLO, ADA!`\",\n7\t    \"`greet Ada` still prints `Hello, Ada!`\",\n8\t    \"`greet --help` lists `--shout`\"\n9\t  ],\n10\t  \"labels\": [\n11\t    \"sail\"\n12\t  ],\n13\t  \"links\": [],\n14\t  \"attachments\": []\n15\t}\n16"
         },
         {
           "type": "tool:start",
@@ -72,7 +73,8 @@
           "type": "tool:end",
           "callId": "toolu_01EPxwVPN4EspLt6yn4hFrAB",
           "status": "completed",
-          "durationMs": 10
+          "durationMs": 10,
+          "result": "1\t# Spec\n2\t\n3\t## Requirements\n4\t\n5\t- `bun src/cli.ts Ada --shout` prints `HELLO, ADA!` followed by a newline. The whole greeting is upper-cased, the name included, and the flag is accepted before or after the name (`greet --shout Ada` prints the same).\n6\t- `bun src/cli.ts Ada` without the flag still prints `Hello, Ada!` followed by a newline, and the existing behaviour (trimming, `Hello, world!` for a blank or missing name) is unchanged.\n7\t- `bun src/cli.ts --help` prints a usage line that lists `--shout`, for example `usage: greet [name] [--shout]`.\n8\t\n9\t## Tasks\n10\t\n11\t1. Add an optional `shout` option to `greet()` that upper-cases the whole greeting, defaulting to off so current callers are unaffected. Add unit tests for `greet('Ada', { shout: true })` returning `HELLO, ADA!`, for the blank-name case returning `HELLO, WORLD!`, and for the default staying `Hello, Ada!`. Files: `src/greet.ts`, `test/greet.test.ts`.\n12\t2. Make the CLI recognise `--shout` anywhere in the arguments, take the first remaining argument that isn't a flag as the name, and pass `shout` through to `greet()`. Add CLI tests for `Ada --shout` → `HELLO, ADA!\\n`, `--shout Ada` → `HELLO, ADA!\\n` and `Ada` → `Hello, Ada!\\n`. Files: `src/cli.ts`, `test/cli.test.ts`.\n13\t3. Change the `--help` usage text to list `--shout` (`usage: greet [name] [--shout]`) and update the existing help test to match. Files: `src/cli.ts`, `test/cli.test.ts`.\n14"
         },
         {
           "type": "tool:start",
@@ -97,7 +99,8 @@
           "type": "tool:end",
           "callId": "toolu_0117nhF51jqvc6JVWRYSCHFn",
           "status": "completed",
-          "durationMs": 137
+          "durationMs": 137,
+          "result": "commit 509fefed16854d08bd0e8538f3f86f1777852bff\nAuthor: sail fixture <fixture@sail.invalid>\nDate:   Thu Oct 22 14:08:13 2026 +0300\n\n    Update --help usage text to list --shout\n    \n    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n src/cli.ts       | 2 +-\n test/cli.test.ts | 2 +-\n 2 files changed, 2 insertions(+), 2 deletions(-)\n\ncommit d4316b76a31d05280283e588b1b79f6fb33a90e9\nAuthor: sail fixture <fixture@sail.invalid>\nDate:   Thu Oct 22 14:07:59 2026 +0300\n\n    Make the CLI accept --shout anywhere in the arguments\n    \n    Takes the first remaining non-flag argument as the name and passes shout through to greet().\n    \n    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n src/cli.ts       |  8 +++++---\n test/cli.test.ts | 15 +++++++++++++++\n 2 files changed, 20 insertions(+), 3 deletions(-)\n\ncommit 113c36eb9a74ef813a5fb8aac97b47c3f8ed9b31\nAuthor: sail fixture <fixture@sail.invalid>\nDate:   Thu Oct 22 14:07:20 2026 +0300\n\n    Add shout option to greet()\n    \n    Upper-cases the whole greeting when requested, defaulting to off so existing callers are unaffected.\n    \n    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>\n\n src/greet.ts       | 5 +++--\n test/greet.test.ts | 3 +++\n 2 files changed, 6 insertions(+), 2 deletions(-)"
         },
         {
           "type": "agent:thinking",
@@ -127,7 +130,8 @@
           "type": "tool:end",
           "callId": "toolu_01CC86inRkiTfk2f56qVTRL3",
           "status": "completed",
-          "durationMs": 9
+          "durationMs": 9,
+          "result": "File created successfully at: $STAGE_OUT/pr-body.md (file state is current in your context — no need to Read it back)"
         },
         {
           "type": "tool:start",
@@ -156,7 +160,8 @@
           "type": "tool:end",
           "callId": "toolu_01AR1xXm71aitS6fC9JikMdS",
           "status": "completed",
-          "durationMs": 4
+          "durationMs": 4,
+          "result": "Structured output provided successfully"
         },
         {
           "type": "usage:update",

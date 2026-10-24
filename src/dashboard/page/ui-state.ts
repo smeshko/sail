@@ -1,5 +1,6 @@
-// What a person has chosen on the page, which every view reads: the open run, card and tab, the rail's open sections,
-// the theme, and the offset their clock is at. It holds nothing about the runs themselves.
+// What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
+// is open and which of its tool calls, the rail's open sections, the theme, and the offset their clock is at. It holds
+// nothing about the runs themselves.
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];
@@ -12,6 +13,10 @@ export interface UiState {
   runId?: string;
   /** The selected card's key. */
   key?: string;
+  /** Whether the centre shows the selected card's timeline, rather than the run's cards. */
+  timeline: boolean;
+  /** The timeline's tool calls opened to show their input and result, by call id. */
+  opened: string[];
   tab: InspectorTab;
   /** The log stream the log tab shows, when one is chosen. */
   stream?: string;
@@ -21,14 +26,24 @@ export interface UiState {
   inspector: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
   cursor: number;
-  /** Whether the log follows its tail. */
+  /** Whether the log and the timeline follow their tail. */
   follow: boolean;
   /** The clock's offset east of UTC, in minutes: times are shown at it. */
   tz: number;
 }
 
 export function initialUi(tz: number): UiState {
-  return { tab: 'overview', open: [], theme: 'dark', inspector: true, cursor: 0, follow: true, tz };
+  return {
+    tab: 'overview',
+    timeline: false,
+    opened: [],
+    open: [],
+    theme: 'dark',
+    inspector: true,
+    cursor: 0,
+    follow: true,
+    tz,
+  };
 }
 
 /** The pill class a status or an outcome is drawn with. */
