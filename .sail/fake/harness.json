@@ -6,6 +6,9 @@
         "slug": "show-total-cost",
         "scope": "cli",
         "risk": "large",
+        "demonstration": {
+          "surface": "cli"
+        },
         "tasks": [
           {
             "id": "TASK-001",
@@ -16,7 +19,7 @@
         ]
       },
       "files": {
-        "plan.md": "# Plan: Total cost in sail show's footer\n\nRisk: large\n\n## Goal\n\n`sail show <run>` ends with the run's total cost, so a reader sees what a run spent without adding the calls up.\n\n## Scope\n\n- A footer line in `src/cli/commands/show.ts`, summed from each call's `costUsd`\n\n## Out of Scope\n\n- The dashboard's run view, which already shows a total\n\n## Research Summary\n\n`src/cli/commands/show.ts` renders one row per call from `summary.json`; each call carries `usage.costUsd`.\n\n## Decisions\n\n- Sum the calls' costs rather than read a run-level field: `summary.json` has none.\n\n## Risks\n\n- Floating-point sums print long decimals: round to two places when printing.\n\n## Acceptance Criteria\n\n- [ ] `sail show <run>` ends with `total $<cost>`\n- [ ] A run with no agent calls prints `total $0.00`\n\n## Tasks\n\n- [ ] TASK-001: Print the total cost in the footer\n\n## Task details\n\n### TASK-001: Print the total cost in the footer\n\nType: impl\nDepends on: none\nSuggested commit: feat(cli): print the run's total cost in sail show's footer\n\nGoal: the footer line.\n\nFiles: `src/cli/commands/show.ts`, the footer.\n\nAcceptance:\n\n- [ ] `sail show` ends with `total $<cost>`\n\nEvidence: `test/cli/show.test.ts` passing.\n"
+        "plan.md": "# Plan: Total cost in sail show's footer\n\nRisk: large\n\n## Goal\n\n`sail show <run>` ends with the run's total cost, so a reader sees what a run spent without adding the calls up.\n\n## Scope\n\n- A footer line in `src/cli/commands/show.ts`, summed from each call's `costUsd`\n\n## Out of Scope\n\n- The dashboard's run view, which already shows a total\n\n## Research Summary\n\n`src/cli/commands/show.ts` renders one row per call from `summary.json`; each call carries `usage.costUsd`.\n\n## Decisions\n\n- Sum the calls' costs rather than read a run-level field: `summary.json` has none.\n\n## Risks\n\n- Floating-point sums print long decimals: round to two places when printing.\n\n## Acceptance Criteria\n\n- [ ] `sail show <run>` ends with `total $<cost>`\n- [ ] A run with no agent calls prints `total $0.00`\n\n## Demonstration\n\nSurface: cli. In a demo repository, a fake run of `FAKE-1`, then `sail show` on it.\n\n- `sail show <run>` ends with `total $<cost>`: after the fake run, `sail show <run>`'s last line is `total $` and the sum of the calls' costs in `summary.json`, to two decimals\n- A run with no agent calls prints `total $0.00`: a seeded workflow of one script stage, run, then `sail show <run>` ends with `total $0.00`\n\n## Tasks\n\n- [ ] TASK-001: Print the total cost in the footer\n\n## Task details\n\n### TASK-001: Print the total cost in the footer\n\nType: impl\nDepends on: none\nSuggested commit: feat(cli): print the run's total cost in sail show's footer\n\nGoal: the footer line.\n\nFiles: `src/cli/commands/show.ts`, the footer.\n\nAcceptance:\n\n- [ ] `sail show` ends with `total $<cost>`\n\nEvidence: `test/cli/show.test.ts` passing.\n"
       },
       "messages": ["Plan written: one task, risk large."],
       "turns": 12,
@@ -26,35 +29,6 @@
         "cacheWriteTokens": 2000,
         "outputTokens": 1500,
         "costUsd": 0.9
-      }
-    }
-  ],
-  "write-tests": [
-    {
-      "outcome": "done",
-      "output": {
-        "cases": [
-          {
-            "task": "TASK-001",
-            "file": "test/cli/show.test.ts",
-            "name": "ends with the run's total cost"
-          },
-          {
-            "task": "TASK-001",
-            "file": "test/cli/show.test.ts",
-            "name": "prints a zero total for a run with no agent calls"
-          }
-        ],
-        "none": null
-      },
-      "messages": ["Two pending tests and a stub footer."],
-      "turns": 20,
-      "usage": {
-        "inputTokens": 4000,
-        "cacheReadTokens": 20000,
-        "cacheWriteTokens": 2000,
-        "outputTokens": 1500,
-        "costUsd": 1.4
       }
     }
   ],
@@ -79,6 +53,64 @@
         "cacheWriteTokens": 2000,
         "outputTokens": 1500,
         "costUsd": 2.1
+      }
+    }
+  ],
+  "demonstrate#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "criteria": [
+          {
+            "criterion": "`sail show <run>` ends with `total $<cost>`",
+            "shown": true,
+            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`, the sum of the calls' costUsd in summary.json"
+          },
+          {
+            "criterion": "A run with no agent calls prints `total $0.00`",
+            "shown": false,
+            "evidence": "a run of a one-script workflow: `sail show` ended with `total $` and nothing after it, not `total $0.00`"
+          }
+        ],
+        "transcript": "$ sail FAKE-1\n…\ncompleted · 1.8s\nexit 0\n$ sail show FAKE-1-01M5PXSR234D2RJBV32YSAZDP3\n…\ntotal $1.35\nexit 0\n$ sail FAKE-2\n…\ncompleted · 0.4s\nexit 0\n$ sail show FAKE-2-01M5PY0000000000000000000\n…\ntotal $\nexit 0"
+      },
+      "messages": ["One of two criteria shown: the no-agent run prints an empty total."],
+      "turns": 18,
+      "usage": {
+        "inputTokens": 3000,
+        "cacheReadTokens": 12000,
+        "cacheWriteTokens": 1000,
+        "outputTokens": 900,
+        "costUsd": 0.6
+      }
+    }
+  ],
+  "demonstrate": [
+    {
+      "outcome": "done",
+      "output": {
+        "criteria": [
+          {
+            "criterion": "`sail show <run>` ends with `total $<cost>`",
+            "shown": true,
+            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`, the sum of the calls' costUsd in summary.json"
+          },
+          {
+            "criterion": "A run with no agent calls prints `total $0.00`",
+            "shown": true,
+            "evidence": "a run of a one-script workflow: `sail show` ended with `total $0.00`"
+          }
+        ],
+        "transcript": "$ sail FAKE-1\n…\ncompleted · 1.8s\nexit 0\n$ sail show FAKE-1-01M5PXSR234D2RJBV32YSAZDP3\n…\ntotal $1.35\nexit 0\n$ sail FAKE-2\n…\ncompleted · 0.4s\nexit 0\n$ sail show FAKE-2-01M5PY0000000000000000000\n…\ntotal $0.00\nexit 0"
+      },
+      "messages": ["Both criteria shown."],
+      "turns": 14,
+      "usage": {
+        "inputTokens": 3000,
+        "cacheReadTokens": 12000,
+        "cacheWriteTokens": 1000,
+        "outputTokens": 900,
+        "costUsd": 0.5
       }
     }
   ],
@@ -185,7 +217,14 @@
       "outcome": "done",
       "output": {
         "title": "feat(cli): print the run's total cost in sail show's footer (FAKE-1)",
-        "bodyFile": "pr-body.md"
+        "bodyFile": "pr-body.md",
+        "followUps": [
+          {
+            "title": "sail show's footer ignores calls replayed from a seeded run",
+            "description": "`src/cli/commands/show.ts` sums `costUsd` over the calls this run made, so a run seeded with `--from-run` prints a total without the replayed calls' cost. Left out: the plan scoped the footer to this run's own calls.",
+            "type": "bug"
+          }
+        ]
       },
       "files": {
         "pr-body.md": "## Summary\n\n`sail show` ends with the run's total cost.\n\n## Changes\n\n- The footer line.\n\n## Testing\n\nTwo tests; `bun run verify` passes.\n\nCloses FAKE-1\n"

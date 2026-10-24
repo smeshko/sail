@@ -9,7 +9,7 @@ export const plan = agent('plan', {
   produces: {
     'plan.md': doc('./templates/plan.md', [
       hasSections('Goal', 'Scope', 'Out of Scope', 'Research Summary', 'Decisions', 'Risks', 'Acceptance Criteria'),
-      hasSections('Tasks', 'Task details'),
+      hasSections('Demonstration', 'Tasks', 'Task details'),
       noPlaceholders(),
       countItems('Tasks', { min: 1, as: 'tasks' }),
     ]),

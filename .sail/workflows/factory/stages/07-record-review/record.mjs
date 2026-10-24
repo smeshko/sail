@@ -1,5 +1,6 @@
 // Formats the review rounds in $INPUT_HISTORY as REVIEW.md: the rounds with their verdict counts, then every finding
-// by verdict, with its commit or its rationale.
+// by verdict, with its commit or its rationale. It has no title and its sections are level 3: the pull request's body
+// holds it under its own `## Review`.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -26,8 +27,6 @@ const listed = (verdict, line) => {
 const last = rounds.at(-1);
 const unchecked = last?.triage.some((each) => each.verdict === 'fix') ?? false;
 const lines = [
-  '# Review',
-  '',
   `${rounds.length} adversarial round${rounds.length === 1 ? '' : 's'}.`,
   ...(unchecked ? ['', `Round ${last.round} still fixed findings, and no later round reviewed those fixes.`] : []),
   '',
@@ -38,15 +37,15 @@ const lines = [
       `| ${round.round} | ${round.findings.length} | ${count(round, 'fix')} | ${count(round, 'defer')} | ${count(round, 'reject')} |`,
   ),
   '',
-  '## Fixes',
+  '### Fixes',
   '',
   ...listed('fix', (row) => `- \`${row.commit?.slice(0, 7) ?? '?'}\` ${cell(row.title)} (${row.id}, ${row.severity})`),
   '',
-  '## Deferred',
+  '### Deferred',
   '',
   ...listed('defer', (row) => `- ${cell(row.title)} (${row.id}, ${row.severity}): ${cell(row.rationale)}`),
   '',
-  '## Rejected',
+  '### Rejected',
   '',
   ...listed('reject', (row) => `- ${cell(row.title)} (${row.id}, ${row.severity}): ${cell(row.rationale)}`),
   '',
