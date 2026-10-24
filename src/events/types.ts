@@ -231,7 +231,14 @@ interface Payloads {
   'agent:message': { key: string; text: string };
   'agent:thinking': { key: string; text: string };
   'tool:start': { key: string; callId: string; tool: string; input: unknown };
-  'tool:end': { key: string; callId: string; status: 'completed' | 'denied' | 'failed'; durationMs: number };
+  'tool:end': {
+    key: string;
+    callId: string;
+    status: 'completed' | 'denied' | 'failed';
+    durationMs: number;
+    /** The start of the text the tool returned, when it returned any. */
+    result?: string;
+  };
   'permission:denied': {
     key: string;
     callId: string;

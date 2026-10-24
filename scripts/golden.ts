@@ -1,6 +1,7 @@
 // Generates the golden run: the run directory under test/fixtures/runs/, and the four terminal views of its events
-// under test/fixtures/terminal/. Then it renders the dashboard's views of its recorded fixtures, with the golden run
-// among them, under test/fixtures/dashboard/views/. The golden run is what the engine writes for the fixture
+// under test/fixtures/terminal/. Then it records and plays back the session sets, and last renders the dashboard's
+// views of its recorded fixtures, with the golden run and a played-back run among them, under
+// test/fixtures/dashboard/views/. The golden run is what the engine writes for the fixture
 // repository's `ticket-to-pr` on `FAKE-1`, on the fakes. Nobody edits it by hand: `bun run golden` rewrites it after a
 // change to what a run writes, and test/scripts/golden.test.ts fails while the committed one is stale.
 //
@@ -34,6 +35,7 @@ import { queueId, renderQueues } from '../src/dashboard/page/queue-view';
 import { renderRail } from '../src/dashboard/page/rail-view';
 import { foldRun } from '../src/dashboard/page/run-model';
 import { renderRun } from '../src/dashboard/page/run-view';
+import { renderTimeline } from '../src/dashboard/page/timeline-view';
 import { type InspectorTab, initialUi, type UiState } from '../src/dashboard/page/ui-state';
 import { resolveAdapters } from '../src/engine/adapters';
 import { type AdapterConfig, readConfig } from '../src/engine/config';
@@ -281,6 +283,18 @@ export function renderDashboardViews(outDir: string): string[] {
         ui({ repo, runId, key, tab }),
       );
     }
+    // Timelines: the golden run's steps and script, and a recorded Claude Code session's tool calls, its first three
+    // opened.
+    const timelines: [name: string, dir: string, key: string][] = [
+      ['timeline-golden-publish-1.html', machine.alpha.runDir, 'publish#1'],
+      ['timeline-claude-code-implement-1.html', join(PLAYBACK, 'fake-1-claude-code'), 'implement#1'],
+    ];
+    for (const [file, dir, key] of timelines) {
+      const card = foldRun(readEvents(dir)).cards.find((entry) => entry.key === key);
+      if (card === undefined) throw new Error(`${dir} has no call ${key}`);
+      const opened = card.timeline.flatMap((entry) => (entry.kind === 'tool' ? [entry.callId] : [])).slice(0, 3);
+      views[file] = renderTimeline(card, ui({ key, timeline: true, opened }), VIEWS_NOW);
+    }
     mkdirSync(outDir, { recursive: true });
     return Object.entries(views).map(([file, view]) => {
       writeFileSync(join(outDir, file), `${view.value}\n`);
@@ -301,8 +315,6 @@ if (import.meta.main) {
     writeFileSync(view, renderView(events, verbosity));
     console.log(relative(root, view));
   }
-  rmSync(DASHBOARD_VIEWS, { recursive: true, force: true });
-  for (const file of renderDashboardViews(DASHBOARD_VIEWS)) console.log(relative(root, join(DASHBOARD_VIEWS, file)));
   // The scripted golden run, recorded, replaces its set; then every real set plays back to its own golden.
   const scratch = mkdtempSync(join(tmpdir(), 'sail-golden-record-'));
   try {
@@ -319,4 +331,7 @@ if (import.meta.main) {
     await playBack(set, played);
     for (const file of filesIn(played)) console.log(relative(root, join(played, file)));
   }
+  // Last, since a timeline is drawn from a played-back run.
+  rmSync(DASHBOARD_VIEWS, { recursive: true, force: true });
+  for (const file of renderDashboardViews(DASHBOARD_VIEWS)) console.log(relative(root, join(DASHBOARD_VIEWS, file)));
 }
