@@ -27,7 +27,9 @@ function element(fields: Partial<ElementLike> = {}): ElementLike & { styles: Rec
   };
 }
 
-function fakeWindow(options: { storage?: 'throws'; clipboard?: 'rejects' | 'missing'; fetch?: 'fails' } = {}) {
+function fakeWindow(
+  options: { storage?: 'throws'; clipboard?: 'rejects' | 'missing'; fetch?: 'fails'; search?: string } = {},
+) {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
   const elements: Record<string, ReturnType<typeof element>> = { rail: element(), body: element() };
   const fetched: { url: string; headers: Record<string, string> }[] = [];
@@ -48,7 +50,7 @@ function fakeWindow(options: { storage?: 'throws'; clipboard?: 'rejects' | 'miss
       },
       documentElement: root,
     },
-    location: { host: '127.0.0.1:4100' },
+    location: { host: '127.0.0.1:4100', search: options.search ?? '' },
     async fetch(url, init) {
       fetched.push({ url, headers: init.headers });
       if (options.fetch === 'fails') throw new Error('offline');
@@ -96,6 +98,17 @@ function fakeWindow(options: { storage?: 'throws'; clipboard?: 'rejects' | 'miss
   };
   return { win, elements, fetched, sockets, timers, cleared, root, stored, copied, fire, listeners };
 }
+
+test("start gives the URL's query as names and values, decoded, and nothing for a URL with none", () => {
+  const asked = fakeWindow({ search: '?repo=alpha&run=FAKE-2-01M5&key=implement%231&tab=permissions' });
+  expect(browserHost(asked.win).start()).toEqual({
+    repo: 'alpha',
+    run: 'FAKE-2-01M5',
+    key: 'implement#1',
+    tab: 'permissions',
+  });
+  expect(browserHost(fakeWindow().win).start()).toEqual({});
+});
 
 test("a click on a child of a data-action element is delegated once, with the element's data; a click outside any is not", () => {
   const fake = fakeWindow();

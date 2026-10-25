@@ -40,6 +40,8 @@ export interface PageHost {
   setInspector(open: boolean): void;
   /** The browser's offset east of UTC, in minutes. */
   offset(): number;
+  /** What the page's URL asks it to open first, from `?repo=…&run=…&key=…&tab=…`: empty when it asks nothing. */
+  start(): Record<string, string>;
 }
 
 /** The members of an element the page uses. */
@@ -74,7 +76,7 @@ export interface BrowserWindow {
     removeEventListener(type: string, listener: (event: EventLike) => void): void;
     documentElement: { dataset: Record<string, string | undefined> };
   };
-  location: { host: string };
+  location: { host: string; search: string };
   fetch(url: string, init: { headers: Record<string, string> }): Promise<{ status: number; text(): Promise<string> }>;
   WebSocket: new (url: string) => SocketLike;
   localStorage: { getItem(key: string): string | null; setItem(key: string, value: string): void };
@@ -204,6 +206,7 @@ export function browserHost(win: BrowserWindow): PageHost {
     setTheme(theme) {
       doc.documentElement.dataset.theme = theme;
     },
+    start: () => Object.fromEntries(new URLSearchParams(win.location.search)),
     setInspector(open) {
       doc.documentElement.dataset.inspector = open ? 'open' : 'closed';
     },
