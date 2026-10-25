@@ -88,4 +88,7 @@ test('the cost row counts an open session at its last usage reading, as the budg
     undefined,
   ]);
   expect([opened.tracked, reopened.tracked]).toEqual([0.4125, 0.4625]);
+  for (const { row, tracked } of [opened, reopened]) {
+    expect(row?.[1].startsWith(`$${tracked.toFixed(2)} of `)).toBe(true);
+  }
 });
