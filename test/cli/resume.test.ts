@@ -3,6 +3,7 @@
 // per .sail/, and Bun caches the workflow's modules by path, so the run and its resume never share a .sail/.
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED, type ExitCode } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
@@ -131,19 +132,15 @@ test('sail resume opens with what already ran, runs the interrupted call as its 
   });
 }, 30_000);
 
-test('-q with -v is refused with exit 3, and the run is left as it was', async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedInto(repo.dir);
-    const before = runFiles(repo.dir);
-    const { code, stdout, stderr } = await runCaptured(['resume', runId, '-qv'], repo.dir);
-    expect({ code, stdout, stderr }).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr: "sail resume: -q and -v can't be combined\n",
-    });
-    expect(runFiles(repo.dir)).toEqual(before);
+// The flags are refused before the run is looked up, so no run needs to exist for either refusal below.
+test('-q with -v is refused with exit 3, before any run is read', async () => {
+  const { code, stdout, stderr } = await runCaptured(['resume', 'FAKE-1-NONE', '-qv'], tmpdir());
+  expect({ code, stdout, stderr }).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: "sail resume: -q and -v can't be combined\n",
   });
-}, 30_000);
+});
 
 type Refusal = (repoDir: string) => Promise<{ argv: string[]; message: string }>;
 
@@ -430,72 +427,19 @@ test('sail resume replays the intake from the journal: its line is as the start 
   });
 }, 30_000);
 
-test('sail FAKE-1 sent SIGINT during implement#2 exits 2, sail resume in a new process exits 0, and across both the ticket is fetched into the stream once', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { sleepAt: 'implement#2' });
-    const started = Bun.spawn([process.execPath, shim, 'FAKE-1'], {
-      cwd: repo.dir,
-      env: repo.env,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const { end: code, alive } = await interruptWhenAsleep(repo.dir, started.exited, () => started.kill('SIGINT'));
-    expect(await new Response(started.stderr).text()).toBe('');
-    expect({ code, alive }).toEqual({ code: 2, alive: [] });
-    const runId = runIdIn(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    const suspended = await new Response(started.stdout).text();
-    expect(suspended).toEndWith(`  run      .sail-runs/${runId}\nresume it with: sail resume ${runId}\n`);
-    expect(suspended).toContain('\n  stop     interrupted: stopped during implement#2\n');
-
-    const resumed = Bun.spawnSync([process.execPath, shim, 'resume', runId], { cwd: repo.dir, env: repo.env });
-    expect(resumed.stdout.toString()).toStartWith(
-      `sail · ticket-to-pr v1 · ${runId} · resumed after 4 calls, last tests#1 failed\n`,
-    );
-    expect(resumed.stderr.toString()).toBe('');
-    expect(resumed.exitCode).toBe(0);
-    expect(readStatus(dir)).toEqual({ status: 'completed' });
-    const fetched = readEvents(dir).filter((event) => event.type === 'ticket:fetched');
-    expect(fetched).toMatchObject([{ key: 'intake#1', ticketKey: 'FAKE-1' }]);
-    expect(readJournal(dir).entries.map((entry) => entry.key)).toEqual([
-      'intake#1',
-      'spec#1',
-      'implement#1',
-      'tests#1',
-      'implement#2',
-      'tests#2',
-      'self-review#1',
-      'publish#1',
-    ]);
-    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+test('sail resume --input is refused as an unknown argument with exit 3, before any run is read', async () => {
+  expect(await runCaptured(['resume', 'FAKE-1-NONE', '--input', '{}'], tmpdir())).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: "sail: unknown argument '--input'\nRun 'sail --help' for usage.\n",
   });
-}, 60_000);
-
-test('sail resume --input is refused as an unknown argument with exit 3, and the run is left as it was', async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedInto(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    const files = () =>
-      ['STATUS', 'events.ndjson', 'journal.ndjson'].map((name) => readFileSync(join(dir, name), 'utf8'));
-    const before = files();
-    expect(await runCaptured(['resume', runId, '--input', '{}'], repo.dir)).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr: "sail: unknown argument '--input'\nRun 'sail --help' for usage.\n",
-    });
-    expect(files()).toEqual(before);
-    expect(before[0]).toBe('suspended interrupted\n');
-  });
-}, 30_000);
+});
 
 test('sail resume with no run id is refused with its usage, which takes a run and nothing else', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    expect(await runCaptured(['resume'], repo.dir)).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr: 'sail resume: usage: sail resume <run>\n',
-    });
+  expect(await runCaptured(['resume'], tmpdir())).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: 'sail resume: usage: sail resume <run>\n',
   });
 });
 

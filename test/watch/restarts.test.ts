@@ -67,9 +67,11 @@ function issues(runs: string, workflows: string[]): string[] {
   ];
 }
 
-test.each(['SIGTERM', 'SIGKILL'] as const)(
-  'a watcher killed with %s while two runs are held in flight leaves both running; a new sail watch a adopts both, starts the third ticket only once one has completed, and all three complete with one run each',
-  async (signal) => {
+// SIGKILL is the harder way to lose a watcher: its queue lease and registry field are left behind by a dead pid. A
+// SIGTERM'd watcher leaving its runs running is the next case's first step, and its tidy exit is test/cli/watch.test.ts's.
+test(
+  'a watcher killed with SIGKILL while two runs are held in flight leaves both running; a new sail watch a adopts both, starts the third ticket only once one has completed, and all three complete with one run each',
+  async () => {
     await withTempRepo(async (repo) => {
       const { env, runs } = repository(repo, { a: 2, b: 1 }, [
         { key: 'FAKE-1', labels: ['sail-a'] },
@@ -80,7 +82,7 @@ test.each(['SIGTERM', 'SIGKILL'] as const)(
       let second: SailProcess | undefined;
       try {
         expect(await until('two runs held', () => heldRuns(repo.dir).length === 2)).toBe('two runs held');
-        killOne(first.pid, signal);
+        killOne(first.pid, 'SIGKILL');
         expect(await gone(first.pid)).toBe(true);
         const inFlight = queueOf(runs, 'a').items.filter((item) => item.state === 'dispatched');
         expect(inFlight.map((item) => item.pid !== undefined && alive(item.pid))).toEqual([true, true]);

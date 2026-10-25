@@ -7,7 +7,7 @@
 // A pull request cut from a `main` that has since moved merges after one fix pass: `security#1` finds one `high` thing,
 // `fix#1` is given it, the six reviewers run again, `update` merges `main` in and pushes a new head, `tests` and
 // `checks` pass, `gate` reads the label and the head, and `merge` squashes at that head. One run, observed once, read by
-// the cases below. No wait is a duration: the fixture's checks stage waits one second between its few reads.
+// the cases below. No wait is a duration: the fixture's checks stage waits CHAIN_CHECKS_INTERVAL, 0.05 s here, between its few reads.
 import { expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -160,12 +160,19 @@ test("afterwards the run's workspace and lease are released, and the clone's HEA
   });
 });
 
-test('a pull request whose check test never registers gets no merge request: its checks read an empty list every time, and an empty read never passes', async () => {
-  const run = await observe({ pulls: [{ number: 8, branch: 'sail/ADW-1-silent', ticket: 'ADW-1' }], silent: [8] }, [
+let silent: Promise<Observed> | undefined;
+/** PR 8, whose check `test` never registers: run once, and kept for the two cases that read it. */
+const silentRun = (): Promise<Observed> => {
+  silent ??= observe({ pulls: [{ number: 8, branch: 'sail/ADW-1-silent', ticket: 'ADW-1' }], silent: [8] }, [
     '#8',
     '--workflow',
     'pr-to-main',
   ]);
+  return silent;
+};
+
+test('a pull request whose check test never registers gets no merge request: its checks read an empty list every time, and an empty read never passes', async () => {
+  const run = await silentRun();
   const reads = run.routes.filter((route) => route.includes('/check-runs'));
   expect({
     code: run.code,
@@ -349,11 +356,7 @@ test('a conflict with main: pass 2 update exits failed with the conflicting file
 });
 
 test('checks still pending when the tries run out: a test that never registers hands back with checks still pending after four reads, and no merge request', async () => {
-  const run = await observe({ pulls: [{ number: 8, branch: 'sail/ADW-1-silent', ticket: 'ADW-1' }], silent: [8] }, [
-    '#8',
-    '--workflow',
-    'pr-to-main',
-  ]);
+  const run = await silentRun();
   expectGivenUp(run, 8);
   expect(run.end.message).toBe('handed back: checks still pending');
   expect(run.routes.filter((route) => route.includes('/check-runs'))).toHaveLength(4);

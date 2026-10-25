@@ -8,12 +8,7 @@
 // whatever still reaches it. The session is offered only the tools its step can use (D2). The CLI scrubs the provider's
 // credentials from the Bash tool's environment (D3), returns that tool to the workspace after each command (D4), and
 // runs it under bash, the shell decide() reads. Each SDK message also goes to the request's onRaw as it comes, for a recording (11.3 D3). The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
-import {
-  type Options,
-  type SDKMessage,
-  type SDKResultMessage,
-  query as sdkQuery,
-} from '@anthropic-ai/claude-agent-sdk';
+import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
@@ -205,8 +200,6 @@ interface Progress {
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harness {
-  const query = options.query ?? sdkQuery;
-
   async function session(
     request: HarnessRequest,
     reader: SessionReader,
@@ -250,6 +243,9 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
     try {
       progress.started = true;
       watch.start();
+      // The SDK is imported by the first session, not with the CLI: it is most of what a sail process would load at
+      // start, and only an agent step needs it.
+      const query = options.query ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
       for await (const message of query({ prompt: request.prompt, options: sessionAt })) {
         tap(request, message);
         for (const event of reader.read(message)) emit(event);

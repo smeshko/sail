@@ -228,6 +228,8 @@ test('a directory outside any git repository is refused', async () => {
   }
 });
 
+// Each definition problem has its engine test (test/engine/layout, definitions, watchable), and every case here pays a
+// full type-check first: these prove a problem reaches sail check with its file, relative to the working directory.
 test('a stage named unlike its folder is refused, naming the file', async () => {
   await withTempRepo(async (repo) => {
     const stage = join(copyFixture(repo.dir), 'workflows', 'ticket-to-pr', 'stages', 'spec', 'stage.ts');
@@ -237,65 +239,6 @@ test('a stage named unlike its folder is refused, naming the file', async () => 
       stdout: '',
       stderr:
         "../../.sail/workflows/ticket-to-pr/stages/spec/stage.ts  declares stage 'specs', but its folder spec/ says 'spec'\n",
-    });
-  });
-});
-
-test("a workflow importing another's private stage is refused, naming the importing file", async () => {
-  await withTempRepo(async (repo) => {
-    const other = join(copyFixture(repo.dir), 'workflows', 'other');
-    mkdirSync(other);
-    writeFileSync(
-      join(other, 'workflow.ts'),
-      "import { workflow } from 'sail';\n" +
-        "import { ticket } from 'sail/intakes';\n" +
-        "import { spec } from '../ticket-to-pr/stages/spec/stage';\n\n" +
-        "export default workflow('other', { intake: ticket }, async (run) => {\n" +
-        "  await run.stage(spec, { brief: run.intake.files['brief.md'] });\n" +
-        '});\n',
-    );
-    expect(await runCaptured(['check'], subdirectory(repo.dir))).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr:
-        '../../.sail/workflows/other/workflow.ts  imports workflows/ticket-to-pr/stages/spec/stage.ts, which is private ' +
-        'to workflow ticket-to-pr\n',
-    });
-  });
-});
-
-test('a workflow reaching two stages named alike is refused, naming its workflow.ts and both stages', async () => {
-  await withTempRepo(async (repo) => {
-    const sail = copyFixture(repo.dir);
-    const owned = join(sail, 'workflows', 'ticket-to-pr');
-    cpSync(join(sail, 'stages', 'tests'), join(owned, 'stages', 'tests'), { recursive: true });
-    const workflow = join(owned, 'workflow.ts');
-    writeFileSync(
-      workflow,
-      readFileSync(workflow, 'utf8').replace(
-        "import { workflow } from 'sail';",
-        "import { workflow } from 'sail';\nimport { tests as ownTests } from './stages/tests/stage';\nexport const own = ownTests;",
-      ),
-    );
-    expect(await runCaptured(['check'], repo.dir)).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr:
-        ".sail/workflows/ticket-to-pr/workflow.ts  reaches two stages named 'tests': stages/tests/stage.ts and " +
-        'workflows/ticket-to-pr/stages/tests/stage.ts\n',
-    });
-  });
-});
-
-test('a workflow that throws on import is refused, naming the file', async () => {
-  await withTempRepo(async (repo) => {
-    const boom = join(copyFixture(repo.dir), 'workflows', 'boom');
-    mkdirSync(boom);
-    writeFileSync(join(boom, 'workflow.ts'), "throw new Error('boom');\n");
-    expect(await runCaptured(['check'], repo.dir)).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr: '.sail/workflows/boom/workflow.ts  boom\n',
     });
   });
 });
@@ -315,31 +258,6 @@ test('a watched workflow with a cap of 0, written past the types, is refused, na
   });
 });
 
-test('a watched workflow whose own intake accepts both tickets and pull requests is refused, naming its workflow.ts', async () => {
-  await withTempRepo(async (repo) => {
-    const reviews = join(copyFixture(repo.dir), 'workflows', 'reviews');
-    mkdirSync(reviews);
-    writeFileSync(
-      join(reviews, 'intake.ts'),
-      "import { intake, z } from 'sail';\n\n" +
-        "export const reviewIntake = intake('reviews', { accepts: ['ticket', 'pr'], output: z.object({}) });\n",
-    );
-    writeFileSync(
-      join(reviews, 'workflow.ts'),
-      "import { workflow } from 'sail';\n" +
-        "import { reviewIntake } from './intake';\n\n" +
-        "export default workflow('reviews', { intake: reviewIntake, watch: { every: '5m' }, maxConcurrentRuns: 1 }, " +
-        'async () => {});\n',
-    );
-    expect(await runCaptured(['check'], repo.dir)).toEqual({
-      code: EXIT_REFUSED,
-      stdout: '',
-      stderr:
-        ".sail/workflows/reviews/workflow.ts  its intake 'reviews' accepts ticket and pr, and a watched workflow polls one kind of source\n",
-    });
-  });
-});
-
 test('a sail range the running version does not satisfy is refused, naming the file and /sail', async () => {
   await withTempRepo(async (repo) => {
     const project = join(copyFixture(repo.dir), 'project.yaml');
@@ -349,24 +267,6 @@ test('a sail range the running version does not satisfy is refused, naming the f
       stdout: '',
       stderr: `.sail/project.yaml  /sail is '>=1.0 <2', which sail ${pkg.version} doesn't satisfy\n`,
     });
-  });
-});
-
-test('run.stage() given an intake is a type error sail check reports with exit 3, at its line in workflow.ts', async () => {
-  await withTempRepo(async (repo) => {
-    const workflow = join(copyFixture(repo.dir), 'workflows', 'ticket-to-pr', 'workflow.ts');
-    const first = '    const s = await run.stage(spec,';
-    const text = readFileSync(workflow, 'utf8').replace(first, `    await run.stage(ticket);\n${first}`);
-    writeFileSync(workflow, text);
-    const line = text.split('\n').findIndex((each) => each.includes('run.stage(ticket)')) + 1;
-    expect(line).toBeGreaterThan(1);
-
-    const { code, stdout, stderr } = await runCaptured(['check'], repo.dir);
-    expect(code).toBe(EXIT_REFUSED);
-    expect(stdout).toBe('');
-    expect(stderr).toStartWith(`.sail/workflows/ticket-to-pr/workflow.ts:${line}:`);
-    expect(stderr).toContain('  TS2345  ');
-    expect(stderr).toEndWith('sail check: 1 type error in .sail/\n');
   });
 });
 

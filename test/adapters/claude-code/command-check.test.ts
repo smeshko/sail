@@ -19,29 +19,42 @@ import { createGate } from '../../../src/adapters/claude-code/gate';
 
 const base = mkdtempSync(join(tmpdir(), 'sail-command-check-'));
 afterAll(() => rmSync(base, { recursive: true, force: true }));
-const [work, stubs, stageIn, stageOut, gits] = ['work', 'bin', 'in', 'out', 'gits'].map((name) => join(base, name)) as [
-  string,
-  string,
-  string,
-  string,
-  string,
-];
-for (const dir of [work, stubs, stageIn, stageOut, gits]) mkdirSync(dir, { recursive: true });
-writeFileSync(join(work, 'README.md'), 'readme\n');
-const LOG = join(base, 'log');
+const [stageIn, stageOut] = ['in', 'out'].map((name) => join(base, name)) as [string, string];
+for (const dir of [stageIn, stageOut]) mkdirSync(dir, { recursive: true });
 
-/** A stub command: a bash script, so it runs whatever PATH the command under test has. */
-function stub(name: string, body: string): void {
-  writeFileSync(join(stubs, name), `#!/bin/bash\n${body}\n`);
-  chmodSync(join(stubs, name), 0o755);
+/** Where one worker's commands run: its own worktree, stubs, log and git argument files, so workers never meet. */
+interface Box {
+  readonly work: string;
+  readonly stubs: string;
+  readonly gits: string;
+  readonly log: string;
 }
-stub('sleep', `echo "sleep $$" >> ${LOG}; exec /bin/sleep 0.3`);
-stub('git', `printf '%s\\0' "$@" > ${gits}/$$-$RANDOM`);
-for (const shell of ['zsh', 'sh', 'dash', 'ksh', 'fish']) stub(shell, `echo "shell ${shell}" >> ${LOG}`);
-for (const name of ['bash', 'env', 'nohup', 'xargs', 'find', 'cat', 'true']) {
-  const real = Bun.which(name, { PATH: '/bin:/usr/bin' });
-  if (real !== null) symlinkSync(real, join(stubs, name));
+
+/** Each stub logs to its own box by a path written into it: `env -i` would clear a variable naming the box. */
+function box(name: string): Box {
+  const [work, stubs, gits] = ['work', 'bin', 'gits'].map((each) => join(base, name, each)) as [string, string, string];
+  for (const dir of [work, stubs, gits]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(work, 'README.md'), 'readme\n');
+  const log = join(base, name, 'log');
+  /** A stub command: a bash script, so it runs whatever PATH the command under test has. */
+  const stub = (command: string, body: string): void => {
+    writeFileSync(join(stubs, command), `#!/bin/bash\n${body}\n`);
+    chmodSync(join(stubs, command), 0o755);
+  };
+  stub('sleep', `echo "sleep $$" >> ${log}; exec /bin/sleep 0.3`);
+  stub('git', `printf '%s\\0' "$@" > ${gits}/$$-$RANDOM`);
+  for (const shell of ['zsh', 'sh', 'dash', 'ksh', 'fish']) stub(shell, `echo "shell ${shell}" >> ${log}`);
+  for (const command of ['bash', 'env', 'nohup', 'xargs', 'find', 'cat', 'true']) {
+    const real = Bun.which(command, { PATH: '/bin:/usr/bin' });
+    if (real !== null) symlinkSync(real, join(stubs, command));
+  }
+  return { work, stubs, gits, log };
 }
+
+/** The allowed commands run this many at a time, each worker in its own box. */
+const WORKERS = 8;
+const boxes = Array.from({ length: WORKERS }, (_, at) => box(`box-${at}`));
+const work = boxes[0]?.work ?? '';
 
 const gate = createGate({
   permissions: { read: ['**'], write: ['**'], commands: ['*'] },
@@ -121,8 +134,8 @@ const alive = (pid: number): boolean => {
 };
 
 /** What `text` did under bash that the gate should have refused. */
-async function underBash(text: string): Promise<string[]> {
-  writeFileSync(LOG, '');
+async function underBash(text: string, { work, stubs, gits, log }: Box): Promise<string[]> {
+  writeFileSync(log, '');
   for (const file of readdirSync(gits)) rmSync(join(gits, file));
   const run = Bun.spawn(['/bin/bash', '-c', text], {
     cwd: work,
@@ -135,7 +148,7 @@ async function underBash(text: string): Promise<string[]> {
   await run.exited;
   clearTimeout(timer);
   const problems = new Set<string>();
-  for (const line of readFileSync(LOG, 'utf8').split('\n')) {
+  for (const line of readFileSync(log, 'utf8').split('\n')) {
     if (line.startsWith('shell ')) problems.add(`ran ${line.slice(6)}`);
     const pid = line.startsWith('sleep ') ? Number(line.slice(6)) : 0;
     if (pid > 0 && alive(pid)) {
@@ -156,8 +169,7 @@ async function underBash(text: string): Promise<string[]> {
 test('no command the gate allows does under bash what the gate refuses: 600 seeded commands', async () => {
   const rand = random(108);
   const signal = new AbortController().signal;
-  const escapes: string[] = [];
-  let ran = 0;
+  const allowed: string[] = [];
   for (let i = 0; i < 600; i++) {
     const text = command(rand, 2);
     const answer = (await gate.preToolUse(
@@ -173,10 +185,18 @@ test('no command the gate allows does under bash what the gate refuses: 600 seed
       undefined,
       { signal },
     )) as { hookSpecificOutput?: { permissionDecision?: string } };
-    if (answer.hookSpecificOutput?.permissionDecision !== 'allow') continue;
-    ran++;
-    const problems = await underBash(text);
-    if (problems.length > 0) escapes.push(`${JSON.stringify(text)}: ${problems.join('; ')}`);
+    if (answer.hookSpecificOutput?.permissionDecision === 'allow') allowed.push(text);
   }
-  expect({ ranSome: ran >= 30, escapes }).toEqual({ ranSome: true, escapes: [] });
+  const escapes: string[] = [];
+  let next = 0;
+  await Promise.all(
+    boxes.map(async (each) => {
+      for (let at = next++; at < allowed.length; at = next++) {
+        const text = allowed[at] ?? '';
+        const problems = await underBash(text, each);
+        if (problems.length > 0) escapes.push(`${JSON.stringify(text)}: ${problems.join('; ')}`);
+      }
+    }),
+  );
+  expect({ ranSome: allowed.length >= 30, escapes }).toEqual({ ranSome: true, escapes: [] });
 }, 120_000);
