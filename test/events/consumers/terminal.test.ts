@@ -6,7 +6,6 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { renderView } from '../../../scripts/golden';
 import type { JournalEntry } from '../../../src/engine/journal';
 import {
   formatDuration,
@@ -203,14 +202,7 @@ function visibleLive(out: string): string | undefined {
   return drawn.slice(text + ' \x1b[2m'.length, drawn.endsWith('\x1b[0m') ? -'\x1b[0m'.length : undefined);
 }
 
-// TASK-003: quiet and normal.
-
-test.each(['quiet', 'normal', 'verbose', 'trace'] as const)(
-  'FAKE-1 at %s equals its golden view, byte for byte',
-  (verbosity) => {
-    expect(renderView(fake1(), verbosity)).toBe(golden(verbosity));
-  },
-);
+// TASK-003: quiet and normal. FAKE-1's four golden views are test/scripts/golden.test.ts's, which also proves them stale.
 
 test('quiet prints an error end with its duration and each message, a later line indented two more, and no tail', () => {
   const runs = runsWith({ '03-tests/call-1/stdout.log': 'a tail quiet leaves out\n' });

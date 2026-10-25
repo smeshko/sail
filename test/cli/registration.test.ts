@@ -1,6 +1,7 @@
-// Registration, in process through run(): `sail <ticket>` and `sail resume` record their repository in the watcher
-// registry under `SAIL_HOME` just before the run opens. Each case runs a copy of the fixture repository in a temp
-// repository of its own, because a process opens one run per .sail/.
+// Registration: `sail <ticket>` and `sail resume` record their repository in the watcher registry under `SAIL_HOME` just
+// before the run opens. The first two cases prove each command does, in process through run(), each on a copy of the
+// fixture repository in a temp repository of its own, because a process opens one run per .sail/. The rest call
+// registerRepository() as the commands do, with no run: what it records, and that it only ever warns.
 import { expect, test } from 'bun:test';
 import {
   existsSync,
@@ -15,6 +16,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import { registerRepository } from '../../src/cli/registration';
+import { readConfig } from '../../src/engine/config';
 import { validateDocument } from '../../src/engine/schemas';
 import { copyFixture } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
@@ -93,52 +96,64 @@ test('sail resume records its repository again: an entry deleted since the run s
   });
 }, 90_000);
 
-test('another live clone with another remote under the same name: one warning, the run goes on, and this clone takes the entry', async () => {
+/**
+ * registerRepository() for the fixture's copy in `repo`, as `sail FAKE-1` calls it, with the registry under `sailHome`
+ * and `.sail/` at `sailDir`: what it wrote on stderr.
+ */
+async function register(repo: TempRepo, sailHome: string, sailDir = join(repo.dir, '.sail')): Promise<string> {
+  const config = readConfig(sailDir);
+  if ('issues' in config) throw new Error(`the fixture's project.yaml: ${JSON.stringify(config.issues)}`);
+  let stderr = '';
+  const io = {
+    cwd: repo.dir,
+    stdout: () => {},
+    stderr: (text: string) => {
+      stderr += text;
+    },
+    env: { ...repo.env, SAIL_HOME: sailHome },
+  };
+  await registerRepository(io, 'sail FAKE-1', { sailDir, config });
+  return stderr;
+}
+
+test('another live clone with another remote under the same name: one warning, and this clone takes the entry', async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'sail-home');
     const elsewhere = join(repo.home, 'elsewhere');
     otherClone(sailHome, elsewhere, 'https://example.com/other.git', true);
     copyFixture(repo.dir);
-    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '-q']);
-    expect(code).toBe(EXIT_OK);
-    const lines = stderr.split('\n').filter((line) => line !== '');
+    const lines = (await register(repo, sailHome)).split('\n').filter((line) => line !== '');
     expect(lines).toHaveLength(1);
     expect(lines[0]).toStartWith(`sail FAKE-1: warning: 'fixture' was registered from ${elsewhere}`);
     expect(fixtureEntry(sailHome).clone).toBe(realpathSync(repo.dir));
   });
-}, 60_000);
+});
 
 test.each([
   ['a live clone with the same remote', null, true],
   ['a clone whose .sail/ is gone, with another remote', 'https://example.com/other.git', false],
-] as const)(
-  'the entry of %s moves to this clone without a warning',
-  async (_, remote, live) => {
-    await withTempRepo(async (repo) => {
-      const sailHome = join(repo.home, 'sail-home');
-      otherClone(sailHome, join(repo.home, 'elsewhere'), remote, live);
-      copyFixture(repo.dir);
-      const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '--until', 'spec', '-q']);
-      expect({ code, stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
-      expect(fixtureEntry(sailHome).clone).toBe(realpathSync(repo.dir));
-    });
-  },
-  60_000,
-);
+] as const)('the entry of %s moves to this clone without a warning', async (_, remote, live) => {
+  await withTempRepo(async (repo) => {
+    const sailHome = join(repo.home, 'sail-home');
+    otherClone(sailHome, join(repo.home, 'elsewhere'), remote, live);
+    copyFixture(repo.dir);
+    expect(await register(repo, sailHome)).toBe('');
+    expect(fixtureEntry(sailHome).clone).toBe(realpathSync(repo.dir));
+  });
+});
 
-test('a registry that cannot be written is a warning, and the run still completes', async () => {
+test('a registry that cannot be written is one warning, never a throw', async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'not-a-directory');
     writeFileSync(sailHome, 'a file\n');
     copyFixture(repo.dir);
-    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '-q']);
-    expect(code).toBe(EXIT_OK);
+    const stderr = await register(repo, sailHome);
     expect(stderr).toStartWith(
       `sail FAKE-1: warning: could not record this repository in ${join(sailHome, 'watchers')}: `,
     );
     expect(stderr.split('\n').filter((line) => line !== '')).toHaveLength(1);
   });
-}, 60_000);
+});
 
 test('a .sail/ that is a symlink is recorded where the run writes: beside the link, in its own clone (review #3.2)', async () => {
   await withTempRepo(async (repo) => {
@@ -148,15 +163,16 @@ test('a .sail/ that is a symlink is recorded where the run writes: beside the li
     mkdirSync(join(repo.home, 'shared'));
     renameSync(join(repo.dir, '.sail'), shared);
     symlinkSync(shared, join(repo.dir, '.sail'));
-    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '-q']);
-    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    // A run, not registerRepository() alone: the entry has to name where the run itself writes.
+    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '--until', 'spec', '-q']);
+    expect({ code, stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
     const clone = realpathSync(repo.dir);
     expect(fixtureEntry(sailHome)).toMatchObject({ clone, sailDir: join(clone, '.sail') });
     expect(readdirSync(join(clone, '.sail-runs')).length).toBeGreaterThan(0);
   });
-});
+}, 60_000);
 
-test("sail FAKE-1 keeps the entry's live watcher as it was, and still refreshes updatedAt", async () => {
+test("registering keeps the entry's live watcher as it was, and still refreshes updatedAt", async () => {
   await withTempRepo(async (repo) => {
     const sailHome = join(repo.home, 'sail-home');
     copyFixture(repo.dir);
@@ -172,10 +188,9 @@ test("sail FAKE-1 keeps the entry's live watcher as it was, and still refreshes 
     mkdirSync(join(sailHome, 'watchers'), { recursive: true });
     const updatedAt = '2026-01-01T00:00:00.000Z';
     writeFileSync(join(sailHome, 'watchers', 'fixture.json'), JSON.stringify({ ...old, updatedAt, watcher }));
-    const { code, stderr } = await sail(repo, sailHome, ['FAKE-1', '--until', 'spec', '-q']);
-    expect({ code, stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+    expect(await register(repo, sailHome)).toBe('');
     const entry = fixtureEntry(sailHome);
     expect(entry).toEqual({ ...old, updatedAt: expect.any(String), watcher });
     expect(String(entry.updatedAt) > updatedAt).toBe(true);
   });
-}, 60_000);
+});

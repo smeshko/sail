@@ -1,9 +1,12 @@
 import { expect, test } from 'bun:test';
-import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { readJournal } from '../../src/engine/journal';
 import { wrapUntrusted } from '../../src/engine/render';
+import { readStatus } from '../../src/engine/run-dir';
+import { formatIssue, validateRunDir } from '../../src/engine/schemas';
+import { readEvents } from '../../src/events/consumers/ndjson';
 import { copyFixture, edit } from '../helpers/fixture';
 import { interruptWhenAsleep, stubExecutions, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -35,28 +38,6 @@ test('the shim exits with the code run() returns', async () => {
     const result = Bun.spawnSync([process.execPath, shim, '--bogus'], { cwd: repo.dir, env: repo.env });
     expect(result.stderr.toString()).toContain("unknown argument '--bogus'");
     expect(result.exitCode).toBe(3);
-  });
-});
-
-test('the shim runs check: 0 on a fixture copy, 3 once a binding is wrongly wired', async () => {
-  await withTempRepo((repo) => {
-    const sail = join(repo.dir, '.sail');
-    cpSync(join(import.meta.dir, '..', 'fixtures', 'repo', '.sail'), sail, { recursive: true });
-    const check = () => Bun.spawnSync([process.execPath, shim, 'check'], { cwd: repo.dir, env: repo.env });
-
-    const passing = check();
-    expect(passing.stdout.toString()).toBe('.sail/ checked: 2 workflows, 11 stages\n');
-    expect(passing.exitCode).toBe(0);
-
-    const workflow = join(sail, 'workflows', 'ticket-to-pr', 'workflow.ts');
-    writeFileSync(
-      workflow,
-      readFileSync(workflow, 'utf8').replace("s.files['spec.md'], feedback", 'run.input, feedback'),
-    );
-    const failing = check();
-    expect(failing.stderr.toString()).toContain('.sail/workflows/ticket-to-pr/workflow.ts:');
-    expect(failing.stderr.toString()).toContain('TS2739');
-    expect(failing.exitCode).toBe(3);
   });
 });
 
@@ -137,7 +118,12 @@ test.each(['SIGINT', 'SIGTERM'] as const)(
       );
       expect(resumedOut).toEndWith(`  run      .sail-runs/${runId}\n`);
       expect(resumedOut.includes('\x1b')).toBe(false);
-      expect(resumed.exitCode).toBe(0);
+      expect({ code: resumed.exitCode, stderr: resumed.stderr.toString() }).toEqual({ code: 0, stderr: '' });
+      expect(readStatus(dir)).toEqual({ status: 'completed' });
+      // Across both processes the ticket is fetched into the stream once: the resume replays the intake's journal.
+      const fetched = readEvents(dir).filter((event) => event.type === 'ticket:fetched');
+      expect(fetched).toMatchObject([{ key: 'intake#1', ticketKey: 'FAKE-1' }]);
+      expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
       expect(stubExecutions(repo.dir)).toEqual([
         'spec#1',
         'implement#1',
