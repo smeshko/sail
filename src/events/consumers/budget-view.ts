@@ -24,11 +24,11 @@ export function budgetText(event: EventOf<'budget:warning'> | EventOf<'budget:ex
     : `budget ${event.budget} exceeded: ${used}`;
 }
 
-/** A `budget:raised`: `budget raised by $5: now $5.50`, or by minutes, or both. */
+/** A `budget:raised`: `budget raised by $5.00: now $5.50`, or by minutes, or both. */
 export function raisedText(event: EventOf<'budget:raised'>): string {
   const by: string[] = [];
   const now: string[] = [];
-  if (event.usd !== undefined) by.push(`$${event.usd}`);
+  if (event.usd !== undefined) by.push(usd(event.usd));
   if (event.minutes !== undefined) by.push(`${minutes(event.minutes)} min`);
   if (event.budget.maxUsd !== undefined && event.usd !== undefined) now.push(usd(event.budget.maxUsd));
   if (event.budget.maxMinutes !== undefined && event.minutes !== undefined)

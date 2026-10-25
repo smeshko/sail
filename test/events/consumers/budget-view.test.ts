@@ -27,10 +27,12 @@ test('a raise prints what it added and the budget after it: dollars, minutes, or
     raisedText(one({ type: 'budget:raised', usd: 5, budget: { maxUsd: 5.5, maxMinutes: 90 } })),
     raisedText(one({ type: 'budget:raised', minutes: 30, budget: { maxMinutes: 120 } })),
     raisedText(one({ type: 'budget:raised', usd: 5, minutes: 30, budget: { maxUsd: 5.5, maxMinutes: 120 } })),
+    raisedText(one({ type: 'budget:raised', usd: 0.0000001, budget: { maxUsd: 0.5 } })),
   ]).toEqual([
-    'budget raised by $5: now $5.50',
+    'budget raised by $5.00: now $5.50',
     'budget raised by 30 min: now 120 min',
-    'budget raised by $5 and 30 min: now $5.50 and 120 min',
+    'budget raised by $5.00 and 30 min: now $5.50 and 120 min',
+    'budget raised by $0.00: now $0.50',
   ]);
 });
 
