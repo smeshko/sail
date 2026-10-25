@@ -17,3 +17,6 @@ coverage/
 *.tgz
 .sail/sail.d.ts
 .sail/sail-intakes.d.ts
+
+# Claude Code agent worktrees: whole checkouts, each with its own biome.json
+.claude/worktrees/

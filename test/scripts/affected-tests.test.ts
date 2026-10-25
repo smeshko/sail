@@ -229,22 +229,29 @@ test('affectedTests selects from the branch, and every test when there is no mer
   });
 });
 
-test('testArgs runs the selection with a generous timeout, every test only under test/, and nothing when empty', () => {
-  expect(testArgs({ kind: 'all', reason: 'x' })).toEqual(['--timeout', '60000', './test']);
-  expect(testArgs(some('test/a.test.ts', 'test/b.test.ts'))).toEqual([
+const CI = { CI: 'true' };
+
+test('testArgs runs the selection with a generous timeout, every test only under test/ and on CI, nothing when empty', () => {
+  expect(testArgs({ kind: 'all', reason: 'x' }, CI)).toEqual(['--timeout', '60000', './test']);
+  expect(testArgs({ kind: 'all', reason: 'x' }, {})).toBeUndefined();
+  expect(testArgs(some('test/a.test.ts', 'test/b.test.ts'), {})).toEqual([
     '--timeout',
     '60000',
     './test/a.test.ts',
     './test/b.test.ts',
   ]);
-  expect(testArgs(some())).toBeUndefined();
+  expect(testArgs(some(), CI)).toBeUndefined();
 });
 
-test('describe says why every test runs, how many were selected, or that the step is skipped', () => {
-  expect(describe({ kind: 'all', reason: 'bun.lock changed' })).toBe(
+test('describe says why every test runs or is left to CI, how many were selected, or that the step is skipped', () => {
+  expect(describe({ kind: 'all', reason: 'bun.lock changed' }, CI)).toBe(
     'affected tests: every test, because bun.lock changed',
   );
-  expect(describe(some('test/a.test.ts'))).toBe('affected tests: 1 file');
-  expect(describe(some('test/a.test.ts', 'test/b.test.ts'))).toBe('affected tests: 2 files');
-  expect(describe(some())).toBe('affected tests: none, so the test step is skipped');
+  expect(describe({ kind: 'all', reason: 'bun.lock changed' }, {})).toBe(
+    "affected tests: every test, because bun.lock changed. CI's verify runs them, so the test step is skipped here " +
+      '(SAIL_FULL_SUITE=1 runs them)',
+  );
+  expect(describe(some('test/a.test.ts'), {})).toBe('affected tests: 1 file');
+  expect(describe(some('test/a.test.ts', 'test/b.test.ts'), {})).toBe('affected tests: 2 files');
+  expect(describe(some(), {})).toBe('affected tests: none, so the test step is skipped');
 });

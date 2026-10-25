@@ -8,6 +8,7 @@
 //   --base <ref>                            the base branch, `origin/staging` by default
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, normalize } from 'node:path';
+import { fullSuiteAllowed } from './full-suite';
 
 const checkout = join(import.meta.dir, '..');
 
@@ -188,20 +189,30 @@ export function allTests(root: string): string[] {
 }
 
 /**
- * The arguments for scripts/test.ts that run `selection` with a generous timeout: undefined when it's empty. Every test
- * means every test under test/: left without a path, Bun runs any `*.test.ts` in the checkout, the ignored plan drafts
- * under docs/ included.
+ * The arguments for scripts/test.ts that run `selection` with a generous timeout: undefined when it's empty, or when
+ * it's every test and `env` isn't CI's, since CI's verify runs them all. Every test means every test under test/: left
+ * without a path, Bun runs any `*.test.ts` in the checkout, the ignored plan drafts under docs/ included.
  */
-export function testArgs(selection: Selection): string[] | undefined {
+export function testArgs(
+  selection: Selection,
+  env: Record<string, string | undefined> = process.env,
+): string[] | undefined {
   const timeout = ['--timeout', '60000'];
-  if (selection.kind === 'all') return [...timeout, './test'];
+  if (selection.kind === 'all') return fullSuiteAllowed(env) ? [...timeout, './test'] : undefined;
   if (selection.tests.length === 0) return undefined;
   return [...timeout, ...selection.tests.map((path) => `./${path}`)];
 }
 
-/** What the gate says before it runs: why it runs every test, how many it selected, or that it skips them. */
-export function describe(selection: Selection): string {
-  if (selection.kind === 'all') return `affected tests: every test, because ${selection.reason}`;
+/**
+ * What the gate says before it runs: why it runs every test or leaves them to CI, how many it selected, or that it skips
+ * them.
+ */
+export function describe(selection: Selection, env: Record<string, string | undefined> = process.env): string {
+  if (selection.kind === 'all') {
+    const why = `affected tests: every test, because ${selection.reason}`;
+    if (fullSuiteAllowed(env)) return why;
+    return `${why}. CI's verify runs them, so the test step is skipped here (SAIL_FULL_SUITE=1 runs them)`;
+  }
   if (selection.tests.length === 0) return 'affected tests: none, so the test step is skipped';
   return `affected tests: ${selection.tests.length} file${selection.tests.length === 1 ? '' : 's'}`;
 }
