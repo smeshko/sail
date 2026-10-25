@@ -1,6 +1,7 @@
 // What the terminal view draws of a run's budget (budget-view.ts): the lines of the run's own budget events and of a
 // raise, and the final block's cost row against the budget as raised.
 import { expect, test } from 'bun:test';
+import { usedOf } from '../../../src/engine/budget';
 import { budgetText, createBudgetView, raisedText } from '../../../src/events/consumers/budget-view';
 import type { NewEvent, SailEvent } from '../../../src/events/types';
 import { runStart, session, stamp } from '../../helpers/events';
@@ -46,4 +47,43 @@ test("the cost row is what the sessions spent against the run's dollar budget, a
     rowAfter(runStart(), ended('spec#1', 0.3125)),
     rowAfter(runStart({ maxUsd: 0.5 })),
   ]).toEqual([['cost', '$0.50 of $0.50 (100.6%)'], ['cost', '$0.50 of $5.50 (9.1%)'], ['cost', '$0.31'], undefined]);
+});
+
+test('the cost row counts an open session at its last usage reading, as the budget tracker does, and a reopened key once', () => {
+  const rowAfter = (...list: NewEvent[]) => {
+    const events = stamp(...list.map((event, i): [number, NewEvent] => [i, event]));
+    const view = createBudgetView();
+    for (const event of events) view.update(event);
+    return { row: view.costRow(), tracked: usedOf(events).usd };
+  };
+  const open = (key: string): NewEvent => ({
+    type: 'harness:session_start',
+    key,
+    adapter: 'fake',
+    sessionId: `session-${key}`,
+    model: 'fake',
+  });
+  const reading = (key: string, costUsdSoFar: number): NewEvent => ({
+    type: 'usage:update',
+    key,
+    turn: 1,
+    tokens: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 },
+    costUsdSoFar,
+  });
+  const base = [runStart({ maxUsd: 0.5 }), ended('spec#1', 0.3125)];
+  const opened = rowAfter(...base, open('implement#1'), reading('implement#1', 0.1));
+  const reopened = rowAfter(
+    ...base,
+    open('implement#1'),
+    reading('implement#1', 0.1),
+    open('implement#1'),
+    reading('implement#1', 0.05),
+  );
+  const bare = rowAfter(runStart({ maxUsd: 0.5 }), open('implement#1'));
+  expect([opened.row, reopened.row, bare.row]).toEqual([
+    ['cost', '$0.41 of $0.50 (82.5%)'],
+    ['cost', '$0.46 of $0.50 (92.5%)'],
+    undefined,
+  ]);
+  expect([opened.tracked, reopened.tracked]).toEqual([0.4125, 0.4625]);
 });
