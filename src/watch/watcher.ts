@@ -37,6 +37,7 @@ import { readStatus, runsDir as runsDirOf } from '../engine/run-dir';
 import { resolveSource } from '../engine/source';
 import type { QueueEvent } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
+import { sameLabel } from '../ports/labels';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
 import { createDispatcher, type Dispatcher } from './dispatch';
@@ -203,8 +204,11 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     }
     const all = [...watchedTargets(), ...targets];
     // One label per kind: a ticket workflow and a pull-request workflow may both poll `sail`, which is the hand-over.
+    // A pull request's label matches whatever its case, so `sail` and `Sail` are one label to two pull-request workflows.
+    const clash = (a: WatchTarget, b: WatchTarget) =>
+      a.kind === b.kind && (a.kind === 'pr' ? sameLabel(a.label, b.label) : a.label === b.label);
     for (const [index, target] of all.entries()) {
-      const other = all.slice(0, index).find((each) => each.label === target.label && each.kind === target.kind);
+      const other = all.slice(0, index).find((each) => clash(each, target));
       if (other !== undefined) {
         return {
           refused: `workflows '${other.workflow}' and '${target.workflow}' both poll the label '${target.label}'`,

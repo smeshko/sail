@@ -24,6 +24,7 @@ import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../../adapters/leases';
 import type { ProjectConfig } from '../../engine/config';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
+import { sameLabel } from '../../ports/labels';
 import { dropCommand } from '../../watch/inbox';
 import { readWatch, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
 import { QUEUE_DIR } from '../../watch/queue-store';
@@ -174,9 +175,12 @@ export function watchCommand(deps: WatchDeps = {}): Command {
         const watch = await readWatch({ sailDir, config, name });
         if ('refused' in watch) return refuse(watch.refused);
         if (known.some((each) => each.workflow === name)) continue;
-        // One label per kind (14.2's D9): a ticket workflow and a pull-request workflow may both poll `sail`.
+        // One label per kind (14.2's D9): a ticket workflow and a pull-request workflow may both poll `sail`. A pull
+        // request's label matches whatever its case, so a pull-request workflow's clashes with `Sail` as with `sail`.
+        const clashes = (label: string) =>
+          watch.kind === 'pr' ? sameLabel(label, watch.label) : label === watch.label;
         let other: (typeof known)[number] | undefined;
-        for (const each of known.filter((each) => each.label === watch.label)) {
+        for (const each of known.filter((each) => clashes(each.label))) {
           const theirs = kinds.get(each.workflow) ?? (await readWatch({ sailDir, config, name: each.workflow }));
           if ('refused' in theirs || theirs.kind === watch.kind) {
             other = each;
