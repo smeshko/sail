@@ -586,7 +586,7 @@ test("a ticket:fetched under the intake's key before a ticketed journal:append s
   expect(folded(stream)?.ticket).toEqual(TICKET);
 });
 
-test('a reused call is listed where its journal:append comes,with its fromRun and no duration, and counts in no total', () => {
+test('a reused call is listed where its journal:append comes, with its fromRun and no duration, and counts in no total', () => {
   const source = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
   const summary = folded(
     stamp(
