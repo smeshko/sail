@@ -699,6 +699,22 @@ test("a CodeHost of the repository's own that answers a draft, a closed and an u
   expect(itemKeys(dir, 'r')).toEqual(['pr:1@1111111']);
 });
 
+test('a pull request labelled in another case than the poll label is queued', async () => {
+  const dir = tempDir();
+  const clock = manualClock(START);
+  const { host } = fakeHost(dir);
+  const cased = { ...(await host.getPullRequest(1)), labels: ['Sail'] };
+  const r = prTarget(dir, { ...host, listDesignated: async () => [cased] }, clock);
+  expect(await pollOnce(r, clock)).toBe('polled');
+  expect({
+    keys: itemKeys(dir, 'r'),
+    polled: events(dir, 'r').filter((event) => event.type === 'queue:polled'),
+  }).toEqual({
+    keys: ['pr:1@1111111'],
+    polled: [{ type: 'queue:polled', kind: 'pr', label: 'sail', found: 1, added: 1, durationMs: 0 }],
+  });
+});
+
 test("an answer that is no list of pull requests fails a pr workflow's poll as the codeHost's invalid, and a codeHost that refuses the credentials pauses it", async () => {
   const dir = tempDir();
   const clock = manualClock(START);

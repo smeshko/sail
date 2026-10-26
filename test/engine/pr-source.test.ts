@@ -50,6 +50,8 @@ const SEED = [
   pull(13, { head: 'patch-2', fork: true, state: 'closed' }),
   pull(14, { head: 'sail/FAKE-12-x', ticketKey: 'FAKE-1', draft: true }),
   pull(15, { head: 'sail/FAKE-1-x', ticketKey: 'FAKE-1' }),
+  pull(16, { labels: ['Sail'] }),
+  pull(17, { labels: ['other'] }),
 ];
 
 /** The fake CodeHost and the fake TicketSource on seeds of their own, and the state files each writes only on a change. */
@@ -115,6 +117,13 @@ test.each<[string, number, Partial<ResolvePullRequestOptions>, Expected]>([
     99,
     {},
     { refused: 'codeHost.getPullRequest: no pull request #99 (not_found)' },
+  ],
+  ['a label in another case', 16, {}, { number: 16, ticketKey: null, forced: [] }],
+  [
+    'a different label',
+    17,
+    {},
+    { refused: `pull request #17 is not designated: it carries no 'sail' label. ${FORCE}` },
   ],
   ['a closed one, forced', 4, { force: true }, { number: 4, ticketKey: null, forced: ['state'] }],
   ['a draft, forced', 6, { force: true }, { number: 6, ticketKey: null, forced: ['state'] }],

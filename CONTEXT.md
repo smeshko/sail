@@ -41,7 +41,7 @@ A ticket its team has marked for sail with a label (`sail` by default, configura
 _Avoid_: tagged ticket, eligible ticket, allowlisted ticket
 
 **Designated pull request**:
-An open, non-draft pull request carrying the designation label, whose head branch is in the repository. A workflow that opens a pull request adds the label to hand it to a workflow that watches pull requests, and a human adds it to consent to the same. The watcher polls these, and the built-in `pr` intake accepts them.
+An open, non-draft pull request carrying the designation label, in any case, whose head branch is in the repository. A workflow that opens a pull request adds the label to hand it to a workflow that watches pull requests, and a human adds it to consent to the same. The watcher polls these, and the built-in `pr` intake accepts them.
 _Avoid_: tagged PR, labelled PR, bot PR
 
 **Ticket marker**:

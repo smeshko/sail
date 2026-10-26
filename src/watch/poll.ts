@@ -19,6 +19,7 @@ import { parseEvery, pollKind, watchLabel, watchProblem } from '../engine/watcha
 import type { QueueEvent } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
+import { holdsLabel } from '../ports/labels';
 import type { TicketSource } from '../ports/ticket-source';
 import { PullRequest, Ticket } from '../ports/types';
 import type { SourceKind } from '../sdk/intake';
@@ -133,13 +134,13 @@ async function listPullRequests(target: WatchTarget): Promise<PullRequest[]> {
 
 /**
  * Lists `target`'s designated sources, filters them again, and queues them: how many were found, and how many queued.
- * A designated pull request is open, no draft, and carries the label.
+ * A designated pull request is open, no draft, and carries the label, whatever its case.
  */
 async function pollSources(target: WatchTarget): Promise<() => { found: number; added: number }> {
   if (target.kind === 'pr') {
     const answered = await listPullRequests(target);
     return () => {
-      const prs = answered.filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(target.label));
+      const prs = answered.filter((pr) => pr.state === 'open' && !pr.draft && holdsLabel(pr.labels, target.label));
       return { found: prs.length, added: target.store.addPullRequests(prs) };
     };
   }
