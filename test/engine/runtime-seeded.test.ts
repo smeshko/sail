@@ -23,6 +23,12 @@ afterAll(() => source.release());
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 
+const FAKE_TICKET = {
+  ticketKey: 'FAKE-1',
+  title: 'Add a --shout flag to the greet command',
+  url: expect.stringContaining('FAKE-1'),
+};
+
 const journaled = (dir: string) => readJournal(dir).entries.map((entry) => `${entry.key} ${entry.outcome}`);
 const issuesOf = (dir: string) => validateRunDir(dir).issues.map(formatIssue);
 
@@ -51,8 +57,14 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
     );
     const order = (find: (event: (typeof events)[number]) => boolean) => events.findIndex(find);
     const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+    const sourceSummary: Summary = JSON.parse(readFileSync(join(from.dir, 'summary.json'), 'utf8'));
+    const reusedIntake = events.find((event) => event.type === 'journal:append' && event.key === 'intake#1');
     expect({
       journal: journaled(dir),
+      ticket: summary.ticket,
+      sourceTicket: sourceSummary.ticket,
+      intakeTicket: reusedIntake?.type === 'journal:append' ? reusedIntake.ticket : undefined,
+      fetched: events.some((event) => event.type === 'ticket:fetched'),
       start: [start.type, start.fromRun],
       appended,
       intakeStarted: events.some((event) => event.type === 'intake:start'),
@@ -67,6 +79,10 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
       issues: issuesOf(dir),
     }).toEqual({
       journal: ['intake#1 passed', 'spec#1 done'],
+      ticket: FAKE_TICKET,
+      sourceTicket: FAKE_TICKET,
+      intakeTicket: FAKE_TICKET,
+      fetched: false,
       start: ['run:start', from.runId],
       appended: [
         { key: 'intake#1', line: 1, fromRun: from.runId },
@@ -80,6 +96,24 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
     });
   });
 }, 60_000);
+
+test('a run seeded from a seeded run names the same ticket in its summary, though neither fetched it', async () => {
+  await withTempRepo(async (first) => {
+    const from = await source.copyInto(first.dir);
+    const stopped = await seeded(first, from.runId, 'spec');
+    expect(endOf(stopped)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const middle = 'refused' in stopped ? '' : stopped.runId;
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const end = await seeded(second, middle, 'spec');
+      expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+      const dir = dirOf(end);
+      const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+      const original: Summary = JSON.parse(readFileSync(join(from.dir, 'summary.json'), 'utf8'));
+      expect([summary.ticket, summary.ticket?.url, issuesOf(dir)]).toEqual([FAKE_TICKET, original.ticket?.url, []]);
+    });
+  });
+}, 90_000);
 
 test('with continue, a run seeded for spec runs to its end with the calls of the source, and opens its pull request from its own branch', async () => {
   await withTempRepo(async (repo) => {

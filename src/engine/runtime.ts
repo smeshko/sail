@@ -58,7 +58,8 @@
 //
 // A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
 // and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
-// reported once, right after what opening the run did, as a `journal:append` with `fromRun`. Unless `--continue`, it
+// reported once, right after what opening the run did, as a `journal:append` with `fromRun`; the intake's also carries
+// the source's ticket, which names the run's ticket in its summary as no fetch happened. Unless `--continue`, it
 // stops after the stage it was seeded for, as `until` stops a run. A seed never splits a group: when the stage's first
 // call belongs to one, the seeded run's first move is the whole group.
 //
@@ -547,9 +548,11 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
     for (const event of opened.claimed) bus.emit(event);
     // A seeded run's reused calls, each once: they were journaled as the run opened, with no stream to hear them.
     if (opened.seeded !== undefined) {
-      const { fromRun, entries } = opened.seeded;
-      for (const { key, seq, outcome } of entries)
-        bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun });
+      const { fromRun, entries, ticket } = opened.seeded;
+      for (const { key, seq, outcome } of entries) {
+        const named = key === INTAKE_KEY && ticket !== undefined ? { ticket } : {};
+        bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun, ...named });
+      }
     }
     await options.onOpened?.();
     // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.

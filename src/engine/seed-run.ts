@@ -15,7 +15,7 @@
 //      never splits a group, so the seeded run runs the whole group again. Each of its entries must point inside its
 //      own call directory, at regular files, since that is what a run writes and all the copy takes.
 // Then the run id is minted and the header built and checked, with `fromRun` and no claim: a seeded run reads no
-// ticket and claims nothing. An abort seen by then refuses. Then, as a start does, the branch is leased and the run
+// ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by then refuses. Then, as a start does, the branch is leased and the run
 // directory and the workspace made, each undone on a refusal. The branch is the source's, suffixed
 // `-seeded-<the run id's last 8 characters>`, so a seeded run blocks neither its source nor another seeded run.
 //
@@ -29,7 +29,8 @@
 // setup runs as any run's does, so what the setup installed in the source's workspace is there again.
 import { cpSync, existsSync, lstatSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
-import { createEventsFile } from '../events/consumers/ndjson';
+import { createEventsFile, readEvents } from '../events/consumers/ndjson';
+import { summarize } from '../events/summary';
 import type { ProviderEvent } from '../events/types';
 import type { RunRef } from '../ports/workspace';
 import type { ResolvedAdapters } from './adapters';
@@ -213,6 +214,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   const seed = entries.slice(0, at);
   const copied = callDirs(source.dir, fromRun, seed);
   if ('refused' in copied) return copied;
+  const named = summarize(readEvents(source.dir))?.ticket;
+  const ticket = named?.url === undefined ? undefined : { ...named, url: named.url };
 
   const runId = newRunId(ticketKey, now.getTime(), options.random);
   const branch = `${sourceBranch}-seeded-${runId.slice(-8).toLowerCase()}`;
@@ -286,6 +289,6 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     claimed: [],
     ...(options.continue === true ? {} : { until: stage }),
     firstSeq: 1,
-    seeded: { fromRun, stage, entries: journaled },
+    seeded: { fromRun, stage, entries: journaled, ...(ticket === undefined ? {} : { ticket }) },
   };
 }
