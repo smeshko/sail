@@ -568,6 +568,7 @@ const reusedIntake = (key: string, ticket = TICKET): NewEvent => ({
 test("a reused intake's journal:append carrying a ticket names the run's ticket, and validates as an event", () => {
   const summary = folded(stamp([0, runStart()], [10, reusedIntake('intake#1')]));
   expect(summary?.ticket).toEqual(TICKET);
+  expect(validateDocument('sail.summary.v1', summary).map(formatIssue)).toEqual([]);
   const [event] = stamp([10, reusedIntake('intake#1')]);
   expect(validateDocument('sail.event.v1', event).map(formatIssue)).toEqual([]);
 });
