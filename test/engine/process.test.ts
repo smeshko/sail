@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -154,4 +154,36 @@ test('stopping a group that is already gone does nothing', async () => {
   const started = performance.now();
   await stopGroup(child.pid, 5000);
   expect(performance.now() - started).toBeLessThan(500);
+});
+
+/** Runs `body` with every group kill answered by EPERM, as macOS does for a group whose last members are exiting. */
+async function withGroupEperm(body: () => Promise<void>): Promise<void> {
+  const original = process.kill.bind(process);
+  const spy = spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+    if (pid < 0) throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    return original(pid, signal);
+  }) as typeof process.kill);
+  try {
+    await body();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+test('an EPERM from the group once the leader exits leaves the real exit', async () => {
+  const s = scratch();
+  await withGroupEperm(async () => {
+    const end = await runProcess(s.options(['bash', '-c', 'exit 3']));
+    expect(end).toEqual({ started: true, code: 3, signal: null, timedOut: false, aborted: false });
+  });
+});
+
+test('stopping a group that answers EPERM returns at once', async () => {
+  const child = Bun.spawn(['true'], { detached: true });
+  await child.exited;
+  await withGroupEperm(async () => {
+    const started = performance.now();
+    await stopGroup(child.pid, 5000);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
