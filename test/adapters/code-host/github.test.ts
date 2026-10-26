@@ -583,6 +583,36 @@ test('a label holding a slash and a space is removed as one encoded path segment
   });
 });
 
+test('a label named . or .. is refused as invalid before anything is sent, though the pull request holds it', async () => {
+  const on = world({ pullRequests: [{ number: 7, head: 'sail/designated', labels: ['sail', '.', '..'] }] });
+  const capture = captureEvents();
+  const adapter = host(on, capture.emit);
+  const failures = [
+    portFailure(await rejection(adapter.removeLabel(7, '.'))),
+    portFailure(await rejection(adapter.removeLabel(7, '..'))),
+  ];
+  expect({ failures, sent: on.routes(), held: on.pullRequests[0]?.labels, events: capture.events }).toEqual({
+    failures: [
+      { port: 'codeHost', op: 'removeLabel', code: 'invalid' },
+      { port: 'codeHost', op: 'removeLabel', code: 'invalid' },
+    ],
+    sent: [],
+    held: ['sail', '.', '..'],
+    events: [],
+  });
+});
+
+test('a label named ... is still deleted by its own path', async () => {
+  const on = world({ pullRequests: [{ number: 7, head: 'sail/designated', labels: ['sail', '...'] }] });
+  const capture = captureEvents();
+  const removed = await host(on, capture.emit).removeLabel(7, '...');
+  expect({ labels: removed.labels, sent: on.routes(), held: on.pullRequests[0]?.labels }).toEqual({
+    labels: ['sail'],
+    sent: ['GET /repos/o/r/pulls/7', 'DELETE /repos/o/r/issues/7/labels/...'],
+    held: ['sail'],
+  });
+});
+
 test('a 404 on the DELETE, the label gone in a race, answers a fresh read of the labels and emits nothing', async () => {
   const on = world();
   const capture = captureEvents();

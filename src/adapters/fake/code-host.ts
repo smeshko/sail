@@ -301,7 +301,18 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       return result;
     },
     addLabel: async (number, name) => label('addLabel', number, name),
-    removeLabel: async (number, name) => label('removeLabel', number, name),
+    removeLabel: async (number, name) => {
+      // Mirrors the GitHub adapter, whose DELETE for such a name would reach the labels collection.
+      if (/^\.\.?$/.test(name)) {
+        throw new PortError(
+          'codeHost',
+          'removeLabel',
+          'invalid',
+          `the label "${name}" is a path segment of dots: its DELETE would reach the pull request's labels collection`,
+        );
+      }
+      return label('removeLabel', number, name);
+    },
     async comment(number, body) {
       const posted = store.change((world) => {
         const pr = find(world, 'comment', number);

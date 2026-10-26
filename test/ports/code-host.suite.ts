@@ -394,6 +394,24 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     expectValidEvents(capture);
   });
 
+  test(`${label}: removing a label named . or .. rejects with invalid, sends nothing, and leaves the labels as they were`, async () => {
+    const { adapter, world, capture } = await start();
+    const before = (await adapter.getPullRequest(world.designated)).labels;
+    const failures = [
+      portFailure(await rejection(adapter.removeLabel(world.designated, '.'))),
+      portFailure(await rejection(adapter.removeLabel(world.designated, '..'))),
+    ];
+    const after = (await adapter.getPullRequest(world.designated)).labels;
+    expect({ failures, after, events: capture.events }).toEqual({
+      failures: [
+        { port: 'codeHost', op: 'removeLabel', code: 'invalid' },
+        { port: 'codeHost', op: 'removeLabel', code: 'invalid' },
+      ],
+      after: before,
+      events: [],
+    });
+  });
+
   test(`${label}: a comment is posted, and emits codehost:commented`, async () => {
     const { adapter, world, capture } = await start();
     const posted = await adapter.comment(world.designated, 'Checks passed.');
