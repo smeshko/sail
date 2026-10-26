@@ -21,7 +21,9 @@ export default workflow(
   'factory',
   {
     intake: ticket,
-    version: 4,
+    version: 5,
+    watch: { every: '5m' },
+    maxConcurrentRuns: 3,
     description: 'plan, implement test first, demonstrate, review, pull request, follow-ups',
   },
   async (run) => {
