@@ -14,6 +14,8 @@ import { checkTasks } from './stages/04-check-tasks/stage';
 import { describe } from './stages/05-describe/stage';
 import { open } from './stages/06-open/stage';
 
+const IMPLEMENT_PASSES = 3;
+
 export default workflow(
   'factory',
   {
@@ -32,25 +34,30 @@ export default workflow(
 
     // implement-plan, its final validation, then a surface check that every task is implemented: a failed validation,
     // or a task left out, goes back to implement.
+    // A failed last pass would fail the run with the loop exceeded: break instead, so the run fails below, saying why.
     let implemented = false;
-    for (const iteration of run.loop('implement', { max: 3, feedback: PassFeedback })) {
+    let passes = 0;
+    for (const iteration of run.loop('implement', { max: IMPLEMENT_PASSES, feedback: PassFeedback })) {
+      passes++;
       const impl = await run.stage(implement, { plan: planFile, commit, feedback: iteration.previous });
       if (impl.outcome === 'blocked') return run.fail(`implement blocked: ${impl.reason}`);
       const v = await run.stage(validate);
       if (v.outcome === 'failed') {
+        if (passes === IMPLEMENT_PASSES) break;
         iteration.fail({ validation: v.output, tasks: null });
         continue;
       }
       const checked = await run.stage(checkTasks, { plan: planFile });
       if (checked.outcome === 'blocked') return run.fail(`check-tasks blocked: ${checked.reason}`);
       if (checked.output.tasks.some((task) => !task.implemented)) {
+        if (passes === IMPLEMENT_PASSES) break;
         iteration.fail({ validation: null, tasks: checked.output });
         continue;
       }
       implemented = true;
       break;
     }
-    if (!implemented) return run.fail('implement: validation or a task still fails after three passes');
+    if (!implemented) return run.fail(`implement: validation or a task still fails after ${IMPLEMENT_PASSES} passes`);
 
     // create-pr
     const d = await run.stage(describe, { ticket: run.input, plan: planFile });

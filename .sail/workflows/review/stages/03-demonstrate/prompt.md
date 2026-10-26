@@ -58,8 +58,12 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
 - A scenario written as a test command (`bun run test`, `bun test`) is not one you can run: the step's
   permissions refuse it. Don't try it. Report that criterion shown only if a sail run in a demo repository shows it;
   otherwise report it not shown, saying a test is the only way it was written to be observed.
-- End the step **blocked** only when you can't run the scenario at all: the harness refuses, or a tool it needs is
-  missing. A change that runs and behaves wrong is a report, not a block.
+- The harness runs `sail` commands one at a time, in the foreground, with no shell: no pipe, no redirect, no command in
+  the background, no second command while the first runs. A scenario that needs one, such as `sail … | head -1`, or a
+  `sail stop` while `sail watch` runs, can't be run here. Don't work around it: report the criterion not shown, naming
+  what the scenario needs that the harness doesn't run, and the judge decides.
+- End the step **blocked** only when the harness itself can't run: `demo.sh new` fails, or a tool it needs is missing.
+  A scenario the harness doesn't run is a report, as is a change that runs and behaves wrong.
 
 ## Submit
 
