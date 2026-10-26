@@ -1,5 +1,5 @@
 // The inspector: one call, on four tabs. Overview has its facts, output and errors; files, what it produced and how
-// each was validated; permissions, the step's permissions and budget from the roster and each denial with the command
+// each was validated, each name opening the file in the drawer; permissions, the step's permissions and budget from the roster and each denial with the command
 // it refused; log, its session or its stdout and stderr. Everything comes from the run's own files: the card from its
 // events, the roster from `run:start`, and the call's `result.json` and logs over REST.
 import { clock, cost, duration } from './format';
@@ -77,7 +77,12 @@ function files(card: StageCard, result: Fields | undefined): SafeHtml {
     const name = text(file.name);
     const validated = card.files.find((entry) => entry.name === name);
     const sha = typeof file.sha256 === 'string' ? file.sha256 : undefined;
-    return html`<div class="art"><span class="ic">▤</span><span><b>${name}</b><span class="d">${text(file.path ?? '')}${
+    const path = typeof file.path === 'string' ? file.path : undefined;
+    const title =
+      path === undefined
+        ? html`<b>${name}</b>`
+        : html`<button class="art-open" data-action="open-file" data-name="${name}" data-path="${path}" title="read ${name}"><b>${name}</b></button>`;
+    return html`<div class="art"><span class="ic">▤</span><span>${title}<span class="d">${text(file.path ?? '')}${
       typeof file.bytes === 'number' ? ` · ${file.bytes} bytes` : ''
     }${sha === undefined ? '' : html` · <span class="sha" title="${sha}">${sha.slice(0, 12)}</span>`}</span></span>${
       validated?.ok === undefined

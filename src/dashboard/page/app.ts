@@ -9,6 +9,8 @@
 // - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
 //   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry. The
 //   kinds of entry it hides hold for every call's timeline, and are saved like the theme.
+// - A file name in the inspector's files tab opens the file in the drawer, read over REST: a markdown file as the HTML
+//   the server built from it. Esc or the close button shuts the drawer, and so does opening another run.
 // - The inspector reads a call's `result.json` and log over REST. A response for a selection that has changed since is
 //   dropped, and a running call's log is read again at most once a second.
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
@@ -20,6 +22,7 @@ import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
 import { attention } from './attention';
 import { renderAttention } from './attention-view';
+import { isMarkdown, renderDrawer } from './drawer-view';
 import type { PageHost, Region } from './host';
 import { REGIONS } from './host';
 import { html } from './html';
@@ -100,6 +103,10 @@ export function boot(host: PageHost): Page {
   let run: OpenRun | undefined;
   let result: Loaded<unknown> | undefined;
   let log: Loaded<string> | undefined;
+  /** The drawer's file, as read. */
+  let doc: Loaded<string> | undefined;
+  /** Bumped on every file the drawer opens: only the latest read is shown. */
+  let docRead = 0;
   /** Bumped on every change of the selected call: a read made for an older one is dropped. */
   let selection = 0;
   /** Bumped on every result and log read asked for: only the latest of each is shown. */
@@ -148,6 +155,7 @@ export function boot(host: PageHost): Page {
     },
     inspector: () => renderInspector(selected(), run?.model.roster, result, log, ui).value,
     status: () => (run === undefined ? '' : renderStatus(run.model, summaryOf(run)).value),
+    drawer: () => renderDrawer(ui, doc).value,
   };
 
   const flush = () => {
@@ -349,12 +357,36 @@ export function boot(host: PageHost): Page {
     closing.connection?.close();
   };
 
+  const closeFile = () => {
+    if (ui.file === undefined) return;
+    delete ui.file;
+    doc = undefined;
+    docRead++;
+    mark('drawer');
+  };
+
+  const openFile = (name: string, path: string) => {
+    const open = run;
+    if (open === undefined) return;
+    ui.file = { name, path };
+    doc = { state: 'loading' };
+    const asked = ++docRead;
+    const as = isMarkdown(path) ? '&as=html' : '';
+    void host.get(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/file?path=${enc(path)}${as}`).then((answer) => {
+      if (asked !== docRead) return;
+      doc = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
+      mark('drawer');
+    });
+    mark('drawer');
+  };
+
   const selectRun = (repo: string, runId: string) => {
     if (run?.repo === repo && run.runId === runId) return;
     closeRun();
     clearCall();
     ui.repo = repo;
     ui.runId = runId;
+    closeFile();
     delete ui.key;
     ui.timeline = false;
     ui.opened = [];
@@ -470,6 +502,10 @@ export function boot(host: PageHost): Page {
       ui.timeline = false;
       mark('main');
     },
+    'open-file': (data) => {
+      if (data.name !== undefined && data.path !== undefined) openFile(data.name, data.path);
+    },
+    'close-file': () => closeFile(),
     'step-card': (data) => step(Number(data.by) < 0 ? -1 : 1),
     'toggle-tool': (data) => {
       const call = data.call;
@@ -531,8 +567,12 @@ export function boot(host: PageHost): Page {
       const card = run?.model.cards[ui.cursor];
       if (card !== undefined) selectCard(card.key, undefined, true);
     },
-    // Back to the cards from a timeline, keeping the selection; from the cards, no selection.
-    Escape: () => (ui.timeline ? actions['close-timeline']?.({}) : selectCard(undefined)),
+    // The drawer shut first; then back to the cards from a timeline, keeping the selection; from the cards, no selection.
+    Escape: () => {
+      if (ui.file !== undefined) closeFile();
+      else if (ui.timeline) actions['close-timeline']?.({});
+      else selectCard(undefined);
+    },
     ']': () => step(1),
     '[': () => step(-1),
     i: () => actions['toggle-inspector']?.({}),

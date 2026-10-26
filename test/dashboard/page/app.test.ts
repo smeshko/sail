@@ -199,7 +199,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'inspector', 'main', 'queues', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'queues', 'rail', 'status']);
   host.push(host.open('index')[0], indexMessage());
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
   replay(host.open('run=')[0], GOLDEN());
@@ -579,6 +579,47 @@ test('the timeline filter loads what was saved, toggles a kind in the order of t
   expect(page.ui.hidden).toEqual(['thinking', 'messages', 'scripts']);
   host.click({ action: 'show-all' });
   expect([page.ui.hidden, host.storage.get(FILTER_KEY)]).toEqual([[], '']);
+});
+
+test("a file name opens the drawer with the file's markdown as HTML, another file as text, Esc closes it before the timeline, and another run closes it", async () => {
+  const file = (path: string) => `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/file?path=${encodeURIComponent(path)}`;
+  host.bodies.set(`${file('01-spec/call-1/spec.md')}&as=html`, { status: 200, body: '<h1>Spec</h1>' });
+  host.bodies.set(file('00-intake/call-1/ticket.json'), { status: 200, body: '{}' });
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN(), false);
+  host.click({ action: 'select-card', key: 'spec#1' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  expect(page.ui.file).toEqual({ name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.advance(100);
+  expect(host.regions.drawer).toContain('<div class="code">loading…</div>');
+  await settle();
+  host.advance(100);
+  expect(host.regions.drawer).toContain('<div class="md"><h1>Spec</h1></div>');
+  host.click({ action: 'open-file', name: 'ticket.json', path: '00-intake/call-1/ticket.json' });
+  host.click({ action: 'open-file', name: 'gone.txt', path: '00-intake/call-1/gone.txt' });
+  await settle();
+  host.advance(100);
+  expect(host.reads.map((read) => read.path).filter((path) => path.includes('/file?'))).toEqual([
+    `${file('01-spec/call-1/spec.md')}&as=html`,
+    file('00-intake/call-1/ticket.json'),
+    file('00-intake/call-1/gone.txt'),
+  ]);
+  // Only the latest file's read is shown.
+  expect(host.regions.drawer).toContain('<b>gone.txt</b>');
+  expect(host.regions.drawer).toContain('this file is not in the run');
+  host.press('Escape');
+  expect([page.ui.file, page.ui.timeline]).toEqual([undefined, true]);
+  host.advance(100);
+  expect(host.regions.drawer).toBe('');
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'close-file' });
+  expect(page.ui.file).toBeUndefined();
+  host.click({ action: 'open-file', name: 'spec.md' });
+  expect(page.ui.file).toBeUndefined();
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+  expect(page.ui.file).toBeUndefined();
 });
 
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {

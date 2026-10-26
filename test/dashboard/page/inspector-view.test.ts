@@ -50,7 +50,7 @@ test("the permissions tab explains FAKE-2's denial from its events, roster and r
 
 test("the files tab lists the golden implement#2's diff.patch with its bytes and a sha256 prefix, the whole hash in its title", () => {
   expect(inspect(GOLDEN_RUN, 'implement#2', 'files')).toContain(
-    '<div class="grp-t">files · 1</div><div class="art"><span class="ic">▤</span><span><b>diff.patch</b><span class="d">02-implement/call-2/diff.patch · 613 bytes · <span class="sha" title="2a10783a63a95398d9ab4bace6f0919d15d15ab03637579579b192693547ea25">2a10783a63a9</span></span></span></div>',
+    '<div class="grp-t">files · 1</div><div class="art"><span class="ic">▤</span><span><button class="art-open" data-action="open-file" data-name="diff.patch" data-path="02-implement/call-2/diff.patch" title="read diff.patch"><b>diff.patch</b></button><span class="d">02-implement/call-2/diff.patch · 613 bytes · <span class="sha" title="2a10783a63a95398d9ab4bace6f0919d15d15ab03637579579b192693547ea25">2a10783a63a9</span></span></span></div>',
   );
   expect(inspect(FAKE_2, 'implement#1', 'files')).toContain('<div class="code">this call produced no files</div>');
   const events = readEvents(GOLDEN_RUN);
