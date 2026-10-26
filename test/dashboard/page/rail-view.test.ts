@@ -1,5 +1,5 @@
-// The rail, drawn from the index model: each repository with its runs, finished runs folded into a counted completed
-// section that opens when asked or when it holds the open run, and every run a delegated `select-run` action.
+// The rail, drawn from the index model: each repository with its runs, failed and completed runs folded into counted
+// sections that open when asked or when they hold the open run, and every run a delegated `select-run` action.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { index } from '../../../src/dashboard/files';
 import { railRepos } from '../../../src/dashboard/page/index-model';
@@ -21,9 +21,13 @@ const shown = (markup: string) =>
     ...markup.matchAll(/<button class="run( sel)?" data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)">/g),
   ].map(([, sel, repo, run]) => `${repo} ${run}${sel ? ' *' : ''}`);
 
-test("the rail shows alpha's FAKE-2, its completed section open on the selected golden run, and beta's FAKE-3 suspended on budget_exceeded with its title escaped", () => {
-  const markup = rail({ repo: 'alpha', runId: GOLDEN_RUN_ID });
+test("the rail shows alpha's failed FAKE-2 in its opened failed section, its completed section open on the selected golden run, and beta's FAKE-3 suspended on budget_exceeded with its title escaped", () => {
+  const markup = rail({ repo: 'alpha', runId: GOLDEN_RUN_ID, open: ['alpha:failed'] });
   expect(shown(markup)).toEqual([`alpha ${FAKE_2_ID}`, `alpha ${GOLDEN_RUN_ID} *`, `beta ${FAKE_3_ID}`]);
+  expect(markup).toContain(
+    '<button class="subgrp-h open" data-action="toggle-section" data-section="alpha:failed"><span class="caret">›</span><span class="sw p-fail"></span><span>failed</span><span class="n">1</span></button>',
+  );
+  expect(markup.indexOf('data-section="alpha:failed"')).toBeLessThan(markup.indexOf('data-section="alpha:completed"'));
   expect(markup).toContain('<span class="nm">alpha</span>');
   expect(markup).toContain('<div class="lgrp-r">https://example.com/beta.git</div>');
   expect(markup).toContain(
@@ -36,9 +40,11 @@ test("the rail shows alpha's FAKE-2, its completed section open on the selected 
   expect(markup).toContain('<div class="rail-h"><span>repositories</span><span class="c">4 runs</span></div>');
 });
 
-test('the completed section stays closed unless it is opened or holds the selection', () => {
-  expect(shown(rail())).toEqual([`alpha ${FAKE_2_ID}`, `beta ${FAKE_3_ID}`]);
+test('the failed and completed sections stay closed unless opened or holding the selection', () => {
+  expect(shown(rail())).toEqual([`beta ${FAKE_3_ID}`]);
+  expect(rail()).toContain('<button class="subgrp-h" data-action="toggle-section" data-section="alpha:failed">');
   expect(rail()).toContain('<button class="subgrp-h" data-action="toggle-section" data-section="alpha:completed">');
+  expect(shown(rail({ repo: 'alpha', runId: FAKE_2_ID }))).toEqual([`alpha ${FAKE_2_ID} *`, `beta ${FAKE_3_ID}`]);
   const states = [
     'completed',
     'passed',
@@ -64,9 +70,5 @@ test('the completed section stays closed unless it is opened or holds the select
     'p-pend',
     'p-skip',
   ]);
-  expect(shown(rail({ open: ['alpha:completed'] }))).toEqual([
-    `alpha ${FAKE_2_ID}`,
-    `alpha ${GOLDEN_RUN_ID}`,
-    `beta ${FAKE_3_ID}`,
-  ]);
+  expect(shown(rail({ open: ['alpha:completed'] }))).toEqual([`alpha ${GOLDEN_RUN_ID}`, `beta ${FAKE_3_ID}`]);
 });
