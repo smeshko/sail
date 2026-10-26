@@ -1,10 +1,10 @@
-// The run view: the run's header, its totals against its budget, its loops and routes, one stage card per call grouped
-// by loop iteration, a group's cards side by side under a header of their own, the roster stages not called yet, the
-// pull request it opened, and the CLI commands to copy. The cards come from the run model, fed by the run's events. The
-// totals, loops and routes come from the summary in the index when there is one, and from the cards otherwise.
+// The run view: the run's header, its totals against its budget, one stage card per call grouped by loop iteration, a
+// group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
+// and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
+// summary in the index when there is one, and from the cards otherwise.
 import type { Summary } from '../../events/summary';
 import { runCommands } from './commands';
-import { cost, duration, percent } from './format';
+import { cost, duration, percent, tokens } from './format';
 import { html, type SafeHtml, safeHref, text } from './html';
 import { elapsedMs, type PendingCard, type RunModel, type StageCard } from './run-model';
 import { pillOf, type UiState } from './ui-state';
@@ -115,7 +115,6 @@ export function renderRun(model: RunModel, summary: Summary | null | undefined, 
   const ticket = model.ticket ?? summary?.ticket;
   // A summary's result is the workflow's own, free-form: its PR is read only when it is an object (review R2-1).
   const pr = model.pr ?? fieldsOf(fieldsOf(summary?.result)?.pr);
-  const loops = Object.entries(model.loops);
   return html`<div class="d-h run-h">${
     ticket === undefined ? '' : html`<span class="d-title">${ticket.ticketKey}</span> ${link(ticket.url, ticket.title)}`
   }<span class="pill ${pillOf(status)}">${status ?? 'unknown'}</span>${
@@ -124,19 +123,6 @@ export function renderRun(model: RunModel, summary: Summary | null | undefined, 
 ${model.end?.message === undefined ? '' : html`<div class="d-msg">${model.end.message}</div>`}
 <div class="run-b">
 ${totals(model, summary, now)}
-${
-  loops.length === 0
-    ? ''
-    : html`<div class="loops">${loops.map(
-        ([name, loop]) =>
-          html`<span class="loopbadge">${name}: ${loop.iteration}/${loop.max}${loop.exited === undefined ? '' : html` · ${loop.exited}`}</span>`,
-      )}</div>`
-}
-${
-  model.routes.length === 0
-    ? ''
-    : html`<div class="routes">${model.routes.map((route) => html`<span class="route">${route.at} ${route.value} → ${route.took}</span>`)}</div>`
-}
 ${groups(model, ui, now)}
 ${
   model.pending.length === 0
@@ -157,15 +143,34 @@ ${
 </div>`;
 }
 
-/** The status bar: calls settled of all, tool calls, denials, cost, and whether the run is live. */
+/** The run's tokens: the summary's totals once there is one, else what its cards' sessions reported. */
+function tokensOf(
+  model: RunModel,
+  summary: Summary | null | undefined,
+): { input: number; output: number; cached: number } {
+  const usage = summary?.totals.usage;
+  if (usage !== undefined) {
+    return { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cached: usage.cacheReadTokens ?? 0 };
+  }
+  const sum = (pick: (card: StageCard) => number | undefined) =>
+    model.cards.reduce((total, card) => total + (pick(card) ?? 0), 0);
+  return {
+    input: sum((card) => card.tokens?.input),
+    output: sum((card) => card.tokens?.output),
+    cached: sum((card) => card.tokens?.cacheRead),
+  };
+}
+
+/** The status bar: calls settled of all, tool calls, denials, tokens, cost, and whether the run is live. */
 export function renderStatus(model: RunModel, summary: Summary | null | undefined): SafeHtml {
   const settled = model.cards.filter((entry) => entry.state === 'settled').length;
   const tools = model.cards.reduce((sum, entry) => sum + entry.toolCalls, 0);
   const denials = model.cards.reduce((sum, entry) => sum + entry.denials.length, 0);
   const spent = summary?.totals.usage.costUsd ?? model.cards.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0);
+  const used = tokensOf(model, summary);
   return html`<span>calls <b>${settled}/${model.cards.length}</b></span><span>tools <b>${tools}</b></span><span class="${
     denials > 0 ? 'w' : ''
-  }">denied <b>${denials}</b></span><span>cost <b>${cost(spent)}</b></span><span class="spacer"></span><span>${
+  }">denied <b>${denials}</b></span><span title="tokens in, out and read from the cache">tokens <b>${tokens(used.input)}</b> in · <b>${tokens(used.output)}</b> out · <b>${tokens(used.cached)}</b> cached</span><span>cost <b>${cost(spent)}</b></span><span class="spacer"></span><span>${
     model.end === undefined ? '● live' : `ended ${model.end.status}`
   }</span>`;
 }

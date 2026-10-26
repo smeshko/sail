@@ -311,7 +311,8 @@
       .sw.p-pass {
         background: var(--ok);
       }
-      .st.p-fail {
+      .st.p-fail,
+      .sw.p-fail {
         background: var(--err);
       }
       .st.p-run {
@@ -489,23 +490,6 @@
         font-size: 10px;
         color: var(--fg-3);
         text-transform: uppercase;
-      }
-      .loops,
-      .routes {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin-bottom: 10px;
-      }
-      .loopbadge,
-      .route {
-        font-family: var(--mono);
-        font-size: 11px;
-        padding: 3px 8px;
-        border-radius: 5px;
-        border: 1px solid var(--line);
-        background: var(--panel-2);
-        color: var(--fg-2);
       }
       .grp,
       .cgrp {
@@ -803,6 +787,23 @@
       .tl-h .btn {
         flex: none;
       }
+      .tl-f {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px 14px;
+        border-bottom: 1px solid var(--line);
+        background: var(--bg);
+      }
+      .tl-f .n {
+        color: var(--fg-4);
+      }
+      .tl-f .f-errors.on {
+        color: var(--err);
+      }
       .tl {
         padding: 8px 0 18px;
       }
@@ -1050,6 +1051,151 @@
         color: var(--fg-3);
         overflow-wrap: anywhere;
       }
+      .art-open {
+        text-align: left;
+        color: var(--fg);
+      }
+      .art-open:hover {
+        text-decoration: underline;
+      }
+      .drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 20;
+        width: min(760px, 92vw);
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        border-left: 1px solid var(--line);
+        box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+        animation: drawer-in 0.15s ease-out;
+      }
+      .drawer:empty {
+        display: none;
+      }
+      @keyframes drawer-in {
+        from {
+          transform: translateX(24px);
+          opacity: 0;
+        }
+      }
+      .drawer-h {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--line);
+      }
+      .drawer-h > span {
+        flex: 1;
+        min-width: 0;
+      }
+      .drawer-h b {
+        display: block;
+        font-size: 14px;
+      }
+      .drawer-h .d {
+        display: block;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--fg-3);
+        overflow-wrap: anywhere;
+      }
+      .drawer-b {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 20px 28px;
+      }
+      .drawer-b > .code {
+        white-space: pre-wrap;
+      }
+      .drawer .md {
+        font-family: var(--sans);
+        font-size: 13.5px;
+        line-height: 1.6;
+        color: var(--fg);
+        overflow-wrap: anywhere;
+      }
+      .drawer .md h1,
+      .drawer .md h2,
+      .drawer .md h3,
+      .drawer .md h4,
+      .drawer .md h5,
+      .drawer .md h6 {
+        margin: 1.2em 0 0.5em;
+        line-height: 1.3;
+      }
+      .drawer .md h1 {
+        font-size: 20px;
+      }
+      .drawer .md h2 {
+        font-size: 17px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--line);
+      }
+      .drawer .md h3 {
+        font-size: 14.5px;
+      }
+      .drawer .md p,
+      .drawer .md ul,
+      .drawer .md ol,
+      .drawer .md blockquote,
+      .drawer .md table,
+      .drawer .md pre {
+        margin: 0 0 0.8em;
+      }
+      .drawer .md ul,
+      .drawer .md ol {
+        padding-left: 1.5em;
+      }
+      .drawer .md li.task {
+        list-style: none;
+        margin-left: -1.3em;
+      }
+      .drawer .md code {
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: var(--panel-2);
+      }
+      .drawer .md pre {
+        padding: 10px 12px;
+        border-radius: 6px;
+        background: var(--inset);
+        border: 1px solid var(--line);
+        overflow-x: auto;
+      }
+      .drawer .md pre code {
+        padding: 0;
+        background: none;
+      }
+      .drawer .md blockquote {
+        padding-left: 12px;
+        border-left: 3px solid var(--line);
+        color: var(--fg-3);
+      }
+      .drawer .md table {
+        border-collapse: collapse;
+      }
+      .drawer .md th,
+      .drawer .md td {
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+      }
+      .drawer .md hr {
+        border: 0;
+        border-top: 1px solid var(--line);
+        margin: 1.2em 0;
+      }
+      .drawer .md a {
+        color: var(--run);
+      }
+      .drawer .md .md-img {
+        color: var(--fg-3);
+      }
       .mini {
         margin: 6px 0;
         border: 1px solid var(--line);
@@ -1120,6 +1266,7 @@
         </aside>
       </div>
       <footer class="status" id="status"></footer>
+      <aside class="drawer" id="drawer"></aside>
     </div>
     <script type="module" id="sail-page"></script>
   </body>

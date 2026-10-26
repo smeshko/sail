@@ -20,9 +20,29 @@ test('duration gives ms, tenths of a second, minutes and seconds, then hours and
   expect([undefined, -1, Number.NaN].map(duration)).toEqual(['—', '—', '—']);
 });
 
-test('tokens gives counts, one-decimal and whole thousands, then millions, a k count that rounds to 1000k in millions', () => {
-  const at = [0, 999, 1000, 9999, 10_000, 999_499, 999_999, 1_000_000, 9_940_000, 12_345_678];
-  expect(at.map(tokens)).toEqual(['0', '999', '1.0k', '10.0k', '10k', '999k', '1.0m', '1.0m', '9.9m', '12m']);
+test('tokens gives counts, thousands with one decimal below 100k, millions with one below 10m, whole above, a k count that rounds to 1000k in millions', () => {
+  const at = [
+    0, 534, 999, 1000, 9999, 12_600, 99_949, 99_950, 189_200, 999_499, 999_999, 1_000_000, 9_940_000, 99_950_000,
+    12_345_678, 13_000_000,
+  ];
+  expect(at.map(tokens)).toEqual([
+    '0',
+    '534',
+    '999',
+    '1.0k',
+    '10.0k',
+    '12.6k',
+    '99.9k',
+    '100k',
+    '189k',
+    '999k',
+    '1.0m',
+    '1.0m',
+    '9.9m',
+    '100m',
+    '12m',
+    '13m',
+  ]);
   expect(tokens(undefined)).toBe('?');
 });
 

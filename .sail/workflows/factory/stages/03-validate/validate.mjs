@@ -1,7 +1,8 @@
 // Validates the branch in the workspace and prints the Validation: what is uncommitted, and how `bun run gate` ended:
 // typecheck, lint and the affected tests. The full suite with its coverage gate is CI's `verify` check on the pull
-// request, which the run doesn't wait for.
-import { spawnSync } from 'node:child_process';
+// request, which the run doesn't wait for. The gate's output goes to stderr as it comes, so the call's log fills while the
+// gate runs.
+import { spawn, spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const bun = process.env.SAIL_BUN ?? 'bun';
@@ -17,10 +18,24 @@ const uncommitted = status.stdout
   .filter(Boolean)
   .map((line) => line.slice(3));
 
-const verified = spawnSync(bun, ['run', 'gate'], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-const log = `${verified.stdout}${verified.stderr}`;
-process.stderr.write(log);
-const verify = { ok: verified.status === 0, exitCode: verified.status ?? -1, tail: failures(log) ?? tail(log) };
+/** Runs the gate, passing its stdout and stderr through to stderr as they come, and collecting both in order. */
+function gate() {
+  return new Promise((resolve) => {
+    const child = spawn(bun, ['run', 'gate'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks = [];
+    const pass = (chunk) => {
+      chunks.push(chunk);
+      process.stderr.write(chunk);
+    };
+    child.stdout.on('data', pass);
+    child.stderr.on('data', pass);
+    child.on('error', (error) => resolve({ code: null, log: `${error.message}\n` }));
+    child.on('close', (code) => resolve({ code, log: Buffer.concat(chunks).toString('utf8') }));
+  });
+}
+
+const { code, log } = await gate();
+const verify = { ok: code === 0, exitCode: code ?? -1, tail: failures(log) ?? tail(log) };
 
 /**
  * Each failing test with the error lines Bun printed above it, then the counts: what the implementer needs, which the
