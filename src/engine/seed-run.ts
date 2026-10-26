@@ -15,9 +15,10 @@
 //      never splits a group, so the seeded run runs the whole group again. Each of its entries must point inside its
 //      own call directory, at regular files, since that is what a run writes and all the copy takes.
 // Then the run id is minted and the header built and checked, with `fromRun` and no claim: a seeded run reads no
-// ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by then refuses. Then, as a start does, the branch is leased and the run
-// directory and the workspace made, each undone on a refusal. The branch is the source's, suffixed
-// `-seeded-<the run id's last 8 characters>`, so a seeded run blocks neither its source nor another seeded run.
+// ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by
+// then refuses. Then, as a start does, the branch is leased and the run directory and the workspace made, each undone
+// on a refusal. The branch is the source's, suffixed `-seeded-<the run id's last 8 characters>`, so a seeded run
+// blocks neither its source nor another seeded run.
 //
 // The reused calls' directories are copied from the source, every try included, so the journal's paths hold in the new
 // run directory and the consumed files keep their bytes. A copy that fails undoes the workspace, the run directory and

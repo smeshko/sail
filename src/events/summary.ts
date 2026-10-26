@@ -18,7 +18,8 @@
 //
 // The run's ticket is the one its intake fetched: the first `ticket:fetched` under the intake's key. A script step's
 // `sail port ticket-source get` emits one too, under its own key, and names another fetch, not the run's ticket.
-// A seeded run fetches nothing: its reused intake's `journal:append` carries the ticket instead, and names it the same way.
+// A seeded run fetches nothing: its reused intake's `journal:append` carries the ticket instead, and names it the
+// same way.
 import { INTAKE_KEY } from '../engine/intake';
 import type { JournalEntry } from '../engine/journal';
 import type { StopReason } from '../engine/run-dir';
