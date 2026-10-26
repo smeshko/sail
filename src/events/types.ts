@@ -198,13 +198,13 @@ interface Payloads {
   'output:invalid': { key: string; message: string };
   'file:produced': { key: string; name: string; path: string; bytes: number; sha256: string };
   'file:validated': { key: string; name: string; ok: boolean; checks: string[] };
-  /** `fromRun` marks a reused call: the run it was taken from. */
-  /** `ticket` is present only on a reused intake's line: the run's ticket, its title untrusted text. */
   'journal:append': {
     key: string;
     line: number;
     outcome: Outcome;
+    /** Marks a reused call: the run it was taken from. */
     fromRun?: string;
+    /** Present only on a reused intake's line: the run's ticket, its title untrusted text. */
     ticket?: { ticketKey: string; title: string; url: string };
   };
   'loop:iteration': {
