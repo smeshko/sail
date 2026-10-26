@@ -1,6 +1,7 @@
 // The fake Harness: answers scripted per call key and try, keeping no state, so a resume, a parallel call or a new
 // process gets the same answer (D2). It writes an answer's files into `$STAGE_OUT`, honours `maxTurns`, `maxUsd`,
-// `maxMinutes` and an abort, and never rejects. As `claude-code` does, it ends a session once a turn before its last
+// `maxMinutes` and an abort, and never rejects. As `claude-code` does, it refuses a `maxUsd` of 0 before any session
+// starts, and it ends a session once a turn before its last
 // has spent `maxUsd`, so a session's last turn may pass it, and it ends a scripted delay at `maxMinutes`. It never
 // checks `output` against the schema: invalid output is scripted as a `done` answer whose
 // output doesn't conform, which the agent kind rejects. Every session that starts ends once, with its id, the turns it
@@ -136,6 +137,9 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
       raw,
     });
     if (request.signal?.aborted) return fail('aborted');
+    if (!(request.budget.maxUsd > 0)) {
+      return fail('fake harness: maxUsd must be more than 0, as claude-code refuses --max-budget-usd 0');
+    }
     const script = load();
     if (typeof script === 'string') return fail(script);
     const answersFor = (key: string) => (Object.hasOwn(script, key) ? script[key] : undefined);
