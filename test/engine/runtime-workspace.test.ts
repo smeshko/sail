@@ -6,7 +6,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { readLease, takeLease } from '../../src/adapters/leases';
+import { leaseFile, readLease, takeLease } from '../../src/adapters/leases';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import { openRun } from '../../src/engine/open-run';
 import { writeStatus } from '../../src/engine/run-dir';
@@ -336,6 +336,50 @@ test("a run whose lease can't be released still ends with run:end, which says so
       message: `its lease on ${BRANCH} was not released`,
       workspace: false,
     });
+  });
+});
+
+test.skipIf(process.getuid?.() === 0)(
+  "a run whose lease directory became read-only still ends with run:end, which says its lease wasn't released",
+  async () => {
+    await withTempRepo(async (repo) => {
+      writeStub(repo.dir, { testsPassAt: 1 });
+      const lock: Consumer = {
+        name: 'lock',
+        onEvent: (event) => {
+          if (event.type === 'journal:append' && event.key === 'publish#1') chmodSync(leasesOf(repo.dir), 0o555);
+        },
+      };
+      let end: RunEnd | undefined;
+      try {
+        end = await ran(repo.dir, { consumers: [lock] });
+      } finally {
+        chmodSync(leasesOf(repo.dir), 0o755);
+      }
+      const last = readEvents(end.dir).at(-1);
+      const message = last?.type === 'run:end' ? last.message : last?.type;
+      expect(end.status).toBe('completed');
+      expect(message).toContain(`its lease on ${BRANCH} was not released: workspace.lease:`);
+      expect(message).toContain('EACCES');
+    });
+  },
+);
+
+test('a start whose lease file is a directory is refused as unavailable, and leaves no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    mkdirSync(leaseFile(leasesOf(repo.dir), REMOTE, BRANCH), { recursive: true });
+    const end = await runWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+    });
+    const refused = 'refused' in end ? end.refused : `ran: ${end.status}`;
+    expect(refused).toContain(`the branch ${BRANCH} could not be leased`);
+    expect(refused).toContain('EISDIR');
+    expect(refused).toContain('(unavailable)');
+    expect(runIds(repo.dir)).toEqual([]);
   });
 });
 

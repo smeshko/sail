@@ -29,14 +29,21 @@ export function leaseFile(dir: string, remote: string, branch: string): string {
   return join(dir, `${hex.slice(0, 16)}.json`);
 }
 
-/** The lease in `file`, or undefined when there is no file. A file that isn't a lease is `invalid`. */
+/** The filesystem refused `path`: `unavailable`, naming it and the errno. */
+const unavailable = (path: string, error: unknown): PortError =>
+  new PortError('workspace', 'lease', 'unavailable', `${path}: ${(error as Error).message}`);
+
+/**
+ * The lease in `file`, or undefined when there is no file. A file that isn't a lease is `invalid`, and a filesystem
+ * failure is `unavailable`.
+ */
 function readFile(file: string): Lease | undefined {
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
+    throw unavailable(file, error);
   }
   let data: unknown;
   try {
@@ -52,7 +59,7 @@ function readFile(file: string): Lease | undefined {
   return result.data;
 }
 
-/** The lease on `remote` and `branch`, or undefined when there is none. A file that isn't a lease throws. */
+/** The lease on `remote` and `branch`, or undefined when there is none. A file that isn't a lease, or one that can't be read, throws. */
 export function readLease(dir: string, remote: string, branch: string): Lease | undefined {
   return readFile(leaseFile(dir, remote, branch));
 }
@@ -83,7 +90,7 @@ export function isStale(lease: Lease): boolean {
 
 /**
  * The lease that holds `branch` of `remote` now, or undefined when there is none or it is stale. It only reads: a stale
- * lease is left for the next taker. A file that isn't a lease is `invalid`.
+ * lease is left for the next taker. A file that isn't a lease is `invalid`, a filesystem failure `unavailable`.
  */
 export function heldLease(dir: string, remote: string, branch: string): Lease | undefined {
   const lease = readLease(dir, remote, branch);
@@ -100,13 +107,17 @@ const text = (lease: Lease): string => `${JSON.stringify(lease)}\n`;
 /** Creates `file` holding `lease` all at once, by linking a written temp file to it. False when `file` exists. */
 function create(file: string, lease: Lease): boolean {
   const tmp = `${file}.${lease.runId}.${process.pid}.tmp`;
-  writeFileSync(tmp, text(lease));
+  try {
+    writeFileSync(tmp, text(lease));
+  } catch (error) {
+    throw unavailable(tmp, error);
+  }
   try {
     linkSync(tmp, file);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    throw error;
+    throw unavailable(file, error);
   } finally {
     rmSync(tmp, { force: true });
   }
@@ -124,7 +135,7 @@ function dropIfStill(file: string, read: Lease, runId: string): boolean {
     renameSync(file, aside);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw error;
+    throw unavailable(file, error);
   }
   const moved = readFile(aside);
   const same = moved !== undefined && JSON.stringify(moved) === JSON.stringify(read);
@@ -132,7 +143,7 @@ function dropIfStill(file: string, read: Lease, runId: string): boolean {
     try {
       linkSync(aside, file);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw unavailable(file, error);
     }
   }
   rmSync(aside, { force: true });
@@ -158,7 +169,11 @@ export function takeLease(
     const [issue] = checked.error.issues;
     throw new PortError('workspace', 'lease', 'invalid', `holder: ${issue?.path.join('.')} ${issue?.message}`);
   }
-  mkdirSync(dir, { recursive: true });
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    throw unavailable(dir, error);
+  }
   const file = leaseFile(dir, remote, branch);
   const { runId, runDir, pid } = checked.data;
   const lease: Lease = { remote, branch, runId, runDir, pid, takenAt: now.toISOString() };
