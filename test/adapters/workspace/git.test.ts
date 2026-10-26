@@ -2,9 +2,27 @@
 // long is a failed result rather than a throw, and a remote's URL loses its credentials before anything keys or logs
 // it.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fetchRemote, gitSync, nonInteractive, stripUserinfo } from '../../../src/adapters/workspace/git';
+import {
+  fetchRemote,
+  gitSync,
+  nonInteractive,
+  removeWorktree,
+  stripUserinfo,
+} from '../../../src/adapters/workspace/git';
+import { messageOf, portFailure } from '../../helpers/ports';
 import { withTempRepo } from '../../helpers/temp-repo';
 
 test("git never asks: no terminal prompt, no askpass, no credential manager dialog, the caller's ssh kept, and none of a hook's repository variables, but the user's own -c config (review #2.1)", () => {
@@ -122,3 +140,33 @@ test("a remote's URL keys and logs without its credentials, and any other URL as
     '/srv/git/r.git',
   ]);
 });
+
+test.skipIf(process.getuid?.() === 0)(
+  'a linked workspace that cannot be unlinked is unavailable, naming the path, and the link stays',
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'sail-unlink-'));
+    try {
+      const runDir = join(root, 'run');
+      mkdirSync(runDir);
+      const target = join(root, 'elsewhere');
+      mkdirSync(target);
+      const link = join(runDir, 'workspace');
+      symlinkSync(target, link);
+      chmodSync(runDir, 0o555);
+      let error: unknown;
+      try {
+        removeWorktree(root, runDir, 'release');
+      } catch (thrown) {
+        error = thrown;
+      } finally {
+        chmodSync(runDir, 0o755);
+      }
+      expect(portFailure(error)).toEqual({ port: 'workspace', op: 'release', code: 'unavailable' });
+      expect(messageOf(error)).toContain(link);
+      expect(messageOf(error)).toContain('EACCES');
+      expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
