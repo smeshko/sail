@@ -52,7 +52,6 @@ test("the files tab lists the golden implement#2's diff.patch with its bytes and
   expect(inspect(GOLDEN_RUN, 'implement#2', 'files')).toContain(
     '<div class="grp-t">files · 1</div><div class="art"><span class="ic">▤</span><span><button class="art-open" data-action="open-file" data-name="diff.patch" data-path="02-implement/call-2/diff.patch" title="read diff.patch"><b>diff.patch</b></button><span class="d">02-implement/call-2/diff.patch · 613 bytes · <span class="sha" title="2a10783a63a95398d9ab4bace6f0919d15d15ab03637579579b192693547ea25">2a10783a63a9</span></span></span></div>',
   );
-  expect(inspect(FAKE_2, 'implement#1', 'files')).toContain('<div class="code">this call produced no files</div>');
   const events = readEvents(GOLDEN_RUN);
   const end = events.findIndex((event) => event.type === 'stage:end' && event.key === 'implement#2');
   const at = { seq: 900, ts: events[end]?.ts ?? '', runId: 'x', key: 'implement#2' };
@@ -119,4 +118,17 @@ test("the overview shows the call's facts, output, consumed bindings, errors and
   expect(renderInspector(undefined, undefined, undefined, undefined, initialUi(0)).value).toBe(
     '<div class="ins-h"><span>inspector</span></div><div class="ins-b"><div class="code">select a stage card</div></div>',
   );
+});
+
+test('a script call has no permissions tab, a call with no files no files tab, and a tab the call lacks shows its overview', () => {
+  const tabs = (markup: string) => [...markup.matchAll(/data-action="tab" data-tab="([a-z]+)"/g)].map(([, tab]) => tab);
+  const script = inspect(GOLDEN_RUN, 'tests#1', 'permissions');
+  expect(tabs(script)).toEqual(['overview', 'files', 'log']);
+  expect(script).toContain('<button class="tab on" data-action="tab" data-tab="overview">overview</button>');
+  expect(script).not.toContain('denials ·');
+  const noFiles = inspect(FAKE_2, 'implement#1', 'files');
+  expect(tabs(noFiles)).toEqual(['overview', 'permissions', 'log']);
+  expect(noFiles).toContain('<button class="tab on" data-action="tab" data-tab="overview">overview</button>');
+  expect(noFiles).not.toContain('this call produced no files');
+  expect(tabs(inspect(GOLDEN_RUN, 'implement#2', 'overview'))).toEqual(['overview', 'files', 'permissions', 'log']);
 });
