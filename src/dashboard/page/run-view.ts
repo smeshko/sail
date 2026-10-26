@@ -4,7 +4,7 @@
 // summary in the index when there is one, and from the cards otherwise.
 import type { Summary } from '../../events/summary';
 import { runCommands } from './commands';
-import { cost, duration, percent } from './format';
+import { cost, duration, percent, tokens } from './format';
 import { html, type SafeHtml, safeHref, text } from './html';
 import { elapsedMs, type PendingCard, type RunModel, type StageCard } from './run-model';
 import { pillOf, type UiState } from './ui-state';
@@ -143,15 +143,34 @@ ${
 </div>`;
 }
 
-/** The status bar: calls settled of all, tool calls, denials, cost, and whether the run is live. */
+/** The run's tokens: the summary's totals once there is one, else what its cards' sessions reported. */
+function tokensOf(
+  model: RunModel,
+  summary: Summary | null | undefined,
+): { input: number; output: number; cached: number } {
+  const usage = summary?.totals.usage;
+  if (usage !== undefined) {
+    return { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cached: usage.cacheReadTokens ?? 0 };
+  }
+  const sum = (pick: (card: StageCard) => number | undefined) =>
+    model.cards.reduce((total, card) => total + (pick(card) ?? 0), 0);
+  return {
+    input: sum((card) => card.tokens?.input),
+    output: sum((card) => card.tokens?.output),
+    cached: sum((card) => card.tokens?.cacheRead),
+  };
+}
+
+/** The status bar: calls settled of all, tool calls, denials, tokens, cost, and whether the run is live. */
 export function renderStatus(model: RunModel, summary: Summary | null | undefined): SafeHtml {
   const settled = model.cards.filter((entry) => entry.state === 'settled').length;
   const tools = model.cards.reduce((sum, entry) => sum + entry.toolCalls, 0);
   const denials = model.cards.reduce((sum, entry) => sum + entry.denials.length, 0);
   const spent = summary?.totals.usage.costUsd ?? model.cards.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0);
+  const used = tokensOf(model, summary);
   return html`<span>calls <b>${settled}/${model.cards.length}</b></span><span>tools <b>${tools}</b></span><span class="${
     denials > 0 ? 'w' : ''
-  }">denied <b>${denials}</b></span><span>cost <b>${cost(spent)}</b></span><span class="spacer"></span><span>${
+  }">denied <b>${denials}</b></span><span title="tokens in, out and read from the cache">tokens <b>${tokens(used.input)}</b> in · <b>${tokens(used.output)}</b> out · <b>${tokens(used.cached)}</b> cached</span><span>cost <b>${cost(spent)}</b></span><span class="spacer"></span><span>${
     model.end === undefined ? '● live' : `ended ${model.end.status}`
   }</span>`;
 }

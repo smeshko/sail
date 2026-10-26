@@ -220,6 +220,38 @@ test("live cost: a session's usage updates, then a second session's, sum to what
   expect(model.cards[0]?.state).toBe('running');
 });
 
+test("live tokens: a session's last usage update counts until its end, whose usage replaces it, and a later session's adds to it", () => {
+  const events = golden();
+  const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
+  const usage = (seq: number, input: number, output: number, cacheRead: number) => ({
+    ...at,
+    seq,
+    type: 'usage:update',
+    turn: 1,
+    tokens: { input, output, cacheRead, cacheWrite: 0 },
+    costUsdSoFar: 0.01,
+  });
+  const start = events.find((event) => event.type === 'stage:start' && event.key === 'spec#1');
+  const end = {
+    ...at,
+    seq: 904,
+    type: 'harness:session_end',
+    outcome: 'completed',
+    turns: 2,
+    toolCalls: 0,
+    denials: 0,
+    usage: { inputTokens: 1200, outputTokens: 300, cacheReadTokens: 9000, costUsd: 0.02 },
+  };
+  const before = [events[0], start, usage(901, 100, 10, 1000), usage(902, 500, 50, 4000)];
+  expect(foldRun(before).cards[0]?.tokens).toEqual({ input: 500, output: 50, cacheRead: 4000 });
+  expect(foldRun([...before, end]).cards[0]?.tokens).toEqual({ input: 1200, output: 300, cacheRead: 9000 });
+  expect(foldRun([...before, end, usage(905, 7, 3, 20)]).cards[0]?.tokens).toEqual({
+    input: 1207,
+    output: 303,
+    cacheRead: 9020,
+  });
+});
+
 test("a file's validation joins its card's file, and a denied tool call with no command shows its input as JSON", () => {
   const events = golden();
   const at = { seq: 900, ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };

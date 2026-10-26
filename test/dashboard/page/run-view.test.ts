@@ -91,7 +91,7 @@ test('a running card shows running and its time so far, a PR link is drawn only 
   expect(markup).toContain('<span class="pill p-run">running</span><span class="d-agent">');
   expect(markup).toContain(`<code>sail show ${GOLDEN_RUN_ID} --follow</code>`);
   expect(renderStatus(model, undefined).value).toBe(
-    '<span>calls <b>3/4</b></span><span>tools <b>0</b></span><span class="">denied <b>0</b></span><span>cost <b>$0.79</b></span><span class="spacer"></span><span>● live</span>',
+    '<span>calls <b>3/4</b></span><span>tools <b>0</b></span><span class="">denied <b>0</b></span><span title="tokens in, out and read from the cache">tokens <b>15.0k</b> in · <b>5.4k</b> out · <b>82.4k</b> cached</span><span>cost <b>$0.79</b></span><span class="spacer"></span><span>● live</span>',
   );
   const at = { seq: 900, ts: events[until]?.ts ?? '', runId: 'x', key: 'tests#1/lint' };
   const stepped = foldRun([
@@ -108,7 +108,7 @@ test('a running card shows running and its time so far, a PR link is drawn only 
     '<a class="lnk" href="https://example.com/pull/7" rel="noreferrer" target="_blank">#7</a>',
   );
   expect(renderStatus(foldRun(readEvents(FAKE_2)), summaryOf(FAKE_2)).value).toBe(
-    '<span>calls <b>3/3</b></span><span>tools <b>1</b></span><span class="w">denied <b>1</b></span><span>cost <b>$0.36</b></span><span class="spacer"></span><span>ended failed</span>',
+    '<span>calls <b>3/3</b></span><span>tools <b>1</b></span><span class="w">denied <b>1</b></span><span title="tokens in, out and read from the cache">tokens <b>6.4k</b> in · <b>1.9k</b> out · <b>24.8k</b> cached</span><span>cost <b>$0.36</b></span><span class="spacer"></span><span>ended failed</span>',
   );
 });
 
