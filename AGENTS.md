@@ -37,10 +37,10 @@ Bun `>=1.3.14` is the only runtime. No command needs Node.
 - `staging` is the base branch, and every PR targets it. `main` receives releases.
 - Branch names carry the Linear issue id, as in `chore/adw-77-<slug>`. One commit per task, in Conventional Commits.
 - Stage files by name: `git add <paths>`.
-- `staging` is protected, admins included. Every change lands through a PR whose `verify` check is green on a head that
-  contains the latest `staging`. CI runs the full `bun run verify` as that check, and a PR is ready only when it's green.
-  The pre-push hook runs the narrow `bun run gate`, so a typecheck, lint or affected-test failure shows up before the
-  push.
+- `staging` is protected. Every change lands through a PR whose `verify` check is green; the head needn't contain the
+  latest `staging`. CI runs the full `bun run verify` as that check, and a PR is ready only when it's green. An admin
+  may merge before it finishes (`gh pr merge --admin`). The pre-push hook runs the narrow `bun run gate`, so a
+  typecheck, lint or affected-test failure shows up before the push.
 
 ## Tracker
 
