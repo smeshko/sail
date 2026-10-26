@@ -88,6 +88,22 @@ test('sail resume refuses a raise that is not a positive number of dollars with 
   });
 }, 120_000);
 
+test('sail resume refuses a raise under 0.01, which would print as nothing, with exit 3, and leaves STATUS as it was', async () => {
+  const { repo, runId, dir } = await suspendedRun();
+  const refusals = [];
+  for (const flag of ['--raise-budget', '--raise-minutes']) {
+    const refused = await sail(repo.dir, repo.env, ['resume', runId, `${flag}=0.001`]);
+    refusals.push([refused.code, refused.stderr.trim()]);
+  }
+  expect({ refusals, status: status(dir) }).toEqual({
+    refusals: [
+      [3, "sail resume: --raise-budget takes at least 0.01 dollars: '0.001'"],
+      [3, "sail resume: --raise-minutes takes at least 0.01 minutes: '0.001'"],
+    ],
+    status: 'suspended budget_exceeded\n',
+  });
+}, 120_000);
+
 test('sail resume --raise-budget 5 exits 0, with the raise in the events once', async () => {
   const { dir } = await suspendedRun();
   const resumed = await raisedResume();

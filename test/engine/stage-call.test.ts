@@ -543,6 +543,17 @@ test("callProblems of a multi-step stage lists each step's own problems by step,
     "step 'open': timeoutSeconds must be a positive number: -1",
     "'ticketKey' is required",
   ]);
+  const free = stage('free', {
+    consumes: { ticketKey: value(TicketKey) },
+    output: PrInfo,
+    steps: [
+      agent('describe', { ...describe, budget: { ...budget, maxUsd: 0 } }),
+      script('open', { run: './open.sh', output: PrInfo }),
+    ],
+  });
+  expect(
+    callProblems(free, { ticketKey: { kind: 'value', value: 'FAKE-1', from: 'x' } }, { harness, model: MODEL }),
+  ).toEqual(["step 'describe': budget.maxUsd must be a positive number: 0"]);
   expect(callProblems(publish, { ticketKey: { kind: 'value', value: 'FAKE-1', from: 'x' } })).toEqual([
     "agent steps need a harness and a model, which weren't resolved",
   ]);

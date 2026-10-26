@@ -77,18 +77,18 @@ export interface Over {
 const round = (value: number): number => Math.round(value * 1e6) / 1e6;
 
 /**
- * The least dollars a request is handed, the rounding's unit: `claude-code`'s CLI refuses `--max-budget-usd 0`, so a
- * request the others' shares leave nothing still runs its one turn, as a share of 0 would on the fake (D12, D13).
+ * The least dollars a request is handed, the rounding's unit: `claude-code`'s CLI refuses `--max-budget-usd 0`, and
+ * so does the fake, so a request the others' shares leave nothing still runs its one turn (D12, D13).
  */
 const LEAST_SHARE_USD = 0.000001;
 
 /** The dollars fold: what settled sessions spent, and each open session's last reading by key. */
-interface Dollars {
+export interface Dollars {
   settled: number;
   open: Map<string, number>;
 }
 
-function foldDollars(dollars: Dollars, event: SailEvent): void {
+export function foldDollars(dollars: Dollars, event: SailEvent): void {
   switch (event.type) {
     case 'harness:session_start': {
       const last = dollars.open.get(event.key);
@@ -105,7 +105,7 @@ function foldDollars(dollars: Dollars, event: SailEvent): void {
   }
 }
 
-const dollarsOf = (dollars: Dollars): number => {
+export const dollarsOf = (dollars: Dollars): number => {
   let sum = dollars.settled;
   for (const reading of dollars.open.values()) sum += reading;
   return round(sum);

@@ -5,7 +5,8 @@
 // the journal still fits it. It asks nothing of the ticket and claims nothing: the run's input is in its journal.
 //
 // A raise adds to the run's budget, and is recorded in its events before anything runs: a run suspended over its budget
-// resumes only with one that takes it back under, and a raise of a budget the run doesn't have is refused.
+// resumes only with one that takes it back under, and a raise of a budget the run doesn't have is refused. So is a
+// raise under 0.01, which the terminal would print as `$0.00` or `0 min`.
 //
 // Ctrl-C or SIGTERM suspends the run again, as it does during `sail <ticket>`, and the command prints how to resume it.
 //
@@ -32,7 +33,7 @@ import {
 
 const COMMAND = 'sail resume';
 
-/** The raise the flags ask for, or why one of them isn't a positive number. */
+/** The raise the flags ask for, or why one of them isn't a positive number, or is under 0.01, which prints as nothing. */
 function raiseOf(args: Parsed): Raise | { refused: string } {
   const raise: Raise = {};
   const flags = [
@@ -46,6 +47,7 @@ function raiseOf(args: Parsed): Raise | { refused: string } {
     if (given.trim() === '' || !Number.isFinite(value) || value <= 0) {
       return { refused: `--${flag} takes a positive number of ${unit}: '${given}'` };
     }
+    if (value < 0.01) return { refused: `--${flag} takes at least 0.01 ${unit}: '${given}'` };
     raise[field] = value;
   }
   return raise;

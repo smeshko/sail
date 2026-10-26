@@ -182,7 +182,10 @@ const UNSTARTED = { adapter: 'scripted', model: MODEL, turns: 0, toolCalls: 0, d
 test('problems() reports a produced name the engine writes, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
   expect(agentKind.kind).toBe('agent');
   expect(agentKind.problems(spec())).toEqual([]);
-  expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 0 }, onInvalidOutput: 'fail' }))).toEqual([]);
+  expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 1 }, onInvalidOutput: 'fail' }))).toEqual([]);
+  expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 0 } }))).toEqual([
+    'budget.maxUsd must be a positive number: 0',
+  ]);
   expect(agentKind.problems(spec({ produces: { 'session.log': 'file', '../spec.md': 'file' } }))).toEqual([
     "'session.log' can't be produced: the engine writes it in $STAGE_OUT",
     "'../spec.md' can't be produced: it is not a plain file name",
@@ -193,6 +196,7 @@ test('problems() reports a produced name the engine writes, a budget out of rang
     ['maxTurns', Number.NaN],
     ['maxMinutes', 0],
     ['maxMinutes', Number.NaN],
+    ['maxUsd', 0],
     ['maxUsd', -0.01],
     ['maxUsd', Number.NaN],
     ['maxUsd', Number.POSITIVE_INFINITY],
