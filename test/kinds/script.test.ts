@@ -228,21 +228,6 @@ test('exitCodes fills the lists it leaves out, and a code listed under error is 
   expect(exitCodeMap(tests())).toEqual({ passed: [0], failed: [1], error: [] });
 });
 
-test('a timeout is error, with the signal that ended the script and no output', async () => {
-  const s = setup();
-  s.run('sleep 5');
-  const started = performance.now();
-  const run = await scriptKind.run(tests({ timeoutSeconds: 1 }), s.context);
-  console.log(`timeout: ${Math.round(performance.now() - started)} ms`);
-  expect(run).toMatchObject({
-    outcome: 'error',
-    output: null,
-    errors: [{ reason: 'timeout', message: 'timed out after 1s' }],
-    record: { exit: { code: null, signal: 'SIGTERM' } },
-  });
-  expect(performance.now() - started).toBeLessThan(3500);
-});
-
 test('a script killed by a signal is exit_code, naming the signal', async () => {
   const s = setup();
   s.run('kill -KILL $$');

@@ -526,14 +526,20 @@ test('a session whose last turn reaches maxUsd completes: the last turn may pass
   });
 });
 
-test('with maxUsd 0, a one-turn answer completes and a two-turn one ends after its first turn', async () => {
-  const one = await ranWith({ ...IMPLEMENT, turns: 1 }, { maxUsd: 0 });
-  const two = await ranWith({ ...IMPLEMENT, turns: 2 }, { maxUsd: 0 });
-  expect([
-    summary(one.result),
-    summary(two.result),
-    labels(two.events).filter((label) => label.startsWith('usage')),
-  ]).toEqual([{}, 'error: budget exceeded: maxUsd 0', ['usage:update 1']]);
+test('maxUsd 0 is refused as claude-code refuses --max-budget-usd 0: an error before any session starts', async () => {
+  const { result, events } = await ranWith({ ...IMPLEMENT, turns: 1 }, { maxUsd: 0 });
+  expect([summary(result), labels(events)]).toEqual([
+    'error: fake harness: maxUsd must be more than 0, as claude-code refuses --max-budget-usd 0',
+    [],
+  ]);
+});
+
+test('with a tiny maxUsd, a two-turn answer ends after its first turn', async () => {
+  const { result, events } = await ranWith({ ...IMPLEMENT, turns: 2 }, { maxUsd: 0.000001 });
+  expect([summary(result), labels(events).filter((label) => label.startsWith('usage'))]).toEqual([
+    'error: budget exceeded: maxUsd 0.000001',
+    ['usage:update 1'],
+  ]);
 });
 
 test('a delay longer than maxMinutes ends the session at maxMinutes, budget_exceeded with a minutes budget:exceeded, and one with a minute to spare completes', async () => {

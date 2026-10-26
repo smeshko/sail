@@ -1,7 +1,11 @@
 // withTempRepo(): a throwaway git repository with its own HOME, removed afterwards even when the test throws.
 // Bun spawns inherit the startup environment, not a mutated process.env, so a test must pass `repo.env` to every
 // subprocess it starts. process.env itself is never touched.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+//
+// Every repository is a copy of one template, made once per test process under the launcher's throwaway HOME: git init,
+// README.md and the commit cost three git spawns, and copying the template costs none. So every temp repository starts
+// at the same commit.
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,13 +20,36 @@ export interface TempRepo {
   git(...args: string[]): string;
 }
 
+/** Runs git in `cwd` with `env`. Returns trimmed stdout; throws with stderr on a non-zero exit. */
+function runGit(cwd: string, env: Readonly<Record<string, string>>, args: readonly string[]): string {
+  const result = Bun.spawnSync(['git', ...args], { cwd, env });
+  if (result.exitCode !== 0) {
+    throw new Error(`git ${args.join(' ')} exited ${result.exitCode}: ${result.stderr.toString().trim()}`);
+  }
+  return result.stdout.toString().trim();
+}
+
+let template: string | undefined;
+/** The repository every temp repository copies: `git init -b main` and one commit of README.md, made on first use. */
+function templateRepo(env: Readonly<Record<string, string>>): string {
+  if (template !== undefined && existsSync(template)) return template;
+  const parent = process.env.SAIL_TEST_HOME ?? tmpdir();
+  const dir = join(realpathSync(mkdtempSync(join(parent, 'sail-repo-template-'))), 'repo');
+  mkdirSync(dir);
+  runGit(dir, env, ['init', '-b', 'main']);
+  writeFileSync(join(dir, 'README.md'), '# test repo\n');
+  runGit(dir, env, ['add', 'README.md']);
+  runGit(dir, env, ['commit', '-m', 'initial']);
+  template = dir;
+  return dir;
+}
+
 export async function withTempRepo<T>(fn: (repo: TempRepo) => T | Promise<T>): Promise<T> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'sail-repo-')));
   try {
     // HOME is a sibling of the repository, so a test that chdirs into `dir` never mistakes ~/.sail for its .sail/.
     const dir = join(root, 'repo');
     const home = join(root, 'home');
-    mkdirSync(dir);
     mkdirSync(home);
 
     // The launcher has already isolated process.env (git identity, GIT_CONFIG_NOSYSTEM); only HOME moves per call.
@@ -33,19 +60,8 @@ export async function withTempRepo<T>(fn: (repo: TempRepo) => T | Promise<T>): P
     env.HOME = home;
     env.XDG_CONFIG_HOME = join(home, '.config');
 
-    const git = (...args: string[]): string => {
-      const result = Bun.spawnSync(['git', ...args], { cwd: dir, env });
-      if (result.exitCode !== 0) {
-        throw new Error(`git ${args.join(' ')} exited ${result.exitCode}: ${result.stderr.toString().trim()}`);
-      }
-      return result.stdout.toString().trim();
-    };
-
-    git('init', '-b', 'main');
-    writeFileSync(join(dir, 'README.md'), '# test repo\n');
-    git('add', 'README.md');
-    git('commit', '-m', 'initial');
-
+    cpSync(templateRepo(env), dir, { recursive: true });
+    const git = (...args: string[]): string => runGit(dir, env, args);
     return await fn({ dir, home, env, git });
   } finally {
     rmSync(root, { recursive: true, force: true });

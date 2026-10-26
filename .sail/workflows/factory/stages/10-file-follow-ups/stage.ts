@@ -3,7 +3,7 @@
 // fatal.
 import { script, value, z } from 'sail';
 import { FollowUps } from '../../schemas';
-import { PrInfo } from '../08-open/stage';
+import { PrInfo } from '../09-open/stage';
 
 export const Filed = z.object({
   filed: z.array(z.object({ title: z.string(), ticketKey: z.string(), url: z.string() })),

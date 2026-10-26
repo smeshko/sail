@@ -9,9 +9,11 @@
 // 5. Any other request needs `X-Sail-Dashboard: 1`, which a cross-origin page can't send without a preflight.
 //
 // No answer carries a CORS header. Errors are JSON, `{ "error": "…" }`.
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
+import { renderMarkdown } from './markdown';
 import { createPage } from './page';
 import { queueViews } from './queues';
 import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
@@ -88,6 +90,7 @@ function route(registryDir: string, segments: string[], url: URL): Response {
   if (part === 'events' && key === undefined) {
     return file(runDir, join(runDir, 'events.ndjson'), 'application/x-ndjson');
   }
+  if (part === 'file' && key === undefined) return runFile(runDir, url);
   if (part !== 'calls' || key === undefined || rest.length > 0) return error(404, 'no such route');
   if (what === 'result') return served(runDir, callFile(runDir, key, 'result.json'), 'application/json');
   if (what !== 'log') return error(404, 'no such route');
@@ -97,6 +100,23 @@ function route(registryDir: string, segments: string[], url: URL): Response {
   const session = callFile(runDir, key, 'session.log');
   const log = typeof session === 'string' ? session : callFile(runDir, key, 'stdout.log');
   return served(runDir, log, 'text/plain; charset=utf-8');
+}
+
+/**
+ * The run's file at `?path=`, relative to the run directory, as text, or with `as=html` as the HTML of its markdown.
+ * A path outside the run, or not a regular file, is 404.
+ */
+function runFile(runDir: string, url: URL): Response {
+  const path = url.searchParams.get('path');
+  if (path === null || path === '') return error(400, '?path names a file of the run');
+  const as = url.searchParams.get('as');
+  if (as !== null && as !== 'html') return error(400, '?as takes html');
+  if (as === null) return file(runDir, join(runDir, path), 'text/plain; charset=utf-8');
+  const real = containedFile(runDir, join(runDir, path));
+  if (real === undefined) return error(404, 'no such file in this run');
+  return new Response(renderMarkdown(readFileSync(real, 'utf8')), {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
 }
 
 function served(runDir: string, path: string | { missing: string }, type: string): Response {

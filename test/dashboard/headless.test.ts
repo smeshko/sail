@@ -53,7 +53,7 @@ async function bootHeadless(dashboard: Dashboard) {
       removeEventListener() {},
       documentElement: { dataset: {} },
     },
-    location: { host: `127.0.0.1:${dashboard.port}` },
+    location: { host: `127.0.0.1:${dashboard.port}`, search: '' },
     fetch: (path, init) => fetch(`${origin}${path}`, init),
     // Bun's own WebSocket, with the Origin a browser would send.
     WebSocket: class extends WebSocket {

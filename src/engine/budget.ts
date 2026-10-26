@@ -77,8 +77,8 @@ export interface Over {
 const round = (value: number): number => Math.round(value * 1e6) / 1e6;
 
 /**
- * The least dollars a request is handed, the rounding's unit: `claude-code`'s CLI refuses `--max-budget-usd 0`, so a
- * request the others' shares leave nothing still runs its one turn, as a share of 0 would on the fake (D12, D13).
+ * The least dollars a request is handed, the rounding's unit: `claude-code`'s CLI refuses `--max-budget-usd 0`, and
+ * so does the fake, so a request the others' shares leave nothing still runs its one turn (D12, D13).
  */
 const LEAST_SHARE_USD = 0.000001;
 

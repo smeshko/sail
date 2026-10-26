@@ -21,6 +21,7 @@ import type { HarnessRequest } from '../../src/ports/harness';
 import { fakeAdapters } from '../helpers/adapters';
 import { writeHarnessScript } from '../helpers/agent-fixture';
 import { copyFixture, edit } from '../helpers/fixture';
+import { holdTempRepo } from '../helpers/held-repo';
 import { REVIEW_KEYS, TRIO, writeTrio } from '../helpers/review-fixture';
 import { recording } from '../helpers/scripted-harness';
 import { copyRun, STUB_SPEC_CALL, writeStub } from '../helpers/stub-workflow';
@@ -101,8 +102,32 @@ function errorsOf(runDir: string, list: readonly SailEvent[], key: string, tryNu
   return (JSON.parse(readFileSync(join(runDir, ended.resultPath), 'utf8')) as { errors?: unknown }).errors;
 }
 
-/** The fixture run with `maxUsd: 0.5`, suspended in a repository of its own, then copied into `to`. Its id. */
-function suspendedCopy(to: string, budget = '{ maxUsd: 0.5, maxMinutes: 90 }'): Promise<string> {
+const OVER = '{ maxUsd: 0.5, maxMinutes: 90 }';
+
+const overRepo = holdTempRepo();
+let overOnce: Promise<{ end: RunEnd; requests: HarnessRequest[] }> | undefined;
+/**
+ * The fixture run with `maxUsd: 0.5`, suspended over its budget once for the file in a repository held for it, and the
+ * requests its harness was given. The cases read it, and copy it to resume it: the source is never touched again.
+ */
+function overBudget(): Promise<{ end: RunEnd; requests: HarnessRequest[] }> {
+  overOnce ??= (async () => {
+    fixtureWith(overRepo().dir, OVER);
+    const requests: HarnessRequest[] = [];
+    const end = await ran(overRepo().dir, { requests });
+    expect(end.stopReason).toBe('budget_exceeded');
+    return { end, requests };
+  })();
+  return overOnce;
+}
+
+/** The fixture run suspended over `budget`, copied into `to`: the shared one for the default budget. Its id. */
+async function suspendedCopy(to: string, budget = OVER): Promise<string> {
+  if (budget === OVER) {
+    const { end } = await overBudget();
+    copyRun(overRepo().dir, to);
+    return end.runId;
+  }
   return withTempRepo(async (from) => {
     fixtureWith(from.dir, budget);
     const end = await ran(from.dir);
@@ -113,63 +138,53 @@ function suspendedCopy(to: string, budget = '{ maxUsd: 0.5, maxMinutes: 90 }'): 
 }
 
 test('a run whose budget is below its needs is suspended with budget_exceeded before its next call: STATUS says so, and the journal ends at the last call that completed', async () => {
-  await withTempRepo(async (repo) => {
-    fixtureWith(repo.dir, '{ maxUsd: 0.5, maxMinutes: 90 }');
-    const end = await ran(repo.dir);
-    const list = readEvents(end.dir);
-    expect({
-      end: { status: end.status, stopReason: end.stopReason, budget: end.budget, message: end.message },
-      status: status(end.dir),
-      journal: keys(end.dir),
-      implement: errorsOf(end.dir, list, 'implement#1'),
-    }).toEqual({
-      end: {
-        status: 'suspended',
-        stopReason: 'budget_exceeded',
-        budget: 'usd',
-        message: '$0.50 of its $0.50 used before implement#1: raise it with --raise-budget <usd>',
-      },
-      status: 'suspended budget_exceeded\n',
-      journal: ['intake#1', 'spec#1'],
-      implement: [{ reason: 'budget_exceeded', message: 'budget exceeded: maxUsd 0.1875' }],
-    });
+  const { end } = await overBudget();
+  const list = readEvents(end.dir);
+  expect({
+    end: { status: end.status, stopReason: end.stopReason, budget: end.budget, message: end.message },
+    status: status(end.dir),
+    journal: keys(end.dir),
+    implement: errorsOf(end.dir, list, 'implement#1'),
+  }).toEqual({
+    end: {
+      status: 'suspended',
+      stopReason: 'budget_exceeded',
+      budget: 'usd',
+      message: '$0.50 of its $0.50 used before implement#1: raise it with --raise-budget <usd>',
+    },
+    status: 'suspended budget_exceeded\n',
+    journal: ['intake#1', 'spec#1'],
+    implement: [{ reason: 'budget_exceeded', message: 'budget exceeded: maxUsd 0.1875' }],
   });
 });
 
 test("the run's warning at 80%, its exceeded budget, the session's own and run:suspended come in that order, and the sessions spent the budget plus one turn", async () => {
-  await withTempRepo(async (repo) => {
-    fixtureWith(repo.dir, '{ maxUsd: 0.5, maxMinutes: 90 }');
-    const end = await ran(repo.dir);
-    const list = readEvents(end.dir);
-    expect({ trail: budgetTrail(list), spent: spent(list) }).toEqual({
-      trail: [
-        { type: 'budget:warning', budget: 'usd', limit: 0.5, used: 0.4077 },
-        { type: 'budget:exceeded', budget: 'usd', limit: 0.5, used: 0.5029 },
-        { type: 'budget:exceeded', key: 'implement#1', budget: 'usd', limit: 0.1875, used: 0.1904 },
-        { type: 'run:suspended', stopReason: 'budget_exceeded', budget: 'usd', limit: 0.5, used: 0.5029 },
-        {
-          type: 'run:end',
-          status: 'suspended',
-          stopReason: 'budget_exceeded',
-          message: '$0.50 of its $0.50 used before implement#1: raise it with --raise-budget <usd>',
-          replays: 3,
-        },
-      ],
-      spent: 0.5029,
-    });
+  const { end } = await overBudget();
+  const list = readEvents(end.dir);
+  expect({ trail: budgetTrail(list), spent: spent(list) }).toEqual({
+    trail: [
+      { type: 'budget:warning', budget: 'usd', limit: 0.5, used: 0.4077 },
+      { type: 'budget:exceeded', budget: 'usd', limit: 0.5, used: 0.5029 },
+      { type: 'budget:exceeded', key: 'implement#1', budget: 'usd', limit: 0.1875, used: 0.1904 },
+      { type: 'run:suspended', stopReason: 'budget_exceeded', budget: 'usd', limit: 0.5, used: 0.5029 },
+      {
+        type: 'run:end',
+        status: 'suspended',
+        stopReason: 'budget_exceeded',
+        message: '$0.50 of its $0.50 used before implement#1: raise it with --raise-budget <usd>',
+        replays: 3,
+      },
+    ],
+    spent: 0.5029,
   });
 });
 
 test("each agent request is narrowed to what the run has left, keeping its step's own budget where that is smaller", async () => {
-  await withTempRepo(async (repo) => {
-    fixtureWith(repo.dir, '{ maxUsd: 0.5, maxMinutes: 90 }');
-    const requests: HarnessRequest[] = [];
-    await ran(repo.dir, { requests });
-    expect(requests.map((request) => [request.key, request.budget.maxUsd, request.budget.maxMinutes])).toEqual([
-      ['spec#1', 0.5, 10],
-      ['implement#1', 0.1875, 20],
-    ]);
-  });
+  const { requests } = await overBudget();
+  expect(requests.map((request) => [request.key, request.budget.maxUsd, request.budget.maxMinutes])).toEqual([
+    ['spec#1', 0.5, 10],
+    ['implement#1', 0.1875, 20],
+  ]);
 });
 
 test('a run with maxUsd 0 is suspended before intake#1, with nothing journaled', async () => {
@@ -292,7 +307,8 @@ test('a sibling starved by the shares of the others while the run is under its b
 
 test('a session handed less time than it needs ends over the minutes, and the run is suspended over its minutes with that call unjournaled', async () => {
   await withTempRepo(async (repo) => {
-    fixtureWith(repo.dir, '{ maxMinutes: 0.05 }');
+    // 1.2 s: enough for the intake, well short of the session's 6 s.
+    fixtureWith(repo.dir, '{ maxMinutes: 0.02 }');
     const script = scriptIn(repo.dir);
     script.spec = (script.spec ?? []).map((answer) => ({ ...answer, delayMs: 6000 }));
     writeHarnessScript(repo.dir, script);
@@ -304,13 +320,13 @@ test('a session handed less time than it needs ends over the minutes, and the ru
 test("a workflow that waits past the run's minutes before its first stage is suspended before that stage starts", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
-    edit(sail, 'project.yaml', BUDGET, 'budgets: { run: { maxMinutes: 0.03 } }');
+    edit(sail, 'project.yaml', BUDGET, 'budgets: { run: { maxMinutes: 0.01 } }');
     edit(
       sail,
       'workflows/ticket-to-pr/workflow.ts',
       STUB_SPEC_CALL,
       // The first replay alone waits, so a run that isn't suspended goes on at the stub's pace.
-      `  if (!(globalThis as { waited?: boolean }).waited) {\n    (globalThis as { waited?: boolean }).waited = true;\n    await new Promise((resolve) => setTimeout(resolve, 3000));\n  }\n${STUB_SPEC_CALL}`,
+      `  if (!(globalThis as { waited?: boolean }).waited) {\n    (globalThis as { waited?: boolean }).waited = true;\n    await new Promise((resolve) => setTimeout(resolve, 1000));\n  }\n${STUB_SPEC_CALL}`,
     );
     const end = await ran(repo.dir);
     const list = readEvents(end.dir);
@@ -323,7 +339,7 @@ test("a workflow that waits past the run's minutes before its first stage is sus
     }).toEqual({
       stopReason: 'budget_exceeded',
       budget: 'minutes',
-      message: '<used> of its 0.03 minutes used before spec#1: raise it with --raise-minutes <minutes>',
+      message: '<used> of its 0.01 minutes used before spec#1: raise it with --raise-minutes <minutes>',
       specStarted: false,
       journal: ['intake#1'],
     });

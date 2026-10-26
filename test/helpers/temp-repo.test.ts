@@ -33,6 +33,17 @@ test('the repository is on main with one commit by the test identity', async () 
   });
 });
 
+test('each repository is its own copy: a commit in one never reaches the next', async () => {
+  const initial = await withTempRepo((repo) => {
+    const head = repo.git('rev-parse', 'HEAD');
+    repo.git('commit', '--allow-empty', '-m', 'second');
+    return head;
+  });
+  await withTempRepo((repo) => {
+    expect([repo.git('rev-parse', 'HEAD'), repo.git('status', '--porcelain')]).toEqual([initial, '']);
+  });
+});
+
 test('no global git config is reachable', async () => {
   await withTempRepo((repo) => {
     expect(() => repo.git('config', '--global', '--list')).toThrow();

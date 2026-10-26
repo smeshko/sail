@@ -215,6 +215,49 @@ test('a fetch that hangs is killed at fetchTimeoutMs, and one whose signal abort
   });
 }, 5_000);
 
+test('the workspace setup runs in each new workspace before create returns, and before workspace:created', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const { emit, events } = captureEvents();
+    const setup = 'echo "$PWD" > installed.txt; test -z "$GIT_DIR"';
+    const adapter = adapterOf(repo, w, { emit, setup, env: { ...repo.env, GIT_DIR: repo.dir } });
+    const created = await settle(adapter.create(runIn(w.runsDir), { branch: BRANCH }));
+    const path = join(w.runsDir, 'r1', 'workspace');
+    expect({
+      created: 'rejected' in created ? created : created.path,
+      ran: readFileSync(join(path, 'installed.txt'), 'utf8').trim(),
+      events: events.map((event) => event.type),
+    }).toEqual({ created: path, ran: path, events: ['workspace:created'] });
+  });
+});
+
+test('a workspace setup that fails, or outlasts setupTimeoutMs, fails create as unavailable, quoting its output, and the workspace is removed', async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const { emit, events } = captureEvents();
+    const failing = adapterOf(repo, w, { emit, setup: 'echo resolving; echo "lockfile is stale" >&2; exit 3' });
+    const failed = failing.create(runIn(w.runsDir, 'r1'), { branch: BRANCH }).catch(messageOf);
+    const slow = adapterOf(repo, w, { emit, setup: 'sleep 5', setupTimeoutMs: 300 });
+    const timedOut = await settle(slow.create(runIn(w.runsDir, 'r2'), { branch: BRANCH }));
+    expect({
+      failed: await failed,
+      timedOut,
+      left: ['r1', 'r2'].filter((run) => existsSync(join(w.runsDir, run, 'workspace'))),
+      registered: registered(repo).filter((path) => path.startsWith(w.runsDir)),
+      events: events.length,
+    }).toEqual({
+      failed:
+        'workspace.create: setup `echo resolving; echo "lockfile is stale" >&2; exit 3` exited 3: resolving\nlockfile is stale',
+      timedOut: { rejected: { port: 'workspace', op: 'create', code: 'unavailable' } },
+      left: [],
+      registered: [],
+      events: 0,
+    });
+  });
+}, 5_000);
+
 test("two creates at once on a clone whose origin moved both succeed: the fetch that lost git's ref lock is tried again", async () => {
   await withTempRepo(async (repo) => {
     const origin = withOrigin(repo);
@@ -464,7 +507,7 @@ test("a workspace is made with no hook of the clone's: neither its post-checkout
   });
 });
 
-test('git-worktree is a built-in for the workspace port alone: its options are remote and defaultBranch, and any other is refused by name', async () => {
+test('git-worktree is a built-in for the workspace port alone: its options are remote, defaultBranch and setup, and any other is refused by name', async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
     const sailDir = copyFixture(repo.dir);
@@ -472,7 +515,7 @@ test('git-worktree is a built-in for the workspace port alone: its options are r
       sailDir,
       'project.yaml',
       'workspace: { use: fake }',
-      'workspace: { use: git-worktree, remote: origin, defaultBranch: main }',
+      'workspace: { use: git-worktree, remote: origin, defaultBranch: main, setup: bun install }',
     );
     const config = readConfig(sailDir);
     if ('issues' in config) throw new Error(JSON.stringify(config.issues));

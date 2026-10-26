@@ -1,11 +1,12 @@
-// The inspector: one call, on four tabs. Overview has its facts, output and errors; files, what it produced and how
-// each was validated; permissions, the step's permissions and budget from the roster and each denial with the command
-// it refused; log, its session or its stdout and stderr. Everything comes from the run's own files: the card from its
+// The inspector: one call, on up to four tabs. Overview has its facts, output and errors; files, what it produced and how
+// each was validated, each name opening the file in the drawer; permissions, the step's permissions and budget from the
+// roster and each denial with the command it refused; log, its session or its stdout and stderr. A script call has no
+// permissions tab, and a call with no files no files tab. Everything comes from the run's own files: the card from its
 // events, the roster from `run:start`, and the call's `result.json` and logs over REST.
 import { clock, cost, duration } from './format';
 import { html, type SafeHtml, text } from './html';
 import type { Roster, StageCard } from './run-model';
-import { pillOf, TABS, type UiState } from './ui-state';
+import { type InspectorTab, pillOf, TABS, type UiState } from './ui-state';
 
 /** A read the shell made for the inspector: still going, not there, or what came back. */
 export type Loaded<T> = { state: 'loading' } | { state: 'missing'; message?: string } | { state: 'loaded'; value: T };
@@ -69,15 +70,32 @@ ${
 }`;
 }
 
-function files(card: StageCard, result: Fields | undefined): SafeHtml {
+/** The call's files: its `result.json`'s, else those its events named. */
+function filesOf(card: StageCard, result: Fields | undefined): Fields[] {
   const fromResult = Object.entries(obj(result?.files) ?? {}).map(([name, file]) => ({ name, ...(obj(file) ?? {}) }));
-  const shown = fromResult.length > 0 ? fromResult : card.files;
-  if (shown.length === 0) return html`<div class="code">this call produced no files</div>`;
+  return fromResult.length > 0 ? fromResult : card.files.map((file) => ({ ...file }));
+}
+
+/** The tabs the call has: a script has no permissions, and a call with no files no files tab. */
+export function tabsOf(card: StageCard, result: Fields | undefined): InspectorTab[] {
+  return TABS.filter(
+    (tab) =>
+      !(tab === 'permissions' && card.kind === 'script') && !(tab === 'files' && filesOf(card, result).length === 0),
+  );
+}
+
+function files(card: StageCard, result: Fields | undefined): SafeHtml {
+  const shown = filesOf(card, result);
   return html`<div class="grp"><div class="grp-t">files · ${shown.length}</div>${shown.map((file: Fields) => {
     const name = text(file.name);
     const validated = card.files.find((entry) => entry.name === name);
     const sha = typeof file.sha256 === 'string' ? file.sha256 : undefined;
-    return html`<div class="art"><span class="ic">▤</span><span><b>${name}</b><span class="d">${text(file.path ?? '')}${
+    const path = typeof file.path === 'string' ? file.path : undefined;
+    const title =
+      path === undefined
+        ? html`<b>${name}</b>`
+        : html`<button class="art-open" data-action="open-file" data-name="${name}" data-path="${path}" title="read ${name}"><b>${name}</b></button>`;
+    return html`<div class="art"><span class="ic">▤</span><span>${title}<span class="d">${text(file.path ?? '')}${
       typeof file.bytes === 'number' ? ` · ${file.bytes} bytes` : ''
     }${sha === undefined ? '' : html` · <span class="sha" title="${sha}">${sha.slice(0, 12)}</span>`}</span></span>${
       validated?.ok === undefined
@@ -163,7 +181,9 @@ export function renderInspector(
       : result.state === 'missing'
         ? html`<div class="hint">this call has no result.json yet: shown from its events</div>`
         : '';
-  const tab = ui.tab;
+  const tabs = tabsOf(card, value);
+  // A tab the call lacks shows its overview.
+  const tab = tabs.includes(ui.tab) ? ui.tab : 'overview';
   const body =
     tab === 'overview'
       ? overview(card, value)
@@ -175,6 +195,6 @@ export function renderInspector(
   return html`<div class="ins-h"><span>${card.key}</span><span class="pill ${pillOf(card.state === 'running' ? 'running' : card.outcome)}">${
     card.state === 'running' ? 'running' : (card.outcome ?? '—')
   }</span></div>
-<div class="tabs">${TABS.map((name) => html`<button class="tab${name === tab ? ' on' : ''}" data-action="tab" data-tab="${name}">${name}</button>`)}</div>
+<div class="tabs">${tabs.map((name) => html`<button class="tab${name === tab ? ' on' : ''}" data-action="tab" data-tab="${name}">${name}</button>`)}</div>
 <div class="ins-b">${tab === 'log' ? '' : note}${body}</div>`;
 }

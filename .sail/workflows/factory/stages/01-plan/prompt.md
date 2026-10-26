@@ -45,7 +45,33 @@ Break the work into tasks, numbered `TASK-001`, `TASK-002`, … in order:
   only writes tests, or one that only makes earlier tests pass.
 - Final validation is not a task: the workflow runs `bun run gate` after the last task.
 
-## 4. Submit
+## 4. Plan the demonstration
 
-Submit the plan's slug (kebab-case, a few words), the Conventional Commits scope its commits share, its risk, and its
-tasks, each with its id, title, type and suggested commit, matching the plan's Tasks list.
+After validation, a separate stage shows the change working the way a user would see it, and checks it against the
+plan's Demonstration section, which you write now, before any code exists. Pick the change's surface:
+
+| Surface | When | What the stage runs |
+|---|---|---|
+| `engine` | the change is in how a run behaves: `src/engine`, `src/kinds`, `src/adapters`, `src/watch`, `src/events` | a fake run in a demo repository, its `.sail/fake/` seeded to reproduce the ticket's scenario |
+| `cli` | a command's arguments or output change: `src/cli` | the command in a demo repository |
+| `dashboard` | what the dashboard draws or serves changes: `src/dashboard` | the dashboard in headless Chrome, over a demo repository's runs |
+| `none` | nothing a user runs changes: a refactor, types, docs, tests alone | nothing |
+
+A demo repository is a scratch git repository holding the fixture repository's `.sail/` (`test/fixtures/repo/.sail/`,
+the `ticket-to-pr` workflow on fake ports, with `FAKE-1` seeded) or a `.sail/` of the stage's own making, every port on
+`fake`, and this branch's `sail` on the `PATH`. When a change shows on more than one surface, pick the one closest to
+the user: a new command's engine work is shown by running the command.
+
+For each acceptance criterion, write one bullet: the scenario to set up (the seeds, the command, the view) and what to
+observe, exact enough to check without judgment: an exit code, an event type and its field, an output line, the text
+an element shows. For `none`, write why nothing can be shown, and submit that reason.
+
+Every scenario runs sail, never a test: validation has run the tests already, and the stage can't run them. A criterion
+about a fake's behaviour is shown through a fake run that exercises it, its answer seeded in `.sail/fake/`. A criterion
+only a test can observe, such as a test rewritten or added, gets no bullet.
+
+## 5. Submit
+
+Submit the plan's slug (kebab-case, a few words), the Conventional Commits scope its commits share, its risk, its
+demonstration (the surface, and for `none` the reason), and its tasks, each with its id, title, type and suggested
+commit, matching the plan's Tasks list.

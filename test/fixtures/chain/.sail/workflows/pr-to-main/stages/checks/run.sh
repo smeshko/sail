@@ -31,6 +31,7 @@ while :; do
   esac
   if [ "$try" -ge "$tries" ]; then break; fi
   try=$((try + 1))
-  sleep "$(cat "$INPUT_INTERVALSECONDS")"
+  # The tests' worlds answer at once, so CHAIN_CHECKS_INTERVAL shortens a wait no case measures.
+  sleep "${CHAIN_CHECKS_INTERVAL:-$(cat "$INPUT_INTERVALSECONDS")}"
 done
 printf '%s\n' "$read"

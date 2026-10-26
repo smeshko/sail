@@ -204,6 +204,8 @@ export async function withChain<T>(options: ChainOptions, fn: (chain: Chain) => 
         SAIL_GITHUB_API_URL: servedGitHub.url,
         LINEAR_API_KEY: LINEAR_KEY,
         SAIL_LINEAR_API_URL: servedLinear.url,
+        // The checks stage waits a second between reads by default: no case measures it, and the runs' reads add up.
+        CHAIN_CHECKS_INTERVAL: '0.05',
         ...options.env,
       };
       const runs = join(repo.dir, RUNS);

@@ -38,7 +38,7 @@ function problems(step: AgentStep): string[] {
   if (!(Number.isInteger(maxTurns) && maxTurns >= 1)) {
     found.push(`budget.maxTurns must be a whole number of 1 or more: ${maxTurns}`);
   }
-  if (!(Number.isFinite(maxUsd) && maxUsd >= 0)) found.push(`budget.maxUsd must be a number of 0 or more: ${maxUsd}`);
+  if (!(Number.isFinite(maxUsd) && maxUsd > 0)) found.push(`budget.maxUsd must be a positive number: ${maxUsd}`);
   if (!(Number.isFinite(maxMinutes) && maxMinutes > 0)) {
     found.push(`budget.maxMinutes must be a positive number: ${maxMinutes}`);
   }

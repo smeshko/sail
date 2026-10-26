@@ -380,7 +380,7 @@ function specTries(...answers: ((answer: ScriptedAnswer & { outcome: 'done' }) =
   return { ...script, spec: answers.map((make) => make(answer)) };
 }
 
-test('a first spec try that leaves the template as it is gets one correction: try-2 is told each validator message, writes a valid spec, and the run completes', async () => {
+test('a first spec try that leaves the template as it is gets one correction: try-2 is told each validator message, and writes a valid spec', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     writeHarnessScript(
@@ -390,9 +390,10 @@ test('a first spec try that leaves the template as it is gets one correction: tr
         (answer) => answer,
       ),
     );
-    const ran = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    // Nothing after spec#1 reads the correction: the run stops there.
+    const ran = await runCaptured(['FAKE-1', '--until', 'spec'], repo.dir, { env: repo.env });
     const dir = latestRun(repo.dir);
-    expect([ran.code, journalOf(dir)]).toEqual([EXIT_OK, JOURNAL]);
+    expect([ran.code, journalOf(dir)]).toEqual([EXIT_SUSPENDED, ['intake#1 passed', 'spec#1 done']]);
     const messages = [
       'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
       'spec.md: noPlaceholders: line 9 still holds the placeholder {{tasks: …}}',

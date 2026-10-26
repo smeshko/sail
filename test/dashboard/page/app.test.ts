@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
-import { boot, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
+import { boot, FILTER_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
 import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/page/host';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
@@ -48,6 +48,8 @@ class FakeHost implements PageHost {
   copied: string[] = [];
   theme = '';
   inspector = true;
+  /** The query the page's URL holds, as start() gives it. */
+  startAt: Record<string, string> = {};
   clock = Date.parse('2026-10-01T12:00:00.000Z');
   private timers = new Map<number, { at: number; fn: () => void }>();
   private next = 1;
@@ -132,6 +134,9 @@ class FakeHost implements PageHost {
   offset() {
     return 0;
   }
+  start() {
+    return this.startAt;
+  }
 
   /** Moves the clock on by `ms`, running every timer that falls due, in order. */
   advance(ms: number) {
@@ -194,7 +199,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'inspector', 'main', 'queues', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'queues', 'rail', 'status']);
   host.push(host.open('index')[0], indexMessage());
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
   replay(host.open('run=')[0], GOLDEN());
@@ -242,6 +247,40 @@ test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, re
   expect(host.regions.inspector).toContain('<dt>command</dt><dd><code>git push --force origin HEAD</code></dd>');
   expect(host.regions.inspector).toContain('<dt>rule</dt><dd>commands</dd>');
   expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+});
+
+test("a URL naming FAKE-2's implement#1 and its permissions tab opens them on the first index, not the newest run", async () => {
+  host.startAt = { repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' };
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+  expect(host.reads.map((read) => read.path)).toEqual([
+    `/api/repos/alpha/runs/${FAKE_2_ID}/calls/implement%231/result`,
+  ]);
+  replay(host.open('run=')[0], fake2Dir(m));
+  await settle();
+  host.advance(100);
+  expect(host.regions.inspector).toContain(
+    '<button class="tab on" data-action="tab" data-tab="permissions">permissions</button>',
+  );
+  expect(host.regions.main).toContain('<div class="card cursor sel" data-action="select-card" data-key="implement#1">');
+});
+
+test('a URL naming a run no repository lists opens the newest run instead', () => {
+  host.startAt = { repo: 'alpha', run: 'FAKE-9-01M5PY0000000000000000000' };
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
+});
+
+test('the URL is read on the first index only: a run picked since stays open through the next index', () => {
+  host.startAt = { repo: 'alpha', run: FAKE_2_ID };
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.push(host.open('index')[0], indexMessage());
+  expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
 });
 
 test("live: events pushed one by one show tests#1 running, then settled, and a running call's log is read again at most once a second", async () => {
@@ -516,6 +555,138 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
   host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
   expect(page.ui.key).toBeUndefined();
+});
+
+test('the timeline filter loads what was saved, toggles a kind in the order of the chips, saves it, holds across calls, and all clears it', () => {
+  host.storage.set(FILTER_KEY, 'tools,bogus,thinking');
+  page = boot(host);
+  expect(page.ui.hidden).toEqual(['thinking', 'tools']);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN(), false);
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'toggle-filter', filter: 'scripts' });
+  host.click({ action: 'toggle-filter', filter: 'messages' });
+  host.click({ action: 'toggle-filter', filter: 'tools' });
+  host.click({ action: 'toggle-filter', filter: 'nonsense' });
+  expect(page.ui.hidden).toEqual(['thinking', 'messages', 'scripts']);
+  expect(host.storage.get(FILTER_KEY)).toBe('thinking,messages,scripts');
+  host.advance(100);
+  expect(host.regions.main).toContain(
+    '<button class="tog f-scripts" data-action="toggle-filter" data-filter="scripts">',
+  );
+  expect(host.regions.main).not.toContain('open.sh');
+  host.click({ action: 'step-card', by: '-1' });
+  expect(page.ui.hidden).toEqual(['thinking', 'messages', 'scripts']);
+  host.click({ action: 'show-all' });
+  expect([page.ui.hidden, host.storage.get(FILTER_KEY)]).toEqual([[], '']);
+});
+
+test("a file name opens the drawer with the file's markdown as HTML, another file as text, Esc closes it before the timeline, and another run closes it", async () => {
+  const file = (path: string) => `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/file?path=${encodeURIComponent(path)}`;
+  host.bodies.set(`${file('01-spec/call-1/spec.md')}&as=html`, { status: 200, body: '<h1>Spec</h1>' });
+  host.bodies.set(file('00-intake/call-1/ticket.json'), { status: 200, body: '{}' });
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN(), false);
+  host.click({ action: 'select-card', key: 'spec#1' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  expect(page.ui.file).toEqual({ name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.advance(100);
+  expect(host.regions.drawer).toContain('<div class="code">loading…</div>');
+  await settle();
+  host.advance(100);
+  expect(host.regions.drawer).toContain('<div class="md"><h1>Spec</h1></div>');
+  host.click({ action: 'open-file', name: 'ticket.json', path: '00-intake/call-1/ticket.json' });
+  host.click({ action: 'open-file', name: 'gone.txt', path: '00-intake/call-1/gone.txt' });
+  await settle();
+  host.advance(100);
+  expect(host.reads.map((read) => read.path).filter((path) => path.includes('/file?'))).toEqual([
+    `${file('01-spec/call-1/spec.md')}&as=html`,
+    file('00-intake/call-1/ticket.json'),
+    file('00-intake/call-1/gone.txt'),
+  ]);
+  // Only the latest file's read is shown.
+  expect(host.regions.drawer).toContain('<b>gone.txt</b>');
+  expect(host.regions.drawer).toContain('this file is not in the run');
+  host.press('Escape');
+  expect([page.ui.file, page.ui.timeline]).toEqual([undefined, true]);
+  host.advance(100);
+  expect(host.regions.drawer).toBe('');
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'close-file' });
+  expect(page.ui.file).toBeUndefined();
+  host.click({ action: 'open-file', name: 'spec.md' });
+  expect(page.ui.file).toBeUndefined();
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
+  expect(page.ui.file).toBeUndefined();
+});
+
+test("opening a script command reads the call's stdout and stderr once, shows them, and a running call's are read again at most once a second", async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, GOLDEN(), false);
+  host.click({ action: 'select-card', key: 'tests#1' });
+  const outputReads = () => host.reads.map((read) => read.path).filter((path) => path.includes('/log?'));
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  const tests = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls/tests%231/log`;
+  expect(outputReads()).toEqual([`${tests}?stream=stdout`, `${tests}?stream=stderr`]);
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain('<div class="grp-t">stdout</div><pre class="code">bun test v1.3.14');
+  // Another call starts over; while it runs, its events read its output again, a second apart at most.
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  const before = outputReads().length;
+  const at = { ts: '2026-10-01T12:00:00.000Z', runId: GOLDEN_RUN_ID, key: 'publish#1' };
+  host.push(socket, {
+    kind: 'event',
+    event: { ...at, seq: 990, type: 'stage:start', stage: 'publish', call: 1, try: 2, kind: 'stage' },
+  });
+  host.push(socket, {
+    kind: 'event',
+    event: { ...at, seq: 991, type: 'script:exec', command: 'more', cwd: '.', envKeys: [] },
+  });
+  expect(outputReads().length).toBe(before);
+  host.advance(1000);
+  expect(outputReads().length).toBe(before + 2);
+});
+
+test("with no events, a running call's time is drawn again each second, and with nothing running nothing is drawn", () => {
+  const { dir, rest } = runningCopy(m, 1);
+  const lines = rest.map((line) => JSON.parse(line));
+  const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'tests#1');
+  host.clock = Date.parse(lines[start].ts) + 1000;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
+  host.click({ action: 'select-card', key: 'tests#1' });
+  host.advance(100);
+  expect(host.regions.main).toContain('<span class="d-agent">1.1s');
+  host.renders = [];
+  host.advance(1000);
+  expect(host.regions.main).toContain('<span class="d-agent">2.1s');
+  expect(host.renders.sort()).toEqual(['inspector', 'main', 'rail', 'status']);
+  host.advance(1000);
+  expect(host.regions.main).toContain('<span class="d-agent">3.1s');
+  page.stop();
+  page = undefined;
+
+  // The seeded machine alone runs nothing: no tick draws anything.
+  host = new FakeHost(m);
+  rmSync(dir, { recursive: true });
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  host.renders = [];
+  host.advance(5000);
+  expect(host.renders).toEqual([]);
 });
 
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {

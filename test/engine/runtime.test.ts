@@ -51,6 +51,7 @@ import {
 } from '../helpers/agent-fixture';
 import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, type SteppingClock, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
+import { holdTempRepo } from '../helpers/held-repo';
 import { TRIO, TRIO_GROUP, TRIO_KEYS, writeTrio } from '../helpers/review-fixture';
 import {
   copyRun,
@@ -112,57 +113,86 @@ const runIds = (repoDir: string): string[] =>
 /** The only run in `repoDir`'s `.sail-runs/`. */
 const onlyRun = (repoDir: string) => join(repoDir, '.sail-runs', runIds(repoDir)[0] ?? '');
 
-test('the stub runs to completion through its fix loop, and every call ran once', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
+/** The stub's run from `FAKE-1` to its end, and what it showed while it ran: run once, and read by several cases. */
+interface Completed {
+  readonly repoDir: string;
+  readonly end: RunEnd;
+  /** The journal entries onCall saw, and the run header's hash at the first of them. */
+  readonly journaled: JournalEntry[];
+  readonly header: string | undefined;
+  /** summary.json's call count after each call, and every way it broke sail.summary.v1 then. */
+  readonly listed: number[];
+  readonly summaryIssues: string[];
+  /** What a consumer passed in received. */
+  readonly seen: SailEvent[];
+}
+
+const completedRepo = holdTempRepo();
+let completedOnce: Promise<Completed> | undefined;
+function completed(): Promise<Completed> {
+  completedOnce ??= (async () => {
+    const repoDir = completedRepo().dir;
+    writeStub(repoDir);
     const journaled: JournalEntry[] = [];
     let header: string | undefined;
-    const end = await ran(repo.dir, {
+    const listed: number[] = [];
+    const summaryIssues: string[] = [];
+    const seen: SailEvent[] = [];
+    const end = await ran(repoDir, {
       onCall: (entry) => {
         journaled.push(entry);
-        header ??= sha256(join(onlyRun(repo.dir), 'run.json'));
+        header ??= sha256(join(onlyRun(repoDir), 'run.json'));
+        const summary = summaryOf(onlyRun(repoDir));
+        summaryIssues.push(...validateDocument('sail.summary.v1', summary).map(formatIssue));
+        listed.push(summary?.calls.length ?? 0);
       },
+      consumers: [{ name: 'mirror', onEvent: (event) => seen.push(event) }],
     });
+    return { repoDir, end, journaled, header, listed, summaryIssues, seen };
+  })();
+  return completedOnce;
+}
 
-    expect(end).toMatchObject({
-      status: 'completed',
-      result: { outcome: 'passed', output: { number: 1, url: 'fake://codehost/stub/pull/1', draft: false }, files: {} },
-    });
-    expect(end.stopReason).toBeUndefined();
-    const { entries } = readJournal(end.dir);
-    expect(entries.map((entry) => entry.key)).toEqual([
-      'intake#1',
-      'spec#1',
-      'implement#1',
-      'tests#1',
-      'implement#2',
-      'tests#2',
-      'self-review#1',
-      'publish#1',
-    ]);
-    expect(entries.map((entry) => entry.outcome)).toEqual([
-      'passed',
-      'passed',
-      'passed',
-      'failed',
-      'passed',
-      'passed',
-      'passed',
-      'passed',
-    ]);
-    expect(journaled).toEqual(entries);
-    expect(readStatus(end.dir)).toEqual({ status: 'completed' });
-    // Every stage call ran once, as a script. The intake is no script: the engine ran it.
-    expect(stubExecutions(repo.dir)).toEqual(keys(end.dir).slice(1));
-    expect(validateRunDir(end.dir).issues).toEqual([]);
-    const implement = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
-    expect(implement.consumed).toEqual({
-      spec: '01-spec/call-1/spec.md',
-      feedback: '03-tests/call-1/result.json#/output',
-    });
-    expect(implement.output).toEqual({ notes: 'a stub change', sawFeedback: true });
-    expect(sha256(join(end.dir, RUN_HEADER_FILE))).toBe(header ?? '');
+test('the stub runs to completion through its fix loop, and every call ran once', async () => {
+  const { repoDir, end, journaled, header } = await completed();
+  expect(end).toMatchObject({
+    status: 'completed',
+    result: { outcome: 'passed', output: { number: 1, url: 'fake://codehost/stub/pull/1', draft: false }, files: {} },
   });
+  expect(end.stopReason).toBeUndefined();
+  const { entries } = readJournal(end.dir);
+  expect(entries.map((entry) => entry.key)).toEqual([
+    'intake#1',
+    'spec#1',
+    'implement#1',
+    'tests#1',
+    'implement#2',
+    'tests#2',
+    'self-review#1',
+    'publish#1',
+  ]);
+  expect(entries.map((entry) => entry.outcome)).toEqual([
+    'passed',
+    'passed',
+    'passed',
+    'failed',
+    'passed',
+    'passed',
+    'passed',
+    'passed',
+  ]);
+  expect(journaled).toEqual(entries);
+  expect(readStatus(end.dir)).toEqual({ status: 'completed' });
+  // Every stage call ran once, as a script. The intake is no script: the engine ran it.
+  expect(stubExecutions(repoDir)).toEqual(keys(end.dir).slice(1));
+  expect(validateRunDir(end.dir).issues).toEqual([]);
+  const implement = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
+  expect(implement.consumed).toEqual({
+    spec: '01-spec/call-1/spec.md',
+    feedback: '03-tests/call-1/result.json#/output',
+  });
+  expect(implement.output).toEqual({ notes: 'a stub change', sawFeedback: true });
+  expect(sha256(join(end.dir, RUN_HEADER_FILE))).toBe(header ?? '');
 });
 
 test('tests that never pass fail the run when the fix loop exceeds its max', async () => {
@@ -258,20 +288,6 @@ test('a workflow whose calls change between replays fails with determinism_viola
   );
 });
 
-test('a journal that breaks mid-run is an exception inside sail, and STATUS stays running', async () => {
-  await withTempRepo(async (repo) => {
-    const sail = writeStub(repo.dir);
-    edit(
-      sail,
-      'workflows/ticket-to-pr/stages/spec/run.sh',
-      "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
-    );
-    await expect(ran(repo.dir)).rejects.toThrow(JournalError);
-    expect(readStatus(onlyRun(repo.dir))).toEqual({ status: 'running' });
-  });
-});
-
 test('a second run from the same .sail/ in a process throws before it writes anything', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
@@ -300,13 +316,49 @@ function interruptedIn(repoDir: string, options: Partial<RunWorkflowOptions> = {
   return interruptWhenAsleep(repoDir, running, () => controller.abort());
 }
 
-/** The stub's run, interrupted during `implement#2` in a repository of its own, then copied into `to`. Its id. */
-function interruptedCopy(to: string, options: Partial<RunWorkflowOptions> = {}): Promise<string> {
-  return withTempRepo(async (from) => {
-    const { end } = await interruptedIn(from.dir, options);
-    copyRun(from.dir, to);
-    return end.runId;
-  });
+const interruptedRepo = holdTempRepo();
+let interruptedOnce: Promise<string> | undefined;
+/**
+ * The stub's run, interrupted during `implement#2` once for the file in a repository held for it, then copied into `to`
+ * for each case: a copy resumes from a `.sail/` of its own, and the source is never touched again. Its id.
+ */
+async function interruptedCopy(to: string): Promise<string> {
+  interruptedOnce ??= interruptedIn(interruptedRepo().dir).then(({ end }) => end.runId);
+  const runId = await interruptedOnce;
+  copyRun(interruptedRepo().dir, to);
+  return runId;
+}
+
+/** The interrupted run, copied into a repository held for the file, read before and after one resume there. */
+interface Resumed {
+  readonly repoDir: string;
+  readonly runId: string;
+  readonly dir: string;
+  /** The run header's hash before the resume. */
+  readonly header: string;
+  /** events.ndjson's text, its events and summary.json as the interrupt left them. */
+  readonly eventsBefore: string;
+  readonly interrupted: SailEvent[];
+  readonly interruptedSummary: Summary | undefined;
+  readonly end: Awaited<ReturnType<typeof resumeWorkflow>>;
+}
+
+const resumedRepo = holdTempRepo();
+let resumedOnce: Promise<Resumed> | undefined;
+/** The stub's run interrupted during `implement#2`, then resumed to its end: run once, and read by several cases. */
+function resumed(): Promise<Resumed> {
+  resumedOnce ??= (async () => {
+    const repoDir = resumedRepo().dir;
+    const runId = await interruptedCopy(repoDir);
+    const dir = join(repoDir, '.sail-runs', runId);
+    const header = sha256(join(dir, RUN_HEADER_FILE));
+    const eventsBefore = eventsText(dir);
+    const interrupted = events(dir);
+    const interruptedSummary = summaryOf(dir);
+    const end = await resumeWorkflow({ cwd: repoDir, adapters: await fakeAdapters(repoDir), runId });
+    return { repoDir, runId, dir, header, eventsBefore, interrupted, interruptedSummary, end };
+  })();
+  return resumedOnce;
 }
 
 const STAGE_KEYS = ['spec#1', 'implement#1', 'tests#1', 'implement#2', 'tests#2', 'self-review#1', 'publish#1'];
@@ -444,32 +496,27 @@ test("an abort suspends a run whose replay hangs in the workflow's own code", as
 });
 
 test('a resume runs the interrupted call again as its next try, and nothing journaled runs again', async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedCopy(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    const header = sha256(join(dir, RUN_HEADER_FILE));
-    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
-    expect(end).toMatchObject({ runId, dir, status: 'completed' });
-    expect(keys(dir)).toEqual(ALL_KEYS);
-    expect(stubExecutions(repo.dir)).toEqual([
-      'spec#1',
-      'implement#1',
-      'tests#1',
-      'implement#2',
-      'implement#2',
-      'tests#2',
-      'self-review#1',
-      'publish#1',
-    ]);
-    const retried = readJournal(dir).entries.find((entry) => entry.key === 'implement#2');
-    expect(retried?.resultPath).toBe('02-implement/call-2/try-2/result.json');
-    const tryTwo = JSON.parse(readFileSync(join(dir, '02-implement', 'call-2', 'try-2', 'result.json'), 'utf8'));
-    expect(tryTwo.env.TRY).toBe('2');
-    expect(existsSync(join(dir, '02-implement', 'call-2', 'stdout.log'))).toBe(true);
-    expect(readStatus(dir)).toEqual({ status: 'completed' });
-    expect(validateRunDir(dir).issues).toEqual([]);
-    expect(sha256(join(dir, RUN_HEADER_FILE))).toBe(header);
-  });
+  const { repoDir, runId, dir, header, end } = await resumed();
+  expect(end).toMatchObject({ runId, dir, status: 'completed' });
+  expect(keys(dir)).toEqual(ALL_KEYS);
+  expect(stubExecutions(repoDir)).toEqual([
+    'spec#1',
+    'implement#1',
+    'tests#1',
+    'implement#2',
+    'implement#2',
+    'tests#2',
+    'self-review#1',
+    'publish#1',
+  ]);
+  const retried = readJournal(dir).entries.find((entry) => entry.key === 'implement#2');
+  expect(retried?.resultPath).toBe('02-implement/call-2/try-2/result.json');
+  const tryTwo = JSON.parse(readFileSync(join(dir, '02-implement', 'call-2', 'try-2', 'result.json'), 'utf8'));
+  expect(tryTwo.env.TRY).toBe('2');
+  expect(existsSync(join(dir, '02-implement', 'call-2', 'stdout.log'))).toBe(true);
+  expect(readStatus(dir)).toEqual({ status: 'completed' });
+  expect(validateRunDir(dir).issues).toEqual([]);
+  expect(sha256(join(dir, RUN_HEADER_FILE))).toBe(header);
 }, 30_000);
 
 test('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and nothing runs', async () => {
@@ -611,62 +658,59 @@ const seqs = (list: readonly SailEvent[]) => list.map((event) => event.seq);
 const gapless = (list: readonly SailEvent[]) => list.map((_, i) => i + 1);
 
 test("the stub's run writes its whole event stream to events.ndjson, numbered from 1: its start, what the claim did, the intake, then every call", async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const end = await ran(repo.dir);
-    const list = events(end.dir);
+  const { end } = await completed();
+  const list = events(end.dir);
 
-    expect(outline(list)).toEqual(STUB_OUTLINE);
-    expect(seqs(list)).toEqual(gapless(list));
-    expect(list.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue)).toEqual([]);
+  expect(outline(list)).toEqual(STUB_OUTLINE);
+  expect(seqs(list)).toEqual(gapless(list));
+  expect(list.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue)).toEqual([]);
 
-    const header = JSON.parse(readFileSync(join(end.dir, RUN_HEADER_FILE), 'utf8'));
-    expect(list[0]).toEqual({
-      seq: 1,
-      ts: expect.any(String),
-      type: 'run:start',
-      runId: end.runId,
-      source: header.source,
-      workflow: header.workflow,
-      roster: { intake: header.intake, stages: header.stages },
-      adapters: header.adapters,
-      budget: header.budget,
-    });
-    expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
-    // What the claim did, as the engine reports it: neither event belongs to a call, so neither has a key.
-    const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-1' };
-    expect(list.slice(3, 5)).toEqual([
-      { seq: 4, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
-      { seq: 5, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
-    ]);
-    expect(list.at(-1)).toEqual({
-      seq: list.length,
-      ts: expect.any(String),
-      type: 'run:end',
-      runId: end.runId,
-      status: 'completed',
-      result: end.result,
-      replays: 8,
-    });
-    expect(list.filter((event) => event.type === 'journal:append')).toMatchObject(
-      readJournal(end.dir).entries.map((entry) => ({ key: entry.key, line: entry.seq, outcome: entry.outcome })),
-    );
-    expect(list.filter((event) => event.type === 'loop:iteration' || event.type === 'loop:exit')).toMatchObject([
-      { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 },
-      {
-        type: 'loop:iteration',
-        loop: 'fix',
-        iteration: 2,
-        max: 3,
-        feedback: { from: '03-tests/call-1/result.json#/output' },
-      },
-      { type: 'loop:exit', loop: 'fix', iterations: 2, max: 3, reason: 'break' },
-    ]);
-    expect(
-      list.filter((event) => event.type === 'workflow:route').map((event) => ('value' in event ? event.value : null)),
-    ).toEqual(['passed', 'passed', 'failed', 'passed', 'passed', 'passed', 'passed']);
-    expect(validateRunDir(end.dir).issues).toEqual([]);
+  const header = JSON.parse(readFileSync(join(end.dir, RUN_HEADER_FILE), 'utf8'));
+  expect(list[0]).toEqual({
+    seq: 1,
+    ts: expect.any(String),
+    type: 'run:start',
+    runId: end.runId,
+    source: header.source,
+    workflow: header.workflow,
+    roster: { intake: header.intake, stages: header.stages },
+    adapters: header.adapters,
+    budget: header.budget,
   });
+  expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
+  // What the claim did, as the engine reports it: neither event belongs to a call, so neither has a key.
+  const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-1' };
+  expect(list.slice(3, 5)).toEqual([
+    { seq: 4, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
+    { seq: 5, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+  ]);
+  expect(list.at(-1)).toEqual({
+    seq: list.length,
+    ts: expect.any(String),
+    type: 'run:end',
+    runId: end.runId,
+    status: 'completed',
+    result: end.result,
+    replays: 8,
+  });
+  expect(list.filter((event) => event.type === 'journal:append')).toMatchObject(
+    readJournal(end.dir).entries.map((entry) => ({ key: entry.key, line: entry.seq, outcome: entry.outcome })),
+  );
+  expect(list.filter((event) => event.type === 'loop:iteration' || event.type === 'loop:exit')).toMatchObject([
+    { type: 'loop:iteration', loop: 'fix', iteration: 1, max: 3 },
+    {
+      type: 'loop:iteration',
+      loop: 'fix',
+      iteration: 2,
+      max: 3,
+      feedback: { from: '03-tests/call-1/result.json#/output' },
+    },
+    { type: 'loop:exit', loop: 'fix', iterations: 2, max: 3, reason: 'break' },
+  ]);
+  expect(
+    list.filter((event) => event.type === 'workflow:route').map((event) => ('value' in event ? event.value : null)),
+  ).toEqual(['passed', 'passed', 'failed', 'passed', 'passed', 'passed', 'passed']);
+  expect(validateRunDir(end.dir).issues).toEqual([]);
 });
 
 test('a run whose loop exceeds its max ends its stream with loop:exit exceeded, then run:end failed', async () => {
@@ -698,36 +742,28 @@ test('a run whose loop exceeds its max ends its stream with loop:exit exceeded, 
 });
 
 test("a resume appends to the interrupted run's events, continuing seq with no marker", async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedCopy(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    const before = eventsText(dir);
-    const interrupted = events(dir);
-    expect(interrupted.at(-1)).toMatchObject({
-      type: 'run:end',
-      status: 'suspended',
-      stopReason: 'interrupted',
-      message: 'stopped during implement#2',
-    });
-
-    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
-      status: 'completed',
-    });
-    expect(eventsText(dir).startsWith(before)).toBe(true);
-    const list = events(dir);
-    expect(seqs(list)).toEqual(gapless(list));
-    const resumed = list.slice(interrupted.length);
-    expect(outline(resumed.slice(0, 4))).toEqual([
-      'workspace:leased',
-      'loop:iteration',
-      'workflow:route tests#1→implement#2',
-      'stage:start implement#2',
-    ]);
-    expect(resumed[3]).toMatchObject({ try: 2 });
-    expect(outline(resumed).filter((line) => line.startsWith('run:start'))).toEqual([]);
-    expect(resumed.at(-1)).toMatchObject({ type: 'run:end', status: 'completed', replays: 5 });
-    expect(validateRunDir(dir).issues).toEqual([]);
+  const { dir, eventsBefore, interrupted, end } = await resumed();
+  expect(interrupted.at(-1)).toMatchObject({
+    type: 'run:end',
+    status: 'suspended',
+    stopReason: 'interrupted',
+    message: 'stopped during implement#2',
   });
+  expect(end).toMatchObject({ status: 'completed' });
+  expect(eventsText(dir).startsWith(eventsBefore)).toBe(true);
+  const list = events(dir);
+  expect(seqs(list)).toEqual(gapless(list));
+  const after = list.slice(interrupted.length);
+  expect(outline(after.slice(0, 4))).toEqual([
+    'workspace:leased',
+    'loop:iteration',
+    'workflow:route tests#1→implement#2',
+    'stage:start implement#2',
+  ]);
+  expect(after[3]).toMatchObject({ try: 2 });
+  expect(outline(after).filter((line) => line.startsWith('run:start'))).toEqual([]);
+  expect(after.at(-1)).toMatchObject({ type: 'run:end', status: 'completed', replays: 5 });
+  expect(validateRunDir(dir).issues).toEqual([]);
 }, 30_000);
 
 test("a forced run of a ticket that is not unstarted reports the move in the claim's place: ticket:updated, then ticket:commented, and run:start lists the state check as overridden", async () => {
@@ -758,16 +794,10 @@ test("a forced run of a ticket that is not unstarted reports the move in the cla
 });
 
 test('a resume reports nothing of the claim again: across both processes the stream holds it once', async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedCopy(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
-      status: 'completed',
-    });
-    const ticket = outline(events(dir)).filter((line) => line.startsWith('ticket:'));
-    expect(ticket).toEqual(['ticket:claimed', 'ticket:commented', 'ticket:fetched intake#1']);
-    expect(validateRunDir(dir).issues).toEqual([]);
-  });
+  const { dir, end } = await resumed();
+  expect(end).toMatchObject({ status: 'completed' });
+  const ticket = outline(events(dir)).filter((line) => line.startsWith('ticket:'));
+  expect(ticket).toEqual(['ticket:claimed', 'ticket:commented', 'ticket:fetched intake#1']);
 }, 30_000);
 
 test('a torn tail is cut before a resume, and seq continues from the last complete line', async () => {
@@ -838,7 +868,8 @@ test('a consumer that throws is reported after each event it failed on, and the 
   });
 });
 
-test('an exception inside sail leaves error:crash as the last event, and still propagates', async () => {
+// One crash, read four ways: a journal that breaks while spec#1 is journaled is an exception inside sail.
+test('an exception inside sail propagates, leaves error:crash as the last event, STATUS and summary.json running, and lets go of the relay', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
     edit(
@@ -847,7 +878,8 @@ test('an exception inside sail leaves error:crash as the last event, and still p
       "printf '# Spec",
       'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
     );
-    const error = await ran(repo.dir).catch((thrown: unknown) => thrown);
+    const adapters = await fakeAdapters(repo.dir);
+    const error = await ran(repo.dir, { adapters }).catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(JournalError);
     const [runId = ''] = runIds(repo.dir);
     const dir = join(repo.dir, '.sail-runs', runId);
@@ -861,6 +893,13 @@ test('an exception inside sail leaves error:crash as the last event, and still p
       message: (error as Error).message,
     });
     expect(readStatus(dir)).toEqual({ status: 'running' });
+    const summary = summaryOf(dir);
+    expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['intake#1', 'spec#1']]);
+
+    const seen: ProviderEvent[] = [];
+    adapters.relay.attach((event) => seen.push(event));
+    adapters.relay.emit(LEASED);
+    expect(seen).toEqual([LEASED]);
   });
 });
 
@@ -941,13 +980,9 @@ test('run:end holds the result as it was serialised once, so a toJSON that throw
 });
 
 test('consumers passed in receive the events the file holds, in the same order', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { testsPassAt: 1 });
-    const seen: SailEvent[] = [];
-    const end = await ran(repo.dir, { consumers: [{ name: 'mirror', onEvent: (event) => seen.push(event) }] });
-    expect(outline([seen[0], seen.at(-1)].filter((event) => event !== undefined))).toEqual(['run:start', 'run:end']);
-    expect(JSON.parse(JSON.stringify(seen))).toEqual(events(end.dir));
-  });
+  const { end, seen } = await completed();
+  expect(outline([seen[0], seen.at(-1)].filter((event) => event !== undefined))).toEqual(['run:start', 'run:end']);
+  expect(JSON.parse(JSON.stringify(seen))).toEqual(events(end.dir));
 });
 
 /** The run's summary.json as written, or '' when it has none. */
@@ -972,93 +1007,74 @@ const STUB_ROUTES = [
 ];
 
 test("the stub's summary.json is rewritten after every call, and ends completed with its loops and routes", async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const listed: number[] = [];
-    const issues: string[] = [];
-    const end = await ran(repo.dir, {
-      onCall: () => {
-        const summary = summaryOf(onlyRun(repo.dir));
-        issues.push(...validateDocument('sail.summary.v1', summary).map(formatIssue));
-        listed.push(summary?.calls.length ?? 0);
-      },
-    });
-
-    expect(readdirSync(end.dir).sort()).toEqual([
-      '00-intake',
-      '01-spec',
-      '02-implement',
-      '03-tests',
-      '04-self-review',
-      '05-publish',
-      'STATUS',
-      'events.ndjson',
-      'journal.ndjson',
-      'run.json',
-      'summary.json',
-    ]);
-    expect([listed, issues]).toEqual([[1, 2, 3, 4, 5, 6, 7, 8], []]);
-    const text = summaryText(end.dir);
-    const summary = JSON.parse(text);
-    expect(text).toBe(`${JSON.stringify(summary, null, 2)}\n`);
-    expect(summary).toMatchObject({
-      status: 'completed',
-      loops: { fix: { iterations: 2, max: 3 } },
-      totals: { replays: 8 },
-    });
-    expect(summary.calls.map((call: { key: string }) => call.key)).toEqual(ALL_KEYS);
-    expect(summary.routes).toEqual(STUB_ROUTES);
-    expect(validateRunDir(end.dir).issues).toEqual([]);
+  const { end, listed, summaryIssues: issues } = await completed();
+  expect(readdirSync(end.dir).sort()).toEqual([
+    '00-intake',
+    '01-spec',
+    '02-implement',
+    '03-tests',
+    '04-self-review',
+    '05-publish',
+    'STATUS',
+    'events.ndjson',
+    'journal.ndjson',
+    'run.json',
+    'summary.json',
+  ]);
+  expect([listed, issues]).toEqual([[1, 2, 3, 4, 5, 6, 7, 8], []]);
+  const text = summaryText(end.dir);
+  const summary = JSON.parse(text);
+  expect(text).toBe(`${JSON.stringify(summary, null, 2)}\n`);
+  expect(summary).toMatchObject({
+    status: 'completed',
+    loops: { fix: { iterations: 2, max: 3 } },
+    totals: { replays: 8 },
   });
+  expect(summary.calls.map((call: { key: string }) => call.key)).toEqual(ALL_KEYS);
+  expect(summary.routes).toEqual(STUB_ROUTES);
+  expect(validateRunDir(end.dir).issues).toEqual([]);
 });
 
 test("rebuilding the stub's summary.json from its events writes the file the run wrote, byte for byte", async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { testsPassAt: 1 });
-    const end = await ran(repo.dir);
-    const written = summaryText(end.dir);
-    const path = join(end.dir, 'summary.json');
-    rmSync(path, { force: true });
-    const rebuilt = rebuildSummary(end.dir);
-    expect([rebuilt, summaryText(end.dir)]).toEqual([{ summary: JSON.parse(written || 'null'), path }, written]);
-  });
+  // The last case on the shared run: it rewrites summary.json, to the same bytes.
+  const { end } = await completed();
+  const written = summaryText(end.dir);
+  const path = join(end.dir, 'summary.json');
+  rmSync(path, { force: true });
+  const rebuilt = rebuildSummary(end.dir);
+  expect([rebuilt, summaryText(end.dir)]).toEqual([{ summary: JSON.parse(written || 'null'), path }, written]);
 });
 
 test("after an interrupt and a resume, summary.json is completed with the retried call's latest try, one route into it and both processes' replays", async () => {
-  await withTempRepo(async (repo) => {
-    const runId = await interruptedCopy(repo.dir);
-    const dir = join(repo.dir, '.sail-runs', runId);
-    const interrupted = summaryOf(dir);
-    expect([interrupted?.status, interrupted?.stopReason, interrupted?.calls.map((call) => call.key)]).toEqual([
-      'suspended',
-      'interrupted',
-      ['intake#1', 'spec#1', 'implement#1', 'tests#1', 'implement#2'],
-    ]);
+  // Last of the cases on the shared resume: it rebuilds summary.json, to the same bytes.
+  const { dir, interruptedSummary: interrupted, end } = await resumed();
+  expect([interrupted?.status, interrupted?.stopReason, interrupted?.calls.map((call) => call.key)]).toEqual([
+    'suspended',
+    'interrupted',
+    ['intake#1', 'spec#1', 'implement#1', 'tests#1', 'implement#2'],
+  ]);
 
-    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
-      status: 'completed',
-    });
-    const written = summaryText(dir);
-    const summary = summaryOf(dir);
-    const replays = events(dir).reduce((sum, event) => sum + (event.type === 'run:end' ? event.replays : 0), 0);
-    expect([summary?.status, summary?.totals.replays, summary?.calls.map((call) => call.key)]).toEqual([
-      'completed',
-      replays,
-      ALL_KEYS,
-    ]);
-    expect(summary?.calls.find((call) => call.key === 'implement#2')).toMatchObject({
-      key: 'implement#2',
-      outcome: 'passed',
-      resultPath: '02-implement/call-2/try-2/result.json',
-    });
-    expect(summary?.routes?.filter((move) => move.at === 'tests#1')).toEqual([
-      { at: 'tests#1', value: 'failed', took: 'implement#2' },
-    ]);
-
-    rmSync(join(dir, 'summary.json'));
-    expect(rebuildSummary(dir)).toEqual({ summary: summary as Summary, path: join(dir, 'summary.json') });
-    expect(summaryText(dir)).toBe(written);
+  expect(end).toMatchObject({ status: 'completed' });
+  const written = summaryText(dir);
+  const summary = summaryOf(dir);
+  const replays = events(dir).reduce((sum, event) => sum + (event.type === 'run:end' ? event.replays : 0), 0);
+  expect([summary?.status, summary?.totals.replays, summary?.calls.map((call) => call.key)]).toEqual([
+    'completed',
+    replays,
+    ALL_KEYS,
+  ]);
+  expect(summary?.calls.find((call) => call.key === 'implement#2')).toMatchObject({
+    key: 'implement#2',
+    outcome: 'passed',
+    resultPath: '02-implement/call-2/try-2/result.json',
   });
+  expect(summary?.routes?.filter((move) => move.at === 'tests#1')).toEqual([
+    { at: 'tests#1', value: 'failed', took: 'implement#2' },
+  ]);
+
+  rmSync(join(dir, 'summary.json'));
+  expect(rebuildSummary(dir)).toEqual({ summary: summary as Summary, path: join(dir, 'summary.json') });
+  expect(summaryText(dir)).toBe(written);
 }, 30_000);
 
 test("a summary.json that can't be written is reported at each write point after, and the run completes", async () => {
@@ -1085,21 +1101,6 @@ test("a summary.json that can't be written is reported at each write point after
       ['summary.json', 'run:end'],
     ]);
     expect(outline(list.filter((event) => event.type !== 'error:consumer'))).toEqual(STUB_OUTLINE);
-  });
-});
-
-test('a crash leaves summary.json running, with the calls made before it', async () => {
-  await withTempRepo(async (repo) => {
-    const sail = writeStub(repo.dir);
-    edit(
-      sail,
-      'workflows/ticket-to-pr/stages/spec/run.sh',
-      "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
-    );
-    await expect(ran(repo.dir)).rejects.toThrow(JournalError);
-    const summary = summaryOf(onlyRun(repo.dir));
-    expect([summary?.status, summary?.calls.map((call) => call.key)]).toEqual(['running', ['intake#1', 'spec#1']]);
   });
 });
 
@@ -1779,27 +1780,6 @@ test('once run:end is out nothing an adapter emits reaches the file, and the run
     expect(list.at(-1)?.type).toBe('run:end');
     // Neither of the two emitted from the end on is in the stream, which holds no push of its own.
     expect(list.filter((event) => event.type === 'codehost:pushed')).toEqual([]);
-  });
-});
-
-test('a run that crashes lets go of the relay too', async () => {
-  await withTempRepo(async (repo) => {
-    const sail = writeStub(repo.dir);
-    edit(
-      sail,
-      'workflows/ticket-to-pr/stages/spec/run.sh',
-      "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
-    );
-    const adapters = await fakeAdapters(repo.dir);
-    const error = await ran(repo.dir, { adapters }).catch((thrown: unknown) => thrown);
-    expect(error).toBeInstanceOf(JournalError);
-
-    const seen: ProviderEvent[] = [];
-    adapters.relay.attach((event) => seen.push(event));
-    adapters.relay.emit(LEASED);
-    expect(seen).toEqual([LEASED]);
-    expect(events(onlyRun(repo.dir)).at(-1)?.type).toBe('error:crash');
   });
 });
 
