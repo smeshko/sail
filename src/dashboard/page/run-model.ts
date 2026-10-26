@@ -81,10 +81,21 @@ export type TimelineEntry =
   | TimelineTool
   | TimelineScript;
 
+/** A count of tokens, by kind. */
+export interface Tokens {
+  input: number;
+  output: number;
+  cacheRead: number;
+}
+
+const noTokens = (): Tokens => ({ input: 0, output: 0, cacheRead: 0 });
+
 /** What a call's harness sessions have spent: the ended ones in all, and the one still going. */
 interface Sessions {
   costEnded: number;
   costLive: number;
+  tokensEnded: Tokens;
+  tokensLive: Tokens;
   turnsEnded: number;
   turnLive: number;
   toolsEnded: number;
@@ -107,6 +118,8 @@ export interface StageCard {
   durationMs?: number;
   costUsd?: number;
   turns?: number;
+  /** The tokens its sessions used, once any reported usage. */
+  tokens?: Tokens;
   toolCalls: number;
   denials: Denial[];
   files: CardFile[];
@@ -251,7 +264,17 @@ function newCard(
     timeline: [],
     events: 0,
     other: dict(),
-    sessions: { costEnded: 0, costLive: 0, turnsEnded: 0, turnLive: 0, toolsEnded: 0, toolsLive: 0, seen: false },
+    sessions: {
+      costEnded: 0,
+      costLive: 0,
+      tokensEnded: noTokens(),
+      tokensLive: noTokens(),
+      turnsEnded: 0,
+      turnLive: 0,
+      toolsEnded: 0,
+      toolsLive: 0,
+      seen: false,
+    },
   };
   if (open !== undefined && loop !== undefined)
     card.iteration = { loop: open, iteration: loop.iteration, max: loop.max };
@@ -265,13 +288,25 @@ function meter(card: StageCard): void {
   card.toolCalls = sessions.toolsEnded + sessions.toolsLive;
   if (!sessions.seen) return;
   card.costUsd = sessions.costEnded + sessions.costLive;
+  const { tokensEnded: ended, tokensLive: live } = sessions;
+  card.tokens = {
+    input: ended.input + live.input,
+    output: ended.output + live.output,
+    cacheRead: ended.cacheRead + live.cacheRead,
+  };
   card.turns = sessions.turnsEnded + sessions.turnLive;
 }
 
 /** Ends the card's live session, with what its end says it spent where it says. */
 function endSession(card: StageCard, end?: Fields): void {
   const { sessions } = card;
-  sessions.costEnded += num(obj(end?.usage)?.costUsd) ?? sessions.costLive;
+  const usage = obj(end?.usage);
+  sessions.costEnded += num(usage?.costUsd) ?? sessions.costLive;
+  const { tokensEnded: ended, tokensLive: live } = sessions;
+  ended.input += num(usage?.inputTokens) ?? live.input;
+  ended.output += num(usage?.outputTokens) ?? live.output;
+  ended.cacheRead += num(usage?.cacheReadTokens) ?? live.cacheRead;
+  sessions.tokensLive = noTokens();
   sessions.turnsEnded += num(end?.turns) ?? sessions.turnLive;
   sessions.toolsEnded += num(end?.toolCalls) ?? sessions.toolsLive;
   sessions.costLive = 0;
@@ -495,6 +530,13 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       card.sessions.seen = true;
       card.sessions.costLive = spent;
       card.sessions.turnLive = num(e.turn) ?? card.sessions.turnLive;
+      const tokens = obj(e.tokens);
+      if (tokens !== undefined) {
+        const live = card.sessions.tokensLive;
+        live.input = num(tokens.input) ?? live.input;
+        live.output = num(tokens.output) ?? live.output;
+        live.cacheRead = num(tokens.cacheRead) ?? live.cacheRead;
+      }
       meter(card);
       return true;
     }

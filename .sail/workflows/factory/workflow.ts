@@ -6,7 +6,6 @@ import { workflow, type z } from 'sail';
 import { ticket } from 'sail/intakes';
 import type { Demonstrated, FollowUp, NumberedFinding, Round } from './schemas';
 import { PassFeedback } from './schemas';
-import { setup } from './stages/00-setup/stage';
 import { plan } from './stages/01-plan/stage';
 import { implement } from './stages/02-implement/stage';
 import { validate } from './stages/03-validate/stage';
@@ -22,12 +21,10 @@ export default workflow(
   'factory',
   {
     intake: ticket,
-    version: 3,
+    version: 4,
     description: 'plan, implement test first, demonstrate, review, pull request, follow-ups',
   },
   async (run) => {
-    await run.stage(setup);
-
     // create-plan
     const p = await run.stage(plan, { brief: run.intake.files['brief.md'] });
     if (p.outcome === 'blocked') return run.fail(`plan blocked: ${p.reason}`);

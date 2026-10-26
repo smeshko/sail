@@ -21,16 +21,16 @@ export function cost(usd: number | undefined): string {
   return usd > 0 && usd < 0.01 ? `$${usd.toFixed(3)}` : `$${usd.toFixed(2)}`;
 }
 
-/** `999`, `1.0k`, `12k`, `1.0m` or `12m`: a k count that rounds to 1000k is shown in millions. */
+/** `999`, `12.6k`, `189k`, `1.2m` or `13m`: one decimal below 100k and below 10m, as the count rounds. */
 export function tokens(n: number | undefined): string {
   if (!isNumber(n)) return '?';
   if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) {
-    const shown = n < 10_000 ? (n / 1000).toFixed(1) : String(Math.round(n / 1000));
-    return Number(shown) >= 1000 ? `${(n / 1_000_000).toFixed(1)}m` : `${shown}k`;
-  }
-  if (n < 10_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
-  return `${Math.round(n / 1_000_000)}m`;
+  const scaled = (unit: number, suffix: string, decimalBelow: number) => {
+    const tenths = Math.round(n / (unit / 10)) / 10;
+    return tenths < decimalBelow ? `${tenths.toFixed(1)}${suffix}` : `${Math.round(n / unit)}${suffix}`;
+  };
+  // A k count that rounds to 1000k is shown in millions.
+  return Math.round(n / 1000) < 1000 ? scaled(1000, 'k', 100) : scaled(1_000_000, 'm', 10);
 }
 
 const two = (n: number) => String(n).padStart(2, '0');

@@ -17,7 +17,8 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
 - `.sail/lib/demo.sh run $STAGE_OUT/demo <command> [args…]` commits what changed in the demo repository, runs the
   command there, prints its output and its exit code, and appends both to `$STAGE_OUT/demo/transcript.txt`. It exits
   with the command's code. Run `sail` by name: `.sail/lib/demo.sh run $STAGE_OUT/demo sail FAKE-1`.
-- Set a scenario up by writing files under `$STAGE_OUT/demo/repo/.sail/` before the run: tickets in
+- Set a scenario up by writing files under `$STAGE_OUT/demo/repo/.sail/` before the run, with your file tools, not
+  `sed -i`, which the step's permissions refuse: tickets in
   `fake/tickets.json`, agent answers in `fake/harness.json`, pull requests in `fake/prs.json`, and workflows and stages
   under `workflows/`. Read the fixture's own files for each format, and `src/adapters/fake/` for what the fakes accept.
   A run writes `.sail-runs/<run>/` in the demo repository: read its `events.ndjson`, `summary.json` and each call's
@@ -45,11 +46,15 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
 - A criterion that isn't shown gets what you saw instead, quoted, and where the difference starts. Never call it shown
   because the code looks right, because a test covers it, or because the difference looks small.
 - Change nothing outside `$STAGE_OUT`, and fix nothing: implement gets your report.
+- A scenario the plan writes as a test command (`bun run test`, `bun test`) is not one you can run: the step's
+  permissions refuse it. Don't try it. Report that criterion shown only if a sail run in a demo repository shows it;
+  otherwise end the step **blocked**, naming the scenario, since implement can't change what you're allowed to run.
 - End the step **blocked** only when you can't run the scenario at all: the harness refuses, or a tool it needs is
   missing. A change that runs and behaves wrong is a report, not a block.
 
 ## Submit
 
-Submit each of the plan's acceptance criteria, in the plan's words, with whether it was shown and its evidence, and the
-transcript: the commands from `transcript.txt` that show the criteria, with the output lines that matter, under 4000
-characters.
+Submit each acceptance criterion the Demonstration section gives a scenario, in the plan's words, with whether it was
+shown and its evidence. Leave out a criterion the plan says gets no bullet, because only a test can observe it:
+validation has passed its tests. Submit too the transcript: the commands from `transcript.txt` that show the criteria,
+with the output lines that matter, under 4000 characters.

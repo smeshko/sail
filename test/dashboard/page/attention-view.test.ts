@@ -19,7 +19,7 @@ test("FAKE-2's failure and denial and FAKE-3's suspension are buttons in one lis
     `<button class="sig sig-failed" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"><b>failed: stage_error</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">FAKE-2 Print the version with --version</span></button>`,
   );
   expect(markup).toContain(
-    `<button class="sig sig-denial" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}" data-key="implement#1" data-tab="permissions"><b>implement#1: 1 denial</b><span class="w">alpha · ${FAKE_2_ID} · implement#1</span>`,
+    `<button class="sig sig-denial" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}" data-key="implement#1" data-tab="permissions"><b>1 denial</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">implement#1: 1</span></button>`,
   );
   expect(markup).toContain(
     `<button class="sig sig-suspended" data-action="open" data-repo="beta" data-run="${FAKE_3_ID}"><b>suspended: budget_exceeded</b><span class="w">beta · ${FAKE_3_ID}</span><span class="p">sail resume ${FAKE_3_ID}</span></button>`,

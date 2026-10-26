@@ -7,9 +7,15 @@
 //   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything.
 // - One queue socket per watched workflow in the index feeds its recent events and its watch state.
 // - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
-//   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry.
+//   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry. The
+//   kinds of entry it hides hold for every call's timeline, and are saved like the theme. An opened script command shows
+//   the call's stdout and stderr, read over REST, and read again at most once a second while the call runs.
+// - A file name in the inspector's files tab opens the file in the drawer, read over REST: a markdown file as the HTML
+//   the server built from it. Esc or the close button shuts the drawer, and so does opening another run.
 // - The inspector reads a call's `result.json` and log over REST. A response for a selection that has changed since is
 //   dropped, and a running call's log is read again at most once a second.
+// - While anything runs, the regions with a running time are drawn again each second, so the time counts up between
+//   events.
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
 //   by one flush at most every 100 ms.
 //
@@ -19,6 +25,7 @@ import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
 import { attention } from './attention';
 import { renderAttention } from './attention-view';
+import { isMarkdown, renderDrawer } from './drawer-view';
 import type { PageHost, Region } from './host';
 import { REGIONS } from './host';
 import { html } from './html';
@@ -28,13 +35,26 @@ import { type QueueStream, queueId, renderQueues } from './queue-view';
 import { renderRail } from './rail-view';
 import { applyEvent, emptyRun, type RunModel } from './run-model';
 import { renderRun, renderStatus } from './run-view';
-import { renderTimeline } from './timeline-view';
-import { type InspectorTab, initialUi, TABS, THEMES, type Theme, type UiState } from './ui-state';
+import { type CallOutput, renderTimeline } from './timeline-view';
+import {
+  FILTERS,
+  type InspectorTab,
+  initialUi,
+  TABS,
+  THEMES,
+  type Theme,
+  type TimelineFilter,
+  type UiState,
+} from './ui-state';
 
 export const THEME_KEY = 'sail-dashboard-theme';
+/** Where the kinds of entry the timeline hides are saved, comma-separated. */
+export const FILTER_KEY = 'sail-dashboard-timeline-hidden';
 export const RECONNECT_MS = 2000;
 export const FLUSH_MS = 100;
 export const LOG_REFRESH_MS = 1000;
+/** How often a running time is drawn again. */
+export const TICK_MS = 1000;
 /** How many of a queue's events its panel lists. */
 export const RECENT_EVENTS = 20;
 
@@ -81,12 +101,22 @@ export function boot(host: PageHost): Page {
   const saved = host.load(THEME_KEY);
   if ((THEMES as readonly string[]).includes(saved ?? '')) ui.theme = saved as Theme;
   host.setTheme(ui.theme);
+  ui.hidden = FILTERS.filter((kind) => (host.load(FILTER_KEY) ?? '').split(',').includes(kind));
   host.setInspector(ui.inspector);
 
   let index: IndexRepo[] | undefined;
   let run: OpenRun | undefined;
   let result: Loaded<unknown> | undefined;
   let log: Loaded<string> | undefined;
+  /** The selected call's stdout and stderr, once one of its script commands is opened. */
+  let output: CallOutput | undefined;
+  let outputRead = 0;
+  let lastOutputRead = Number.NEGATIVE_INFINITY;
+  let outputTimer: number | undefined;
+  /** The drawer's file, as read. */
+  let doc: Loaded<string> | undefined;
+  /** Bumped on every file the drawer opens: only the latest read is shown. */
+  let docRead = 0;
   /** Bumped on every change of the selected call: a read made for an older one is dropped. */
   let selection = 0;
   /** Bumped on every result and log read asked for: only the latest of each is shown. */
@@ -100,6 +130,7 @@ export function boot(host: PageHost): Page {
   let logTimer: number | undefined;
   const queues = new Map<string, OpenQueue>();
   let indexConnection: { close(): void } | undefined;
+  let tickTimer: number | undefined;
   let indexRetry: number | undefined;
   let stopped = false;
 
@@ -130,11 +161,12 @@ export function boot(host: PageHost): Page {
       const view =
         card === undefined
           ? renderRun(run.model, summaryOf(run), ui, host.now())
-          : renderTimeline(card, ui, host.now());
+          : renderTimeline(card, ui, host.now(), output);
       return html`${error}${view}`.value;
     },
     inspector: () => renderInspector(selected(), run?.model.roster, result, log, ui).value,
     status: () => (run === undefined ? '' : renderStatus(run.model, summaryOf(run)).value),
+    drawer: () => renderDrawer(ui, doc).value,
   };
 
   const flush = () => {
@@ -158,6 +190,23 @@ export function boot(host: PageHost): Page {
   const mark = (...regions: Region[]) => {
     for (const region of regions) dirty.add(region);
     if (flushTimer === undefined && !stopped) flushTimer = host.later(flush, FLUSH_MS);
+  };
+
+  /** Whether a running time is on screen: the open run's, one of its calls', or a run's in the rail. */
+  const anyRunning = () =>
+    (run !== undefined && run.model.end === undefined && run.model.cards.some((card) => card.state === 'running')) ||
+    (index ?? []).some((repo) => repo.runs.some((item) => statusOf(item) === 'running'));
+
+  /** Draws the running times again each second, for as long as something runs. */
+  const tick = () => {
+    if (tickTimer !== undefined || stopped || !anyRunning()) return;
+    tickTimer = host.later(() => {
+      tickTimer = undefined;
+      if (!anyRunning()) return;
+      mark('rail', 'main', 'status');
+      if (selected()?.state === 'running') mark('inspector');
+      tick();
+    }, TICK_MS);
   };
 
   const callPath = (open: OpenRun, key: string) =>
@@ -213,12 +262,46 @@ export function boot(host: PageHost): Page {
     }, wait);
   };
 
+  /** Reads the selected call's stdout and stderr for its timeline. */
+  const readOutput = () => {
+    const open = run;
+    const key = ui.key;
+    if (open === undefined || key === undefined) return;
+    const asked = ++outputRead;
+    const forSelection = selection;
+    lastOutputRead = host.now();
+    output ??= { stdout: { state: 'loading' }, stderr: { state: 'loading' } };
+    for (const stream of ['stdout', 'stderr'] as const) {
+      void host.get(`${callPath(open, key)}/log?stream=${stream}`).then((answer) => {
+        if (asked !== outputRead || forSelection !== selection || output === undefined) return;
+        output[stream] = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
+        mark('main');
+      });
+    }
+  };
+
+  /** Reads a running call's output again, at most once a second. */
+  const refreshOutput = () => {
+    if (outputTimer !== undefined) return;
+    const wait = Math.max(0, lastOutputRead + LOG_REFRESH_MS - host.now());
+    if (wait === 0) return readOutput();
+    outputTimer = host.later(() => {
+      outputTimer = undefined;
+      readOutput();
+    }, wait);
+  };
+
+  const scriptOpened = () => ui.opened.some((id) => id.startsWith('script:'));
+
   const clearCall = () => {
     selection++;
     result = undefined;
     log = undefined;
+    output = undefined;
     if (logTimer !== undefined) host.cancel(logTimer);
     logTimer = undefined;
+    if (outputTimer !== undefined) host.cancel(outputTimer);
+    outputTimer = undefined;
   };
 
   /** Selects the call `key`, or none. `timeline` opens its timeline, or goes back to the cards; left out, keeps either. */
@@ -248,6 +331,7 @@ export function boot(host: PageHost): Page {
       const event = message.event as SailEvent & { key?: unknown };
       applyEvent(open.model, event);
       mark('main', 'status');
+      tick();
       const place = cursorPending ? open.model.cards.findIndex((entry) => entry.key === ui.key) : -1;
       if (place >= 0) {
         ui.cursor = place;
@@ -262,6 +346,7 @@ export function boot(host: PageHost): Page {
         const ended = (event.type === 'stage:end' || event.type === 'intake:end') && event.key === key;
         if (ended) readResult();
         if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog();
+        if (ui.timeline && output !== undefined && (card?.state === 'running' || ended)) refreshOutput();
       }
     } else if (message?.kind === 'end') {
       open.ended = true;
@@ -336,12 +421,36 @@ export function boot(host: PageHost): Page {
     closing.connection?.close();
   };
 
+  const closeFile = () => {
+    if (ui.file === undefined) return;
+    delete ui.file;
+    doc = undefined;
+    docRead++;
+    mark('drawer');
+  };
+
+  const openFile = (name: string, path: string) => {
+    const open = run;
+    if (open === undefined) return;
+    ui.file = { name, path };
+    doc = { state: 'loading' };
+    const asked = ++docRead;
+    const as = isMarkdown(path) ? '&as=html' : '';
+    void host.get(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/file?path=${enc(path)}${as}`).then((answer) => {
+      if (asked !== docRead) return;
+      doc = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
+      mark('drawer');
+    });
+    mark('drawer');
+  };
+
   const selectRun = (repo: string, runId: string) => {
     if (run?.repo === repo && run.runId === runId) return;
     closeRun();
     clearCall();
     ui.repo = repo;
     ui.runId = runId;
+    closeFile();
     delete ui.key;
     ui.timeline = false;
     ui.opened = [];
@@ -420,6 +529,7 @@ export function boot(host: PageHost): Page {
     }
     if (run !== undefined) followAgain(run, true);
     mark('rail', 'attention', 'queues', 'main', 'status');
+    tick();
   };
 
   const openIndex = () => {
@@ -457,11 +567,29 @@ export function boot(host: PageHost): Page {
       ui.timeline = false;
       mark('main');
     },
+    'open-file': (data) => {
+      if (data.name !== undefined && data.path !== undefined) openFile(data.name, data.path);
+    },
+    'close-file': () => closeFile(),
     'step-card': (data) => step(Number(data.by) < 0 ? -1 : 1),
     'toggle-tool': (data) => {
       const call = data.call;
       if (call === undefined) return;
       ui.opened = ui.opened.includes(call) ? ui.opened.filter((each) => each !== call) : [...ui.opened, call];
+      if (output === undefined && scriptOpened()) readOutput();
+      mark('main');
+    },
+    'toggle-filter': (data) => {
+      if (!(FILTERS as readonly string[]).includes(data.filter ?? '')) return;
+      const kind = data.filter as TimelineFilter;
+      const hidden = ui.hidden.includes(kind) ? ui.hidden.filter((each) => each !== kind) : [...ui.hidden, kind];
+      ui.hidden = FILTERS.filter((each) => hidden.includes(each));
+      host.save(FILTER_KEY, ui.hidden.join(','));
+      mark('main');
+    },
+    'show-all': () => {
+      ui.hidden = [];
+      host.save(FILTER_KEY, '');
       mark('main');
     },
     tab: (data) => {
@@ -505,8 +633,12 @@ export function boot(host: PageHost): Page {
       const card = run?.model.cards[ui.cursor];
       if (card !== undefined) selectCard(card.key, undefined, true);
     },
-    // Back to the cards from a timeline, keeping the selection; from the cards, no selection.
-    Escape: () => (ui.timeline ? actions['close-timeline']?.({}) : selectCard(undefined)),
+    // The drawer shut first; then back to the cards from a timeline, keeping the selection; from the cards, no selection.
+    Escape: () => {
+      if (ui.file !== undefined) closeFile();
+      else if (ui.timeline) actions['close-timeline']?.({});
+      else selectCard(undefined);
+    },
     ']': () => step(1),
     '[': () => step(-1),
     i: () => actions['toggle-inspector']?.({}),
@@ -538,6 +670,8 @@ export function boot(host: PageHost): Page {
       queues.clear();
       if (flushTimer !== undefined) host.cancel(flushTimer);
       if (logTimer !== undefined) host.cancel(logTimer);
+      if (outputTimer !== undefined) host.cancel(outputTimer);
+      if (tickTimer !== undefined) host.cancel(tickTimer);
     },
   };
 }

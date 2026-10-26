@@ -1,5 +1,5 @@
 // The run view, drawn from the run model and the summary the index carries: the header, the totals against the
-// budget, the loops and routes, one stage card per call grouped by loop iteration, the pending cards, the PR and the
+// budget, one stage card per call grouped by loop iteration, the pending cards, the PR and the
 // CLI commands. The status bar line is drawn from the same model.
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -45,18 +45,10 @@ test("the golden run's eight cards are grouped: intake and spec, then fix's iter
   expect(markup.match(/data-action="select-card"/g)?.length).toBe(8);
 });
 
-test('the golden run view shows its loop, its eight routes, $1.35 of its $25.00 budget, its PR and sail show', () => {
+test('the golden run view shows $1.35 of its $25.00 budget, its PR and sail show, and no loop or route chips', () => {
   const markup = renderRun(foldRun(readEvents(GOLDEN_RUN)), summaryOf(GOLDEN_RUN), initialUi(0), NOW).value;
-  expect(markup).toContain('<span class="loopbadge">fix: 2/3 · break</span>');
-  expect([...markup.matchAll(/<span class="route">([^<]+)<\/span>/g)].map(([, route]) => route)).toEqual([
-    'spec#1 done → implement#1',
-    'implement#1 done → tests#1',
-    'tests#1 failed → implement#2',
-    'implement#2 done → tests#2',
-    'tests#2 passed → self-review#1',
-    'self-review#1 done → publish#1',
-    'publish#1 passed → end',
-  ]);
+  expect(markup).not.toContain('loopbadge');
+  expect(markup).not.toContain('class="route');
   expect(markup).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
   expect(markup).toContain('<div class="stat"><b>16.4s</b><span>of 90m</span></div>');
   expect(markup).toContain('<div class="stat"><b>8/8</b><span>calls settled</span></div>');
@@ -99,7 +91,7 @@ test('a running card shows running and its time so far, a PR link is drawn only 
   expect(markup).toContain('<span class="pill p-run">running</span><span class="d-agent">');
   expect(markup).toContain(`<code>sail show ${GOLDEN_RUN_ID} --follow</code>`);
   expect(renderStatus(model, undefined).value).toBe(
-    '<span>calls <b>3/4</b></span><span>tools <b>0</b></span><span class="">denied <b>0</b></span><span>cost <b>$0.79</b></span><span class="spacer"></span><span>● live</span>',
+    '<span>calls <b>3/4</b></span><span>tools <b>0</b></span><span class="">denied <b>0</b></span><span title="tokens in, out and read from the cache">tokens <b>15.0k</b> in · <b>5.4k</b> out · <b>82.4k</b> cached</span><span>cost <b>$0.79</b></span><span class="spacer"></span><span>● live</span>',
   );
   const at = { seq: 900, ts: events[until]?.ts ?? '', runId: 'x', key: 'tests#1/lint' };
   const stepped = foldRun([
@@ -116,7 +108,7 @@ test('a running card shows running and its time so far, a PR link is drawn only 
     '<a class="lnk" href="https://example.com/pull/7" rel="noreferrer" target="_blank">#7</a>',
   );
   expect(renderStatus(foldRun(readEvents(FAKE_2)), summaryOf(FAKE_2)).value).toBe(
-    '<span>calls <b>3/3</b></span><span>tools <b>1</b></span><span class="w">denied <b>1</b></span><span>cost <b>$0.36</b></span><span class="spacer"></span><span>ended failed</span>',
+    '<span>calls <b>3/3</b></span><span>tools <b>1</b></span><span class="w">denied <b>1</b></span><span title="tokens in, out and read from the cache">tokens <b>6.4k</b> in · <b>1.9k</b> out · <b>24.8k</b> cached</span><span>cost <b>$0.36</b></span><span class="spacer"></span><span>ended failed</span>',
   );
 });
 
