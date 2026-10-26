@@ -655,6 +655,40 @@ test("opening a script command reads the call's stdout and stderr once, shows th
   expect(outputReads().length).toBe(before + 2);
 });
 
+test("with no events, a running call's time is drawn again each second, and with nothing running nothing is drawn", () => {
+  const { dir, rest } = runningCopy(m, 1);
+  const lines = rest.map((line) => JSON.parse(line));
+  const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'tests#1');
+  host.clock = Date.parse(lines[start].ts) + 1000;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
+  host.click({ action: 'select-card', key: 'tests#1' });
+  host.advance(100);
+  expect(host.regions.main).toContain('<span class="d-agent">1.1s');
+  host.renders = [];
+  host.advance(1000);
+  expect(host.regions.main).toContain('<span class="d-agent">2.1s');
+  expect(host.renders.sort()).toEqual(['inspector', 'main', 'rail', 'status']);
+  host.advance(1000);
+  expect(host.regions.main).toContain('<span class="d-agent">3.1s');
+  page.stop();
+  page = undefined;
+
+  // The seeded machine alone runs nothing: no tick draws anything.
+  host = new FakeHost(m);
+  rmSync(dir, { recursive: true });
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  host.renders = [];
+  host.advance(5000);
+  expect(host.renders).toEqual([]);
+});
+
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {
   const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
   page = boot(host);
