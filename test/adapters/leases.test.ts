@@ -1,7 +1,7 @@
 // Branch leases (D9, ADR-0018): one run holds a remote's branch at a time, machine-wide. A second live run is refused
 // and told who holds the lease, the same run renews it on a resume, and a stale lease is taken over.
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultLeasesDir, heldLease, readLease, releaseLease, takeLease } from '../../src/adapters/leases';
@@ -167,6 +167,64 @@ test('a lease file naming pid 0 is invalid: it would read alive forever', () => 
     op: 'lease',
     code: 'invalid',
   });
+});
+
+const unavailable = { port: 'workspace', op: 'lease', code: 'unavailable' };
+const asRoot = process.getuid?.() === 0;
+
+test.each([
+  ['readLease', (dir: string) => readLease(dir, REMOTE, BRANCH)],
+  ['heldLease', (dir: string) => heldLease(dir, REMOTE, BRANCH)],
+  ['takeLease', (dir: string) => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW)],
+  ['releaseLease', (dir: string) => releaseLease(dir, REMOTE, BRANCH, 'r1')],
+] as const)('%s on a lease path that is a directory is unavailable, naming the file and EISDIR', (_, call) => {
+  const dir = tempDir();
+  mkdirSync(leaseFile(dir, REMOTE, BRANCH));
+  const error = caught(() => call(dir));
+  expect(portFailure(error)).toEqual(unavailable);
+  expect(messageOf(error)).toContain(leaseFile(dir, REMOTE, BRANCH));
+  expect(messageOf(error)).toContain('EISDIR');
+});
+
+test.skipIf(asRoot)('taking a free branch in a read-only lease directory is unavailable, naming EACCES', () => {
+  const dir = tempDir();
+  chmodSync(dir, 0o555);
+  try {
+    const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
+    expect(portFailure(error)).toEqual(unavailable);
+    expect(messageOf(error)).toContain(leaseFile(dir, REMOTE, BRANCH));
+    expect(messageOf(error)).toContain('EACCES');
+  } finally {
+    chmodSync(dir, 0o755);
+  }
+  expect(readdirSync(dir)).toEqual([]);
+});
+
+test.skipIf(asRoot)(
+  'releasing a held lease in a read-only lease directory is unavailable, and leaves the lease',
+  () => {
+    const dir = tempDir();
+    takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW);
+    chmodSync(dir, 0o555);
+    try {
+      const error = caught(() => releaseLease(dir, REMOTE, BRANCH, 'r1'));
+      expect(portFailure(error)).toEqual(unavailable);
+      expect(messageOf(error)).toContain(leaseFile(dir, REMOTE, BRANCH));
+      expect(messageOf(error)).toContain('EACCES');
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    expect(existsSync(leaseFile(dir, REMOTE, BRANCH))).toBe(true);
+  },
+);
+
+test('a lease directory that cannot be made is unavailable, naming it', () => {
+  const blocker = join(tempDir(), 'file');
+  writeFileSync(blocker, '');
+  const dir = join(blocker, 'leases');
+  const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
+  expect(portFailure(error)).toEqual(unavailable);
+  expect(messageOf(error)).toContain(dir);
 });
 
 test('leases live in ~/.sail/leases unless a caller names a directory', () => {

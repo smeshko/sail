@@ -141,7 +141,8 @@ function isLink(path: string): boolean {
  * what that removal left registered. The prune is the repository's whole, so it runs only then: a worktree of the
  * user's on a volume that isn't mounted stays registered otherwise. A link at the path is unlinked and never followed,
  * since git would remove the worktree it names, and a run directory that is a link is refused for the same reason. It
- * fails, as `unavailable`, when the run directory is a link or the path is still there.
+ * fails, as `unavailable`, when the run directory is a link, a link at the path can't be unlinked, or the path is still
+ * there.
  */
 export function removeWorktree(
   repo: string,
@@ -154,7 +155,11 @@ export function removeWorktree(
     throw new PortError('workspace', op, 'unavailable', `${runDir} is a link: the run's workspace is left where it is`);
   }
   if (isLink(path)) {
-    unlinkSync(path);
+    try {
+      unlinkSync(path);
+    } catch (error) {
+      throw new PortError('workspace', op, 'unavailable', `${path}: ${(error as Error).message}`);
+    }
     return { code: 0, stdout: '', stderr: '' };
   }
   const removed = gitSync(repo, ['worktree', 'remove', '--force', '--force', path], env);
