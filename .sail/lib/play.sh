@@ -1,4 +1,4 @@
-# Sourced first by every script stage of the factory. On the fake workspace it plays the stage's seeded report from
+# Sourced first by the validate stage. On the fake workspace it plays the stage's seeded report from
 # .sail/fake/scripts/<stage>.json, by $CALL, instead of running: fake agents change no code, so a real check would give
 # the same result on every pass, and the loops it routes would never be driven. Everywhere else it does nothing.
 sail_dir=$(cd "$(dirname "${SAIL_CONFIG:?}")" && pwd)
