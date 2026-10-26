@@ -1,6 +1,29 @@
 {
   "remote": "fake://codehost/sail",
   "defaultBranch": "staging",
-  "branches": {},
-  "pullRequests": []
+  "branches": {
+    "staging": "8cdaad7c30e274ed1e7ae6dfd185d6bd14087447",
+    "sail/FAKE-1-print-the-run-s-cost": "cb9c6b50425ad5072892f561cc7459be4c65983d"
+  },
+  "pullRequests": [
+    {
+      "number": 7,
+      "title": "feat(cli): print the run's total cost in sail show's footer (FAKE-1)",
+      "body": "## Summary\n\n`sail show` ends with the run's total cost.\n\n## Demonstration\n\nSurface: cli.\n\n- `sail show <run>` ends with `total $<cost>`: a fake run of FAKE-1, then `sail show` on it.\n- A run with no agent calls prints `total $0.00`: a one-script workflow, then `sail show`.\n\nCloses FAKE-1",
+      "base": "staging",
+      "head": "sail/FAKE-1-print-the-run-s-cost",
+      "headSha": "cb9c6b50425ad5072892f561cc7459be4c65983d",
+      "baseSha": "8cdaad7c30e274ed1e7ae6dfd185d6bd14087447",
+      "draft": false,
+      "state": "open",
+      "labels": ["factory"],
+      "ticketKey": "FAKE-1",
+      "checks": [
+        {
+          "name": "verify",
+          "statuses": ["pending", "passed"]
+        }
+      ]
+    }
+  ]
 }

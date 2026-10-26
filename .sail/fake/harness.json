@@ -6,9 +6,6 @@
         "slug": "show-total-cost",
         "scope": "cli",
         "risk": "large",
-        "demonstration": {
-          "surface": "cli"
-        },
         "tasks": [
           {
             "id": "TASK-001",
@@ -56,162 +53,6 @@
       }
     }
   ],
-  "demonstrate#1": [
-    {
-      "outcome": "done",
-      "output": {
-        "criteria": [
-          {
-            "criterion": "`sail show <run>` ends with `total $<cost>`",
-            "shown": true,
-            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`, the sum of the calls' costUsd in summary.json"
-          },
-          {
-            "criterion": "A run with no agent calls prints `total $0.00`",
-            "shown": false,
-            "evidence": "a run of a one-script workflow: `sail show` ended with `total $` and nothing after it, not `total $0.00`"
-          }
-        ],
-        "transcript": "$ sail FAKE-1\n…\ncompleted · 1.8s\nexit 0\n$ sail show FAKE-1-01M5PXSR234D2RJBV32YSAZDP3\n…\ntotal $1.35\nexit 0\n$ sail FAKE-2\n…\ncompleted · 0.4s\nexit 0\n$ sail show FAKE-2-01M5PY0000000000000000000\n…\ntotal $\nexit 0"
-      },
-      "messages": ["One of two criteria shown: the no-agent run prints an empty total."],
-      "turns": 18,
-      "usage": {
-        "inputTokens": 3000,
-        "cacheReadTokens": 12000,
-        "cacheWriteTokens": 1000,
-        "outputTokens": 900,
-        "costUsd": 0.6
-      }
-    }
-  ],
-  "demonstrate": [
-    {
-      "outcome": "done",
-      "output": {
-        "criteria": [
-          {
-            "criterion": "`sail show <run>` ends with `total $<cost>`",
-            "shown": true,
-            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`, the sum of the calls' costUsd in summary.json"
-          },
-          {
-            "criterion": "A run with no agent calls prints `total $0.00`",
-            "shown": true,
-            "evidence": "a run of a one-script workflow: `sail show` ended with `total $0.00`"
-          }
-        ],
-        "transcript": "$ sail FAKE-1\n…\ncompleted · 1.8s\nexit 0\n$ sail show FAKE-1-01M5PXSR234D2RJBV32YSAZDP3\n…\ntotal $1.35\nexit 0\n$ sail FAKE-2\n…\ncompleted · 0.4s\nexit 0\n$ sail show FAKE-2-01M5PY0000000000000000000\n…\ntotal $0.00\nexit 0"
-      },
-      "messages": ["Both criteria shown."],
-      "turns": 14,
-      "usage": {
-        "inputTokens": 3000,
-        "cacheReadTokens": 12000,
-        "cacheWriteTokens": 1000,
-        "outputTokens": 900,
-        "costUsd": 0.5
-      }
-    }
-  ],
-  "review#1": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "One real bug in the rounding.",
-        "findings": [
-          {
-            "severity": "high",
-            "file": "src/cli/commands/show.ts",
-            "title": "A cost of 0.005 prints as $0.00",
-            "detail": "toFixed rounds half to even on binary floats, so 0.005 shows as 0.00."
-          }
-        ]
-      },
-      "messages": ["bugs lens: one finding."],
-      "turns": 15,
-      "usage": {
-        "inputTokens": 4000,
-        "cacheReadTokens": 20000,
-        "cacheWriteTokens": 2000,
-        "outputTokens": 1500,
-        "costUsd": 0.8
-      }
-    }
-  ],
-  "review#2": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "The tests prove the behaviour.",
-        "findings": [
-          {
-            "severity": "low",
-            "file": "test/cli/show.test.ts",
-            "title": "The zero-total test could also cover a script-only run",
-            "detail": "A run with only script calls takes the same path, but no test names it."
-          }
-        ]
-      },
-      "messages": ["tests lens: one finding."],
-      "turns": 12,
-      "usage": {
-        "inputTokens": 4000,
-        "cacheReadTokens": 20000,
-        "cacheWriteTokens": 2000,
-        "outputTokens": 1500,
-        "costUsd": 0.7
-      }
-    }
-  ],
-  "review#3": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "The fix holds, and the deferral is reasonable.",
-        "findings": []
-      },
-      "messages": ["Round 2: nothing new."],
-      "turns": 10,
-      "usage": {
-        "inputTokens": 4000,
-        "cacheReadTokens": 20000,
-        "cacheWriteTokens": 2000,
-        "outputTokens": 1500,
-        "costUsd": 0.6
-      }
-    }
-  ],
-  "fix": [
-    {
-      "outcome": "done",
-      "output": {
-        "triage": [
-          {
-            "finding": "R1-1",
-            "verdict": "fix",
-            "rationale": "A real rounding bug in the printed total.",
-            "commit": "b4efb0c5de84d87c1455d4504b8b75b095a8e10b"
-          },
-          {
-            "finding": "R1-2",
-            "verdict": "defer",
-            "rationale": "The same code path; a test of its own is a follow-up.",
-            "commit": null
-          }
-        ]
-      },
-      "messages": ["Fixed R1-1, deferred R1-2."],
-      "turns": 18,
-      "usage": {
-        "inputTokens": 4000,
-        "cacheReadTokens": 20000,
-        "cacheWriteTokens": 2000,
-        "outputTokens": 1500,
-        "costUsd": 1.1
-      }
-    }
-  ],
   "describe": [
     {
       "outcome": "done",
@@ -237,6 +78,330 @@
         "cacheWriteTokens": 2000,
         "outputTokens": 1500,
         "costUsd": 0.1
+      }
+    }
+  ],
+  "check-tasks#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "tasks": [
+          {
+            "id": "TASK-001",
+            "implemented": false,
+            "evidence": "No commit touches show.ts's footer: the branch's one commit only adds the test."
+          }
+        ]
+      },
+      "turns": 6,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.1
+      }
+    }
+  ],
+  "check-tasks": [
+    {
+      "outcome": "done",
+      "output": {
+        "tasks": [
+          {
+            "id": "TASK-001",
+            "implemented": true,
+            "evidence": "89541459: src/cli/commands/show.ts prints the footer, test/cli/show.test.ts covers it."
+          }
+        ]
+      },
+      "turns": 5,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.1
+      }
+    }
+  ],
+  "demonstrate": [
+    {
+      "outcome": "done",
+      "output": {
+        "criteria": [
+          {
+            "criterion": "`sail show <run>` ends with `total $<cost>`",
+            "shown": true,
+            "evidence": "`sail show FAKE-1-01M5…` ended with `total $1.35`"
+          },
+          {
+            "criterion": "A run with no agent calls prints `total $0.00`",
+            "shown": false,
+            "evidence": "a run of a one-script workflow ended with `total $` and nothing after it"
+          }
+        ],
+        "skipped": null,
+        "transcript": "$ sail show FAKE-1-01M5\n…\ntotal $1.35\nexit 0"
+      },
+      "turns": 14,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.6
+      }
+    }
+  ],
+  "review#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The footer meets the first criterion; the empty run is the open one.",
+        "findings": [
+          {
+            "severity": "medium",
+            "file": "src/cli/commands/show.ts",
+            "title": "An empty run prints no amount",
+            "detail": "With no agent calls the sum is undefined, so the footer prints `total $`."
+          }
+        ]
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review#2": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The footer fits show.ts's renderer.",
+        "findings": []
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review#3": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Readable; one naming nit.",
+        "findings": [
+          {
+            "severity": "low",
+            "file": "src/cli/commands/show.ts",
+            "title": "`tot` is a terse name",
+            "detail": "`tot` reads as a typo; `total` matches the rest of the file."
+          }
+        ]
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review#4": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "One rounding bug.",
+        "findings": [
+          {
+            "severity": "high",
+            "file": "src/cli/commands/show.ts",
+            "title": "A cost of 0.005 prints as $0.00",
+            "detail": "toFixed rounds binary floats down here, so 0.005 shows as 0.00."
+          },
+          {
+            "severity": "medium",
+            "file": "src/cli/commands/runs.ts",
+            "title": "sail runs sums costs the same unrounded way",
+            "detail": "runs.ts has the same float sum, outside this change."
+          }
+        ]
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "judge": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The footer works for runs with agent calls; an empty run and a rounding edge are broken, and validation fails on the empty run's test.",
+        "decisions": [
+          {
+            "finding": "V1",
+            "verdict": "fix",
+            "rationale": "The failing test is the empty-run criterion.",
+            "ticket": null
+          },
+          {
+            "finding": "D1",
+            "verdict": "fix",
+            "rationale": "An acceptance criterion this change must meet.",
+            "ticket": null
+          },
+          {
+            "finding": "R1",
+            "verdict": "drop",
+            "rationale": "Duplicates D1.",
+            "ticket": null
+          },
+          {
+            "finding": "R2",
+            "verdict": "drop",
+            "rationale": "Taste: the name is local to one function.",
+            "ticket": null
+          },
+          {
+            "finding": "R3",
+            "verdict": "fix",
+            "rationale": "A real bug in the line this change adds.",
+            "ticket": null
+          },
+          {
+            "finding": "R4",
+            "verdict": "ticket",
+            "rationale": "Real, but in runs.ts, outside this change.",
+            "ticket": {
+              "title": "sail runs sums call costs without rounding",
+              "description": "`src/cli/commands/runs.ts` sums `costUsd` as floats and prints them unrounded, as show.ts did before its review.",
+              "type": "bug"
+            }
+          }
+        ]
+      },
+      "turns": 18,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.9
+      }
+    }
+  ],
+  "fix": [
+    {
+      "outcome": "done",
+      "output": {
+        "fixes": [
+          {
+            "finding": "V1",
+            "commit": "1111111111111111111111111111111111111111",
+            "note": "Sums from 0."
+          },
+          {
+            "finding": "D1",
+            "commit": "1111111111111111111111111111111111111111",
+            "note": "Same fix as V1."
+          },
+          {
+            "finding": "R3",
+            "commit": "2222222222222222222222222222222222222222",
+            "note": "Rounds in cents."
+          }
+        ]
+      },
+      "turns": 40,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 2.1
+      }
+    }
+  ],
+  "check-fix#1": [
+    {
+      "outcome": "done",
+      "output": {
+        "items": [
+          {
+            "finding": "V1",
+            "resolved": true,
+            "detail": "The sum starts at 0."
+          },
+          {
+            "finding": "D1",
+            "resolved": true,
+            "detail": "An empty run prints `total $0.00`."
+          },
+          {
+            "finding": "R3",
+            "resolved": false,
+            "detail": "Rounds 0.005 correctly, but 1.005 still prints 1.00: the cents are taken before the multiply."
+          }
+        ],
+        "findings": []
+      },
+      "turns": 15,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.7
+      }
+    }
+  ],
+  "check-fix": [
+    {
+      "outcome": "done",
+      "output": {
+        "items": [
+          {
+            "finding": "V1",
+            "resolved": true,
+            "detail": "Holds."
+          },
+          {
+            "finding": "D1",
+            "resolved": true,
+            "detail": "Holds."
+          },
+          {
+            "finding": "R3",
+            "resolved": true,
+            "detail": "1.005 prints 1.01; the test covers both edges."
+          }
+        ],
+        "findings": []
+      },
+      "turns": 12,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.6
       }
     }
   ]

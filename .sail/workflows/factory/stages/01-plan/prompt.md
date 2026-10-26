@@ -47,8 +47,9 @@ Break the work into tasks, numbered `TASK-001`, `TASK-002`, … in order:
 
 ## 4. Plan the demonstration
 
-After validation, a separate stage shows the change working the way a user would see it, and checks it against the
-plan's Demonstration section, which you write now, before any code exists. Pick the change's surface:
+Once the pull request is open, the review workflow shows the change working the way a user would see it, and checks it
+against the plan's Demonstration section, which the pull request's body carries and you write now, before any code
+exists. Pick the change's surface:
 
 | Surface | When | What the stage runs |
 |---|---|---|
@@ -66,12 +67,16 @@ For each acceptance criterion, write one bullet: the scenario to set up (the see
 observe, exact enough to check without judgment: an exit code, an event type and its field, an output line, the text
 an element shows. For `none`, write why nothing can be shown, and submit that reason.
 
+The stage runs each scenario as `sail` commands, one at a time and in the foreground, through a harness that captures
+their output itself. There is no shell: no pipe, no redirect, no command in the background, no second command while the
+first runs. A criterion that needs one, such as `sail … | head -1`, or a `sail stop` while `sail watch` runs, can't be
+shown: give it no bullet, and name the test that observes it in its task's Evidence.
+
 Every scenario runs sail, never a test: validation has run the tests already, and the stage can't run them. A criterion
 about a fake's behaviour is shown through a fake run that exercises it, its answer seeded in `.sail/fake/`. A criterion
 only a test can observe, such as a test rewritten or added, gets no bullet.
 
 ## 5. Submit
 
-Submit the plan's slug (kebab-case, a few words), the Conventional Commits scope its commits share, its risk, its
-demonstration (the surface, and for `none` the reason), and its tasks, each with its id, title, type and suggested
-commit, matching the plan's Tasks list.
+Submit the plan's slug (kebab-case, a few words), the Conventional Commits scope its commits share, its risk, and its
+tasks, each with its id, title, type and suggested commit, matching the plan's Tasks list.

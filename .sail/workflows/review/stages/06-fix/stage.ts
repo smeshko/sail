@@ -1,0 +1,45 @@
+// fix: fixes what the judge decided to fix on this pull request, one commit each, test first. A later pass reads what
+// check-fix found still open, what the fixes broke, and a failed validation.
+import { agent, file, value, z } from 'sail';
+import { Findings, Fixed, FixFeedback } from '../../schemas';
+
+export const fix = agent('fix', {
+  prompt: './prompt.md',
+  consumes: {
+    requirements: file('requirements.md'),
+    findings: value(Findings),
+    feedback: value(FixFeedback).optional(),
+    /** The ticket each commit names, unbound for a pull request with none. */
+    ticketKey: value(z.string()).optional(),
+    base: value(z.string()),
+  },
+  output: Fixed,
+  model: 'deep',
+  permissions: {
+    read: ['**'],
+    write: ['src/**', 'test/**', 'types/**', 'schemas/**', 'bin/**', 'scripts/**', 'CONTEXT.md', '$STAGE_OUT/**'],
+    commands: [
+      'cat *',
+      'grep *',
+      'head *',
+      'tail *',
+      'wc *',
+      'ls *',
+      'bun run test *',
+      'bun run typecheck',
+      'bun run lint',
+      'bun run fix',
+      'bun run types',
+      'bun run golden',
+      'git add *',
+      'git commit *',
+      'git diff *',
+      'git status *',
+      'git log *',
+      'git show *',
+      'git grep *',
+      'git rev-parse *',
+    ],
+  },
+  budget: { maxTurns: 150, maxUsd: 6, maxMinutes: 40 },
+});
