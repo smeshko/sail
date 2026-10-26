@@ -1160,6 +1160,14 @@ test('listDesignated reads the open pull requests 100 to a page until a short pa
   });
 });
 
+test('listDesignated lists a pull request labelled in another case and not one labelled with a longer name', async () => {
+  const on = world({
+    pullRequests: many(2, (number) => ({ labels: number === 2 ? ['Factory'] : ['factor'] })),
+  });
+  const listed = await settle(host(on).listDesignated('factory'));
+  expect('rejected' in listed ? listed : listed.map((pr) => pr.number)).toEqual([2]);
+});
+
 test('listDesignated reads at most 10 pages: a 10th page that is full rejects as invalid, and no 11th is asked for', async () => {
   const on = world({ pullRequests: many(1001, (number) => ({ labels: number === 1 ? ['sail'] : [] })) });
   const error = await rejection(host(on).listDesignated('sail'));

@@ -11,6 +11,7 @@ import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
+import { holdsLabel, sameLabel } from '../../ports/labels';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import { type Labelled, MergeRequest, type MergeResult, mergeRequestIssue, type PullRequest } from '../../ports/types';
 import { gitSync, stripUserinfo } from '../workspace/git';
@@ -54,9 +55,6 @@ const PAGE = 100;
 const MAX_PAGES = 10;
 
 const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-// GitHub's label names are case-insensitive.
-const sameLabel = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-const holds = (labels: readonly string[], label: string) => labels.some((each) => sameLabel(each, label));
 
 export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
   const { owner, repo } = options;
@@ -129,7 +127,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
     current: readonly string[],
   ): Promise<{ labels: string[]; raw: { name: string }[] | null }> => {
     const missing = labels.filter(
-      (label, i) => labels.findIndex((each) => sameLabel(each, label)) === i && !holds(current, label),
+      (label, i) => labels.findIndex((each) => sameLabel(each, label)) === i && !holdsLabel(current, label),
     );
     if (missing.length === 0) return { labels: [...current], raw: null };
     const answer = await client.request<{ name: string }[]>(op, 'POST', client.repoPath('issues', number, 'labels'), {
@@ -220,7 +218,10 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
             (node) =>
               node.state === 'open' &&
               node.draft !== true &&
-              (node.labels ?? []).some((each) => each.name === label) &&
+              holdsLabel(
+                (node.labels ?? []).map((each) => each.name),
+                label,
+              ) &&
               !isFork(node, `${owner}/${repo}`),
           )
           .sort((a, b) => a.number - b.number)
@@ -286,7 +287,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
     addLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
         const pr = await read('addLabel', number);
-        if (holds(pr.labels, label)) return { number, labels: pr.labels, raw: pr.raw };
+        if (holdsLabel(pr.labels, label)) return { number, labels: pr.labels, raw: pr.raw };
         const added = await addLabels('addLabel', number, [label], pr.labels);
         return { number, labels: added.labels, raw: added.raw };
       }),
@@ -309,7 +310,7 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
           return { number, labels: now.labels, raw: now.raw };
         }
         const labels = answer.map((each) => each.name);
-        if (!holds(labels, held)) emit({ type: 'codehost:labelled', number, label: held, change: 'removed' });
+        if (!holdsLabel(labels, held)) emit({ type: 'codehost:labelled', number, label: held, change: 'removed' });
         return { number, labels, raw: answer };
       }),
     comment: (number, text) =>

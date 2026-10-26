@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
+import { holdsLabel } from '../../ports/labels';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import {
   CheckStatus,
@@ -232,7 +233,7 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
     async listDesignated(name) {
       const world = store.read();
       return world.pullRequests
-        .filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(name) && pr.fork !== true)
+        .filter((pr) => pr.state === 'open' && !pr.draft && holdsLabel(pr.labels, name) && pr.fork !== true)
         .sort((a, b) => a.number - b.number)
         .map((pr) => toPullRequest(world, pr));
     },

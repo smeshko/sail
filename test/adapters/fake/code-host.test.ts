@@ -94,6 +94,11 @@ codeHostSuite('fake', async (emit) => ({
   },
 }));
 
+test('listDesignated lists a pull request seeded with the label in upper case', async () => {
+  const host = createFakeCodeHost(files((seed) => seed.pullRequests.push(seeded(7, { labels: ['SAIL'] }))));
+  expect((await host.listDesignated('sail')).map((pr) => pr.number)).toContain(7);
+});
+
 test('checks scripted pending then failed read pending, then failed from then on', async () => {
   const host = createFakeCodeHost(files());
   const reads: unknown[] = [];

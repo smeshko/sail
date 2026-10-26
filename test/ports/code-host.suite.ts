@@ -240,6 +240,16 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     }).toEqual({ designated: true, others: [] });
   });
 
+  test(`${label}: listDesignated lists a pull request carrying the label in another case`, async () => {
+    const { adapter, world } = await start();
+    const { cwd, branch } = await world.pushable();
+    await adapter.push(cwd, branch);
+    const request = { base: world.base, head: branch, title: 'Cased', body: '', labels: [world.label.toUpperCase()] };
+    const pr = await adapter.openPullRequest(request);
+    const listed = await listedNumbers(adapter, world.label);
+    expect(Array.isArray(listed) ? listed.includes(pr.number) : listed).toBe(true);
+  });
+
   test(`${label}: getPullRequest answers its details, which parse, with the base it targets, not a fork, and a comment posted to it last`, async () => {
     const { adapter, world } = await start();
     await adapter.comment(world.designated, 'Reviewed by the suite.');
