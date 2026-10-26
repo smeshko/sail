@@ -86,7 +86,7 @@ test('a resume prints its raise, and its final block has the cost of the whole r
   const prior = at(SUSPENDED);
   const out = render(at(RESUMED, prior.length), 'normal', { prior });
   expect(linesOf(out, '$ budget', 'cost')).toEqual([
-    `${''.padEnd(WIDTH)}  $ budget raised by $5: now $5.50`,
+    `${''.padEnd(WIDTH)}  $ budget raised by $5.00: now $5.50`,
     '  cost     $0.98 of $5.50 (17.8%)',
   ]);
 });
@@ -97,6 +97,6 @@ test('at trace, run:suspended prints its generic line, and budget:raised its own
   const resumed = render(at(RESUMED, prior.length), 'trace', { prior });
   expect([...linesOf(suspended, '· run:suspended'), ...linesOf(resumed, '$ budget raised')]).toEqual([
     `${''.padEnd(WIDTH)}  · run:suspended {"stopReason":"budget_exceeded","budget":"usd","limit":0.5,"used":0.5029}`,
-    `${''.padEnd(WIDTH)}  $ budget raised by $5: now $5.50`,
+    `${''.padEnd(WIDTH)}  $ budget raised by $5.00: now $5.50`,
   ]);
 });
