@@ -4,7 +4,7 @@
 // The filter chips count each kind of entry and hide the kinds the page hides, keeping separators.
 import { expect, test } from 'bun:test';
 import { foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
-import { filterOf, inputSummary, renderTimeline } from '../../../src/dashboard/page/timeline-view';
+import { filterOf, inputSummary, OUTPUT_LINES, renderTimeline } from '../../../src/dashboard/page/timeline-view';
 import { initialUi, type UiState } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import { GOLDEN_RUN } from '../../helpers/dashboard';
@@ -129,7 +129,7 @@ test('steps and tries are separators, and a script shows its command, then its d
   expect(publish).toContain('<div class="tl-sep"><span>step 1/2 · describe</span></div>');
   expect(publish).toContain('<div class="tl-sep"><span>step 2/2 · open</span></div>');
   expect(publish).toContain(
-    '<div class="tcall t-completed"><div class="trow"><span class="tname">$</span><span class="tdet">.sail/workflows/ticket-to-pr/stages/publish/open.sh</span><span class="tmeta">100ms<span class="mark">exit 0</span></span></div></div>',
+    '<div class="tcall t-completed"><button class="trow" data-action="toggle-tool" data-call="script:0"><span class="tname">$</span><span class="tdet">.sail/workflows/ticket-to-pr/stages/publish/open.sh</span><span class="tmeta">100ms<span class="mark">exit 0</span></span></button></div>',
   );
   const card = spec([
     { ...at, seq: 901, type: 'stage:start', stage: 'spec', call: 1, try: 2, kind: 'agent' },
@@ -147,10 +147,10 @@ test('steps and tries are separators, and a script shows its command, then its d
     '<span class="tdet">sleep 9</span><span class="tmeta">900ms<span class="mark">SIGTERM</span>',
   );
   expect(markup).toContain(
-    '<div class="tcall t-failed"><div class="trow"><span class="tname">$</span><span class="tdet">make</span><span class="tmeta">50ms<span class="mark">exit 2</span>',
+    '<div class="tcall t-failed"><button class="trow" data-action="toggle-tool" data-call="script:1"><span class="tname">$</span><span class="tdet">make</span><span class="tmeta">50ms<span class="mark">exit 2</span>',
   );
   expect(markup).toContain(
-    '<div class="tcall t-running"><div class="trow"><span class="tname">$</span><span class="tdet">tail -f log</span><span class="tmeta"><span class="mark">…</span>',
+    '<div class="tcall t-running"><button class="trow" data-action="toggle-tool" data-call="script:2"><span class="tname">$</span><span class="tdet">tail -f log</span><span class="tmeta"><span class="mark">…</span>',
   );
   expect(markup).toContain('<span class="tdet">odd</span><span class="tmeta">5ms<span class="mark"></span>');
 });
@@ -220,4 +220,32 @@ test('a filter that hides every entry says so, and a call with no entries has no
   expect(markup).toContain('<div class="qempty">the filter hides every entry</div>');
   expect(markup).not.toContain('Only this');
   expect(renderTimeline(spec([]), ui(), NOW).value).not.toContain('class="tl-f"');
+});
+
+test("an opened script shows the call's stdout and stderr, escaped, the last lines of a long one, loading, and says when it printed nothing", () => {
+  const golden = foldRun(readEvents(GOLDEN_RUN)).cards.find((card) => card.key === 'publish#1') as StageCard;
+  const opened = ui({ opened: ['script:0'] });
+  expect(renderTimeline(golden, ui(), NOW, { stdout: { state: 'loaded', value: 'x' } }).value).not.toContain('tout');
+  const long = Array.from({ length: OUTPUT_LINES + 5 }, (_, i) => `line ${i}`).join('\n');
+  const both = renderTimeline(golden, opened, NOW, {
+    stdout: { state: 'loaded', value: '{"ok":"<yes>"}\n' },
+    stderr: { state: 'loaded', value: `${long}\n` },
+  }).value;
+  expect(both).toContain(
+    '<div class="tcall t-completed open"><button class="trow" data-action="toggle-tool" data-call="script:0">',
+  );
+  expect(both).toContain(
+    '</button><div class="tout"><div class="grp-t">stdout</div><pre class="code">{&quot;ok&quot;:&quot;&lt;yes&gt;&quot;}</pre><div class="grp-t">stderr · last 200 lines</div><pre class="code">line 5\n',
+  );
+  expect(both).toContain(`line ${OUTPUT_LINES + 4}</pre></div></div>`);
+  expect(both).not.toContain('line 4\n');
+  expect(
+    renderTimeline(golden, opened, NOW, { stdout: { state: 'loading' }, stderr: { state: 'missing' } }).value,
+  ).toContain('<div class="tout"><div class="grp-t">stdout</div><div class="code">loading…</div></div>');
+  expect(renderTimeline(golden, opened, NOW, undefined).value).toContain(
+    '<div class="tout"><div class="grp-t">stdout</div><div class="code">loading…</div><div class="grp-t">stderr</div><div class="code">loading…</div></div>',
+  );
+  expect(
+    renderTimeline(golden, opened, NOW, { stdout: { state: 'loaded', value: '' }, stderr: { state: 'missing' } }).value,
+  ).toContain('<div class="tout"><div class="code">the call printed nothing</div></div>');
 });

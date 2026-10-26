@@ -622,6 +622,39 @@ test("a file name opens the drawer with the file's markdown as HTML, another fil
   expect(page.ui.file).toBeUndefined();
 });
 
+test("opening a script command reads the call's stdout and stderr once, shows them, and a running call's are read again at most once a second", async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, GOLDEN(), false);
+  host.click({ action: 'select-card', key: 'tests#1' });
+  const outputReads = () => host.reads.map((read) => read.path).filter((path) => path.includes('/log?'));
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  const tests = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls/tests%231/log`;
+  expect(outputReads()).toEqual([`${tests}?stream=stdout`, `${tests}?stream=stderr`]);
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain('<div class="grp-t">stdout</div><pre class="code">bun test v1.3.14');
+  // Another call starts over; while it runs, its events read its output again, a second apart at most.
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  const before = outputReads().length;
+  const at = { ts: '2026-10-01T12:00:00.000Z', runId: GOLDEN_RUN_ID, key: 'publish#1' };
+  host.push(socket, {
+    kind: 'event',
+    event: { ...at, seq: 990, type: 'stage:start', stage: 'publish', call: 1, try: 2, kind: 'stage' },
+  });
+  host.push(socket, {
+    kind: 'event',
+    event: { ...at, seq: 991, type: 'script:exec', command: 'more', cwd: '.', envKeys: [] },
+  });
+  expect(outputReads().length).toBe(before);
+  host.advance(1000);
+  expect(outputReads().length).toBe(before + 2);
+});
+
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {
   const beta = join(m.beta.clone, '.sail-runs', FAKE_3_ID);
   page = boot(host);
