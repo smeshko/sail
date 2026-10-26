@@ -53,6 +53,23 @@ test('the shim starts a run from a ticket through a pipe in plain mode, with no 
   });
 });
 
+test('shim exits 0 with nothing on stderr when its stdout pipe closes after the first line', async () => {
+  await withTempRepo((repo) => {
+    writeStub(repo.dir);
+    const stderrFile = join(repo.dir, 'sail.stderr');
+    const exitFile = join(repo.dir, 'sail.exit');
+    const pipeline = '{ "$0" "$1" FAKE-1 2>"$2"; echo $? >"$3"; } | head -1';
+    const result = Bun.spawnSync(['sh', '-c', pipeline, process.execPath, shim, stderrFile, exitFile], {
+      cwd: repo.dir,
+      env: repo.env,
+    });
+    expect(readFileSync(exitFile, 'utf8')).toBe('0\n');
+    expect(readFileSync(stderrFile, 'utf8')).toBe('');
+    expect(result.stdout.toString()).toMatch(/^sail · ticket-to-pr v1 · FAKE-1-[0-9A-Z]{26}\n$/);
+    expect(readFileSync(join(repo.dir, '.sail-runs', runIdIn(repo.dir), 'STATUS'), 'utf8')).toBe('completed\n');
+  });
+});
+
 test('the shim refuses a ticket that is not designated: one line on stderr, exit 3, and nothing under .sail-runs/', async () => {
   await withTempRepo((repo) => {
     writeStub(repo.dir);
