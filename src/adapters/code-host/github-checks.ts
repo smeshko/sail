@@ -42,8 +42,8 @@ export function commitStatus(status: Pick<GitHubStatus, 'state'>): CheckStatus {
 
 /**
  * Every item of a paged list, page after page of 100, until `total_count` items have been read. A page without its list
- * or its count, one whose count differs from the first page's, or one that ends the list short of the count, is
- * `unavailable`: a check left unread could have failed.
+ * or its count, one whose count differs from the first page's, one that ends the list short of the count, or one
+ * listing an entry that is no object with a string `key`, is `unavailable`: a check left unread could have failed.
  */
 async function readPaged<T>(
   client: GitHubClient,
@@ -51,6 +51,7 @@ async function readPaged<T>(
   sha: string,
   endpoint: 'check-runs' | 'status',
   field: 'check_runs' | 'statuses',
+  key: 'name' | 'context',
 ): Promise<T[]> {
   const read: T[] = [];
   let expected: number | undefined;
@@ -79,6 +80,14 @@ async function readPaged<T>(
         `GitHub's ${endpoint} count for ${sha} changed from ${expected} to ${total} while it was read`,
       );
     }
+    if (!listed.every((entry) => typeof entry === 'object' && entry !== null && typeof entry[key] === 'string')) {
+      throw new PortError(
+        'codeHost',
+        op,
+        'unavailable',
+        `GitHub's ${endpoint} answer for ${sha} lists an entry without a ${key}`,
+      );
+    }
     read.push(...(listed as T[]));
     if (read.length >= total) return read;
     if (listed.length === 0) {
@@ -99,8 +108,8 @@ export async function readChecks(
   op: string,
   sha: string,
 ): Promise<{ checks: Check[]; raw: { checkRuns: GitHubCheckRun[]; statuses: GitHubStatus[] } }> {
-  const checkRuns = await readPaged<GitHubCheckRun>(client, op, sha, 'check-runs', 'check_runs');
-  const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses');
+  const checkRuns = await readPaged<GitHubCheckRun>(client, op, sha, 'check-runs', 'check_runs', 'name');
+  const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses', 'context');
   const runUrl = (run: GitHubCheckRun) => run.html_url ?? run.details_url ?? undefined;
   const checks: Check[] = [
     ...checkRuns.map((run) => {

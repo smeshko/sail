@@ -850,6 +850,30 @@ test.each<[string, string, unknown, (sha: string) => string]>([
     { total_count: 2, statuses: [] },
     (sha) => `GitHub listed 0 of 2 status on ${sha}`,
   ],
+  [
+    'a check-runs page holding null',
+    'check-runs',
+    { total_count: 1, check_runs: [null] },
+    (sha) => `GitHub's check-runs answer for ${sha} lists an entry without a name`,
+  ],
+  [
+    'a check run without a name',
+    'check-runs',
+    { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'success' }] },
+    (sha) => `GitHub's check-runs answer for ${sha} lists an entry without a name`,
+  ],
+  [
+    'a status page holding null',
+    'status',
+    { total_count: 1, statuses: [null] },
+    (sha) => `GitHub's status answer for ${sha} lists an entry without a context`,
+  ],
+  [
+    'a status without a context',
+    'status',
+    { total_count: 1, statuses: [{ state: 'success' }] },
+    (sha) => `GitHub's status answer for ${sha} lists an entry without a context`,
+  ],
 ])(
   '%s rejects the read as unavailable, and emits nothing: an unread check never passes',
   async (_, endpoint, body, message) => {
