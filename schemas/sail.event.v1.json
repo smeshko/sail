@@ -816,7 +816,18 @@
       "properties": {
         "line": { "type": "integer", "minimum": 1 },
         "outcome": { "$ref": "#/$defs/outcome" },
-        "fromRun": { "description": "the run a reused call was taken from", "type": "string", "minLength": 1 }
+        "fromRun": { "description": "the run a reused call was taken from", "type": "string", "minLength": 1 },
+        "ticket": {
+          "description": "the run's ticket, on a reused intake's line only; the title is untrusted text",
+          "type": "object",
+          "properties": {
+            "ticketKey": { "type": "string" },
+            "title": { "type": "string" },
+            "url": { "type": "string" }
+          },
+          "required": ["ticketKey", "title", "url"],
+          "additionalProperties": false
+        }
       },
       "required": ["line", "outcome"],
       "unevaluatedProperties": false
