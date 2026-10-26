@@ -7,8 +7,17 @@
 // a plain removal, then `prune`. It refuses to port two things. Nothing is symlinked or copied into the worktree, secrets
 // least of all. And a fetch that fails fails the workspace, after the retries a lost ref lock gets: a run never starts
 // from a stale base without saying so.
+//
+// Its `setup` option is the workspace setup: a shell command run in each workspace it makes, such as `bun install
+// --frozen-lockfile`, before the workspace is handed out. Every run's workspace gets it, a seeded run's included, whose
+// reused calls can't have left anything in a workspace that is new. A setup that fails, times out or is stopped fails
+// the create, and the workspace is removed again.
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { withoutRepositoryVariables } from '../../engine/git-env';
+import { runProcess } from '../../engine/process';
 import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition, Env } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
@@ -31,6 +40,12 @@ import {
 /** How long a fetch may take before it is killed. */
 export const FETCH_TIMEOUT_MS = 120_000;
 
+/** How long the workspace setup may take before it is killed. */
+export const SETUP_TIMEOUT_MS = 600_000;
+
+/** How many of its last lines of output a failed setup's message quotes. */
+const SETUP_TAIL_LINES = 20;
+
 export interface GitWorktreeOptions extends ProviderOptions {
   /** The clone the worktrees are made from. */
   readonly repo: string;
@@ -43,6 +58,49 @@ export interface GitWorktreeOptions extends ProviderOptions {
   /** The environment for every git call. This process's when left out. */
   readonly env?: Readonly<Record<string, string>>;
   readonly fetchTimeoutMs?: number;
+  /** The workspace setup: a shell command run in each new workspace before it is handed out. None when left out. */
+  readonly setup?: string;
+  readonly setupTimeoutMs?: number;
+}
+
+/**
+ * Runs the workspace setup `command` with `sh -c` in the workspace at `path`. It fails as `unavailable`, quoting the
+ * end of what it printed, when it can't start, exits non-zero, times out or is stopped.
+ */
+async function setUp(
+  command: string,
+  path: string,
+  env: Readonly<Record<string, string>> | undefined,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const logs = mkdtempSync(join(tmpdir(), 'sail-setup-'));
+  try {
+    const stdout = join(logs, 'stdout');
+    const stderr = join(logs, 'stderr');
+    const end = await runProcess({
+      command: ['sh', '-c', command],
+      cwd: path,
+      env: withoutRepositoryVariables(env ?? process.env),
+      stdout,
+      stderr,
+      timeoutMs,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (end.started && end.code === 0 && !end.timedOut && !end.aborted) return;
+    const printed = [stdout, stderr].map((file) => readFileSync(file, 'utf8').trim()).filter((each) => each !== '');
+    const tail = printed.join('\n').split('\n').slice(-SETUP_TAIL_LINES).join('\n');
+    const how = !end.started
+      ? end.message
+      : end.timedOut
+        ? `timed out after ${timeoutMs} ms`
+        : end.aborted
+          ? 'stopped'
+          : `exited ${end.code ?? end.signal}`;
+    throw new PortError('workspace', 'create', 'unavailable', `setup \`${command}\` ${how}: ${tail}`.trim());
+  } finally {
+    rmSync(logs, { recursive: true, force: true });
+  }
 }
 
 export function createGitWorktreeWorkspace(options: GitWorktreeOptions): WorkspacePort {
@@ -100,6 +158,17 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${from} names no commit`);
       const path = join(run.runDir, WORKSPACE_DIR);
       const added = addDetached(repo, path, baseSha, env);
+      if (options.setup !== undefined) {
+        try {
+          await setUp(options.setup, path, env, options.setupTimeoutMs ?? SETUP_TIMEOUT_MS, signal);
+        } catch (error) {
+          // The setup's failure is the one to report: a removal that fails too leaves a workspace a sweep takes.
+          try {
+            removeWorktree(repo, run.runDir, 'create', env);
+          } catch {}
+          throw error;
+        }
+      }
       emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
       return { path, branch, baseSha, raw: added };
     },
@@ -128,23 +197,31 @@ function definedEnv(env: Env): Record<string, string> {
   return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined));
 }
 
-/** `workspace: { use: git-worktree }`: options `remote` and `defaultBranch`, on the repository the run starts in. */
+/**
+ * `workspace: { use: git-worktree }`: options `remote`, `defaultBranch` and `setup`, on the repository the run starts
+ * in.
+ */
 export const gitWorktreeDefinition: AdapterDefinition<WorkspacePort> = {
   create(options, context) {
-    const shape = { remote: z.string().min(1).optional(), defaultBranch: z.string().min(1).optional() };
+    const shape = {
+      remote: z.string().min(1).optional(),
+      defaultBranch: z.string().min(1).optional(),
+      setup: z.string().min(1).optional(),
+    };
     const parsed = z.strictObject(shape).safeParse(options);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const option = issue?.code === 'unrecognized_keys' ? issue.keys.join(', ') : issue?.path.join('.');
       throw new Error(`git-worktree workspace: option ${option}: ${issue?.message}`);
     }
-    const { remote, defaultBranch } = parsed.data;
+    const { remote, defaultBranch, setup } = parsed.data;
     return createGitWorktreeWorkspace({
       ...(context.emit === undefined ? {} : { emit: context.emit }),
       ...(context.now === undefined ? {} : { now: context.now }),
       repo: context.root,
       ...(remote === undefined ? {} : { remote }),
       ...(defaultBranch === undefined ? {} : { defaultBranch }),
+      ...(setup === undefined ? {} : { setup }),
       env: definedEnv(context.env),
     });
   },
