@@ -1,6 +1,7 @@
 // Needs attention: one list, across every repository, of what a person should look at. It comes from the index alone,
 // whose runs carry their summaries and whose repositories carry their queues, so no run is opened to build it. Each
-// item says what to open: its run, its call, and the inspector's tab, where the run's own files explain it.
+// item says what to open: its run, its call, and the inspector's tab, where the run's own files explain it. A run's
+// denials are one item, however many of its calls had them.
 
 import type { IndexRepo } from '../files';
 import { shellWord } from './commands';
@@ -48,6 +49,7 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
       const detail = `sail resume ${shellWord(runId)}`;
       items.push({ repo: name, runId, kind: 'suspended', title: `suspended: ${stopReason}`, detail, opens });
     }
+    const denying: { key: string; denials: number }[] = [];
     for (const call of run.summary?.calls ?? []) {
       const { key } = call;
       if (call.outcome === 'error') {
@@ -62,19 +64,20 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
           opens: { ...opens, key },
         });
       }
-      if ((call.denials ?? 0) > 0) {
-        const title = `${key}: ${plural(call.denials ?? 0, 'denial')}`;
-        const detail = 'the permissions tab names each command and the permission that refused it';
-        items.push({
-          repo: name,
-          runId,
-          key,
-          kind: 'denial',
-          title,
-          detail,
-          opens: { ...opens, key, tab: 'permissions' },
-        });
-      }
+      if ((call.denials ?? 0) > 0) denying.push({ key, denials: call.denials ?? 0 });
+    }
+    // A run's denials are one item, naming each call that had them, which opens the first one's permissions.
+    const first = denying[0];
+    if (first !== undefined) {
+      const total = denying.reduce((sum, each) => sum + each.denials, 0);
+      items.push({
+        repo: name,
+        runId,
+        kind: 'denial',
+        title: plural(total, 'denial'),
+        detail: denying.map((each) => `${each.key}: ${each.denials}`).join(' · '),
+        opens: { ...opens, key: first.key, tab: 'permissions' },
+      });
     }
     if (run.problem !== undefined)
       problems.push({ repo: name, runId, kind: 'problem', title: 'run', detail: run.problem, opens });

@@ -45,10 +45,9 @@ test("attention lists, across both repositories, FAKE-2's failure, error and den
     {
       repo: 'alpha',
       runId: FAKE_2_ID,
-      key: 'implement#1',
       kind: 'denial',
-      title: 'implement#1: 1 denial',
-      detail: 'the permissions tab names each command and the permission that refused it',
+      title: '1 denial',
+      detail: 'implement#1: 1',
       opens: { repo: 'alpha', runId: FAKE_2_ID, key: 'implement#1', tab: 'permissions' },
     },
     {
@@ -77,6 +76,28 @@ test("attention lists, across both repositories, FAKE-2's failure, error and den
     },
   ]);
   expect(items.some((item) => item.runId === GOLDEN_RUN_ID)).toBe(false);
+});
+
+test("a run's denials across several calls are one item: their total, each call's count in order, opening the first", () => {
+  const repos = index(m.registryDir);
+  const run = repos.find((repo) => repo.name === 'alpha')?.runs.find((each) => each.runId === FAKE_2_ID);
+  const calls = run?.summary?.calls ?? [];
+  expect(calls.map((call) => [call.key, call.denials])).toEqual([
+    ['intake#1', undefined],
+    ['spec#1', 0],
+    ['implement#1', 1],
+  ]);
+  for (const call of calls) if (call.key === 'spec#1') call.denials = 4;
+  expect(attention(repos).filter((item) => item.kind === 'denial')).toEqual([
+    {
+      repo: 'alpha',
+      runId: FAKE_2_ID,
+      kind: 'denial',
+      title: '5 denials',
+      detail: 'spec#1: 4 · implement#1: 1',
+      opens: { repo: 'alpha', runId: FAKE_2_ID, key: 'spec#1', tab: 'permissions' },
+    },
+  ]);
 });
 
 test("without beta's queue/ the parked item is gone, and the rest stays", () => {
