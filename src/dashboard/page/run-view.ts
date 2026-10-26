@@ -1,7 +1,7 @@
-// The run view: the run's header, its totals against its budget, its loops and routes, one stage card per call grouped
-// by loop iteration, a group's cards side by side under a header of their own, the roster stages not called yet, the
-// pull request it opened, and the CLI commands to copy. The cards come from the run model, fed by the run's events. The
-// totals, loops and routes come from the summary in the index when there is one, and from the cards otherwise.
+// The run view: the run's header, its totals against its budget, one stage card per call grouped by loop iteration, a
+// group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
+// and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
+// summary in the index when there is one, and from the cards otherwise.
 import type { Summary } from '../../events/summary';
 import { runCommands } from './commands';
 import { cost, duration, percent } from './format';
@@ -115,7 +115,6 @@ export function renderRun(model: RunModel, summary: Summary | null | undefined, 
   const ticket = model.ticket ?? summary?.ticket;
   // A summary's result is the workflow's own, free-form: its PR is read only when it is an object (review R2-1).
   const pr = model.pr ?? fieldsOf(fieldsOf(summary?.result)?.pr);
-  const loops = Object.entries(model.loops);
   return html`<div class="d-h run-h">${
     ticket === undefined ? '' : html`<span class="d-title">${ticket.ticketKey}</span> ${link(ticket.url, ticket.title)}`
   }<span class="pill ${pillOf(status)}">${status ?? 'unknown'}</span>${
@@ -124,19 +123,6 @@ export function renderRun(model: RunModel, summary: Summary | null | undefined, 
 ${model.end?.message === undefined ? '' : html`<div class="d-msg">${model.end.message}</div>`}
 <div class="run-b">
 ${totals(model, summary, now)}
-${
-  loops.length === 0
-    ? ''
-    : html`<div class="loops">${loops.map(
-        ([name, loop]) =>
-          html`<span class="loopbadge">${name}: ${loop.iteration}/${loop.max}${loop.exited === undefined ? '' : html` · ${loop.exited}`}</span>`,
-      )}</div>`
-}
-${
-  model.routes.length === 0
-    ? ''
-    : html`<div class="routes">${model.routes.map((route) => html`<span class="route">${route.at} ${route.value} → ${route.took}</span>`)}</div>`
-}
 ${groups(model, ui, now)}
 ${
   model.pending.length === 0
