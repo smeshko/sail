@@ -2,10 +2,11 @@
 // are blocks of text. A tool call is one row with its input and, once it ends, its duration and how it ended; opened, it
 // shows its whole input, the start of its result and any denial. Steps and tries are separators, and a script's
 // command is a row with its exit. Everything comes from the card, so a running call's timeline grows with its events.
+// Above the entries, a chip for each kind the call has, with its count, shows or hides that kind; separators always stay.
 import { clock, cost, duration } from './format';
 import { html, type SafeHtml, text } from './html';
 import { elapsedMs, type StageCard, type TimelineEntry, type TimelineScript, type TimelineTool } from './run-model';
-import { pillOf, type UiState } from './ui-state';
+import { FILTERS, pillOf, type TimelineFilter, type UiState } from './ui-state';
 
 /** The longest a tool's input runs on its row. */
 const SUMMARY_LENGTH = 160;
@@ -47,6 +48,41 @@ function tool(entry: TimelineTool, ui: UiState): SafeHtml {
   }<span class="mark">${MARKS[entry.status]}</span></span></button>${body}</div>`;
 }
 
+const scriptStatus = (entry: TimelineScript) =>
+  entry.durationMs === undefined ? 'running' : entry.outcome === 'passed' ? 'completed' : 'failed';
+
+/** The kind of entry `entry` is: a failed or denied tool call and a failed script are errors. A separator is none. */
+export function filterOf(entry: TimelineEntry): TimelineFilter | undefined {
+  switch (entry.kind) {
+    case 'thinking':
+      return 'thinking';
+    case 'message':
+      return 'messages';
+    case 'tool':
+      return entry.status === 'failed' || entry.status === 'denied' ? 'errors' : 'tools';
+    case 'script':
+      return scriptStatus(entry) === 'failed' ? 'errors' : 'scripts';
+    default:
+      return undefined;
+  }
+}
+
+/** A chip for each kind of entry in `entries`, with its count, and `all` while one of them is hidden. */
+function filters(entries: readonly TimelineEntry[], ui: UiState): SafeHtml {
+  const counts = new Map<TimelineFilter, number>();
+  for (const entry of entries) {
+    const kind = filterOf(entry);
+    if (kind !== undefined) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const present = FILTERS.filter((kind) => counts.has(kind));
+  if (present.length === 0) return html``;
+  const hiding = present.some((kind) => ui.hidden.includes(kind));
+  return html`<div class="tl-f">${present.map(
+    (kind) =>
+      html`<button class="tog f-${kind}${ui.hidden.includes(kind) ? '' : ' on'}" data-action="toggle-filter" data-filter="${kind}">${kind} <span class="n">${counts.get(kind) ?? 0}</span></button>`,
+  )}${hiding ? html`<button class="tog" data-action="show-all">all</button>` : ''}</div>`;
+}
+
 function script(entry: TimelineScript): SafeHtml {
   const ended =
     entry.durationMs === undefined
@@ -54,8 +90,7 @@ function script(entry: TimelineScript): SafeHtml {
       : html`${duration(entry.durationMs)}<span class="mark">${
           entry.signal ?? (entry.code === undefined ? '' : `exit ${entry.code}`)
         }</span>`;
-  const status = entry.durationMs === undefined ? 'running' : entry.outcome === 'passed' ? 'completed' : 'failed';
-  return html`<div class="tcall t-${status}"><div class="trow"><span class="tname">$</span><span class="tdet">${entry.command}</span><span class="tmeta">${ended}</span></div></div>`;
+  return html`<div class="tcall t-${scriptStatus(entry)}"><div class="trow"><span class="tname">$</span><span class="tdet">${entry.command}</span><span class="tmeta">${ended}</span></div></div>`;
 }
 
 function entryOf(entry: TimelineEntry, ui: UiState): SafeHtml {
@@ -85,15 +120,23 @@ export function renderTimeline(card: StageCard, ui: UiState, now: number): SafeH
     card.toolCalls === 1 ? '' : 's'
   }${denials === 0 ? '' : ` · ${denials} denied`}`;
   const entries = card.timeline;
+  const shown = entries.filter((entry) => {
+    const kind = filterOf(entry);
+    return kind === undefined || !ui.hidden.includes(kind);
+  });
+  const hidesAll =
+    entries.some((entry) => filterOf(entry) !== undefined) && shown.every((entry) => filterOf(entry) === undefined);
   return html`<div class="d-h tl-h"><button class="btn" data-action="close-timeline" title="back to the cards (Esc)">‹ cards</button><span class="d-title">${card.key}</span><span class="pill ${pillOf(state)}">${state}</span><span class="c-agent">${card.kind}${
     card.model === undefined ? '' : html` <span class="c-model">${card.model}</span>`
   }</span><span class="d-agent">${facts}</span><button class="btn" data-action="step-card" data-by="-1" title="previous call ([)">‹</button><button class="btn" data-action="step-card" data-by="1" title="next call (])">›</button>${
     running ? html`<button class="tog${ui.follow ? ' on' : ''}" data-action="toggle-follow">follow</button>` : ''
   }</div>
-<div class="tl">${
+${filters(entries, ui)}<div class="tl">${
     entries.length === 0
       ? html`<div class="qempty">${running ? 'nothing yet: the timeline fills as the call works' : 'this call recorded no timeline'}</div>`
-      : entries.map((entry) => entryOf(entry, ui))
+      : hidesAll
+        ? html`<div class="qempty">the filter hides every entry</div>`
+        : shown.map((entry) => entryOf(entry, ui))
   }${
     running
       ? html`<div class="streaming"><i></i>${card.key} is working…</div>`

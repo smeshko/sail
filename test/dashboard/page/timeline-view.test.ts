@@ -1,9 +1,10 @@
 // The timeline, drawn from a card's timeline in the run model: its header with the way back and the steps either side,
 // thinking and messages as escaped text, a tool call's row with its input, duration and how it ended, and opened, its
 // whole input, denial and result; step and try separators, a script's command and exit, and the end or the work going on.
+// The filter chips count each kind of entry and hide the kinds the page hides, keeping separators.
 import { expect, test } from 'bun:test';
 import { foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
-import { inputSummary, renderTimeline } from '../../../src/dashboard/page/timeline-view';
+import { filterOf, inputSummary, renderTimeline } from '../../../src/dashboard/page/timeline-view';
 import { initialUi, type UiState } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import { GOLDEN_RUN } from '../../helpers/dashboard';
@@ -152,4 +153,71 @@ test('steps and tries are separators, and a script shows its command, then its d
     '<div class="tcall t-running"><div class="trow"><span class="tname">$</span><span class="tdet">tail -f log</span><span class="tmeta"><span class="mark">…</span>',
   );
   expect(markup).toContain('<span class="tdet">odd</span><span class="tmeta">5ms<span class="mark"></span>');
+});
+
+test('each entry is of one kind: a failed or denied tool and a failed script are errors, and a separator is none', () => {
+  const card = spec([
+    { ...at, seq: 901, type: 'agent:thinking', text: 'hm' },
+    { ...at, seq: 902, type: 'agent:message', text: 'ok' },
+    { ...at, seq: 903, type: 'tool:start', callId: 'c1', tool: 'Read', input: {} },
+    { ...at, seq: 904, type: 'tool:end', callId: 'c1', status: 'completed', durationMs: 1 },
+    { ...at, seq: 905, type: 'tool:start', callId: 'c2', tool: 'Bash', input: {} },
+    { ...at, seq: 906, type: 'tool:end', callId: 'c2', status: 'failed', durationMs: 1 },
+    { ...at, seq: 907, type: 'tool:start', callId: 'c3', tool: 'Bash', input: {} },
+    { ...at, seq: 908, type: 'tool:end', callId: 'c3', status: 'denied', durationMs: 1 },
+    { ...at, seq: 909, type: 'tool:start', callId: 'c4', tool: 'Grep', input: {} },
+    { ...at, seq: 910, type: 'script:exec', command: 'ok', cwd: '.', envKeys: [] },
+    { ...at, seq: 911, type: 'script:exit', code: 0, outcome: 'passed', durationMs: 5, stdoutBytes: 0 },
+    { ...at, seq: 912, type: 'script:exec', command: 'bad', cwd: '.', envKeys: [] },
+    { ...at, seq: 913, type: 'script:exit', code: 1, outcome: 'failed', durationMs: 5, stdoutBytes: 0 },
+    { ...at, seq: 914, type: 'script:exec', command: 'going', cwd: '.', envKeys: [] },
+    { ...at, seq: 915, type: 'stage:start', stage: 'spec', call: 1, try: 2, kind: 'agent' },
+  ]);
+  expect(card.timeline.map(filterOf)).toEqual([
+    'thinking',
+    'messages',
+    'tools',
+    'errors',
+    'errors',
+    'tools',
+    'scripts',
+    'errors',
+    'scripts',
+    undefined,
+  ]);
+});
+
+test('the chips count the kinds the call has, a hidden kind is off and its entries gone, separators stay, and all shows while one is hidden', () => {
+  const card = spec([
+    { ...at, seq: 901, type: 'agent:thinking', text: 'pondering' },
+    { ...at, seq: 902, type: 'agent:thinking', text: 'more' },
+    { ...at, seq: 903, type: 'agent:message', text: 'Saying' },
+    { ...at, seq: 904, type: 'stage:start', stage: 'spec', call: 1, try: 2, kind: 'agent' },
+    { ...at, seq: 905, type: 'tool:start', callId: 'c1', tool: 'Bash', input: { command: 'false' } },
+    { ...at, seq: 906, type: 'tool:end', callId: 'c1', status: 'failed', durationMs: 1 },
+  ]);
+  const all = renderTimeline(card, ui(), NOW).value;
+  expect(all).toContain(
+    '<div class="tl-f"><button class="tog f-thinking on" data-action="toggle-filter" data-filter="thinking">thinking <span class="n">2</span></button><button class="tog f-messages on" data-action="toggle-filter" data-filter="messages">messages <span class="n">1</span></button><button class="tog f-errors on" data-action="toggle-filter" data-filter="errors">errors <span class="n">1</span></button></div>',
+  );
+  expect(all).not.toContain('data-action="show-all"');
+
+  const errorsOnly = renderTimeline(card, ui({ hidden: ['thinking', 'messages', 'tools'] }), NOW).value;
+  expect(errorsOnly).toContain('<button class="tog f-thinking" data-action="toggle-filter" data-filter="thinking">');
+  expect(errorsOnly).toContain('<button class="tog" data-action="show-all">all</button>');
+  expect(errorsOnly).not.toContain('pondering');
+  expect(errorsOnly).not.toContain('Saying');
+  expect(errorsOnly).toContain('<div class="tl-sep"><span>try 2</span></div>');
+  expect(errorsOnly).toContain('<span class="tdet">false</span>');
+
+  // A hidden kind the call doesn't have hides nothing, so all doesn't show.
+  expect(renderTimeline(card, ui({ hidden: ['scripts'] }), NOW).value).not.toContain('show-all');
+});
+
+test('a filter that hides every entry says so, and a call with no entries has no chips', () => {
+  const card = spec([{ ...at, seq: 901, type: 'agent:message', text: 'Only this' }]);
+  const markup = renderTimeline(card, ui({ hidden: ['messages'] }), NOW).value;
+  expect(markup).toContain('<div class="qempty">the filter hides every entry</div>');
+  expect(markup).not.toContain('Only this');
+  expect(renderTimeline(spec([]), ui(), NOW).value).not.toContain('class="tl-f"');
 });

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
-import { boot, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
+import { boot, FILTER_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
 import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/page/host';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
@@ -555,6 +555,30 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
   host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', FAKE_2_ID)]);
   expect(page.ui.key).toBeUndefined();
+});
+
+test('the timeline filter loads what was saved, toggles a kind in the order of the chips, saves it, holds across calls, and all clears it', () => {
+  host.storage.set(FILTER_KEY, 'tools,bogus,thinking');
+  page = boot(host);
+  expect(page.ui.hidden).toEqual(['thinking', 'tools']);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN(), false);
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'toggle-filter', filter: 'scripts' });
+  host.click({ action: 'toggle-filter', filter: 'messages' });
+  host.click({ action: 'toggle-filter', filter: 'tools' });
+  host.click({ action: 'toggle-filter', filter: 'nonsense' });
+  expect(page.ui.hidden).toEqual(['thinking', 'messages', 'scripts']);
+  expect(host.storage.get(FILTER_KEY)).toBe('thinking,messages,scripts');
+  host.advance(100);
+  expect(host.regions.main).toContain(
+    '<button class="tog f-scripts" data-action="toggle-filter" data-filter="scripts">',
+  );
+  expect(host.regions.main).not.toContain('open.sh');
+  host.click({ action: 'step-card', by: '-1' });
+  expect(page.ui.hidden).toEqual(['thinking', 'messages', 'scripts']);
+  host.click({ action: 'show-all' });
+  expect([page.ui.hidden, host.storage.get(FILTER_KEY)]).toEqual([[], '']);
 });
 
 test('the open run, once ended, opens its stream again when the index says it runs again, folds past its old run:end as live, and leaves one socket (review R1-2)', () => {

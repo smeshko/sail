@@ -1,9 +1,13 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
-// is open and which of its tool calls, the rail's open sections, the theme, and the offset their clock is at. It holds
-// nothing about the runs themselves.
+// is open, which of its tool calls and which kinds of its entries it hides, the rail's open sections, the theme, and the
+// offset their clock is at. It holds nothing about the runs themselves.
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];
+
+/** The kinds of entry a timeline can hide. Every thinking, message, tool call and script command is of exactly one. */
+export const FILTERS = ['thinking', 'messages', 'tools', 'scripts', 'errors'] as const;
+export type TimelineFilter = (typeof FILTERS)[number];
 
 export const THEMES = ['dark', 'light', 'system'] as const;
 export type Theme = (typeof THEMES)[number];
@@ -17,6 +21,8 @@ export interface UiState {
   timeline: boolean;
   /** The timeline's tool calls opened to show their input and result, by call id. */
   opened: string[];
+  /** The kinds of entry every timeline hides. */
+  hidden: TimelineFilter[];
   tab: InspectorTab;
   /** The log stream the log tab shows, when one is chosen. */
   stream?: string;
@@ -37,6 +43,7 @@ export function initialUi(tz: number): UiState {
     tab: 'overview',
     timeline: false,
     opened: [],
+    hidden: [],
     open: [],
     theme: 'dark',
     inspector: true,

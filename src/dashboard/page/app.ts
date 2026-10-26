@@ -7,7 +7,8 @@
 //   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything.
 // - One queue socket per watched workflow in the index feeds its recent events and its watch state.
 // - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
-//   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry.
+//   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry. The
+//   kinds of entry it hides hold for every call's timeline, and are saved like the theme.
 // - The inspector reads a call's `result.json` and log over REST. A response for a selection that has changed since is
 //   dropped, and a running call's log is read again at most once a second.
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
@@ -29,9 +30,20 @@ import { renderRail } from './rail-view';
 import { applyEvent, emptyRun, type RunModel } from './run-model';
 import { renderRun, renderStatus } from './run-view';
 import { renderTimeline } from './timeline-view';
-import { type InspectorTab, initialUi, TABS, THEMES, type Theme, type UiState } from './ui-state';
+import {
+  FILTERS,
+  type InspectorTab,
+  initialUi,
+  TABS,
+  THEMES,
+  type Theme,
+  type TimelineFilter,
+  type UiState,
+} from './ui-state';
 
 export const THEME_KEY = 'sail-dashboard-theme';
+/** Where the kinds of entry the timeline hides are saved, comma-separated. */
+export const FILTER_KEY = 'sail-dashboard-timeline-hidden';
 export const RECONNECT_MS = 2000;
 export const FLUSH_MS = 100;
 export const LOG_REFRESH_MS = 1000;
@@ -81,6 +93,7 @@ export function boot(host: PageHost): Page {
   const saved = host.load(THEME_KEY);
   if ((THEMES as readonly string[]).includes(saved ?? '')) ui.theme = saved as Theme;
   host.setTheme(ui.theme);
+  ui.hidden = FILTERS.filter((kind) => (host.load(FILTER_KEY) ?? '').split(',').includes(kind));
   host.setInspector(ui.inspector);
 
   let index: IndexRepo[] | undefined;
@@ -462,6 +475,19 @@ export function boot(host: PageHost): Page {
       const call = data.call;
       if (call === undefined) return;
       ui.opened = ui.opened.includes(call) ? ui.opened.filter((each) => each !== call) : [...ui.opened, call];
+      mark('main');
+    },
+    'toggle-filter': (data) => {
+      if (!(FILTERS as readonly string[]).includes(data.filter ?? '')) return;
+      const kind = data.filter as TimelineFilter;
+      const hidden = ui.hidden.includes(kind) ? ui.hidden.filter((each) => each !== kind) : [...ui.hidden, kind];
+      ui.hidden = FILTERS.filter((each) => hidden.includes(each));
+      host.save(FILTER_KEY, ui.hidden.join(','));
+      mark('main');
+    },
+    'show-all': () => {
+      ui.hidden = [];
+      host.save(FILTER_KEY, '');
       mark('main');
     },
     tab: (data) => {

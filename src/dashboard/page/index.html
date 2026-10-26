@@ -803,6 +803,23 @@
       .tl-h .btn {
         flex: none;
       }
+      .tl-f {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px 14px;
+        border-bottom: 1px solid var(--line);
+        background: var(--bg);
+      }
+      .tl-f .n {
+        color: var(--fg-4);
+      }
+      .tl-f .f-errors.on {
+        color: var(--err);
+      }
       .tl {
         padding: 8px 0 18px;
       }
