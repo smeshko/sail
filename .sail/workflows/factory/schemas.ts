@@ -42,7 +42,7 @@ export const Validation = z.object({
   verify: z.object({ ok: z.boolean(), exitCode: z.number().int(), tail: z.string() }),
 });
 
-/** What the demonstrate stage saw: each of the plan's acceptance criteria, shown or not, with what showed it. */
+/** What the demonstrate stage saw: each criterion the plan's Demonstration covers, shown or not, with what showed it. */
 export const Demonstrated = z.object({
   criteria: z
     .array(

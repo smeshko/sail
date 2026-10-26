@@ -25,7 +25,8 @@
 // seed, the events file and STATUS `running` are written.
 //
 // The workspace starts at the source's base: the source's code changes are not carried. A reused call's commits are not
-// in the seeded workspace, so a later stage that consumes a gitDiff sees only what the seeded run changed.
+// in the seeded workspace, so a later stage that consumes a gitDiff sees only what the seeded run changed. Its workspace
+// setup runs as any run's does, so what the setup installed in the source's workspace is there again.
 import { cpSync, existsSync, lstatSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile } from '../events/consumers/ndjson';

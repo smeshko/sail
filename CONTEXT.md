@@ -294,6 +294,10 @@ _Avoid_: cached call, skipped call
 The checkout a run works in, on its own branch. How it is made (a branch in the current clone, a git worktree, a container) is up to the workspace adapter.
 _Avoid_: worktree (one mechanism), checkout, sandbox, working copy
 
+**Workspace setup**:
+The shell command the `git-worktree` adapter runs in each workspace it makes, before any stage runs: its `setup` option, such as `bun install --frozen-lockfile`. Every run gets it, a seeded run included, whose reused calls left nothing in its new workspace. A setup that fails refuses the run.
+_Avoid_: bootstrap, install step, setup stage
+
 **Base**:
 The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`. For a pull-request source it is the pull request's head.
 _Avoid_: start point, fork point
