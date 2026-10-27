@@ -544,7 +544,7 @@ One call's card in the dashboard's run view, with its outcome, tries, duration, 
 _Avoid_: tile, step card, job
 
 **Timeline**:
-One call's events in order, drawn where the run view's cards were when a stage card is opened, and followed live while the call runs. It shows thinking, messages, steps, tries, script commands, and each tool call: its input, and once it ends, its status, duration, the start of its result and any denial. It comes from the run's events alone, so a running call shows one before its transcript is written.
+One call's events in order, drawn where the run view's cards were when a stage card is opened, and followed live while the call runs. It shows thinking, messages, steps, tries, script commands, a step queued for its exclusive slot with the run holding it, and each tool call: its input, and once it ends, its status, duration, the start of its result and any denial. It comes from the run's events alone, so a running call shows one before its transcript is written.
 _Avoid_: feed, activity, live log, stream (the event stream's word)
 
 **Inspector**:
