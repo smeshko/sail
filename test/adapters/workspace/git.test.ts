@@ -163,6 +163,35 @@ test('a diff over <rev>... or <rev>...HEAD whose rev shares no commit with HEAD 
 });
 
 test.skipIf(process.getuid?.() === 0)(
+  'a workspace that survives its removal, under a read-only run directory, is unavailable, naming the path, and stays on disk',
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'sail-survive-'));
+    try {
+      const runDir = join(root, 'run');
+      const workspace = join(runDir, 'workspace');
+      mkdirSync(workspace, { recursive: true });
+      writeFileSync(join(workspace, 'file.txt'), 'kept\n');
+      chmodSync(runDir, 0o555);
+      let error: unknown;
+      try {
+        removeWorktree(root, runDir, 'release');
+      } catch (thrown) {
+        error = thrown;
+      } finally {
+        chmodSync(runDir, 0o755);
+      }
+      expect({
+        failure: portFailure(error),
+        named: messageOf(error).includes(workspace),
+        onDisk: existsSync(workspace),
+      }).toEqual({ failure: { port: 'workspace', op: 'release', code: 'unavailable' }, named: true, onDisk: true });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(process.getuid?.() === 0)(
   'a linked workspace that cannot be unlinked is unavailable, naming the path, and the link stays',
   () => {
     const root = mkdtempSync(join(tmpdir(), 'sail-unlink-'));
