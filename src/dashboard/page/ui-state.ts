@@ -1,7 +1,7 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
-// is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded sections, the rail's
-// open sections and closed groups, whether needs attention is open, the theme, the offset their clock is at, and the
-// file open in the drawer. It holds nothing about the runs themselves.
+// is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place with its folded
+// sections, the rail's open sections and closed groups, whether needs attention is open, the theme, the offset their
+// clock is at, and the file open in the drawer. It holds nothing about the runs themselves.
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];

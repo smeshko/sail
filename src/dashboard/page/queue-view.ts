@@ -1,7 +1,8 @@
 // The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
-// run, with its polling, a box of items for each state that has any (running first) that folds from its heading, and its recent events from the queue's own
-// stream, folded until the person opens them. A failed or parked item shows the commands that requeue or drop it, to
-// copy, and an item whose run the rail lists opens it: the dashboard changes nothing itself.
+// run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
+// its recent events from the queue's own stream, folded until the person opens them. A failed or parked item shows the
+// commands that requeue or drop it, to copy, and an item whose run the rail lists opens it: the dashboard changes
+// nothing itself.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
 import { parkedCommands } from './commands';
