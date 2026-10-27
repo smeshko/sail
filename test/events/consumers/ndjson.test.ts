@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   createEventsFile,
   type EventCursor,
+  holdsSeq,
   lastSeq,
   ndjsonConsumer,
   nextSeq,
@@ -261,4 +262,57 @@ test("lastSeq is the last whole line's seq, read from the file's tail: a torn ta
     torn: 3,
     one: 7,
   });
+});
+
+/** The `seq`th event's line with its newline, `bytes` long in all: its note is `lead` and then padding. */
+function lineOf(seq: number, bytes: number, lead = ''): string {
+  const make = (pad: number) => `${JSON.stringify({ ...event(seq), consumed: { note: lead + 'x'.repeat(pad) } })}\n`;
+  return make(bytes - Buffer.byteLength(make(0)));
+}
+
+test('holdsSeq finds an event many chunks back from the tail, and not a gap, a seq older than the file, or one in a torn tail', () => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  const missing = holdsSeq(dir, 1);
+  const seqs = Array.from({ length: 200 }, (_, i) => i + 10).filter((seq) => seq !== 100);
+  writeFileSync(path, seqs.map((seq) => lineOf(seq, seq % 7 === 0 ? 5000 : 300)).join(''));
+  appendFileSync(path, JSON.stringify(event(500)).slice(0, 40));
+  const found = [10, 55, 99, 101, 209].map((seq) => holdsSeq(dir, seq));
+  const absent = [100, 9, 1, 210, 500].map((seq) => holdsSeq(dir, seq));
+  expect({ missing, found, absent }).toEqual({
+    missing: false,
+    found: [true, true, true, true, true],
+    absent: [false, false, false, false, false],
+  });
+});
+
+test('lines with newlines on chunk boundaries, and a multi-byte character split across two chunks, are read whole', () => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  const lead = 'é';
+  const offsetOfLead = Buffer.from(lineOf(5, 1000, lead)).indexOf(lead);
+  // The last line fills one chunk; the line before it starts so its `é` spans the next chunk's first and last bytes.
+  writeFileSync(
+    path,
+    lineOf(1, 4096) +
+      lineOf(2, 4095) +
+      lineOf(3, 4097) +
+      lineOf(4, 8192) +
+      lineOf(5, 4097 + offsetOfLead, lead) +
+      lineOf(6, 4096),
+  );
+  const file = readFileSync(path);
+  expect(file.length - file.indexOf(Buffer.from(lead))).toBe(4096 + 4097);
+  expect(lastSeq(dir)).toBe(6);
+  expect([1, 2, 3, 4, 5, 6, 7].map((seq) => holdsSeq(dir, seq))).toEqual([true, true, true, true, true, true, false]);
+});
+
+test('lastSeq reads a 64 MB last line in linear time', () => {
+  const dir = runDir();
+  writeFileSync(join(dir, 'events.ndjson'), lines(1, 2) + lineOf(3, 64 * 1024 * 1024));
+  const started = performance.now();
+  const seq = lastSeq(dir);
+  const took = performance.now() - started;
+  expect(seq).toBe(3);
+  expect(took).toBeLessThan(2000);
 });
