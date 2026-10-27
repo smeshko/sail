@@ -10,6 +10,9 @@ Gather enough context to plan without guessing:
 - Check recent history for related changes: `git log --oneline -20`.
 - Note the files likely to change, the patterns to follow, the constraints, and what is still uncertain.
 
+You read and never run: the tests, the gate and scratch files outside `$STAGE_OUT` are denied. Reason from the code
+and the tests as written.
+
 ## 2. Resolve every question yourself
 
 No one answers questions during this run. Settle each open point from the ticket, the code and the conventions, and
@@ -44,6 +47,9 @@ Break the work into tasks, numbered `TASK-001`, `TASK-002`, … in order:
 - A task's tests are part of the task: implement writes them first, in the task's own commit. Never plan a task that
   only writes tests, or one that only makes earlier tests pass.
 - Final validation is not a task: the workflow runs `bun run gate` after the last task.
+- Implement may write only `src/`, `test/`, `types/`, `schemas/`, `bin/`, `scripts/`, `.sail/`, `.githooks/`, the root
+  configs (`package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `biome.json`), `AGENTS.md` and `CONTEXT.md`.
+  If the change needs any other path, end the step **blocked**, naming the path: implement would block on it.
 
 ## 4. Plan the demonstration
 
