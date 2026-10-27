@@ -299,12 +299,14 @@
       }
       .subgrp-h .caret,
       .lgrp-h .caret,
-      .wf-h .caret {
+      .wf-h .caret,
+      .qrecent-h .caret {
         transition: transform 0.12s;
       }
       .subgrp-h.open .caret,
       .lgrp-h.open .caret,
-      .wf-h.open .caret {
+      .wf-h.open .caret,
+      .qrecent-h.open .caret {
         transform: rotate(90deg);
       }
       .subgrp-h .sw {
@@ -845,6 +847,50 @@
       .qrow2.done {
         opacity: 0.6;
       }
+      .qsec {
+        padding: 12px 14px 0;
+      }
+      .qbox {
+        margin: 0 14px 4px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        overflow: hidden;
+        background: var(--panel);
+      }
+      .qbox .qrow2:first-child {
+        border-top: 0;
+      }
+      .run-link {
+        flex: 0 0 auto;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--run);
+      }
+      .run-link:hover {
+        text-decoration: underline;
+      }
+      .qrecent-h {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        padding: 14px 14px 8px;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--fg-3);
+      }
+      .qrecent-h:hover {
+        color: var(--fg-2);
+      }
+      .qrecent-h .n {
+        color: var(--fg-4);
+      }
       .c-dot {
         flex: 0 0 8px;
         padding-top: 5px;
@@ -863,6 +909,13 @@
       .c-t {
         display: block;
         overflow-wrap: anywhere;
+      }
+      a.c-t {
+        color: var(--fg);
+        text-decoration: none;
+      }
+      a.c-t:hover {
+        text-decoration: underline;
       }
       .c-sub {
         display: block;

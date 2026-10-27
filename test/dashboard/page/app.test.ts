@@ -489,6 +489,9 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   host.advance(100);
   expect(host.regions.main).toStartWith('<div class="d-h"><span class="d-title">ticket-to-pr queue</span>');
   expect(host.regions.main).toContain('<span class="pill p-pass">watched</span>');
+  expect(host.regions.main).not.toContain('<div class="ev">');
+  host.click({ action: 'toggle-queue-events' });
+  host.advance(100);
   expect(host.regions.main).toContain('<span class="tname">queue:parked</span>');
   expect(host.regions.main?.match(/<div class="ev">/g)).toHaveLength(9);
   expect(host.regions.rail).toContain('<button class="wf-q sel" data-action="select-queue"');

@@ -37,6 +37,8 @@ export interface UiState {
   closed: string[];
   /** Whether the needs attention pane is open. */
   attention: boolean;
+  /** Whether the queue view shows its recent events. */
+  queueEvents: boolean;
   theme: Theme;
   inspector: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
@@ -56,6 +58,7 @@ export function initialUi(tz: number): UiState {
     open: [],
     closed: [],
     attention: false,
+    queueEvents: false,
     theme: 'dark',
     inspector: true,
     cursor: 0,
