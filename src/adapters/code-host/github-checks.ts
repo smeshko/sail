@@ -1,5 +1,5 @@
-// A pull request's checks on GitHub: the check runs and the commit statuses on its head sha, in the port's words
-// (DECISIONS D4). Each is read in pages of 100 until GitHub's `total_count` is reached, and an answer GitHub doesn't
+// A pull request's checks on GitHub: the latest check run of each name and the commit statuses on its head sha, in the
+// port's words (DECISIONS D4); a run a later run of its name superseded is dropped. Each is read in pages of 100 until GitHub's `total_count` is reached, and an answer GitHub doesn't
 // document reads as failed: a check sail can't read is never one that passed.
 import { PortError } from '../../ports/errors';
 import type { Check, CheckStatus } from '../../ports/types';
@@ -7,6 +7,7 @@ import type { GitHubClient } from './github-client';
 
 /** A check run as GitHub's `check-runs` endpoint lists it: the fields the adapter reads. */
 export interface GitHubCheckRun {
+  readonly id?: number;
   readonly name: string;
   readonly status: string;
   readonly conclusion?: string | null;
@@ -102,7 +103,21 @@ async function readPaged<T>(
   throw new PortError('codeHost', op, 'unavailable', `more than ${PER_PAGE * MAX_PAGES} checks on ${sha}`);
 }
 
-/** The checks on `sha`: its check runs, then its commit statuses, each in GitHub's order. */
+/** Each name's latest run, the greatest id, in GitHub's order; a name with a run lacking an integer id keeps every run. */
+export function latestRuns(runs: readonly GitHubCheckRun[]): GitHubCheckRun[] {
+  const latest = new Map<string, number>();
+  const unordered = new Set<string>();
+  for (const run of runs) {
+    if (!Number.isInteger(run.id)) unordered.add(run.name);
+    else latest.set(run.name, Math.max(latest.get(run.name) ?? Number.NEGATIVE_INFINITY, run.id as number));
+  }
+  return runs.filter((run) => unordered.has(run.name) || run.id === latest.get(run.name));
+}
+
+/**
+ * The checks on `sha`: its latest check run of each name, then its commit statuses, each in GitHub's order. A run a later
+ * one of its name superseded is dropped from `checks` and kept in `raw`.
+ */
 export async function readChecks(
   client: GitHubClient,
   op: string,
@@ -112,7 +127,7 @@ export async function readChecks(
   const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses', 'context');
   const runUrl = (run: GitHubCheckRun) => run.html_url ?? run.details_url ?? undefined;
   const checks: Check[] = [
-    ...checkRuns.map((run) => {
+    ...latestRuns(checkRuns).map((run) => {
       const url = runUrl(run);
       return { name: run.name, status: checkRunStatus(run), ...(url === undefined ? {} : { url }) };
     }),

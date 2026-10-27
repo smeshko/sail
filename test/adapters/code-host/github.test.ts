@@ -24,6 +24,7 @@ import {
   type GitHubWorld,
   type GitHubWorldSeed,
   WORLD_API,
+  type WorldCheckRun,
   type WorldSeedPull,
   worldMergeSha,
 } from '../../helpers/github-world';
@@ -773,6 +774,93 @@ test('a read of checks asks for pull request 7, then the check runs and the stat
       },
     ],
   });
+});
+
+/** A world whose pull request 7 holds `checkRuns` and `statuses` on its head. */
+const checksWorld = (checkRuns: WorldCheckRun[], statuses: { context: string; state: string }[] = []) =>
+  world({ pullRequests: [{ number: 7, head: 'sail/designated', checkRuns, statuses }] });
+
+test('a check re-run reads as its latest run: failed then passed twice reads as one passed check, in the event too, and raw keeps all three', async () => {
+  const on = checksWorld([
+    { id: 1, name: 'test', status: 'completed', conclusion: 'failure' },
+    { id: 2, name: 'test', status: 'completed', conclusion: 'success' },
+    { id: 3, name: 'test', status: 'completed', conclusion: 'success' },
+  ]);
+  const capture = captureEvents();
+  const read = await settle(host(on, capture.emit).checks(7));
+  expect({
+    checks: 'rejected' in read ? read : read.checks,
+    events: capture.events.map((event) => ('checks' in event ? event.checks : event)),
+    rawRuns: 'rejected' in read ? read : (read.raw as { checkRuns: unknown[] }).checkRuns.length,
+  }).toEqual({
+    checks: [{ name: 'test', status: 'passed' }],
+    events: [[{ name: 'test', status: 'passed' }]],
+    rawRuns: 3,
+  });
+});
+
+test.each<[string, WorldCheckRun[], CheckStatus]>([
+  [
+    'a later pending run supersedes an earlier failure',
+    [
+      { id: 1, name: 'test', status: 'completed', conclusion: 'failure' },
+      { id: 2, name: 'test', status: 'in_progress' },
+    ],
+    'pending',
+  ],
+  [
+    'a later failed run supersedes an earlier success',
+    [
+      { id: 1, name: 'test', status: 'completed', conclusion: 'success' },
+      { id: 2, name: 'test', status: 'completed', conclusion: 'failure' },
+    ],
+    'failed',
+  ],
+  [
+    'the greatest id wins whatever its position in the list',
+    [
+      { id: 9, name: 'test', status: 'completed', conclusion: 'success' },
+      { id: 4, name: 'test', status: 'completed', conclusion: 'failure' },
+      { id: 2, name: 'test', status: 'completed', conclusion: 'failure' },
+    ],
+    'passed',
+  ],
+])('%s', async (_name, runs, status) => {
+  const read = await settle(host(checksWorld(runs)).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([{ name: 'test', status }]);
+});
+
+test("runs of different names are each kept in GitHub's order, beside the latest of a repeated one", async () => {
+  const on = checksWorld(
+    [
+      { id: 1, name: 'build', status: 'completed', conclusion: 'success' },
+      { id: 2, name: 'test', status: 'completed', conclusion: 'failure' },
+      { id: 3, name: 'lint', status: 'completed', conclusion: 'success' },
+      { id: 4, name: 'test', status: 'completed', conclusion: 'success' },
+    ],
+    [{ context: 'ci/legacy', state: 'success' }],
+  );
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'build', status: 'passed' },
+    { name: 'lint', status: 'passed' },
+    { name: 'test', status: 'passed' },
+    { name: 'ci/legacy', status: 'passed' },
+  ]);
+});
+
+test('a repeated name with a run lacking an id keeps every run of that name', async () => {
+  const on = checksWorld([
+    { id: 5, name: 'test', status: 'completed', conclusion: 'success' },
+    { name: 'test', status: 'completed', conclusion: 'failure' },
+    { id: 1, name: 'build', status: 'completed', conclusion: 'success' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'test', status: 'passed' },
+    { name: 'test', status: 'failed' },
+    { name: 'build', status: 'passed' },
+  ]);
 });
 
 /** A world whose pull request 7 has `count` passing check runs. */
