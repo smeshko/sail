@@ -199,6 +199,16 @@ test('--dry-run with --dispatch is refused with exit 3, and writes nothing', asy
   expect(after).toEqual(before);
 }, 60_000);
 
+test('--dry-run with --head-sha is refused with exit 3, and writes nothing', async () => {
+  const { code, stdout, stderr, before, after } = await dryIn(['FAKE-1', '--dry-run', '--head-sha', '0'.repeat(40)]);
+  expect({ code, stdout, stderr }).toEqual({
+    code: EXIT_REFUSED,
+    stdout: '',
+    stderr: "sail FAKE-1: --dry-run and --head-sha can't be combined\n",
+  });
+  expect(after).toEqual(before);
+}, 60_000);
+
 test('--dry-run prints a stage of several steps as its steps, each with what it declares', async () => {
   const { code, stdout } = await dryIn(['FAKE-1', '--dry-run']);
   const lines = stdout.split('\n');

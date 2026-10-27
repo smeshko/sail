@@ -3,7 +3,7 @@
 // its own: a process opens one run per `.sail/`. The fake harness answers by call key, not by prompt, so a changed
 // answer in `.sail/fake/harness.json` stands in for the different output an edited prompt would get (DECISIONS D10).
 import { afterAll, expect, test } from 'bun:test';
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
@@ -109,6 +109,12 @@ test.each<[string, (runId: string) => string[], (dir: string) => void, (runId: s
     (runId) => ['--from-run', runId, '--stage', 'nope'],
     () => {},
     () => `sail run: --stage names 'nope', which is no stage of workflow 'ticket-to-pr': its stages are ${STAGES}\n`,
+  ],
+  [
+    'a workflow that is gone',
+    (runId) => ['--from-run', runId, '--stage', 'spec'],
+    (dir) => rmSync(join(dir, '..', '..', '.sail', 'workflows', 'ticket-to-pr'), { recursive: true }),
+    () => "sail run: no workflow 'ticket-to-pr': .sail/workflows/ticket-to-pr/workflow.ts doesn't exist\n",
   ],
   [
     'a stage the source never ran',
