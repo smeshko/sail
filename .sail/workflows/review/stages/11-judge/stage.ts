@@ -1,5 +1,6 @@
-// judge: reads every finding of validation, the demonstration and the four reviewers, and decides what each becomes:
-// fixed on this pull request, filed as a ticket, or dropped. The workflow routes on its verdicts.
+// judge: reads every finding of validation, the leak check, the demonstration and the six reviewers, and decides what
+// each becomes: fixed on this pull request, filed as a ticket, or dropped. It names the reviews too thin to trust,
+// which stop the merge. The workflow routes on its verdicts.
 import { agent, file, value } from 'sail';
 import { Evidence, Findings, Judgement } from '../../schemas';
 

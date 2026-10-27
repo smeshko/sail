@@ -1,30 +1,46 @@
-// review: a factory-labelled pull request in, merged out. Validation, the demonstration and four reviewers look at it at
-// once; a judge decides what each finding becomes: fixed here, filed as a ticket, or dropped. Up to three fix passes
-// follow, each reviewed beside a fresh validation. Then the fixes are pushed, the tickets filed, the review commented,
-// and the pull request merged once its checks pass. A review that leaves findings open comments them, takes the label
-// off and fails, leaving the pull request to a human.
+// review: a factory-labelled pull request in, merged out. Validation, the leak check, the demonstration and six
+// reviewers look at it at once; a judge decides what each finding becomes (fixed here, filed as a ticket, or dropped)
+// and which reviews are too thin to trust. Up to three fix passes follow, each reviewed beside a fresh validation. Then
+// the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
+// request merged once its checks pass. A review that leaves findings open, or one too thin to trust, comments why,
+// takes the label off and fails, leaving the pull request to a human.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
 import { workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
 import { validate } from '../../stages/validate/stage';
-import type { Judgement, NumberedFinding, ReviewRecord } from './schemas';
+import type { Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
-import { demonstrate } from './stages/03-demonstrate/stage';
-import { review } from './stages/04-review/stage';
-import { judge } from './stages/05-judge/stage';
-import { fix } from './stages/06-fix/stage';
-import { checkFix } from './stages/07-check-fix/stage';
-import { push } from './stages/08-push/stage';
-import { report } from './stages/10-report/stage';
-import { merge } from './stages/11-merge/stage';
+import { leakCheck } from './stages/03-leak-check/stage';
+import { demonstrate } from './stages/04-demonstrate/stage';
+import { reviewRequirements } from './stages/05-review-requirements/stage';
+import { reviewArchitecture } from './stages/06-review-architecture/stage';
+import { reviewBugs } from './stages/07-review-bugs/stage';
+import { reviewTests } from './stages/08-review-tests/stage';
+import { reviewSecurity } from './stages/09-review-security/stage';
+import { reviewConventions } from './stages/10-review-conventions/stage';
+import { judge } from './stages/11-judge/stage';
+import { fix } from './stages/12-fix/stage';
+import { checkFix } from './stages/13-check-fix/stage';
+import { push } from './stages/14-push/stage';
+import { attachDemonstration } from './stages/16-attach-demonstration/stage';
+import { report } from './stages/17-report/stage';
+import { merge } from './stages/18-merge/stage';
 
 /** The designation label: the factory's pull requests carry it, and a review that can't finish takes it off. */
 const LABEL = 'factory';
 
-const LENSES = ['requirements', 'architecture', 'quality', 'bugs'] as const;
+/** The reviewers' lenses, in the order the group calls their stages. */
+const LENSES = [
+  'requirements',
+  'architecture',
+  'bugs',
+  'tests',
+  'security',
+  'conventions',
+] as const satisfies readonly z.infer<typeof Lens>[];
 
 const FIX_PASSES = 3;
 
@@ -32,11 +48,11 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 1,
+    version: 2,
     watch: { every: '5m' },
     // One pull request at a time: each merge moves the base the next one is reviewed against.
     maxConcurrentRuns: 1,
-    description: 'validate, demonstrate and review at once, judge, fix in rounds, merge',
+    description: 'validate, leak-check, demonstrate and review six ways at once, judge, fix in rounds, merge',
   },
   async (run) => {
     const brief = run.intake.files['brief.md'];
@@ -46,14 +62,17 @@ export default workflow(
     const req = await run.stage(requirements, { ticketKey: ticketKey ?? '' });
     const reading = { brief, requirements: req.files['requirements.md'], base };
 
-    // Everything that looks at the pull request, at once.
-    const [validated, shown, ...reviews] = await run.all([
+    // Everything that looks at the pull request, at once. The reviewers come last, in LENSES' order.
+    const [validated, leaks, shown, ...reviews] = await run.all([
       [validate],
+      [leakCheck, { diff: run.intake.files['diff.patch'] }],
       [demonstrate, reading],
-      [review, { ...reading, lens: LENSES[0] }],
-      [review, { ...reading, lens: LENSES[1] }],
-      [review, { ...reading, lens: LENSES[2] }],
-      [review, { ...reading, lens: LENSES[3] }],
+      [reviewRequirements, reading],
+      [reviewArchitecture, reading],
+      [reviewBugs, reading],
+      [reviewTests, reading],
+      [reviewSecurity, reading],
+      [reviewConventions, reading],
     ]);
     if (shown.outcome === 'blocked') return run.fail(`demonstrate blocked: ${shown.reason}`);
     const findings: z.infer<typeof NumberedFinding>[] = [];
@@ -70,6 +89,20 @@ export default workflow(
           .join('\n\n'),
       });
     }
+    for (const [index, hit] of leaks.output.hits.entries()) {
+      findings.push({
+        id: `L${index + 1}`,
+        source: 'leak-check',
+        severity: 'high',
+        file: `${hit.file}:${hit.line}`,
+        title: hit.kind === 'key' ? `A tracker key other than ADW: ${hit.match}` : 'A term from the private denylist',
+        // A denylisted term is private by definition: the finding names its line, never the term.
+        detail:
+          hit.kind === 'key'
+            ? `${hit.file}:${hit.line} adds ${hit.match}. Committed text names only sail and its ADW-<n> issues.`
+            : `${hit.file}:${hit.line} adds a term on the leak denylist. Committed text names only sail and its ADW-<n> issues.`,
+      });
+    }
     for (const criterion of shown.output.criteria.filter((each) => !each.shown)) {
       findings.push({
         id: `D${findings.filter((each) => each.source === 'demonstrate').length + 1}`,
@@ -80,11 +113,12 @@ export default workflow(
         detail: criterion.evidence,
       });
     }
-    const summaries: { lens: (typeof LENSES)[number]; summary: string }[] = [];
+    const summaries: ({ lens: (typeof LENSES)[number] } & Pick<z.infer<typeof Reviewed>, 'summary' | 'coverage'>)[] =
+      [];
     for (const [index, reviewed] of reviews.entries()) {
       const lens = LENSES[index] ?? 'bugs';
-      if (reviewed.outcome === 'blocked') return run.fail(`review (${lens}) blocked: ${reviewed.reason}`);
-      summaries.push({ lens, summary: reviewed.output.summary });
+      if (reviewed.outcome === 'blocked') return run.fail(`review-${lens} blocked: ${reviewed.reason}`);
+      summaries.push({ lens, summary: reviewed.output.summary, coverage: reviewed.output.coverage });
       for (const finding of reviewed.output.findings) {
         findings.push({
           ...finding,
@@ -94,28 +128,26 @@ export default workflow(
       }
     }
 
-    // The judge decides what each finding becomes.
-    let judgement: z.infer<typeof Judgement> | null = null;
-    let targets: z.infer<typeof NumberedFinding>[] = [];
+    // The judge decides what each finding becomes, and which reviews it can't trust. It runs with no findings too: a
+    // clean review is only as good as what its coverage says it checked.
+    const judged = await run.stage(judge, {
+      brief,
+      requirements: reading.requirements,
+      findings: { findings },
+      evidence: { validation: validated.output, demonstration: shown.output, reviews: summaries },
+    });
+    if (judged.outcome === 'blocked') return run.fail(`judge blocked: ${judged.reason}`);
+    const judgement: z.infer<typeof Judgement> = judged.output;
+    const decided = new Map(judgement.decisions.map((each) => [each.finding, each]));
+    const undecided = findings.filter((finding) => !decided.has(finding.id)).map((finding) => finding.id);
+    if (undecided.length > 0) return run.fail(`judge left ${undecided.join(', ')} undecided`);
+    let targets = findings.filter((finding) => decided.get(finding.id)?.verdict === 'fix');
     const tickets: z.infer<typeof FollowUp>[] = [];
-    if (findings.length > 0) {
-      const judged = await run.stage(judge, {
-        brief,
-        requirements: reading.requirements,
-        findings: { findings },
-        evidence: { validation: validated.output, demonstration: shown.output, reviews: summaries },
-      });
-      if (judged.outcome === 'blocked') return run.fail(`judge blocked: ${judged.reason}`);
-      judgement = judged.output;
-      const decided = new Map(judgement.decisions.map((each) => [each.finding, each]));
-      const undecided = findings.filter((finding) => !decided.has(finding.id)).map((finding) => finding.id);
-      if (undecided.length > 0) return run.fail(`judge left ${undecided.join(', ')} undecided`);
-      targets = findings.filter((finding) => decided.get(finding.id)?.verdict === 'fix');
-      for (const decision of judgement.decisions) {
-        if (decision.verdict === 'ticket' && decision.ticket !== null)
-          tickets.push({ ...decision.ticket, fromReview: true });
-      }
+    for (const decision of judgement.decisions) {
+      if (decision.verdict === 'ticket' && decision.ticket !== null)
+        tickets.push({ ...decision.ticket, fromReview: true });
     }
+    const { thin } = judgement;
 
     // Fix, then review the fixes beside a fresh validation, up to FIX_PASSES passes. What is still open, what the fixes
     // broke at medium or above, and a failed validation go to the next pass.
@@ -170,7 +202,7 @@ export default workflow(
       }
     }
 
-    // Push the fixes, file the tickets, comment the review.
+    // Push the fixes, file the tickets, put the demonstration on the ticket, comment the review.
     const pushed = await run.stage(push, { since });
     if (tickets.length > 0) {
       await run.stage(fileFollowUps, {
@@ -179,12 +211,18 @@ export default workflow(
         origin: `the review of pull request #${number}`,
       });
     }
+    if (ticketKey !== undefined) {
+      await run.stage(attachDemonstration, { demonstration: shown.output, ticketKey, pr: pullRequest });
+    }
     await run.stage(report, {
-      record: { findings, judgement, rounds, resolved, open },
+      record: { findings, judgement, rounds, resolved, open, thin },
       pr: pullRequest,
       label: LABEL,
     });
     if (!resolved) return run.fail(`review: ${open.length} still open after ${rounds.length} fix rounds`);
+    if (thin.length > 0) {
+      return run.fail(`review: ${thin.map((each) => `review-${each.lens}`).join(', ')} too thin to trust`);
+    }
 
     // Merge once the checks on the pushed head pass.
     const merged = await run.stage(merge, { pr: pullRequest, headSha: pushed.output.headSha, label: LABEL });

@@ -65,6 +65,10 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
 - End the step **blocked** only when the harness itself can't run: `demo.sh new` fails, or a tool it needs is missing.
   A scenario the harness doesn't run is a report, as is a change that runs and behaves wrong.
 
+Each demo repository's `transcript.txt` and every screenshot you capture are attached to the pull request's ticket,
+for a reader who wasn't here. Name each screenshot after what it shows (`run-view-total`, not `shot-1`), and capture
+one for each criterion a view shows.
+
 ## Submit
 
 Submit each acceptance criterion you ran a scenario for, in the requirements' or the Demonstration section's words,

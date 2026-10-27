@@ -154,101 +154,6 @@
       }
     }
   ],
-  "review#1": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "The footer meets the first criterion; the empty run is the open one.",
-        "findings": [
-          {
-            "severity": "medium",
-            "file": "src/cli/commands/show.ts",
-            "title": "An empty run prints no amount",
-            "detail": "With no agent calls the sum is undefined, so the footer prints `total $`."
-          }
-        ]
-      },
-      "turns": 20,
-      "usage": {
-        "inputTokens": 0,
-        "cacheReadTokens": 0,
-        "cacheWriteTokens": 0,
-        "outputTokens": 0,
-        "costUsd": 0.8
-      }
-    }
-  ],
-  "review#2": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "The footer fits show.ts's renderer.",
-        "findings": []
-      },
-      "turns": 20,
-      "usage": {
-        "inputTokens": 0,
-        "cacheReadTokens": 0,
-        "cacheWriteTokens": 0,
-        "outputTokens": 0,
-        "costUsd": 0.8
-      }
-    }
-  ],
-  "review#3": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "Readable; one naming nit.",
-        "findings": [
-          {
-            "severity": "low",
-            "file": "src/cli/commands/show.ts",
-            "title": "`tot` is a terse name",
-            "detail": "`tot` reads as a typo; `total` matches the rest of the file."
-          }
-        ]
-      },
-      "turns": 20,
-      "usage": {
-        "inputTokens": 0,
-        "cacheReadTokens": 0,
-        "cacheWriteTokens": 0,
-        "outputTokens": 0,
-        "costUsd": 0.8
-      }
-    }
-  ],
-  "review#4": [
-    {
-      "outcome": "done",
-      "output": {
-        "summary": "One rounding bug.",
-        "findings": [
-          {
-            "severity": "high",
-            "file": "src/cli/commands/show.ts",
-            "title": "A cost of 0.005 prints as $0.00",
-            "detail": "toFixed rounds binary floats down here, so 0.005 shows as 0.00."
-          },
-          {
-            "severity": "medium",
-            "file": "src/cli/commands/runs.ts",
-            "title": "sail runs sums costs the same unrounded way",
-            "detail": "runs.ts has the same float sum, outside this change."
-          }
-        ]
-      },
-      "turns": 20,
-      "usage": {
-        "inputTokens": 0,
-        "cacheReadTokens": 0,
-        "cacheWriteTokens": 0,
-        "outputTokens": 0,
-        "costUsd": 0.8
-      }
-    }
-  ],
   "judge": [
     {
       "outcome": "done",
@@ -275,18 +180,12 @@
           },
           {
             "finding": "R2",
-            "verdict": "drop",
-            "rationale": "Taste: the name is local to one function.",
-            "ticket": null
-          },
-          {
-            "finding": "R3",
             "verdict": "fix",
             "rationale": "A real bug in the line this change adds.",
             "ticket": null
           },
           {
-            "finding": "R4",
+            "finding": "R3",
             "verdict": "ticket",
             "rationale": "Real, but in runs.ts, outside this change.",
             "ticket": {
@@ -294,8 +193,15 @@
               "description": "`src/cli/commands/runs.ts` sums `costUsd` as floats and prints them unrounded, as show.ts did before its review.",
               "type": "bug"
             }
+          },
+          {
+            "finding": "R4",
+            "verdict": "drop",
+            "rationale": "Taste: the name is local to one function.",
+            "ticket": null
           }
-        ]
+        ],
+        "thin": []
       },
       "turns": 18,
       "usage": {
@@ -323,7 +229,7 @@
             "note": "Same fix as V1."
           },
           {
-            "finding": "R3",
+            "finding": "R2",
             "commit": "2222222222222222222222222222222222222222",
             "note": "Rounds in cents."
           }
@@ -355,7 +261,7 @@
             "detail": "An empty run prints `total $0.00`."
           },
           {
-            "finding": "R3",
+            "finding": "R2",
             "resolved": false,
             "detail": "Rounds 0.005 correctly, but 1.005 still prints 1.00: the cents are taken before the multiply."
           }
@@ -388,7 +294,7 @@
             "detail": "Holds."
           },
           {
-            "finding": "R3",
+            "finding": "R2",
             "resolved": true,
             "detail": "1.005 prints 1.01; the test covers both edges."
           }
@@ -402,6 +308,202 @@
         "cacheWriteTokens": 0,
         "outputTokens": 0,
         "costUsd": 0.6
+      }
+    }
+  ],
+  "review-requirements": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The footer meets the first criterion; the empty run is the open one.",
+        "coverage": [
+          {
+            "what": "`sail show <run>` ends with `total $<cost>`",
+            "how": "show.ts footer, and test/cli/show.test.ts 'prints the total'",
+            "status": "holds"
+          },
+          {
+            "what": "A run with no agent calls prints `total $0.00`",
+            "how": "show.ts sums with reduce and no initial value; no test covers an empty run",
+            "status": "finding"
+          },
+          {
+            "what": "Nothing beyond the requirements",
+            "how": "git diff --stat: show.ts and its test only",
+            "status": "holds"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "medium",
+            "file": "src/cli/commands/show.ts",
+            "title": "An empty run prints no amount",
+            "detail": "With no agent calls the sum is undefined, so the footer prints `total $`."
+          }
+        ]
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review-architecture": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The footer fits show.ts's renderer.",
+        "coverage": [
+          {
+            "what": "src/cli/commands/show.ts",
+            "how": "the footer stays in the CLI renderer; summary.json is read as before",
+            "status": "holds"
+          },
+          {
+            "what": "Contracts changed",
+            "how": "none: no event, schema or flag changes",
+            "status": "holds"
+          }
+        ],
+        "findings": []
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review-bugs": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "One rounding bug, and the same sum elsewhere.",
+        "coverage": [
+          {
+            "what": "footer(calls)",
+            "how": "traced 0 calls, 1 call, costs of 0.005 and 1.005",
+            "status": "finding"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "high",
+            "file": "src/cli/commands/show.ts",
+            "title": "A cost of 0.005 prints as $0.00",
+            "detail": "toFixed rounds binary floats down here, so 0.005 shows as 0.00."
+          },
+          {
+            "severity": "medium",
+            "file": "src/cli/commands/runs.ts",
+            "title": "sail runs sums costs the same unrounded way",
+            "detail": "runs.ts has the same float sum, outside this change."
+          }
+        ]
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review-tests": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "The new test proves the footer for a run with calls.",
+        "coverage": [
+          {
+            "what": "The footer line",
+            "how": "test/cli/show.test.ts asserts the exact line; reverting show.ts turns it red",
+            "status": "holds"
+          }
+        ],
+        "findings": []
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review-security": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Nothing reaches a command, path or prompt.",
+        "coverage": [
+          {
+            "what": "Untrusted input",
+            "how": "the footer prints numbers from summary.json only",
+            "status": "holds"
+          },
+          {
+            "what": "Permissions and secrets",
+            "how": "no stage, permission or credential changes",
+            "status": "holds"
+          }
+        ],
+        "findings": []
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
+  ],
+  "review-conventions": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "Readable; one naming nit.",
+        "coverage": [
+          {
+            "what": "Commit subjects",
+            "how": "git log: feat(cli): ... (FAKE-1)",
+            "status": "holds"
+          },
+          {
+            "what": "Names",
+            "how": "`tot` in show.ts",
+            "status": "finding"
+          }
+        ],
+        "findings": [
+          {
+            "severity": "low",
+            "file": "src/cli/commands/show.ts",
+            "title": "`tot` is a terse name",
+            "detail": "`tot` reads as a typo; `total` matches the rest of the file."
+          }
+        ]
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
       }
     }
   ]
