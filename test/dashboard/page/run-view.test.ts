@@ -113,9 +113,12 @@ test('a running card shows running and its time so far, a PR link is drawn only 
 });
 
 test("the footer shows the golden run's tokens from its summary once it has ended", () => {
-  expect(renderStatus(foldRun(readEvents(GOLDEN_RUN)), summaryOf(GOLDEN_RUN)).value).toContain(
-    'tokens <b>28.4k</b> in · <b>9.0k</b> out · <b>189k</b> cached',
-  );
+  const model = foldRun(readEvents(GOLDEN_RUN));
+  const summary = summaryOf(GOLDEN_RUN);
+  expect(renderStatus(model, summary).value).toContain('tokens <b>28.4k</b> in · <b>9.0k</b> out · <b>189k</b> cached');
+  const usage = { ...summary.totals.usage, inputTokens: 534, outputTokens: 12_600, cacheReadTokens: 13_000_000 };
+  const final = { ...summary, totals: { ...summary.totals, usage } };
+  expect(renderStatus(model, final).value).toContain('tokens <b>534</b> in · <b>12.6k</b> out · <b>13m</b> cached');
 });
 
 test("while a call runs, the footer's tokens count its live usage over a summary written before it", () => {
