@@ -278,6 +278,33 @@ test('a suspended run keeps its worktree and its lease, and a failed run release
   });
 });
 
+test("a failed run that committed in its workspace keeps its commits at refs/sail/runs/<runId>, which workspace:released records, and run:end's message stays the run's own", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 99 });
+    before(sail, IMPLEMENT_SCRIPT, IMPLEMENT_BODY, 'git -C "$WORKSPACE" commit -q --allow-empty -m "implement $CALL"');
+    const end = await ran(repo.dir);
+    const ref = `refs/sail/runs/${end.runId}`;
+    const list = readEvents(end.dir);
+    const released = list.find((event) => event.type === 'workspace:released');
+    const last = list.at(-1);
+    expect({
+      status: end.status,
+      released: released?.type === 'workspace:released' ? { ref: released.ref, head: released.head } : released,
+      message: last?.type === 'run:end' ? last.message?.includes('refs/sail/runs/') : last?.type,
+      kept: repo.git('log', '--format=%s', `main..${ref}`).split('\n')[0],
+      issues: validateRunDir(end.dir).issues.map(formatIssue),
+      worktrees: worktrees(repo),
+    }).toEqual({
+      status: 'failed',
+      released: { ref, head: repo.git('rev-parse', ref) },
+      message: false,
+      kept: expect.stringMatching(/^implement \d+$/),
+      issues: [],
+      worktrees: [],
+    });
+  });
+});
+
 test("a run whose workspace can't be removed still releases its lease, and its run:end says which workspace it left", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
@@ -306,7 +333,7 @@ test("a run whose workspace can't be removed still releases its lease, and its r
       lease: readLease(leasesOf(repo.dir), REMOTE, BRANCH) ?? null,
     }).toEqual({
       status: 'completed',
-      message: `its workspace at .sail-runs/${end.runId}/workspace was not removed`,
+      message: `its workspace at .sail-runs/${end.runId}/workspace was not released`,
       lease: null,
     });
   });

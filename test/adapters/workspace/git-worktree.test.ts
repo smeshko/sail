@@ -639,3 +639,36 @@ test('a locked workspace is still removed on release, and git no longer lists it
     }).toEqual({ released: false, workspace: false, listed: false });
   });
 });
+
+test("a release whose commits can't be kept at their ref still removes the workspace, then fails as unavailable, naming the ref and the commit", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const adapter = adapterOf(repo, w);
+    const run = runIn(w.runsDir);
+    const { path, baseSha } = await adapter.create(run, { branch: BRANCH });
+    writeFileSync(join(run.runDir, 'run.json'), JSON.stringify({ repository: { baseSha } }));
+    gitIn(repo, path, 'commit', '-q', '--allow-empty', '-m', 'work');
+    const head = gitIn(repo, path, 'rev-parse', 'HEAD').stdout;
+    // A lock git left behind: the ref can't be written.
+    mkdirSync(join(repo.dir, '.git', 'refs', 'sail', 'runs'), { recursive: true });
+    writeFileSync(join(repo.dir, '.git', 'refs', 'sail', 'runs', 'r1.lock'), '');
+    let failure: unknown;
+    try {
+      await adapter.release(run, false);
+    } catch (error) {
+      failure = error;
+    }
+    expect({
+      failure: portFailure(failure),
+      message: messageOf(failure).split(': ')[1],
+      workspace: existsSync(path),
+      ref: gitIn(repo, repo.dir, 'rev-parse', '--verify', '--quiet', 'refs/sail/runs/r1').code,
+    }).toEqual({
+      failure: { port: 'workspace', op: 'release', code: 'unavailable' },
+      message: `its commits at ${head} were not kept at refs/sail/runs/r1`,
+      workspace: false,
+      ref: 1,
+    });
+  });
+});

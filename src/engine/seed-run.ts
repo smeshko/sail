@@ -48,7 +48,7 @@ import {
   undoOpened,
 } from './open-run';
 import { modelProblems } from './roster';
-import { runsDir, type Source, writeStatus } from './run-dir';
+import { copyStageFolders, runsDir, type Source, writeStatus } from './run-dir';
 import {
   assertRunHeader,
   buildRunHeader,
@@ -263,6 +263,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
         errorOnExist: true,
       });
     }
+    // A fresh copy, not the source run's: the seeded run is a new run of the workflow as it reads now.
+    copyStageFolders(dir, root, header);
     writeRunHeader(dir, header);
     createJournal(dir);
     journaled = seed.map(({ seq: _, recordedAt: __, ...entry }) => appendJournal(dir, entry, now));

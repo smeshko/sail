@@ -234,6 +234,61 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expectValidEvents(capture);
   });
 
+  test(`${label}: a released workspace whose HEAD is past the base run.json records keeps it at refs/sail/runs/<runId>, out of git branch, and says so on workspace:released`, async () => {
+    const { adapter, world, capture } = await start();
+    const ids = ['moved', 'unmoved', 'unrecorded', 'kept'];
+    const runs: RunRef[] = [];
+    const paths: string[] = [];
+    for (const id of ids) {
+      const run = await world.run(id);
+      runs.push(run);
+      paths.push((await adapter.create(run, { base: world.base, branch: BRANCH })).path);
+    }
+    const [moved = '', unmoved = '', unrecorded = '', kept = ''] = paths;
+    // Only run.json's `repository.baseSha` is read. `unrecorded` has none, as a start refused before run.json has.
+    const header = { repository: { url: world.remote, defaultBranch: world.defaultBranch, baseSha: world.baseSha } };
+    for (const id of ['moved', 'unmoved', 'kept']) {
+      writeFileSync(join(world.runsDir, id, 'run.json'), JSON.stringify(header));
+    }
+    for (const path of [moved, unrecorded, kept]) {
+      expect(world.git(path, 'commit', '-q', '--allow-empty', '-m', 'work').code).toBe(0);
+    }
+    const head = world.git(moved, 'rev-parse', 'HEAD').stdout;
+    const results = [];
+    for (const [index, run] of runs.entries()) results.push(await adapter.release(run, ids[index] === 'kept'));
+    expect(results.flatMap((result) => parseIssues(WorkspaceReleased, result))).toEqual([]);
+    expect(results.map(bare)).toEqual([
+      { path: moved, kept: false, ref: 'refs/sail/runs/moved', head },
+      { path: unmoved, kept: false },
+      { path: unrecorded, kept: false },
+      { path: kept, kept: true },
+    ]);
+    // A failed run whose workspace a sweep takes keeps its commits the same way.
+    const swept = await adapter.create(await world.run('swept', 'failed'), { base: world.base, branch: BRANCH });
+    writeFileSync(join(world.runsDir, 'swept', 'run.json'), JSON.stringify(header));
+    world.git(swept.path, 'commit', '-q', '--allow-empty', '-m', 'swept work');
+    const sweptHead = world.git(swept.path, 'rev-parse', 'HEAD').stdout;
+    expect((await adapter.sweep(world.runsDir)).paths).toEqual([swept.path]);
+    expect({
+      refs: world.git(kept, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/sail/').stdout.split('\n'),
+      // No branch reaches it. `git branch` would list a detached HEAD that contains it as (no branch).
+      branches: world.git(kept, 'for-each-ref', '--contains', head, 'refs/heads', 'refs/remotes').stdout,
+      log: world.git(kept, 'log', '-1', '--format=%s', 'refs/sail/runs/moved').stdout,
+    }).toEqual({
+      refs: [`refs/sail/runs/moved ${head}`, `refs/sail/runs/swept ${sweptHead}`],
+      branches: '',
+      log: 'work',
+    });
+    expect(capture.events.filter((event) => event.type === 'workspace:released')[0]).toEqual({
+      type: 'workspace:released',
+      path: moved,
+      kept: false,
+      ref: 'refs/sail/runs/moved',
+      head,
+    });
+    expectValidEvents(capture);
+  });
+
   test(`${label}: sweep removes the workspaces of completed and failed runs, and keeps the rest`, async () => {
     const { adapter, world } = await start();
     const statuses: (Status | 'none')[] = ['completed', 'failed', 'running', 'suspended', 'none'];

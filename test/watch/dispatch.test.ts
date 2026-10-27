@@ -598,6 +598,40 @@ test('a started ticket not claimed by a failed run of this clone is still droppe
   });
 });
 
+test('a forced item is forced for its first start only: once its run failed, its retry re-checks the ticket and drops it when another run took it to In Review, while a forced first start still starts In Progress', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2, { claiming: false });
+    expect((await w.ticketSource.claim('FAKE-2')).claimed).toBe(true);
+    for (const key of ['FAKE-1', 'FAKE-2']) {
+      w.store.drop(`ticket:${key}`, 'to be added again, forced');
+      w.store.add([await w.ticketSource.get(key)], { forced: true });
+    }
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const firstStarts = w.spawner.runs.map((run) => [run.ticketKey, run.force]);
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stage_error' });
+    await dispatcher.tick();
+    // Run by hand meanwhile: it completed, opened its pull request and moved the ticket on.
+    await w.ticketSource.update('FAKE-1', { state: 'in-review' });
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect({
+      firstStarts,
+      started: spawnedKeys(w.spawner),
+      items: states(w.store),
+      dropped: eventsOf(w.runs, 'queue:dropped').filter((event) => event.reason !== 'to be added again, forced'),
+    }).toEqual({
+      firstStarts: [
+        ['FAKE-1', true],
+        ['FAKE-2', true],
+      ],
+      started: ['FAKE-1', 'FAKE-2'],
+      items: ['FAKE-2 dispatched 1'],
+      dropped: [{ dedupKey: 'ticket:FAKE-1', reason: 'it is In Review' }],
+    });
+  });
+});
+
 // Pull requests (14.2's D10): the lease on the queued branch first, from the queue alone, then a re-check of the pull
 // request through the CodeHost, and a run pinned to the queued head sha.
 

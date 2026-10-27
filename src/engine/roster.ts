@@ -19,6 +19,8 @@ export interface StepRosterEntry {
   network?: readonly string[];
   permissions?: Permissions;
   budget?: Budget;
+  /** An agent step's own conventions, when it names them. */
+  conventions?: string[];
 }
 
 /** A stage: a one-step agent or script recorded flat, or a stage of several steps. */
@@ -32,6 +34,8 @@ export interface RosterEntry {
   permissions?: Permissions;
   exitCodes?: { passed?: readonly number[]; failed?: readonly number[]; error?: readonly number[] };
   budget?: Budget;
+  /** An agent step's own conventions, when it names them. */
+  conventions?: string[];
   steps?: StepRosterEntry[];
 }
 
@@ -109,7 +113,16 @@ function stepFields(
   const own = { ...field('output', name(step.output)), ...field('produces', produces) };
   if (step.kind === 'agent') {
     const model = config.models[step.model ?? 'default'];
-    return { kind: 'agent', ...field('model', model), ...own, permissions: step.permissions, budget: step.budget };
+    // An empty list is recorded: it appends none, where a step that names none gets the project's.
+    const conventions = step.conventions === undefined ? {} : { conventions: [...step.conventions] };
+    return {
+      kind: 'agent',
+      ...field('model', model),
+      ...own,
+      permissions: step.permissions,
+      budget: step.budget,
+      ...conventions,
+    };
   }
   const network = step.network === 'none' ? [] : step.network;
   return { kind: 'script', ...own, ...(network === undefined ? {} : { network }) };

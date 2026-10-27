@@ -101,6 +101,27 @@ test('a suspended run stopped ends failed stopped: STATUS, run:end last with the
   });
 });
 
+test('a stopped run that committed in its workspace keeps its commits at refs/sail/runs/<runId>, which workspace:released records', async () => {
+  await withTempRepo(async (repo) => {
+    const end = await suspendedRun(repo);
+    repo.git('-C', join(end.dir, 'workspace'), 'commit', '-q', '--allow-empty', '-m', 'work');
+    const head = repo.git('-C', join(end.dir, 'workspace'), 'rev-parse', 'HEAD');
+    const stopped = await stop(repo, end.runId);
+    const ref = `refs/sail/runs/${end.runId}`;
+    expect({
+      message: 'ended' in stopped ? stopped.ended.message : stopped,
+      released: events(end.dir).find((event) => event.type === 'workspace:released')?.ref,
+      kept: repo.git('rev-parse', ref),
+      ...stoppedState(repo, end),
+    }).toEqual({
+      message: 'stopped by sail stop',
+      released: ref,
+      kept: head,
+      ...STOPPED,
+    });
+  });
+});
+
 test('a run left running by a process that is gone is stopped the same way, its torn last event cut first', async () => {
   await withTempRepo(async (repo) => {
     const end = await suspendedRun(repo);

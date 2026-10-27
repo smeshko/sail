@@ -27,6 +27,7 @@ export const plan = agent('plan', {
       'wc *',
       'sed -n *',
       'echo *',
+      'bun --version',
       'git log *',
       'git diff *',
       'git show *',

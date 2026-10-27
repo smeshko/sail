@@ -189,6 +189,12 @@
       },
       "additionalProperties": false
     },
+    "conventions": {
+      "description": "an agent step's own convention files, in place of project.yaml's; none when empty",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
     "permissions": {
       "type": "object",
       "properties": {
@@ -221,6 +227,7 @@
         "permissions": { "$ref": "#/$defs/permissions" },
         "exitCodes": { "$ref": "#/$defs/exitCodes" },
         "budget": { "$ref": "#/$defs/stepBudget" },
+        "conventions": { "$ref": "#/$defs/conventions" },
         "steps": {
           "type": "array",
           "minItems": 2,
@@ -242,6 +249,7 @@
         "permissions": { "$ref": "#/$defs/permissions" },
         "exitCodes": { "$ref": "#/$defs/exitCodes" },
         "budget": { "$ref": "#/$defs/stepBudget" },
+        "conventions": { "$ref": "#/$defs/conventions" },
         "steps": {
           "type": "array",
           "minItems": 2,
@@ -261,7 +269,8 @@
         "produces": { "type": "array", "items": { "type": "string" } },
         "permissions": { "$ref": "#/$defs/permissions" },
         "network": { "type": "array", "items": { "type": "string" } },
-        "budget": { "$ref": "#/$defs/stepBudget" }
+        "budget": { "$ref": "#/$defs/stepBudget" },
+        "conventions": { "$ref": "#/$defs/conventions" }
       },
       "required": ["step", "kind"],
       "additionalProperties": false

@@ -306,7 +306,8 @@ interface Payloads {
   'workspace:leased': { remote: string; branch: string; took?: string };
   'workspace:lease_released': { remote: string; branch: string };
   'workspace:created': { path: string; branch: string; baseSha: string; durationMs: number };
-  'workspace:released': { path: string; kept: boolean };
+  /** `ref` is where a removed workspace's commits are kept, at `head`, when its `HEAD` had moved past its base. */
+  'workspace:released': { path: string; kept: boolean; ref?: string; head?: string };
 }
 
 type PayloadOf<T extends EventType> = Payloads[T];

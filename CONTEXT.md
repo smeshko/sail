@@ -187,7 +187,7 @@ A piece of prompt text sail appends to every agent step's prompt: one about untr
 _Avoid_: partial, include, snippet, footer
 
 **Conventions**:
-The repository's own instruction files for agents, such as `AGENTS.md`. The engine appends each one as it is, after the fragments, to every agent step's prompt. The config lists them, and an empty list appends none. With no list, they are `AGENTS.md` and `CLAUDE.md`, where those exist.
+The repository's own instruction files for agents, such as `AGENTS.md`. The engine appends each one as it is, after the fragments, to every agent step's prompt. The config lists them, and an empty list appends none. With no list, they are `AGENTS.md` and `CLAUDE.md`, where those exist. An agent step may name its own list, which replaces the config's for that step.
 _Avoid_: rules, guidelines, context files, memory
 
 **Submit**:
@@ -302,12 +302,16 @@ _Avoid_: bootstrap, install step, setup stage
 The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`. For a pull-request source it is the pull request's head.
 _Avoid_: start point, fork point
 
+**Run ref**:
+`refs/sail/runs/<runId>` in the repository: where a run's commits are kept when its workspace is removed with its `HEAD` past its base and on no remote-tracking ref, recorded as `ref` on `workspace:released`. A failed run never pushed its branch, so this is where its work survives. `git branch` doesn't list it and gc keeps what it reaches; `git branch <name> refs/sail/runs/<runId>` recovers the work.
+_Avoid_: backup branch, rescue ref
+
 **Branch**:
 Always the git branch, such as the one a run's workspace sits on. A workflow's routing decision is a route, never a branch.
 _Avoid_: using "branch" for a route or a fork in the workflow
 
 **Run directory**:
-Everything a run wrote: the run header, the journal, the events, the summary, and one directory per call holding its result and files.
+Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from, and one directory per call holding its result and files.
 _Avoid_: run folder, output directory, artifacts
 
 **Run header**:

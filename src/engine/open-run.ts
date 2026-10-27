@@ -62,7 +62,16 @@ import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
 import { modelProblems } from './roster';
-import { createRunDir, type RunStatus, readStatus, removeRunDir, runsDir, type Source, writeStatus } from './run-dir';
+import {
+  copyStageFolders,
+  createRunDir,
+  type RunStatus,
+  readStatus,
+  removeRunDir,
+  runsDir,
+  type Source,
+  writeStatus,
+} from './run-dir';
 import {
   type AdapterEntry,
   assertRunHeader,
@@ -533,6 +542,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const dir = run.runDir;
   try {
     assertRunHeader(header);
+    copyStageFolders(dir, root, header);
     writeRunHeader(dir, header);
     createJournal(dir);
     createEventsFile(dir);

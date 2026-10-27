@@ -19,6 +19,7 @@ import { withoutRepositoryVariables } from '../engine/git-env';
 import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
+import { checkoutPath } from '../engine/run-dir';
 import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
 
@@ -160,7 +161,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   // runs in the workspace.
   const at = (path: string) => relative(context.root, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
-  const recorded = { command: at(command), env };
+  const recorded = { command: checkoutPath(context.root, context.runDir, command), env };
 
   emit({
     type: 'script:exec',

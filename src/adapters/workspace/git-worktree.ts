@@ -14,7 +14,7 @@
 // the create, and the workspace is removed again.
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { z } from 'zod';
 import { withoutRepositoryVariables } from '../../engine/git-env';
 import { runProcess } from '../../engine/process';
@@ -29,6 +29,7 @@ import {
   diffWorkingTree,
   fetchRemote,
   gitSync,
+  releaseWorktree,
   removeWorktree,
   reopenWorktree,
   resolveCommit,
@@ -180,12 +181,18 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     },
     async release(run, keep) {
       const path = join(run.runDir, WORKSPACE_DIR);
-      const raw = keep ? null : removeWorktree(repo, run.runDir, 'release', env);
-      emit({ type: 'workspace:released', path, kept: keep });
-      return { path, kept: keep, raw };
+      if (keep) {
+        emit({ type: 'workspace:released', path, kept: keep });
+        return { path, kept: keep, raw: null };
+      }
+      const { raw, ...commits } = releaseWorktree(repo, run, 'release', env);
+      emit({ type: 'workspace:released', path, kept: keep, ...commits });
+      return { path, kept: keep, ...commits, raw };
     },
     async sweep(runsDir) {
-      const paths = sweepEnded(runsDir, (runDir) => removeWorktree(repo, runDir, 'sweep', env));
+      const paths = sweepEnded(runsDir, (runDir) =>
+        releaseWorktree(repo, { runId: basename(runDir), runDir }, 'sweep', env),
+      );
       return { paths, raw: null };
     },
     capabilities: () => ({ keep: true, sweep: true }),

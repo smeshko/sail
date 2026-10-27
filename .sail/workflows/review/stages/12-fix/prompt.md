@@ -28,6 +28,9 @@ For each, in order:
 If a fix turns out deeper than the finding looked, or would widen the change past its requirements, leave it, make no
 commit for it, and say why in its note. Don't fix what isn't listed.
 
+Read files with the Read tool, or `sed -n` for a range. Change them only with Edit and Write: `sed -i`, `python3` and
+a heredoc into a file are denied, and each denial costs a turn.
+
 ## Submit
 
 Submit each finding you were given, and each in `fresh`, by its id, with its fix commit's sha, or null when you made

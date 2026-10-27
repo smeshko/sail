@@ -41,6 +41,12 @@ hands the pull request to a human, so name one only for a real gap, never for a 
 A failed validation and an unshown criterion are `fix` unless the problem lies outside the change. Never `drop` a real
 problem to keep the pull request moving: a real problem out of scope is a `ticket`.
 
+An unshown criterion is `fix` only when the demonstration ran its scenario and saw the wrong thing. When its evidence
+says the harness couldn't run the scenario at all (a pipe, a second command alongside the first, a background process,
+a test), no fix to the code can show it either: read the tests the change adds for it. When a test asserts the
+criterion, `drop` the finding as covered by that test, naming it; when none does, it is `fix`, and the fix is that
+test, never another attempt at the demonstration.
+
 For a `ticket`, write the ticket: a title, a description a reader can act on without this run (the files, what is
 wrong, what triggers it), and its type: `bug`, `feature` or `refactoring`.
 

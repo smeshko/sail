@@ -20,8 +20,10 @@
 //   costs no provider call (D6). A leased item stays queued, uses no slot and counts no attempt, and says so with one
 //   `queue:skipped_leased` per holder. An item no longer designated or unstarted is dropped, unless its ticket is
 //   started by the claim of this clone's own run that failed (the latest `sail run <id> started` comment): a retry or a
-//   requeue must be able to run it again, and that run starts with `--force`. A forced item, added with
-//   `--force`, skips the re-check: only the lease holds it back, and its run starts with `--force`.
+//   requeue must be able to run it again, and that run starts with `--force`. A forced item, added with `--force`,
+//   skips the re-check on its first dispatch: only the lease holds it back, and its run starts with `--force`. What
+//   `--force` started is that dispatch, so once it has an attempt its retry is re-checked as any item's is, and a ticket
+//   another run moved on meanwhile is dropped rather than run a second time.
 // - **The start** is recorded before the process exists (`dispatched`, which counts the attempt and names the run),
 //   and its pid after (`spawned`, which emits `queue:dispatched`). The run claims its own ticket as it starts (D2): the
 //   dispatch only reads the ticket.
@@ -268,14 +270,15 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
 
   /**
    * Whether the item may start now, and whether its run must be forced: its branches are free, and its ticket is still
-   * designated and unstarted, or started by this clone's own failed run, which a forced start takes over.
+   * designated and unstarted, or started by this clone's own failed run, which a forced start takes over. A forced
+   * item skips the re-check until its first dispatch.
    */
   const eligible = async (item: QueueItem, remote: string): Promise<false | { force: boolean }> => {
     if (item.source.kind === 'pr') return (await eligiblePullRequest(item, item.source, remote)) && { force: false };
     const { ticketKey } = item.source;
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
     if (await leased(item, remote, branch)) return false;
-    if (item.forced === true) return { force: true };
+    if (item.forced === true && item.attempts === 0) return { force: true };
     const ticket = await getTicket(ticketSource, ticketKey);
     if (!ticketSource.isDesignated(ticket, label)) {
       store.drop(item.dedupKey, `it is not designated: it carries no '${label}' label`);

@@ -16,7 +16,15 @@ if (ticketKey === '') {
   process.exit(0);
 }
 
-const result = spawnSync('sail', ['port', 'ticket-source', 'get', ticketKey], { encoding: 'utf8' });
+// A read is safe to repeat: Linear going quiet for a moment (`… (unavailable)`) is retried, after 5 s then 15 s.
+const WAITS = [5_000, 15_000];
+let result = spawnSync('sail', ['port', 'ticket-source', 'get', ticketKey], { encoding: 'utf8' });
+for (const wait of WAITS) {
+  if (result.status === 0 || !/\(unavailable\)/.test(result.stderr)) break;
+  process.stderr.write(`${result.stderr.trim()}: retrying in ${wait / 1000} s\n`);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait);
+  result = spawnSync('sail', ['port', 'ticket-source', 'get', ticketKey], { encoding: 'utf8' });
+}
 if (result.status !== 0) {
   process.stderr.write(result.stderr);
   throw new Error(`sail port ticket-source get ${ticketKey} exited ${result.status}`);

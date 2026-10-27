@@ -17,7 +17,20 @@ export const judge = agent('judge', {
   permissions: {
     read: ['**'],
     write: ['$STAGE_OUT/**'],
-    commands: ['cat *', 'grep *', 'head *', 'tail *', 'wc *', 'git log *', 'git diff *', 'git show *', 'git grep *'],
+    commands: [
+      'cat *',
+      'grep *',
+      'head *',
+      'tail *',
+      'wc *',
+      'ls *',
+      'sed -n *',
+      'echo *',
+      'git log *',
+      'git diff *',
+      'git show *',
+      'git grep *',
+    ],
   },
   budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 15 },
 });

@@ -1187,7 +1187,9 @@
       "$ref": "#/$defs/envelope",
       "properties": {
         "path": { "type": "string" },
-        "kept": { "type": "boolean" }
+        "kept": { "type": "boolean" },
+        "ref": { "type": "string", "pattern": "^refs/sail/runs/" },
+        "head": { "$ref": "#/$defs/sha" }
       },
       "required": ["path", "kept"],
       "unevaluatedProperties": false

@@ -4,14 +4,16 @@
 // gate runs. A validation tests what changed since the branch's last validated commit, when it has one, so the
 // validation after a fix tests only what the fix changed: typecheck and lint still check everything. One gate runs at a
 // time on the machine: its test files already take a worker per core, and two runs' gates side by side slow each other.
+// A gate that outlasts GATE_SECONDS is stopped and fails the validation, so a hung gate never holds the lock for good.
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const root = process.cwd();
 const bun = process.env.SAIL_BUN ?? 'bun';
 const tail = (text, lines = 80) => text.split('\n').slice(-lines).join('\n').slice(-8000);
+const GATE_SECONDS = Number(process.env.SAIL_GATE_SECONDS ?? 1500);
 
 const status = spawnSync('git', ['-c', 'core.quotePath=false', 'status', '--porcelain=v1', '--untracked-files=all'], {
   cwd: root,
@@ -53,22 +55,55 @@ function lastValidated() {
 const since = lastValidated();
 if (since) process.stderr.write(`validate: testing what changed since ${since.slice(0, 12)}, validated last\n`);
 
-/** Runs the gate, passing its stdout and stderr through to stderr as they come, and collecting both in order. */
+/**
+ * Runs the gate, passing its stdout and stderr through to stderr as they come, and collecting both in order. The gate
+ * leads a process group of its own, so one past GATE_SECONDS is stopped with its test workers.
+ */
 function gate() {
   return new Promise((resolve) => {
     const child = spawn(bun, ['run', 'gate', ...(since ? ['--base', since] : [])], {
       cwd: root,
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
     const chunks = [];
     const pass = (chunk) => {
       chunks.push(chunk);
       process.stderr.write(chunk);
     };
+    const stop = () => {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {}
+    };
+    // Its own group is out of reach of the stage's: a stopped validation stops the gate itself.
+    for (const [signal, code] of [
+      ['SIGTERM', 143],
+      ['SIGINT', 130],
+      ['SIGHUP', 129],
+    ]) {
+      process.once(signal, () => {
+        stop();
+        process.exit(code);
+      });
+    }
+    let late = false;
+    const timer = setTimeout(() => {
+      late = true;
+      stop();
+    }, GATE_SECONDS * 1000);
     child.stdout.on('data', pass);
     child.stderr.on('data', pass);
     child.on('error', (error) => resolve({ code: null, log: `${error.message}\n` }));
-    child.on('close', (code) => resolve({ code, log: Buffer.concat(chunks).toString('utf8') }));
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      const log = Buffer.concat(chunks).toString('utf8');
+      resolve(
+        late
+          ? { code: null, log: `${log}\nvalidate: the gate outlasted ${GATE_SECONDS} s and was stopped\n` }
+          : { code, log },
+      );
+    });
   });
 }
 
@@ -107,6 +142,31 @@ function isStale() {
   }
 }
 
+/**
+ * Removes a lock left behind. It is renamed aside first, which only one waiter can do, then checked: a waiter that saw
+ * the same stale lock as another may have renamed the fresh lock that one took meanwhile, and puts it back.
+ */
+function takeOver() {
+  const seen = holder()?.pid;
+  const aside = `${LOCK}.${process.pid}`;
+  try {
+    renameSync(LOCK, aside);
+  } catch {
+    return;
+  }
+  let moved;
+  try {
+    moved = Number(readFileSync(join(aside, 'holder'), 'utf8').split(' ')[0]);
+  } catch {}
+  if (moved !== undefined && moved !== seen && isAlive(moved)) {
+    try {
+      renameSync(aside, LOCK);
+      return;
+    } catch {}
+  }
+  rmSync(aside, { recursive: true, force: true });
+}
+
 /** Takes the lock, waiting as long as another validation holds it, and frees it when this process exits. */
 async function lock() {
   for (let waiting = false; ; ) {
@@ -119,7 +179,7 @@ async function lock() {
       if (error.code !== 'EEXIST') throw error;
     }
     if (isStale()) {
-      rmSync(LOCK, { recursive: true, force: true });
+      takeOver();
       continue;
     }
     if (!waiting) {

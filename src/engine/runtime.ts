@@ -108,7 +108,7 @@ import {
   rootRelative,
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
-import { type StopReason, writeStatus } from './run-dir';
+import { copiedStageFile, type StopReason, writeStatus } from './run-dir';
 import { openSeededRun, type SeededRunOptions } from './seed-run';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
@@ -406,10 +406,11 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const { workspace } = opened;
       const run = { runId, runDir: dir };
       try {
+        // A head nothing pushed is kept at its run ref, which workspace:released names: the message stays the run's.
         await opened.adapters.workspace.release(run, false);
       } catch (error) {
         if (!(error instanceof PortError)) throw error;
-        const why = `its workspace at ${relative(root, workspace.path)} was not removed: ${error.message}`;
+        const why = `its workspace at ${relative(root, workspace.path)} was not released: ${error.message}`;
         message = message === undefined ? why : `${message}; ${why}`;
       }
       try {
@@ -483,7 +484,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         call: call.call,
         try: nextTry(dir, call.stageIndex, call.stage, call.call),
         definition: call.definition,
-        stageFile: call.stageFile,
+        stageFile: copiedStageFile(dir, header.stages[call.stage]?.origin, call.stageFile),
         workspace: opened.workspace.path,
         root,
         branch: opened.workspace.branch,

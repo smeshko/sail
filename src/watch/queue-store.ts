@@ -13,7 +13,8 @@
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
 //   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
 //   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
-// - A forced item, added with `--force`, says so in `forced`: its dispatch skips the re-check of designation and state.
+// - A forced item, added with `--force`, says so in `forced`: its first dispatch skips the re-check of designation and
+//   state, and a retry is re-checked. `requeue()` clears its attempts, so the dispatch after it is a first one again.
 //   An unforced item whose ticket its own failed run claimed passes the re-check too, and its run starts forced.
 // - A dispatch is two steps: `dispatched()` counts the attempt and names the run before any process exists, and
 //   `spawned()` adds the process's pid once it does, emitting `queue:dispatched`. An item a re-check finds ineligible
@@ -73,7 +74,7 @@ export const QueueItem = z.strictObject({
   /** Why it last failed. */
   reason: z.string().optional(),
   finishedAt: z.string().optional(),
-  /** Added with `--force`: dispatched without the re-check of designation and state, and started with `--force`. */
+  /** Added with `--force`: first dispatched without the re-check of designation and state, and started with `--force`. */
   forced: z.literal(true).optional(),
 });
 export type QueueItem = z.infer<typeof QueueItem>;

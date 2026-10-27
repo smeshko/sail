@@ -40,11 +40,14 @@ steps below say, in a commit of its own.
    looks right is not evidence. Don't commit a task whose acceptance fails.
 6. Run `bun run typecheck` and `bun run lint`. Run test files by name, never a folder or the whole suite, and never
    `bun run gate`: a broad run outlasts your 10-minute command limit, and validation runs the affected tests after the
-   last task.
+   last task. `bun scripts/affected-tests.ts --list` prints the test files your change selects.
 7. **Commit** the task's tests and code together: stage every path it changed by name (`git add <paths>`, never `-A`
    or `.`), then `git commit -m '<subject>'`, the task's suggested subject, its type or scope changed only if the diff
    demands it, ending with the ticket: `feat({{commit.scope}}): <what it does> ({{commit.ticketKey}})`. Write the
    message as one single-quoted `-m`: a message built with `$(…)` or a heredoc can't be checked, and is denied.
+
+Read files with the Read tool, or `sed -n` for a range. Change them only with Edit and Write: `sed -i`, `python3` and
+a heredoc into a file are denied, and each denial costs a turn.
 
 ## When something is wrong
 
