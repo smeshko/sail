@@ -2308,6 +2308,26 @@ test("a call of a group that throws after the journal holds the group whole keep
   });
 }, 30_000);
 
+test("a group whose calls all completed crashes with the journal's error when it can't be read for all:end", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    const crashed = ranTrio(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key === 'a#1') appendFileSync(join(onlyRun(repo.dir), JOURNAL_FILE), '\n');
+      },
+    });
+    const error = await crashed.then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(JournalError);
+
+    const list = events(onlyRun(repo.dir));
+    expect(list.at(-1)).toMatchObject({ type: 'error:crash', message: (error as JournalError).message });
+    expect(ofType(list, 'all:end')).toEqual([]);
+  });
+}, 30_000);
+
 // Multi-step calls in a run: brief-to-spec with publish a stage of two steps, describe on the fake harness, then open.
 
 const STEP_JOURNAL = [
