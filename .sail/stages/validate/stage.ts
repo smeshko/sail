@@ -14,5 +14,6 @@ export const Validation = z.object({
 export const validate = script('validate', {
   run: './run.sh',
   output: Validation,
-  timeoutSeconds: 1800,
+  // The gate waits its turn behind the other runs' gates on the machine.
+  timeoutSeconds: 3600,
 });

@@ -2,9 +2,11 @@
 // typecheck, lint and the affected tests. The full suite with its coverage gate is CI's `verify` check on the pull
 // request, which the run doesn't wait for. The gate's output goes to stderr as it comes, so the call's log fills while the
 // gate runs. A validation tests what changed since the branch's last validated commit, when it has one, so the
-// validation after a fix tests only what the fix changed: typecheck and lint still check everything.
+// validation after a fix tests only what the fix changed: typecheck and lint still check everything. One gate runs at a
+// time on the machine: its test files already take a worker per core, and two runs' gates side by side slow each other.
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const root = process.cwd();
@@ -70,6 +72,65 @@ function gate() {
   });
 }
 
+// The lock is a directory, which only one process can make, holding the holder's pid and workspace. A holder that died
+// without removing it, killed at the stage's timeout, leaves it to the next validation to remove.
+const LOCK = join(tmpdir(), 'sail-validate.lock');
+
+/** The holder of the lock: its pid and workspace, or undefined while it is still writing them. */
+function holder() {
+  try {
+    const [pid, ...dir] = readFileSync(join(LOCK, 'holder'), 'utf8').trim().split(' ');
+    return { pid: Number(pid), dir: dir.join(' ') };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a process with this pid exists: signal 0 checks without sending anything. */
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
+/** Whether the lock was left behind: its holder is gone, or never wrote itself down. */
+function isStale() {
+  const held = holder();
+  if (held) return !isAlive(held.pid);
+  try {
+    return Date.now() - statSync(LOCK).mtimeMs > 10_000;
+  } catch {
+    return false;
+  }
+}
+
+/** Takes the lock, waiting as long as another validation holds it, and frees it when this process exits. */
+async function lock() {
+  for (let waiting = false; ; ) {
+    try {
+      mkdirSync(LOCK);
+      writeFileSync(join(LOCK, 'holder'), `${process.pid} ${root}\n`);
+      process.on('exit', () => rmSync(LOCK, { recursive: true, force: true }));
+      return;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
+    if (isStale()) {
+      rmSync(LOCK, { recursive: true, force: true });
+      continue;
+    }
+    if (!waiting) {
+      process.stderr.write(`validate: waiting for the validation in ${holder()?.dir ?? 'another workspace'}\n`);
+      waiting = true;
+    }
+    await Bun.sleep(1000);
+  }
+}
+
+await lock();
 const { code, log } = await gate();
 const verify = { ok: code === 0, exitCode: code ?? -1, tail: failures(log) ?? tail(log) };
 
