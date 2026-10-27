@@ -136,7 +136,10 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   if ('issues' in config) return refuseConfig(config.issues);
 
   // What runs is type-checked: the stage's own files, so a half-edited workflow elsewhere doesn't block it.
-  const types = await typecheck(found.dir, { files: [stageFile] });
+  const types = await typecheck(found.dir, {
+    files: [stageFile],
+    ...(io.tsc === undefined ? {} : { tsc: io.tsc }),
+  });
   if ('internal' in types) {
     io.stderr(`sail stage run: could not run tsc\n${types.internal}\n`);
     return EXIT_INTERNAL;

@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { join, relative } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
-import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import { SPEC, SPEC_STAGE, submits, TICKET, writeAgentFixture } from '../helpers/agent-fixture';
@@ -421,6 +421,28 @@ test("a type error in the stage's own files is refused before it runs", async ()
     expect(stderr).toContain('TS2322');
     expect(stderr).toEndWith('sail stage run: 1 type error in .sail/stages/tests/stage.ts\n');
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('a tsc that cannot run exits 4 and says so, and runs no step', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureCopy(repo);
+    const tsc = join(repo.dir, 'missing', 'tsc');
+    const { code, stdout, stderr } = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir, { tsc });
+    const [first, second] = stderr.split('\n');
+    expect({
+      code,
+      stdout,
+      first,
+      reason: second?.startsWith('tsc exited '),
+      ran: existsSync(join(repo.dir, '.sail-runs')),
+    }).toEqual({
+      code: EXIT_INTERNAL,
+      stdout: '',
+      first: 'sail stage run: could not run tsc',
+      reason: true,
+      ran: false,
+    });
   });
 });
 

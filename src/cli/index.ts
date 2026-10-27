@@ -29,6 +29,8 @@ export interface Io {
   env?: Readonly<Record<string, string | undefined>>;
   /** All of stdin, as text. Present when the command may read it. */
   stdin?: () => Promise<string>;
+  /** The `tsc` the type-check runs. Falls back to TypeScript's own. */
+  tsc?: string;
 }
 
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.

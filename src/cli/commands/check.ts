@@ -117,7 +117,7 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
 
   // Before the type-check, so a stale declaration never reaches it.
   refreshEditorDeclarations(found.dir, io, at);
-  const types = await typecheck(found.dir);
+  const types = await typecheck(found.dir, io.tsc === undefined ? {} : { tsc: io.tsc });
   if ('internal' in types) {
     io.stderr(`sail check: could not run tsc\n${types.internal}\n`);
     return EXIT_INTERNAL;
