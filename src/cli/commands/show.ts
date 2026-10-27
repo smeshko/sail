@@ -22,12 +22,6 @@ import { at, interruptibly, refuseAs, terminalFor, verbosityOf } from './run-wor
 
 const COMMAND = 'sail show';
 
-/** Why the run stopped, from its last `run:end`: `sail.summary.v1` has no field for it. */
-function stopMessage(events: readonly SailEvent[]): string | undefined {
-  const last = events.findLast((event) => event.type === 'run:end');
-  return last?.type === 'run:end' ? last.message : undefined;
-}
-
 const costOf = (usd: number | undefined) => (usd === undefined ? '' : formatUsd(usd));
 
 /** A row per call, and one per step under its call, indented. `next` is where the workflow went from the call. */
@@ -47,8 +41,8 @@ function callRows(summary: Summary): string[][] {
 }
 
 /** The run as `sail show` prints it: a title, the calls, then how the run stopped, its loops, totals and cost. */
-function render(summary: Summary, message: string | undefined): string[] {
-  const { stopReason, totals } = summary;
+function render(summary: Summary): string[] {
+  const { stopReason, message, totals } = summary;
   const title = [summary.runId, summary.workflow, summary.status, stopReason, formatDuration(summary.durationMs ?? 0)]
     .filter((part) => part !== undefined)
     .join(' · ');
@@ -139,6 +133,6 @@ export async function show(args: Parsed, io: Io): Promise<ExitCode> {
   if ('refused' in read) return refuse(read.refused);
   const summary = summarize(read.events);
   if (summary === undefined) return refuse(`run ${run.runId}'s events hold no run:start`);
-  for (const line of render(summary, stopMessage(read.events))) io.stdout(`${line}\n`);
+  for (const line of render(summary)) io.stdout(`${line}\n`);
   return EXIT_OK;
 }

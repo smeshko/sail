@@ -87,6 +87,8 @@ export interface Summary {
   ticket?: { ticketKey: string; title: string; url?: string };
   status: 'running' | 'suspended' | 'completed' | 'failed';
   stopReason?: StopReason;
+  /** Why the run stopped, as its `run:end` said it. */
+  message?: string;
   startedAt: string;
   endedAt?: string;
   durationMs?: number;
@@ -155,7 +157,13 @@ export interface SummaryState {
   /** The ticket the intake fetched. */
   ticket?: NonNullable<Summary['ticket']>;
   ending?:
-    | { status: 'completed' | 'failed' | 'suspended'; stopReason?: StopReason; endedAt: string; result?: unknown }
+    | {
+        status: 'completed' | 'failed' | 'suspended';
+        stopReason?: StopReason;
+        message?: string;
+        endedAt: string;
+        result?: unknown;
+      }
     | undefined;
   latestTs?: string;
   calls: Map<string, CallState>;
@@ -297,6 +305,7 @@ function foldRunEnd(state: SummaryState, event: EventOf<'run:end'>): void {
   state.ending = defined<NonNullable<SummaryState['ending']>>({
     status: event.status,
     stopReason: event.stopReason,
+    message: event.message,
     endedAt: event.ts,
     result: event.status === 'completed' ? event.result : undefined,
   });
@@ -431,6 +440,7 @@ export function toSummary(state: SummaryState): Summary | undefined {
     ticket: state.ticket === undefined ? undefined : { ...state.ticket },
     status: ending?.status ?? 'running',
     stopReason: ending?.stopReason,
+    message: ending?.message,
     startedAt: run.startedAt,
     endedAt: ending?.endedAt,
     durationMs: elapsed(run.startedAt, ending?.endedAt ?? state.latestTs ?? run.startedAt),

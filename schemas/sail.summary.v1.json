@@ -58,6 +58,10 @@
         "interrupted"
       ]
     },
+    "message": {
+      "description": "what the run's last run:end said about how it ended, such as a run.fail() reason; absent when it said nothing",
+      "type": "string"
+    },
     "startedAt": { "$ref": "#/$defs/ts" },
     "endedAt": { "$ref": "#/$defs/ts" },
     "durationMs": { "type": "number", "minimum": 0 },
