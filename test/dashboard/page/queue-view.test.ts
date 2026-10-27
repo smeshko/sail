@@ -23,7 +23,7 @@ const queueEvents = (): QueueEvent[] =>
     .split('\n')
     .map((line) => JSON.parse(line));
 
-test("beta's queue view shows its header, its four items each in the box of its state, its recent events folded, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
+test("beta's queue view lists running first, shows its header, its four items each in the box of its state, its recent events folded, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
   const events = queueEvents();
   const id = queueId('beta', QUEUE_WORKFLOW);
   const panel = queuePanels(index(m.registryDir)).find((each) => queueId(each.repo, each.workflow) === id);
@@ -39,10 +39,17 @@ test("beta's queue view shows its header, its four items each in the box of its 
       ),
     ].map(([, box, state, key]) => `${box}: ${key} ${state}`),
   ).toEqual([
-    'waiting · 1: ticket:FAKE-5 queued',
     'running · 1: ticket:FAKE-3 dispatched',
+    'waiting · 1: ticket:FAKE-5 queued',
     'parked · 1: ticket:FAKE-6 parked',
     'done · 1: ticket:FAKE-4 done',
+  ]);
+  expect([...markup.matchAll(/<span class="sf"><i class="d \w+"><\/i>(\w+) /g)].map(([, label]) => label)).toEqual([
+    'running',
+    'waiting',
+    'failed',
+    'parked',
+    'done',
   ]);
   expect(markup).toContain('<div class="qrow2 done">');
   expect(markup).toContain(
