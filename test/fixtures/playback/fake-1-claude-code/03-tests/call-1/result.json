@@ -27,8 +27,8 @@
     }
   },
   "consumed": {},
-  "startedAt": "2026-09-25T09:00:33.300Z",
-  "finishedAt": "2026-09-25T09:00:34.000Z",
+  "startedAt": "2026-09-25T09:00:33.400Z",
+  "finishedAt": "2026-09-25T09:00:34.100Z",
   "durationMs": 700,
   "exit": {
     "code": 1,

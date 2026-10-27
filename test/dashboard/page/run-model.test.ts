@@ -367,14 +367,14 @@ test("a card's timeline holds its messages, steps and script commands with their
   expect(timeline('spec#1')).toEqual([
     {
       kind: 'message',
-      ts: '2026-09-25T09:00:02.900Z',
+      ts: '2026-09-25T09:00:03.000Z',
       text: 'Spec written: two tasks, greet() and the CLI first, then the tests.',
     },
   ]);
   expect(timeline('tests#1')).toEqual([
     {
       kind: 'script',
-      ts: '2026-09-25T09:00:06.500Z',
+      ts: '2026-09-25T09:00:06.600Z',
       command: '.sail/stages/tests/run.sh',
       durationMs: 100,
       code: 1,

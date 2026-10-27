@@ -1,4 +1,5 @@
 sail · ticket-to-pr v1 · FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
+                    keep-awake · held by fake
 intake#1            ▶ intake ticket · builtin
 intake#1              output valid
 intake#1              file ticket.json · 1.7 KB
@@ -78,7 +79,7 @@ publish#1/open        │ {"number":5,"url":"fake://codehost/fixture/pull/5","ti
 publish#1           ✓ passed · 2.1s
 publish#1           → end · on passed
 
-completed · 16.4s
+completed · 16.5s
   calls    8 · 3 passed, 4 done, 1 failed
   loops    fix 2/3
   replays  8

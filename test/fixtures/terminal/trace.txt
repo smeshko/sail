@@ -3,6 +3,7 @@ sail · ticket-to-pr v1 · FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N
                     · workspace:created {"path":".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace","branch":"sail/FAKE-1-add-a-shout-flag-to-the-greet-command","baseSha":"4203211311dad98c507528d05a25fff53b821b31","durationMs":100}
                     · ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}
                     · ticket:commented {"ticketKey":"FAKE-1","body":"sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started"}
+                    keep-awake · held by fake
 intake#1            ▶ intake ticket · builtin
 intake#1            · ticket:fetched {"ticketKey":"FAKE-1","title":"Add a --shout flag to the greet command","url":"fake://tickets/FAKE-1","comments":2,"links":0,"attachments":0,"durationMs":100}
 intake#1              output valid
@@ -140,7 +141,7 @@ publish#1           → end · on passed
                     · workspace:released {"path":".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace","kept":false}
                     · workspace:lease_released {"remote":"fake://origin","branch":"sail/FAKE-1-add-a-shout-flag-to-the-greet-command"}
 
-completed · 16.4s
+completed · 16.5s
   calls    8 · 3 passed, 4 done, 1 failed
   loops    fix 2/3
   replays  8

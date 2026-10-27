@@ -109,7 +109,7 @@ test('thinking and messages are escaped text; a tool row shows its input, durati
     '<div class="tcall t-running"><button class="trow" data-action="toggle-tool" data-call="c3">',
   );
   expect(closed).toContain('<span class="tmeta"><span class="mark">…</span>');
-  expect(closed).toContain('<span class="d-agent">28.6s · — · 3 tool calls · 1 denied</span>');
+  expect(closed).toContain('<span class="d-agent">28.5s · — · 3 tool calls · 1 denied</span>');
   expect(closed).not.toContain('class="tout"');
 
   const opened = renderTimeline(card, ui({ opened: ['c1', 'c2'] }), NOW).value;

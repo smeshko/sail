@@ -52,7 +52,7 @@ test('the golden run directory is valid against every run-directory schema', () 
   expect(counts).toMatchObject({
     'sail.run.v1': 1,
     'sail.journal.v1': 10,
-    'sail.event.v1': 129,
+    'sail.event.v1': 130,
     'sail.summary.v1': 1,
     'sail.result.v1': 10,
   });
@@ -108,7 +108,7 @@ test('it holds nothing a run cannot write yet: no tool, thinking or denial event
     'workspace:leased',
     'workspace:released',
   ]);
-  expect(types.size).toBe(33);
+  expect(types.size).toBe(34);
   const header = JSON.parse(text('run.json'));
   expect(Object.keys(header)).toEqual([
     'schema',
@@ -182,7 +182,10 @@ test('the golden run records its claim: run.json holds it, the stream reports it
     'workspace:created',
     'ticket:claimed',
     'ticket:commented',
-    'intake:start',
+    'run:keep_awake',
+  ]);
+  expect(events.filter((event) => event.type === 'run:keep_awake')).toEqual([
+    expect.objectContaining({ seq: 6, ts: '2026-09-25T09:00:01.200Z', held: true, by: 'fake' }),
   ]);
   const envelope = (seq: number, ts: string, type: string) => ({ seq, ts, type, runId: RUN_ID, ticketKey: 'FAKE-1' });
   expect(events.slice(3, 5)).toEqual([
