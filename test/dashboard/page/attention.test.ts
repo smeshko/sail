@@ -117,6 +117,16 @@ test('a failed run without a message keeps the ticket as its detail, and a suspe
   ]);
 });
 
+test('a suspended run without a message has the resume command alone as its detail', () => {
+  const repos = index(m.registryDir);
+  const suspended = repos.find((r) => r.name === 'beta')?.runs.find((r) => r.runId === FAKE_3_ID)?.summary;
+  if (suspended) Reflect.deleteProperty(suspended, 'message');
+  const details = attention(repos)
+    .filter((item) => item.kind === 'suspended')
+    .map((item) => item.detail);
+  expect(details).toEqual([`sail resume ${FAKE_3_ID}`]);
+});
+
 test("without beta's queue/ the parked item is gone, and the rest stays", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(attention(index(m.registryDir)).map((item) => `${item.repo} ${item.kind}`)).toEqual([
