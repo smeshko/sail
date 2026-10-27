@@ -300,12 +300,14 @@
       .subgrp-h .caret,
       .lgrp-h .caret,
       .wf-h .caret,
+      .qsec .caret,
       .qrecent-h .caret {
         transition: transform 0.12s;
       }
       .subgrp-h.open .caret,
       .lgrp-h.open .caret,
       .wf-h.open .caret,
+      .qsec.open .caret,
       .qrecent-h.open .caret {
         transform: rotate(90deg);
       }
@@ -848,7 +850,14 @@
         opacity: 0.6;
       }
       .qsec {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
         padding: 12px 14px 0;
+      }
+      .qsec:hover {
+        color: var(--fg-2);
       }
       .qbox {
         margin: 0 14px 4px;

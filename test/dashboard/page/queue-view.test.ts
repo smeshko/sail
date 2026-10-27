@@ -35,7 +35,7 @@ test("beta's queue view lists running first, shows its header, its four items ea
   expect(
     [
       ...markup.matchAll(
-        /<div class="qsec grp-t">([\w ·]+)<\/div><div class="qbox"><div class="qrow2[\w ]*"><span class="c-dot"><i class="(\w+)"><\/i><\/span><span class="c-ref">([\w:-]+)<\/span>/g,
+        /<button class="qsec grp-t open" data-action="toggle-queue-section" data-section="beta\/ticket-to-pr:\w+"><span class="caret">›<\/span>([\w ·]+)<\/button><div class="qbox"><div class="qrow2[\w ]*"><span class="c-dot"><i class="(\w+)"><\/i><\/span><span class="c-ref">([\w:-]+)<\/span>/g,
       ),
     ].map(([, box, state, key]) => `${box}: ${key} ${state}`),
   ).toEqual([
@@ -81,12 +81,26 @@ test("beta's queue view lists running first, shows its header, its four items ea
   expect(opened).toContain('<span class="ts">11:01:05</span><span class="tname">queue:parked</span>');
 });
 
+test('a folded section draws only its heading and count, without its items, while the other sections stay open', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const ui = { ...initialUi(0), folded: [`${queueId(panel.repo, panel.workflow)}:done`] };
+  const markup = renderQueue(panel, undefined, ui, NOW).value;
+  expect(markup).toContain(
+    '<button class="qsec grp-t" data-action="toggle-queue-section" data-section="beta/ticket-to-pr:done"><span class="caret">›</span>done · 1</button>\n',
+  );
+  expect(markup).not.toContain('ticket:FAKE-4');
+  for (const key of ['ticket:FAKE-3', 'ticket:FAKE-5', 'ticket:FAKE-6'])
+    expect(markup).toContain(`<span class="c-ref">${key}</span>`);
+  expect(markup.match(/<button class="qsec grp-t open"/g)).toHaveLength(3);
+});
+
 test('a failed item shows its requeue and drop commands, and a queue with no items says it is empty', () => {
   const [panel] = queuePanels(index(m.registryDir));
   if (panel === undefined) throw new Error('beta has no queue');
   const failed = panel.items.map((item) => (item.state === 'parked' ? { ...item, state: 'failed' as const } : item));
   const markup = renderQueue({ ...panel, items: failed }, undefined, initialUi(0), NOW).value;
-  expect(markup).toContain('<div class="qsec grp-t">failed · 1</div>');
+  expect(markup).toContain('<span class="caret">›</span>failed · 1</button><div class="qbox">');
   expect(markup).toContain('<code>sail queue requeue ticket-to-pr ticket:FAKE-6</code>');
   expect(renderQueue({ ...panel, items: [] }, undefined, initialUi(0), NOW).value).toContain(
     '<div class="qempty">the queue is empty</div>',

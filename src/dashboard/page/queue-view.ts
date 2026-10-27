@@ -1,5 +1,5 @@
 // The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
-// run, with its polling, a box of items for each state that has any (running first), and its recent events from the queue's own
+// run, with its polling, a box of items for each state that has any (running first) that folds from its heading, and its recent events from the queue's own
 // stream, folded until the person opens them. A failed or parked item shows the commands that requeue or drop it, to
 // copy, and an item whose run the rail lists opens it: the dashboard changes nothing itself.
 import type { QueueEvent } from '../../events/types';
@@ -108,7 +108,11 @@ ${
     : QUEUE_STATES.map((state) => {
         const items = panel.items.filter((item) => item.state === state);
         if (items.length === 0) return '';
-        return html`<div class="qsec grp-t">${LABELS[state]} · ${items.length}</div><div class="qbox">${items.map((item) => itemRow(panel, item, ui))}</div>`;
+        const id = `${queueId(panel.repo, panel.workflow)}:${state}`;
+        const open = !ui.folded.includes(id);
+        const heading = html`<button class="qsec grp-t${open ? ' open' : ''}" data-action="toggle-queue-section" data-section="${id}"><span class="caret">›</span>${LABELS[state]} · ${items.length}</button>`;
+        if (!open) return heading;
+        return html`${heading}<div class="qbox">${items.map((item) => itemRow(panel, item, ui))}</div>`;
       })
 }
 ${recentEvents(stream, ui)}
