@@ -16,6 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  diffWorkingTree,
   fetchRemote,
   gitSync,
   nonInteractive,
@@ -139,6 +140,26 @@ test("a remote's URL keys and logs without its credentials, and any other URL as
     'https://github.com/o/r.git',
     '/srv/git/r.git',
   ]);
+});
+
+test('a diff over <rev>... or <rev>...HEAD whose rev shares no commit with HEAD is invalid, saying so, while <rev> alone diffs', async () => {
+  await withTempRepo(async (repo) => {
+    const orphan = repo.git('commit-tree', repo.git('rev-parse', 'HEAD^{tree}'), '-m', 'unrelated');
+    const refused = (range: string) => {
+      try {
+        diffWorkingTree(repo.dir, range, repo.env);
+        return 'diffed';
+      } catch (error) {
+        return { failure: portFailure(error), said: messageOf(error).includes('share no commit') };
+      }
+    };
+    const invalid = { failure: { port: 'workspace', op: 'diff', code: 'invalid' }, said: true };
+    expect({
+      withHead: refused(`${orphan}...HEAD`),
+      bare: refused(`${orphan}...`),
+      alone: refused(orphan),
+    }).toEqual({ withHead: invalid, bare: invalid, alone: 'diffed' });
+  });
 });
 
 test.skipIf(process.getuid?.() === 0)(
