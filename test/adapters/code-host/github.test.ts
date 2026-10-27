@@ -863,6 +863,35 @@ test('a repeated name with a run lacking an id keeps every run of that name', as
   ]);
 });
 
+test.each<[string, string | null | number]>([
+  ['a string', '5'],
+  ['null', null],
+  ['a fraction', 2.5],
+])('a repeated name with a run whose id is %s keeps every run of that name', async (_name, id) => {
+  const on = checksWorld([
+    { id: 1, name: 'test', status: 'completed', conclusion: 'success' },
+    { id, name: 'test', status: 'completed', conclusion: 'failure' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'test', status: 'passed' },
+    { name: 'test', status: 'failed' },
+  ]);
+});
+
+test('a repeated name whose runs all have ids collapses beside a name with a run lacking one', async () => {
+  const on = checksWorld([
+    { id: 1, name: 'build', status: 'completed', conclusion: 'failure' },
+    { name: 'test', status: 'completed', conclusion: 'success' },
+    { id: 2, name: 'build', status: 'completed', conclusion: 'success' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'test', status: 'passed' },
+    { name: 'build', status: 'passed' },
+  ]);
+});
+
 test("runs of one name from different apps are distinct checks: an earlier app's failure is kept beside a later app's pass", async () => {
   const on = checksWorld([
     { id: 10, app: { id: 15368 }, name: 'build', status: 'completed', conclusion: 'failure' },
