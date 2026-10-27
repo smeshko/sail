@@ -605,6 +605,18 @@ test("callProblems of a multi-step stage checks the stage's own produces with it
   ]);
 });
 
+test("callProblems of a multi-step stage refuses its own produces name that differs from an engine file's only by case", () => {
+  const harness = createFakeHarness({ script: {} });
+  const variant = stage('variant', {
+    produces: { 'Result.json': 'file' },
+    output: PrInfo,
+    steps: [script('a', { run: './a.sh', output: z.object({}) }), script('b', { run: './b.sh', output: PrInfo })],
+  });
+  expect(callProblems(variant, {}, { harness, model: MODEL })).toEqual([
+    "step 'b': 'Result.json' can't be produced: the engine writes 'result.json' in $STAGE_OUT, and a file system that ignores case takes them for one",
+  ]);
+});
+
 test("an optional fromStep() the earlier step's output leaves out is bound to nothing: the step runs, and its result consumed it as null (review R1-5)", async () => {
   await withTempRepo(async (repo) => {
     const s = setup(repo);

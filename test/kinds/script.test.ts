@@ -388,6 +388,31 @@ test('a script on a later try sees TRY as that try', async () => {
   expect((run.record.env as Record<string, string>).TRY).toBe('3');
 });
 
+test("problems() refuses a produced name that differs from an engine file's or a try's only by case: a case-insensitive file system would clobber it", () => {
+  const tail = 'and a file system that ignores case takes them for one';
+  const variants = script('tests', {
+    run: './run.sh',
+    produces: {
+      'Prompt.md': 'file',
+      'RESULT.JSON': 'file',
+      In: 'file',
+      Steps: 'file',
+      'Session.Log': 'file',
+      'Try-2': 'file',
+      'Notes.md': 'file',
+    },
+    output: TestReport,
+  });
+  expect(scriptKind.problems(variants)).toEqual([
+    `'Prompt.md' can't be produced: the engine writes 'prompt.md' in $STAGE_OUT, ${tail}`,
+    `'RESULT.JSON' can't be produced: the engine writes 'result.json' in $STAGE_OUT, ${tail}`,
+    `'In' can't be produced: the engine writes 'in' in $STAGE_OUT, ${tail}`,
+    `'Steps' can't be produced: the engine writes 'steps' in $STAGE_OUT, ${tail}`,
+    `'Session.Log' can't be produced: the engine writes 'session.log' in $STAGE_OUT, ${tail}`,
+    `'Try-2' can't be produced: the engine uses 'try-2' for a later try, ${tail}`,
+  ]);
+});
+
 test('problems() reports overlapping exit codes, a produced name that is reserved or not plain, and a timeout that is not positive', () => {
   expect(scriptKind.problems(tests())).toEqual([]);
   expect(scriptKind.problems(tests({ exitCodes: { passed: [0], failed: [0, 1], error: [1] } }))).toEqual([
