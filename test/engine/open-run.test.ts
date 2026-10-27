@@ -24,6 +24,7 @@ import { validateRunDir } from '../../src/engine/schemas';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { TicketState } from '../../src/ports/types';
+import type { WorkspacePort } from '../../src/ports/workspace';
 import { fakeAdapters } from '../helpers/adapters';
 import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
@@ -319,6 +320,58 @@ test('reopenRun reopens a suspended run with the header on disk, nothing a claim
   });
 });
 
+test('reopenRun whose lease throws is refused, and leaves STATUS, the events and the leases as they were', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    const events = readFileSync(join(dir, 'events.ndjson'), 'utf8');
+    const adapters = await workspaceWith(repo.dir, 'lease', () => async () => {
+      throw new PortError('workspace', 'lease', 'unavailable', 'leases are down');
+    });
+    const leases = join(repo.dir, '.sail-runs', 'fake', 'leases');
+    const leasesBefore = existsSync(leases) ? readdirSync(leases) : [];
+
+    expect(await reopenRun({ cwd: repo.dir, runId: run.runId, adapters })).toEqual({
+      refused: `the branch ${run.header.branch} could not be leased: workspace.lease: leases are down (unavailable)`,
+    });
+    expect({
+      status: readStatus(dir),
+      events: readFileSync(join(dir, 'events.ndjson'), 'utf8'),
+      leases: existsSync(leases) ? readdirSync(leases) : [],
+    }).toEqual({ status: { status: 'suspended', stopReason: 'budget_exceeded' }, events, leases: leasesBefore });
+  });
+});
+
+test('reopenRun on a run a stop ended while it took the lease, whose release then fails, is refused naming the lease left behind, which is stale', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    const adapters = await workspaceWith(repo.dir, 'lease', (lease) => (...args) => {
+      writeStatus(dir, 'failed', 'stopped');
+      return lease(...args);
+    });
+    adapters.ports.workspace.releaseLease = async () => {
+      throw new PortError('workspace', 'releaseLease', 'unavailable', 'leases are down');
+    };
+
+    expect(await reopenRun({ cwd: repo.dir, runId: run.runId, adapters })).toEqual({
+      refused: `run ${run.runId} failed (stopped): a failed run is final, and its lease on ${run.header.branch} was not released: workspace.releaseLease: leases are down (unavailable)`,
+    });
+    expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'stopped' });
+    expect(readdirSync(join(repo.dir, '.sail-runs', 'fake', 'leases'))).toHaveLength(1);
+
+    const other = await fakeAdapters(repo.dir);
+    const { branch, repository } = run.header;
+    if (branch === undefined || repository === undefined) throw new Error('the run header names no branch');
+    const taken = await other.ports.workspace.lease(repository.url, branch, {
+      runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      runDir: join(repo.dir, '.sail-runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N'),
+      pid: process.pid,
+    });
+    expect(taken).toMatchObject({ leased: true });
+  });
+});
+
 test('openRun creates an empty events.ndjson beside the journal, and its events start at seq 1', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
@@ -567,6 +620,7 @@ interface StubRun {
   until?: string;
   signal?: AbortSignal;
   dispatch?: { runId: string };
+  headSha?: string;
 }
 
 /** Opens a run of the stub from `repoDir`, on the adapters given or its own. */
@@ -594,6 +648,18 @@ async function adaptersWith<Op extends 'claim' | 'comment'>(
   const adapters = await fakeAdapters(repoDir);
   const { ticketSource } = adapters.ports;
   ticketSource[op] = instead(ticketSource[op].bind(ticketSource) as TicketSource[Op]);
+  return adapters;
+}
+
+/** The repository's adapters, with `instead` answering in place of the Workspace port's own `op`. */
+async function workspaceWith<Op extends 'lease' | 'releaseLease'>(
+  repoDir: string,
+  op: Op,
+  instead: (own: WorkspacePort[Op]) => WorkspacePort[Op],
+): Promise<ResolvedAdapters> {
+  const adapters = await fakeAdapters(repoDir);
+  const { workspace } = adapters.ports;
+  workspace[op] = instead(workspace[op].bind(workspace) as WorkspacePort[Op]);
   return adapters;
 }
 
@@ -1068,4 +1134,36 @@ test("a workflow's own watch.label is the label a start checks: only the reposit
     { refused: "the ticket is not designated: it carries no 'sail-review' label. --force runs it anyway" },
     { runId: 'FAKE-6-', label: 'FAKE-6' },
   ]);
+});
+
+test('a start from a ticket with --head-sha is refused, with no run directory, lease or claim', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    expect(await openStub(repo.dir, { ticket: 'FAKE-1', headSha: 'abc1234' })).toEqual({
+      refused: '--head-sha pins a pull request to its head, and FAKE-1 is a ticket',
+    });
+    expect(await leftBehind(repo.dir)).toEqual({ runs: [], leases: [], state: 'Todo', comments: 1 });
+  });
+});
+
+test("a start whose lease throws is refused, naming the branch and the port's error, with no run directory, workspace, lease or claim", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await workspaceWith(repo.dir, 'lease', () => async () => {
+      throw new PortError('workspace', 'lease', 'unavailable', 'leases are down');
+    });
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
+    expect(run).toEqual({
+      refused:
+        'the branch sail/FAKE-1-add-a-greeting could not be leased: workspace.lease: leases are down (unavailable)',
+    });
+    expect(await leftBehind(repo.dir)).toEqual({ runs: [], leases: [], state: 'Todo', comments: 1 });
+    const worktrees = Bun.spawnSync(['git', 'worktree', 'list', '--porcelain'], { cwd: repo.dir, env: repo.env });
+    expect(
+      worktrees.stdout
+        .toString()
+        .split('\n')
+        .filter((line) => line.startsWith('worktree ')),
+    ).toHaveLength(1);
+  });
 });
