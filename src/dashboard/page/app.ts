@@ -127,6 +127,8 @@ export function boot(host: PageHost): Page {
   let resultRead = 0;
   let logRead = 0;
   let lastLogRead = Number.NEGATIVE_INFINITY;
+  /** The key the log tab's text was read for: a call's, or one of its steps'. */
+  let logFor: string | undefined;
   /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
   let cursorPending = false;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
@@ -252,6 +254,8 @@ export function boot(host: PageHost): Page {
     const asked = ++logRead;
     const forSelection = selection;
     lastLogRead = host.now();
+    if (target.key !== logFor) log = undefined;
+    logFor = target.key;
     if (log === undefined) log = { state: 'loading' };
     void host.get(`${callPath(open, target.key)}/log?stream=${enc(stream)}`).then((answer) => {
       if (asked !== logRead || forSelection !== selection) return;
@@ -260,8 +264,14 @@ export function boot(host: PageHost): Page {
     });
   };
 
-  /** Reads a running call's log again, at most once a second. */
+  /** Reads a running call's log again, at most once a second, and at once when the log tab has moved to its next step. */
   const refreshLog = () => {
+    const card = run?.model.cards.find((entry) => entry.key === ui.key);
+    if (card !== undefined && logTarget(card, ui).key !== logFor) {
+      if (logTimer !== undefined) host.cancel(logTimer);
+      logTimer = undefined;
+      return readLog();
+    }
     if (logTimer !== undefined) return;
     const wait = Math.max(0, lastLogRead + LOG_REFRESH_MS - host.now());
     if (wait === 0) return readLog();
