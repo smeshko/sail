@@ -164,17 +164,16 @@ test('a diff over <rev>... or <rev>...HEAD whose rev shares no commit with HEAD 
 
 test.skipIf(process.getuid?.() === 0)(
   'a workspace that survives its removal, under a read-only run directory, is unavailable, naming the path, and stays on disk',
-  () => {
-    const root = mkdtempSync(join(tmpdir(), 'sail-survive-'));
-    try {
-      const runDir = join(root, 'run');
+  async () => {
+    await withTempRepo(async (repo) => {
+      const runDir = join(repo.dir, 'run');
       const workspace = join(runDir, 'workspace');
       mkdirSync(workspace, { recursive: true });
       writeFileSync(join(workspace, 'file.txt'), 'kept\n');
       chmodSync(runDir, 0o555);
       let error: unknown;
       try {
-        removeWorktree(root, runDir, 'release');
+        removeWorktree(repo.dir, runDir, 'release', repo.env);
       } catch (thrown) {
         error = thrown;
       } finally {
@@ -185,9 +184,7 @@ test.skipIf(process.getuid?.() === 0)(
         named: messageOf(error).includes(workspace),
         onDisk: existsSync(workspace),
       }).toEqual({ failure: { port: 'workspace', op: 'release', code: 'unavailable' }, named: true, onDisk: true });
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    });
   },
 );
 
