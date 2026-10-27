@@ -321,6 +321,23 @@ test(
 );
 
 test(
+  'each run the watcher dispatched went through the engine keep-awake: one run:keep_awake in its events, opted out by the environment',
+  async () => {
+    const run = await watched();
+    const reported = run.finished.map((each) =>
+      each.events
+        .filter((event) => event.type === 'run:keep_awake')
+        .map((event) => ({ held: event.held, reason: event.reason })),
+    );
+    expect(reported).toEqual([
+      [{ held: false, reason: 'SAIL_KEEP_AWAKE is off' }],
+      [{ held: false, reason: 'SAIL_KEEP_AWAKE is off' }],
+    ]);
+  },
+  TIMEOUT_MS,
+);
+
+test(
   'the SIGINT stopped the watcher with exit 0 and left both runs going: both pids were alive just after, and both runs end completed',
   async () => {
     const run = await watched();
