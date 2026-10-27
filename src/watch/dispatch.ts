@@ -18,7 +18,8 @@
 //   its ticket through the TicketSource, then the lease on the branch its fresh title names when that differs. The
 //   lease comes first because a leased item is skipped on every tick for as long as the lease lasts, and checking it
 //   costs no provider call (D6). A leased item stays queued, uses no slot and counts no attempt, and says so with one
-//   `queue:skipped_leased` per holder. An item no longer designated or unstarted is dropped, unless its ticket is
+//   `queue:skipped_leased` per holder. An item no longer designated or unstarted, or whose ticket the re-check doesn't
+//   find (`not_found`: deleted, or moved out of the team), is dropped, unless its ticket is
 //   started by the claim of this clone's own run that failed (the latest `sail run <id> started` comment): a retry or a
 //   requeue must be able to run it again, and that run starts with `--force`. A forced item, added with `--force`,
 //   skips the re-check on its first dispatch: only the lease holds it back, and its run starts with `--force`. What
@@ -314,7 +315,14 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
     if (await leased(item, remote, branch)) return false;
     if (item.forced === true && item.attempts === 0) return { force: true };
-    const ticket = await getTicket(ticketSource, ticketKey);
+    let ticket: Awaited<ReturnType<typeof getTicket>>;
+    try {
+      ticket = await getTicket(ticketSource, ticketKey);
+    } catch (error) {
+      if (!(error instanceof PortError && error.code === 'not_found')) throw error;
+      store.drop(item.dedupKey, `it no longer exists: ${error.message}`);
+      return false;
+    }
     if (!ticketSource.isDesignated(ticket, label)) {
       store.drop(item.dedupKey, `it is not designated: it carries no '${label}' label`);
       return false;
