@@ -127,6 +127,16 @@ test('a suspended run without a message has the resume command alone as its deta
   expect(details).toEqual([`sail resume ${FAKE_3_ID}`]);
 });
 
+test('a failed run without a ticket has its message alone as its detail', () => {
+  const repos = index(m.registryDir);
+  const failed = repos.find((r) => r.name === 'alpha')?.runs.find((r) => r.runId === FAKE_2_ID)?.summary;
+  if (failed) Reflect.deleteProperty(failed, 'ticket');
+  const details = attention(repos)
+    .filter((item) => item.kind === 'failed')
+    .map((item) => item.detail);
+  expect(details).toEqual([FAKE_2_MESSAGE]);
+});
+
 test("without beta's queue/ the parked item is gone, and the rest stays", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   expect(attention(index(m.registryDir)).map((item) => `${item.repo} ${item.kind}`)).toEqual([
