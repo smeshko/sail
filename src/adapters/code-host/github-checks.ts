@@ -1,6 +1,7 @@
-// A pull request's checks on GitHub: the latest check run of each name and the commit statuses on its head sha, in the
-// port's words (DECISIONS D4); a run a later run of its name superseded is dropped. Each is read in pages of 100 until GitHub's `total_count` is reached, and an answer GitHub doesn't
-// document reads as failed: a check sail can't read is never one that passed.
+// A pull request's checks on GitHub: the latest check run of each name and app and the commit statuses on its head sha,
+// in the port's words (DECISIONS D4); a run a later run of its name and app superseded is dropped. Each is read in
+// pages of 100 until GitHub's `total_count` is reached, and an answer GitHub doesn't document reads as failed: a check
+// sail can't read is never one that passed.
 import { PortError } from '../../ports/errors';
 import type { Check, CheckStatus } from '../../ports/types';
 import type { GitHubClient } from './github-client';
@@ -120,8 +121,8 @@ export function latestRuns(runs: readonly GitHubCheckRun[]): GitHubCheckRun[] {
 }
 
 /**
- * The checks on `sha`: its latest check run of each name and app, then its commit statuses, each in GitHub's order. A run
- * a later one of its name and app superseded is dropped from `checks` and kept in `raw`.
+ * The checks on `sha`: its latest check run of each name and app, then its commit statuses, each in GitHub's order. A
+ * run a later one of its name and app superseded is dropped from `checks` and kept in `raw`.
  */
 export async function readChecks(
   client: GitHubClient,
