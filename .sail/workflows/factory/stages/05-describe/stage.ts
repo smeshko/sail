@@ -24,4 +24,6 @@ export const describe = agent('describe', {
     commands: ['cat *', 'grep *', 'head *', 'tail *', 'wc *', 'git log *', 'git diff *', 'git show *'],
   },
   budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 5 },
+  // The body is written in the vocabulary, and the prompt states the rules of AGENTS.md it follows.
+  conventions: ['CONTEXT.md'],
 });

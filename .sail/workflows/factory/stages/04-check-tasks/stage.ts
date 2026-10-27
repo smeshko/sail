@@ -14,4 +14,6 @@ export const checkTasks = agent('check-tasks', {
     commands: ['cat *', 'grep *', 'head *', 'tail *', 'wc *', 'git log *', 'git diff *', 'git show *', 'git grep *'],
   },
   budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 10 },
+  // It compares commits with the plan's tasks: neither the conventions nor the vocabulary bear on that.
+  conventions: [],
 });
