@@ -320,6 +320,58 @@ test('reopenRun reopens a suspended run with the header on disk, nothing a claim
   });
 });
 
+test('reopenRun whose lease throws is refused, and leaves STATUS, the events and the leases as they were', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    const events = readFileSync(join(dir, 'events.ndjson'), 'utf8');
+    const adapters = await workspaceWith(repo.dir, 'lease', () => async () => {
+      throw new PortError('workspace', 'lease', 'unavailable', 'leases are down');
+    });
+    const leases = join(repo.dir, '.sail-runs', 'fake', 'leases');
+    const leasesBefore = existsSync(leases) ? readdirSync(leases) : [];
+
+    expect(await reopenRun({ cwd: repo.dir, runId: run.runId, adapters })).toEqual({
+      refused: `the branch ${run.header.branch} could not be leased: workspace.lease: leases are down (unavailable)`,
+    });
+    expect({
+      status: readStatus(dir),
+      events: readFileSync(join(dir, 'events.ndjson'), 'utf8'),
+      leases: existsSync(leases) ? readdirSync(leases) : [],
+    }).toEqual({ status: { status: 'suspended', stopReason: 'budget_exceeded' }, events, leases: leasesBefore });
+  });
+});
+
+test('reopenRun on a run a stop ended while it took the lease, whose release then fails, is refused naming the lease left behind, which is stale', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    const adapters = await workspaceWith(repo.dir, 'lease', (lease) => (...args) => {
+      writeStatus(dir, 'failed', 'stopped');
+      return lease(...args);
+    });
+    adapters.ports.workspace.releaseLease = async () => {
+      throw new PortError('workspace', 'releaseLease', 'unavailable', 'leases are down');
+    };
+
+    expect(await reopenRun({ cwd: repo.dir, runId: run.runId, adapters })).toEqual({
+      refused: `run ${run.runId} failed (stopped): a failed run is final, and its lease on ${run.header.branch} was not released: workspace.releaseLease: leases are down (unavailable)`,
+    });
+    expect(readStatus(dir)).toEqual({ status: 'failed', stopReason: 'stopped' });
+    expect(readdirSync(join(repo.dir, '.sail-runs', 'fake', 'leases'))).toHaveLength(1);
+
+    const other = await fakeAdapters(repo.dir);
+    const { branch, repository } = run.header;
+    if (branch === undefined || repository === undefined) throw new Error('the run header names no branch');
+    const taken = await other.ports.workspace.lease(repository.url, branch, {
+      runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      runDir: join(repo.dir, '.sail-runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N'),
+      pid: process.pid,
+    });
+    expect(taken).toMatchObject({ leased: true });
+  });
+});
+
 test('openRun creates an empty events.ndjson beside the journal, and its events start at seq 1', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
