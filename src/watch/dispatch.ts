@@ -114,6 +114,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const unsettled = new Map<string, string>();
   /** The exit codes of the processes this dispatcher started, a run or a resume, by dedup key. */
   const exits = new Map<string, number | null>();
+  /** Where the output of the process this dispatcher last started begins in its dispatch log, by dedup key. */
+  const logFroms = new Map<string, number>();
   /** The runs this dispatcher has resumed: each is resumed once. */
   const resumed = new Set<string>();
   /** Until the first settle is over: a live run found then is adopted. */
@@ -156,6 +158,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       park(item, runId, `its resume could not be started: ${messageOf(error)}`);
       return;
     }
+    logFroms.set(item.dedupKey, spawned.logFrom);
     store.resumed(item.dedupKey, spawned.pid, from);
     watchExit(item, spawned);
   };
@@ -175,6 +178,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const reconcile = async (item: QueueItem) => {
     const runId = item.runId ?? '';
     const exited = exits.get(item.dedupKey);
+    const logFrom = logFroms.get(item.dedupKey);
     try {
       const answer = await reconcileItem(item, {
         runsDir: options.runsDir,
@@ -184,6 +188,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         first,
         resumed: resumed.has(runId),
         ...(exits.has(item.dedupKey) ? { exited: exited ?? null } : {}),
+        ...(logFrom === undefined ? {} : { logFrom }),
       });
       unsettled.delete(item.dedupKey);
       return answer;
@@ -344,6 +349,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       fail(item, runId, `its run could not be started: ${messageOf(error)}`);
       return;
     }
+    logFroms.set(item.dedupKey, spawned.logFrom);
     store.spawned(item.dedupKey, spawned.pid);
     watchExit(item, spawned);
   };

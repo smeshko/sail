@@ -3,7 +3,7 @@
 // file-backed fakes in a temp repository, a hand-moved clock and a fake spawner.
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { requestStop, requestUnwatch } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
@@ -15,6 +15,7 @@ import type { PullRequestDetails } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
+import { dispatchLog } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
 import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
 import { manualClock, queueEventIssues, queueEvents, sourceKey } from '../helpers/queue';
@@ -371,6 +372,29 @@ test("a resume whose process ends with its run still suspended parks the item wi
       spawned: ['FAKE-1'],
       issues: [],
     });
+  });
+});
+
+test("a resume that dies without logging parks the item with its exit, not with the original run's last line", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    await w.dispatcher().tick();
+    const { runId, workflow } = w.spawner.run('FAKE-1');
+    const log = dispatchLog(w.runs, workflow, runId);
+    mkdirSync(dirname(log), { recursive: true });
+    writeFileSync(log, "the original run's last line\n");
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    const dispatcher = w.dispatcher(w.store);
+    await dispatcher.tick();
+    w.spawner.endResume(runId, { status: 'suspended', stopReason: 'interrupted', code: 1 });
+    await Bun.sleep(0);
+    await dispatcher.tick();
+    await dispatcher.tick();
+    const reason = 'its resume failed: it exited 1';
+    expect({
+      item: w.store.snapshot().items.map(({ state, reason }) => ({ state, reason })),
+      parked: eventsOf(w.runs, 'queue:parked').map(({ reason }) => reason),
+    }).toEqual({ item: [{ state: 'parked', reason }], parked: [reason] });
   });
 });
 

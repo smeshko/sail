@@ -4,7 +4,7 @@
 // | The item's run | The answer |
 // |---|---|
 // | its pid alive | in flight, counting against the cap; adopted on the dispatcher's first settle |
-// | no `run.json` | a start that was refused, failed with its dispatch log's last line or its exit code |
+// | no `run.json` | a start that was refused, failed with the last line the start logged, or its exit code |
 // | `completed` | done |
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
@@ -14,7 +14,8 @@
 // The lease comes before a resume because the item's pid is the process the watcher started last: a resume another
 // process started, or one a watcher spawned and died before recording, holds the run's lease with a live pid. Adopting
 // it then, rather than resuming the run a second time, keeps two processes off one workspace. A run this dispatcher has
-// already resumed, found unended with its resume's process gone, is parked with why: its resume failed. A new
+// already resumed, found unended with its resume's process gone, is parked with why: its resume failed, by the last
+// line the resume itself logged (the log after the offset the spawn reported) or, with none, by its exit. A new
 // dispatcher, a restart or the workflow watched again, starts with none resumed, so it gets one more chance.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,6 +38,8 @@ export interface ReconcileContext {
   resumed: boolean;
   /** How the process this dispatcher last started for the item exited, once it has. */
   exited?: number | null;
+  /** Where the output of the process this dispatcher last started for the item begins in its dispatch log. */
+  logFrom?: number;
 }
 
 /** What to do with one dispatched item. */
@@ -94,11 +97,15 @@ export async function liveHolder(
   return holder?.runId === runId && context.isAlive(holder.pid) ? holder.pid : undefined;
 }
 
-/** Why the process the dispatcher started for the item ended without its work: its log's last line, or its exit. */
+/**
+ * Why the process the dispatcher started for the item ended without its work: the last line it logged, or its exit.
+ * Only what the log gained from `logFrom` on is the process's, so a resume never quotes the run it resumed.
+ */
 function why(context: ReconcileContext, runId: string, what: string): string | undefined {
-  const line = lastLine(dispatchLog(context.runsDir, context.workflow, runId));
+  const line = lastLine(dispatchLog(context.runsDir, context.workflow, runId), context.logFrom);
   if (line !== undefined) return `${what}: ${line}`;
-  return context.exited === undefined ? undefined : `${what}: it exited ${context.exited}`;
+  if (context.exited === undefined) return undefined;
+  return context.exited === null ? `${what}: it was ended by a signal` : `${what}: it exited ${context.exited}`;
 }
 
 export async function reconcileItem(item: QueueItem, context: ReconcileContext): Promise<Reconciled> {
