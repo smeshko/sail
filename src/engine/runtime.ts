@@ -12,8 +12,9 @@
 // A group, `run.all()`, ends the replay with its unjournaled calls, which run at once, each in its own call directory.
 // Each is journaled as it completes, carrying the group's keys, so the journal holds them in completion order, and
 // `all:start` and `all:end` bracket them. An `error` doesn't stop its siblings. A call that throws, a bug in sail, stops
-// them, and the error goes on once they have settled. An abort suspends the run with the calls that completed
-// journaled. The relay's key is the running call's while exactly one runs, and none otherwise.
+// them, and the error goes on once they have settled, even when reporting `all:end` fails too. An abort suspends the
+// run with the calls that completed journaled. The relay's key is the running call's while exactly one runs, and none
+// otherwise.
 //
 // What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
 // that is running. A workspace event carries none, and its path is made relative to the repository root. The lease, the
@@ -725,13 +726,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       );
       running = undefined;
       // A group the journal holds whole has ended, even when an abort or a crash came after its last call: no replay
-      // reports it again, so this is its only all:end.
-      if (journaledNow === calls.length) {
-        const journaled = new Map(readJournal(dir).entries.map((entry) => [entry.key, entry.outcome]));
-        const outcomes = Object.fromEntries(keys.map((key) => [key, journaled.get(key) as JournalEntry['outcome']]));
-        bus.emit({ type: 'all:end', keys, outcomes, durationMs: Math.max(0, clock().getTime() - startedAt) });
-      }
+      // reports it again, so this is its only all:end. A report that fails gives way to a call's crash, which is the
+      // run's cause; with no call crashed, the failure is the run's crash.
       const rejected = settled.find((each): each is PromiseRejectedResult => each.status === 'rejected');
+      if (journaledNow === calls.length) {
+        try {
+          const journaled = new Map(readJournal(dir).entries.map((entry) => [entry.key, entry.outcome]));
+          const outcomes = Object.fromEntries(keys.map((key) => [key, journaled.get(key) as JournalEntry['outcome']]));
+          bus.emit({ type: 'all:end', keys, outcomes, durationMs: Math.max(0, clock().getTime() - startedAt) });
+        } catch (error) {
+          throw rejected === undefined ? error : rejected.reason;
+        }
+      }
       if (rejected !== undefined) throw rejected.reason;
       if (signal?.aborted) return await interrupted(`stopped during ${what}`);
     }

@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
-import { type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
+import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
@@ -2282,6 +2282,49 @@ test('an abort as the last call of a group is journaled still ends the group wit
       { 'a#1': 'done', 'b#1': 'done', 'c#1': 'done' },
     ]);
     expect(typed(list).indexOf('all:end')).toBeLessThan(typed(list).indexOf('run:end'));
+  });
+}, 30_000);
+
+test("a call of a group that throws after the journal holds the group whole keeps its crash when the journal can't be read for all:end", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    const crashed = ranTrio(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key !== 'a#1') return;
+        appendFileSync(join(onlyRun(repo.dir), JOURNAL_FILE), '\n');
+        throw new Error('a bug in sail');
+      },
+    });
+    expect(
+      await crashed.then(
+        () => 'resolved',
+        (error: Error) => error.message,
+      ),
+    ).toBe('a bug in sail');
+
+    const list = events(onlyRun(repo.dir));
+    expect(list.at(-1)).toMatchObject({ type: 'error:crash', message: 'a bug in sail' });
+    expect(ofType(list, 'all:end')).toEqual([]);
+  });
+}, 30_000);
+
+test("a group whose calls all completed crashes with the journal's error when it can't be read for all:end", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    const crashed = ranTrio(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key === 'a#1') appendFileSync(join(onlyRun(repo.dir), JOURNAL_FILE), '\n');
+      },
+    });
+    const error = await crashed.then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(JournalError);
+
+    const list = events(onlyRun(repo.dir));
+    expect(list.at(-1)).toMatchObject({ type: 'error:crash', message: (error as JournalError).message });
+    expect(ofType(list, 'all:end')).toEqual([]);
   });
 }, 30_000);
 
