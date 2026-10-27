@@ -291,7 +291,8 @@ test('lines with newlines on chunk boundaries, and a multi-byte character split 
   const path = join(dir, 'events.ndjson');
   const lead = 'é';
   const offsetOfLead = Buffer.from(lineOf(5, 1000, lead)).indexOf(lead);
-  // The last line fills one chunk; the line before it starts so its `é` spans the next chunk's first and last bytes.
+  // The last line fills one chunk; the line before it starts so its `é` straddles the second and third chunks read
+  // back: its first byte is the third chunk's last, and its second byte the second chunk's first.
   writeFileSync(
     path,
     lineOf(1, 4096) +
