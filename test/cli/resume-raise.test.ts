@@ -71,18 +71,23 @@ test('sail FAKE-1 over its budget exits 2 and names the flag that raises it, and
   });
 }, 120_000);
 
-test('sail resume refuses a raise that is not a positive number of dollars with exit 3, and leaves STATUS as it was', async () => {
+test('sail resume refuses a raise that is not a positive number of dollars or minutes with exit 3, and leaves STATUS as it was', async () => {
   const { repo, runId, dir } = await suspendedRun();
   const refusals = [];
-  for (const value of ['x', '-1', '0']) {
-    const refused = await sail(repo.dir, repo.env, ['resume', runId, `--raise-budget=${value}`]);
-    refusals.push([refused.code, refused.stderr.trim()]);
+  for (const flag of ['--raise-budget', '--raise-minutes']) {
+    for (const value of ['x', '-1', '0']) {
+      const refused = await sail(repo.dir, repo.env, ['resume', runId, `${flag}=${value}`]);
+      refusals.push([refused.code, refused.stderr.trim()]);
+    }
   }
   expect({ refusals, status: status(dir) }).toEqual({
     refusals: [
       [3, "sail resume: --raise-budget takes a positive number of dollars: 'x'"],
       [3, "sail resume: --raise-budget takes a positive number of dollars: '-1'"],
       [3, "sail resume: --raise-budget takes a positive number of dollars: '0'"],
+      [3, "sail resume: --raise-minutes takes a positive number of minutes: 'x'"],
+      [3, "sail resume: --raise-minutes takes a positive number of minutes: '-1'"],
+      [3, "sail resume: --raise-minutes takes a positive number of minutes: '0'"],
     ],
     status: 'suspended budget_exceeded\n',
   });

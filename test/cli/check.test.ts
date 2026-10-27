@@ -16,7 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
-import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { editorDeclarations } from '../../src/engine/editor';
 import { dropReview } from '../helpers/review-fixture';
 import { runCaptured } from '../helpers/run-captured';
@@ -173,6 +173,21 @@ test('a copy of the fixture checks from a subdirectory with no node_modules in r
     expect(stdout).not.toContain(repo.dir);
     expect(nodeModulesAbove(repo.dir)).toEqual([]);
     expect([...new Bun.Glob('**/node_modules').scanSync({ cwd: repo.dir, dot: true, onlyFiles: false })]).toEqual([]);
+  });
+});
+
+test('a tsc that cannot run exits 4 and says so', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const tsc = join(repo.dir, 'missing', 'tsc');
+    const { code, stdout, stderr } = await runCaptured(['check'], repo.dir, { tsc });
+    const [first, second] = stderr.split('\n');
+    expect({ code, stdout, first, reason: second?.startsWith('tsc exited ') }).toEqual({
+      code: EXIT_INTERNAL,
+      stdout: '',
+      first: 'sail check: could not run tsc',
+      reason: true,
+    });
   });
 });
 

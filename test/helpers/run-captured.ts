@@ -20,6 +20,8 @@ export interface CaptureOptions {
   env?: Io['env'];
   /** What the command reads as all of stdin. Left out, the command has no stdin. */
   stdin?: string;
+  /** Handed to the command as `io.tsc`: the `tsc` its type-check runs. */
+  tsc?: string;
 }
 
 /** `text` with each duration the terminal view prints, such as `850ms`, `2.5s`, `1m 11s` or `2h 2m`, as `<t>`. */
@@ -45,6 +47,7 @@ export async function runCaptured(
     ...(options.onInterrupt === undefined ? {} : { onInterrupt: options.onInterrupt }),
     ...(options.tty === undefined ? {} : { tty: options.tty }),
     ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.tsc === undefined ? {} : { tsc: options.tsc }),
     ...(options.stdin === undefined ? {} : { stdin: () => Promise.resolve(options.stdin as string) }),
   };
   const code = await run(argv, io);

@@ -104,7 +104,10 @@ export async function typecheckWorkflow(
   sailDir: string,
   workflowFile: string,
 ): Promise<ExitCode | undefined> {
-  const types = await typecheck(sailDir, { files: [workflowFile] });
+  const types = await typecheck(sailDir, {
+    files: [workflowFile],
+    ...(io.tsc === undefined ? {} : { tsc: io.tsc }),
+  });
   if ('internal' in types) {
     io.stderr(`${command}: could not run tsc\n${types.internal}\n`);
     return EXIT_INTERNAL;

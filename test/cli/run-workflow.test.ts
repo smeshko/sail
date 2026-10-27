@@ -4,6 +4,7 @@
 // second command on the same ticket runs in a copy of the first one's repository.
 import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { verbosityOf } from '../../src/cli/commands/run-workflow';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
@@ -363,6 +364,19 @@ test('a type error in the workflow is printed where it is, then refused with exi
       touched: false,
     });
   }
+});
+
+test('a tsc that cannot run exits 4, says so, and starts no run', async () => {
+  const tsc = join(tmpdir(), 'sail-no-such-dir', 'tsc');
+  const { code, stdout, stderr, touched } = await sailIn(['FAKE-1'], {}, () => undefined, { tsc });
+  const [first, second] = stderr.split('\n');
+  expect({ code, stdout, first, reason: second?.startsWith('tsc exited '), touched }).toEqual({
+    code: EXIT_INTERNAL,
+    stdout: '',
+    first: 'sail FAKE-1: could not run tsc',
+    reason: true,
+    touched: false,
+  });
 });
 
 // The ticket: claimed as the run starts, forced past its checks, and stopped by --until.
