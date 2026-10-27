@@ -67,6 +67,7 @@ test('a spawned run gets the ticket, its workflow and --dispatch with the run id
     cli: ['/bin/sh', fakeSail(dir)],
   });
   expect(spawned.pid).toBeGreaterThan(0);
+  expect(spawned.logFrom).toBe(0);
   expect(await spawned.exited).toBe(3);
   const log = dispatchLog(runs, 'a', RUN);
   expect(log).toBe(join(runs, 'queue', 'a', 'dispatch', `${RUN}.log`));
@@ -126,6 +127,16 @@ test('lastLine gives the last line that is not blank, cut to 500 characters, and
   ]);
 });
 
+test('lastLine from a byte offset ignores everything before it, counting bytes, not characters', () => {
+  const dir = tempDir();
+  const log = join(dir, 'run.log');
+  const earlier = 'earlier é\n';
+  writeFileSync(log, `${earlier}later\n`);
+  const from = Buffer.byteLength(earlier);
+  const whole = Buffer.byteLength(`${earlier}later\n`);
+  expect([lastLine(log, from), lastLine(log, whole), lastLine(log)]).toEqual(['later', undefined, 'later']);
+});
+
 test("a spawned resume gets resume and the run id, runs in the root in a process group of its own, and appends to the run's dispatch log", async () => {
   const dir = tempDir();
   const root = join(dir, 'repo');
@@ -136,6 +147,7 @@ test("a spawned resume gets resume and the run id, runs in the root in a process
   writeFileSync(log, 'what the dispatched run printed\n');
   const env = { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: join(dir, 'home'), SAIL_SPAWN_MARK: 'resumed' };
   const spawned = spawnResume({ root, runsDir: runs, workflow: 'a', runId: RUN, env, cli: ['/bin/sh', fakeSail(dir)] });
+  expect(spawned.logFrom).toBe(Buffer.byteLength('what the dispatched run printed\n'));
   expect(await spawned.exited).toBe(3);
   const lines = readFileSync(log, 'utf8').split('\n');
   expect(lines.filter((line) => !line.startsWith('pgid') && !line.startsWith('pid'))).toEqual([

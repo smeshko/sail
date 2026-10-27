@@ -6,7 +6,7 @@
 // `claimSource()`. The test then ends it: with a run directory and a STATUS, or refused, with only a dispatch log. It
 // stands in for `sail resume <run>` too: a resume takes a pid from the same counter, and the test ends it with the
 // STATUS it leaves and the line it logs.
-import { appendFileSync, cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isAlive as processIsAlive } from '../../src/adapters/leases';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
@@ -132,7 +132,8 @@ export function fakeSpawner(runsDir: string, ticketSource?: TicketSource): FakeS
       live.add(pid);
       const exited = new Promise<number | null>((resolve) => exits.set(pid, resolve));
       resumes.push({ workflow: options.workflow, runId: options.runId, pid });
-      return { pid, exited };
+      const log = dispatchLog(runsDir, options.workflow, options.runId);
+      return { pid, exited, logFrom: existsSync(log) ? statSync(log).size : 0 };
     },
     endResume(runId, ending = { status: 'completed' }) {
       const resumed = resumes.findLast((each) => each.runId === runId);
@@ -166,7 +167,7 @@ export function fakeSpawner(runsDir: string, ticketSource?: TicketSource): FakeS
       });
       const alive = runs.filter((each) => each.workflow === workflow && live.has(each.pid)).length;
       peak[workflow] = Math.max(peak[workflow] ?? 0, alive);
-      return { pid, exited };
+      return { pid, exited, logFrom: 0 };
     },
     isAlive: (pid) => live.has(pid) || (pid < FAKE_PID && processIsAlive(pid)),
     run,
