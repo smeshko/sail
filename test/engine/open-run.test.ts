@@ -24,6 +24,7 @@ import { validateRunDir } from '../../src/engine/schemas';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { TicketState } from '../../src/ports/types';
+import type { WorkspacePort } from '../../src/ports/workspace';
 import { fakeAdapters } from '../helpers/adapters';
 import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
@@ -567,6 +568,7 @@ interface StubRun {
   until?: string;
   signal?: AbortSignal;
   dispatch?: { runId: string };
+  headSha?: string;
 }
 
 /** Opens a run of the stub from `repoDir`, on the adapters given or its own. */
@@ -594,6 +596,18 @@ async function adaptersWith<Op extends 'claim' | 'comment'>(
   const adapters = await fakeAdapters(repoDir);
   const { ticketSource } = adapters.ports;
   ticketSource[op] = instead(ticketSource[op].bind(ticketSource) as TicketSource[Op]);
+  return adapters;
+}
+
+/** The repository's adapters, with `instead` answering in place of the Workspace port's own `op`. */
+async function workspaceWith<Op extends 'lease' | 'releaseLease'>(
+  repoDir: string,
+  op: Op,
+  instead: (own: WorkspacePort[Op]) => WorkspacePort[Op],
+): Promise<ResolvedAdapters> {
+  const adapters = await fakeAdapters(repoDir);
+  const { workspace } = adapters.ports;
+  workspace[op] = instead(workspace[op].bind(workspace) as WorkspacePort[Op]);
   return adapters;
 }
 
@@ -1068,4 +1082,35 @@ test("a workflow's own watch.label is the label a start checks: only the reposit
     { refused: "the ticket is not designated: it carries no 'sail-review' label. --force runs it anyway" },
     { runId: 'FAKE-6-', label: 'FAKE-6' },
   ]);
+});
+
+test('a start from a ticket with --head-sha is refused, with no run directory, lease or claim', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    expect(await openStub(repo.dir, { ticket: 'FAKE-1', headSha: 'abc1234' })).toEqual({
+      refused: '--head-sha pins a pull request to its head, and FAKE-1 is a ticket',
+    });
+    expect(await leftBehind(repo.dir)).toEqual({ runs: [], leases: [], state: 'Todo', comments: 1 });
+  });
+});
+
+test("a start whose lease throws is refused, naming the branch and the port's error, with no run directory, workspace, lease or claim", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await workspaceWith(repo.dir, 'lease', () => async () => {
+      throw new PortError('workspace', 'lease', 'unavailable', 'leases are down');
+    });
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
+    expect('refused' in run ? run.refused : 'opened').toMatch(
+      /^the branch \S+ could not be leased: workspace\.lease: leases are down \(unavailable\)$/,
+    );
+    expect(await leftBehind(repo.dir)).toEqual({ runs: [], leases: [], state: 'Todo', comments: 1 });
+    const worktrees = Bun.spawnSync(['git', 'worktree', 'list', '--porcelain'], { cwd: repo.dir, env: repo.env });
+    expect(
+      worktrees.stdout
+        .toString()
+        .split('\n')
+        .filter((line) => line.startsWith('worktree ')),
+    ).toHaveLength(1);
+  });
 });
