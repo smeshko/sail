@@ -167,6 +167,21 @@ test('callFile finds no running step file for a step key whose step part is ..',
   expect(callFile(run, 'publish#1/..', 'stdout.log')).toEqual({ missing: expect.any(String) });
 });
 
+test('callFile finds no running step file for a step:start with no index', () => {
+  const run = m.alpha.runDir;
+  mkdirSync(join(run, '05-publish/call-2/steps/2-open'), { recursive: true });
+  writeFileSync(join(run, '05-publish/call-2/steps/2-open/stdout.log'), 'x\n');
+  appendEvent(run, 'step:start', {
+    key: 'publish#2/open',
+    stage: 'publish',
+    step: 'open',
+    of: 2,
+    kind: 'script',
+    try: 1,
+  });
+  expect(callFile(run, 'publish#2/open', 'stdout.log')).toEqual({ missing: expect.any(String) });
+});
+
 test.each([
   ['an unknown key', 'nope#1', 'result.json', () => {}],
   ['a name outside the four', 'implement#1', 'prompt.md', () => {}],
