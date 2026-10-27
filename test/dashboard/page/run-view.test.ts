@@ -8,7 +8,7 @@ import { foldRun } from '../../../src/dashboard/page/run-model';
 import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
-import type { Summary } from '../../../src/events/summary';
+import { type Summary, summarize } from '../../../src/events/summary';
 import { DASHBOARD_FIXTURES, FAKE_2_ID, FAKE_3_ID, GOLDEN_RUN, GOLDEN_RUN_ID } from '../../helpers/dashboard';
 import { FAKE_4_ID, REVIEW_KEYS } from '../../helpers/review-fixture';
 
@@ -110,6 +110,27 @@ test('a running card shows running and its time so far, a PR link is drawn only 
   expect(renderStatus(foldRun(readEvents(FAKE_2)), summaryOf(FAKE_2)).value).toBe(
     '<span>calls <b>3/3</b></span><span>tools <b>1</b></span><span class="w">denied <b>1</b></span><span title="tokens in, out and read from the cache">tokens <b>6.4k</b> in · <b>1.9k</b> out · <b>24.8k</b> cached</span><span>cost <b>$0.36</b></span><span class="spacer"></span><span>ended failed</span>',
   );
+});
+
+test("the footer shows the golden run's tokens from its summary once it has ended", () => {
+  const model = foldRun(readEvents(GOLDEN_RUN));
+  const summary = summaryOf(GOLDEN_RUN);
+  expect(renderStatus(model, summary).value).toContain('tokens <b>28.4k</b> in · <b>9.0k</b> out · <b>189k</b> cached');
+  const usage = { ...summary.totals.usage, inputTokens: 534, outputTokens: 12_600, cacheReadTokens: 13_000_000 };
+  const final = { ...summary, totals: { ...summary.totals, usage } };
+  expect(renderStatus(model, final).value).toContain('tokens <b>534</b> in · <b>12.6k</b> out · <b>13m</b> cached');
+});
+
+test("while a call runs, the footer's tokens count its live usage over a summary written before it", () => {
+  const events = readEvents(GOLDEN_RUN);
+  const journals = events.flatMap((event, at) => (event.type === 'journal:append' ? [at] : []));
+  const journaled = journals[1] ?? -1;
+  const live = events.findIndex((event, at) => at > journaled && event.type === 'usage:update');
+  const stale = summarize(events.slice(0, journaled + 1));
+  const slice = events.slice(0, live + 1);
+  const current = renderStatus(foldRun(slice), stale).value;
+  expect(current).toContain('tokens <b>7.2k</b> in · <b>2.2k</b> out · <b>31.2k</b> cached');
+  expect(current).not.toContain('<b>5.2k</b> in');
 });
 
 const FAKE_4 = join(DASHBOARD_FIXTURES, 'beta', FAKE_4_ID);
