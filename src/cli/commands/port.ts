@@ -7,6 +7,8 @@
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
 //                                                   files a new ticket: its description from the file or stdin
+//   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
+//                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
 //   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
 //
@@ -28,7 +30,7 @@
 // and is found from the working directory otherwise. Only the port asked for is resolved, so no other adapter is
 // loaded or asked for its credentials. `render` is a helper beside the ports: it needs no `.sail/`.
 import { readFileSync, statSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import type { Port } from '../../engine/config';
 import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
@@ -38,7 +40,7 @@ import type { PortErrorEvent, ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
-import { Created, Moved, Posted, type Ticket, type TicketMove } from '../../ports/types';
+import { Attached, Created, Moved, Posted, type Ticket, type TicketMove } from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { CODEHOST } from './port-codehost';
@@ -182,6 +184,47 @@ const createOperation: PortOperation<TicketSource> = {
   },
 };
 
+/** What Bun gives a file whose extension it doesn't know: no content type to attach it with. */
+const UNKNOWN_TYPE = 'application/octet-stream';
+
+/**
+ * A file attached to the ticket `<ticket>` names: the port's `Attached`, parsed before it is printed. Its content type
+ * is `--content-type`, or what its extension says; a file that isn't one, or whose type its extension doesn't say, is
+ * refused before the port is called.
+ */
+const attachOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: {
+    file: { value: 'path', required: true, filled: true },
+    title: { value: 'text', filled: true },
+    'content-type': { value: 'type', filled: true },
+  },
+  async run(source, { cwd, positionals: [ref = ''], values }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const named = typeof values.file === 'string' ? values.file : '';
+    const path = resolve(cwd, named);
+    if (!isFile(path)) return { refused: `--file names ${named}, which is no file` };
+    const given = values['content-type'];
+    const contentType = typeof given === 'string' ? given : Bun.file(path).type;
+    if (contentType === UNKNOWN_TYPE && typeof given !== 'string') {
+      return { refused: `${named}'s extension says no content type: give one with --content-type` };
+    }
+    const attached = Attached.safeParse(
+      await source.attach(ticketKey, {
+        name: basename(path),
+        contentType,
+        bytes: new Uint8Array(readFileSync(path)),
+        ...(typeof values.title === 'string' ? { title: values.title } : {}),
+      }),
+    );
+    if (attached.success) return { value: attached.data };
+    const [issue] = attached.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'attach', 'invalid', `its answer is not an Attached: ${where}`);
+  },
+};
+
 /** `links` and `attachments` are no operations of the port: they read `get`'s answer. */
 const TICKET_SOURCE: PortTable<'ticketSource'> = {
   port: 'ticketSource',
@@ -192,6 +235,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     comment: commentOperation,
     update: updateOperation,
     create: createOperation,
+    attach: attachOperation,
   },
 };
 

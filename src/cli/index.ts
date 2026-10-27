@@ -58,6 +58,8 @@ Usage:
                                                              Move a ticket to that state
   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
                                                              File a new ticket, the description from the file or stdin
+  sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
+                                                             Upload a file and attach it to a ticket
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version
@@ -228,6 +230,8 @@ const commands = new Map<string, CommandSpec>([
         method: { type: 'string' },
         'expected-head-sha': { type: 'string' },
         state: { type: 'string' },
+        file: { type: 'string' },
+        'content-type': { type: 'string' },
       },
       positionals: 4,
       command: port,

@@ -105,6 +105,13 @@ const seedOf = (states: readonly WorldState[], tickets: LinearWorldSeed['tickets
   ...(pageSize === undefined ? {} : { pageSize }),
 });
 
+/** A screenshot, as the demonstrate stage leaves one. */
+const FILE = {
+  name: 'run view.png',
+  contentType: 'image/png',
+  bytes: new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+};
+
 /** A PortError's port, op and code, with its message. */
 const failure = (error: unknown) => [portFailure(error), messageOf(error)];
 
@@ -470,8 +477,12 @@ test('every document the adapter sends stays under Linear’s complexity limit o
   await adapter.update('ADW-1', { state: 'in-review' });
   await adapter.comment('ADW-1', 'Done.');
   await adapter.create({ title: 'Follow up', description: 'More.', labels: [] });
-  const sent = world.requests.map((request) => [request.operationName, complexity(request.query)] as const);
+  await adapter.attach('ADW-1', FILE);
+  const sent = world.requests
+    .filter((request) => request.operationName !== 'upload')
+    .map((request) => [request.operationName, complexity(request.query)] as const);
   expect([...new Set(sent.map(([name]) => name))].sort()).toEqual([
+    'SailAttach',
     'SailComment',
     'SailCreate',
     'SailDesignated',
@@ -480,6 +491,7 @@ test('every document the adapter sends stays under Linear’s complexity limit o
     'SailTeamLabels',
     'SailTicket',
     'SailTicketComments',
+    'SailUpload',
   ]);
   expect(sent.filter(([, points]) => points > 10_000)).toEqual([]);
   // The estimate is no zero: a ticket and its five connections are worth thousands.
@@ -762,5 +774,93 @@ test('the definition refuses options it cannot read, naming the option: no team,
     'linear ticketSource: option team: Invalid input: expected string, received undefined',
     'linear ticketSource: option team: must be a Linear team key, such as ADW',
     'linear ticketSource: option apiUrl: Unrecognized key: "apiUrl"',
+  ]);
+});
+
+test('attach asks fileUpload for a signed URL, PUTs the bytes there with the signed headers, its content type and a long cache, then attaches the asset URL under its title, and emits ticket:attached', async () => {
+  const { world, adapter, capture } = linear();
+  const attached = await adapter.attach('ADW-1', { ...FILE, title: 'Run view' });
+  expect(world.operations()).toEqual(['SailTicket', 'SailUpload', 'upload', 'SailAttach']);
+  expect(world.requests[1]?.variables).toEqual({ contentType: 'image/png', filename: 'run view.png', size: 8 });
+  const [upload] = world.uploads;
+  expect(upload?.url).toBe('https://uploads.linear.test/upload/1/run%20view.png');
+  expect([upload?.headers['content-type'], upload?.headers['cache-control']]).toEqual([
+    'image/png',
+    'public, max-age=31536000',
+  ]);
+  expect([...(upload?.bytes ?? [])]).toEqual([...FILE.bytes]);
+  // The API key goes to Linear's GraphQL alone, never to the storage host.
+  expect(upload?.headers.authorization).toBeUndefined();
+  expect(world.requests[3]?.variables).toEqual({
+    issueId: 'issue-1',
+    url: 'https://uploads.linear.test/assets/1/run%20view.png',
+    title: 'Run view',
+  });
+  expect(attached.url).toBe('https://uploads.linear.test/assets/1/run%20view.png');
+  expect(world.ticket(1).attachments?.at(-1)).toEqual({ title: 'Run view', url: attached.url });
+  expect(capture.events).toEqual([
+    {
+      type: 'ticket:attached',
+      ticketKey: 'ADW-1',
+      name: 'Run view',
+      contentType: 'image/png',
+      size: 8,
+      url: attached.url,
+    },
+  ]);
+  expect(eventIssues(capture.stamped('publish#1/open'))).toEqual([]);
+});
+
+test('a PUT the storage refuses is forbidden for a 403 and unavailable for a 500, with its status and words, and attaches nothing: no SailAttach is sent and nothing is emitted', async () => {
+  const errors = [];
+  for (const status of [403, 500]) {
+    const { world, adapter, capture } = linear();
+    world.failNext('upload', { status, body: status === 403 ? 'SignatureDoesNotMatch' : '' });
+    errors.push(failure(await rejection(adapter.attach('ADW-1', FILE))));
+    expect([world.operations(), capture.events]).toEqual([['SailTicket', 'SailUpload', 'upload'], []]);
+  }
+  expect(errors).toEqual([
+    [
+      { port: 'ticketSource', op: 'attach', code: 'forbidden' },
+      "ticketSource.attach: Linear's upload host uploads.linear.test refused the file: 403 SignatureDoesNotMatch",
+    ],
+    [
+      { port: 'ticketSource', op: 'attach', code: 'unavailable' },
+      "ticketSource.attach: Linear's upload host uploads.linear.test refused the file: 500",
+    ],
+  ]);
+});
+
+test('a PUT that never reaches the storage is unavailable, naming the host and why', async () => {
+  const { world } = linear();
+  const fetch: Fetch = (input, init) =>
+    init.method === 'PUT' ? Promise.reject(new TypeError('connection refused')) : world.fetch(input, init);
+  const adapter = createLinearTicketSource({ team: 'ADW', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch });
+  expect(failure(await rejection(adapter.attach('ADW-1', FILE)))).toEqual([
+    { port: 'ticketSource', op: 'attach', code: 'unavailable' },
+    "ticketSource.attach: Linear's upload host uploads.linear.test is unreachable: connection refused",
+  ]);
+});
+
+test('Linear answering success: false to fileUpload or to attachmentCreate is a conflict naming the file, and emits nothing', async () => {
+  const errors = [];
+  for (const [operation, data] of [
+    ['SailUpload', { fileUpload: { success: false, uploadFile: null } }],
+    ['SailAttach', { attachmentCreate: { success: false, attachment: null } }],
+  ] as const) {
+    const { world, adapter, capture } = linear();
+    world.failNext(operation, { status: 200, body: { data } });
+    errors.push(failure(await rejection(adapter.attach('ADW-1', FILE))));
+    expect(capture.events).toEqual([]);
+  }
+  expect(errors).toEqual([
+    [
+      { port: 'ticketSource', op: 'attach', code: 'conflict' },
+      'ticketSource.attach: Linear gave no upload URL for run view.png',
+    ],
+    [
+      { port: 'ticketSource', op: 'attach', code: 'conflict' },
+      'ticketSource.attach: Linear did not attach run view.png to ADW-1',
+    ],
   ]);
 });

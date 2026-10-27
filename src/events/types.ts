@@ -56,6 +56,7 @@ export const EVENT_TYPES = [
   'ticket:updated',
   'ticket:commented',
   'ticket:created',
+  'ticket:attached',
   'codehost:pushed',
   'codehost:pr_opened',
   'codehost:checks',
@@ -285,6 +286,8 @@ interface Payloads {
   'ticket:commented': { key?: string; ticketKey: string; body: string };
   /** A ticket `create` filed. Its title is the workflow's own text. */
   'ticket:created': { key?: string; ticketKey: string; title: string; url: string };
+  /** A file `attach` attached: its name, content type and size in bytes, and the attachment's URL. */
+  'ticket:attached': { key?: string; ticketKey: string; name: string; contentType: string; size: number; url: string };
   'codehost:pushed': { key?: string; branch: string; headSha: string };
   'codehost:pr_opened': {
     key?: string;

@@ -60,6 +60,10 @@ export type Posted = z.infer<typeof Posted>;
 export const Created = z.object({ ticketKey: z.string(), url: z.string(), raw: Raw });
 export type Created = z.infer<typeof Created>;
 
+/** A file `attach` attached to a ticket: the attachment's URL. */
+export const Attached = z.object({ url: z.string(), raw: Raw });
+export type Attached = z.infer<typeof Attached>;
+
 // Pull requests
 
 export const PullRequest = z.object({

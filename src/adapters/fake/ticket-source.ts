@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
-import type { ProviderOptions, TicketSource } from '../../ports/ticket-source';
+import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
 import { Attachment, Comment, Link, type Ticket, TicketMove, TicketState } from '../../ports/types';
 import { createStore } from './store';
 
@@ -137,6 +137,20 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       });
       emit({ type: 'ticket:created', ticketKey: created.ticketKey, title, url: created.url });
       return created;
+    },
+    async attach(ticketKey, file) {
+      checkAttachment(file);
+      const name = file.title ?? file.name;
+      const attached = store.change((world) => {
+        const ticket = find(world, 'attach', ticketKey);
+        const url = `fake://tickets/${ticketKey}/attachments/${ticket.attachments.length + 1}`;
+        const attachment = { name, url, mimeType: file.contentType };
+        ticket.attachments.push(attachment);
+        return { url, raw: structuredClone(attachment) };
+      });
+      const { contentType, bytes } = file;
+      emit({ type: 'ticket:attached', ticketKey, name, contentType, size: bytes.byteLength, url: attached.url });
+      return attached;
     },
     capabilities: () => ({
       comments: true,

@@ -1,6 +1,8 @@
 // createLinearWorld(): a scripted Linear for the linear TicketSource's tests. One team with its workflow states and labels, and its
 // tickets with labels, comments, relations and attachments, answering the adapter's GraphQL operations by
-// `operationName` and `variables`, either as an injected `fetch` or served on 127.0.0.1 for the CLI.
+// `operationName` and `variables`, either as an injected `fetch` or served on 127.0.0.1 for the CLI. It stands in for
+// Linear's file storage too: `fileUpload` signs an upload URL, and a PUT to it is taken only with the headers, content
+// type and size it was signed for, as `upload` in `requests`.
 //
 // It reads no filter out of the query: the filters it honours arrive as variables. What it does check of the query is
 // cheap and catches a typo, not a wrong shape: the query declares the operation it is sent as, declares every variable
@@ -37,7 +39,7 @@ export interface WorldTicket {
   comments?: WorldComment[];
   /** This ticket's relations to other tickets of the world, by number. Their inverse is derived. */
   readonly relations?: readonly { readonly type: string; readonly number: number }[];
-  readonly attachments?: readonly { readonly title: string; readonly url: string }[];
+  attachments?: readonly { readonly title: string; readonly url: string }[];
   readonly priority?: number;
   readonly assignee?: { readonly name: string; readonly email: string } | null;
 }
@@ -79,6 +81,13 @@ export interface WorldRequest {
   readonly headers: Record<string, string>;
 }
 
+/** A file the world's storage took: the PUT's URL, headers and bytes. */
+export interface WorldUpload {
+  readonly url: string;
+  readonly headers: Record<string, string>;
+  readonly bytes: Uint8Array;
+}
+
 export interface LinearWorld {
   /** Answers one request as Linear would: inject it as the adapter's `fetch`. */
   readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
@@ -86,6 +95,8 @@ export interface LinearWorld {
   serve(): { url: string; stop(): void };
   /** Every request the world received, in order. */
   readonly requests: WorldRequest[];
+  /** The files the world's storage took, in order. */
+  readonly uploads: WorldUpload[];
   /** The operation names of the requests, in order. */
   operations(): string[];
   /**
@@ -118,6 +129,8 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'commentCreate',
   'issueCreate',
   'issueLabels',
+  'fileUpload',
+  'attachmentCreate',
   // Arguments and filters.
   'filter',
   'first',
@@ -133,6 +146,9 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'issueId',
   'teamId',
   'labelIds',
+  'contentType',
+  'filename',
+  'size',
   // Connections.
   'nodes',
   'pageInfo',
@@ -169,9 +185,21 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   // Mutation payloads.
   'success',
   'comment',
+  'attachment',
+  'uploadFile',
+  'uploadUrl',
+  'assetUrl',
+  'headers',
+  'value',
 ]);
 
-const MUTATIONS = new Set(['SailMove', 'SailComment', 'SailCreate']);
+const MUTATIONS = new Set(['SailMove', 'SailComment', 'SailCreate', 'SailUpload', 'SailAttach']);
+
+/** The header `fileUpload` signs an upload with, which the PUT must carry back. */
+export const UPLOAD_SIGNATURE = 'x-sail-signature';
+
+/** Where an injected `fetch` finds the world's storage. `serve()` serves it beside the GraphQL endpoint instead. */
+const STORAGE = 'https://uploads.linear.test';
 
 /** Linear's answer to a GraphQL error: status 400 and one error with its code. */
 const graphqlError = (status: number, code: string, message: string): WorldResponse => ({
@@ -209,6 +237,10 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
   }));
   const pageSize = seed.pageSize ?? 250;
   const requests: WorldRequest[] = [];
+  const uploads: WorldUpload[] = [];
+  /** Each signed upload by its number: what its PUT must carry. */
+  const signed = new Map<string, { contentType: string; size: number; filename: string }>();
+  let storage = STORAGE;
   const failures: { operationName: string; after: string | undefined; response: WorldResponse }[] = [];
   let posted = 0;
 
@@ -352,6 +384,31 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
         },
       });
     },
+    SailUpload: ({ contentType, filename, size }) => {
+      const number = String(signed.size + 1);
+      signed.set(number, { contentType: String(contentType), size: Number(size), filename: String(filename) });
+      const path = `${number}/${encodeURIComponent(String(filename))}`;
+      return ok({
+        fileUpload: {
+          success: true,
+          uploadFile: {
+            uploadUrl: `${storage}/upload/${path}`,
+            assetUrl: `${storage}/assets/${path}`,
+            headers: [{ key: UPLOAD_SIGNATURE, value: `signed-${number}` }],
+          },
+        },
+      });
+    },
+    SailAttach: ({ issueId, url, title }) => {
+      const ticket = byId(issueId);
+      if (ticket === undefined) return graphqlError(400, 'INPUT_ERROR', 'Entity not found: Issue');
+      if (!uploads.some((upload) => upload.url.replace('/upload/', '/assets/') === url)) {
+        return graphqlError(400, 'INPUT_ERROR', `no file was uploaded for ${String(url)}`);
+      }
+      ticket.attachments = [...(ticket.attachments ?? []), { title: String(title), url: String(url) }];
+      const id = `attachment-${ticket.attachments.length}`;
+      return ok({ attachmentCreate: { success: true, attachment: { id, url: String(url) } } });
+    },
     SailMove: ({ id, stateId }) => {
       const ticket = byId(id);
       const state = team.states.find((candidate) => candidate.id === stateId);
@@ -379,6 +436,29 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
       });
     },
   };
+
+  /**
+   * A PUT to the storage: taken when it carries the signature, content type and size its upload was signed for, and
+   * refused with 403 otherwise, as a signed URL is. A failure `failNext('upload', …)` set answers first.
+   */
+  function store(url: string, headers: Record<string, string>, bytes: Uint8Array): WorldResponse {
+    requests.push({ method: 'PUT', operationName: 'upload', query: '', variables: { url }, headers });
+    const failure = failures.find((candidate) => candidate.operationName === 'upload' && candidate.after === undefined);
+    if (failure !== undefined) {
+      failures.splice(failures.indexOf(failure), 1);
+      return failure.response;
+    }
+    const number = /\/upload\/(\d+)\//.exec(url)?.[1] ?? '';
+    const upload = signed.get(number);
+    const fits =
+      upload !== undefined &&
+      headers[UPLOAD_SIGNATURE] === `signed-${number}` &&
+      headers['content-type'] === upload.contentType &&
+      bytes.byteLength === upload.size;
+    if (!fits) return { status: 403, body: 'SignatureDoesNotMatch' };
+    uploads.push({ url, headers, bytes });
+    return { status: 200 };
+  }
 
   function answer(method: string, headers: Record<string, string>, text: string): WorldResponse {
     let body: { query?: unknown; variables?: unknown; operationName?: unknown };
@@ -430,19 +510,32 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
   const headersOf = (init: Headers): Record<string, string> => Object.fromEntries(init.entries());
 
   return {
-    async fetch(_input, init) {
+    async fetch(input, init) {
+      const headers = headersOf(new Headers(init.headers));
+      if (init.method === 'PUT') {
+        const bytes = init.body instanceof Uint8Array ? init.body : new Uint8Array();
+        return toResponse(store(input, headers, bytes));
+      }
       const text = typeof init.body === 'string' ? init.body : '';
-      return toResponse(answer(init.method ?? 'GET', headersOf(new Headers(init.headers)), text));
+      return toResponse(answer(init.method ?? 'GET', headers, text));
     },
     serve() {
       const server = Bun.serve({
         port: 0,
         hostname: '127.0.0.1',
-        fetch: async (request) => toResponse(answer(request.method, headersOf(request.headers), await request.text())),
+        fetch: async (request) => {
+          const headers = headersOf(request.headers);
+          if (request.method === 'PUT') {
+            return toResponse(store(request.url, headers, new Uint8Array(await request.arrayBuffer())));
+          }
+          return toResponse(answer(request.method, headers, await request.text()));
+        },
       });
+      storage = `http://127.0.0.1:${server.port}`;
       return { url: `http://127.0.0.1:${server.port}/graphql`, stop: () => server.stop(true) };
     },
     requests,
+    uploads,
     operations: () => requests.map((request) => request.operationName),
     failNext(operationName, response, options = {}) {
       failures.push({ operationName, after: options.after, response });

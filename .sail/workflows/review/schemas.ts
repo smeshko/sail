@@ -14,20 +14,15 @@ export const Finding = z.object({
   detail: z.string(),
 });
 
-/** What found it: validation, the demonstration, one reviewer's lens, or check-fix reviewing the fixes. */
-export const Source = z.enum([
-  'validate',
-  'demonstrate',
-  'requirements',
-  'architecture',
-  'quality',
-  'bugs',
-  'check-fix',
-]);
+/** The reviewers, one stage each. */
+export const Lens = z.enum(['requirements', 'architecture', 'bugs', 'tests', 'security', 'conventions']);
+
+/** What found it: validation, the leak check, the demonstration, one reviewer, or check-fix reviewing the fixes. */
+export const Source = z.enum(['validate', 'leak-check', 'demonstrate', ...Lens.options, 'check-fix']);
 
 /**
- * A finding the workflow numbered: `V1` from validation, `D<n>` from the demonstration, `R<n>` from a reviewer, and
- * `F<round>-<n>` from check-fix.
+ * A finding the workflow numbered: `V1` from validation, `L<n>` from the leak check, `D<n>` from the demonstration,
+ * `R<n>` from a reviewer, and `F<round>-<n>` from check-fix.
  */
 export const NumberedFinding = Finding.extend({ id: z.string(), source: Source });
 
@@ -49,15 +44,28 @@ export const Demonstrated = z.object({
   transcript: z.string().max(4000),
 });
 
-export const Lens = z.enum(['requirements', 'architecture', 'quality', 'bugs']);
+/**
+ * One thing a reviewer checked, and how: the record that tells a review from a skim. `holds` when it checked out,
+ * `finding` when a finding came of it, `unchecked` when the reviewer couldn't check it, with why.
+ */
+export const Checked = z.object({
+  what: z.string(),
+  how: z.string(),
+  status: z.enum(['holds', 'finding', 'unchecked']),
+});
 
-export const Reviewed = z.object({ summary: z.string(), findings: z.array(Finding) });
+export const Reviewed = z.object({
+  summary: z.string(),
+  /** Everything the lens's checklist asked of this change, each checked or said why not. */
+  coverage: z.array(Checked).min(1),
+  findings: z.array(Finding),
+});
 
 /** What the judge read beside the findings: how each check went as a whole. */
 export const Evidence = z.object({
   validation: Validation,
   demonstration: Demonstrated,
-  reviews: z.array(z.object({ lens: Lens, summary: z.string() })),
+  reviews: z.array(z.object({ lens: Lens, summary: z.string(), coverage: z.array(Checked) })),
 });
 
 export const Verdict = z.enum(['fix', 'ticket', 'drop']);
@@ -65,6 +73,8 @@ export const Verdict = z.enum(['fix', 'ticket', 'drop']);
 export const Judgement = z.object({
   /** The pull request's state in a paragraph: what holds, and what doesn't. */
   summary: z.string(),
+  /** The reviews too thin to trust: a lens whose coverage leaves out what the change needed checked. */
+  thin: z.array(z.object({ lens: Lens, why: z.string() })),
   decisions: z.array(
     z.object({
       finding: z.string(),
@@ -108,5 +118,7 @@ export const ReviewRecord = z.object({
   rounds: z.array(z.object({ round: z.number().int(), fixed: Fixed, checked: FixChecked, validated: z.boolean() })),
   /** True when every fix held and validation passed. */
   resolved: z.boolean(),
+  /** The reviews the judge found too thin to trust: each stops the merge. */
+  thin: Judgement.shape.thin,
   open: z.array(z.object({ finding: z.string(), detail: z.string() })),
 });

@@ -1,5 +1,6 @@
 // Formats the ReviewRecord in $INPUT_RECORD as REVIEW.md, comments it on the pull request, and, when findings are
-// still open, removes the designation label in $INPUT_LABEL. Prints whether it removed it.
+// still open or a review was too thin to trust, removes the designation label in $INPUT_LABEL. Prints whether it removed
+// it.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,17 +28,25 @@ const verdict = (id) => {
   return decision.verdict;
 };
 
+const mergeable = record.resolved && record.thin.length === 0;
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+const why = [
+  ...(record.resolved
+    ? []
+    : [`${plural(record.open.length, 'finding')} still open after ${plural(record.rounds.length, 'fix round')}`]),
+  ...(record.thin.length === 0 ? [] : [`${plural(record.thin.length, 'review')} too thin to trust`]),
+];
 const lines = ['## sail review', ''];
 lines.push(
-  record.resolved
+  mergeable
     ? 'Every finding to fix is fixed, and validation passes.'
-    : `${record.open.length} finding${record.open.length === 1 ? '' : 's'} still open after ${record.rounds.length} fix round${record.rounds.length === 1 ? '' : 's'}: this pull request needs a human, and its \`${label}\` label is off.`,
+    : `${why.join(', and ')}: this pull request needs a human, and its \`${label}\` label is off.`,
   '',
 );
 if (record.judgement) lines.push(record.judgement.summary, '');
 if (record.findings.length === 0) {
   lines.push(
-    'No findings: validation passed, the demonstration showed every criterion, and no reviewer found anything.',
+    'No findings: validation passed, the leak check found nothing, the demonstration showed every criterion, and no reviewer found anything.',
   );
 } else {
   lines.push('| Finding | From | Severity | Verdict | |', '|---|---|---|---|---|');
@@ -59,6 +68,10 @@ if (record.rounds.length > 0) {
     );
   }
 }
+if (record.thin.length > 0) {
+  lines.push('', '### Reviews too thin to trust', '');
+  for (const each of record.thin) lines.push(`- ${each.lens}: ${cell(each.why)}`);
+}
 if (record.open.length > 0) {
   lines.push('', '### Still open', '');
   for (const each of record.open) lines.push(`- ${each.finding}: ${cell(each.detail)}`);
@@ -68,5 +81,5 @@ lines.push('');
 const body = join(process.env.STAGE_OUT, 'REVIEW.md');
 writeFileSync(body, lines.join('\n'));
 port(['codehost', 'comment', String(pr.number), '--body-file', body]);
-if (!record.resolved) port(['codehost', 'remove-label', String(pr.number), label]);
-console.log(JSON.stringify({ unlabelled: !record.resolved }));
+if (!mergeable) port(['codehost', 'remove-label', String(pr.number), label]);
+console.log(JSON.stringify({ unlabelled: !mergeable }));

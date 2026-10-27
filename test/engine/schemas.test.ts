@@ -550,6 +550,15 @@ const PROVIDER: NewEvent[] = [
     title: 'Follow up on the --shout flag',
     url: 'fake://tickets/FAKE-2',
   },
+  {
+    type: 'ticket:attached',
+    key: OPEN,
+    ticketKey: 'FAKE-1',
+    name: 'transcript.txt',
+    contentType: 'text/plain',
+    size: 42,
+    url: 'fake://tickets/FAKE-1/attachments/1',
+  },
   { type: 'codehost:pushed', key: OPEN, branch: 'sail/FAKE-1', headSha: SHA },
   {
     type: 'codehost:pr_opened',

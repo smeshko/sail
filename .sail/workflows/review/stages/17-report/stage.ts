@@ -1,6 +1,6 @@
 // report: comments the review on the pull request: the judge's summary, each finding and its verdict, the fix rounds,
-// and what is still open. A review that left findings open also takes the designation label off, so the watcher
-// doesn't review the pushed head again.
+// and what is still open. A review that left findings open, or one too thin to trust, also takes the designation label
+// off, so the watcher doesn't review the pushed head again.
 import { script, value, z } from 'sail';
 import { PullRequestRef } from '../../../../stages/file-follow-ups/stage';
 import { ReviewRecord } from '../../schemas';
