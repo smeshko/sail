@@ -1,7 +1,9 @@
 // Selects the tests a branch affects, for the pre-push hook's narrow gate (`bun run gate`). The full `bun run verify`
 // stays CI's check. A branch's changes are every file that differs from its merge-base with the base branch, committed
-// or not, plus untracked files. A changed test file is selected, and so is every test file that reaches a changed file
-// through imports or through a path it names, such as `join(dir, '..', 'fixtures', 'runs')` or the CLI it spawns.
+// or not, plus untracked files. Each change selects its nearest tests: a changed test file selects itself, and any
+// other file the tests that reach it through imports or through a path they name, such as
+// `join(dir, '..', 'fixtures', 'runs')` or the CLI they spawn, at the fewest steps that reach any. The tests further
+// out, which reach it only through the modules between, are left to CI.
 //
 //   bun scripts/affected-tests.ts           runs the selected tests, or every test when it can't narrow
 //   bun scripts/affected-tests.ts --list    prints the selection, one test file per line
@@ -130,24 +132,38 @@ export function selectTests(root: string, changed: readonly string[]): Selection
   if (unplaced) return { kind: 'all', reason: `${unplaced} changed, and no rule says which tests it reaches` };
 
   const graph = readGraph(root);
-  const affected = new Set(relevant);
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const [path, { imports, named }] of graph) {
-      if (affected.has(path)) continue;
-      const reached =
-        imports.some((target) => affected.has(target)) ||
-        named.some((segments) => [...affected].some((target) => names(path, segments, target)));
-      if (reached) {
-        affected.add(path);
-        grew = true;
+  const dependents = new Map<string, string[]>();
+  /** The files that import or name `target`. */
+  const reaching = (target: string): string[] => {
+    let found = dependents.get(target);
+    if (!found) {
+      found = [...graph]
+        .filter(([path, { imports, named }]) => {
+          if (path === target) return false;
+          return imports.includes(target) || named.some((segments) => names(path, segments, target));
+        })
+        .map(([path]) => path);
+      dependents.set(target, found);
+    }
+    return found;
+  };
+  const tests = new Set<string>();
+  for (const path of relevant) {
+    // Walk out from the change a step at a time, and stop at the first step that holds a test. A helper or a type-test
+    // case also selects the tests beside it, which may read it without importing it, and the walk goes on past them.
+    const seen = new Set([path]);
+    for (let step = [path]; step.length > 0; ) {
+      const reached = step.filter((file) => isTest(file) && graph.has(file));
+      const helpers = new Set(step.filter((file) => file.startsWith('test/') && !isTest(file)).map(dirname));
+      for (const file of graph.keys()) if (isTest(file) && helpers.has(dirname(file))) tests.add(file);
+      if (reached.length > 0) {
+        for (const file of reached) tests.add(file);
+        break;
       }
+      step = step.flatMap(reaching).filter((next) => !seen.has(next) && Boolean(seen.add(next)));
     }
   }
-  // A helper or a type-test case also selects the tests beside it, which may read it without importing it.
-  const besides = new Set([...affected].filter((path) => path.startsWith('test/') && !isTest(path)).map(dirname));
-  const tests = [...graph.keys()].filter((path) => isTest(path) && (affected.has(path) || besides.has(dirname(path))));
-  return { kind: 'some', tests: tests.sort() };
+  return { kind: 'some', tests: [...tests].sort() };
 }
 
 /** Runs git in `root`: its stdout, or undefined when it fails. */

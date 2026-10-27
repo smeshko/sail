@@ -17,9 +17,10 @@ Bun `>=1.3.14` is the only runtime. No command needs Node.
   suite, refused locally as above. Each test gets 30 s unless you pass `--timeout`.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
 - `bun run gate`: typecheck, lint, then only the tests the branch affects, with no coverage gate. It's what the pre-push
-  hook runs. `bun scripts/affected-tests.ts --list` prints the selection: test files changed since the merge-base with
-  `origin/staging`, and test files that reach a changed file through imports or a path they name, such as a helper or
-  a fixture. A change to `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `scripts/test.ts`, `test/setup.ts`
+  hook runs. `bun scripts/affected-tests.ts --list` prints the selection: each change since the merge-base with
+  `origin/staging` selects its nearest tests. A changed test file selects itself; any other file selects the test files
+  that reach it through imports or a path they name, such as a helper or a fixture, at the fewest steps that reach any.
+  The tests further out are CI's. A change to `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `scripts/test.ts`, `test/setup.ts`
   or the coverage census, or a branch with no merge-base, affects every test, and the gate leaves those to CI. A
   prose-only change runs none.
 - `bun run types`: regenerates `types/`, the SDK's committed declarations. Run it after changing `src/sdk`: `verify`
