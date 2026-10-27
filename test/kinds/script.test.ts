@@ -952,6 +952,26 @@ test("the wait for the slot doesn't count toward timeoutSeconds", async () => {
   expect(typesOf(b.events).slice(0, 2)).toEqual(['step:queued', 'script:exec']);
 });
 
+test('a queued step reports each new holder it finds', async () => {
+  const slots = slotsDir();
+  const next = { ...HOLDER, runId: 'HOLDER-2', key: 'verify#2' };
+  takeSlot(slots, 'verify', HOLDER);
+  const b = slotted(slots, 'RUN-B');
+  b.s.run("echo '{}'");
+  const waiting = scriptKind.run(verify(), b.context);
+  await Bun.sleep(100);
+  releaseSlot(slots, 'verify', HOLDER);
+  takeSlot(slots, 'verify', next);
+  await Bun.sleep(100);
+  releaseSlot(slots, 'verify', next);
+  expect((await waiting).outcome).toBe('passed');
+  const holders = b.events.flatMap((event) => (event.type === 'step:queued' ? [event.holder] : []));
+  expect(holders).toMatchObject([
+    { runId: 'HOLDER-1', key: 'verify#1' },
+    { runId: 'HOLDER-2', key: 'verify#2' },
+  ]);
+});
+
 test('a step queued behind a SIGKILLed holder runs', async () => {
   const slots = slotsDir();
   const child = Bun.spawn(
