@@ -187,6 +187,41 @@ test('an agent records the tools it lists as declared, and run.json takes them',
   expect(validateDocument('sail.run.v1', header)).toEqual([]);
 });
 
+test('an agent records the conventions it names, an empty list included, and leaves them out when it names none', () => {
+  const narrowed = agent('describe', {
+    prompt: './p.md',
+    output: Out,
+    permissions,
+    budget,
+    conventions: ['CONTEXT.md'],
+  });
+  const none = agent('route', { prompt: './p.md', output: Out, permissions, budget, conventions: [] });
+  const plain = agent('plain', { prompt: './p.md', output: Out, permissions, budget });
+  expect(entryOf(narrowed)).toMatchObject({ conventions: ['CONTEXT.md'] });
+  expect(entryOf(none)).toMatchObject({ conventions: [] });
+  expect(entryOf(plain)).not.toHaveProperty('conventions');
+  const first = agent('first', { prompt: './p.md', output: Out, permissions, budget, conventions: [] });
+  const both = stage('both', { output: Out, steps: [first, plain] });
+  expect(entryOf(both)?.steps?.[0]).toMatchObject({ step: 'first', conventions: [] });
+  for (const entry of [entryOf(narrowed), entryOf(both)]) {
+    const header = {
+      schema: 'sail.run.v1',
+      runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+      source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+      claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
+      workflow: { name: 'unit', version: 1 },
+      sail: { version: '0.0.0', runtime: 'bun' },
+      adapters: Object.fromEntries(
+        Object.keys(CONFIG.adapters).map((port) => [port, { use: 'fake', origin: 'builtin' }]),
+      ),
+      intake: { name: 'ticket', origin: 'builtin' },
+      stages: { describe: entry },
+      startedAt: '2026-09-27T09:00:00.000Z',
+    };
+    expect(validateDocument('sail.run.v1', header)).toEqual([]);
+  }
+});
+
 test("a script's network of none records [], a list stays, and none declared is left out", () => {
   const none = script('none', { run: './r.sh', output: Out, network: 'none' });
   const hosts = script('hosts', { run: './r.sh', output: Out, network: ['api.example.com'] });

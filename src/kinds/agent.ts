@@ -6,7 +6,7 @@
 // result that isn't one, a rejection and a throw are all harness errors. Its events are forwarded as they come, apart
 // from the session's end: the kind emits that once, when the session is over, with the usage the harness returned.
 import { writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { bindingValues, prepareAgentPrompt } from '../engine/agent-prompt';
 import { runRelative, stageOut, writeOwnFile } from '../engine/call-dir';
@@ -45,8 +45,25 @@ function problems(step: AgentStep): string[] {
   if (step.onInvalidOutput !== undefined && !POLICIES.includes(step.onInvalidOutput)) {
     found.push(`onInvalidOutput must be 'retry-once' or 'fail': ${String(step.onInvalidOutput)}`);
   }
+  found.push(...conventionProblems(step.conventions));
   const submission = submissionSchema(step);
   if ('problem' in submission) found.push(submission.problem);
+  return found;
+}
+
+/** What `project.yaml`'s schema holds of its own list: distinct, non-empty paths, here also relative ones. */
+function conventionProblems(conventions: readonly string[] | undefined): string[] {
+  if (conventions === undefined) return [];
+  if (!Array.isArray(conventions)) return [`conventions must be a list of paths: ${String(conventions)}`];
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const name of conventions) {
+    const inside = (why: string) => found.push(`conventions must be paths inside the repository: '${name}' ${why}`);
+    if (typeof name !== 'string' || name === '') inside('is empty');
+    else if (isAbsolute(name)) inside('is absolute');
+    else if (seen.has(name)) found.push(`conventions names '${name}' twice`);
+    seen.add(name);
+  }
   return found;
 }
 
@@ -214,12 +231,14 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     record,
   });
 
+  // The step's own conventions replace the project's.
+  const conventions = step.conventions ?? agent.conventions;
   const prompt = prepareAgentPrompt({
     sailDir: dirname(context.config),
     file: resolve(context.stageDir, step.prompt),
     bindings: agent.bindings,
     inputs: context.inputs,
-    ...(agent.conventions === undefined ? {} : { conventions: agent.conventions }),
+    ...(conventions === undefined ? {} : { conventions }),
     ...(agent.feedback === undefined ? {} : { feedback: agent.feedback }),
   });
   /** A try that never reached a session: there is nothing to say of one, so an empty transcript and nothing spent. */

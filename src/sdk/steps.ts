@@ -63,6 +63,13 @@ export interface AgentOptions<C extends Consumes, P extends AgentProduces, O ext
   readonly model?: string;
   readonly permissions: Permissions;
   readonly budget: Budget;
+  /**
+   * The convention files appended to this step's prompt, each a path inside the repository, in place of project.yaml's
+   * `conventions`: `[]` appends none. It may name any file in the repository, the project's or not, under the same rule
+   * as project.yaml's list: a regular file inside the repository, or the call doesn't start. Left out, the step gets
+   * the project's.
+   */
+  readonly conventions?: readonly string[];
   /** What an invalid output leads to. The engine defaults to `retry-once`, feeding the errors back. */
   readonly onInvalidOutput?: 'retry-once' | 'fail';
 }

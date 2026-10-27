@@ -187,7 +187,7 @@ A piece of prompt text sail appends to every agent step's prompt: one about untr
 _Avoid_: partial, include, snippet, footer
 
 **Conventions**:
-The repository's own instruction files for agents, such as `AGENTS.md`. The engine appends each one as it is, after the fragments, to every agent step's prompt. The config lists them, and an empty list appends none. With no list, they are `AGENTS.md` and `CLAUDE.md`, where those exist.
+The repository's own instruction files for agents, such as `AGENTS.md`. The engine appends each one as it is, after the fragments, to every agent step's prompt. The config lists them, and an empty list appends none. With no list, they are `AGENTS.md` and `CLAUDE.md`, where those exist. An agent step may name its own list, which replaces the config's for that step.
 _Avoid_: rules, guidelines, context files, memory
 
 **Submit**:

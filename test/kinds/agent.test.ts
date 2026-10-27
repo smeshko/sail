@@ -55,7 +55,9 @@ const Spec = z.object({ summary: z.string().max(400), tasks: z.array(z.string())
 const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: ['git log *'] };
 const budget = { maxTurns: 40, maxUsd: 2, maxMinutes: 10 };
 
-type Options = Partial<Pick<AgentStep, 'consumes' | 'produces' | 'output' | 'budget' | 'onInvalidOutput'>>;
+type Options = Partial<
+  Pick<AgentStep, 'consumes' | 'produces' | 'output' | 'budget' | 'onInvalidOutput' | 'conventions'>
+>;
 
 /** The `spec` step: it reads a brief, writes `spec.md` and submits a `Spec`, unless `options` say otherwise. */
 const spec = (options: Options = {}): AgentStep =>
@@ -273,6 +275,57 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
   expect(s.read('prompt.md')).toBe(prompt ?? '');
   expect(run.output).toEqual({ ...VALID, points: 2, approved: true });
   expect(run.record).toMatchObject({ try: 3, validationTry: 2, validationFailed: false });
+});
+
+test("problems() reports a step's conventions that aren't a list of distinct, non-empty paths relative to the repository", () => {
+  expect(agentKind.problems(spec({ conventions: [] }))).toEqual([]);
+  expect(agentKind.problems(spec({ conventions: ['CONTEXT.md', 'docs/STYLE.md'] }))).toEqual([]);
+  expect(agentKind.problems(spec({ conventions: ['CONTEXT.md', ''] }))).toEqual([
+    "conventions must be paths inside the repository: '' is empty",
+  ]);
+  expect(agentKind.problems(spec({ conventions: ['/etc/hosts'] }))).toEqual([
+    "conventions must be paths inside the repository: '/etc/hosts' is absolute",
+  ]);
+  expect(agentKind.problems(spec({ conventions: ['CONTEXT.md', 'CONTEXT.md'] }))).toEqual([
+    "conventions names 'CONTEXT.md' twice",
+  ]);
+  expect(agentKind.problems(spec({ conventions: 'CONTEXT.md' as never }))).toEqual([
+    'conventions must be a list of paths: CONTEXT.md',
+  ]);
+});
+
+test("a step's own conventions replace the project's in its prompt, in its own order, and an empty list appends none", async () => {
+  const project = { conventions: ['AGENTS.md', 'CONTEXT.md'] };
+  const prepared = (conventions?: readonly string[]) => {
+    const step = spec(conventions === undefined ? {} : { conventions });
+    const s = setup(step);
+    write(join(s.workspace, 'AGENTS.md'), 'Indent with tabs.\n');
+    write(join(s.workspace, 'CONTEXT.md'), '**Run**: one ticket through a workflow.\n');
+    return { step, s, harness: scripted({ resolves: done(VALID), files: { 'spec.md': '# Spec\n' } }) };
+  };
+  const conventionsOf = (events: readonly CallEvent[]) =>
+    events.flatMap((event) => (event.type === 'prompt:rendered' ? [event.conventions] : []));
+
+  const inherited = prepared();
+  await agentKind.run(inherited.step, inherited.s.context(inherited.harness, project));
+  expect(conventionsOf(inherited.s.events)).toEqual([['AGENTS.md', 'CONTEXT.md']]);
+
+  const narrowed = prepared(['CONTEXT.md']);
+  await agentKind.run(narrowed.step, narrowed.s.context(narrowed.harness, project));
+  expect(conventionsOf(narrowed.s.events)).toEqual([['CONTEXT.md']]);
+  expect(narrowed.harness.requests[0]?.prompt).toContain('## Repository conventions: CONTEXT.md');
+  expect(narrowed.harness.requests[0]?.prompt).not.toContain('Indent with tabs.');
+
+  // A step may name a file the project's list doesn't: each is read as a path inside the repository either way.
+  const reordered = prepared(['CONTEXT.md', 'AGENTS.md']);
+  await agentKind.run(reordered.step, reordered.s.context(reordered.harness, { conventions: [] }));
+  expect(conventionsOf(reordered.s.events)).toEqual([['CONTEXT.md', 'AGENTS.md']]);
+
+  const none = prepared([]);
+  await agentKind.run(none.step, none.s.context(none.harness, project));
+  expect(conventionsOf(none.s.events)).toEqual([[]]);
+  expect(none.harness.requests[0]?.prompt).not.toContain('## Repository conventions');
+  expect(none.s.read('prompt.md')).not.toContain('Indent with tabs.');
 });
 
 test('a done session gives its output and the hashes of its files, and records its try, its prompt, the harness and the usage, with the transcript in session.log', async () => {

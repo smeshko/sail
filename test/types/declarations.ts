@@ -28,6 +28,19 @@ agent('one-tool', {
   budget,
 });
 
+agent('narrowed', { prompt: './prompt.md', output: Output, permissions, budget, conventions: ['CONTEXT.md'] });
+
+agent('no-conventions', { prompt: './prompt.md', output: Output, permissions, budget, conventions: [] });
+
+agent('one-convention', {
+  prompt: './prompt.md',
+  output: Output,
+  permissions,
+  budget,
+  // @ts-expect-error TS2322: a step lists its conventions, so one path is not enough
+  conventions: 'CONTEXT.md',
+});
+
 agent('raw-schema', {
   prompt: './prompt.md',
   // @ts-expect-error TS2322: a schema is not a binding until value() wraps it
