@@ -43,10 +43,14 @@ function repoItems(repo: IndexRepo): AttentionItem[] {
     const stopReason = stopReasonOf(run) ?? 'no stop reason';
     const ticket = run.summary?.ticket;
     const about = ticket === undefined ? '' : `${ticket.ticketKey} ${ticket.title}`;
-    if (status === 'failed')
-      items.push({ repo: name, runId, kind: 'failed', title: `failed: ${stopReason}`, detail: about, opens });
+    const message = run.summary?.message;
+    if (status === 'failed') {
+      const detail = [about, message].filter((part) => part !== undefined && part !== '').join(' · ');
+      items.push({ repo: name, runId, kind: 'failed', title: `failed: ${stopReason}`, detail, opens });
+    }
     if (status === 'suspended') {
-      const detail = `sail resume ${shellWord(runId)}`;
+      const resume = `sail resume ${shellWord(runId)}`;
+      const detail = message === undefined ? resume : `${message} · ${resume}`;
       items.push({ repo: name, runId, kind: 'suspended', title: `suspended: ${stopReason}`, detail, opens });
     }
     const denying: { key: string; denials: number }[] = [];

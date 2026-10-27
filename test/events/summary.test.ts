@@ -31,7 +31,7 @@ function folded(events: readonly SailEvent[]): Summary | undefined {
 
 /** How the run ended, as far as the summary says: the fields a run's end sets, those present only. */
 function ending(summary: Summary | undefined): Record<string, unknown> {
-  const fields = ['status', 'stopReason', 'endedAt', 'durationMs', 'result'] as const;
+  const fields = ['status', 'stopReason', 'message', 'endedAt', 'durationMs', 'result'] as const;
   return Object.fromEntries(
     fields.filter((field) => summary !== undefined && field in summary).map((f) => [f, summary?.[f]]),
   );
@@ -86,7 +86,14 @@ test.each([
       [400, runEnd(status, 2, { stopReason, message: 'stopped' })],
     ),
   );
-  expect(ending(summary)).toEqual({ status, stopReason, endedAt: at(400), durationMs: 400 });
+  expect(ending(summary)).toEqual({ status, stopReason, message: 'stopped', endedAt: at(400), durationMs: 400 });
+});
+
+test('a failed run:end with a message puts it in the summary, and one without leaves no message key', () => {
+  const failed = (extra: { message?: string }) =>
+    folded(stamp([0, runStart()], [400, runEnd('failed', 0, { stopReason: 'workflow_failed', ...extra })]));
+  expect(failed({ message: 'spec blocked: x' })?.message).toBe('spec blocked: x');
+  expect(failed({})).not.toHaveProperty('message');
 });
 
 test('an event after run:end, other than error:consumer, sets the run back to running', () => {
