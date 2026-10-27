@@ -266,6 +266,10 @@ _Avoid_: rejection, abort, error (an outcome)
 `sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease, claim or comment. It exits 0, or 3 with the start's own refusal.
 _Avoid_: preview, simulation, plan
 
+**Keep-awake**:
+The hold a run's process takes against the machine's sleep, from its start or resume until it ends. It is released at the end, or by the OS when the process dies: `caffeinate` on macOS, none elsewhere or with `SAIL_KEEP_AWAKE=off`, and recorded as `run:keep_awake`. It doesn't stop a laptop on battery sleeping when its lid is closed.
+_Avoid_: wake lock, caffeinate, sleep assertion
+
 **Suspended**:
 The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
