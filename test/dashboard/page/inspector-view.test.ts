@@ -3,7 +3,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type Loaded, logTarget, renderInspector } from '../../../src/dashboard/page/inspector-view';
+import { type Loaded, logTarget, renderInspector, streamsOf } from '../../../src/dashboard/page/inspector-view';
 import { type CardStep, foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
 import { type InspectorTab, initialUi, type UiState } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
@@ -166,4 +166,10 @@ test("a multi-step call's log tab shows its steps, the last chosen until one is 
   expect(
     steps(renderInspector(card('tests#1'), model.roster, undefined, undefined, { ...initialUi(0), tab: 'log' }).value),
   ).toEqual([]);
+});
+
+test('a multi-step call writes no log streams of its own: its steps do', () => {
+  expect(streamsOf('stage')).toEqual([]);
+  expect(streamsOf('agent')).toEqual(['session']);
+  expect(streamsOf('script')).toEqual(['stdout', 'stderr']);
 });

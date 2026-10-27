@@ -19,11 +19,10 @@ const obj = (value: unknown): Fields | undefined =>
 const list = (value: unknown): string[] =>
   Array.isArray(value) ? value.map((item) => (typeof item === 'string' ? item : text(item))) : [];
 
-/** The log streams a call of `kind` writes. */
+/** The log streams a call or step of `kind` writes. A multi-step call writes none: its steps do. */
 export function streamsOf(kind: string): string[] {
   if (kind === 'agent') return ['session'];
   if (kind === 'script') return ['stdout', 'stderr'];
-  if (kind === 'stage') return ['session', 'stdout', 'stderr'];
   return [];
 }
 
