@@ -16,6 +16,7 @@ import { join, relative } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
+import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import { SPEC, SPEC_STAGE, submits, TICKET, writeAgentFixture } from '../helpers/agent-fixture';
 import { edit, write } from '../helpers/fixture';
@@ -213,6 +214,27 @@ test.each([
       key: 'tests#1',
       outcome: 'failed',
       command: `.sail/${folder}/run.sh`,
+    });
+  });
+});
+
+test('a stage run holds the keep-awake around its call and releases it, whether the call passes or ends in error', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureCopy(repo);
+    const runSh = join(sail, 'stages', 'tests', 'run.sh');
+    const { keepAwake, calls } = recordingKeepAwake();
+    writeScript(
+      runSh,
+      'echo \'{"ok":true,"total":1,"failed":0,"durationMs":1,"failures":[]}\'\necho "<x/>" > "$STAGE_OUT/junit.xml"',
+    );
+    const passed = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir, { keepAwake });
+    expect({ code: passed.code, calls }).toEqual({ code: EXIT_OK, calls: ['acquire', 'release'] });
+
+    writeScript(runSh, 'echo \'{"ok":true}\'');
+    const errored = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir, { keepAwake });
+    expect({ code: errored.code, calls }).toEqual({
+      code: EXIT_FAILED,
+      calls: ['acquire', 'release', 'acquire', 'release'],
     });
   });
 });

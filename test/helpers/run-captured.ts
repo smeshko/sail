@@ -18,6 +18,8 @@ export interface CaptureOptions {
   tty?: Tty;
   /** Handed to the command as `io.env`: the environment it runs in, in place of the process's. */
   env?: Io['env'];
+  /** Handed to the command as `io.keepAwake`: what it holds while a run is going, in place of the system's. */
+  keepAwake?: Io['keepAwake'];
   /** What the command reads as all of stdin. Left out, the command has no stdin. */
   stdin?: string;
   /** Handed to the command as `io.tsc`: the `tsc` its type-check runs. */
@@ -48,6 +50,7 @@ export async function runCaptured(
     ...(options.tty === undefined ? {} : { tty: options.tty }),
     ...(options.env === undefined ? {} : { env: options.env }),
     ...(options.tsc === undefined ? {} : { tsc: options.tsc }),
+    ...(options.keepAwake === undefined ? {} : { keepAwake: options.keepAwake }),
     ...(options.stdin === undefined ? {} : { stdin: () => Promise.resolve(options.stdin as string) }),
   };
   const code = await run(argv, io);

@@ -7,6 +7,9 @@
 // or workspace, so it needs none of their credentials. A script stage resolves no adapter at all. A multi-step stage
 // runs its steps in order, with no journal and no resume, and a step that declares a `gitDiff()` can't start: a stage
 // in isolation has no workspace to take one from.
+//
+// It holds a keep-awake for its call, as a run does for its whole length, though it has no run:keep_awake to report it
+// in: a stage in isolation has no event stream.
 import { existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
@@ -15,6 +18,7 @@ import type { Supplied } from '../../engine/bindings';
 import { type AgentExecution, callProblems, runCall } from '../../engine/call';
 import { type ProjectConfig, readConfig } from '../../engine/config';
 import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
+import { systemKeepAwake } from '../../engine/keep-awake';
 import { modelProblemsOf } from '../../engine/roster';
 import { runsDir } from '../../engine/run-dir';
 import { newRunId } from '../../engine/run-id';
@@ -178,6 +182,7 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
   const runId = newRunId(definition.name);
   const controller = new AbortController();
   const unregister = io.onInterrupt?.(() => controller.abort());
+  const hold = (io.keepAwake ?? systemKeepAwake(io.env ?? process.env)).acquire();
   let ran: Awaited<ReturnType<typeof runCall>>;
   try {
     ran = await runCall({
@@ -198,6 +203,7 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
       ...(agent === undefined ? {} : { agent }),
     });
   } finally {
+    hold.release();
     unregister?.();
   }
 

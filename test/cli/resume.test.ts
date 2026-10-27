@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED, type ExitCode } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
+import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
@@ -92,6 +93,17 @@ function replaysOf(repoDir: string, runId: string): number {
     .filter((event) => event.type === 'run:end')
     .reduce((sum, event) => sum + (event.replays ?? 0), 0);
 }
+
+test('sail resume holds the keep-awake for the resumed run and releases it at its end, the resume reporting its own', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedInto(repo.dir);
+    const { keepAwake, calls } = recordingKeepAwake();
+    const { code } = await runCaptured(['resume', runId], repo.dir, { keepAwake });
+    const held = readEvents(join(repo.dir, '.sail-runs', runId)).filter((event) => event.type === 'run:keep_awake');
+    expect({ code, calls }).toEqual({ code: EXIT_OK, calls: ['acquire', 'release'] });
+    expect(held.at(-1)).toEqual(expect.objectContaining({ held: true, by: 'fake' }));
+  });
+});
 
 test('sail resume opens with what already ran, runs the interrupted call as its second try, and ends with the whole run', async () => {
   await withTempRepo(async (repo) => {

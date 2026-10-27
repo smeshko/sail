@@ -13,6 +13,7 @@
 // The terminal view shows the whole run: it reads the run's earlier events first, prints nothing for them, and opens
 // with what already ran once the resume's first event arrives. A resume refused before then prints nothing.
 import type { Raise } from '../../engine/budget';
+import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { findRun } from '../../engine/open-run';
 import { resumeWorkflow } from '../../engine/runtime';
@@ -82,6 +83,7 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
       ...(Object.keys(raise).length === 0 ? {} : { raise }),
       adapters: recording?.adapters ?? project.adapters,
       signal,
+      keepAwake: io.keepAwake ?? systemKeepAwake(io.env ?? process.env),
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );

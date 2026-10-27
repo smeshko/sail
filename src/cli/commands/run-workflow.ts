@@ -24,6 +24,7 @@ import { recordingHarness, writeJournalKeys } from '../../adapters/recording';
 import { type ResolvedAdapters, resolveAdapters } from '../../engine/adapters';
 import { raiseFlag } from '../../engine/budget';
 import { type Port, type ProjectConfig, readConfig } from '../../engine/config';
+import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { runsDir } from '../../engine/run-dir';
 import { type RunEnd, runWorkflow } from '../../engine/runtime';
@@ -292,6 +293,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
       ...(typeof headSha === 'string' ? { headSha } : {}),
       adapters: recording?.adapters ?? project.adapters,
       signal,
+      keepAwake: io.keepAwake ?? systemKeepAwake(io.env ?? process.env),
       consumers: [terminal],
     }).finally(() => terminal.close()),
   );

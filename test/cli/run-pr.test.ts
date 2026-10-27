@@ -7,6 +7,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { takeLease } from '../../src/adapters/leases';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
+import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { write } from '../helpers/fixture';
@@ -68,6 +69,18 @@ function stub(repo: TempRepo, delayMs = 0): { sail: string; headSha: string } {
   ]);
   return { sail, headSha };
 }
+
+test("sail '#1' --workflow review-pr holds the keep-awake for the run, and releases it at its end", async () => {
+  await withTempRepo(async (repo) => {
+    stub(repo);
+    const { keepAwake, calls } = recordingKeepAwake();
+    const { code } = await runCaptured(['#1', '--workflow', 'review-pr'], repo.dir, { keepAwake });
+    const dir = join(repo.dir, '.sail-runs', runIds(repo.dir)[0] ?? '');
+    const held = readEvents(dir).filter((event) => event.type === 'run:keep_awake');
+    expect({ code, calls }).toEqual({ code: EXIT_OK, calls: ['acquire', 'release'] });
+    expect(held).toEqual([expect.objectContaining({ held: true, by: 'fake' })]);
+  });
+});
 
 test("sail '#1' --workflow review-pr runs to completion in a workspace at the head sha, on the head branch, with a pull-request source and no claim, and its review's prompt holds the body wrapped", async () => {
   await withTempRepo(async (repo) => {

@@ -7,6 +7,7 @@ import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { readJournal } from '../../src/engine/journal';
+import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { readStatus } from '../../src/engine/run-dir';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { edit } from '../helpers/fixture';
@@ -41,6 +42,21 @@ async function sailRun(repo: TempRepo, sourceId: string, args: string[], capture
   const [runId = ''] = runIds(repo.dir).filter((id) => id !== sourceId);
   return { ...captured, runId, dir: join(repo.dir, '.sail-runs', runId) };
 }
+
+test('a seeded run holds the keep-awake once and releases it at its end, with --continue or without', async () => {
+  for (const extra of [[], ['--continue']]) {
+    await withTempRepo(async (repo) => {
+      const from = await source.copyInto(repo.dir);
+      const { keepAwake, calls } = recordingKeepAwake();
+      const ran = await sailRun(repo, from.runId, ['--from-run', from.runId, '--stage', 'spec', ...extra], {
+        keepAwake,
+      });
+      const held = readEvents(ran.dir).filter((event) => event.type === 'run:keep_awake');
+      expect({ args: extra, calls }).toEqual({ args: extra, calls: ['acquire', 'release'] });
+      expect(held).toEqual([expect.objectContaining({ held: true, by: 'fake' })]);
+    });
+  }
+});
 
 test('sail run --from-run --stage spec, after an edit of the spec prompt, reruns spec alone on the reused brief and stops suspended: its prompt carries the edit and its output is its own', async () => {
   await withTempRepo(async (repo) => {
