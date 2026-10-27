@@ -177,14 +177,14 @@ test('a timeout ends in error within the grace period, and no child survives', a
     const pidFile = join(repo.dir, 'grandchild.pid');
     s.run(`sleep 30 &\necho $! > "${pidFile}"\nsleep 5`);
     const started = performance.now();
-    const { paths } = await runCall(s.request(testsStep({ timeoutSeconds: 1 }), exitWith(0)));
+    const { paths } = await runCall(s.request(testsStep({ timeoutSeconds: 3 }), exitWith(0)));
     const ms = performance.now() - started;
     console.log(`timeout: ${Math.round(ms)} ms`);
-    expect(ms).toBeLessThan(3500);
+    expect(ms).toBeLessThan(5500);
     expect(readBack(paths.result)).toMatchObject({
       outcome: 'error',
       output: null,
-      errors: [{ reason: 'timeout', message: 'timed out after 1s' }],
+      errors: [{ reason: 'timeout', message: 'timed out after 3s' }],
       exit: { code: null, signal: 'SIGTERM' },
     });
     const pid = Number(readFileSync(pidFile, 'utf8'));
