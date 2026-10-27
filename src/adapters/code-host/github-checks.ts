@@ -43,7 +43,7 @@ export function commitStatus(status: Pick<GitHubStatus, 'state'>): CheckStatus {
 /**
  * Every item of a paged list, page after page of 100, until `total_count` items have been read. A page without its list
  * or its count, one whose count differs from the first page's, one that ends the list short of the count, or one
- * listing an entry that is no object with a string `key`, is `unavailable`: a check left unread could have failed.
+ * listing an entry that is no object or holds no string under `nameField`, is `unavailable`: a check left unread could have failed.
  */
 async function readPaged<T>(
   client: GitHubClient,
@@ -51,7 +51,7 @@ async function readPaged<T>(
   sha: string,
   endpoint: 'check-runs' | 'status',
   field: 'check_runs' | 'statuses',
-  key: 'name' | 'context',
+  nameField: 'name' | 'context',
 ): Promise<T[]> {
   const read: T[] = [];
   let expected: number | undefined;
@@ -80,12 +80,12 @@ async function readPaged<T>(
         `GitHub's ${endpoint} count for ${sha} changed from ${expected} to ${total} while it was read`,
       );
     }
-    if (!listed.every((entry) => typeof entry === 'object' && entry !== null && typeof entry[key] === 'string')) {
+    if (!listed.every((entry) => typeof entry === 'object' && entry !== null && typeof entry[nameField] === 'string')) {
       throw new PortError(
         'codeHost',
         op,
         'unavailable',
-        `GitHub's ${endpoint} answer for ${sha} lists an entry without a ${key}`,
+        `GitHub's ${endpoint} answer for ${sha} lists an entry without a ${nameField}`,
       );
     }
     read.push(...(listed as T[]));
