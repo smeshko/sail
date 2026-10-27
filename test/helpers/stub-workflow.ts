@@ -356,6 +356,9 @@ export function setSleepAt(repoDir: string, key: string): void {
   rmSync(join(repoDir, '.stub', 'sleeping'), { force: true });
 }
 
+/** How long a call may take to fall asleep: a sail process boots and runs the stages before it, on a loaded machine. */
+const SLEEP_MS = 20_000;
+
 /** The pids of the sleeping script and its `sleep`, from `<repo>/.stub/sleeping`, or undefined until it exists. */
 export function sleepingPids(repoDir: string): number[] | undefined {
   const path = join(repoDir, '.stub', 'sleeping');
@@ -364,7 +367,7 @@ export function sleepingPids(repoDir: string): number[] | undefined {
 }
 
 /** Waits for the call `sleepAt` names to fall asleep, and returns its pids. It throws, naming the file, after `timeoutMs`. */
-export async function whenSleeping(repoDir: string, timeoutMs = 10_000): Promise<number[]> {
+export async function whenSleeping(repoDir: string, timeoutMs = SLEEP_MS): Promise<number[]> {
   const deadline = performance.now() + timeoutMs;
   let pids = sleepingPids(repoDir);
   while (pids === undefined) {
@@ -401,7 +404,7 @@ export async function interruptWhenAsleep<T>(
   repoDir: string,
   running: Promise<T>,
   interrupt: () => void,
-  timeoutMs = 10_000,
+  timeoutMs = SLEEP_MS,
 ): Promise<{ end: T; alive: number[] }> {
   let ended = false;
   const settled = running.then(
