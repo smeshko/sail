@@ -83,6 +83,18 @@ test('the shim refuses a ticket that is not designated: one line on stderr, exit
   });
 });
 
+test('the shim exits 3 on a refused ticket when its stderr pipe is closed before it writes', async () => {
+  await withTempRepo((repo) => {
+    writeStub(repo.dir);
+    const exitFile = join(repo.dir, 'sail.exit');
+    // The reader closes its end at once, so the refusal's line on stderr meets a pipe nobody reads.
+    const pipeline = '{ "$0" "$1" FAKE-3 2>&1 >/dev/null; echo $? >"$2"; } | exec 0<&-';
+    Bun.spawnSync(['sh', '-c', pipeline, process.execPath, shim, exitFile], { cwd: repo.dir, env: repo.env });
+    expect(readFileSync(exitFile, 'utf8')).toBe('3\n');
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
 // In a process of its own, because bun test fails a test on any unhandled rejection, whatever the process listens for.
 test("a run.fail() in a chain the workflow doesn't await, after the run has ended, changes neither its end nor its code", async () => {
   await withTempRepo((repo) => {
