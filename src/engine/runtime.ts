@@ -406,10 +406,11 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       const { workspace } = opened;
       const run = { runId, runDir: dir };
       try {
+        // A head nothing pushed is kept at its run ref, which workspace:released names: the message stays the run's.
         await opened.adapters.workspace.release(run, false);
       } catch (error) {
         if (!(error instanceof PortError)) throw error;
-        const why = `its workspace at ${relative(root, workspace.path)} was not removed: ${error.message}`;
+        const why = `its workspace at ${relative(root, workspace.path)} was not released: ${error.message}`;
         message = message === undefined ? why : `${message}; ${why}`;
       }
       try {

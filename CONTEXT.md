@@ -302,6 +302,10 @@ _Avoid_: bootstrap, install step, setup stage
 The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`. For a pull-request source it is the pull request's head.
 _Avoid_: start point, fork point
 
+**Run ref**:
+`refs/sail/runs/<runId>` in the repository: where a run's commits are kept when its workspace is removed with its `HEAD` past its base and on no remote-tracking ref, recorded as `ref` on `workspace:released`. A failed run never pushed its branch, so this is where its work survives. `git branch` doesn't list it and gc keeps what it reaches; `git branch <name> refs/sail/runs/<runId>` recovers the work.
+_Avoid_: backup branch, rescue ref
+
 **Branch**:
 Always the git branch, such as the one a run's workspace sits on. A workflow's routing decision is a route, never a branch.
 _Avoid_: using "branch" for a route or a fork in the workflow

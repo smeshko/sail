@@ -4,7 +4,7 @@
 // a constant (`fake://origin` unless set), and its definition keeps leases beside the repository's runs rather than
 // machine-wide. The branch is never checked out: a workspace records it for the later push of `HEAD:<branch>`, so only
 // the lease keeps two runs of one branch apart (ADR-0018). `holder()` reads the same leases.
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import type { ProviderOptions } from '../../ports/ticket-source';
@@ -13,7 +13,7 @@ import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases'
 import {
   addDetached,
   diffWorkingTree,
-  removeWorktree,
+  releaseWorktree,
   reopenWorktree,
   resolveCommit,
   sweepEnded,
@@ -80,12 +80,18 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     },
     async release(run, keep) {
       const path = join(run.runDir, WORKSPACE_DIR);
-      const raw = keep ? null : removeWorktree(repo, run.runDir, 'release', env);
-      emit({ type: 'workspace:released', path, kept: keep });
-      return { path, kept: keep, raw };
+      if (keep) {
+        emit({ type: 'workspace:released', path, kept: keep });
+        return { path, kept: keep, raw: null };
+      }
+      const { raw, ...commits } = releaseWorktree(repo, run, 'release', env);
+      emit({ type: 'workspace:released', path, kept: keep, ...commits });
+      return { path, kept: keep, ...commits, raw };
     },
     async sweep(runsDir) {
-      const paths = sweepEnded(runsDir, (runDir) => removeWorktree(repo, runDir, 'sweep', env));
+      const paths = sweepEnded(runsDir, (runDir) =>
+        releaseWorktree(repo, { runId: basename(runDir), runDir }, 'sweep', env),
+      );
       return { paths, raw: null };
     },
     capabilities: () => ({ keep: true, sweep: true }),

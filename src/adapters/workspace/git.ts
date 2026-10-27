@@ -20,6 +20,7 @@ import { join, resolve } from 'node:path';
 import { withoutRepositoryVariables } from '../../engine/git-env';
 import { runProcess } from '../../engine/process';
 import { readStatus } from '../../engine/run-dir';
+import { RUN_HEADER_FILE } from '../../engine/run-header';
 import { PortError } from '../../ports/errors';
 import type { Diff, Workspace } from '../../ports/types';
 
@@ -174,6 +175,80 @@ export function removeWorktree(
   }
   if (existsSync(path)) throw new PortError('workspace', op, 'unavailable', `${path}: ${why}`);
   return removed;
+}
+
+/** The run ref, where a removed workspace's commits are kept: outside `refs/heads/`, so `git branch` never lists it. */
+export const runRef = (runId: string): string => `refs/sail/runs/${runId}`;
+
+/**
+ * The base `run.json` in `runDir` records, or undefined when there is none. Only `repository.baseSha` is read, so a
+ * header that has since broken `sail.run.v1` still names its base.
+ */
+function recordedBase(runDir: string): string | undefined {
+  try {
+    const header = JSON.parse(readFileSync(join(runDir, RUN_HEADER_FILE), 'utf8'));
+    const baseSha = header?.repository?.baseSha;
+    return typeof baseSha === 'string' ? baseSha : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Points `runRef(runId)` in `repo` at the `HEAD` of the run's workspace, when that is a commit other than the base
+ * `run.json` records and no remote-tracking ref reaches: a run that never pushed its branch has nothing else reaching its commits once the worktree goes,
+ * and git's gc deletes them. The adapter compares against the run's record, since a workspace is released by a process
+ * that may never have made it. A workspace with no recorded base is a start's refused before `run.json`, which ran no
+ * step, and a link is never looked into, since its `HEAD` is another checkout's. It gives the ref and the commit, or
+ * what failed when the ref couldn't be written.
+ */
+function keepHead(
+  repo: string,
+  run: { runId: string; runDir: string },
+  env?: Readonly<Record<string, string>>,
+): { ref: string; head: string } | { failed: string } | undefined {
+  const path = resolve(run.runDir, WORKSPACE_DIR);
+  const base = recordedBase(run.runDir);
+  if (base === undefined || isLink(run.runDir) || isLink(path)) return undefined;
+  const shown = gitSync(path, ['rev-parse', '--show-toplevel', 'HEAD'], env);
+  const [top, head] = shown.stdout.trim().split('\n');
+  if (shown.code !== 0 || top !== realpathSync(path) || head === undefined || head === base) return undefined;
+  // A head a remote-tracking ref reaches was pushed, as a pull request's head is: the remote keeps it already.
+  const pushed = gitSync(
+    path,
+    ['for-each-ref', '--contains', head, '--count=1', '--format=%(refname)', 'refs/remotes'],
+    env,
+  );
+  if (pushed.code === 0 && pushed.stdout.trim() !== '') return undefined;
+  const ref = runRef(run.runId);
+  const wrote = gitSync(repo, ['update-ref', ref, head], env);
+  if (wrote.code !== 0) return { failed: `its commits at ${head} were not kept at ${ref}: ${wrote.stderr}` };
+  return { ref, head };
+}
+
+/**
+ * Removes the run's workspace for good, for a release or a sweep (`op`): keeps its commits at `runRef()` as
+ * `keepHead()` does, then removes it with `removeWorktree()`. A ref that can't be written doesn't stop the removal: `op`
+ * then fails as `unavailable`, saying so, and with the removal's own failure after it when there is one.
+ */
+export function releaseWorktree(
+  repo: string,
+  run: { runId: string; runDir: string },
+  op: string,
+  env?: Readonly<Record<string, string>>,
+): { raw: GitResult; ref?: string; head?: string } {
+  const kept = keepHead(repo, run, env);
+  const failed = kept !== undefined && 'failed' in kept ? kept.failed : undefined;
+  let removed: GitResult;
+  try {
+    removed = removeWorktree(repo, run.runDir, op, env);
+  } catch (error) {
+    if (failed === undefined || !(error instanceof PortError)) throw error;
+    const why = error.message.slice(`workspace.${op}: `.length);
+    throw new PortError('workspace', op, 'unavailable', `${failed}; ${why}`);
+  }
+  if (failed !== undefined) throw new PortError('workspace', op, 'unavailable', failed);
+  return { raw: removed, ...(kept === undefined || 'failed' in kept ? {} : kept) };
 }
 
 /** What `range` diffs against: a rev, and whether it is the merge-base of that rev and `HEAD`. Undefined: no range. */

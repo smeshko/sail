@@ -107,7 +107,7 @@ export async function stopRun(options: StopRunOptions): Promise<Stopped> {
         await port.release(run, false);
       } catch (error) {
         if (!(error instanceof PortError)) throw error;
-        said.push(`its workspace was not removed: ${error.message}`);
+        said.push(`its workspace was not released: ${error.message}`);
       }
     }
     if (lease !== undefined) {
