@@ -150,6 +150,8 @@ function entryOf(
       return html`<div class="tl-sep"><span>step ${entry.index}/${entry.of} · ${entry.step}</span></div>`;
     case 'try':
       return html`<div class="tl-sep"><span>try ${entry.try}</span></div>`;
+    case 'queued':
+      return html`<div class="tl-sep"><span>queued for exclusive ${entry.exclusive} · held by ${entry.holder}</span></div>`;
   }
 }
 

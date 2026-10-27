@@ -20,6 +20,17 @@ function spec(events: Record<string, unknown>[]): StageCard {
   return card;
 }
 
+test('renders a queued entry naming the holder, as a separator no filter hides', () => {
+  const holder = { runId: 'HOLDER-1', key: 'verify#1', pid: 4242, takenAt: '2026-09-25T09:00:00.000Z' };
+  const card = spec([{ ...at, seq: 901, type: 'step:queued', exclusive: 'verify', holder }]);
+  const queued = card.timeline.at(-1);
+  if (queued === undefined) throw new Error('no queued entry');
+  expect(filterOf(queued)).toBeUndefined();
+  expect(renderTimeline(card, ui(), NOW).value).toContain(
+    '<div class="tl-sep"><span>queued for exclusive verify · held by HOLDER-1</span></div>',
+  );
+});
+
 test("a tool call's input is shown by its most telling field's first line, else as JSON, cut at 160 characters", () => {
   expect([
     inputSummary({ command: 'bun test\nsecond', file_path: 'a.ts' }),

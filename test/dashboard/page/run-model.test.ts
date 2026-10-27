@@ -438,6 +438,22 @@ test("a tool call is one timeline entry: started running, given its denial, and 
   expect(model.unreadable).toBe(1);
 });
 
+test("a queued step joins its call's timeline, and one without a holder is unreadable", () => {
+  const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
+  const holder = { runId: 'HOLDER-1', key: 'verify#1', pid: 4242, takenAt: '2026-09-25T09:00:00.000Z' };
+  const model = foldRun([
+    ...golden().slice(0, 14),
+    { ...at, seq: 901, type: 'step:queued', exclusive: 'verify', holder },
+    { ...at, seq: 902, type: 'script:exec', command: 'make', cwd: '.', envKeys: [] },
+    { ...at, seq: 903, type: 'step:queued', exclusive: 'verify' },
+  ]);
+  expect(model.cards[1]?.timeline.slice(-2)).toEqual([
+    { kind: 'queued', ts: at.ts, exclusive: 'verify', holder: 'HOLDER-1' },
+    { kind: 'script', ts: at.ts, command: 'make' },
+  ]);
+  expect(model.unreadable).toBe(1);
+});
+
 test('a later try is a timeline entry, and a script exit ends the open script with its code or signal, passes over one with none open, and is unreadable without a duration', () => {
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
   const model = foldRun([
