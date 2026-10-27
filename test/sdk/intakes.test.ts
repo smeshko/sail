@@ -1,11 +1,11 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { render } from '../../src/engine/render';
 import { markUntrusted } from '../../src/engine/untrusted';
 import { PrInput, pr, TicketInput, ticket } from '../../src/sdk/intakes';
-import { isUntrusted } from '../../src/sdk/untrusted';
+import { isUntrusted, untrusted } from '../../src/sdk/untrusted';
 
 const goldenIntake = join(
   import.meta.dir,
@@ -131,18 +131,20 @@ test("a prompt that prints the input's URL or an attachment's MIME type keeps a 
 });
 
 /** Schema types that hold no string. */
-const STRINGLESS = ['number', 'int', 'boolean', 'bigint', 'literal', 'enum', 'null', 'undefined', 'date'];
+const STRINGLESS = ['number', 'int', 'boolean', 'bigint', 'literal', 'enum', 'null', 'undefined', 'date', 'never'];
 /** Schema types that hold one schema, `innerType`, and parse what it parses. */
 const WRAPS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
 
 /**
- * The paths of the strings `schema` holds that are not marked untrusted, as `a.b[]`, and of each schema of a type it
- * doesn't know, as `a.b (<type>)`: a new kind of field fails the test until this walks it (review R1-8).
+ * The paths of the strings `schema` holds that are not marked untrusted, as `a.b[]`, with `{}` marking a record's
+ * values or an object's catchall, and of each schema of a type it doesn't know, as `a.b (<type>)`: a new kind of field
+ * fails the test until this walks it (review R1-8).
  */
 function unmarked(schema: z.ZodType, path = ''): string[] {
   const def = schema.def as {
     type: string;
     shape?: Record<string, z.ZodType>;
+    catchall?: z.ZodType;
     element?: z.ZodType;
     innerType?: z.ZodType;
     options?: z.ZodType[];
@@ -153,9 +155,12 @@ function unmarked(schema: z.ZodType, path = ''): string[] {
   if (def.type === 'string') return isUntrusted(schema) ? [] : [path];
   if (isUntrusted(schema) || STRINGLESS.includes(def.type)) return [];
   if (def.type === 'object') {
-    return Object.entries(def.shape ?? {}).flatMap(([key, field]) =>
-      unmarked(field, path === '' ? key : `${path}.${key}`),
-    );
+    return [
+      ...Object.entries(def.shape ?? {}).flatMap(([key, field]) =>
+        unmarked(field, path === '' ? key : `${path}.${key}`),
+      ),
+      ...(def.catchall === undefined ? [] : unmarked(def.catchall, `${path}{}`)),
+    ];
   }
   if (def.type === 'array' && def.element !== undefined) return unmarked(def.element, `${path}[]`);
   if (WRAPS.includes(def.type) && def.innerType !== undefined) return unmarked(def.innerType, path);
@@ -166,6 +171,16 @@ function unmarked(schema: z.ZodType, path = ''): string[] {
   }
   return [`${path} (${def.type})`];
 }
+
+test("the unmarked-string guard walks an object's catchall: a bare string or a loose object fails it, a marked or strict one doesn't", () => {
+  expect({
+    bare: unmarked(z.object({ a: untrusted() }).catchall(z.string())),
+    marked: unmarked(z.object({ a: untrusted() }).catchall(untrusted())),
+    strict: unmarked(z.strictObject({ a: untrusted() })),
+    loose: unmarked(z.looseObject({})),
+    nested: unmarked(z.object({ meta: z.object({}).catchall(z.string()) })),
+  }).toEqual({ bare: ['{}'], marked: [], strict: [], loose: ['{} (unknown)'], nested: ['meta{}'] });
+});
 
 test('pr is the built-in intake for pull requests, and PrInput marks every string the host returned untrusted: only headSha, baseSha and ticketKey are left bare', () => {
   expect(pr).toMatchObject({
