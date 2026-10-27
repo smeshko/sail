@@ -318,6 +318,13 @@ test("a newline on a chunk's first byte ends the chunk's lines, and the line bef
   expect([1, 2, 3, 4].map((seq) => holdsSeq(dir, seq))).toEqual([true, true, true, false]);
 }, 5000);
 
+test('an empty line is a line: a last one holds no seq, and holdsSeq looks past one', () => {
+  const dir = runDir();
+  writeFileSync(join(dir, 'events.ndjson'), `${lines(1, 2)}\n${lines(3)}\n`);
+  expect(lastSeq(dir)).toBeUndefined();
+  expect([1, 2, 3, 4].map((seq) => holdsSeq(dir, seq))).toEqual([true, true, true, false]);
+});
+
 test('lastSeq reads a 64 MB last line in linear time', () => {
   const dir = runDir();
   writeFileSync(join(dir, 'events.ndjson'), lines(1, 2) + lineOf(3, 64 * 1024 * 1024));
