@@ -432,17 +432,20 @@ test.each([
   ['lazy', 'z.lazy(() => Description)'],
   ['any', 'z.any()'],
   ['transformed', 'Description.transform((d) => d)'],
-])("a stage whose step picks a key its earlier step's %s output holds loads with no problem", async (_, output) => {
-  await withTempRepo(async (repo) => {
-    const sail = publishWith(
-      repo.dir,
-      `describe('describe', { output: ${output} }), open({ title: fromStep('describe').output('title') })`,
-    );
-    const found = await loadDefinitions(sail);
-    expect(found.problems).toEqual([]);
-    expect(found.stages.map((s) => s.name)).toEqual(['publish']);
-  });
-});
+])(
+  "a stage whose step picks an output key its earlier step's %s output holds loads with no problem",
+  async (_, output) => {
+    await withTempRepo(async (repo) => {
+      const sail = publishWith(
+        repo.dir,
+        `describe('describe', { output: ${output} }), open({ title: fromStep('describe').output('title') })`,
+      );
+      const found = await loadDefinitions(sail);
+      expect(found.problems).toEqual([]);
+      expect(found.stages.map((s) => s.name)).toEqual(['publish']);
+    });
+  },
+);
 
 test('a gitDiff the stage declares on itself, rather than on the step that reads it, is refused at load', async () => {
   await withTempRepo(async (repo) => {
