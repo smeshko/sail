@@ -1,11 +1,15 @@
 // The page's shell. `boot(host)` holds what is on screen and keeps it live:
 //
-// - One index socket feeds the rail, needs attention, the queues and the open run's summary. The first index opens the
-//   newest running run, else the newest run, unless the URL names a run it lists, and a selection is kept while its
+// - One index socket feeds the rail, needs attention, the queue view and the open run's summary. The first index opens
+//   the newest running run, else the newest run, unless the URL names a run it lists, and a selection is kept while its
 //   run is still listed.
 // - One run socket is open at a time, for the open run, and its events are folded into the run model. A socket that
 //   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything.
-// - One queue socket per watched workflow in the index feeds its recent events and its watch state.
+// - One queue socket per watched workflow in the index feeds its recent events and its watch state. A workflow's queue
+//   row in the rail opens its queue in the centre, in place of the run, until a run is opened again. A queue that leaves
+//   the index gives the centre back to the run.
+// - Needs attention is a button in the top bar with its count. It opens a pane over the page, and `a` toggles it; Esc,
+//   a click outside it, and opening one of its items close it.
 // - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
 //   socket's events. While the call runs and the timeline is followed, each draw scrolls it to its newest entry. The
 //   kinds of entry it hides hold for every call's timeline, and are saved like the theme. An opened script command shows
@@ -31,7 +35,7 @@ import { REGIONS } from './host';
 import { html } from './html';
 import { newestFirst, queuePanels, railRepos, statusOf } from './index-model';
 import { type Loaded, renderInspector, streamsOf } from './inspector-view';
-import { type QueueStream, queueId, renderQueues } from './queue-view';
+import { type QueueStream, queueId, renderQueue } from './queue-view';
 import { renderRail } from './rail-view';
 import { applyEvent, emptyRun, type RunModel } from './run-model';
 import { renderRun, renderStatus } from './run-view';
@@ -141,6 +145,11 @@ export function boot(host: PageHost): Page {
     index?.find((repo) => repo.name === open?.repo)?.runs.find((item) => item.runId === open?.runId)?.summary;
 
   const selected = () => run?.model.cards.find((entry) => entry.key === ui.key);
+  /** The queue the centre shows in place of the run, while the index lists it. */
+  const openQueue = () =>
+    ui.queue === undefined
+      ? undefined
+      : queuePanels(index ?? []).find((panel) => queueId(panel.repo, panel.workflow) === ui.queue);
   /** The card whose timeline the centre shows, when it shows one: a card selected before it exists shows the run. */
   const opened = () => (ui.timeline ? selected() : undefined);
 
@@ -148,13 +157,13 @@ export function boot(host: PageHost): Page {
     rail: () =>
       index === undefined
         ? html`<div class="qempty">connecting…</div>`.value
-        : renderRail(railRepos(index, host.now()), ui).value,
-    attention: () => (index === undefined ? '' : renderAttention(attention(index)).value),
-    queues: () => {
-      const streams = Object.fromEntries([...queues].map(([id, open]) => [id, open.stream]));
-      return index === undefined ? '' : renderQueues(queuePanels(index), streams, ui, host.now()).value;
-    },
+        : renderRail(railRepos(index, host.now()), ui, host.now()).value,
+    attention: () => renderAttention(index === undefined ? [] : attention(index), ui.attention).value,
     main: () => {
+      const panel = openQueue();
+      if (panel !== undefined) {
+        return renderQueue(panel, queues.get(ui.queue ?? '')?.stream, ui, host.now()).value;
+      }
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = run.error === undefined ? '' : html`<div class="code bad">${run.error}</div>`;
       const card = opened();
@@ -460,7 +469,7 @@ export function boot(host: PageHost): Page {
     mark('rail', 'main', 'inspector', 'status');
   };
 
-  const onQueueMessage = (open: OpenQueue, text: string) => {
+  const onQueueMessage = (id: string, open: OpenQueue, text: string) => {
     const message = parse(text);
     if (message?.kind !== 'queue-event') return;
     const event = message.event as QueueEvent;
@@ -468,7 +477,7 @@ export function boot(host: PageHost): Page {
     const watch =
       event.type === 'watch:added' ? 'watched' : event.type === 'watch:removed' ? 'not watched' : open.stream.watch;
     open.stream = { recent, watch };
-    mark('queues');
+    if (ui.queue === id) mark('main');
   };
 
   const openQueueSocket = (id: string) => {
@@ -476,7 +485,7 @@ export function boot(host: PageHost): Page {
     queues.set(id, open);
     const connect = () => {
       open.connection = host.connect(`queue=${enc(id)}`, {
-        message: (text) => onQueueMessage(open, text),
+        message: (text) => onQueueMessage(id, open, text),
         close: () => {
           if (stopped || queues.get(id) !== open) return;
           open.retry = host.later(() => {
@@ -484,7 +493,7 @@ export function boot(host: PageHost): Page {
             if (queues.get(id) !== open) return;
             open.stream = { recent: [], watch: 'unknown' };
             connect();
-            mark('queues');
+            if (ui.queue === id) mark('main');
           }, RECONNECT_MS);
         },
       });
@@ -528,7 +537,8 @@ export function boot(host: PageHost): Page {
       if (first !== undefined) selectRun(first.repo, first.runId);
     }
     if (run !== undefined) followAgain(run, true);
-    mark('rail', 'attention', 'queues', 'main', 'status');
+    if (ui.queue !== undefined && openQueue() === undefined) delete ui.queue;
+    mark('rail', 'attention', 'main', 'status');
     tick();
   };
 
@@ -552,13 +562,35 @@ export function boot(host: PageHost): Page {
     if (next !== undefined) selectCard(next.key);
   };
 
+  /** Gives the centre back to the run, from the queue it showed. */
+  const leaveQueue = () => {
+    if (ui.queue === undefined) return;
+    delete ui.queue;
+    mark('rail', 'main');
+  };
+
+  const closeAttention = () => {
+    if (!ui.attention) return;
+    ui.attention = false;
+    mark('attention');
+  };
+
   const actions: Record<string, (data: Record<string, string>) => void> = {
     'select-run': (data) => {
-      if (data.repo !== undefined && data.run !== undefined) selectRun(data.repo, data.run);
+      if (data.repo === undefined || data.run === undefined) return;
+      leaveQueue();
+      selectRun(data.repo, data.run);
+    },
+    'select-queue': (data) => {
+      if (data.queue === undefined) return;
+      ui.queue = data.queue;
+      mark('rail', 'main');
     },
     'select-card': (data) => selectCard(data.key, undefined, true),
     open: (data) => {
       if (data.repo === undefined || data.run === undefined) return;
+      closeAttention();
+      leaveQueue();
       selectRun(data.repo, data.run);
       const tab = (TABS as readonly string[]).includes(data.tab ?? '') ? (data.tab as InspectorTab) : 'overview';
       if (data.key !== undefined) selectCard(data.key, tab, false);
@@ -605,6 +637,15 @@ export function boot(host: PageHost): Page {
       readLog();
       mark('inspector');
     },
+    'toggle-group': (data) => {
+      const group = data.group ?? '';
+      ui.closed = ui.closed.includes(group) ? ui.closed.filter((closed) => closed !== group) : [...ui.closed, group];
+      mark('rail');
+    },
+    'toggle-attention': () => {
+      ui.attention = !ui.attention;
+      mark('attention');
+    },
     'toggle-section': (data) => {
       const section = data.section ?? '';
       ui.open = ui.open.includes(section) ? ui.open.filter((open) => open !== section) : [...ui.open, section];
@@ -633,15 +674,18 @@ export function boot(host: PageHost): Page {
       const card = run?.model.cards[ui.cursor];
       if (card !== undefined) selectCard(card.key, undefined, true);
     },
-    // The drawer shut first; then back to the cards from a timeline, keeping the selection; from the cards, no selection.
+    // Needs attention and the drawer shut first; then back to the cards from a timeline, keeping the selection; from
+    // the cards, no selection.
     Escape: () => {
-      if (ui.file !== undefined) closeFile();
+      if (ui.attention) closeAttention();
+      else if (ui.file !== undefined) closeFile();
       else if (ui.timeline) actions['close-timeline']?.({});
       else selectCard(undefined);
     },
     ']': () => step(1),
     '[': () => step(-1),
     i: () => actions['toggle-inspector']?.({}),
+    a: () => actions['toggle-attention']?.({}),
   };
 
   host.onAction((action, data) => actions[action]?.(data));

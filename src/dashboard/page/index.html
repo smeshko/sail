@@ -192,6 +192,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
+        width: 100%;
         padding: 8px 12px;
         font-size: 12.5px;
         font-weight: 600;
@@ -219,7 +220,7 @@
       }
       .lgrp-r,
       .lgrp-p {
-        padding: 0 12px 6px 22px;
+        padding: 0 12px 6px 34px;
         font-family: var(--mono);
         font-size: 10.5px;
         color: var(--fg-4);
@@ -234,7 +235,7 @@
         align-items: flex-start;
         gap: 8px;
         width: 100%;
-        padding: 6px 12px 6px 22px;
+        padding: 6px 12px 6px 34px;
         font-family: var(--mono);
         font-size: 11.5px;
         color: var(--fg-2);
@@ -280,7 +281,7 @@
         align-items: center;
         gap: 7px;
         width: 100%;
-        padding: 5px 12px 5px 22px;
+        padding: 5px 12px 5px 34px;
         font-family: var(--mono);
         font-size: 10px;
         letter-spacing: 0.08em;
@@ -291,10 +292,19 @@
         background: var(--hover);
         color: var(--fg-2);
       }
-      .subgrp-h .caret {
+      .lgrp-h .caret,
+      .wf-h .caret {
+        font-size: 11px;
+        color: var(--fg-4);
+      }
+      .subgrp-h .caret,
+      .lgrp-h .caret,
+      .wf-h .caret {
         transition: transform 0.12s;
       }
-      .subgrp-h.open .caret {
+      .subgrp-h.open .caret,
+      .lgrp-h.open .caret,
+      .wf-h.open .caret {
         transform: rotate(90deg);
       }
       .subgrp-h .sw {
@@ -374,10 +384,115 @@
         color: var(--err);
       }
 
-      /* needs attention */
-      .attention {
-        padding: 10px 12px;
+      /* the rail's workflows, inside a repository, and a watched workflow's queue row */
+      .lgrp-h:hover,
+      .wf-h:hover,
+      .wf-q:hover {
+        background: var(--hover);
+      }
+      .wf {
         border-top: 1px solid var(--line);
+      }
+      .wf-h {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        padding: 7px 12px 7px 22px;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--fg-2);
+      }
+      .wf-h .nm {
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .wf-h .counts {
+        margin-left: auto;
+        display: flex;
+        gap: 6px;
+        font-size: 10.5px;
+        color: var(--fg-4);
+      }
+      .wf-h .counts .r {
+        color: var(--run);
+      }
+      .wf-h .counts .f {
+        color: var(--err);
+      }
+      .wf-q {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        padding: 5px 12px 5px 34px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-3);
+        border-left: 2px solid transparent;
+      }
+      .wf-q.sel {
+        background: var(--panel-2);
+        border-left-color: var(--warn);
+        color: var(--fg);
+      }
+      .wf-q .qd {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        border: 1.5px solid var(--warn);
+        flex: 0 0 auto;
+      }
+      .wf-q .n {
+        margin-left: auto;
+      }
+      /* needs attention: a button in the top bar, and the pane it opens */
+      .att-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .att-btn .badge {
+        min-width: 16px;
+        padding: 0 5px;
+        border-radius: 8px;
+        background: var(--err);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 700;
+        text-align: center;
+      }
+      .att-btn.on {
+        border-color: var(--err);
+        color: var(--fg);
+      }
+      .att-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 39;
+      }
+      .att-pane {
+        position: fixed;
+        top: 52px;
+        right: 14px;
+        z-index: 40;
+        width: min(440px, calc(100vw - 28px));
+        max-height: 70vh;
+        overflow-y: auto;
+        background: var(--panel);
+        border: 1px solid var(--line-2);
+        border-radius: 10px;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+      }
+      .att-pane .rail-h {
+        position: sticky;
+        top: 0;
+        background: var(--panel);
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--line);
+      }
+      .att-list {
+        padding: 10px 12px 4px;
       }
       .sig {
         display: block;
@@ -654,13 +769,7 @@
         border: 1px solid var(--line);
       }
 
-      /* the queue panel */
-      .queues:empty {
-        display: none;
-      }
-      .queues {
-        border-top: 1px solid var(--line);
-      }
+      /* the queue view */
       .qpanel {
         border-bottom: 1px solid var(--line);
       }
@@ -1247,18 +1356,17 @@
       <header class="top">
         <div class="brand"><i></i>sail dashboard</div>
         <div class="spacer"></div>
+        <div id="attention"></div>
         <button class="btn" type="button" data-action="toggle-theme" title="theme">◐</button>
         <button class="btn" type="button" data-action="toggle-inspector" title="inspector (i)">⇥</button>
       </header>
       <div class="body" id="body">
         <nav class="rail">
           <div id="rail"></div>
-          <div class="attention" id="attention"></div>
         </nav>
         <div class="resize-handle" data-resize="left"></div>
         <main class="main">
           <div id="main"></div>
-          <div class="queues" id="queues"></div>
         </main>
         <div class="resize-handle resize-right" data-resize="right"></div>
         <aside class="inspector">

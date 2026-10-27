@@ -1,5 +1,6 @@
-// Needs attention, drawn: one list across both repositories, each item a button whose data opens its run, its call
-// and the inspector's tab, and an item with nothing to open drawn without the action.
+// Needs attention, drawn: a top-bar button with the count, and, open, a pane with one list across both repositories,
+// each item a button whose data opens its run, its call and the inspector's tab, and an item with nothing to open drawn
+// without the action.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { index } from '../../../src/dashboard/files';
 import { attention } from '../../../src/dashboard/page/attention';
@@ -13,8 +14,14 @@ beforeEach(() => {
 afterEach(() => m.remove());
 
 test("FAKE-2's failure and denial and FAKE-3's suspension are buttons in one list whose data opens the run, the key and the tab", () => {
-  const markup = renderAttention(attention(index(m.registryDir))).value;
-  expect(markup).toStartWith('<div class="grp-t">needs attention · 6</div>');
+  const items = attention(index(m.registryDir));
+  const button =
+    '<button class="btn att-btn on" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention<span class="badge">6</span></button>';
+  const markup = renderAttention(items, true).value;
+  expect(markup).toStartWith(
+    `${button}<div class="att-scrim" data-action="toggle-attention"></div><div class="att-pane"><div class="rail-h"><span>needs attention</span><span class="c">6</span></div><div class="att-list">`,
+  );
+  expect(renderAttention(items, false).value).toBe(button.replace(' on"', '"'));
   expect(markup).toContain(
     `<button class="sig sig-failed" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"><b>failed: stage_error</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">FAKE-2 Print the version with --version</span></button>`,
   );
@@ -30,8 +37,11 @@ test("FAKE-2's failure and denial and FAKE-3's suspension are buttons in one lis
   expect(markup.match(/data-action="open"/g)?.length).toBe(5);
 });
 
-test('an empty list says nothing needs attention', () => {
-  expect(renderAttention([]).value).toBe(
-    '<div class="grp-t">needs attention · 0</div>\n<div class="att-empty">nothing needs attention</div>',
+test('an empty list has no count on the button, and the open pane says nothing needs attention', () => {
+  expect(renderAttention([], false).value).toBe(
+    '<button class="btn att-btn" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention</button>',
+  );
+  expect(renderAttention([], true).value).toContain(
+    '<div class="att-list"><div class="att-empty">nothing needs attention</div></div></div>',
   );
 });

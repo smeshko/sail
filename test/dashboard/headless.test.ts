@@ -95,26 +95,32 @@ test("the real bundle boots headless: both repositories, the golden run's eight 
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(page.ids).toEqual(expect.arrayContaining(['rail', 'attention', 'queues', 'main', 'inspector', 'status']));
+  expect(page.ids).toEqual(expect.arrayContaining(['rail', 'attention', 'main', 'inspector', 'status']));
+  expect(page.ids).not.toContain('queues');
   expect(await until(() => page.text('rail').includes('<span class="nm">beta</span>'))).toBe(true);
   expect(page.text('rail')).toContain('<span class="nm">alpha</span>');
   expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('main')).toContain('<div class="stat"><b>$1.35</b><span>of $25.00 (5.4%)</span></div>');
-  expect(await until(() => page.text('queues').includes('<span class="pill p-pass">watched</span>'))).toBe(true);
+  expect(page.text('attention')).toContain('<span class="badge">6</span>');
+  page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(await until(() => page.text('main').includes('<span class="pill p-pass">watched</span>'))).toBe(true);
   page.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
   expect(await until(() => page.text('inspector').includes('<code>git push --force origin HEAD</code>'))).toBe(true);
   expect(page.text('inspector')).toContain('<dt>rule</dt><dd>commands</dd>');
   expect(page.text('main')).toContain(`<span class="d-agent">${FAKE_2_ID} · ticket-to-pr@1</span>`);
 }, 30_000);
 
-test("once beta's queue/ is gone, the next index empties the queues region", async () => {
+test("once beta's queue/ is gone, the next index drops its queue row and gives the centre back to the run", async () => {
   m = seedFixtures();
   const started = startDashboard({ registryDir: m.registryDir, port: 0, followPollMs: 20, indexPollMs: 50 });
   if ('refused' in started) throw new Error(started.refused);
   server = started;
   const page = await bootHeadless(server);
-  expect(await until(() => page.text('queues').includes('beta / ticket-to-pr'))).toBe(true);
+  expect(await until(() => page.text('rail').includes('data-action="select-queue"'))).toBe(true);
+  page.click({ action: 'select-queue', queue: 'beta/ticket-to-pr' });
+  expect(await until(() => page.text('main').includes('beta / ticket-to-pr'))).toBe(true);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
-  expect(await until(() => page.text('queues') === '')).toBe(true);
+  expect(await until(() => !page.text('rail').includes('select-queue'))).toBe(true);
+  expect(await until(() => (page.text('main').match(/data-action="select-card"/g) ?? []).length === 8)).toBe(true);
   expect(page.text('rail')).toContain('<span class="nm">beta</span>');
 }, 30_000);

@@ -31,7 +31,7 @@ import { renderAttention } from '../src/dashboard/page/attention-view';
 import type { SafeHtml } from '../src/dashboard/page/html';
 import { queuePanels, railRepos, watchState } from '../src/dashboard/page/index-model';
 import { renderInspector } from '../src/dashboard/page/inspector-view';
-import { queueId, renderQueues } from '../src/dashboard/page/queue-view';
+import { queueId, renderQueue } from '../src/dashboard/page/queue-view';
 import { renderRail } from '../src/dashboard/page/rail-view';
 import { foldRun } from '../src/dashboard/page/run-model';
 import { renderRun } from '../src/dashboard/page/run-view';
@@ -246,13 +246,14 @@ export function renderDashboardViews(outDir: string): string[] {
       repos.find((entry) => entry.name === repo)?.runs.find((run) => run.runId === runId)?.summary;
     const views: Record<string, SafeHtml> = {};
     const selected = ui({ repo: 'alpha', runId: GOLDEN_RUN_ID });
-    views['rail.html'] = renderRail(railRepos(repos, VIEWS_NOW), selected);
-    views['attention.html'] = renderAttention(attention(repos));
+    views['rail.html'] = renderRail(railRepos(repos, VIEWS_NOW), selected, VIEWS_NOW);
+    views['attention.html'] = renderAttention(attention(repos), true);
     const queueEvents = readEvents(queueDirOf(machine)) as unknown as QueueEvent[];
-    const streams = {
-      [queueId('beta', QUEUE_WORKFLOW)]: { recent: queueEvents.slice(-20), watch: watchState(queueEvents) },
-    };
-    views['queues.html'] = renderQueues(queuePanels(repos), streams, selected, VIEWS_NOW);
+    const stream = { recent: queueEvents.slice(-20), watch: watchState(queueEvents) };
+    const queue = queueId('beta', QUEUE_WORKFLOW);
+    const panel = queuePanels(repos).find((each) => queueId(each.repo, each.workflow) === queue);
+    if (panel === undefined) throw new Error(`beta has no ${QUEUE_WORKFLOW} queue`);
+    views['queue.html'] = renderQueue(panel, stream, { ...selected, queue }, VIEWS_NOW);
     for (const [name, [repo, dir]] of Object.entries(runDirs)) {
       const runId = runIdOf[name as keyof typeof runIdOf];
       const model = foldRun(readEvents(dir));
