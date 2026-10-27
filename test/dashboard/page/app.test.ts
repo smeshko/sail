@@ -599,6 +599,13 @@ test("a multi-step call's log reads its steps by step key", async () => {
   await settle();
   host.advance(100);
   expect(host.regions.inspector).toContain('PR description written.');
+  // A stream picked on one step isn't carried to the next one picked, even one that writes it.
+  host.click({ action: 'log-step', step: 'open' });
+  host.click({ action: 'stream', stream: 'stderr' });
+  host.click({ action: 'log-step', step: 'describe' });
+  host.click({ action: 'log-step', step: 'open' });
+  expect(page.ui.stream).toBeUndefined();
+  expect(logReads().at(-1)).toBe(`${base}/publish%231%2Fopen/log?stream=stdout`);
   host.click({ action: 'select-card', key: 'tests#1' });
   expect(page.ui.step).toBeUndefined();
   expect(logReads().at(-1)).toBe(`${base}/tests%231/log?stream=stdout`);
