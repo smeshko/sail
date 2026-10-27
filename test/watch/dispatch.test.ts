@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { requestStop, requestUnwatch } from '../../src/engine/control';
+import { claimComment } from '../../src/engine/source';
 import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -410,6 +411,111 @@ test("a new dispatcher's first tick adopts each live run once with run:adopted, 
     await again.tick();
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4']);
     expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
+  });
+});
+
+// A ticket the item's own run claimed stays In Progress after the run fails or is stopped: the re-check accepts it by
+// the claim comment, and the run starts forced.
+
+test('a failed attempt whose run claimed its ticket is retried with --force instead of dropped, and its second claim goes through update', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.run('FAKE-1').claimed;
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stage_error' });
+    await dispatcher.tick();
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    const retry = w.spawner.run('FAKE-1');
+    expect({
+      spawned: w.spawner.runs.map((run) => [run.ticketKey, run.force]),
+      dropped: eventsOf(w.runs, 'queue:dropped'),
+      claim: await retry.claimed,
+      items: states(w.store),
+    }).toEqual({
+      spawned: [
+        ['FAKE-1', false],
+        ['FAKE-1', true],
+      ],
+      dropped: [],
+      claim: expect.objectContaining({ forced: ['state'] }),
+      items: ['FAKE-1 dispatched 2'],
+    });
+    expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
+  });
+});
+
+test("a parked item a person requeued is dispatched again with --force when its last run claimed the ticket, and the requeue's previousRunId is what proves it", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.run('FAKE-1').claimed;
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stopped' });
+    await dispatcher.tick();
+    expect(states(w.store)).toEqual(['FAKE-1 parked 1']);
+    w.store.requeue('ticket:FAKE-1', 'requeued by hand');
+    await dispatcher.tick();
+    expect({
+      spawned: w.spawner.runs.map((run) => [run.ticketKey, run.force]),
+      dropped: eventsOf(w.runs, 'queue:dropped'),
+      items: states(w.store),
+    }).toEqual({
+      spawned: [
+        ['FAKE-1', false],
+        ['FAKE-1', true],
+      ],
+      dropped: [],
+      items: ['FAKE-1 dispatched 1'],
+    });
+  });
+});
+
+test('an item whose ticket a later claim of another run holds is dropped as In Progress under another claim, and never spawned', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.run('FAKE-1').claimed;
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stage_error' });
+    await dispatcher.tick();
+    await w.ticketSource.comment('FAKE-1', claimComment('FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N'));
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect({
+      spawned: spawnedKeys(w.spawner),
+      dropped: eventsOf(w.runs, 'queue:dropped'),
+      items: states(w.store),
+    }).toEqual({
+      spawned: ['FAKE-1'],
+      dropped: [{ dedupKey: 'ticket:FAKE-1', reason: 'it is In Progress under another claim' }],
+      items: [],
+    });
+  });
+});
+
+test('an own-claimed ticket that lost its label is dropped as not designated, and never spawned', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.run('FAKE-1').claimed;
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stage_error' });
+    await dispatcher.tick();
+    const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+    const stored = JSON.parse(readFileSync(state, 'utf8'));
+    stored.tickets[0].labels = [];
+    writeFileSync(state, JSON.stringify(stored));
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect({
+      spawned: spawnedKeys(w.spawner),
+      dropped: eventsOf(w.runs, 'queue:dropped'),
+    }).toEqual({
+      spawned: ['FAKE-1'],
+      dropped: [{ dedupKey: 'ticket:FAKE-1', reason: "it is not designated: it carries no 'sail' label" }],
+    });
   });
 });
 

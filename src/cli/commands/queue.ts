@@ -10,8 +10,8 @@
 //   dispatched. Then it drops the command, waits up to 15 s for the watcher to take it, and prints the item as
 //   its queue file holds it then. A command not taken in time waits in the inbox, and the command exits 0 saying so, as
 //   `sail watch` does. One the watcher took but didn't apply exits 3: its terminal says why. What it applied is read
-//   from the events it emitted for the item since, so an add or a requeue its dispatch then dropped, as a ticket left
-//   In Progress is, exits 3 saying both, with the reason.
+//   from the events it emitted for the item since, so an add or a requeue its dispatch then dropped, as a ticket another
+//   run claimed is, exits 3 saying both, with the reason.
 //
 // An item is named by its dedup key (`ticket:FAKE-1`, as the dashboard's commands print it) or its ticket key. Every
 // refusal is exit code 3.

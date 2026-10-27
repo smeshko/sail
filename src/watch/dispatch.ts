@@ -18,8 +18,11 @@
 //   its ticket through the TicketSource, then the lease on the branch its fresh title names when that differs. The
 //   lease comes first because a leased item is skipped on every tick for as long as the lease lasts, and checking it
 //   costs no provider call (D6). A leased item stays queued, uses no slot and counts no attempt, and says so with one
-//   `queue:skipped_leased` per holder. An item no longer designated or unstarted is dropped. A forced item, added with
-//   `--force`, skips the re-check: only the lease holds it back, and its run starts with `--force`.
+//   `queue:skipped_leased` per holder. An item no longer designated or unstarted is dropped, unless its ticket is In
+//   Progress under the item's own claim: the latest claim comment names the run of its last dispatch (`runId`, or
+//   `previousRunId` after a requeue), as after a failed attempt or a stop. That run starts with `--force`, which moves
+//   the ticket through `update`. A forced item, added with `--force`, skips the re-check: only the lease holds it back,
+//   and its run starts with `--force`.
 // - **The start** is recorded before the process exists (`dispatched`, which counts the attempt and names the run),
 //   and its pid after (`spawned`, which emits `queue:dispatched`). The run claims its own ticket as it starts (D2): the
 //   dispatch only reads the ticket.
@@ -30,6 +33,7 @@ import { branchFor } from '../engine/branch';
 import { cancelUnwatch } from '../engine/control';
 import { getPullRequestDetails } from '../engine/pr-source';
 import { newRunId } from '../engine/run-id';
+import { claimingRun } from '../engine/source';
 import type { ResumedFrom } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
@@ -249,27 +253,36 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     return false;
   };
 
-  /** Whether the item may start now: its branches are free, and its ticket is still designated and unstarted. */
-  const eligible = async (item: QueueItem, remote: string): Promise<boolean> => {
-    if (item.source.kind === 'pr') return eligiblePullRequest(item, item.source, remote);
+  /**
+   * Whether the item may start now, and whether its run starts forced: its branches are free, and its ticket is still
+   * designated and unstarted, or In Progress under the item's own claim, which only a forced start can take over.
+   */
+  const eligible = async (item: QueueItem, remote: string): Promise<{ force: boolean } | undefined> => {
+    if (item.source.kind === 'pr')
+      return (await eligiblePullRequest(item, item.source, remote)) ? { force: false } : undefined;
     const { ticketKey } = item.source;
     const branch = branchFor(options.branchPrefix, ticketKey, item.title);
-    if (await leased(item, remote, branch)) return false;
-    if (item.forced === true) return true;
+    if (await leased(item, remote, branch)) return undefined;
+    if (item.forced === true) return { force: true };
     const ticket = await getTicket(ticketSource, ticketKey);
     if (!ticketSource.isDesignated(ticket, label)) {
       store.drop(item.dedupKey, `it is not designated: it carries no '${label}' label`);
-      return false;
+      return undefined;
     }
-    if (ticket.state.type !== 'unstarted') {
-      store.drop(item.dedupKey, `it is ${ticket.state.name}`);
-      return false;
+    const ownRun = item.runId ?? item.previousRunId;
+    const own = ticket.state.type === 'started' && ownRun !== undefined && claimingRun(ticket) === ownRun;
+    if (ticket.state.type !== 'unstarted' && !own) {
+      store.drop(
+        item.dedupKey,
+        ownRun === undefined ? `it is ${ticket.state.name}` : `it is ${ticket.state.name} under another claim`,
+      );
+      return undefined;
     }
     const fresh = branchFor(options.branchPrefix, ticketKey, ticket.title);
-    return fresh === branch || !(await leased(item, remote, fresh));
+    return fresh === branch || !(await leased(item, remote, fresh)) ? { force: own } : undefined;
   };
 
-  const start = (item: QueueItem) => {
+  const start = (item: QueueItem, force: boolean) => {
     const { source } = item;
     const runId = newRunId(source.kind === 'pr' ? `pr-${source.number}` : source.ticketKey, now().getTime());
     store.dispatched(item.dedupKey, runId);
@@ -284,7 +297,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
           : { ticketKey: source.ticketKey }),
         runId,
         env: options.env,
-        ...(item.forced === true ? { force: true } : {}),
+        ...(item.forced === true || force ? { force: true } : {}),
       });
     } catch (error) {
       fail(item, runId, `its run could not be started: ${messageOf(error)}`);
@@ -298,15 +311,16 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     let remote: string | undefined;
     for (const item of store.due()) {
       if (inFlight() >= options.maxConcurrentRuns) return;
+      let answer: { force: boolean } | undefined;
       try {
         remote ??= (await workspace.repository()).url;
-        if (!(await eligible(item, remote))) continue;
+        answer = await eligible(item, remote);
       } catch (error) {
         if (!(error instanceof PortError)) throw error;
         fail(item, item.runId ?? '', `${error.message} (${error.code})`);
         return;
       }
-      start(item);
+      if (answer !== undefined) start(item, answer.force);
     }
   };
 

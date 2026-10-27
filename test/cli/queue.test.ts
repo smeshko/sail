@@ -286,7 +286,7 @@ test('with a watcher watching a, sail queue requeue a ticket:FAKE-1 queues the p
   });
 }, 30_000);
 
-test('a requeue the watcher applies and its dispatch then drops, as for a ticket left In Progress, says both, with the reason, and exits 3 (review R1-1)', async () => {
+test('a requeue the watcher applies and its dispatch then drops, as for a ticket another run claimed, says both, with the reason, and exits 3 (review R1-1)', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
     await parkTwo(w);
@@ -307,7 +307,8 @@ test('a requeue the watcher applies and its dispatch then drops, as for a ticket
       requeued: {
         code: EXIT_REFUSED,
         stdout: '',
-        stderr: 'sail queue: the watcher requeued ticket:FAKE-1, then dropped it: it is In Progress\n',
+        stderr:
+          'sail queue: the watcher requeued ticket:FAKE-1, then dropped it: it is In Progress under another claim\n',
       },
       events: ['queue:requeued', 'queue:dropped'],
     });

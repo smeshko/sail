@@ -761,6 +761,7 @@ test('a requeue command makes a parked item queued with no attempts and queue:re
     await w.spawner.end('FAKE-4', { status: 'suspended', stopReason: 'interrupted' });
     await w.timers.advance(1000);
     const run4 = w.spawner.run('FAKE-4').runId;
+    const run1 = w.spawner.run('FAKE-1').runId;
     expect(w.spawner.resumes.map((resume) => resume.runId)).toEqual([run4]);
     w.spawner.endResume(run4, { status: 'suspended', stopReason: 'interrupted', log: 'sail resume: it failed' });
     await w.timers.advance(1000);
@@ -792,6 +793,7 @@ test('a requeue command makes a parked item queued with no attempts and queue:re
         state: 'queued',
         attempts: 0,
         addedAt: START,
+        previousRunId: run1,
       },
       requeued: [
         expect.objectContaining({ type: 'queue:requeued', dedupKey: 'ticket:FAKE-1', reason: 'requeued by hand' }),
@@ -802,6 +804,30 @@ test('a requeue command makes a parked item queued with no attempts and queue:re
         "a's queue has no item ticket:FAKE-9\n",
         `ticket:FAKE-4 can't be requeued: its run ${run4} is suspended interrupted, and holds its branch: sail resume ${run4} or sail stop ${run4} first\n`,
       ],
+    });
+    await watcher.stop();
+  });
+});
+
+test('a requeue command of a parked item whose run claimed its ticket is dispatched again with --force on the next tick', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    await w.spawner.run('FAKE-1').claimed;
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stopped' });
+    await w.timers.advance(1000);
+    dropCommand(w.runs, { op: 'requeue', workflow: 'a', dedupKey: 'ticket:FAKE-1' });
+    await w.timers.advance(1000);
+    expect({
+      spawned: w.spawner.runs.map((run) => [run.ticketKey, run.force]),
+      dropped: w.events('a').filter((event) => event.type === 'queue:dropped'),
+    }).toEqual({
+      spawned: [
+        ['FAKE-1', false],
+        ['FAKE-1', true],
+      ],
+      dropped: [],
     });
     await watcher.stop();
   });
