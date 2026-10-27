@@ -35,13 +35,14 @@ export type ProcessEnd =
   | { started: false; message: string }
   | { started: true; code: number | null; signal: string | null; timedOut: boolean; aborted: boolean };
 
-/** Sends `signal` to the group. False when the group is gone. */
+/** Sends `signal` to the group. False when the group is gone, or holds nothing sail can signal: macOS answers EPERM for a group whose last members are exiting. */
 function signalGroup(pgid: number, signal: NodeJS.Signals | 0): boolean {
   try {
     process.kill(-pgid, signal);
     return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH' || code === 'EPERM') return false;
     throw error;
   }
 }

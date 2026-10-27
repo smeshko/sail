@@ -32,20 +32,6 @@ export interface Spawner {
   reap(waitMs?: number): Promise<void>;
 }
 
-/** Stops the group, tolerating one that is gone or going: an EPERM mid-stop still ends in a SIGKILL. */
-async function stopQuietly(pgid: number): Promise<void> {
-  try {
-    await stopGroup(pgid, DEFAULT_GRACE_MS);
-  } catch {
-    // EPERM from a group whose members are exiting: whatever ignored the SIGTERM is killed all the same.
-    try {
-      process.kill(-pgid, 'SIGKILL');
-    } catch {
-      // Gone.
-    }
-  }
-}
-
 /** Every process's pid, parent and group, from `ps`; none when it can't be run. */
 function processTable(): { pid: number; ppid: number; pgid: number }[] {
   try {
@@ -99,7 +85,7 @@ export function createSpawner(options: SpawnerOptions = {}): Spawner {
   const look = (pid: number) => {
     if (alive()) for (const pgid of descendantGroups(pid)) groups.add(pgid);
   };
-  const stopAll = (pid: number) => Promise.all([pid, ...groups].map(stopQuietly));
+  const stopAll = (pid: number) => Promise.all([pid, ...groups].map((pgid) => stopGroup(pgid, DEFAULT_GRACE_MS)));
   const stop = (pid: number) => {
     look(pid);
     stopping ??= stopAll(pid);
