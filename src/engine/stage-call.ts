@@ -45,6 +45,7 @@ import type { JournalEntry } from './journal';
 import { buildResult, buildStageResult, type StepEntry, writeResult } from './result';
 import { checkoutPath } from './run-dir';
 import { validateDocument } from './schemas';
+import { type Def, WRAPPERS } from './untrusted';
 
 /** What a multi-step call is told by the one who runs it, and tells it back. */
 export interface StageHooks {
@@ -79,18 +80,6 @@ const NAME = /^[a-z0-9-]+$/;
 /** `binds 'title' to fromStep('describe')`, then what it picks. */
 const picks = (key: string, binding: FromStepBinding) => `binds '${key}' to fromStep('${binding.step}')`;
 
-interface KeyDef {
-  type: string;
-  shape?: object;
-  innerType?: z.ZodType;
-  out?: z.ZodType;
-  options?: z.ZodType[];
-  left?: z.ZodType;
-  right?: z.ZodType;
-  getter?: () => z.ZodType;
-}
-
-const SHAPE_KEEPING = new Set(['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly']);
 const NEVER_OBJECTS = new Set([
   'string',
   'number',
@@ -112,14 +101,14 @@ const NULLISH = new Set(['null', 'undefined', 'void']);
 /** Whether a schema's value has `key`: `'unknown'` where its shape can't be told at load, which is never refused. */
 function outputKey(schema: z.ZodType, key: string, seen = new Set<z.ZodType>()): 'has' | 'lacks' | 'unknown' {
   if (seen.has(schema)) return 'unknown';
-  const def = (schema as unknown as { def: KeyDef }).def;
+  const def = schema.def as Def;
   if (def.type === 'object') return Object.hasOwn(def.shape as object, key) ? 'has' : 'lacks';
-  if (SHAPE_KEEPING.has(def.type) && def.innerType) return outputKey(def.innerType, key, seen);
+  if (WRAPPERS.includes(def.type) && def.innerType) return outputKey(def.innerType, key, seen);
   if (def.type === 'pipe' && def.out) return outputKey(def.out, key, seen);
   if (def.type === 'lazy' && def.getter) return outputKey(def.getter(), key, new Set(seen).add(schema));
   if (def.type === 'union' && def.options) {
     const answers = def.options
-      .filter((member) => !NULLISH.has((member as unknown as { def: KeyDef }).def.type))
+      .filter((member) => !NULLISH.has((member.def as Def).type))
       .map((member) => outputKey(member, key, seen));
     if (answers.includes('lacks') || answers.length === 0) return 'lacks';
     return answers.includes('unknown') ? 'unknown' : 'has';
