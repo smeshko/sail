@@ -143,12 +143,12 @@ ${
 </div>`;
 }
 
-/** The run's tokens: the summary's totals once there is one, else what its cards' sessions reported. */
+/** The run's tokens: the summary's totals once the run has ended, else what its cards' sessions reported, live ones included. */
 function tokensOf(
   model: RunModel,
   summary: Summary | null | undefined,
 ): { input: number; output: number; cached: number } {
-  const usage = summary?.totals.usage;
+  const usage = model.end === undefined ? undefined : summary?.totals.usage;
   if (usage !== undefined) {
     return { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cached: usage.cacheReadTokens ?? 0 };
   }
