@@ -103,10 +103,15 @@ test('thinking and messages are escaped text; a tool row shows its input, durati
 
   const opened = renderTimeline(card, ui({ opened: ['c1', 'c2'] }), NOW).value;
   expect(opened).toContain(
-    '<div class="tout"><div class="grp-t">input</div><pre class="code">{\n  &quot;command&quot;: &quot;git push&quot;\n}</pre><div class="mini deny"><div class="mini-h">denied · commands</div><div class="mini-b">not &lt;allowed&gt;</div></div><div class="grp-t">result</div><pre class="code">hook error</pre></div>',
+    '<div class="tout"><div class="grp-t">input</div><pre class="code" data-scroll="input:c1">{\n  &quot;command&quot;: &quot;git push&quot;\n}</pre><div class="mini deny"><div class="mini-h">denied · commands</div><div class="mini-b">not &lt;allowed&gt;</div></div><div class="grp-t">result</div><pre class="code" data-scroll="result:c1">hook error</pre></div>',
   );
   expect(opened).toContain('<div class="tcall t-completed open">');
   expect(opened.match(/<div class="grp-t">result<\/div>/g)).toHaveLength(1);
+  expect(opened.match(/data-scroll="[^"]*"/g)).toEqual([
+    'data-scroll="input:c1"',
+    'data-scroll="result:c1"',
+    'data-scroll="input:c2"',
+  ]);
 });
 
 test("a failed tool's result is marked bad, and a tool whose input is no JSON value opens to an empty input", () => {
@@ -116,10 +121,10 @@ test("a failed tool's result is marked bad, and a tool whose input is no JSON va
     { ...at, seq: 903, type: 'tool:start', callId: 'c2', tool: 'Odd' },
   ]);
   const markup = renderTimeline(card, ui({ opened: ['c1', 'c2'] }), NOW).value;
-  expect(markup).toContain('<div class="grp-t">result</div><pre class="code bad">exit 1</pre>');
+  expect(markup).toContain('<div class="grp-t">result</div><pre class="code bad" data-scroll="result:c1">exit 1</pre>');
   expect(markup).toContain('<span class="mark">✗</span>');
   expect(markup).toContain(
-    '<span class="tname">Odd</span><span class="tdet"></span><span class="tmeta"><span class="mark">…</span></span></button><div class="tout"><div class="grp-t">input</div><pre class="code"></pre></div>',
+    '<span class="tname">Odd</span><span class="tdet"></span><span class="tmeta"><span class="mark">…</span></span></button><div class="tout"><div class="grp-t">input</div><pre class="code" data-scroll="input:c2"></pre></div>',
   );
 });
 
@@ -235,7 +240,7 @@ test("an opened script shows the call's stdout and stderr, escaped, the last lin
     '<div class="tcall t-completed open"><button class="trow" data-action="toggle-tool" data-call="script:0">',
   );
   expect(both).toContain(
-    '</button><div class="tout"><div class="grp-t">stdout</div><pre class="code">{&quot;ok&quot;:&quot;&lt;yes&gt;&quot;}</pre><div class="grp-t">stderr · last 200 lines</div><pre class="code">line 5\n',
+    '</button><div class="tout"><div class="grp-t">stdout</div><pre class="code" data-scroll="stdout:script:0">{&quot;ok&quot;:&quot;&lt;yes&gt;&quot;}</pre><div class="grp-t">stderr · last 200 lines</div><pre class="code" data-scroll="stderr:script:0">line 5\n',
   );
   expect(both).toContain(`line ${OUTPUT_LINES + 4}</pre></div></div>`);
   expect(both).not.toContain('line 4\n');

@@ -2,6 +2,11 @@
 // listeners, fetch, WebSocket, storage and the clipboard, each fake recording what the host asked of it.
 import { expect, test } from 'bun:test';
 import { type BrowserWindow, browserHost, type ElementLike, type EventLike } from '../../../src/dashboard/page/host';
+import { foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
+import { renderTimeline } from '../../../src/dashboard/page/timeline-view';
+import { initialUi } from '../../../src/dashboard/page/ui-state';
+import { readEvents } from '../../../src/events/consumers/ndjson';
+import { GOLDEN_RUN } from '../../helpers/dashboard';
 
 interface FakeSocket {
   url: string;
@@ -26,6 +31,48 @@ function element(fields: Partial<ElementLike> = {}): ElementLike & { styles: Rec
     ...fields,
   };
 }
+
+/** A region whose `[data-scroll]` boxes are new elements, at scrollTop 0, each time its innerHTML is set, as a browser's are. */
+function scrollRegion(): ReturnType<typeof element> & { boxes: Map<string, ElementLike> } {
+  let markup = '';
+  let boxes = new Map<string, ElementLike>();
+  const region = element({
+    querySelectorAll: (selectors: string) => (selectors === '[data-scroll]' ? [...boxes.values()] : []),
+  });
+  Object.defineProperty(region, 'innerHTML', {
+    get: () => markup,
+    set: (next: string) => {
+      markup = next;
+      boxes = new Map(
+        [...next.matchAll(/data-scroll="([^"]*)"/g)].map(([, key]) => [
+          key as string,
+          element({ dataset: { scroll: key }, scrollTop: 0 }),
+        ]),
+      );
+    },
+  });
+  Object.defineProperty(region, 'boxes', { get: () => boxes });
+  return region as ReturnType<typeof scrollRegion>;
+}
+
+const NOW = Date.parse('2026-09-25T09:00:31.000Z');
+const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
+
+/** spec#1 of the golden run with a tool call `c1` whose input is long, running until `ended` ends it. */
+function toolCard(extra: Record<string, unknown>[] = []): StageCard {
+  const events = [
+    ...readEvents(GOLDEN_RUN).slice(0, 14),
+    { ...at, seq: 901, type: 'tool:start', callId: 'c1', tool: 'Write', input: { content: 'line\n'.repeat(80) } },
+    { ...at, seq: 902, type: 'tool:end', callId: 'c1', status: 'completed', durationMs: 3, result: 'out\n'.repeat(80) },
+    ...extra,
+  ];
+  const card = foldRun(events).cards[1];
+  if (card === undefined) throw new Error('no spec#1');
+  return card;
+}
+
+const timeline = (opened: string[], card = toolCard()) =>
+  renderTimeline(card, { ...initialUi(0), timeline: true, opened }, NOW).value;
 
 function fakeWindow(
   options: { storage?: 'throws'; clipboard?: 'rejects' | 'missing'; fetch?: 'fails'; search?: string } = {},
@@ -210,4 +257,68 @@ test("render writes a region by id, keys say whether they were typed in an input
   expect(body?.styles['--ins-w']).toBe('240px');
   fake.fire('mousedown', { target: element(), clientX: 0 });
   expect(fake.listeners.mousemove).toHaveLength(1);
+});
+
+test("render keeps an opened tool call's input box scrolled across a redraw", () => {
+  const fake = fakeWindow();
+  const main = scrollRegion();
+  fake.elements.main = main as never;
+  const host = browserHost(fake.win);
+  host.render('main', timeline(['c1']));
+  const first = main.boxes.get('input:c1');
+  if (first === undefined) throw new Error('no input box');
+  first.scrollTop = 240;
+  host.render('main', timeline(['c1']));
+  const again = main.boxes.get('input:c1');
+  expect(again).not.toBe(first);
+  expect(again?.scrollTop).toBe(240);
+  host.render('main', timeline(['c1'], toolCard([{ ...at, seq: 903, type: 'agent:message', text: 'next' }])));
+  expect(main.boxes.get('input:c1')?.scrollTop).toBe(240);
+  expect(main.boxes.get('result:c1')?.scrollTop).toBe(0);
+});
+
+test("render keeps an opened tool call's result box, and an opened script's stdout box, scrolled across a redraw", () => {
+  const fake = fakeWindow();
+  const main = scrollRegion();
+  fake.elements.main = main as never;
+  const host = browserHost(fake.win);
+  host.render('main', timeline(['c1']));
+  const result = main.boxes.get('result:c1');
+  if (result === undefined) throw new Error('no result box');
+  result.scrollTop = 130;
+  host.render('main', timeline(['c1']));
+  expect(main.boxes.get('result:c1')?.scrollTop).toBe(130);
+  expect(main.boxes.get('input:c1')?.scrollTop).toBe(0);
+
+  const golden = foldRun(readEvents(GOLDEN_RUN)).cards.find((card) => card.key === 'publish#1') as StageCard;
+  const drawn = () =>
+    renderTimeline(golden, { ...initialUi(0), timeline: true, opened: ['script:0'] }, NOW, {
+      stdout: { state: 'loaded', value: 'out\n'.repeat(80) },
+      stderr: { state: 'loaded', value: 'err\n'.repeat(80) },
+    }).value;
+  host.render('main', drawn());
+  const stdout = main.boxes.get('stdout:script:0');
+  if (stdout === undefined) throw new Error('no stdout box');
+  stdout.scrollTop = 75;
+  host.render('main', drawn());
+  expect(main.boxes.get('stdout:script:0')?.scrollTop).toBe(75);
+  expect(main.boxes.get('stderr:script:0')?.scrollTop).toBe(0);
+});
+
+test('render passes on no offset to a box that is gone, and renders a region without querySelectorAll', () => {
+  const fake = fakeWindow();
+  const main = scrollRegion();
+  fake.elements.main = main as never;
+  const host = browserHost(fake.win);
+  host.render('main', timeline(['c1']));
+  const box = main.boxes.get('input:c1');
+  if (box === undefined) throw new Error('no input box');
+  box.scrollTop = 240;
+  host.render('main', timeline([]));
+  expect(main.boxes.size).toBe(0);
+  host.render('main', timeline(['c1']));
+  expect(main.boxes.get('input:c1')?.scrollTop).toBe(0);
+
+  host.render('rail', '<b>alpha</b>');
+  expect(fake.elements.rail?.innerHTML).toBe('<b>alpha</b>');
 });
