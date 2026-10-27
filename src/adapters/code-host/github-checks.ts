@@ -8,6 +8,7 @@ import type { GitHubClient } from './github-client';
 /** A check run as GitHub's `check-runs` endpoint lists it: the fields the adapter reads. */
 export interface GitHubCheckRun {
   readonly id?: number;
+  readonly app?: { readonly id?: number } | null;
   readonly name: string;
   readonly status: string;
   readonly conclusion?: string | null;
@@ -103,20 +104,24 @@ async function readPaged<T>(
   throw new PortError('codeHost', op, 'unavailable', `more than ${PER_PAGE * MAX_PAGES} checks on ${sha}`);
 }
 
-/** Each name's latest run, the greatest id, in GitHub's order; a name with a run lacking an integer id keeps every run. */
+/**
+ * Each check's latest run, the greatest id, in GitHub's order. A check is a name from one app, so two apps' runs of a
+ * name are two checks; a check with a run lacking an integer id keeps every run.
+ */
 export function latestRuns(runs: readonly GitHubCheckRun[]): GitHubCheckRun[] {
+  const check = (run: GitHubCheckRun) => JSON.stringify([run.app?.id ?? null, run.name]);
   const latest = new Map<string, number>();
   const unordered = new Set<string>();
   for (const run of runs) {
-    if (!Number.isInteger(run.id)) unordered.add(run.name);
-    else latest.set(run.name, Math.max(latest.get(run.name) ?? Number.NEGATIVE_INFINITY, run.id as number));
+    if (!Number.isInteger(run.id)) unordered.add(check(run));
+    else latest.set(check(run), Math.max(latest.get(check(run)) ?? Number.NEGATIVE_INFINITY, run.id as number));
   }
-  return runs.filter((run) => unordered.has(run.name) || run.id === latest.get(run.name));
+  return runs.filter((run) => unordered.has(check(run)) || run.id === latest.get(check(run)));
 }
 
 /**
- * The checks on `sha`: its latest check run of each name, then its commit statuses, each in GitHub's order. A run a later
- * one of its name superseded is dropped from `checks` and kept in `raw`.
+ * The checks on `sha`: its latest check run of each name and app, then its commit statuses, each in GitHub's order. A run
+ * a later one of its name and app superseded is dropped from `checks` and kept in `raw`.
  */
 export async function readChecks(
   client: GitHubClient,

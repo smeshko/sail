@@ -37,6 +37,7 @@ export interface WorldPull {
 /** A check run on a head sha, as GitHub's check-runs endpoint lists it. */
 export interface WorldCheckRun {
   readonly id?: number;
+  readonly app?: { readonly id: number };
   readonly name: string;
   readonly status: string;
   readonly conclusion?: string | null;

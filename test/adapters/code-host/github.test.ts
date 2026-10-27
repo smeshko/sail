@@ -863,6 +863,19 @@ test('a repeated name with a run lacking an id keeps every run of that name', as
   ]);
 });
 
+test("runs of one name from different apps are distinct checks: an earlier app's failure is kept beside a later app's pass", async () => {
+  const on = checksWorld([
+    { id: 10, app: { id: 15368 }, name: 'build', status: 'completed', conclusion: 'failure' },
+    { id: 11, app: { id: 99 }, name: 'build', status: 'completed', conclusion: 'success' },
+    { id: 12, app: { id: 15368 }, name: 'build', status: 'completed', conclusion: 'failure' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'build', status: 'passed' },
+    { name: 'build', status: 'failed' },
+  ]);
+});
+
 /** A world whose pull request 7 has `count` passing check runs. */
 const manyRuns = (count: number) =>
   world({
