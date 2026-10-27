@@ -452,6 +452,47 @@ test.each<[string, NewEvent[], string]>([
   expect(render(stream(events), 'quiet')).toBe(expected);
 });
 
+const REUSED: NewEvent[] = [
+  { type: 'journal:append', key: 'intake#1', line: 1, outcome: 'passed', fromRun: 'RUN-0' },
+  { type: 'journal:append', key: 'spec#1', line: 2, outcome: 'done', fromRun: 'RUN-0' },
+  { type: 'journal:append', key: 'implement#1', line: 3, outcome: 'done', fromRun: 'RUN-0' },
+  { type: 'journal:append', key: 'tests#1', line: 4, outcome: 'failed', fromRun: 'RUN-0' },
+  { type: 'journal:append', key: 'implement#2', line: 5, outcome: 'done', fromRun: 'RUN-0' },
+  { type: 'journal:append', key: 'tests#2', line: 6, outcome: 'passed', fromRun: 'RUN-0' },
+];
+
+test("a seeded run's final block counts its own calls and names its reused calls apart", () => {
+  const events = stream([
+    rosterStart(),
+    ...REUSED,
+    { type: 'journal:append', key: 'self-review#1', line: 7, outcome: 'done' },
+    { type: 'run:end', status: 'suspended', stopReason: 'until', replays: 1 },
+  ]);
+  expect(render(events, 'quiet')).toContain('  calls    1 · 1 done · 6 reused\n');
+});
+
+test('a seeded run with no call of its own prints calls 0 and its reused calls', () => {
+  const events = stream([
+    rosterStart(),
+    ...REUSED,
+    { type: 'run:end', status: 'failed', stopReason: 'stopped', replays: 1 },
+  ]);
+  expect(render(events, 'quiet')).toContain('  calls    0 · 6 reused\n');
+});
+
+test('a resumed seeded run counts the reused calls of its prior events apart, its resume line counting every call', () => {
+  const events = stream([
+    rosterStart(),
+    ...REUSED,
+    { type: 'run:end', status: 'suspended', stopReason: 'interrupted', replays: 1 },
+    { type: 'journal:append', key: 'self-review#1', line: 7, outcome: 'done' },
+    { type: 'run:end', status: 'completed', replays: 2 },
+  ]);
+  const out = render(events.slice(8), 'quiet', { prior: events.slice(0, 8) });
+  expect(out).toContain('resumed after 6 calls, last tests#2 passed');
+  expect(out).toContain('  calls    1 · 1 done · 6 reused\n');
+});
+
 test("the final block's stop row puts a message's later lines under its value, indented two more", () => {
   const events = stream([
     rosterStart(),

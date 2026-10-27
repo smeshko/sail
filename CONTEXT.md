@@ -374,7 +374,7 @@ The one line an interactive terminal redraws below the terminal view, naming the
 _Avoid_: spinner, progress bar, status line (STATUS is the run's file)
 
 **Final block**:
-The terminal view's closing lines for each `run:end`: status and duration, stop reason, calls, loops, replays and the run directory.
+The terminal view's closing lines for each `run:end`: status and duration, stop reason, calls (the reused ones of a seeded run counted apart), loops, replays and the run directory.
 _Avoid_: result box, summary (the Summary is `summary.json`)
 
 **Route**:
