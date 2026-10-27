@@ -1153,9 +1153,10 @@ test("a start whose lease throws is refused, naming the branch and the port's er
       throw new PortError('workspace', 'lease', 'unavailable', 'leases are down');
     });
     const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
-    expect('refused' in run ? run.refused : 'opened').toMatch(
-      /^the branch \S+ could not be leased: workspace\.lease: leases are down \(unavailable\)$/,
-    );
+    expect(run).toEqual({
+      refused:
+        'the branch sail/FAKE-1-add-a-greeting could not be leased: workspace.lease: leases are down (unavailable)',
+    });
     expect(await leftBehind(repo.dir)).toEqual({ runs: [], leases: [], state: 'Todo', comments: 1 });
     const worktrees = Bun.spawnSync(['git', 'worktree', 'list', '--porcelain'], { cwd: repo.dir, env: repo.env });
     expect(
