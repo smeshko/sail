@@ -46,7 +46,7 @@ async function watched(
   const timers = fakeTimers(START);
   const spawner = fakeSpawner(runs, adapters.ports.ticketSource);
   const out: string[] = [];
-  const start = async (names: string[]): Promise<Watcher> => {
+  const start = async (names: string[], overrides: Partial<WatcherOptions> = {}): Promise<Watcher> => {
     const watcher = await startWatcher({
       sailDir: sail,
       config,
@@ -62,6 +62,7 @@ async function watched(
       isAlive: spawner.isAlive,
       write: (text) => out.push(text),
       lines: { timeZone: 'UTC' },
+      ...overrides,
     });
     if ('refused' in watcher) throw new Error(watcher.refused);
     return watcher;
@@ -699,6 +700,110 @@ test('a watcher starting over completed, failed, running, suspended interrupted 
       lines: ['09:00:00 swept 2 worktrees of ended runs\n'],
     });
     await watcher.stop();
+  });
+});
+
+// Error isolation: one failure never stops the watcher or starves its other workflows.
+
+test("a watcher whose sweep of ended runs' worktrees fails still starts, says so, and dispatches", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+    const workspace = new Proxy(w.adapters.ports.workspace, {
+      get: (target, property) =>
+        property === 'sweep' ? () => Promise.reject(new Error('sweep failed')) : Reflect.get(target, property),
+    });
+    const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
+    expect({ lines: w.out.filter((line) => line.includes('swept')), watching: watcher.watching() }).toEqual({
+      lines: ['09:00:00 error: the worktrees of ended runs were not swept: sweep failed\n'],
+      watching: ['a'],
+    });
+    await w.timers.advance(1000);
+    expect(w.order('a')).toEqual(['FAKE-1']);
+    await watcher.stop();
+  });
+});
+
+test('one workflow whose dispatch throws prints its error and the next workflow still dispatches in the same tick', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-b' }),
+    );
+    const ticketSource = new Proxy(w.adapters.ports.ticketSource, {
+      get: (target, property) =>
+        property === 'get'
+          ? async (key: string) => {
+              if (key === 'FAKE-1') throw new Error('get failed');
+              return target.get(key);
+            }
+          : Reflect.get(target, property),
+    });
+    const watcher = await w.start(['a', 'b'], { adapters: { ...w.adapters.ports, ticketSource } });
+    await w.timers.advance(1000);
+    expect({
+      errors: w.out.filter((line) => line.includes(' error: ')),
+      a: w.order('a'),
+      b: w.order('b'),
+    }).toEqual({ errors: ['09:00:01 a  error: get failed\n'], a: [], b: ['FAKE-2'] });
+    await watcher.stop();
+  });
+});
+
+test("a watcher whose queue lease can't be taken is refused naming its lease directory, and opens no queue", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    mkdirSync(w.runs, { recursive: true });
+    writeFileSync(join(w.runs, '.watcher'), '');
+    const lease = join(w.runs, '.watcher');
+    const message = await w.start(['a']).catch((error: unknown) => String(error));
+    expect(message).toContain(`the watcher's lease in ${lease} can't be taken: `);
+    expect({ queue: existsSync(queueDir(w.runs, 'a')), watcher: readEntry(w.registryDir, 'stub')?.watcher }).toEqual({
+      queue: false,
+      watcher: undefined,
+    });
+  });
+});
+
+test('a command drained after the watcher began stopping is rejected as the watcher is stopping, and adds no workflow', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    let armed = false;
+    let watcher: Watcher | undefined;
+    const timers = {
+      set: w.timers.set,
+      pending: w.timers.pending,
+      advance: w.timers.advance,
+      now: w.timers.now,
+      clear: (handle: Parameters<typeof w.timers.clear>[0]) => {
+        if (armed && watcher !== undefined) {
+          armed = false;
+          void watcher.stop();
+        }
+        w.timers.clear(handle);
+      },
+    };
+    watcher = await w.start(['a'], { timers });
+    armed = true;
+    dropCommand(w.runs, { op: 'poll', workflow: 'a' });
+    dropCommand(w.runs, { op: 'watch', workflows: ['b'] });
+    await w.timers.advance(1000);
+    expect({
+      rejected: rejections(w.out),
+      watching: watcher.watching(),
+      stopped: await stopped(watcher),
+      added: w.events('b').filter((event) => event.type === 'watch:added'),
+    }).toEqual({ rejected: ['the watcher is stopping\n'], watching: [], stopped: true, added: [] });
   });
 });
 
