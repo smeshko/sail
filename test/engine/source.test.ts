@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import type { Forced } from '../../src/engine/run-dir';
-import { claimSource, resolveSource } from '../../src/engine/source';
+import { claimComment, claimedBy, claimSource, resolveSource } from '../../src/engine/source';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { Ticket, TicketState } from '../../src/ports/types';
@@ -308,4 +308,29 @@ test.each<[string, Partial<Calls>, string]>([
   const { source } = world(instead);
   const thrown = await rejection(claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, force: true }));
   expect(thrown).toBeInstanceOf(TypeError);
+});
+
+const said = (...bodies: string[]) => ({
+  comments: bodies.map((body) => ({ author: 'sail', body })),
+});
+
+test('claimedBy gives undefined for a ticket with no comments', () => {
+  expect(claimedBy(said())).toBeUndefined();
+});
+
+test('claimedBy ignores comments that are no claim', () => {
+  expect(claimedBy(said('looks good', 'sail run FAKE-1-a opened https://example.test/pr/1'))).toBeUndefined();
+});
+
+test('claimedBy gives the latest claim, past a later comment that is no claim', () => {
+  const ticket = said(
+    claimComment('FAKE-1-first'),
+    claimComment('FAKE-1-second'),
+    'sail run FAKE-1-second opened https://example.test/pr/1',
+  );
+  expect(claimedBy(ticket)).toBe('FAKE-1-second');
+});
+
+test('claimedBy reads back the run id claimComment wrote', () => {
+  expect(claimedBy(said(`  ${claimComment('FAKE-9-xyz')}\n`))).toBe('FAKE-9-xyz');
 });

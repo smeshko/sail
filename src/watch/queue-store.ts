@@ -14,9 +14,10 @@
 //   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
 //   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
 // - A forced item, added with `--force`, says so in `forced`: its dispatch skips the re-check of designation and state.
+//   An unforced item whose ticket its own failed run claimed passes the re-check too, and its run starts forced.
 // - A dispatch is two steps: `dispatched()` counts the attempt and names the run before any process exists, and
 //   `spawned()` adds the process's pid once it does, emitting `queue:dispatched`. An item a re-check finds ineligible
-//   is dropped: it leaves `items`, and a later poll may queue it again.
+//   (a ticket its own failed run claimed is not) is dropped: it leaves `items`, and a later poll may queue it again.
 // - A dispatched item whose run the watcher found alive is `adopted()`, and one whose run it resumed is `resumed()`: each
 //   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.

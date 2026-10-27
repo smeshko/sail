@@ -154,7 +154,7 @@ export function fakeSpawner(runsDir: string, ticketSource?: TicketSource): FakeS
       const claimed =
         ticketSource === undefined || ticketKey === undefined
           ? Promise.resolve()
-          : claimSource({ ticketKey, runId, ticketSource });
+          : claimSource({ ticketKey, runId, ticketSource, force: options.force === true });
       runs.push({
         workflow,
         ...(ticketKey === undefined ? {} : { ticketKey }),

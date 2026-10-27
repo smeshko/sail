@@ -6,6 +6,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { requestStop, requestUnwatch } from '../../src/engine/control';
+import { writeStatus } from '../../src/engine/run-dir';
+import { claimComment } from '../../src/engine/source';
 import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -529,6 +531,70 @@ test('a forced item whose ticket lost its label, or is In Progress, is started w
       dropped: [{ dedupKey: 'ticket:FAKE-3', reason: "it is not designated: it carries no 'sail' label" }],
       skipped: [{ dedupKey: 'ticket:FAKE-4', branch: byHand.branch, heldBy: byHand.holder.runId }],
     });
+  });
+});
+
+// A ticket the item's own run claimed stays eligible once that run failed: its retry and its requeue start again, forced.
+
+test('a ticket its own run claimed and then failed is retried with --force, not dropped', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.claims();
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stage_error' });
+    await dispatcher.tick();
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(w.spawner.runs.map((run) => [run.ticketKey, run.force])).toEqual([
+      ['FAKE-1', false],
+      ['FAKE-1', true],
+    ]);
+    expect(eventsOf(w.runs, 'queue:dropped')).toEqual([]);
+    expect(states(w.store)).toEqual(['FAKE-1 dispatched 2']);
+  });
+});
+
+test('a parked item whose run claimed its ticket and was stopped runs again with --force once requeued', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.claims();
+    await w.spawner.end('FAKE-1', { status: 'failed', stopReason: 'stopped' });
+    await dispatcher.tick();
+    expect(states(w.store)).toEqual(['FAKE-1 parked 1']);
+    w.store.requeue('ticket:FAKE-1', 'requeued by hand');
+    await dispatcher.tick();
+    expect(w.spawner.runs.map((run) => [run.ticketKey, run.force])).toEqual([
+      ['FAKE-1', false],
+      ['FAKE-1', true],
+    ]);
+    expect(eventsOf(w.runs, 'queue:dropped')).toEqual([]);
+  });
+});
+
+test('a started ticket not claimed by a failed run of this clone is still dropped', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 3, { claiming: false });
+    const ended = (runId: string, status: 'completed' | 'failed') => {
+      const dir = join(w.runs, runId);
+      mkdirSync(dir, { recursive: true });
+      writeStatus(dir, status, status === 'failed' ? 'stage_error' : undefined);
+    };
+    expect((await w.ticketSource.claim('FAKE-1')).claimed).toBe(true);
+    expect((await w.ticketSource.claim('FAKE-2')).claimed).toBe(true);
+    await w.ticketSource.comment('FAKE-2', claimComment('FAKE-2-elsewhere'));
+    expect((await w.ticketSource.claim('FAKE-3')).claimed).toBe(true);
+    await w.ticketSource.comment('FAKE-3', claimComment('FAKE-3-done'));
+    ended('FAKE-3-done', 'completed');
+    await w.dispatcher().tick();
+    expect(spawnedKeys(w.spawner)).toEqual([]);
+    expect(eventsOf(w.runs, 'queue:dropped')).toEqual([
+      { dedupKey: 'ticket:FAKE-1', reason: 'it is In Progress' },
+      { dedupKey: 'ticket:FAKE-2', reason: 'it is In Progress' },
+      { dedupKey: 'ticket:FAKE-3', reason: 'it is In Progress' },
+    ]);
   });
 });
 
