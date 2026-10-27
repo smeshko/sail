@@ -14,7 +14,8 @@
 //
 // The run's own budget events print from normal, a warning in yellow and an exceeded budget in red, and so does a raise
 // (`budget-view.ts`). A step's, which carry their call's key, print only at trace. The final block has a `cost` row once
-// the run has used anything, against its budget as raised.
+// the run has used anything, against its budget as raised. A seeded run's reused calls count apart there, as in the
+// summary.
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { JournalEntry } from '../../engine/journal';
@@ -191,7 +192,7 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
   const kinds = new Map<string, string>();
   const keysByResult = new Map<string, string>();
   /** The journaled calls, their steps left out. */
-  const calls: { key: string; outcome: Outcome }[] = [];
+  const calls: { key: string; outcome: Outcome; reused: boolean }[] = [];
   const loops = new Map<string, { iteration: number; max: number }>();
   let replays = 0;
   /** The calls and steps running now, innermost last: the live line names the last. */
@@ -272,7 +273,9 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         running = running.filter((each) => each.key !== event.key && !each.key.startsWith(`${event.key}/`));
         return;
       case 'journal:append':
-        if (!event.key.includes('/')) calls.push({ key: event.key, outcome: event.outcome });
+        if (!event.key.includes('/')) {
+          calls.push({ key: event.key, outcome: event.outcome, reused: event.fromRun !== undefined });
+        }
         return;
       case 'all:start':
         group = { keys: [...event.keys], since: now() };
@@ -343,11 +346,14 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
       const [first = '', ...more] = textLines(stop);
       rows.push(['stop', first], ...more.map((line): [string, string] => ['', `  ${line}`]));
     }
+    const own = calls.filter((call) => !call.reused);
+    const reused = calls.length - own.length;
     const counts = OUTCOMES.flatMap((outcome) => {
-      const n = calls.filter((call) => call.outcome === outcome).length;
+      const n = own.filter((call) => call.outcome === outcome).length;
       return n === 0 ? [] : [`${n} ${outcome}`];
     });
-    rows.push(['calls', counts.length === 0 ? '0' : `${calls.length} · ${counts.join(', ')}`]);
+    const reusedText = reused > 0 ? ` · ${reused} reused` : '';
+    rows.push(['calls', `${own.length === 0 ? '0' : `${own.length} · ${counts.join(', ')}`}${reusedText}`]);
     if (loops.size > 0) {
       rows.push(['loops', [...loops].map(([name, loop]) => `${name} ${loop.iteration}/${loop.max}`).join(', ')]);
     }
