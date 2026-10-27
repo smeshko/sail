@@ -16,7 +16,7 @@
 // finishes. The runtime journals them, and `sail stage run`, which has no journal, passes nothing.
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { CallEvent, NewEvent } from '../events/types';
 import type { FromStepBinding } from '../sdk/bindings';
 import type { AgentStep, ScriptStep, Stage, Step } from '../sdk/steps';
@@ -45,6 +45,7 @@ import type { JournalEntry } from './journal';
 import { buildResult, buildStageResult, type StepEntry, writeResult } from './result';
 import { checkoutPath } from './run-dir';
 import { validateDocument } from './schemas';
+import { type Def, WRAPPERS } from './untrusted';
 
 /** What a multi-step call is told by the one who runs it, and tells it back. */
 export interface StageHooks {
@@ -79,11 +80,53 @@ const NAME = /^[a-z0-9-]+$/;
 /** `binds 'title' to fromStep('describe')`, then what it picks. */
 const picks = (key: string, binding: FromStepBinding) => `binds '${key}' to fromStep('${binding.step}')`;
 
+const NEVER_OBJECTS = new Set([
+  'string',
+  'number',
+  'boolean',
+  'bigint',
+  'symbol',
+  'literal',
+  'enum',
+  'template_literal',
+  'date',
+  'nan',
+  'null',
+  'undefined',
+  'void',
+  'never',
+]);
+const NULLISH = new Set(['null', 'undefined', 'void']);
+
+/** Whether a schema's value has `key`: `'unknown'` where its shape can't be told at load, which is never refused. */
+function outputKey(schema: z.ZodType, key: string, seen = new Set<z.ZodType>()): 'has' | 'lacks' | 'unknown' {
+  if (seen.has(schema)) return 'unknown';
+  const def = schema.def as Def;
+  if (def.type === 'object') return Object.hasOwn(def.shape as object, key) ? 'has' : 'lacks';
+  if (WRAPPERS.includes(def.type) && def.innerType) return outputKey(def.innerType, key, seen);
+  if (def.type === 'pipe' && def.out) return outputKey(def.out, key, seen);
+  if (def.type === 'lazy' && def.getter) return outputKey(def.getter(), key, new Set(seen).add(schema));
+  if (def.type === 'union' && def.options) {
+    const answers = def.options
+      .filter((member) => !NULLISH.has((member.def as Def).type))
+      .map((member) => outputKey(member, key, seen));
+    if (answers.includes('lacks') || answers.length === 0) return 'lacks';
+    return answers.includes('unknown') ? 'unknown' : 'has';
+  }
+  if (def.type === 'intersection' && def.left && def.right) {
+    const answers = [outputKey(def.left, key, seen), outputKey(def.right, key, seen)];
+    if (answers.includes('has')) return 'has';
+    return answers.includes('unknown') ? 'unknown' : 'lacks';
+  }
+  return NEVER_OBJECTS.has(def.type) ? 'lacks' : 'unknown';
+}
+
 /**
  * What is wrong with how a multi-step stage wires its steps, one message each, naming the stage, the step and the
  * binding (D4, D19). The types catch a misnamed `fromStep()`, and these are erased at run time, so loading checks it
  * again, with what the types can't see: a file the named step doesn't produce, an output key its schema has no field
- * for, two steps of one name or one producing what another does, and an engine binding on the stage itself.
+ * for (read through wrappers, pipes and every member of a union), two steps of one name or one producing what another
+ * does, and an engine binding on the stage itself.
  */
 export function stepProblems(stage: Stage): string[] {
   const at = `stage '${stage.name}'`;
@@ -118,8 +161,7 @@ export function stepProblems(stage: Stage): string[] {
         if (binding.file !== undefined && !Object.hasOwn(source.produces, binding.file)) {
           found.push(`${of}'s file '${binding.file}', which it doesn't produce`);
         }
-        const shape = source.output instanceof z.ZodObject ? (source.output.shape as object) : undefined;
-        if (binding.key !== undefined && shape !== undefined && !Object.hasOwn(shape, binding.key)) {
+        if (binding.key !== undefined && outputKey(source.output, binding.key) === 'lacks') {
           found.push(`${of}'s output key '${binding.key}', which its output doesn't have`);
         }
       }

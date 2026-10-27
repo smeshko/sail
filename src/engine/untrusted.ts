@@ -17,7 +17,7 @@ import { isUntrustedInput, untrustedInput } from './render';
  * What zod's `def` keeps, by `def.type`: probed on zod 4.6.5. test/engine/untrusted.test.ts reads every kind of schema
  * zod defines and the keys each keeps a schema under, and fails when one is missing here.
  */
-interface Def {
+export interface Def {
   type: string;
   shape?: Record<string, z.ZodType>;
   catchall?: z.ZodType;
@@ -45,7 +45,8 @@ interface Def {
   checks?: { _zod?: { def?: { check?: string } } }[];
 }
 
-const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
+/** The kinds that wrap one schema, `innerType`, and keep its shape. */
+export const WRAPPERS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
