@@ -12,11 +12,13 @@
 //   Only the same full sha keeps it: a done item at another sha that shares its first 7 is replaced.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
 //   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
-//   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
+//   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts, and keeps its last run
+//   as `previousRunId`, so the re-check can tell whether the claim its ticket carries is the item's own.
 // - A forced item, added with `--force`, says so in `forced`: its dispatch skips the re-check of designation and state.
 // - A dispatch is two steps: `dispatched()` counts the attempt and names the run before any process exists, and
 //   `spawned()` adds the process's pid once it does, emitting `queue:dispatched`. An item a re-check finds ineligible
-//   is dropped: it leaves `items`, and a later poll may queue it again.
+//   is dropped: it leaves `items`, and a later poll may queue it again. A ticket In Progress under the item's own claim
+//   is eligible, not ineligible.
 // - A dispatched item whose run the watcher found alive is `adopted()`, and one whose run it resumed is `resumed()`: each
 //   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
@@ -67,6 +69,8 @@ export const QueueItem = z.strictObject({
   retryAt: z.string().optional(),
   /** The run its last dispatch started. */
   runId: z.string().optional(),
+  /** The run of its last dispatch before a requeue, whose claim its ticket may still carry. */
+  previousRunId: z.string().optional(),
   /** The process of that run, once it was spawned. */
   pid: z.number().int().positive().optional(),
   /** Why it last failed. */
@@ -373,6 +377,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.state = 'dispatched';
         item.attempts += 1;
         item.runId = runId;
+        delete item.previousRunId;
         delete item.retryAt;
         delete item.pid;
       });
@@ -421,6 +426,8 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         }
         item.state = 'queued';
         item.attempts = 0;
+        const lastRun = item.runId ?? item.previousRunId;
+        if (lastRun !== undefined) item.previousRunId = lastRun;
         for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid'] as const) delete item[field];
       });
       stream.emit({ type: 'queue:requeued', workflow, dedupKey: key, reason });

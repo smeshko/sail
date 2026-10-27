@@ -688,7 +688,10 @@ test('requeue puts a parked or a failed item back queued with no attempts and no
       'ticket:FAKE-4 dispatched',
       'ticket:FAKE-5 done',
     ],
-    items: [fresh('FAKE-1'), fresh('FAKE-2')],
+    items: [
+      { ...fresh('FAKE-1'), previousRunId: RUN_2 },
+      { ...fresh('FAKE-2'), previousRunId: 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3N' },
+    ],
     refusals: [
       "ticket-to-pr's item ticket:FAKE-3 is queued: only a parked or failed item is requeued",
       "ticket-to-pr's item ticket:FAKE-4 is dispatched: only a parked or failed item is requeued",
@@ -701,6 +704,24 @@ test('requeue puts a parked or a failed item back queued with no attempts and no
     ],
     issues: [],
   });
+});
+
+test('a dispatch after a requeue sets the new runId and clears previousRunId', () => {
+  const store = open(runsDir());
+  store.add([ticket('FAKE-1')]);
+  store.dispatched('ticket:FAKE-1', RUN);
+  store.parked('ticket:FAKE-1', 'stopped');
+  store.requeue('ticket:FAKE-1', 'requeued by hand');
+  const requeued = store.snapshot().items[0];
+  store.dispatched('ticket:FAKE-1', RUN_2);
+  const dispatched = store.snapshot().items[0];
+  expect([
+    [requeued?.runId, requeued?.previousRunId],
+    [dispatched?.runId, dispatched?.previousRunId],
+  ]).toEqual([
+    [undefined, RUN],
+    [RUN_2, undefined],
+  ]);
 });
 
 test('a forced add marks its items forced, and a queue.json written before the field existed still reads', () => {
