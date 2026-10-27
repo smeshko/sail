@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import { validateDocument } from '../../src/engine/schemas';
-import { readSlot, takeSlot } from '../../src/engine/slots';
+import { readSlot, releaseSlot, takeSlot } from '../../src/engine/slots';
 import type { CallEvent } from '../../src/events/types';
 import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
 import { BIN_DIR, DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
@@ -936,6 +936,20 @@ test('a queued step emits step:queued naming the holder, once, before script:exe
   ]);
   expect(typesOf(b.events).slice(0, 2)).toEqual(['step:queued', 'script:exec']);
   expect(a.events.some((event) => event.type === 'step:queued')).toBe(false);
+});
+
+test("the wait for the slot doesn't count toward timeoutSeconds", async () => {
+  const slots = slotsDir();
+  takeSlot(slots, 'verify', HOLDER);
+  const b = slotted(slots, 'RUN-B');
+  b.s.run("echo '{}'");
+  // Two seconds to start under a loaded machine, and a wait longer than that.
+  const waiting = scriptKind.run(verify({ timeoutSeconds: 2 }), b.context);
+  await Bun.sleep(3000);
+  releaseSlot(slots, 'verify', HOLDER);
+  const run = await waiting;
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+  expect(typesOf(b.events).slice(0, 2)).toEqual(['step:queued', 'script:exec']);
 });
 
 test('a step queued behind a SIGKILLed holder runs', async () => {
