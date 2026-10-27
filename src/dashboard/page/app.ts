@@ -34,7 +34,7 @@ import type { PageHost, Region } from './host';
 import { REGIONS } from './host';
 import { html } from './html';
 import { newestFirst, queuePanels, railRepos, statusOf } from './index-model';
-import { type Loaded, renderInspector, streamsOf } from './inspector-view';
+import { type Loaded, logTarget, renderInspector } from './inspector-view';
 import { type QueueStream, queueId, renderQueue } from './queue-view';
 import { renderRail } from './rail-view';
 import { applyEvent, emptyRun, type RunModel } from './run-model';
@@ -246,14 +246,14 @@ export function boot(host: PageHost): Page {
     const key = ui.key;
     const card = open?.model.cards.find((entry) => entry.key === key);
     if (open === undefined || key === undefined || card === undefined) return;
-    const streams = streamsOf(card.kind);
-    const stream = ui.stream !== undefined && streams.includes(ui.stream) ? ui.stream : streams[0];
+    const target = logTarget(card, ui);
+    const stream = ui.stream !== undefined && target.streams.includes(ui.stream) ? ui.stream : target.streams[0];
     if (stream === undefined) return;
     const asked = ++logRead;
     const forSelection = selection;
     lastLogRead = host.now();
     if (log === undefined) log = { state: 'loading' };
-    void host.get(`${callPath(open, key)}/log?stream=${enc(stream)}`).then((answer) => {
+    void host.get(`${callPath(open, target.key)}/log?stream=${enc(stream)}`).then((answer) => {
       if (asked !== logRead || forSelection !== selection) return;
       log = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
       mark('inspector');
@@ -319,6 +319,7 @@ export function boot(host: PageHost): Page {
     if (key === undefined) delete ui.key;
     else ui.key = key;
     delete ui.stream;
+    delete ui.step;
     ui.opened = [];
     if (tab !== undefined) ui.tab = tab;
     if (timeline !== undefined) ui.timeline = timeline;
@@ -633,6 +634,14 @@ export function boot(host: PageHost): Page {
     stream: (data) => {
       if (data.stream === undefined) return;
       ui.stream = data.stream;
+      log = undefined;
+      readLog();
+      mark('inspector');
+    },
+    'log-step': (data) => {
+      if (data.step === undefined) return;
+      ui.step = data.step;
+      delete ui.stream;
       log = undefined;
       readLog();
       mark('inspector');

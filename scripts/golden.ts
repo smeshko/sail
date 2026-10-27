@@ -264,6 +264,7 @@ export function renderDashboardViews(outDir: string): string[] {
       ['inspector-golden-implement-2-overview.html', 'golden', 'implement#2', 'overview'],
       ['inspector-golden-implement-2-files.html', 'golden', 'implement#2', 'files'],
       ['inspector-golden-tests-1-log.html', 'golden', 'tests#1', 'log'],
+      ['inspector-golden-publish-1-log.html', 'golden', 'publish#1', 'log'],
     ];
     for (const [file, run, key, tab] of inspectors) {
       const [repo, dir] = runDirs[run] ?? ['', ''];
@@ -271,8 +272,11 @@ export function renderDashboardViews(outDir: string): string[] {
       const card = model.cards.find((entry) => entry.key === key);
       const resultPath = card?.resultPath ?? '';
       const result = JSON.parse(readFileSync(join(dir, resultPath), 'utf8')) as unknown;
+      const stepEnd = readEvents(dir).findLast((event) => event.type === 'step:end' && event.key.startsWith(`${key}/`));
+      const logDir =
+        card?.kind === 'stage' && stepEnd?.type === 'step:end' ? dirname(stepEnd.resultPath) : dirname(resultPath);
       const log = readFileSync(
-        join(dir, dirname(resultPath), card?.kind === 'script' ? 'stdout.log' : 'session.log'),
+        join(dir, logDir, card?.kind === 'script' || card?.kind === 'stage' ? 'stdout.log' : 'session.log'),
         'utf8',
       );
       const runId = runIdOf[run as keyof typeof runIdOf];

@@ -584,6 +584,26 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
   expect(page.ui.key).toBeUndefined();
 });
 
+test("a multi-step call's log reads its steps by step key", async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN(), false);
+  const base = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls`;
+  const logReads = () => host.reads.map((read) => read.path).filter((path) => path.includes('/log?'));
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'tab', tab: 'log' });
+  expect(logReads()).toEqual([`${base}/publish%231%2Fopen/log?stream=stdout`]);
+  host.click({ action: 'log-step', step: 'describe' });
+  expect(page.ui.step).toBe('describe');
+  expect(logReads().at(-1)).toBe(`${base}/publish%231%2Fdescribe/log?stream=session`);
+  await settle();
+  host.advance(100);
+  expect(host.regions.inspector).toContain('PR description written.');
+  host.click({ action: 'select-card', key: 'tests#1' });
+  expect(page.ui.step).toBeUndefined();
+  expect(logReads().at(-1)).toBe(`${base}/tests%231/log?stream=stdout`);
+});
+
 test('the timeline filter loads what was saved, toggles a kind in the order of the chips, saves it, holds across calls, and all clears it', () => {
   host.storage.set(FILTER_KEY, 'tools,bogus,thinking');
   page = boot(host);
