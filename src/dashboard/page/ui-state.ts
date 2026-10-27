@@ -31,6 +31,8 @@ export interface UiState {
   file?: { name: string; path: string };
   /** The log stream the log tab shows, when one is chosen. */
   stream?: string;
+  /** The step the log tab shows for a multi-step call, when one is chosen. */
+  step?: string;
   /** The rail's open sections, as `<repo>/<workflow>:completed`. */
   open: string[];
   /** The rail's closed repositories and workflows, as `<repo>` and `<repo>/<workflow>`. */

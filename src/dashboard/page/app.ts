@@ -34,7 +34,7 @@ import type { PageHost, Region } from './host';
 import { REGIONS } from './host';
 import { html } from './html';
 import { newestFirst, queuePanels, railRepos, statusOf } from './index-model';
-import { type Loaded, renderInspector, streamsOf } from './inspector-view';
+import { type Loaded, logTarget, renderInspector } from './inspector-view';
 import { type QueueStream, queueId, renderQueue } from './queue-view';
 import { renderRail } from './rail-view';
 import { applyEvent, emptyRun, type RunModel } from './run-model';
@@ -127,6 +127,8 @@ export function boot(host: PageHost): Page {
   let resultRead = 0;
   let logRead = 0;
   let lastLogRead = Number.NEGATIVE_INFINITY;
+  /** The key the log tab's text was read for: a call's, or one of its steps'. */
+  let logFor: string | undefined;
   /** Set when a call is selected before its card exists: the cursor moves to it once it does. */
   let cursorPending = false;
   /** What the URL asks to open, until the first index: then it is opened, or dropped when its run isn't listed. */
@@ -246,22 +248,30 @@ export function boot(host: PageHost): Page {
     const key = ui.key;
     const card = open?.model.cards.find((entry) => entry.key === key);
     if (open === undefined || key === undefined || card === undefined) return;
-    const streams = streamsOf(card.kind);
-    const stream = ui.stream !== undefined && streams.includes(ui.stream) ? ui.stream : streams[0];
+    const target = logTarget(card, ui);
+    const stream = ui.stream !== undefined && target.streams.includes(ui.stream) ? ui.stream : target.streams[0];
     if (stream === undefined) return;
     const asked = ++logRead;
     const forSelection = selection;
     lastLogRead = host.now();
+    if (target.key !== logFor) log = undefined;
+    logFor = target.key;
     if (log === undefined) log = { state: 'loading' };
-    void host.get(`${callPath(open, key)}/log?stream=${enc(stream)}`).then((answer) => {
+    void host.get(`${callPath(open, target.key)}/log?stream=${enc(stream)}`).then((answer) => {
       if (asked !== logRead || forSelection !== selection) return;
       log = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
       mark('inspector');
     });
   };
 
-  /** Reads a running call's log again, at most once a second. */
+  /** Reads a running call's log again, at most once a second, and at once when the log tab has moved to its next step. */
   const refreshLog = () => {
+    const card = run?.model.cards.find((entry) => entry.key === ui.key);
+    if (card !== undefined && logTarget(card, ui).key !== logFor) {
+      if (logTimer !== undefined) host.cancel(logTimer);
+      logTimer = undefined;
+      return readLog();
+    }
     if (logTimer !== undefined) return;
     const wait = Math.max(0, lastLogRead + LOG_REFRESH_MS - host.now());
     if (wait === 0) return readLog();
@@ -319,6 +329,7 @@ export function boot(host: PageHost): Page {
     if (key === undefined) delete ui.key;
     else ui.key = key;
     delete ui.stream;
+    delete ui.step;
     ui.opened = [];
     if (tab !== undefined) ui.tab = tab;
     if (timeline !== undefined) ui.timeline = timeline;
@@ -633,6 +644,14 @@ export function boot(host: PageHost): Page {
     stream: (data) => {
       if (data.stream === undefined) return;
       ui.stream = data.stream;
+      log = undefined;
+      readLog();
+      mark('inspector');
+    },
+    'log-step': (data) => {
+      if (data.step === undefined) return;
+      ui.step = data.step;
+      delete ui.stream;
       log = undefined;
       readLog();
       mark('inspector');

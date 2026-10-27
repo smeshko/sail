@@ -119,6 +119,10 @@ test("a call's result and logs: the stream asked for, else the session for an ag
   expect((await get(server, `${RUN}/calls/spec%231/log`)).body).toBe(golden('01-spec/call-1/session.log'));
   expect((await get(server, `${RUN}/calls/tests%232/log`)).body).toBe(golden('03-tests/call-2/stdout.log'));
   expect((await get(server, `${RUN}/calls/tests%231/log?stream=nope`)).status).toBe(400);
+  const describe = await get(server, `${RUN}/calls/publish%231%2Fdescribe/log?stream=session`);
+  expect([describe.status, describe.body]).toEqual([200, golden('05-publish/call-1/steps/1-describe/session.log')]);
+  const open = await get(server, `${RUN}/calls/publish%231%2Fopen/log?stream=stdout`);
+  expect([open.status, open.body]).toEqual([200, golden('05-publish/call-1/steps/2-open/stdout.log')]);
   expect(treeHash(m.root)).toBe(before);
 });
 

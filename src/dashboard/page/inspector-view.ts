@@ -1,11 +1,12 @@
 // The inspector: one call, on up to four tabs. Overview has its facts, output and errors; files, what it produced and how
 // each was validated, each name opening the file in the drawer; permissions, the step's permissions and budget from the
-// roster and each denial with the command it refused; log, its session or its stdout and stderr. A script call has no
+// roster and each denial with the command it refused; log, its session or its stdout and stderr, and for a multi-step
+// call a bar of its steps above them, each step's streams read by its step key. A script call has no
 // permissions tab, and a call with no files no files tab. Everything comes from the run's own files: the card from its
 // events, the roster from `run:start`, and the call's `result.json` and logs over REST.
 import { clock, cost, duration } from './format';
 import { html, type SafeHtml, text } from './html';
-import type { Roster, StageCard } from './run-model';
+import type { CardStep, Roster, StageCard } from './run-model';
 import { type InspectorTab, pillOf, TABS, type UiState } from './ui-state';
 
 /** A read the shell made for the inspector: still going, not there, or what came back. */
@@ -18,11 +19,10 @@ const obj = (value: unknown): Fields | undefined =>
 const list = (value: unknown): string[] =>
   Array.isArray(value) ? value.map((item) => (typeof item === 'string' ? item : text(item))) : [];
 
-/** The log streams a call of `kind` writes. */
+/** The log streams a call or step of `kind` writes. A multi-step call writes none: its steps do. */
 export function streamsOf(kind: string): string[] {
   if (kind === 'agent') return ['session'];
   if (kind === 'script') return ['stdout', 'stderr'];
-  if (kind === 'stage') return ['session', 'stdout', 'stderr'];
   return [];
 }
 
@@ -140,8 +140,16 @@ ${budget === undefined ? '' : html`<div class="grp"><div class="grp-t">budget</d
   }</div>`;
 }
 
+/** What the log tab reads: the key, the streams and, for a multi-step call, the chosen step. */
+export function logTarget(card: StageCard, ui: UiState): { key: string; streams: string[]; step?: CardStep } {
+  if (card.kind !== 'stage') return { key: card.key, streams: streamsOf(card.kind) };
+  const step = card.steps.find((entry) => entry.step === ui.step) ?? card.steps.at(-1);
+  if (step === undefined) return { key: card.key, streams: [] };
+  return { key: `${card.key}/${step.step}`, streams: streamsOf(step.kind), step };
+}
+
 function log(card: StageCard, loaded: Loaded<string> | undefined, ui: UiState): SafeHtml {
-  const streams = streamsOf(card.kind);
+  const { streams, step } = logTarget(card, ui);
   if (streams.length === 0) return html`<div class="code">no log for this call</div>`;
   const chosen = ui.stream !== undefined && streams.includes(ui.stream) ? ui.stream : streams[0];
   const body =
@@ -150,7 +158,14 @@ function log(card: StageCard, loaded: Loaded<string> | undefined, ui: UiState): 
       : loaded.state === 'missing'
         ? html`<div class="code">no log for this call</div>`
         : html`<pre class="code log">${loaded.value}</pre>`;
-  return html`<div class="logbar">${streams.map(
+  const stepBar =
+    card.kind === 'stage'
+      ? html`<div class="logbar">${card.steps.map(
+          (entry) =>
+            html`<button class="tog${entry === step ? ' on' : ''}" data-action="log-step" data-step="${entry.step}">${entry.index} · ${entry.step}</button>`,
+        )}</div>`
+      : '';
+  return html`${stepBar}<div class="logbar">${streams.map(
     (stream) =>
       html`<button class="tog${stream === chosen ? ' on' : ''}" data-action="stream" data-stream="${stream}">${stream}</button>`,
   )}${

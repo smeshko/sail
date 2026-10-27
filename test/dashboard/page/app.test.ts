@@ -584,6 +584,56 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
   expect(page.ui.key).toBeUndefined();
 });
 
+test("a multi-step call's log reads its steps by step key", async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN(), false);
+  const base = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls`;
+  const logReads = () => host.reads.map((read) => read.path).filter((path) => path.includes('/log?'));
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'tab', tab: 'log' });
+  expect(logReads()).toEqual([`${base}/publish%231%2Fopen/log?stream=stdout`]);
+  host.click({ action: 'log-step', step: 'describe' });
+  expect(page.ui.step).toBe('describe');
+  expect(logReads().at(-1)).toBe(`${base}/publish%231%2Fdescribe/log?stream=session`);
+  await settle();
+  host.advance(100);
+  expect(host.regions.inspector).toContain('PR description written.');
+  // A stream picked on one step isn't carried to the next one picked, even one that writes it.
+  host.click({ action: 'log-step', step: 'open' });
+  host.click({ action: 'stream', stream: 'stderr' });
+  host.click({ action: 'log-step', step: 'describe' });
+  host.click({ action: 'log-step', step: 'open' });
+  expect(page.ui.stream).toBeUndefined();
+  expect(logReads().at(-1)).toBe(`${base}/publish%231%2Fopen/log?stream=stdout`);
+  host.click({ action: 'select-card', key: 'tests#1' });
+  expect(page.ui.step).toBeUndefined();
+  expect(logReads().at(-1)).toBe(`${base}/tests%231/log?stream=stdout`);
+});
+
+test("a running multi-step call's next step drops the last step's log and reads its own at once", async () => {
+  const { dir, rest } = runningCopy(m, 1);
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  const lines = rest.map((line) => JSON.parse(line));
+  const next = lines.findIndex((event) => event.type === 'step:start' && event.key === 'publish#1/open');
+  for (const event of lines.slice(0, next)) host.push(socket, { kind: 'event', event });
+  const base = `/api/repos/alpha/runs/${RUNNING_ID}/calls`;
+  host.bodies.set(`${base}/publish%231%2Fdescribe/log?stream=session`, { status: 200, body: 'DESCRIBE_LOG' });
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'tab', tab: 'log' });
+  await settle();
+  host.advance(100);
+  expect(host.regions.inspector).toContain('DESCRIBE_LOG');
+  host.push(socket, { kind: 'event', event: lines[next] });
+  host.advance(100);
+  expect(host.regions.inspector).not.toContain('DESCRIBE_LOG');
+  const logReads = host.reads.map((read) => read.path).filter((path) => path.includes('/log?'));
+  expect(logReads.at(-1)).toBe(`${base}/publish%231%2Fopen/log?stream=stdout`);
+});
+
 test('the timeline filter loads what was saved, toggles a kind in the order of the chips, saves it, holds across calls, and all clears it', () => {
   host.storage.set(FILTER_KEY, 'tools,bogus,thinking');
   page = boot(host);

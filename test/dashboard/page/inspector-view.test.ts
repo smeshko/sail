@@ -3,9 +3,9 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { renderInspector } from '../../../src/dashboard/page/inspector-view';
-import { foldRun } from '../../../src/dashboard/page/run-model';
-import { type InspectorTab, initialUi } from '../../../src/dashboard/page/ui-state';
+import { type Loaded, logTarget, renderInspector, streamsOf } from '../../../src/dashboard/page/inspector-view';
+import { type CardStep, foldRun, type StageCard } from '../../../src/dashboard/page/run-model';
+import { type InspectorTab, initialUi, type UiState } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import { DASHBOARD_FIXTURES, FAKE_2_ID, GOLDEN_RUN } from '../../helpers/dashboard';
 
@@ -131,4 +131,45 @@ test('a script call has no permissions tab, a call with no files no files tab, a
   expect(noFiles).toContain('<button class="tab on" data-action="tab" data-tab="overview">overview</button>');
   expect(noFiles).not.toContain('this call produced no files');
   expect(tabs(inspect(GOLDEN_RUN, 'implement#2', 'overview'))).toEqual(['overview', 'files', 'permissions', 'log']);
+});
+
+test("a multi-step call's log tab shows its steps, the last chosen until one is picked", () => {
+  const model = foldRun(readEvents(GOLDEN_RUN));
+  const card = (key: string) => model.cards.find((entry) => entry.key === key) as StageCard;
+  const publish = card('publish#1');
+  const draw = (ui: Partial<UiState>, loaded: Loaded<string> | undefined = { state: 'loaded', value: 'x' }) =>
+    renderInspector(publish, model.roster, undefined, loaded, { ...initialUi(0), tab: 'log', ...ui }).value;
+  const steps = (markup: string) =>
+    [...markup.matchAll(/data-action="log-step" data-step="([^"]+)"/g)].map((m) => m[1]);
+  const streams = (markup: string) =>
+    [...markup.matchAll(/data-action="stream" data-stream="([^"]+)"/g)].map((m) => m[1]);
+  const last = draw({});
+  expect(steps(last)).toEqual(['describe', 'open']);
+  expect(last).toContain('<button class="tog on" data-action="log-step" data-step="open">2 · open</button>');
+  expect(last).toContain('<button class="tog" data-action="log-step" data-step="describe">1 · describe</button>');
+  expect(streams(last)).toEqual(['stdout', 'stderr']);
+  const first = draw({ step: 'describe' });
+  expect(first).toContain('<button class="tog on" data-action="log-step" data-step="describe">1 · describe</button>');
+  expect(streams(first)).toEqual(['session']);
+  expect(streams(draw({ step: 'nope' }))).toEqual(['stdout', 'stderr']);
+  expect(logTarget(publish, { ...initialUi(0), step: 'describe' })).toEqual({
+    key: 'publish#1/describe',
+    streams: ['session'],
+    step: publish.steps[0] as CardStep,
+  });
+  const none = { ...publish, steps: [] };
+  expect(logTarget(none, initialUi(0))).toEqual({ key: 'publish#1', streams: [] });
+  expect(renderInspector(none, model.roster, undefined, undefined, { ...initialUi(0), tab: 'log' }).value).toContain(
+    '<div class="ins-b"><div class="code">no log for this call</div></div>',
+  );
+  expect(logTarget(card('tests#1'), initialUi(0))).toEqual({ key: 'tests#1', streams: ['stdout', 'stderr'] });
+  expect(
+    steps(renderInspector(card('tests#1'), model.roster, undefined, undefined, { ...initialUi(0), tab: 'log' }).value),
+  ).toEqual([]);
+});
+
+test('a multi-step call writes no log streams of its own: its steps do', () => {
+  expect(streamsOf('stage')).toEqual([]);
+  expect(streamsOf('agent')).toEqual(['session']);
+  expect(streamsOf('script')).toEqual(['stdout', 'stderr']);
 });
