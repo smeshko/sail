@@ -84,6 +84,15 @@ export function claimComment(runId: string): string {
   return `sail run ${runId} started`;
 }
 
+/** The run the ticket's latest claim comment names, if any. */
+export function claimedBy(ticket: Pick<Ticket, 'comments'>): string | undefined {
+  for (const comment of ticket.comments.toReversed()) {
+    const match = /^sail run (\S+) started$/.exec(comment.body.trim());
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
 export interface ClaimSourceOptions {
   ticketKey: string;
   /** The run the comment names, minted before the claim. */
