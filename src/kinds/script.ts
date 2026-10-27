@@ -230,6 +230,18 @@ async function acquire(
   }
 }
 
+/**
+ * Gives slot `name` back. A slot file that can't be released doesn't replace the script's result: the next taker
+ * reports it, naming the file.
+ */
+function release(dir: string, name: string, holder: SlotHolder): void {
+  try {
+    releaseSlot(dir, name, holder);
+  } catch (error) {
+    if (!(error instanceof SlotError)) throw error;
+  }
+}
+
 async function runScript(step: ScriptStep, context: StepContext): Promise<StepRun> {
   const emit = context.emit ?? (() => {});
   const command = resolve(context.stageDir, step.run);
@@ -364,7 +376,7 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
   try {
     return await runScript(step, context);
   } finally {
-    releaseSlot(context.slots?.dir ?? defaultSlotsDir(), step.exclusive, holder);
+    release(context.slots?.dir ?? defaultSlotsDir(), step.exclusive, holder);
   }
 }
 

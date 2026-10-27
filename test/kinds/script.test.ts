@@ -1039,3 +1039,11 @@ test('the slot is released however the script ends', async () => {
   }
   expect(outcomes).toEqual(['passed', 'failed', 'error']);
 });
+
+test("a slot that can't be released leaves the script's own result", async () => {
+  const slots = slotsDir();
+  const c = slotted(slots, 'RUN-C');
+  c.s.run(`echo 'not json' > ${join(slots, 'verify.json')}\necho '{}'`);
+  const run = await scriptKind.run(verify(), c.context);
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+});
