@@ -50,6 +50,7 @@ const SHOWN_FROM: Partial<Record<EventType, Verbosity>> = {
   'intake:end': 'normal',
   'stage:end': 'normal',
   'step:end': 'normal',
+  'step:queued': 'normal',
   'loop:iteration': 'normal',
   'loop:exit': 'normal',
   'all:start': 'normal',
@@ -400,6 +401,13 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         const outcome = event.outcome === undefined ? '' : ` → ${event.outcome}`;
         return [detail(event.key, `exit ${event.code}${outcome} · ${duration}`)];
       }
+      case 'step:queued':
+        return [
+          detail(
+            event.key,
+            `queued for exclusive ${event.exclusive} · held by ${event.holder.runId} ${event.holder.key}`,
+          ),
+        ];
       case 'script:exec':
         return [detail(event.key, `$ ${event.command}${event.cwd === '.' ? '' : ` · in ${event.cwd}`}`)];
       case 'input:materialised':
