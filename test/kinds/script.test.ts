@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -991,6 +992,20 @@ test('a slot file that is no slot ends the step not_started, naming the file', a
   expect(run.errors[0]?.reason).toBe('not_started');
   expect(run.errors[0]?.message).toContain(join(slots, 'verify.json'));
   expect(typesOf(b.events)).toEqual([]);
+});
+
+test('a step whose slot keeps changing hands waits and runs once it settles', async () => {
+  const slots = slotsDir();
+  // A dangling link reads as no slot yet refuses a new one, as a slot taken and released between reads does.
+  const file = join(slots, 'verify.json');
+  symlinkSync(join(slots, 'gone.json'), file);
+  const b = slotted(slots, 'RUN-B');
+  b.s.run("echo '{}'");
+  const waiting = scriptKind.run(verify(), b.context);
+  await Bun.sleep(100);
+  rmSync(file);
+  const run = await waiting;
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
 });
 
 test("problems() rejects an exclusive that isn't a slot name", () => {

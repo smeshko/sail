@@ -28,6 +28,7 @@ import {
   defaultSlotsDir,
   releaseSlot,
   type Slot,
+  SlotContended,
   SlotError,
   type SlotHolder,
   type SlotResult,
@@ -186,8 +187,8 @@ function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
 
 /**
  * Takes the exclusive slot `name`, waiting while another holder has it. Each new holder it finds is reported once, as
- * `step:queued`. Undefined once the slot is held; otherwise the error that ended the wait: an interruption, or a slot
- * file that isn't one.
+ * `step:queued`. A slot that kept changing hands is tried again at the next poll. Undefined once the slot is held;
+ * otherwise the error that ended the wait: an interruption, or a slot file that isn't one.
  */
 async function acquire(
   name: string,
@@ -208,6 +209,10 @@ async function acquire(
     try {
       result = takeSlot(dir, name, holder, (context.clock ?? systemClock)());
     } catch (error) {
+      if (error instanceof SlotContended) {
+        await pause(pollMs, context.signal);
+        continue;
+      }
       if (error instanceof SlotError) return { reason: 'not_started', message: error.message };
       throw error;
     }

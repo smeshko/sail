@@ -26,6 +26,9 @@ export type SlotResult = { taken: true; slot: Slot; took?: string } | { taken: f
 /** A slot file that can't be read or isn't a slot; the message names the file. */
 export class SlotError extends Error {}
 
+/** A slot that kept changing hands while it was being taken: contention, so taking it again later may succeed. */
+export class SlotContended extends SlotError {}
+
 /** Where slots live unless a caller names a directory. Computed per call, so importing this reads nothing. */
 export function defaultSlotsDir(): string {
   return join(homedir(), '.sail', 'slots');
@@ -137,7 +140,7 @@ export function takeSlot(dir: string, name: string, holder: SlotHolder, now = ne
   }
   const current = readFile(file);
   if (current !== undefined) return { taken: false, holder: current };
-  throw new SlotError(`${file}: the slot kept changing hands`);
+  throw new SlotContended(`${file}: the slot kept changing hands`);
 }
 
 /** Removes slot `name`, only while it still names `holder`'s run, key and pid. True when it was removed. */
