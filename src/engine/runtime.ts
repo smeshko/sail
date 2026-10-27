@@ -12,8 +12,9 @@
 // A group, `run.all()`, ends the replay with its unjournaled calls, which run at once, each in its own call directory.
 // Each is journaled as it completes, carrying the group's keys, so the journal holds them in completion order, and
 // `all:start` and `all:end` bracket them. An `error` doesn't stop its siblings. A call that throws, a bug in sail, stops
-// them, and the error goes on once they have settled, even when reporting `all:end` fails too. An abort suspends the run with the calls that completed
-// journaled. The relay's key is the running call's while exactly one runs, and none otherwise.
+// them, and the error goes on once they have settled, even when reporting `all:end` fails too. An abort suspends the
+// run with the calls that completed journaled. The relay's key is the running call's while exactly one runs, and none
+// otherwise.
 //
 // What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
 // that is running. A workspace event carries none, and its path is made relative to the repository root. The lease, the
