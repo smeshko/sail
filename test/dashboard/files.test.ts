@@ -100,21 +100,71 @@ test("callFile finds a stage call through stage:end, a script call's log, and a 
   expect(callFile(run, 'tests#1', 'stdout.log')).toBe(join(run, '03-tests/call-1/stdout.log'));
   expect(callFile(run, 'spec#1', 'session.log')).toBe(join(run, '01-spec/call-1/session.log'));
   expect(callFile(run, 'intake#1', 'result.json')).toBe(join(run, '00-intake/call-1/result.json'));
+  expect(callFile(run, 'publish#1/describe', 'session.log')).toBe(
+    join(run, '05-publish/call-1/steps/1-describe/session.log'),
+  );
+  expect(callFile(run, 'publish#1/open', 'stdout.log')).toBe(join(run, '05-publish/call-1/steps/2-open/stdout.log'));
+});
+
+test("callFile finds a running step's file through its last step:start, its index and its try", () => {
+  const run = m.alpha.runDir;
+  const start = (tryNumber: number) =>
+    appendEvent(run, 'step:start', {
+      key: 'publish#1/open',
+      stage: 'publish',
+      step: 'open',
+      index: 2,
+      of: 2,
+      kind: 'script',
+      try: tryNumber,
+    });
+  for (const dir of ['2-open/try-2', '1-describe/try-3']) {
+    mkdirSync(join(run, '05-publish/call-1/steps', dir), { recursive: true });
+    writeFileSync(
+      join(run, '05-publish/call-1/steps', dir, dir.includes('open') ? 'stdout.log' : 'session.log'),
+      'x\n',
+    );
+  }
+  start(2);
+  expect(callFile(run, 'publish#1/open', 'stdout.log')).toBe(
+    join(run, '05-publish/call-1/steps/2-open/try-2/stdout.log'),
+  );
+  start(1);
+  expect(callFile(run, 'publish#1/open', 'stdout.log')).toBe(join(run, '05-publish/call-1/steps/2-open/stdout.log'));
   appendEvent(run, 'step:end', {
-    key: 'publish#1',
-    step: 'describe',
-    try: 1,
-    outcome: 'done',
-    resultPath: '05-publish/call-1/steps/1-describe/result.json',
-  });
-  appendEvent(run, 'step:end', {
-    key: 'publish#1',
+    key: 'publish#1/open',
     step: 'open',
     try: 1,
     outcome: 'passed',
     resultPath: '05-publish/call-1/steps/2-open/result.json',
   });
-  expect(callFile(run, 'publish#1', 'stderr.log')).toBe(join(run, '05-publish/call-1/steps/2-open/stderr.log'));
+  expect(callFile(run, 'publish#1/open', 'stderr.log')).toBe(join(run, '05-publish/call-1/steps/2-open/stderr.log'));
+  appendEvent(run, 'step:start', {
+    key: 'publish#1/describe',
+    stage: 'publish',
+    step: 'describe',
+    index: 1,
+    of: 2,
+    kind: 'agent',
+    try: 3,
+  });
+  expect(callFile(run, 'publish#1/describe', 'session.log')).toBe(
+    join(run, '05-publish/call-1/steps/1-describe/try-3/session.log'),
+  );
+});
+
+test('callFile finds no running step file for a step key whose step part is ..', () => {
+  const run = m.alpha.runDir;
+  appendEvent(run, 'step:start', {
+    key: 'publish#1/..',
+    stage: 'publish',
+    step: '..',
+    index: 2,
+    of: 2,
+    kind: 'script',
+    try: 1,
+  });
+  expect(callFile(run, 'publish#1/..', 'stdout.log')).toEqual({ missing: expect.any(String) });
 });
 
 test.each([

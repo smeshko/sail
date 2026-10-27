@@ -153,22 +153,31 @@ export function findRunDir(entry: RegistryEntry, runId: string): string | { miss
 }
 
 const CALL_ENDS = new Set(['intake:end', 'stage:end', 'step:end']);
-const CALL_STARTS = new Set(['intake:start', 'stage:start']);
+const CALL_STARTS = new Set(['intake:start', 'stage:start', 'step:start']);
 
 /**
  * File `name` of a call's try that has started and not ended: `NN-<stage>/call-<n>/`, or `try-<t>/` below it for a later
- * try. No end points at it yet, so the directory is found from the key, by the layout src/engine/call-dir.ts writes.
+ * try. For a step key `stage#n/step` it is `call-<n>/steps/<index>-<step>/`, with the `index` its `step:start` named.
+ * No end points at it yet, so the directory is found from the key, by the layout src/engine/call-dir.ts writes.
  */
-function runningFile(runDir: string, key: string, tryNumber: number, name: string): string | undefined {
-  const match = /^([^#/]+)#([1-9][0-9]*)$/.exec(key);
+function runningFile(
+  runDir: string,
+  key: string,
+  tryNumber: number,
+  index: number | undefined,
+  name: string,
+): string | undefined {
+  const match = /^([^#/]+)#([1-9][0-9]*)(?:\/([^/]+))?$/.exec(key);
   if (match === null) return undefined;
-  const [, stage, call] = match;
+  const [, stage, call, step] = match;
+  if (step !== undefined && (index === undefined || !isPlainName(step))) return undefined;
   const stageDir = readdirSync(runDir).find(
     (entry) => /^[0-9]{2,}-/.test(entry) && entry.replace(/^[0-9]+-/, '') === stage,
   );
   if (stageDir === undefined) return undefined;
   const tries = tryNumber > 1 ? [`try-${tryNumber}`] : [];
-  const file = join(runDir, stageDir, `call-${call}`, ...tries, name);
+  const where = step === undefined ? [`call-${call}`] : [`call-${call}`, 'steps', `${index}-${step}`];
+  const file = join(runDir, stageDir, ...where, ...tries, name);
   return inside(runDir, file) ? file : undefined;
 }
 
@@ -179,9 +188,9 @@ function plainResultPath(resultPath: string): boolean {
 }
 
 /**
- * File `name` of the call `key`, found beside the `result.json` the last `intake:end`, `stage:end` or `step:end` with
- * that key points at. A call whose last `intake:start` or `stage:start` came after that end is running, and its file is
- * the running try's (review R3-2). It must exist and lie inside the run directory.
+ * File `name` of the call or step `key`, found beside the `result.json` the last `intake:end`, `stage:end` or `step:end`
+ * with that key points at. One whose last `intake:start`, `stage:start` or `step:start` came after that end is running,
+ * and its file is the running try's (review R3-2). It must exist and lie inside the run directory.
  */
 export function callFile(runDir: string, key: string, name: string): string | { missing: string } {
   const missing = { missing: `no ${name} for '${key}'` };
@@ -189,22 +198,27 @@ export function callFile(runDir: string, key: string, name: string): string | { 
   const unread = eventsProblem(runDir);
   if (unread !== undefined) return { missing: unread };
   let resultPath: string | undefined;
-  let running: number | undefined;
+  let running: { tryNumber: number; index?: number } | undefined;
   try {
     for (const event of readEvents(runDir)) {
-      const fields = event as { key?: unknown; resultPath?: unknown; try?: unknown };
+      const fields = event as { key?: unknown; resultPath?: unknown; try?: unknown; index?: unknown };
       if (fields.key !== key) continue;
       if (CALL_ENDS.has(event.type) && typeof fields.resultPath === 'string') {
         resultPath = fields.resultPath;
         running = undefined;
       } else if (CALL_STARTS.has(event.type)) {
-        running = typeof fields.try === 'number' && Number.isInteger(fields.try) ? fields.try : 1;
+        const tryNumber = typeof fields.try === 'number' && Number.isInteger(fields.try) ? fields.try : 1;
+        const index = event.type === 'step:start' ? fields.index : undefined;
+        running = {
+          tryNumber,
+          ...(typeof index === 'number' && Number.isInteger(index) && index >= 1 ? { index } : {}),
+        };
       }
     }
   } catch (error) {
     return { missing: `the events of this run can't be read: ${messageOf(error)}` };
   }
-  if (running !== undefined) return runningFile(runDir, key, running, name) ?? missing;
+  if (running !== undefined) return runningFile(runDir, key, running.tryNumber, running.index, name) ?? missing;
   if (resultPath === undefined || !plainResultPath(resultPath)) return missing;
   const file = join(runDir, dirname(resultPath), name);
   return inside(runDir, file) ? file : missing;
