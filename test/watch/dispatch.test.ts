@@ -480,6 +480,32 @@ test("a dispatched item whose lease can't be read is left as it was and said onc
   });
 });
 
+test('a lease that reads again and later fails with the same message is said again', async () => {
+  await withTempRepo(async (repo) => {
+    let broken: string | undefined;
+    let unreadable = true;
+    const w = await world(repo, 1, 1, {
+      workspace: failingHolder(
+        () => broken,
+        () => (unreadable ? new PortError('workspace', 'lease', 'invalid', 'lease.json: Unexpected token') : undefined),
+      ),
+    });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    broken = await endRunning(w, 'FAKE-1');
+    await dispatcher.tick();
+    unreadable = false;
+    await dispatcher.tick();
+    const runId = w.spawner.run('FAKE-1').runId;
+    expect(w.spawner.resumes.map((each) => each.runId)).toEqual([runId]);
+    w.spawner.endResume(runId, { status: 'running' });
+    unreadable = true;
+    await dispatcher.tick();
+    const message = 'ticket:FAKE-1 was not settled: workspace.lease: lease.json: Unexpected token (invalid)';
+    expect(w.errors).toEqual([message, message]);
+  });
+});
+
 test('a new dispatcher whose first settle meets an unreadable lease adopts each live run once across ticks', async () => {
   await withTempRepo(async (repo) => {
     let broken: string | undefined;
