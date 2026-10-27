@@ -104,20 +104,25 @@ function stillRunning(lease: Lease, pid: number): boolean {
 
 const text = (lease: Lease): string => `${JSON.stringify(lease)}\n`;
 
-/** Creates `file` holding `lease` all at once, by linking a written temp file to it. False when `file` exists. */
+/**
+ * Creates `file` holding `lease` all at once, by linking a written temp file to it. False when `file` exists. The temp
+ * file is removed whatever happens, a write that failed part way included.
+ */
 function create(file: string, lease: Lease): boolean {
   const tmp = `${file}.${lease.runId}.${process.pid}.tmp`;
   try {
-    writeFileSync(tmp, text(lease));
-  } catch (error) {
-    throw unavailable(tmp, error);
-  }
-  try {
-    linkSync(tmp, file);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    throw unavailable(file, error);
+    try {
+      writeFileSync(tmp, text(lease));
+    } catch (error) {
+      throw unavailable(tmp, error);
+    }
+    try {
+      linkSync(tmp, file);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw unavailable(file, error);
+    }
   } finally {
     rmSync(tmp, { force: true });
   }

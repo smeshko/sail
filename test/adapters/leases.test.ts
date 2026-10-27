@@ -1,9 +1,10 @@
 // Branch leases (D9, ADR-0018): one run holds a remote's branch at a time, machine-wide. A second live run is refused
 // and told who holds the lease, the same run renews it on a resume, and a stale lease is taken over.
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { defaultLeasesDir, heldLease, readLease, releaseLease, takeLease } from '../../src/adapters/leases';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import { type Lease, type LeaseHolder, LeaseResult, Released } from '../../src/ports/types';
@@ -198,6 +199,27 @@ test.skipIf(asRoot)('taking a free branch in a read-only lease directory is unav
     chmodSync(dir, 0o755);
   }
   expect(readdirSync(dir)).toEqual([]);
+});
+
+test('a lease whose temp-file write fails half way is unavailable, and leaves nothing in the lease directory', () => {
+  const dir = tempDir();
+  const real = fs.writeFileSync;
+  const spy = spyOn(fs, 'writeFileSync').mockImplementation(((path, data, options) => {
+    real(path, data, options);
+    if (String(path).endsWith('.tmp')) throw new Error('ENOSPC: no space left on device, write');
+  }) as typeof fs.writeFileSync);
+  try {
+    const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
+    expect(portFailure(error)).toEqual(unavailable);
+    expect(messageOf(error)).toContain(`${leaseFile(dir, REMOTE, BRANCH)}.r1.`);
+    expect(messageOf(error)).toContain('.tmp');
+    expect(messageOf(error)).toContain('ENOSPC');
+  } finally {
+    spy.mockRestore();
+  }
+  expect(readdirSync(dir)).toEqual([]);
+  takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW);
+  expect(readdirSync(dir)).toEqual([basename(leaseFile(dir, REMOTE, BRANCH))]);
 });
 
 test.skipIf(asRoot)(
