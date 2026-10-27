@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { readConfig } from '../../src/engine/config';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
+import { PortError } from '../../src/ports/errors';
 import { commandsDir, dropCommand } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
 import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/registry';
@@ -749,6 +750,49 @@ test('one workflow whose dispatch throws prints its error and the next workflow 
       a: w.order('a'),
       b: w.order('b'),
     }).toEqual({ errors: ['09:00:01 a  error: get failed\n'], a: [], b: ['FAKE-2'] });
+    await watcher.stop();
+  });
+});
+
+test("a dispatched run whose lease can't be read prints one error line across ticks, and the workflow still dispatches its next ticket", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 2 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a', 'FAKE-3': 'sail-a' }),
+    );
+    let broken: string | undefined;
+    const workspace = new Proxy(w.adapters.ports.workspace, {
+      get: (target, property) =>
+        property === 'holder'
+          ? async (remote: string, branch: string) => {
+              if (branch === broken)
+                throw new PortError('workspace', 'lease', 'invalid', 'lease.json: Unexpected token');
+              return target.holder(remote, branch);
+            }
+          : Reflect.get(target, property),
+    });
+    const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
+    await w.timers.advance(1000);
+    expect(w.order('a')).toEqual(['FAKE-1', 'FAKE-2']);
+    await w.spawner.end('FAKE-1', { status: 'running' });
+    broken = branchFor('sail/', 'FAKE-1', 'Ticket FAKE-1');
+    const { url } = await w.adapters.ports.workspace.repository();
+    const header = JSON.stringify({ branch: broken, repository: { url } });
+    writeFileSync(join(w.runs, w.spawner.run('FAKE-1').runId, 'run.json'), `${header}\n`);
+    await w.spawner.end('FAKE-2');
+    for (let tick = 0; tick < 4; tick += 1) await w.timers.advance(1000);
+    expect({
+      errors: w.out.filter((line) => line.includes(' error: ')),
+      a: w.order('a'),
+    }).toEqual({
+      errors: [
+        expect.stringMatching(
+          /^09:00:\d\d a {2}error: ticket:FAKE-1 was not settled: workspace\.lease: lease\.json: Unexpected token \(invalid\)\n$/,
+        ),
+      ],
+      a: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
+    });
     await watcher.stop();
   });
 });

@@ -291,6 +291,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       resume: options.resume ?? spawnResume,
       isAlive,
       onSettled: (settled) => print(settledLine(workflow, settled, now())),
+      onError: (message) => print(errorLine(workflow, message, now())),
       onExit: kick,
     });
     set.set(workflow, { target, poller, dispatcher });

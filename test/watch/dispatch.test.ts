@@ -12,6 +12,7 @@ import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { PullRequestDetails } from '../../src/ports/types';
+import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
 import { fakeAdapters } from '../helpers/adapters';
@@ -36,6 +37,7 @@ interface World {
   adapters: Awaited<ReturnType<typeof fakeAdapters>>;
   spawner: FakeSpawner;
   settled: Settled[];
+  errors: string[];
   dispatcher: (store?: QueueStore) => ReturnType<typeof createDispatcher>;
 }
 
@@ -47,7 +49,11 @@ async function world(
   repo: TempRepo,
   count: number,
   cap: number,
-  options: { claiming?: boolean; source?: (own: TicketSource) => TicketSource } = {},
+  options: {
+    claiming?: boolean;
+    source?: (own: TicketSource) => TicketSource;
+    workspace?: (own: WorkspacePort) => WorkspacePort;
+  } = {},
 ): Promise<World> {
   writeTickets(writeStub(repo.dir), designated(count));
   const adapters = await fakeAdapters(repo.dir);
@@ -64,6 +70,8 @@ async function world(
   const ticketSource = options.source?.(own) ?? own;
   const spawner = fakeSpawner(runs, options.claiming === false ? undefined : own);
   const settled: Settled[] = [];
+  const errors: string[] = [];
+  const workspace = options.workspace?.(adapters.ports.workspace) ?? adapters.ports.workspace;
   const dispatcher = (on: QueueStore = store) =>
     createDispatcher({
       workflow: 'a',
@@ -75,15 +83,16 @@ async function world(
       store: on,
       ticketSource,
       codeHost: adapters.ports.codeHost,
-      workspace: adapters.ports.workspace,
+      workspace,
       env: repo.env,
       now: clock,
       spawn: spawner.spawn,
       resume: spawner.resume,
       isAlive: spawner.isAlive,
       onSettled: (each) => settled.push(each),
+      onError: (message) => errors.push(message),
     });
-  return { runs, clock, store, ticketSource, adapters, spawner, settled, dispatcher };
+  return { runs, clock, store, ticketSource, adapters, spawner, settled, errors, dispatcher };
 }
 
 const spawnedKeys = (spawner: FakeSpawner) => spawner.runs.map((run) => run.ticketKey);
@@ -412,6 +421,137 @@ test("a new dispatcher's first tick adopts each live run once with run:adopted, 
     await again.tick();
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4']);
     expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
+  });
+});
+
+/** Ends `ticketKey`'s run as `running` with a dead pid, its `run.json` naming the branch and remote its lease is keyed by. */
+async function endRunning(w: World, ticketKey: string) {
+  await w.spawner.end(ticketKey, { status: 'running' });
+  const { url } = await w.adapters.ports.workspace.repository();
+  const branch = branchFor('sail/', ticketKey, `Ticket ${ticketKey}`);
+  const dir = join(w.runs, w.spawner.run(ticketKey).runId);
+  writeFileSync(join(dir, 'run.json'), `${JSON.stringify({ branch, repository: { url } })}\n`);
+  return branch;
+}
+
+/** A workspace whose `holder` throws `fail()`'s error, when it gives one, for `branch()`'s branch. */
+const failingHolder = (branch: () => string | undefined, fail: () => Error | undefined) => (own: WorkspacePort) => ({
+  ...own,
+  holder: (remote: string, name: string) => {
+    const error = name === branch() ? fail() : undefined;
+    if (error !== undefined) throw error;
+    return own.holder(remote, name);
+  },
+});
+
+test("a dispatched item whose lease can't be read is left as it was and said once, while the other items settle, the next due item starts, and it settles once its lease reads again", async () => {
+  await withTempRepo(async (repo) => {
+    let broken: string | undefined;
+    let unreadable = true;
+    const w = await world(repo, 3, 2, {
+      workspace: failingHolder(
+        () => broken,
+        () => (unreadable ? new PortError('workspace', 'lease', 'invalid', 'lease.json: Unexpected token') : undefined),
+      ),
+    });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    broken = await endRunning(w, 'FAKE-1');
+    await w.spawner.end('FAKE-2');
+    await dispatcher.tick();
+    await dispatcher.tick();
+    expect({
+      states: states(w.store),
+      spawned: spawnedKeys(w.spawner),
+      resumes: w.spawner.resumes.length,
+      errors: w.errors,
+    }).toEqual({
+      states: ['FAKE-1 dispatched 1', 'FAKE-2 done 1', 'FAKE-3 dispatched 1'],
+      spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
+      resumes: 0,
+      errors: ['ticket:FAKE-1 was not settled: workspace.lease: lease.json: Unexpected token (invalid)'],
+    });
+    unreadable = false;
+    await dispatcher.tick();
+    expect(w.spawner.resumes.map(({ runId }) => runId)).toEqual([w.spawner.run('FAKE-1').runId]);
+    expect(eventsOf(w.runs, 'run:resumed').map((event) => event.dedupKey)).toEqual(['ticket:FAKE-1']);
+    expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 done 1', 'FAKE-3 dispatched 1']);
+  });
+});
+
+test('a lease that reads again and later fails with the same message is said again', async () => {
+  await withTempRepo(async (repo) => {
+    let broken: string | undefined;
+    let unreadable = true;
+    const w = await world(repo, 1, 1, {
+      workspace: failingHolder(
+        () => broken,
+        () => (unreadable ? new PortError('workspace', 'lease', 'invalid', 'lease.json: Unexpected token') : undefined),
+      ),
+    });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    broken = await endRunning(w, 'FAKE-1');
+    await dispatcher.tick();
+    unreadable = false;
+    await dispatcher.tick();
+    const runId = w.spawner.run('FAKE-1').runId;
+    expect(w.spawner.resumes.map((each) => each.runId)).toEqual([runId]);
+    w.spawner.endResume(runId, { status: 'running' });
+    unreadable = true;
+    await dispatcher.tick();
+    const message = 'ticket:FAKE-1 was not settled: workspace.lease: lease.json: Unexpected token (invalid)';
+    expect(w.errors).toEqual([message, message]);
+  });
+});
+
+test('a new dispatcher whose first settle meets an unreadable lease adopts each live run once across ticks', async () => {
+  await withTempRepo(async (repo) => {
+    let broken: string | undefined;
+    const w = await world(repo, 3, 3, {
+      workspace: failingHolder(
+        () => broken,
+        () => new PortError('workspace', 'lease', 'unavailable', 'lease.json: EACCES'),
+      ),
+    });
+    await w.dispatcher().tick();
+    const [run1, run2] = ['FAKE-1', 'FAKE-2'].map((key) => w.spawner.run(key).runId);
+    broken = await endRunning(w, 'FAKE-3');
+    const reopened = openQueue({ runsDir: w.runs, workflow: 'a', label: 'sail', now: w.clock });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    const again = w.dispatcher(reopened);
+    for (let tick = 0; tick < 3; tick += 1) await again.tick();
+    expect(eventsOf(w.runs, 'run:adopted')).toEqual([
+      { dedupKey: 'ticket:FAKE-1', run: run1, pid: FAKE_PID },
+      { dedupKey: 'ticket:FAKE-2', run: run2, pid: FAKE_PID + 1 },
+    ]);
+  });
+});
+
+test('a settle that throws something other than a PortError rejects the tick, and the next tick adopts nothing again', async () => {
+  await withTempRepo(async (repo) => {
+    let broken: string | undefined;
+    let thrown = true;
+    const w = await world(repo, 2, 2, {
+      workspace: failingHolder(
+        () => broken,
+        () => {
+          if (!thrown) return undefined;
+          thrown = false;
+          return new Error('a bug');
+        },
+      ),
+    });
+    await w.dispatcher().tick();
+    const run1 = w.spawner.run('FAKE-1').runId;
+    broken = await endRunning(w, 'FAKE-2');
+    const reopened = openQueue({ runsDir: w.runs, workflow: 'a', label: 'sail', now: w.clock });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    const again = w.dispatcher(reopened);
+    await expect(again.tick()).rejects.toThrow('a bug');
+    await again.tick();
+    expect(eventsOf(w.runs, 'run:adopted')).toEqual([{ dedupKey: 'ticket:FAKE-1', run: run1, pid: FAKE_PID }]);
   });
 });
 
