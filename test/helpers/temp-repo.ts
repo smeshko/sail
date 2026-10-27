@@ -39,7 +39,9 @@ function templateRepo(env: Readonly<Record<string, string>>): string {
   runGit(dir, env, ['init', '-b', 'main']);
   writeFileSync(join(dir, 'README.md'), '# test repo\n');
   runGit(dir, env, ['add', 'README.md']);
-  runGit(dir, env, ['commit', '-m', 'initial']);
+  // A commit may start git's maintenance in the background, whose lock files come and go while the copy reads the
+  // template: each test file makes its own template, so the copy follows the commit at once.
+  runGit(dir, env, ['-c', 'maintenance.auto=false', '-c', 'gc.auto=0', 'commit', '-m', 'initial']);
   template = dir;
   return dir;
 }

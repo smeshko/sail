@@ -2051,7 +2051,9 @@ test("a group's calls run at once and are journaled as each completes, the workf
       more: 0,
     });
     expect(ended?.outcomes).toEqual({ 'a#1': 'done', 'b#1': 'done', 'c#1': 'done' });
-    expect(ended?.durationMs).toBeLessThan(600);
+    // The bracket lasts the longest call at least. That the calls overlapped is the starts before the first end and the
+    // journal's order, not a wall-clock bound, which a loaded machine overruns.
+    expect(ended?.durationMs).toBeGreaterThanOrEqual(300);
     const from = list.indexOf(started as SailEvent);
     const to = list.indexOf(ended as SailEvent);
     expect(typed(list.slice(to - 1, to + 2))).toEqual(['journal:append a#1', 'all:end', 'workflow:route']);

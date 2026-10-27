@@ -6,7 +6,7 @@
 // The whole suite runs only on CI, where it is the verify check of every pull request: it takes about ten minutes
 // there, and longer on a laptop. Locally a run names its files or folders, and SAIL_FULL_SUITE=1 overrides.
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fullSuiteAllowed, wholeSuite } from './full-suite';
 
@@ -40,11 +40,28 @@ Object.assign(env, {
   SAIL_TEST_HOME: home,
 });
 
+const given = (option: string) => args.some((arg) => arg === option || arg.startsWith(`${option}=`));
+
 // Many tests spawn the sail CLI or git, and on a loaded machine they outrun Bun's 5 s default per test. A caller's
 // own --timeout wins. bunfig.toml can't hold this: Bun ignores a `timeout` under [test].
-const timeout = args.some((arg) => arg === '--timeout' || arg.startsWith('--timeout=')) ? [] : ['--timeout', '30000'];
+const timeout = given('--timeout') ? [] : ['--timeout', '60000'];
 
-const child = Bun.spawn([process.execPath, 'test', ...timeout, ...args], {
+// The files run in parallel, a worker per core, and most of a test's time is the processes it waits on. Each run
+// records how long each file took in the repository's common git directory, shared by its worktrees, and the next
+// starts the slowest first. A caller's own --parallel wins: --parallel=1 runs the files one at a time.
+const parallel = given('--parallel') ? [] : [`--parallel=${availableParallelism()}`, ...timings()];
+
+/** The options that read and update the per-file timings, or none outside a git checkout. */
+function timings(): string[] {
+  const common = Bun.spawnSync(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], {
+    cwd: import.meta.dir,
+    env: { PATH: process.env.PATH ?? '' },
+  });
+  if (common.exitCode !== 0) return [];
+  return [`--timings=${join(common.stdout.toString().trim(), 'sail-test-timings.json')}`, '--update-timings'];
+}
+
+const child = Bun.spawn([process.execPath, 'test', ...timeout, ...parallel, ...args], {
   env,
   stdio: ['inherit', 'inherit', 'inherit'],
 });

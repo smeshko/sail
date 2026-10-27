@@ -1,5 +1,6 @@
-// scripts/affected-tests.ts selects the tests the pre-push gate runs. These cases select from a small checkout written
-// into a temp repository: a src module and its importers, a spawned CLI, a helper, fixtures, a schema and an asset.
+// scripts/affected-tests.ts selects the tests the pre-push gate runs: each change's nearest tests. These cases select
+// from a small checkout written into a temp repository: a src module and its importers, a spawned CLI, a helper,
+// fixtures, a schema and an asset.
 import { expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -19,7 +20,8 @@ import { withTempRepo } from '../helpers/temp-repo';
 const TREE: Record<string, string> = {
   'src/sdk/index.ts': 'export const x = 1;\n',
   'src/engine/a.ts': 'export const a = 1;\n',
-  'src/engine/b.ts': "import { a } from './a';\nexport const b = a;\n",
+  'src/engine/b.ts': "import { a } from './a';\nimport { c } from './c';\nexport const b = a + c;\n",
+  'src/engine/c.ts': 'export const c = 1;\n',
   'src/engine/schema.ts': "import doc from '../../schemas/doc.json' with { type: 'json' };\nexport { doc };\n",
   'src/kinds/script.ts':
     "import { join } from 'node:path';\nexport const bin = join(import.meta.dir, '..', '..', 'bin', 'sail');\n",
@@ -116,16 +118,19 @@ test('pathsNamedIn reads a run of literals as one path, and a lone literal only 
   ]);
 });
 
-test('a changed module selects its tests and the tests of every module that imports it, transitively', async () => {
-  expect(await select('src/engine/a.ts')).toEqual(
-    some(
-      'test/engine/a.test.ts',
-      'test/engine/b.test.ts',
-      'test/engine/dynamic.test.ts',
-      // src/cli/main.ts imports b, test/cli/spawn.test.ts spawns main.ts, and bin/sail execs it.
-      'test/cli/spawn.test.ts',
-      'test/bin/sail.test.ts',
-    ),
+test('a changed module selects the tests that import it, not the tests of the modules that import it', async () => {
+  // src/engine/b.ts imports a, and test/engine/b.test.ts imports b: one step further out, so it is left to CI.
+  expect(await select('src/engine/a.ts')).toEqual(some('test/engine/a.test.ts', 'test/engine/dynamic.test.ts'));
+});
+
+test('a module no test reaches directly selects the nearest tests, the fewest steps out', async () => {
+  // c is imported by b alone. One step out, b.test.ts imports b; src/cli/main.ts imports b too, and the tests that
+  // spawn it are a step further.
+  expect(await select('src/engine/c.ts')).toEqual(some('test/engine/b.test.ts'));
+  expect(await select('src/cli/main.ts')).toEqual(some('test/cli/spawn.test.ts'));
+  // Each change walks on its own: one change's nearest tests don't stop another's walk.
+  expect(await select('src/engine/c.ts', 'test/watch/clocked.test.ts')).toEqual(
+    some('test/engine/b.test.ts', 'test/watch/clocked.test.ts'),
   );
 });
 

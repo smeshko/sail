@@ -7,19 +7,21 @@ sail is a software factory: a ticket goes in and a pull request comes out, along
 
 ## Commands
 
-Bun `>=1.3.14` is the only runtime. No command needs Node.
+Bun `>=1.4.2` is the only runtime. No command needs Node.
 
 - `bun install`: installs dependencies and points `core.hooksPath` at `.githooks`, so the pre-push hook runs `gate`.
 - `bun run verify`: typecheck, lint, then every test with the coverage gate. A change is green when this passes. It is
   CI's check, and locally it stops before the tests: the whole suite runs only where `CI` is set, or with
   `SAIL_FULL_SUITE=1`.
 - `bun run test <path>`: tests without the coverage gate. A path filters the run; with none, or `./test`, it is the whole
-  suite, refused locally as above. Each test gets 30 s unless you pass `--timeout`.
+  suite, refused locally as above. Each test gets 60 s unless you pass `--timeout`. The files run in parallel, a worker
+  per core, slowest first by the timings the last runs recorded; `--parallel=1` runs them one at a time.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
 - `bun run gate`: typecheck, lint, then only the tests the branch affects, with no coverage gate. It's what the pre-push
-  hook runs. `bun scripts/affected-tests.ts --list` prints the selection: test files changed since the merge-base with
-  `origin/staging`, and test files that reach a changed file through imports or a path they name, such as a helper or
-  a fixture. A change to `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `scripts/test.ts`, `test/setup.ts`
+  hook runs. `bun scripts/affected-tests.ts --list` prints the selection: each change since the merge-base with
+  `origin/staging` selects its nearest tests. A changed test file selects itself; any other file selects the test files
+  that reach it through imports or a path they name, such as a helper or a fixture, at the fewest steps that reach any.
+  The tests further out are CI's. A change to `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `scripts/test.ts`, `test/setup.ts`
   or the coverage census, or a branch with no merge-base, affects every test, and the gate leaves those to CI. A
   prose-only change runs none.
 - `bun run types`: regenerates `types/`, the SDK's committed declarations. Run it after changing `src/sdk`: `verify`
