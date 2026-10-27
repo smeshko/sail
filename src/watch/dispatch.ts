@@ -28,7 +28,8 @@
 //   and its pid after (`spawned`, which emits `queue:dispatched`). The run claims its own ticket as it starts (D2): the
 //   dispatch only reads the ticket.
 // - A port that fails (`PortError`) fails the item without counting an attempt, so trouble at the provider never parks
-//   a ticket, and the other due items wait for the next tick. Anything else thrown is a bug, for the caller.
+//   a ticket, and the other due items wait for the next tick. A port that fails while a dispatched item is settled
+//   leaves that item as it was, says so once, and settles the rest. Anything else thrown is a bug, for the caller.
 import { join } from 'node:path';
 import { branchFor } from '../engine/branch';
 import { cancelUnwatch } from '../engine/control';
@@ -43,7 +44,7 @@ import { getTicket, type TicketSource } from '../ports/ticket-source';
 import type { Ticket } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
 import type { QueueItem, QueueStore } from './queue-store';
-import { reconcileItem } from './reconcile';
+import { type Reconciled, reconcileItem } from './reconcile';
 import type { SpawnedRun, SpawnResumeOptions, SpawnRunOptions } from './spawn';
 
 /** An item whose run has ended, as the dispatch settled it. */
@@ -84,6 +85,8 @@ export interface DispatcherOptions {
   isAlive: (pid: number) => boolean;
   /** Hears each item the dispatch settled, or failed before its run started. */
   onSettled?: (settled: Settled) => void;
+  /** Hears a dispatched item that could not be settled, once per item and message. */
+  onError?: (message: string) => void;
   /** Hears a run's process end: the watcher ticks again at once. */
   onExit?: () => void;
 }
@@ -107,6 +110,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const { workflow, label, store, ticketSource, codeHost, workspace, isAlive, now } = options;
   /** The run that held each skipped item's branch when it was last reported. */
   const skipped = new Map<string, string>();
+  /** The message reported for each dispatched item that could not be settled, until it settles again. */
+  const unsettled = new Map<string, string>();
   /** The exit codes of the processes this dispatcher started, a run or a resume, by dedup key. */
   const exits = new Map<string, number | null>();
   /** The runs this dispatcher has resumed: each is resumed once. */
@@ -166,11 +171,11 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     });
   };
 
-  const settle = async () => {
-    for (const item of dispatchedItems()) {
-      const runId = item.runId ?? '';
-      const runDir = join(options.runsDir, runId);
-      const exited = exits.get(item.dedupKey);
+  /** Reconciles one dispatched item, or undefined when a port failed: the item stays as it was, and is reported once. */
+  const reconcile = async (item: QueueItem) => {
+    const runId = item.runId ?? '';
+    const exited = exits.get(item.dedupKey);
+    try {
       const answer = await reconcileItem(item, {
         runsDir: options.runsDir,
         workflow,
@@ -180,38 +185,63 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         resumed: resumed.has(runId),
         ...(exits.has(item.dedupKey) ? { exited: exited ?? null } : {}),
       });
-      switch (answer.kind) {
-        case 'in-flight':
-          // A live run's control file is left to the run: taking an `unwatched` back from under it could take a stop
-          // that replaced it meanwhile. One it never reached suspends it, and the next tick resumes it.
-          if (answer.adopt && item.pid !== undefined) store.adopted(item.dedupKey, item.pid);
-          break;
-        case 'adopt':
-          store.adopted(item.dedupKey, answer.pid);
-          break;
-        case 'done':
-          store.done(item.dedupKey);
-          options.onSettled?.({ dedupKey: item.dedupKey, ...sourceOf(item), runId, outcome: 'done' });
-          break;
-        case 'failed':
-          fail(item, runId, answer.reason);
-          break;
-        case 'park':
-          park(item, runId, answer.reason);
-          break;
-        case 'resume':
-          // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
-          if (inFlight() >= options.maxConcurrentRuns) break;
-          // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
-          // to a dead run's control file: `sail stop` ends a run it finds dead itself.
-          cancelUnwatch(runDir);
-          resume(item, runId, answer.from);
-          break;
-        case 'wait':
-          break;
+      unsettled.delete(item.dedupKey);
+      return answer;
+    } catch (error) {
+      if (!(error instanceof PortError)) throw error;
+      const message = `${item.dedupKey} was not settled: ${error.message} (${error.code})`;
+      if (unsettled.get(item.dedupKey) !== message) {
+        unsettled.set(item.dedupKey, message);
+        options.onError?.(message);
       }
+      return undefined;
     }
-    first = false;
+  };
+
+  const apply = (item: QueueItem, answer: Reconciled) => {
+    const runId = item.runId ?? '';
+    const runDir = join(options.runsDir, runId);
+    switch (answer.kind) {
+      case 'in-flight':
+        // A live run's control file is left to the run: taking an `unwatched` back from under it could take a stop
+        // that replaced it meanwhile. One it never reached suspends it, and the next tick resumes it.
+        if (answer.adopt && item.pid !== undefined) store.adopted(item.dedupKey, item.pid);
+        break;
+      case 'adopt':
+        store.adopted(item.dedupKey, answer.pid);
+        break;
+      case 'done':
+        store.done(item.dedupKey);
+        options.onSettled?.({ dedupKey: item.dedupKey, ...sourceOf(item), runId, outcome: 'done' });
+        break;
+      case 'failed':
+        fail(item, runId, answer.reason);
+        break;
+      case 'park':
+        park(item, runId, answer.reason);
+        break;
+      case 'resume':
+        // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
+        if (inFlight() >= options.maxConcurrentRuns) break;
+        // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
+        // to a dead run's control file: `sail stop` ends a run it finds dead itself.
+        cancelUnwatch(runDir);
+        resume(item, runId, answer.from);
+        break;
+      case 'wait':
+        break;
+    }
+  };
+
+  const settle = async () => {
+    try {
+      for (const item of dispatchedItems()) {
+        const answer = await reconcile(item);
+        if (answer !== undefined) apply(item, answer);
+      }
+    } finally {
+      first = false;
+    }
   };
 
   /** Whether a live run holds `branch`, reporting the item as skipped the first time each holder is seen. */
