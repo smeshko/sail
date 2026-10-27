@@ -87,6 +87,12 @@ export interface ScriptOptions<C extends Consumes, P extends Produces, O extends
    * SIGTERM, then SIGKILL after a grace period.
    */
   readonly timeoutSeconds?: number;
+  /**
+   * The name of a machine-wide exclusive slot: one step on the machine holds a name at a time, whichever run it belongs
+   * to. A step that finds it held waits, and its run's events say who holds it. A slot is freed once its holder's
+   * process is dead. Waiting doesn't count toward `timeoutSeconds`. A name is lowercase letters, digits and hyphens.
+   */
+  readonly exclusive?: string;
   /** The hosts the script reaches. Declared and recorded, not enforced. */
   readonly network?: 'none' | readonly string[];
 }

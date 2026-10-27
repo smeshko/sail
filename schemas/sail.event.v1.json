@@ -19,6 +19,7 @@
         "stage:end",
         "step:start",
         "step:end",
+        "step:queued",
         "loop:iteration",
         "loop:exit",
         "all:start",
@@ -120,6 +121,10 @@
     {
       "if": { "properties": { "type": { "const": "step:end" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/stepEnd" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "step:queued" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/stepQueued" }
     },
     {
       "if": { "properties": { "type": { "const": "loop:iteration" } }, "required": ["type"] },
@@ -735,6 +740,27 @@
           "else": { "properties": { "errors": false } }
         }
       ],
+      "unevaluatedProperties": false
+    },
+    "stepQueued": {
+      "description": "a script step waiting for an exclusive slot another run's step holds, naming the holder",
+      "type": "object",
+      "$ref": "#/$defs/callEnvelope",
+      "properties": {
+        "exclusive": { "type": "string" },
+        "holder": {
+          "type": "object",
+          "properties": {
+            "runId": { "type": "string" },
+            "key": { "type": "string" },
+            "pid": { "type": "integer", "minimum": 1 },
+            "takenAt": { "type": "string" }
+          },
+          "required": ["runId", "key", "pid", "takenAt"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["exclusive", "holder"],
       "unevaluatedProperties": false
     },
     "loopIteration": {

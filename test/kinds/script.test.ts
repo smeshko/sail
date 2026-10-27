@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import { validateDocument } from '../../src/engine/schemas';
+import { readSlot, takeSlot } from '../../src/engine/slots';
 import type { CallEvent } from '../../src/events/types';
 import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
 import { BIN_DIR, DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
@@ -876,4 +877,150 @@ test("a step of a multi-step call leaves its produced files in its call's $STAGE
     ['junit.xml', 'steps'],
     ['in', 'stderr.log', 'stdout.log'],
   ]);
+});
+
+// Exclusive slots (machine-wide, one holder per name): the tests use a slots directory of their own and a fast poll.
+const HOLDER = { runId: 'HOLDER-1', key: 'verify#1', runDir: '/tmp/holder', pid: process.pid };
+const SLOTS_MODULE = join(import.meta.dir, '..', '..', 'src', 'engine', 'slots.ts');
+
+/** A step context for run `runId`, with its own workspace, sharing the slots directory `slots`. */
+function slotted(slots: string, runId: string): { s: Setup; context: StepContext; events: CallEvent[] } {
+  const s = setup();
+  const { context, events } = collecting(s);
+  return { s, context: { ...context, runId, slots: { dir: slots, pollMs: 20 } }, events };
+}
+
+const verify = (options: { timeoutSeconds?: number } = {}): ScriptStep =>
+  script('tests', { run: './run.sh', output: z.object({}), exclusive: 'verify', ...options });
+
+function slotsDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-slots-kind-'));
+  dirs.push(dir);
+  return dir;
+}
+
+test('exclusive steps of two runs run one after the other', async () => {
+  const slots = slotsDir();
+  const log = join(slots, 'log.txt');
+  const body = `echo start >> ${log}\nsleep 0.3\necho end >> ${log}\necho '{}'`;
+  const a = slotted(slots, 'RUN-A');
+  const b = slotted(slots, 'RUN-B');
+  a.s.run(body);
+  b.s.run(body);
+  const first = scriptKind.run(verify(), a.context);
+  await Bun.sleep(50);
+  const second = scriptKind.run(verify(), b.context);
+  const [ran, ranToo] = await Promise.all([first, second]);
+  expect([ran.outcome, ranToo.outcome]).toEqual(['passed', 'passed']);
+  expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual(['start', 'end', 'start', 'end']);
+});
+
+test('a queued step emits step:queued naming the holder, once, before script:exec', async () => {
+  const slots = slotsDir();
+  const a = slotted(slots, 'RUN-A');
+  const b = slotted(slots, 'RUN-B');
+  a.s.run("sleep 0.4\necho '{}'");
+  b.s.run("echo '{}'");
+  const first = scriptKind.run(verify(), a.context);
+  await Bun.sleep(50);
+  await scriptKind.run(verify(), b.context);
+  await first;
+  const queued = b.events.filter((event) => event.type === 'step:queued');
+  expect(queued).toEqual([
+    {
+      type: 'step:queued',
+      exclusive: 'verify',
+      holder: { runId: 'RUN-A', key: 'tests#1', pid: process.pid, takenAt: expect.any(String) },
+    },
+  ]);
+  expect(typesOf(b.events).slice(0, 2)).toEqual(['step:queued', 'script:exec']);
+  expect(a.events.some((event) => event.type === 'step:queued')).toBe(false);
+});
+
+test('a step queued behind a SIGKILLed holder runs', async () => {
+  const slots = slotsDir();
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      '-e',
+      `import { takeSlot } from ${JSON.stringify(SLOTS_MODULE)};
+       takeSlot(${JSON.stringify(slots)}, 'verify', { runId: 'DEAD-1', key: 'verify#1', runDir: '/tmp/d', pid: process.pid });
+       console.log('held'); setInterval(() => {}, 1000);`,
+    ],
+    { stdout: 'pipe' },
+  );
+  await child.stdout.getReader().read();
+  const b = slotted(slots, 'RUN-B');
+  b.s.run("echo '{}'");
+  const waiting = scriptKind.run(verify(), b.context);
+  await Bun.sleep(150);
+  expect(typesOf(b.events)).toEqual(['step:queued']);
+  child.kill('SIGKILL');
+  const run = await waiting;
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+  expect(b.events[0]).toMatchObject({ holder: { runId: 'DEAD-1', pid: child.pid } });
+});
+
+test('an interrupted queued step ends not_started without running', async () => {
+  const slots = slotsDir();
+  takeSlot(slots, 'verify', HOLDER);
+  const b = slotted(slots, 'RUN-B');
+  const marker = join(slots, 'ran');
+  b.s.run(`touch ${marker}\necho '{}'`);
+  const controller = new AbortController();
+  const waiting = scriptKind.run(verify(), { ...b.context, signal: controller.signal });
+  await Bun.sleep(100);
+  controller.abort();
+  const run = await waiting;
+  expect(run.outcome).toBe('error');
+  expect(run.errors).toEqual([
+    { reason: 'not_started', message: "interrupted while queued for exclusive slot 'verify'" },
+  ]);
+  expect(existsSync(marker)).toBe(false);
+  expect(typesOf(b.events)).toEqual(['step:queued']);
+  expect(readSlot(slots, 'verify')?.runId).toBe('HOLDER-1');
+});
+
+test('a slot file that is no slot ends the step not_started, naming the file', async () => {
+  const slots = slotsDir();
+  writeFileSync(join(slots, 'verify.json'), 'not json');
+  const b = slotted(slots, 'RUN-B');
+  b.s.run("echo '{}'");
+  const run = await scriptKind.run(verify(), b.context);
+  expect(run.outcome).toBe('error');
+  expect(run.errors[0]?.reason).toBe('not_started');
+  expect(run.errors[0]?.message).toContain(join(slots, 'verify.json'));
+  expect(typesOf(b.events)).toEqual([]);
+});
+
+test("problems() rejects an exclusive that isn't a slot name", () => {
+  const named = (exclusive: string) =>
+    scriptKind.problems(script('tests', { run: './run.sh', output: z.object({}), exclusive }));
+  expect(named('Verify Suite')).toEqual([
+    "exclusive must be a slot name of lowercase letters, digits and hyphens, up to 64, starting with a letter or digit: 'Verify Suite'",
+  ]);
+  expect(named('../x')).toHaveLength(1);
+  expect(named('-x')).toHaveLength(1);
+  expect(named('')).toHaveLength(1);
+  expect(named('a'.repeat(65))).toHaveLength(1);
+  expect(named('verify')).toEqual([]);
+  expect(named('verify-2')).toEqual([]);
+  expect(named('a'.repeat(64))).toEqual([]);
+});
+
+test('the slot is released however the script ends', async () => {
+  const slots = slotsDir();
+  const ends: [string, ScriptStep][] = [
+    ["echo '{}'", verify()],
+    ["echo '{}'\nexit 1", verify()],
+    ['sleep 5', verify({ timeoutSeconds: 0.3 })],
+  ];
+  const outcomes: string[] = [];
+  for (const [body, step] of ends) {
+    const c = slotted(slots, 'RUN-C');
+    c.s.run(body);
+    outcomes.push((await scriptKind.run(step, c.context)).outcome);
+    expect(existsSync(join(slots, 'verify.json'))).toBe(false);
+  }
+  expect(outcomes).toEqual(['passed', 'failed', 'error']);
 });
