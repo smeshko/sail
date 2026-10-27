@@ -15,7 +15,7 @@
 // The caller journals: it hands the call the steps already journaled, which are skipped, and hears of each step as it
 // finishes. The runtime journals them, and `sail stage run`, which has no journal, passes nothing.
 import { readFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { CallEvent, NewEvent } from '../events/types';
 import type { FromStepBinding } from '../sdk/bindings';
@@ -43,6 +43,7 @@ import {
 import { type ContractError, recordFiles } from './contract';
 import type { JournalEntry } from './journal';
 import { buildResult, buildStageResult, type StepEntry, writeResult } from './result';
+import { checkoutPath } from './run-dir';
 import { validateDocument } from './schemas';
 
 /** What a multi-step call is told by the one who runs it, and tells it back. */
@@ -322,7 +323,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
       try: tryNumber,
       ...(step.kind === 'agent'
         ? { model: modelOf(request.agent, step) }
-        : { command: relative(request.root, join(dirname(request.stageFile), step.run)) }),
+        : { command: checkoutPath(request.root, request.runDir, join(dirname(request.stageFile), step.run)) }),
     });
     const end = (tryNumber: number, result: Record<string, unknown>, resultPath: string): CallEvent => ({
       type: 'step:end',

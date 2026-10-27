@@ -10,6 +10,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -1016,6 +1017,7 @@ test("the stub's summary.json is rewritten after every call, and ends completed 
     '04-self-review',
     '05-publish',
     'STATUS',
+    'definition',
     'events.ndjson',
     'journal.ndjson',
     'run.json',
@@ -1977,6 +1979,46 @@ function documentedSpec(sail: string, produces: string): void {
   );
   edit(sail, `${SPEC_STAGE}/stage.ts`, "  produces: { 'spec.md': 'file' },", `  produces: ${produces},`);
 }
+
+test('a call runs its stage folder as the run started with it: a stage folder renamed and a script edited in the checkout mid-run change nothing, since the run reads its own copy (ADW-328)', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
+    const end = await ranAgent(repo.dir, {
+      onCall: (entry) => {
+        if (entry.key !== 'brief#1') return;
+        renameSync(join(sail, SPEC_STAGE), join(sail, `${SPEC_STAGE}-renamed`));
+        write(sail, 'workflows/brief-to-spec/stages/publish/run.sh', '#!/usr/bin/env bash\nexit 3\n');
+      },
+    });
+
+    expect(end).toMatchObject({ status: 'completed', result: { outcome: 'passed', output: { published: true } } });
+    expect(specFile(end.dir, 'prompt.md') ?? '').toStartWith('Write a spec for FAKE-1: ');
+    expect(existsSync(join(end.dir, 'definition', '.sail', SPEC_STAGE, 'prompt.md'))).toBe(true);
+  });
+}, 20_000);
+
+test('a resume runs its calls from the copy of the stage folders the run started with, whatever the checkout holds by then (ADW-328)', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await withTempRepo(async (from) => {
+      writeAgentFixture(from.dir, [submits(SPEC, 0.25)]);
+      setSleepAt(from.dir, 'publish#1');
+      const controller = new AbortController();
+      const running = ranAgent(from.dir, { signal: controller.signal });
+      const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort());
+      expect(end).toMatchObject({ status: 'suspended', message: 'stopped during publish#1' });
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+
+    rmSync(join(repo.dir, '.sail', 'workflows/brief-to-spec/stages/publish/run.sh'));
+    const adapters = await fakeAdapters(repo.dir);
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters, runId })).toMatchObject({
+      status: 'completed',
+      result: { outcome: 'passed', output: { published: true, bytes: 17 } },
+    });
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1', 'publish#1', 'publish#1']);
+  });
+}, 40_000);
 
 test("a run's agent step finds its document's template in $STAGE_OUT, filled with the run's bindings, and a session that leaves it as it is produces it so", async () => {
   await withTempRepo(async (repo) => {

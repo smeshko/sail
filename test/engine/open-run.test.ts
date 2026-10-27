@@ -323,7 +323,14 @@ test('openRun creates an empty events.ndjson beside the journal, and its events 
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
     const run = await opened(repo.dir);
-    expect(readdirSync(run.dir).sort()).toEqual(['STATUS', 'events.ndjson', 'journal.ndjson', 'run.json', 'workspace']);
+    expect(readdirSync(run.dir).sort()).toEqual([
+      'STATUS',
+      'definition',
+      'events.ndjson',
+      'journal.ndjson',
+      'run.json',
+      'workspace',
+    ]);
     expect(readFileSync(join(run.dir, 'events.ndjson'), 'utf8')).toBe('');
     expect(run.firstSeq).toBe(1);
   });

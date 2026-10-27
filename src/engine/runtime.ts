@@ -108,7 +108,7 @@ import {
   rootRelative,
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
-import { type StopReason, writeStatus } from './run-dir';
+import { copiedStageFile, type StopReason, writeStatus } from './run-dir';
 import { openSeededRun, type SeededRunOptions } from './seed-run';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
@@ -484,7 +484,7 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
         call: call.call,
         try: nextTry(dir, call.stageIndex, call.stage, call.call),
         definition: call.definition,
-        stageFile: call.stageFile,
+        stageFile: copiedStageFile(dir, header.stages[call.stage]?.origin, call.stageFile),
         workspace: opened.workspace.path,
         root,
         branch: opened.workspace.branch,

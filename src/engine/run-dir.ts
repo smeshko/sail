@@ -1,8 +1,16 @@
 // A run's directory, `.sail-runs/<ticket key>-<ulid>/` beside `.sail/`, and its STATUS file, which holds the run's
 // status and, for a failed or suspended run, its stop reason. The run id's ticket key comes from the run's source.
-import { readFileSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+//
+// A run also keeps `definition/`: a copy of each stage folder its roster reaches, at its path from the repository root,
+// made as the run starts. Its workflow's modules are imported once, then, but a call reads its stage's prompt, templates
+// and scripts as it runs, so a call reads them from the copy: a stage folder renamed or edited in the checkout mid-run
+// changes nothing the run does, a resume included. A script's command is still recorded at its checkout path. The folders are what `workflow.sha256` hashes, so the copy is what
+// the header vouches for. `.sail/lib/` and the shared prompt fragments are left where they are: a script finds the one
+// beside `$SAIL_CONFIG`, which `sail port` also reads its adapters from, and neither belongs to one stage.
+import { cpSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { createDir, replaceFile } from './durable';
+import type { Roster } from './roster';
 
 export const RUNS_DIR = '.sail-runs';
 
@@ -56,6 +64,40 @@ export function createRunDir(sailDir: string, runId: string): string {
   const dir = join(runs, runId);
   createDir(dir);
   return dir;
+}
+
+/** The folder of a run directory that holds its copy of the stage folders. */
+export const DEFINITION_DIR = 'definition';
+
+/** The path from the repository root an origin names, or undefined for one that isn't the repository's. */
+const repoPath = (origin: string | undefined) =>
+  origin?.startsWith('repo:') ? origin.slice('repo:'.length) : undefined;
+
+/** Copies each stage folder `roster` reaches, from `root`, the directory holding `.sail/`, into `runDir`'s definition. */
+export function copyStageFolders(runDir: string, root: string, roster: Pick<Roster, 'stages'>): void {
+  for (const { origin } of Object.values(roster.stages)) {
+    const path = repoPath(origin);
+    if (path !== undefined) cpSync(join(root, path), join(runDir, DEFINITION_DIR, path), { recursive: true });
+  }
+}
+
+/**
+ * The stage file a call of the stage whose roster origin is `origin` reads its folder beside: the run's copy, or `live`,
+ * the checkout's, for a run that started before runs kept one.
+ */
+export function copiedStageFile(runDir: string, origin: string | undefined, live: string): string {
+  const path = repoPath(origin);
+  const copy = path === undefined ? undefined : join(runDir, DEFINITION_DIR, path);
+  return copy !== undefined && existsSync(copy) ? join(copy, 'stage.ts') : live;
+}
+
+/**
+ * `path` relative to `root`, as a run records it. A file of `runDir`'s copy is recorded at the path it was copied from,
+ * so a script's command reads as the stage's file, whichever copy ran it.
+ */
+export function checkoutPath(root: string, runDir: string, path: string): string {
+  const copied = relative(join(runDir, DEFINITION_DIR), path);
+  return copied.startsWith(`..${sep}`) || copied === '..' ? relative(root, path) || '.' : copied;
 }
 
 /**
