@@ -56,7 +56,7 @@ test("attention lists, across both repositories, FAKE-2's failure, error and den
       runId: FAKE_3_ID,
       kind: 'suspended',
       title: 'suspended: budget_exceeded',
-      detail: `sail resume ${FAKE_3_ID}`,
+      detail: `stopped during implement#1: the run spent $1.06 of its $1.00 budget · sail resume ${FAKE_3_ID}`,
       opens: { repo: 'beta', runId: FAKE_3_ID },
     },
     {

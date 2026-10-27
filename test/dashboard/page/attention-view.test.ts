@@ -23,13 +23,13 @@ test("FAKE-2's failure and denial and FAKE-3's suspension are buttons in one lis
   );
   expect(renderAttention(items, false).value).toBe(button.replace(' on"', '"'));
   expect(markup).toContain(
-    `<button class="sig sig-failed" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"><b>failed: stage_error</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">FAKE-2 Print the version with --version</span></button>`,
+    `<button class="sig sig-failed" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"><b>failed: stage_error</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">FAKE-2 Print the version with --version · implement#1 ended in error: harness: the session ended before it submitted a result</span></button>`,
   );
   expect(markup).toContain(
     `<button class="sig sig-denial" data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}" data-key="implement#1" data-tab="permissions"><b>1 denial</b><span class="w">alpha · ${FAKE_2_ID}</span><span class="p">implement#1: 1</span></button>`,
   );
   expect(markup).toContain(
-    `<button class="sig sig-suspended" data-action="open" data-repo="beta" data-run="${FAKE_3_ID}"><b>suspended: budget_exceeded</b><span class="w">beta · ${FAKE_3_ID}</span><span class="p">sail resume ${FAKE_3_ID}</span></button>`,
+    `<button class="sig sig-suspended" data-action="open" data-repo="beta" data-run="${FAKE_3_ID}"><b>suspended: budget_exceeded</b><span class="w">beta · ${FAKE_3_ID}</span><span class="p">stopped during implement#1: the run spent $1.06 of its $1.00 budget · sail resume ${FAKE_3_ID}</span></button>`,
   );
   expect(markup).toContain(
     '<div class="sig sig-parked"><b>ticket:FAKE-6 parked after 2 attempts</b><span class="w">beta · ticket-to-pr</span>',
