@@ -140,6 +140,40 @@ test('create fetches first: a commit pushed to the origin after the clone fetche
   });
 });
 
+test("a remote other than origin is the one fetched and started from: through the remote option, repository() names upstream and create starts at upstream's tip, and a missing remote is invalid, naming it", async () => {
+  await withTempRepo(async (repo) => {
+    const upstream = withOrigin(repo, 'upstream');
+    const pushed = upstream.push('later.txt');
+    const runsDir = tempDir();
+    const context = { root: repo.dir, sailDir: join(repo.dir, '.sail'), runsDir, env: repo.env };
+    const adapter = await gitWorktreeDefinition.create({ remote: 'upstream' }, context);
+    const repository = await settle(adapter.repository());
+    const created = await settle(adapter.create(runIn(runsDir), { branch: BRANCH }));
+    const nowhere = createGitWorktreeWorkspace({
+      repo: repo.dir,
+      remote: 'nowhere',
+      env: repo.env,
+      leasesDir: tempDir(),
+    });
+    let missing: unknown;
+    try {
+      await nowhere.repository();
+    } catch (error) {
+      missing = error;
+    }
+    expect({
+      repository:
+        'rejected' in repository ? repository : { url: repository.url, defaultBranch: repository.defaultBranch },
+      baseSha: 'rejected' in created ? created : created.baseSha,
+      missing: { failure: portFailure(missing), named: messageOf(missing).includes("no remote 'nowhere'") },
+    }).toEqual({
+      repository: { url: upstream.url, defaultBranch: 'main' },
+      baseSha: pushed,
+      missing: { failure: { port: 'workspace', op: 'repository', code: 'invalid' }, named: true },
+    });
+  });
+});
+
 test("the clone is left as it was: its HEAD, its checked-out branch and its status, with an uncommitted edit and the run's branch checked out", async () => {
   await withTempRepo(async (repo) => {
     withOrigin(repo);
