@@ -136,8 +136,9 @@ const STRINGLESS = ['number', 'int', 'boolean', 'bigint', 'literal', 'enum', 'nu
 const WRAPS = ['optional', 'nullable', 'default', 'prefault', 'catch', 'nonoptional', 'readonly'];
 
 /**
- * The paths of the strings `schema` holds that are not marked untrusted, as `a.b[]` (`a.b{}` for an object's catchall), and of each schema of a type it
- * doesn't know, as `a.b (<type>)`: a new kind of field fails the test until this walks it (review R1-8).
+ * The paths of the strings `schema` holds that are not marked untrusted, as `a.b[]`, with `{}` marking a record's values
+ * or an object's catchall, and of each schema of a type it doesn't know, as `a.b (<type>)`: a new kind of field fails
+ * the test until this walks it (review R1-8).
  */
 function unmarked(schema: z.ZodType, path = ''): string[] {
   const def = schema.def as {
