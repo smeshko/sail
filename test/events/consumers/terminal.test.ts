@@ -925,8 +925,8 @@ test('at trace, an event of every type prints a line of its own', () => {
     [{ type: 'error:crash', message: 'boom' }, head('', '✗ crash: boom', w)],
   ];
   // A group's two lines are their own test's, at every verbosity they print at, and so are the lines of a run suspended
-  // on its budget and of a raise (terminal-budget.test.ts).
-  const grouped = new Set<string>(['all:start', 'all:end', 'run:suspended', 'budget:raised']);
+  // on its budget and of a raise (terminal-budget.test.ts), and a keep-awake's (keep-awake-event.test.ts).
+  const grouped = new Set<string>(['all:start', 'all:end', 'run:suspended', 'budget:raised', 'run:keep_awake']);
   expect(cases.map(([event]) => event.type).sort()).toEqual(EVENT_TYPES.filter((type) => !grouped.has(type)).sort());
 
   const lines = render(stream(cases.map(([event]) => event)), 'trace').split('\n');

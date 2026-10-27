@@ -228,6 +228,7 @@ const PASSED_OVER = new Set([
   'input:materialised',
   'prompt:rendered',
   'output:validated',
+  'run:keep_awake',
   'workspace:leased',
   'workspace:lease_released',
   'workspace:created',

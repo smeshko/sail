@@ -13,6 +13,7 @@
         "run:start",
         "run:end",
         "run:suspended",
+        "run:keep_awake",
         "intake:start",
         "intake:end",
         "stage:start",
@@ -97,6 +98,10 @@
     {
       "if": { "properties": { "type": { "const": "run:suspended" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/runSuspended" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "run:keep_awake" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/runKeepAwake" }
     },
     {
       "if": { "properties": { "type": { "const": "intake:start" } }, "required": ["type"] },
@@ -639,6 +644,25 @@
         "used": { "type": "number", "minimum": 0 }
       },
       "required": ["stopReason", "budget", "limit", "used"],
+      "unevaluatedProperties": false
+    },
+    "runKeepAwake": {
+      "description": "whether the run's process holds a keep-awake, once per process that drives the run; the run's, so no key",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "held": { "type": "boolean" },
+        "by": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "required": ["held"],
+      "allOf": [
+        {
+          "if": { "properties": { "held": { "const": true } }, "required": ["held"] },
+          "then": { "required": ["by"], "properties": { "by": true, "reason": false } },
+          "else": { "required": ["reason"], "properties": { "reason": true, "by": false } }
+        }
+      ],
       "unevaluatedProperties": false
     },
     "intakeStart": {
