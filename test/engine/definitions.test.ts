@@ -362,6 +362,19 @@ test.each([
     "describe('describe', { output: Description.pipe(Description) }), open({ title: fromStep('describe').output('titel') })",
     "stage 'publish': step 'open' binds 'title' to fromStep('describe')'s output key 'titel', which its output doesn't have",
   ],
+  ...[
+    ['a defaulted', "Description.default({ title: '', bodyFile: '' })"],
+    ['a prefaulted', "Description.prefault({ title: '', bodyFile: '' })"],
+    ['a caught', "Description.catch({ title: '', bodyFile: '' })"],
+    ['a non-optional', 'Description.optional().nonoptional()'],
+    ['a readonly', 'Description.readonly()'],
+    ['a lazy', 'z.lazy(() => Description)'],
+    ['an intersected', 'Description.and(Pr)'],
+  ].map(([which, output]) => [
+    `an output key ${which} schema doesn't have`,
+    `describe('describe', { output: ${output} }), open({ title: fromStep('describe').output('titel') })`,
+    "stage 'publish': step 'open' binds 'title' to fromStep('describe')'s output key 'titel', which its output doesn't have",
+  ]),
   [
     'an output key one member of a union lacks',
     "describe('describe', { output: z.union([Description, Pr]) }), open({ title: fromStep('describe').output('title') })",
