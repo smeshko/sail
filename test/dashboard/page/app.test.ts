@@ -494,6 +494,26 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   host.advance(100);
   expect(host.regions.main).toContain('<span class="tname">queue:parked</span>');
   expect(host.regions.main?.match(/<div class="ev">/g)).toHaveLength(9);
+  expect(host.regions.main).toContain('<span class="c-ref">ticket:FAKE-4</span>');
+  host.click({ action: 'toggle-queue-section', section: `beta/${QUEUE_WORKFLOW}:done` });
+  host.advance(100);
+  expect(host.regions.main).toContain(
+    'data-section="beta/ticket-to-pr:done"><span class="caret">›</span>done · 1</button>',
+  );
+  expect(host.regions.main).not.toContain('<span class="c-ref">ticket:FAKE-4</span>');
+  host.renders = [];
+  host.push(sockets[0], {
+    kind: 'queue-event',
+    event: { seq: 98, ts: '2026-09-24T11:08:00.000Z', type: 'watch:added', workflow: QUEUE_WORKFLOW, pid: 1 },
+  });
+  host.advance(100);
+  expect(host.renders).toContain('main');
+  expect(host.regions.main?.match(/<div class="ev">/g)).toHaveLength(10);
+  expect(host.regions.main).not.toContain('<span class="c-ref">ticket:FAKE-4</span>');
+  expect(host.regions.main).toContain('<span class="c-ref">ticket:FAKE-3</span>');
+  host.click({ action: 'toggle-queue-section', section: `beta/${QUEUE_WORKFLOW}:done` });
+  host.advance(100);
+  expect(host.regions.main).toContain('<span class="c-ref">ticket:FAKE-4</span>');
   expect(host.regions.rail).toContain('<button class="wf-q sel" data-action="select-queue"');
   expect(host.regions.rail).not.toContain('<button class="run sel"');
   host.renders = [];

@@ -127,8 +127,8 @@ export function railRepos(index: readonly IndexRepo[], now: number): RailRepo[] 
   });
 }
 
-/** The states in the order the queue view lists them. */
-export const QUEUE_STATES: readonly QueueItemState[] = ['queued', 'dispatched', 'failed', 'parked', 'done'];
+/** The states in the order the queue view lists them: what is running now comes first. */
+export const QUEUE_STATES: readonly QueueItemState[] = ['dispatched', 'queued', 'failed', 'parked', 'done'];
 
 /** A queue item, and whether its run is one the rail lists, so the queue view can open it. */
 export type PanelItem = QueueItem & { runListed: boolean };

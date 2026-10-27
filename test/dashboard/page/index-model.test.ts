@@ -100,8 +100,8 @@ test("queuePanels gives beta's queue with its counts and its items by state, and
   ]);
   expect(panel?.counts).toEqual({ queued: 1, dispatched: 1, failed: 0, parked: 1, done: 1 });
   expect(panel?.items.map((item) => [item.dedupKey, item.state, item.runListed])).toEqual([
-    ['ticket:FAKE-5', 'queued', false],
     ['ticket:FAKE-3', 'dispatched', true],
+    ['ticket:FAKE-5', 'queued', false],
     ['ticket:FAKE-6', 'parked', false],
     ['ticket:FAKE-4', 'done', false],
   ]);

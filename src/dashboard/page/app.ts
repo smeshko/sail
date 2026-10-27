@@ -665,6 +665,12 @@ export function boot(host: PageHost): Page {
       ui.queueEvents = !ui.queueEvents;
       mark('main');
     },
+    'toggle-queue-section': (data) => {
+      const section = data.section;
+      if (!section) return;
+      ui.folded = ui.folded.includes(section) ? ui.folded.filter((id) => id !== section) : [...ui.folded, section];
+      mark('main');
+    },
     'toggle-attention': () => {
       ui.attention = !ui.attention;
       mark('attention');
