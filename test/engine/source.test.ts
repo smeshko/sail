@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import type { Forced } from '../../src/engine/run-dir';
-import { claimSource, resolveSource } from '../../src/engine/source';
+import { claimComment, claimingRun, claimSource, resolveSource } from '../../src/engine/source';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { Ticket, TicketState } from '../../src/ports/types';
@@ -308,4 +308,25 @@ test.each<[string, Partial<Calls>, string]>([
   const { source } = world(instead);
   const thrown = await rejection(claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, force: true }));
   expect(thrown).toBeInstanceOf(TypeError);
+});
+
+const commentsOf = (...bodies: string[]) => ({ comments: bodies.map((body) => ({ author: 'sail', body })) });
+
+test('claimingRun gives undefined for a ticket with no comments or only other comments', () => {
+  expect(claimingRun(commentsOf())).toBeUndefined();
+  expect(claimingRun(commentsOf('looks good', 'please rebase'))).toBeUndefined();
+});
+
+test('claimingRun gives the run id of the latest claim comment', () => {
+  const ticket = commentsOf(claimComment('ADW-1-A'), 'a note', claimComment('ADW-1-B'), 'another note');
+  expect(claimingRun(ticket)).toBe('ADW-1-B');
+});
+
+test('claimingRun ignores a comment that only contains the claim phrase', () => {
+  const ticket = commentsOf(
+    claimComment('ADW-1-A'),
+    'see: sail run ADW-1-B started, then it failed',
+    'sail run ADW-1-C started now',
+  );
+  expect(claimingRun(ticket)).toBe('ADW-1-A');
 });
