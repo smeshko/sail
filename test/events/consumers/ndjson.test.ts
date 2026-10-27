@@ -307,6 +307,17 @@ test('lines with newlines on chunk boundaries, and a multi-byte character split 
   expect([1, 2, 3, 4, 5, 6, 7].map((seq) => holdsSeq(dir, seq))).toEqual([true, true, true, true, true, true, false]);
 });
 
+test("a newline on a chunk's first byte ends the chunk's lines, and the line before it is read from the next chunk", () => {
+  const dir = runDir();
+  const path = join(dir, 'events.ndjson');
+  // The last line is one byte short of a chunk, so the newline before it is the first byte read back.
+  writeFileSync(path, lineOf(1, 300) + lineOf(2, 300) + lineOf(3, 4095));
+  const file = readFileSync(path);
+  expect(file[file.length - 4096]).toBe(0x0a);
+  expect(lastSeq(dir)).toBe(3);
+  expect([1, 2, 3, 4].map((seq) => holdsSeq(dir, seq))).toEqual([true, true, true, false]);
+}, 5000);
+
 test('lastSeq reads a 64 MB last line in linear time', () => {
   const dir = runDir();
   writeFileSync(join(dir, 'events.ndjson'), lines(1, 2) + lineOf(3, 64 * 1024 * 1024));
