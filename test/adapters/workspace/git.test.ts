@@ -16,6 +16,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  diffWorkingTree,
   fetchRemote,
   gitSync,
   nonInteractive,
@@ -140,6 +141,52 @@ test("a remote's URL keys and logs without its credentials, and any other URL as
     '/srv/git/r.git',
   ]);
 });
+
+test('a diff over <rev>... or <rev>...HEAD whose rev shares no commit with HEAD is invalid, saying so, while <rev> alone diffs', async () => {
+  await withTempRepo(async (repo) => {
+    const orphan = repo.git('commit-tree', repo.git('rev-parse', 'HEAD^{tree}'), '-m', 'unrelated');
+    const refused = (range: string) => {
+      try {
+        diffWorkingTree(repo.dir, range, repo.env);
+        return 'diffed';
+      } catch (error) {
+        return { failure: portFailure(error), said: messageOf(error).includes('share no commit') };
+      }
+    };
+    const invalid = { failure: { port: 'workspace', op: 'diff', code: 'invalid' }, said: true };
+    expect({
+      withHead: refused(`${orphan}...HEAD`),
+      bare: refused(`${orphan}...`),
+      alone: refused(orphan),
+    }).toEqual({ withHead: invalid, bare: invalid, alone: 'diffed' });
+  });
+});
+
+test.skipIf(process.getuid?.() === 0)(
+  'a workspace that survives its removal, under a read-only run directory, is unavailable, naming the path, and stays on disk',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const runDir = join(repo.dir, 'run');
+      const workspace = join(runDir, 'workspace');
+      mkdirSync(workspace, { recursive: true });
+      writeFileSync(join(workspace, 'file.txt'), 'kept\n');
+      chmodSync(runDir, 0o555);
+      let error: unknown;
+      try {
+        removeWorktree(repo.dir, runDir, 'release', repo.env);
+      } catch (thrown) {
+        error = thrown;
+      } finally {
+        chmodSync(runDir, 0o755);
+      }
+      expect({
+        failure: portFailure(error),
+        named: messageOf(error).includes(workspace),
+        onDisk: existsSync(workspace),
+      }).toEqual({ failure: { port: 'workspace', op: 'release', code: 'unavailable' }, named: true, onDisk: true });
+    });
+  },
+);
 
 test.skipIf(process.getuid?.() === 0)(
   'a linked workspace that cannot be unlinked is unavailable, naming the path, and the link stays',
