@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { clock } from '../../../src/dashboard/page/format';
 import { html } from '../../../src/dashboard/page/html';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
-import { queueEventLine, renderQueues } from '../../../src/dashboard/page/queue-view';
+import { queueEventLine, renderQueue } from '../../../src/dashboard/page/queue-view';
 import { applyEvent, emptyRun, foldRun } from '../../../src/dashboard/page/run-model';
 import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
 import { initialUi, TABS } from '../../../src/dashboard/page/ui-state';
@@ -65,7 +65,7 @@ test("a result.json whose errors hold null and whose consumed and files hold unp
     items: [],
     counts: { queued: 0, dispatched: 0, failed: 0, parked: 0, done: 0 },
   };
-  expect(() => renderQueues([panel], { 'r/w': { recent: [event], watch: 'unknown' } }, initialUi(0), 0)).not.toThrow();
+  expect(() => renderQueue(panel, { recent: [event], watch: 'unknown' }, initialUi(0), 0)).not.toThrow();
 });
 
 function random(seed: number) {

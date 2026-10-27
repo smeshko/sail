@@ -199,7 +199,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   page = boot(host);
   expect(host.sockets.map((socket) => socket.query)).toEqual(['index=1']);
   host.advance(100);
-  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'queues', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'drawer', 'inspector', 'main', 'rail', 'status']);
   host.push(host.open('index')[0], indexMessage());
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('alpha', GOLDEN_RUN_ID)]);
   replay(host.open('run=')[0], GOLDEN());
@@ -207,7 +207,7 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
   host.advance(99);
   expect(host.renders).toEqual([]);
   host.advance(1);
-  expect(host.renders.sort()).toEqual(['attention', 'inspector', 'main', 'queues', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'inspector', 'main', 'rail', 'status']);
   expect(host.regions.rail).toContain('<span class="nm">alpha</span>');
   expect(host.regions.rail).toContain('<span class="nm">beta</span>');
   expect(host.regions.rail).toContain(
@@ -224,7 +224,8 @@ test('boot renders the rail with alpha and beta from the first index, opens the 
     'publish#1',
   ]);
   expect(host.regions.status).toContain('<span>ended completed</span>');
-  expect(host.regions.attention).toContain('needs attention · 6');
+  expect(host.regions.attention).toContain('⚑ needs attention<span class="badge">6</span></button>');
+  expect(host.regions.attention).not.toContain('att-pane');
 });
 
 test("opening FAKE-2's denial closes the golden run's socket, opens FAKE-2's, reads implement#1's result, and renders its permissions tab", async () => {
@@ -411,8 +412,9 @@ test('a run socket closed without end reconnects after 2 s into a fresh model, o
   host.advance(2000);
   const [again] = host.open('queue=');
   expect([again === queue, again?.query]).toEqual([false, queue?.query]);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
-  expect(host.regions.queues).toContain('<span class="pill p-skip">unknown</span>');
+  expect(host.regions.main).toContain('<span class="pill p-skip">unknown</span>');
 });
 
 test("a run stream's error is shown in the main region, and a message or a result that is no JSON changes nothing", async () => {
@@ -462,12 +464,12 @@ test('a result that arrives after the selection changed is not rendered', async 
   expect(host.regions.inspector).toContain('b4efb0c5de84d87c1455d4504b8b75b095a8e10b');
 });
 
-test("with no queue the queues region is empty and no queue socket opens; with beta's, queue=beta/ticket-to-pr renders its recent events and watched", () => {
+test("with no queue the rail has no queue row and no queue socket opens; with beta's, its row opens queue=beta/ticket-to-pr in the centre with its recent events, until the queue leaves the index", () => {
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   host.advance(100);
-  expect([host.regions.queues, host.open('queue=')]).toEqual(['', []]);
+  expect([host.regions.rail?.includes('select-queue'), host.open('queue=')]).toEqual([false, []]);
   page.stop();
   m.remove();
   m = seedFixtures();
@@ -476,14 +478,36 @@ test("with no queue the queues region is empty and no queue socket opens; with b
   host.push(host.open('index')[0], indexMessage());
   const sockets = host.open('queue=');
   expect(sockets.map((socket) => socket.query)).toEqual([`queue=${encodeURIComponent(`beta/${QUEUE_WORKFLOW}`)}`]);
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  expect(host.regions.rail).toContain('<button class="wf-q" data-action="select-queue"');
+  host.renders = [];
   for (const event of readEvents(queueDirOf(m))) host.push(sockets[0], { kind: 'queue-event', event });
   host.advance(100);
-  expect(host.regions.queues).toContain('<span class="pill p-pass">watched</span>');
-  expect(host.regions.queues).toContain('<span class="tname">queue:parked</span>');
-  expect(host.regions.queues?.match(/<div class="ev">/g)).toHaveLength(9);
+  expect(host.renders).toEqual([]);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(host.regions.main).toStartWith('<div class="d-h"><span class="d-title">ticket-to-pr queue</span>');
+  expect(host.regions.main).toContain('<span class="pill p-pass">watched</span>');
+  expect(host.regions.main).toContain('<span class="tname">queue:parked</span>');
+  expect(host.regions.main?.match(/<div class="ev">/g)).toHaveLength(9);
+  expect(host.regions.rail).toContain('<button class="wf-q sel" data-action="select-queue"');
+  expect(host.regions.rail).not.toContain('<button class="run sel"');
+  host.renders = [];
+  host.push(sockets[0], {
+    kind: 'queue-event',
+    event: { seq: 99, ts: '2026-09-24T11:09:00.000Z', type: 'watch:removed', workflow: QUEUE_WORKFLOW },
+  });
+  host.advance(100);
+  expect([host.renders, host.regions.main?.includes('<span class="pill p-skip">not watched</span>')]).toEqual([
+    ['main'],
+    true,
+  ]);
   rmSync(join(m.beta.clone, '.sail-runs', 'queue'), { recursive: true });
   host.push(host.open('index')[0], indexMessage());
   expect([sockets[0]?.closed, host.open('queue=')]).toEqual([true, []]);
+  host.advance(100);
+  expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
 });
 
 test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
@@ -771,7 +795,7 @@ test("a region whose draw throws shows that it couldn't be drawn, and every othe
   host.renders = [];
   host.push(host.open('index')[0], broken);
   expect(() => host.advance(100)).not.toThrow();
-  expect(host.renders.sort()).toEqual(['attention', 'main', 'queues', 'rail', 'status']);
+  expect(host.renders.sort()).toEqual(['attention', 'main', 'rail', 'status']);
   expect(host.regions.rail).toContain('this part of the page could not be drawn');
   expect(cards(host.regions.main)).toHaveLength(8);
 });
@@ -872,4 +896,59 @@ test('a suspended open run that is resumed and ends between two polls, as comple
   host.push(host.open('index')[0], finished);
   expect(host.open('run=').map((socket) => socket.query)).toEqual([runQuery('beta', FAKE_3_ID)]);
   expect(host.sockets.filter((socket) => socket.query.startsWith('run=beta'))).toHaveLength(2);
+});
+
+test('the needs attention button opens its pane, a and Escape toggle and close it, and opening an item closes it and leaves an open queue', () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  host.click({ action: 'toggle-attention' });
+  host.advance(100);
+  expect(host.regions.attention).toContain('<div class="att-pane">');
+  expect(host.regions.attention).toContain(`data-action="open" data-repo="alpha" data-run="${FAKE_2_ID}"`);
+  host.press('Escape');
+  host.advance(100);
+  expect([page.ui.attention, host.regions.attention?.includes('att-pane')]).toEqual([false, false]);
+  expect(page.ui.key).toBeUndefined();
+  host.press('a');
+  host.advance(100);
+  expect(page.ui.attention).toBe(true);
+  host.press('a', true);
+  expect(page.ui.attention).toBe(true);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.click({ action: 'open', repo: 'alpha', run: FAKE_2_ID, key: 'implement#1', tab: 'permissions' });
+  host.advance(100);
+  expect([page.ui.attention, page.ui.queue, page.ui.runId, page.ui.key]).toEqual([
+    false,
+    undefined,
+    FAKE_2_ID,
+    'implement#1',
+  ]);
+  expect(host.regions.attention).not.toContain('att-pane');
+});
+
+test('a repository or workflow closes and opens again from its header, and opening the open run from the rail gives the centre back from a queue', () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  replay(host.open('run=')[0], GOLDEN());
+  host.advance(100);
+  host.click({ action: 'toggle-group', group: 'beta' });
+  host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(page.ui.closed).toEqual(['beta', `beta/${QUEUE_WORKFLOW}`]);
+  expect(host.regions.rail).toContain('<button class="lgrp-h" data-action="toggle-group" data-group="beta">');
+  host.click({ action: 'toggle-group', group: 'beta' });
+  host.advance(100);
+  expect(page.ui.closed).toEqual([`beta/${QUEUE_WORKFLOW}`]);
+  expect(host.regions.rail).toContain(
+    `<button class="wf-h" data-action="toggle-group" data-group="beta/${QUEUE_WORKFLOW}">`,
+  );
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  expect(cards(host.regions.main)).toEqual([]);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
+  expect(host.sockets.filter((socket) => socket.query.startsWith('run='))).toHaveLength(1);
 });

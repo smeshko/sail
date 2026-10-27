@@ -10,14 +10,14 @@ import { attention } from '../../../src/dashboard/page/attention';
 import { renderAttention } from '../../../src/dashboard/page/attention-view';
 import { queuePanels, railRepos, watchState } from '../../../src/dashboard/page/index-model';
 import { renderInspector } from '../../../src/dashboard/page/inspector-view';
-import { queueId, renderQueues } from '../../../src/dashboard/page/queue-view';
+import { renderQueue } from '../../../src/dashboard/page/queue-view';
 import { renderRail } from '../../../src/dashboard/page/rail-view';
 import { foldRun } from '../../../src/dashboard/page/run-model';
 import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
 import { initialUi, TABS } from '../../../src/dashboard/page/ui-state';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import type { QueueEvent } from '../../../src/events/types';
-import { FAKE_2_ID, fake2Dir, type Machine, QUEUE_WORKFLOW, queueDirOf, seedFixtures } from '../../helpers/dashboard';
+import { FAKE_2_ID, fake2Dir, type Machine, queueDirOf, seedFixtures } from '../../helpers/dashboard';
 
 const RLO = String.fromCharCode(0x202e);
 const PAYLOADS = [
@@ -137,15 +137,16 @@ afterAll(() => m.remove());
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const ui = initialUi(0);
 
-test('the rail, needs attention and the queue panel keep their structure under a hostile payload in every untrusted field', async () => {
+test('the rail, needs attention and the queue view keep their structure under a hostile payload in every untrusted field', async () => {
   const repos = index(m.registryDir).map((repo) => (repo.name === 'beta' ? { ...repo, problem: 'a problem' } : repo));
   const events = readEvents(queueDirOf(m)) as unknown as QueueEvent[];
   const views = (input: typeof repos, queue: QueueEvent[]) => {
-    const streams = { [queueId('beta', QUEUE_WORKFLOW)]: { recent: queue, watch: watchState(queue) } };
+    const stream = { recent: queue, watch: watchState(queue) };
+    const rail = { ...ui, repo: 'alpha', runId: FAKE_2_ID, open: ['alpha/ticket-to-pr:completed'] };
     return [
-      renderRail(railRepos(input, NOW), { ...ui, repo: 'alpha', runId: FAKE_2_ID, open: ['alpha:completed'] }).value,
-      renderAttention(attention(input)).value,
-      renderQueues(queuePanels(input), streams, ui, NOW).value,
+      renderRail(railRepos(input, NOW), rail, NOW).value,
+      renderAttention(attention(input), true).value,
+      ...queuePanels(input).map((panel) => renderQueue(panel, stream, ui, NOW).value),
     ];
   };
   const benign = views(repos, events);

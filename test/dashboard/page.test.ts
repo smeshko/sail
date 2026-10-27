@@ -27,7 +27,7 @@ test('the page builds into one document with exactly one script, inline, holding
   expect(script).toContain('X-Sail-Dashboard');
   expect(script).not.toMatch(/^\s*(import|export)\s/m);
   expect([script.includes('</script'), script.includes('<!--')]).toEqual([false, false]);
-  for (const region of ['rail', 'attention', 'queues', 'main', 'inspector', 'status']) {
+  for (const region of ['rail', 'attention', 'main', 'inspector', 'status']) {
     expect(html).toContain(`id="${region}"`);
   }
 });

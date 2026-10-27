@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
-import { queuePanels, railRepos, watchState } from '../../../src/dashboard/page/index-model';
+import { queuePanels, railRepos, watchState, workflowOf } from '../../../src/dashboard/page/index-model';
 import {
   FAKE_2_ID,
   FAKE_3_ID,
@@ -131,4 +131,21 @@ test('a repository whose .sail/ is gone shows in the rail with its problem and n
     ['beta', 2, 'undefined'],
   ]);
   expect(repos[0]?.problem).toContain('no longer exists');
+});
+
+test("railRepos groups each repository's runs by workflow without its version, beside the queues it has, by name", () => {
+  const repos = railRepos(index(m.registryDir), NOW);
+  const groups = repos.flatMap((repo) =>
+    repo.workflows.map((workflow) => [repo.name, workflow.name, workflow.runs.map((run) => run.runId), workflow.queue]),
+  );
+  expect(groups).toEqual([
+    ['alpha', 'ticket-to-pr', [GOLDEN_RUN_ID, FAKE_2_ID], undefined],
+    ['beta', 'review', [FAKE_4_ID], undefined],
+    ['beta', QUEUE_WORKFLOW, [FAKE_3_ID], { waiting: 1, lastPolledAt: '2026-09-24T11:05:00.000Z' }],
+  ]);
+  expect([workflowOf({ workflow: 'review@12' }), workflowOf({}), workflowOf({ workflow: '' })]).toEqual([
+    'review',
+    'unknown',
+    'unknown',
+  ]);
 });

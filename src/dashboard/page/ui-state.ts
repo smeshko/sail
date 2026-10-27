@@ -1,6 +1,7 @@
 // What a person has chosen on the page, which every view reads: the open run, card and tab, whether the card's timeline
-// is open, which of its tool calls and which kinds of its entries it hides, the rail's open sections, the theme, and the
-// offset their clock is at, and the file open in the drawer. It holds nothing about the runs themselves.
+// is open, which of its tool calls and which kinds of its entries it hides, the queue open in its place, the rail's
+// open sections and closed groups, whether needs attention is open, the theme, the offset their clock is at, and the
+// file open in the drawer. It holds nothing about the runs themselves.
 
 export const TABS = ['overview', 'files', 'permissions', 'log'] as const;
 export type InspectorTab = (typeof TABS)[number];
@@ -17,6 +18,8 @@ export interface UiState {
   runId?: string;
   /** The selected card's key. */
   key?: string;
+  /** The queue the centre shows in place of the run, as `<repo>/<workflow>`. */
+  queue?: string;
   /** Whether the centre shows the selected card's timeline, rather than the run's cards. */
   timeline: boolean;
   /** The timeline's tool calls opened to show their input and result, by call id. */
@@ -28,8 +31,12 @@ export interface UiState {
   file?: { name: string; path: string };
   /** The log stream the log tab shows, when one is chosen. */
   stream?: string;
-  /** The rail's open sections, as `<repo>:completed`. */
+  /** The rail's open sections, as `<repo>/<workflow>:completed`. */
   open: string[];
+  /** The rail's closed repositories and workflows, as `<repo>` and `<repo>/<workflow>`. */
+  closed: string[];
+  /** Whether the needs attention pane is open. */
+  attention: boolean;
   theme: Theme;
   inspector: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */
@@ -47,6 +54,8 @@ export function initialUi(tz: number): UiState {
     opened: [],
     hidden: [],
     open: [],
+    closed: [],
+    attention: false,
     theme: 'dark',
     inspector: true,
     cursor: 0,

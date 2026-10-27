@@ -544,5 +544,5 @@ The dashboard's panel for one call, with its overview, files, permissions and lo
 _Avoid_: details pane, drawer
 
 **Needs attention**:
-The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call.
+The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items.
 _Avoid_: alerts, signals, triage

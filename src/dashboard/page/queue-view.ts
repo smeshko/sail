@@ -1,6 +1,7 @@
-// The queue panel: each watched workflow's queue, with its polling, its items by state, and its recent events from the
-// queue's own stream. With no queue anywhere it renders nothing, and the panel is hidden. A parked item shows the
-// commands that requeue or drop it, to copy: the dashboard changes nothing itself.
+// The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
+// run, with its polling, its items by state, and its recent events from the queue's own stream. A parked item shows
+// the commands that requeue or drop it, to copy, and an item whose run the rail lists opens it: the dashboard changes
+// nothing itself.
 import type { QueueEvent } from '../../events/types';
 import { parkedCommands } from './commands';
 import { ago, clock } from './format';
@@ -86,14 +87,8 @@ ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}
 </section>`;
 }
 
-/** Every queue panel, or nothing when there is none, which hides the panel. */
-export function renderQueues(
-  panels: readonly QueuePanel[],
-  streams: Readonly<Record<string, QueueStream>>,
-  ui: UiState,
-  now: number,
-): SafeHtml {
-  if (panels.length === 0) return html``;
-  return html`<div class="rail-h"><span>queues</span><span class="c">${panels.length}</span></div>
-${panels.map((panel) => panelView(panel, streams[queueId(panel.repo, panel.workflow)], ui, now))}`;
+/** The queue view of `panel`, under a header naming its workflow and repository. */
+export function renderQueue(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
+  return html`<div class="d-h"><span class="d-title">${panel.workflow} queue</span><span class="d-agent">${panel.repo}</span></div>
+${panelView(panel, stream, ui, now)}`;
 }

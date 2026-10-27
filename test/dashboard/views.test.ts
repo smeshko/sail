@@ -32,7 +32,7 @@ test('the committed dashboard views are what the fixtures render now', () => {
   expect(renderDashboardViews(fresh)).toEqual([
     'rail.html',
     'attention.html',
-    'queues.html',
+    'queue.html',
     'run-golden.html',
     'run-fake-2.html',
     'run-fake-3.html',
@@ -54,6 +54,6 @@ test('a view changed by one byte is named as stale, and so is one missing', () =
   cpSync(COMMITTED, changed, { recursive: true });
   const rail = readFileSync(join(changed, 'rail.html'), 'utf8');
   writeFileSync(join(changed, 'rail.html'), rail.replace('alpha', 'alphA'));
-  rmSync(join(changed, 'queues.html'));
-  expect(stale(fresh, changed)).toEqual([`queues.html is missing: ${REGENERATE}`, `rail.html is stale: ${REGENERATE}`]);
+  rmSync(join(changed, 'queue.html'));
+  expect(stale(fresh, changed)).toEqual([`queue.html is missing: ${REGENERATE}`, `rail.html is stale: ${REGENERATE}`]);
 });

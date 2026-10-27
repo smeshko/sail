@@ -1,5 +1,5 @@
-// The index message, made into what the rail and the queue panel show: every repository with its runs, newest first,
-// and every watched workflow's queue. It reads only the index the server streams, which already carries each run's
+// The index message, made into what the rail and the queue view show: every repository with its workflows, each with its
+// runs newest first and its queue's waiting count, and every watched workflow's queue. It reads only the index the server streams, which already carries each run's
 // summary and each repository's queues, so nothing here opens a run. Nothing here names a stage, a workflow or a
 // repository: they all come from the index.
 import type { QueueEvent } from '../../events/types';
@@ -20,13 +20,26 @@ export interface RailRun {
   problem?: string;
 }
 
-/** One repository as the rail lists it: `live` while any of its runs runs. */
+/** One workflow of a repository as the rail lists it: its runs newest first, and its queue when it is watched. */
+export interface RailWorkflow {
+  name: string;
+  runs: RailRun[];
+  queue?: { waiting: number; lastPolledAt?: string };
+}
+
+/** One repository as the rail lists it: `live` while any of its runs runs, and its runs by workflow. */
 export interface RailRepo {
   name: string;
   remote: string | null;
   problem?: string;
   live: boolean;
   runs: RailRun[];
+  workflows: RailWorkflow[];
+}
+
+/** The workflow a run ran, without its version: `name@3` is `name`. A run that names none is `unknown`. */
+export function workflowOf(run: Pick<RailRun, 'workflow'>): string {
+  return run.workflow?.replace(/@\d+$/, '') || 'unknown';
 }
 
 /** The run's status: its STATUS when it can be read, else its summary's, else `unknown`. */
@@ -83,7 +96,22 @@ function railRun(run: RunItem, now: number): RailRun {
   return row;
 }
 
-/** The rail: every repository by name, each with its runs newest first. `now` is ms since the epoch. */
+/** A repository's workflows by name: those its runs ran and those it has a queue for. */
+function workflows(repo: IndexRepo, runs: readonly RailRun[]): RailWorkflow[] {
+  const names = new Set([...runs.map(workflowOf), ...repo.queues.map((view) => view.workflow)]);
+  return byName([...names].map((name) => ({ name }))).map(({ name }) => {
+    const workflow: RailWorkflow = { name, runs: runs.filter((run) => workflowOf(run) === name) };
+    const view = repo.queues.find((each) => each.workflow === name);
+    if (view !== undefined) {
+      const waiting = (view.queue?.items ?? []).filter((item) => item.state === 'queued').length;
+      const polled = view.queue?.polling.lastPolledAt;
+      workflow.queue = polled === undefined ? { waiting } : { waiting, lastPolledAt: polled };
+    }
+    return workflow;
+  });
+}
+
+/** The rail: every repository by name, each with its runs newest first, also by workflow. `now` is ms since the epoch. */
 export function railRepos(index: readonly IndexRepo[], now: number): RailRepo[] {
   return byName(index).map((repo) => {
     const runs = newestFirst(repo.runs.map((run) => railRun(run, now)));
@@ -92,16 +120,17 @@ export function railRepos(index: readonly IndexRepo[], now: number): RailRepo[] 
       remote: repo.remote,
       live: runs.some((run) => run.status === 'running'),
       runs,
+      workflows: workflows(repo, runs),
     };
     if (repo.problem !== undefined) rail.problem = repo.problem;
     return rail;
   });
 }
 
-/** The states in the order the panel lists them. */
+/** The states in the order the queue view lists them. */
 export const QUEUE_STATES: readonly QueueItemState[] = ['queued', 'dispatched', 'failed', 'parked', 'done'];
 
-/** A queue item, and whether its run is one the rail lists, so the panel can open it. */
+/** A queue item, and whether its run is one the rail lists, so the queue view can open it. */
 export type PanelItem = QueueItem & { runListed: boolean };
 
 /** One watched workflow's queue in one repository. */

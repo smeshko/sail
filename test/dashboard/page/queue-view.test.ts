@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { index } from '../../../src/dashboard/files';
 import { queuePanels, watchState } from '../../../src/dashboard/page/index-model';
-import { queueEventLine, queueId, renderQueues } from '../../../src/dashboard/page/queue-view';
+import { queueEventLine, queueId, renderQueue } from '../../../src/dashboard/page/queue-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
 import type { QueueEvent } from '../../../src/events/types';
 import { FAKE_3_ID, type Machine, QUEUE_WORKFLOW, queueDirOf, seedFixtures } from '../../helpers/dashboard';
@@ -23,10 +23,15 @@ const queueEvents = (): QueueEvent[] =>
     .split('\n')
     .map((line) => JSON.parse(line));
 
-test("beta's panel shows its four items with their states, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
+test("beta's queue view shows its header, its four items with their states, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
   const events = queueEvents();
-  const streams = { [queueId('beta', QUEUE_WORKFLOW)]: { recent: events, watch: watchState(events) } };
-  const markup = renderQueues(queuePanels(index(m.registryDir)), streams, initialUi(0), NOW).value;
+  const id = queueId('beta', QUEUE_WORKFLOW);
+  const panel = queuePanels(index(m.registryDir)).find((each) => queueId(each.repo, each.workflow) === id);
+  if (panel === undefined) throw new Error('beta has no queue');
+  const markup = renderQueue(panel, { recent: events, watch: watchState(events) }, initialUi(0), NOW).value;
+  expect(markup).toStartWith(
+    '<div class="d-h"><span class="d-title">ticket-to-pr queue</span><span class="d-agent">beta</span></div>',
+  );
   expect(
     [...markup.matchAll(/<div class="qrow2 (\w+)">.*?<span class="c-ref">([\w:-]+)<\/span>/g)].map(
       ([, state, key]) => `${key} ${state}`,
@@ -48,7 +53,6 @@ test("beta's panel shows its four items with their states, FAKE-6's reason with 
   expect(markup).toContain('<span class="c-t">Escape &lt;b&gt;this&lt;/b&gt; &amp; &quot;that&quot;</span>');
   expect(markup.match(/<div class="ev">/g)?.length).toBe(9);
   expect(markup).toContain('<span class="ts">11:01:05</span><span class="tname">queue:parked</span>');
-  expect(renderQueues([], {}, initialUi(0), NOW).value).toBe('');
 });
 
 test('each queue event is one line, and a type with no line of its own shows its type alone', () => {
