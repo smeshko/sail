@@ -57,14 +57,28 @@ function sha256(path: string): string {
 
 /**
  * What is wrong with a step's `produces`, found before it runs. Later calls consume a file by its name, so each name is
- * a plain file name in `$STAGE_OUT`, and none is one the engine writes there, or a later try's directory.
+ * a plain file name in `$STAGE_OUT`, and none is one the engine writes there, or a later try's directory. The
+ * comparison ignores case: macOS's default file system takes `Prompt.md` for `prompt.md`, so the engine's file would
+ * overwrite the produced one.
  */
 export function producesProblems(produces: Readonly<Record<string, unknown>>): string[] {
   const found: string[] = [];
+  const tail = 'and a file system that ignores case takes them for one';
   for (const name of Object.keys(produces)) {
+    const folded = name.toLowerCase();
     if (!isPlainName(name)) found.push(`'${name}' can't be produced: it is not a plain file name`);
-    else if (RESERVED_NAMES.has(name)) found.push(`'${name}' can't be produced: the engine writes it in $STAGE_OUT`);
-    else if (isTryName(name)) found.push(`'${name}' can't be produced: the engine uses it for a later try`);
+    else if (RESERVED_NAMES.has(folded))
+      found.push(
+        folded === name
+          ? `'${name}' can't be produced: the engine writes it in $STAGE_OUT`
+          : `'${name}' can't be produced: the engine writes '${folded}' in $STAGE_OUT, ${tail}`,
+      );
+    else if (isTryName(folded))
+      found.push(
+        folded === name
+          ? `'${name}' can't be produced: the engine uses it for a later try`
+          : `'${name}' can't be produced: the engine uses '${folded}' for a later try, ${tail}`,
+      );
   }
   return found;
 }

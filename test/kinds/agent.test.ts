@@ -181,6 +181,12 @@ const ends = (events: readonly CallEvent[]): object[] =>
 /** What a try that never reached a session records: no session id, no turns, no usage. */
 const UNSTARTED = { adapter: 'scripted', model: MODEL, turns: 0, toolCalls: 0, denials: 0 };
 
+test("problems() refuses a produced name that differs from an engine file's only by case", () => {
+  expect(agentKind.problems(spec({ produces: { 'Prompt.md': 'file' } }))).toEqual([
+    "'Prompt.md' can't be produced: the engine writes 'prompt.md' in $STAGE_OUT, and a file system that ignores case takes them for one",
+  ]);
+});
+
 test('problems() reports a produced name the engine writes, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
   expect(agentKind.kind).toBe('agent');
   expect(agentKind.problems(spec())).toEqual([]);
