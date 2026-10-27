@@ -26,6 +26,7 @@ import {
   WORLD_API,
   type WorldCheckRun,
   type WorldSeedPull,
+  type WorldWorkflowRun,
   worldMergeSha,
 } from '../../helpers/github-world';
 import { holdTempRepo } from '../../helpers/held-repo';
@@ -902,6 +903,132 @@ test("runs of one name from different apps are distinct checks: an earlier app's
   expect('rejected' in read ? read : read.checks).toEqual([
     { name: 'build', status: 'passed' },
     { name: 'build', status: 'failed' },
+  ]);
+});
+
+test("runs of one name from two workflows are distinct checks: one workflow's failure is kept beside the other's later pass", async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [
+          {
+            id: 10,
+            app: { id: 15368 },
+            check_suite: { id: 100 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            id: 11,
+            app: { id: 15368 },
+            check_suite: { id: 200 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        workflowRuns: [
+          { id: 1000, workflow_id: 1, check_suite_id: 100 },
+          { id: 2000, workflow_id: 2, check_suite_id: 200 },
+        ],
+      },
+    ],
+  });
+  const read = await settle(host(on).checks(7));
+  const sha = headOf7(on);
+  expect({ read: 'rejected' in read ? read : read.checks, sent: on.routes() }).toEqual({
+    read: [
+      { name: 'test', status: 'failed' },
+      { name: 'test', status: 'passed' },
+    ],
+    sent: [
+      'GET /repos/o/r/pulls/7',
+      `GET /repos/o/r/commits/${sha}/check-runs?per_page=100&page=1`,
+      `GET /repos/o/r/actions/runs?head_sha=${sha}&per_page=100&page=1`,
+      `GET /repos/o/r/commits/${sha}/status?per_page=100&page=1`,
+    ],
+  });
+});
+
+test("runs of one name from one workflow's later runs collapse to the latest, though each run is a check suite of its own", async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [
+          {
+            id: 10,
+            app: { id: 15368 },
+            check_suite: { id: 100 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            id: 11,
+            app: { id: 15368 },
+            check_suite: { id: 200 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+          {
+            id: 12,
+            app: { id: 15368 },
+            check_suite: { id: 300 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        workflowRuns: [
+          { id: 1000, workflow_id: 1, check_suite_id: 100 },
+          { id: 2000, workflow_id: 1, check_suite_id: 200 },
+          { id: 3000, workflow_id: 1, check_suite_id: 300 },
+        ],
+      },
+    ],
+  });
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([{ name: 'test', status: 'passed' }]);
+});
+
+test('a workflow runs answer that lists no check suite id reads as unavailable', async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [
+          {
+            id: 10,
+            app: { id: 15368 },
+            check_suite: { id: 100 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            id: 11,
+            app: { id: 15368 },
+            check_suite: { id: 200 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        workflowRuns: [{ id: 1000, workflow_id: 1 } as WorldWorkflowRun],
+      },
+    ],
+  });
+  const error = await rejection(host(on).checks(7));
+  expect(error instanceof PortError ? [error.code, error.message] : String(error)).toEqual([
+    'unavailable',
+    `codeHost.checks: GitHub's actions/runs answer for ${headOf7(on)} lists an entry without a check_suite_id`,
   ]);
 });
 

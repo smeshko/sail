@@ -1,7 +1,7 @@
-// A pull request's checks on GitHub: the latest check run of each name and app and the commit statuses on its head sha,
-// in the port's words (DECISIONS D4); a run a later run of its name and app superseded is dropped. Each is read in
-// pages of 100 until GitHub's `total_count` is reached, and an answer GitHub doesn't document reads as failed: a check
-// sail can't read is never one that passed.
+// A pull request's checks on GitHub: the latest check run of each name, app and workflow and the commit statuses on its
+// head sha, in the port's words (DECISIONS D4); a run a later run of its name, app and workflow superseded is dropped.
+// Each is read in pages of 100 until GitHub's `total_count` is reached, and an answer GitHub doesn't document reads as
+// failed: a check sail can't read is never one that passed.
 import { PortError } from '../../ports/errors';
 import type { Check, CheckStatus } from '../../ports/types';
 import type { GitHubClient } from './github-client';
@@ -10,6 +10,7 @@ import type { GitHubClient } from './github-client';
 export interface GitHubCheckRun {
   readonly id?: number;
   readonly app?: { readonly id?: number } | null;
+  readonly check_suite?: { readonly id?: number } | null;
   readonly name: string;
   readonly status: string;
   readonly conclusion?: string | null;
@@ -22,6 +23,12 @@ export interface GitHubStatus {
   readonly context: string;
   readonly state: string;
   readonly target_url?: string | null;
+}
+
+/** A GitHub Actions workflow run as the `actions/runs` endpoint lists it: the fields the adapter reads. */
+export interface GitHubWorkflowRun {
+  readonly check_suite_id: number;
+  readonly workflow_id?: number;
 }
 
 const PER_PAGE = 100;
@@ -47,20 +54,27 @@ export function commitStatus(status: Pick<GitHubStatus, 'state'>): CheckStatus {
  * Every item of a paged list, page after page of 100, until `total_count` items have been read. A page without its list
  * or its count, one whose count differs from the first page's, one that ends the list short of the count, or one
  * listing an entry that is no object or holds no string under `nameField`, is `unavailable`: a check left unread could have failed.
+ * An `actions/runs` entry holds an integer `check_suite_id` in place of a name.
  */
 async function readPaged<T>(
   client: GitHubClient,
   op: string,
   sha: string,
-  endpoint: 'check-runs' | 'status',
-  field: 'check_runs' | 'statuses',
-  nameField: 'name' | 'context',
+  endpoint: 'check-runs' | 'status' | 'actions/runs',
+  field: 'check_runs' | 'statuses' | 'workflow_runs',
+  nameField: 'name' | 'context' | 'check_suite_id',
 ): Promise<T[]> {
   const read: T[] = [];
   let expected: number | undefined;
-  const path = client.repoPath('commits', sha, endpoint);
+  const actions = endpoint === 'actions/runs';
+  const path = actions ? client.repoPath('actions', 'runs') : client.repoPath('commits', sha, endpoint);
+  const named = (value: unknown) => (actions ? Number.isInteger(value) : typeof value === 'string');
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const query = new URLSearchParams({ per_page: String(PER_PAGE), page: String(page) });
+    const query = new URLSearchParams({
+      ...(actions ? { head_sha: sha } : {}),
+      per_page: String(PER_PAGE),
+      page: String(page),
+    });
     const answer = await client.request<unknown>(op, 'GET', `${path}?${query}`);
     const { [field]: listed, total_count: total } = (typeof answer === 'object' && answer !== null ? answer : {}) as {
       [key: string]: unknown;
@@ -83,7 +97,7 @@ async function readPaged<T>(
         `GitHub's ${endpoint} count for ${sha} changed from ${expected} to ${total} while it was read`,
       );
     }
-    if (!listed.every((entry) => typeof entry === 'object' && entry !== null && typeof entry[nameField] === 'string')) {
+    if (!listed.every((entry) => typeof entry === 'object' && entry !== null && named(entry[nameField]))) {
       throw new PortError(
         'codeHost',
         op,
@@ -105,12 +119,32 @@ async function readPaged<T>(
   throw new PortError('codeHost', op, 'unavailable', `more than ${PER_PAGE * MAX_PAGES} checks on ${sha}`);
 }
 
+/** Whether runs of one name from one app sit in more than one check suite, as runs of two workflows' jobs do. */
+function suitesShareNames(runs: readonly GitHubCheckRun[]): boolean {
+  const suites = new Map<string, unknown>();
+  for (const run of runs) {
+    const check = JSON.stringify([run.app?.id ?? null, run.name]);
+    const suite = run.check_suite?.id;
+    if (suites.has(check) && suites.get(check) !== suite) return true;
+    suites.set(check, suite);
+  }
+  return false;
+}
+
 /**
- * Each check's latest run, the greatest id, in GitHub's order. A check is a name from one app, so two apps' runs of a
- * name are two checks; a check with a run lacking an integer id keeps every run.
+ * Each check's latest run, the greatest id, in GitHub's order. A check is a name from one app and, for a run whose
+ * check suite `workflowOf` maps, one workflow: two apps' or two workflows' runs of a name are two checks, while a
+ * workflow's later runs supersede its earlier ones. A check with a run lacking an integer id keeps every run.
  */
-export function latestRuns(runs: readonly GitHubCheckRun[]): GitHubCheckRun[] {
-  const check = (run: GitHubCheckRun) => JSON.stringify([run.app?.id ?? null, run.name]);
+export function latestRuns(
+  runs: readonly GitHubCheckRun[],
+  workflowOf: ReadonlyMap<number, number> = new Map(),
+): GitHubCheckRun[] {
+  const workflow = (run: GitHubCheckRun) => {
+    const suite = run.check_suite?.id;
+    return suite === undefined ? undefined : workflowOf.get(suite);
+  };
+  const check = (run: GitHubCheckRun) => JSON.stringify([run.app?.id ?? null, workflow(run) ?? null, run.name]);
   const latest = new Map<string, number>();
   const unordered = new Set<string>();
   for (const run of runs) {
@@ -121,8 +155,9 @@ export function latestRuns(runs: readonly GitHubCheckRun[]): GitHubCheckRun[] {
 }
 
 /**
- * The checks on `sha`: its latest check run of each name and app, then its commit statuses, each in GitHub's order. A
- * run a later one of its name and app superseded is dropped from `checks` and kept in `raw`.
+ * The checks on `sha`: its latest check run of each name, app and workflow, then its commit statuses, each in GitHub's
+ * order. A run a later one of its name, app and workflow superseded is dropped from `checks` and kept in `raw`. The
+ * workflows are read only when one app's runs of a name sit in more than one check suite.
  */
 export async function readChecks(
   client: GitHubClient,
@@ -130,10 +165,19 @@ export async function readChecks(
   sha: string,
 ): Promise<{ checks: Check[]; raw: { checkRuns: GitHubCheckRun[]; statuses: GitHubStatus[] } }> {
   const checkRuns = await readPaged<GitHubCheckRun>(client, op, sha, 'check-runs', 'check_runs', 'name');
+  // A name repeated across check suites may be two workflows' jobs: their workflow runs tell which suite is which.
+  const workflowRuns = suitesShareNames(checkRuns)
+    ? await readPaged<GitHubWorkflowRun>(client, op, sha, 'actions/runs', 'workflow_runs', 'check_suite_id')
+    : [];
+  const workflowOf = new Map(
+    workflowRuns.flatMap((run) =>
+      Number.isInteger(run.workflow_id) ? [[run.check_suite_id, run.workflow_id as number] as const] : [],
+    ),
+  );
   const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses', 'context');
   const runUrl = (run: GitHubCheckRun) => run.html_url ?? run.details_url ?? undefined;
   const checks: Check[] = [
-    ...latestRuns(checkRuns).map((run) => {
+    ...latestRuns(checkRuns, workflowOf).map((run) => {
       const url = runUrl(run);
       return { name: run.name, status: checkRunStatus(run), ...(url === undefined ? {} : { url }) };
     }),
