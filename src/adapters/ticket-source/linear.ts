@@ -1,12 +1,13 @@
 // The Linear TicketSource: tickets of one Linear team, read with their comments, relations and attachments, claimed and
-// moved by state type (DECISIONS D4), whatever the team calls its states, and filed in it with the labels it and the
-// workspace hold. Every request goes through the GraphQL client, so each failure keeps Linear's message. The definition
-// reads the API key, and the endpoint, from the operator's environment alone (D3).
+// moved by state type (DECISIONS D4), whatever the team calls its states, filed in it with the labels it and the
+// workspace hold, and given files: uploaded to Linear's storage, then attached. Every GraphQL request goes through the
+// client, so each failure keeps Linear's message. The definition reads the API key, and the endpoint, from the
+// operator's environment alone (D3).
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
-import type { ProviderOptions, TicketSource } from '../../ports/ticket-source';
+import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
 import { type Ticket, TicketMove, type TicketState } from '../../ports/types';
 import { createLinearClient, type Fetch, LINEAR_ENDPOINT } from './linear-client';
 import { COMMENT_FIELDS, stateTypeOf, TICKET_FIELDS, toTicket } from './linear-ticket';
@@ -68,6 +69,21 @@ const CREATE = `mutation SailCreate($teamId: String!, $title: String!, $descript
   }
 }`;
 
+// A signed URL to PUT the file's bytes to, with the headers the PUT must carry, and the URL the file is served at.
+const UPLOAD = `mutation SailUpload($contentType: String!, $filename: String!, $size: Int!) {
+  fileUpload(contentType: $contentType, filename: $filename, size: $size) {
+    success
+    uploadFile { uploadUrl assetUrl headers { key value } }
+  }
+}`;
+
+const ATTACH = `mutation SailAttach($issueId: String!, $url: String!, $title: String!) {
+  attachmentCreate(input: { issueId: $issueId, url: $url, title: $title }) { success attachment { id url } }
+}`;
+
+/** How long the PUT of a file's bytes may take. */
+const UPLOAD_TIMEOUT_MS = 120_000;
+
 /** The Linear state types a designated ticket may be in to be listed: those sail reads as unstarted. */
 const UNSTARTED_TYPES = ['triage', 'backlog', 'unstarted'];
 
@@ -125,6 +141,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   });
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
+  const send = options.fetch ?? fetch;
   let teamStates: LinearState[] | undefined;
 
   /** The ticket node and every page of its comments, or a PortError of `op`. Emits nothing. */
@@ -231,6 +248,39 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     if (chosen === undefined)
       throw new PortError('ticketSource', op, 'invalid', `team ${team} has no state for ${move}`);
     return chosen.id;
+  }
+
+  /**
+   * PUTs `bytes` to Linear's signed `uploadUrl` with the headers it asked for. A refused or failed PUT is a PortError of
+   * `attach`: `forbidden` for a 401 or 403, which an expired signature gives, `unavailable` for anything else.
+   */
+  async function put(uploadUrl: string, headers: Record<string, string>, bytes: Uint8Array): Promise<void> {
+    const host = URL.canParse(uploadUrl) ? new URL(uploadUrl).host : uploadUrl;
+    let response: Response;
+    try {
+      response = await send(uploadUrl, {
+        method: 'PUT',
+        headers,
+        body: bytes,
+        signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      });
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      const why = timedOut
+        ? `did not answer within ${UPLOAD_TIMEOUT_MS} ms`
+        : `is unreachable: ${error instanceof Error ? error.message : String(error)}`;
+      throw new PortError('ticketSource', 'attach', 'unavailable', `Linear's upload host ${host} ${why}`);
+    }
+    if (response.ok) return;
+    const text = await response.text().catch(() => '');
+    const code = response.status === 401 || response.status === 403 ? 'forbidden' : 'unavailable';
+    const words = text.trim().slice(0, 200);
+    throw new PortError(
+      'ticketSource',
+      'attach',
+      code,
+      `Linear's upload host ${host} refused the file: ${response.status}${words === '' ? '' : ` ${words}`}`,
+    );
   }
 
   async function move(op: string, id: string, to: TicketMove): Promise<{ state: TicketState; raw: object }> {
@@ -365,6 +415,46 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const { identifier: ticketKey, url } = data.issueCreate.issue;
       emit({ type: 'ticket:created', ticketKey, title, url });
       return { ticketKey, url, raw: data };
+    },
+    async attach(ticketKey, file) {
+      checkAttachment(file);
+      const { node } = await lookup('attach', ticketKey);
+      const { name, contentType, bytes } = file;
+      const uploaded = await client.request<{
+        fileUpload: {
+          success: boolean;
+          uploadFile: { uploadUrl: string; assetUrl: string; headers: { key: string; value: string }[] } | null;
+        };
+      }>('attach', 'SailUpload', UPLOAD, { contentType, filename: name, size: bytes.byteLength });
+      if (!uploaded.fileUpload.success || uploaded.fileUpload.uploadFile === null) {
+        throw new PortError('ticketSource', 'attach', 'conflict', `Linear gave no upload URL for ${name}`, uploaded);
+      }
+      const { uploadUrl, assetUrl, headers } = uploaded.fileUpload.uploadFile;
+      await put(
+        uploadUrl,
+        {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=31536000',
+          ...Object.fromEntries(headers.map(({ key, value }) => [key, value])),
+        },
+        bytes,
+      );
+      const title = file.title ?? name;
+      const data = await client.request<{
+        attachmentCreate: { success: boolean; attachment: { id: string; url: string } | null };
+      }>('attach', 'SailAttach', ATTACH, { issueId: node.id, url: assetUrl, title });
+      if (!data.attachmentCreate.success || data.attachmentCreate.attachment === null) {
+        throw new PortError(
+          'ticketSource',
+          'attach',
+          'conflict',
+          `Linear did not attach ${name} to ${ticketKey}`,
+          data,
+        );
+      }
+      const { url } = data.attachmentCreate.attachment;
+      emit({ type: 'ticket:attached', ticketKey, name: title, contentType, size: bytes.byteLength, url });
+      return { url, raw: data };
     },
     capabilities: () => ({
       comments: true,

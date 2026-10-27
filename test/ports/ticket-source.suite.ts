@@ -4,8 +4,9 @@
 // sail.event.v1, both as a call emits it, with a key, and as dispatch does, without one.
 import { expect, test } from 'bun:test';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
-import type { TicketSource } from '../../src/ports/ticket-source';
+import { MAX_ATTACHMENT_BYTES, type TicketSource } from '../../src/ports/ticket-source';
 import {
+  Attached,
   ClaimResult,
   Moved,
   Posted,
@@ -41,6 +42,13 @@ export interface TicketWorld {
 }
 
 export type MakeTicketSource = (emit: ProviderEmit) => Promise<{ adapter: TicketSource; world: TicketWorld }>;
+
+/** A small text file, as the demonstrate stage's transcript is. */
+const TRANSCRIPT = {
+  name: 'transcript.txt',
+  contentType: 'text/plain',
+  bytes: new TextEncoder().encode('$ sail show FAKE-1\ntotal $1.35\nexit 0\n'),
+};
 
 const keys = (tickets: readonly Ticket[]): string[] => tickets.map((ticket) => ticket.ticketKey);
 
@@ -97,9 +105,10 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       portFailure(await rejection(adapter.claim(world.missing))),
       portFailure(await rejection(adapter.update(world.missing, { state: 'done' }))),
       portFailure(await rejection(adapter.comment(world.missing, 'hello'))),
+      portFailure(await rejection(adapter.attach(world.missing, TRANSCRIPT))),
     ];
     expect(failures).toEqual(
-      ['get', 'claim', 'update', 'comment'].map((op) => ({ port: 'ticketSource', op, code: 'not_found' })),
+      ['get', 'claim', 'update', 'comment', 'attach'].map((op) => ({ port: 'ticketSource', op, code: 'not_found' })),
     );
     expect(capture.events).toEqual([]);
   });
@@ -184,6 +193,37 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       body: 'Pull request opened.',
     });
     expectValidEvents(capture);
+  });
+
+  test(`${label}: attach puts the file on the ticket under its title, where get lists it, and emits ticket:attached`, async () => {
+    const { adapter, world, capture } = await start();
+    const attached = await adapter.attach(world.designated, { ...TRANSCRIPT, title: 'Demonstration transcript' });
+    expect(parseIssues(Attached, attached)).toEqual([]);
+    const listed = (await adapter.get(world.designated)).attachments.find((each) => each.url === attached.url);
+    expect(listed?.name).toBe('Demonstration transcript');
+    expect(capture.events[0]).toEqual({
+      type: 'ticket:attached',
+      ticketKey: world.designated,
+      name: 'Demonstration transcript',
+      contentType: 'text/plain',
+      size: TRANSCRIPT.bytes.byteLength,
+      url: attached.url,
+    });
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: attach refuses a file it can't send as invalid before reaching the ticket, and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const files = [
+      { ...TRANSCRIPT, name: ' ' },
+      { ...TRANSCRIPT, contentType: 'text' },
+      { ...TRANSCRIPT, bytes: new Uint8Array() },
+      { ...TRANSCRIPT, bytes: new Uint8Array(MAX_ATTACHMENT_BYTES + 1) },
+    ];
+    const failures = [];
+    for (const file of files) failures.push(portFailure(await rejection(adapter.attach(world.missing, file))));
+    expect(failures).toEqual(files.map(() => ({ port: 'ticketSource', op: 'attach', code: 'invalid' })));
+    expect(capture.events).toEqual([]);
   });
 
   test(`${label}: capabilities parse, and update takes every move they list to a state of that move's type`, async () => {

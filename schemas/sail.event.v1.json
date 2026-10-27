@@ -49,6 +49,7 @@
         "ticket:updated",
         "ticket:commented",
         "ticket:created",
+        "ticket:attached",
         "codehost:pushed",
         "codehost:pr_opened",
         "codehost:checks",
@@ -207,6 +208,10 @@
     {
       "if": { "properties": { "type": { "const": "ticket:created" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/ticketCreated" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:attached" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketAttached" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:pushed" } }, "required": ["type"] },
@@ -1041,6 +1046,20 @@
         "url": { "type": "string" }
       },
       "required": ["ticketKey", "title", "url"],
+      "unevaluatedProperties": false
+    },
+    "ticketAttached": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "name": { "type": "string" },
+        "contentType": { "type": "string" },
+        "size": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string" }
+      },
+      "required": ["ticketKey", "name", "contentType", "size", "url"],
       "unevaluatedProperties": false
     },
     "codehostPushed": {

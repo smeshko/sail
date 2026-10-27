@@ -3,6 +3,7 @@
 import type { ProviderEmit } from '../events/types';
 import { PortError } from './errors';
 import {
+  type Attached,
   type ClaimResult,
   type Created,
   type Moved,
@@ -27,6 +28,36 @@ export interface NewTicket {
   readonly labels: readonly string[];
 }
 
+/** A file `attach` attaches: its bytes, with the name and content type it is stored under. */
+export interface NewAttachment {
+  readonly name: string;
+  readonly contentType: string;
+  readonly bytes: Uint8Array;
+  /** What the ticket shows the attachment as. Its name unless given. */
+  readonly title?: string;
+}
+
+/** The largest file `attach` takes: 20 MiB. */
+export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Refuses a file `attach` can't send, before any request: no name, a content type that isn't one (`type/subtype`), no
+ * bytes, or more than `MAX_ATTACHMENT_BYTES`. A PortError of `attach`, code `invalid`.
+ */
+export function checkAttachment(file: NewAttachment): void {
+  const problem =
+    file.name.trim() === ''
+      ? 'the file has no name'
+      : !/^[\w.+-]+\/[\w.+-]+(;.*)?$/.test(file.contentType)
+        ? `${JSON.stringify(file.contentType)} is not a content type`
+        : file.bytes.byteLength === 0
+          ? `${file.name} is empty`
+          : file.bytes.byteLength > MAX_ATTACHMENT_BYTES
+            ? `${file.name} is ${file.bytes.byteLength} bytes, over the ${MAX_ATTACHMENT_BYTES} an attachment may be`
+            : undefined;
+  if (problem !== undefined) throw new PortError('ticketSource', 'attach', 'invalid', problem);
+}
+
 export interface TicketSource {
   readonly name: string;
   /** The ticket key `ref` names: a ticket key, or a URL the provider owns. Undefined for anything else. */
@@ -44,6 +75,10 @@ export interface TicketSource {
   comment(ticketKey: string, body: string): Promise<Posted>;
   /** Files a new ticket with these labels, in whatever state the provider starts one in. Emits `ticket:created`. */
   create(ticket: NewTicket): Promise<Created>;
+  /**
+   * Uploads the file and attaches it to the ticket, after `checkAttachment()` passes it. Emits `ticket:attached`.
+   */
+  attach(ticketKey: string, file: NewAttachment): Promise<Attached>;
   capabilities(): TicketSourceCapabilities;
 }
 
