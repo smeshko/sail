@@ -642,6 +642,10 @@ export function boot(host: PageHost): Page {
       ui.closed = ui.closed.includes(group) ? ui.closed.filter((closed) => closed !== group) : [...ui.closed, group];
       mark('rail');
     },
+    'toggle-queue-events': () => {
+      ui.queueEvents = !ui.queueEvents;
+      mark('main');
+    },
     'toggle-attention': () => {
       ui.attention = !ui.attention;
       mark('attention');

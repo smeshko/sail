@@ -23,7 +23,7 @@ const queueEvents = (): QueueEvent[] =>
     .split('\n')
     .map((line) => JSON.parse(line));
 
-test("beta's queue view shows its header, its four items with their states, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
+test("beta's queue view shows its header, its four items each in the box of its state, its recent events folded, FAKE-6's reason with its requeue and drop commands, its polling, and watched", () => {
   const events = queueEvents();
   const id = queueId('beta', QUEUE_WORKFLOW);
   const panel = queuePanels(index(m.registryDir)).find((each) => queueId(each.repo, each.workflow) === id);
@@ -33,10 +33,21 @@ test("beta's queue view shows its header, its four items with their states, FAKE
     '<div class="d-h"><span class="d-title">ticket-to-pr queue</span><span class="d-agent">beta</span></div>',
   );
   expect(
-    [...markup.matchAll(/<div class="qrow2 (\w+)">.*?<span class="c-ref">([\w:-]+)<\/span>/g)].map(
-      ([, state, key]) => `${key} ${state}`,
-    ),
-  ).toEqual(['ticket:FAKE-5 queued', 'ticket:FAKE-3 dispatched', 'ticket:FAKE-6 parked', 'ticket:FAKE-4 done']);
+    [
+      ...markup.matchAll(
+        /<div class="qsec grp-t">([\w ·]+)<\/div><div class="qbox"><div class="qrow2[\w ]*"><span class="c-dot"><i class="(\w+)"><\/i><\/span><span class="c-ref">([\w:-]+)<\/span>/g,
+      ),
+    ].map(([, box, state, key]) => `${box}: ${key} ${state}`),
+  ).toEqual([
+    'waiting · 1: ticket:FAKE-5 queued',
+    'running · 1: ticket:FAKE-3 dispatched',
+    'parked · 1: ticket:FAKE-6 parked',
+    'done · 1: ticket:FAKE-4 done',
+  ]);
+  expect(markup).toContain('<div class="qrow2 done">');
+  expect(markup).toContain(
+    '<button class="qrecent-h" data-action="toggle-queue-events"><span class="caret">›</span>recent queue events<span class="n">9</span></button>\n</section>',
+  );
   expect(markup).toContain(
     '<span class="nm">beta / ticket-to-pr</span><span class="pill p-pass">watched</span><span class="dt">label sail · polled 5m ago · 0 failed polls</span>',
   );
@@ -48,11 +59,31 @@ test("beta's queue view shows its header, its four items with their states, FAKE
   );
   expect(markup).toContain('<code>sail queue drop ticket-to-pr ticket:FAKE-6</code>');
   expect(markup).toContain(
-    `<button class="btn" data-action="select-run" data-repo="beta" data-run="${FAKE_3_ID}">${FAKE_3_ID}</button>`,
+    `<button class="run-link" data-action="select-run" data-repo="beta" data-run="${FAKE_3_ID}" title="open ${FAKE_3_ID}">${FAKE_3_ID} ›</button>`,
   );
   expect(markup).toContain('<span class="c-t">Escape &lt;b&gt;this&lt;/b&gt; &amp; &quot;that&quot;</span>');
-  expect(markup.match(/<div class="ev">/g)?.length).toBe(9);
-  expect(markup).toContain('<span class="ts">11:01:05</span><span class="tname">queue:parked</span>');
+  expect(markup).not.toContain('<div class="ev">');
+  const opened = renderQueue(
+    panel,
+    { recent: events, watch: watchState(events) },
+    { ...initialUi(0), queueEvents: true },
+    NOW,
+  ).value;
+  expect(opened).toContain('<button class="qrecent-h open" data-action="toggle-queue-events">');
+  expect(opened.match(/<div class="ev">/g)?.length).toBe(9);
+  expect(opened).toContain('<span class="ts">11:01:05</span><span class="tname">queue:parked</span>');
+});
+
+test('a failed item shows its requeue and drop commands, and a queue with no items says it is empty', () => {
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  const failed = panel.items.map((item) => (item.state === 'parked' ? { ...item, state: 'failed' as const } : item));
+  const markup = renderQueue({ ...panel, items: failed }, undefined, initialUi(0), NOW).value;
+  expect(markup).toContain('<div class="qsec grp-t">failed · 1</div>');
+  expect(markup).toContain('<code>sail queue requeue ticket-to-pr ticket:FAKE-6</code>');
+  expect(renderQueue({ ...panel, items: [] }, undefined, initialUi(0), NOW).value).toContain(
+    '<div class="qempty">the queue is empty</div>',
+  );
 });
 
 test('each queue event is one line, and a type with no line of its own shows its type alone', () => {

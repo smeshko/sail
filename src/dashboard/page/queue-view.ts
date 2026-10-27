@@ -1,8 +1,9 @@
 // The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
-// run, with its polling, its items by state, and its recent events from the queue's own stream. A parked item shows
-// the commands that requeue or drop it, to copy, and an item whose run the rail lists opens it: the dashboard changes
-// nothing itself.
+// run, with its polling, a box of items for each state that has any, and its recent events from the queue's own
+// stream, folded until the person opens them. A failed or parked item shows the commands that requeue or drop it, to
+// copy, and an item whose run the rail lists opens it: the dashboard changes nothing itself.
 import type { QueueEvent } from '../../events/types';
+import type { QueueItemState } from '../../watch/queue-store';
 import { parkedCommands } from './commands';
 import { ago, clock } from './format';
 import { html, type SafeHtml, safeHref } from './html';
@@ -60,11 +61,33 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
     item.runId === undefined
       ? ''
       : item.runListed
-        ? html`<button class="btn" data-action="select-run" data-repo="${panel.repo}" data-run="${item.runId}">${item.runId}</button>`
+        ? html`<button class="run-link" data-action="select-run" data-repo="${panel.repo}" data-run="${item.runId}" title="open ${item.runId}">${item.runId} ›</button>`
         : html`<span class="c-run">${item.runId}</span>`;
-  return html`<div class="qrow2 ${item.state}"><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${item.state} · ${plural(item.attempts, 'attempt')}${
+  return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${item.state} · ${plural(item.attempts, 'attempt')}${
     item.retryAt === undefined ? '' : html` · retry at ${clock(item.retryAt, ui.tz)}`
-  }${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span>${item.state === 'parked' ? commands(panel, item) : ''}</span>${run}</div>`;
+  }${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span>${
+    item.state === 'parked' || item.state === 'failed' ? commands(panel, item) : ''
+  }</span>${run}</div>`;
+}
+
+/** What each state is called in the view: what it means to the person, rather than the queue file's word. */
+const LABELS: Record<QueueItemState, string> = {
+  queued: 'waiting',
+  dispatched: 'running',
+  failed: 'failed',
+  parked: 'parked',
+  done: 'done',
+};
+
+/** The queue's recent events, folded under a toggle until opened. */
+function recentEvents(stream: QueueStream | undefined, ui: UiState): SafeHtml {
+  const recent = stream?.recent ?? [];
+  const toggle = html`<button class="qrecent-h${ui.queueEvents ? ' open' : ''}" data-action="toggle-queue-events"><span class="caret">›</span>recent queue events<span class="n">${recent.length}</span></button>`;
+  if (!ui.queueEvents) return toggle;
+  return html`${toggle}<div class="qrecent">${recent.map(
+    (event) =>
+      html`<div class="ev"><span class="ts">${clock(event.ts, ui.tz)}</span><span class="tname">${event.type}</span><span class="tdet">${queueEventLine(event)}</span></div>`,
+  )}</div>`;
 }
 
 function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiState, now: number): SafeHtml {
@@ -78,12 +101,17 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
       : html`<span class="dt">label ${polling.label} · polled ${ago(polling.lastPolledAt, now)} · ${polling.failures} failed polls</span>`
   }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}</div>
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
-<div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${state} <span class="n">${panel.counts[state]}</span></span>`)}</div>
-<div class="qlist">${panel.items.length === 0 ? html`<div class="qempty">the queue is empty</div>` : panel.items.map((item) => itemRow(panel, item, ui))}</div>
-<div class="qrecent">${(stream?.recent ?? []).map(
-    (event) =>
-      html`<div class="ev"><span class="ts">${clock(event.ts, ui.tz)}</span><span class="tname">${event.type}</span><span class="tdet">${queueEventLine(event)}</span></div>`,
-  )}</div>
+<div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>
+${
+  panel.items.length === 0
+    ? html`<div class="qempty">the queue is empty</div>`
+    : QUEUE_STATES.map((state) => {
+        const items = panel.items.filter((item) => item.state === state);
+        if (items.length === 0) return '';
+        return html`<div class="qsec grp-t">${LABELS[state]} · ${items.length}</div><div class="qbox">${items.map((item) => itemRow(panel, item, ui))}</div>`;
+      })
+}
+${recentEvents(stream, ui)}
 </section>`;
 }
 
