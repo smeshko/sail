@@ -411,6 +411,10 @@ _Avoid_: tool use, action, request, invocation
 A tool call refused for falling outside the step's permissions, recorded with the permissions that refused it. The agent carries on.
 _Avoid_: block, violation, rejection
 
+**Exclusive slot**:
+A script step's machine-wide hold on a named slot, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/`. One step on the machine holds a name at a time; a step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
+_Avoid_: lock, mutex, semaphore
+
 **Budget**:
 The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
 _Avoid_: limit, quota, cap, allowance
