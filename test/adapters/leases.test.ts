@@ -187,19 +187,24 @@ test.each([
   expect(messageOf(error)).toContain('EISDIR');
 });
 
-test.skipIf(asRoot)('taking a free branch in a read-only lease directory is unavailable, naming EACCES', () => {
-  const dir = tempDir();
-  chmodSync(dir, 0o555);
-  try {
-    const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
-    expect(portFailure(error)).toEqual(unavailable);
-    expect(messageOf(error)).toContain(leaseFile(dir, REMOTE, BRANCH));
-    expect(messageOf(error)).toContain('EACCES');
-  } finally {
-    chmodSync(dir, 0o755);
-  }
-  expect(readdirSync(dir)).toEqual([]);
-});
+test.skipIf(asRoot)(
+  'taking a free branch in a read-only lease directory is unavailable, naming the temp file and EACCES',
+  () => {
+    const dir = tempDir();
+    chmodSync(dir, 0o555);
+    try {
+      const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
+      expect(portFailure(error)).toEqual(unavailable);
+      expect(messageOf(error)).toStartWith(
+        `workspace.lease: ${leaseFile(dir, REMOTE, BRANCH)}.r1.${process.pid}.tmp: `,
+      );
+      expect(messageOf(error)).toContain('EACCES');
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    expect(readdirSync(dir)).toEqual([]);
+  },
+);
 
 test('a lease whose temp-file write fails half way is unavailable, and leaves nothing in the lease directory', () => {
   const dir = tempDir();
