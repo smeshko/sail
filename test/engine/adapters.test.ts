@@ -495,6 +495,50 @@ test("requires gets the entry's options and the environment, so one adapter can 
   expect(direct).toEqual(issue('harness', 'needs A_TOKEN, which is not set'));
 });
 
+test('a harness requires() gets the model ids the aliases route to it, and another port gets none', async () => {
+  const seen: Record<string, unknown> = {};
+  const recording = (name: string) => ({
+    create: () => stubAdapter('harness'),
+    requires: (_options: unknown, _env: Env, models: unknown) => {
+      seen[name] = models;
+      return [];
+    },
+  });
+  const { sailDir } = repo();
+  const config = configOf({ harness: { use: 'main' }, ticketSource: { use: 'tickets' } });
+  const resolved = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir,
+      config: {
+        ...config,
+        adapters: { ...config.adapters, harnesses: { other: { use: 'second' } } },
+        models: {
+          default: 'groq/llama-3.3-70b-versatile',
+          deep: { harness: 'other', model: 'openai/gpt-5' },
+          same: 'groq/llama-3.3-70b-versatile',
+        },
+      },
+      builtins: {
+        ...BUILTINS,
+        ...builtin('main', 'harness', recording('main')),
+        ...builtin('second', 'harness', recording('second')),
+        ...builtin('tickets', 'ticketSource', {
+          create: () => stubAdapter('ticketSource'),
+          requires: (_options: unknown, _env: Env, models: unknown) => {
+            seen.tickets = models;
+            return [];
+          },
+        }),
+      },
+      env: {},
+    }),
+  );
+  expect(seen).toEqual({ main: ['groq/llama-3.3-70b-versatile'], tickets: [] });
+  const named = await resolved.harnesses(['other']);
+  if ('issues' in named) throw new Error(JSON.stringify(named.issues));
+  expect(seen.second).toEqual(['openai/gpt-5']);
+});
+
 test('with the variable set it resolves, and its value is in no entry', async () => {
   const resolved = resolvedOrThrow(
     await withHarness(harness({ requires: () => ['A_TOKEN'] }), { A_TOKEN: 's3cr3t-token-value' }),

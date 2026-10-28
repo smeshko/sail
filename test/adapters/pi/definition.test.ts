@@ -7,17 +7,28 @@ import { caught } from '../../helpers/ports';
 
 test('requires() names the provider’s key variable, one of two for anthropic, and nothing for a keyless provider', () => {
   expect({
-    default: requires({}, {}),
-    groq: requires({ provider: 'groq' }, {}),
-    anthropic: requires({ provider: 'anthropic' }, {}),
-    ollama: requires({ provider: 'ollama' }, {}),
-    ollamaWithBogus: requires({ provider: 'ollama', bogus: true }, {}),
+    default: requires({}, {}, []),
+    groq: requires({ provider: 'groq' }, {}, []),
+    anthropic: requires({ provider: 'anthropic' }, {}, []),
+    ollama: requires({ provider: 'ollama' }, {}, []),
+    ollamaWithBogus: requires({ provider: 'ollama', bogus: true }, {}, []),
   }).toEqual({
-    default: [['ANTHROPIC_API_KEY', 'ANTHROPIC_OAUTH_TOKEN']],
+    default: [],
     groq: ['GROQ_API_KEY'],
     anthropic: [['ANTHROPIC_API_KEY', 'ANTHROPIC_OAUTH_TOKEN']],
     ollama: [],
     ollamaWithBogus: [],
+  });
+});
+
+test('requires() names the key of each provider the models routed to it use, beside the provider option’s', () => {
+  const groq = 'groq/llama-3.3-70b-versatile';
+  expect({
+    models: requires({}, {}, [groq, 'openai/gpt-5', 'groq/other', 'ollama/llama3', 'no-slash']),
+    disagreeing: requires({ provider: 'anthropic' }, {}, [groq]),
+  }).toEqual({
+    models: ['GROQ_API_KEY', 'OPENAI_API_KEY'],
+    disagreeing: [['ANTHROPIC_API_KEY', 'ANTHROPIC_OAUTH_TOKEN'], 'GROQ_API_KEY'],
   });
 });
 

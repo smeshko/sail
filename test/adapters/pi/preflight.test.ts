@@ -5,7 +5,7 @@ import { copyFixture, edit } from '../../helpers/fixture';
 import { runCaptured } from '../../helpers/run-captured';
 import { withTempRepo } from '../../helpers/temp-repo';
 
-async function dryRun(harness: string) {
+async function dryRun(harness: string, set: Record<string, string> = {}) {
   return withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     edit(sail, 'project.yaml', 'harness: { use: fake }', `harness: ${harness}`);
@@ -13,6 +13,7 @@ async function dryRun(harness: string) {
     edit(sail, 'project.yaml', 'deep: claude-opus-5-5', 'deep: groq/llama-3.3-70b-versatile');
     const env = { ...repo.env };
     delete env.GROQ_API_KEY;
+    Object.assign(env, set);
     const ran = await runCaptured(['FAKE-1', '--dry-run'], repo.dir, { env });
     return { code: ran.code, output: ran.stdout + ran.stderr };
   });
@@ -24,8 +25,14 @@ test('with provider groq and no GROQ_API_KEY, preflight exits 3 naming the varia
   expect(ran.output).toContain('needs GROQ_API_KEY, which is not set');
 });
 
+test("with no provider option, preflight needs the key of the models' provider, not Anthropic's", async () => {
+  const ran = await dryRun('{ use: pi }', { ANTHROPIC_API_KEY: 'sk-ant-test' });
+  expect(ran.code).toBe(3);
+  expect(ran.output).toContain('needs GROQ_API_KEY, which is not set');
+});
+
 test('an unknown option on the pi harness exits 3 naming it', async () => {
-  const ran = await dryRun('{ use: pi, provider: ollama, bogus: true }');
+  const ran = await dryRun('{ use: pi, provider: ollama, bogus: true }', { GROQ_API_KEY: 'gsk-test' });
   expect(ran.code).toBe(3);
   expect(ran.output).toContain('pi harness: option bogus');
 });

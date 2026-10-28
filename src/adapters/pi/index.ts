@@ -1,6 +1,6 @@
 // The built-in pi adapter: the Harness over pi's coding-agent SDK, whose providers include non-Anthropic and local
-// models. It takes one option, `provider` (default `anthropic`), which preflight needs: `requires()` can't see the
-// `models:` it is run with, and names the variable that provider's credential is read from.
+// models. Preflight needs the key of each provider the `provider/model` ids the config routes to it use. It takes one
+// option, `provider`, whose key preflight needs as well.
 import { z } from 'zod';
 import type { AdapterDefinition, AdapterOptions, Env } from '../../ports/adapter';
 import type { Harness } from '../../ports/harness';
@@ -14,12 +14,18 @@ export const PI_VERSION = '0.73.1';
 
 const Options = z.strictObject({ provider: z.string().min(1).optional() });
 
-/** The environment variables the provider needs: one of its key names, and nothing for a keyless provider. */
-export function requires(options: AdapterOptions, _env: Env): (string | string[])[] {
-  const provider = typeof options.provider === 'string' && options.provider !== '' ? options.provider : 'anthropic';
-  const names = keyNames(provider);
-  if (names.length === 0) return [];
-  return names.length === 1 ? [...names] : [[...names]];
+/**
+ * The environment variables the providers need: one of each one's key names, and nothing for a keyless provider. The
+ * providers are the `provider` option's and those of `models`, the model ids routed to this harness.
+ */
+export function requires(options: AdapterOptions, _env: Env, models: readonly string[] = []): (string | string[])[] {
+  const option = typeof options.provider === 'string' && options.provider !== '' ? [options.provider] : [];
+  const routed = models.flatMap((model) => (model.indexOf('/') > 0 ? [model.slice(0, model.indexOf('/'))] : []));
+  return [...new Set([...option, ...routed])].flatMap((provider): (string | string[])[] => {
+    const names = keyNames(provider);
+    if (names.length === 0) return [];
+    return names.length === 1 ? [...names] : [[...names]];
+  });
 }
 
 export const piAdapters: { harness: AdapterDefinition<Harness> } = {
