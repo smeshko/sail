@@ -560,7 +560,7 @@ The watcher taking the next queued source and starting an ordinary run, only whi
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:
-The live, read-only view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls nothing; the CLI does (`sail watch`, `sail unwatch`, `sail queue …`, `sail stop`).
+The live view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. Its one control is the ▲ and ▼ on a waiting queue item, which posts a move to the local server; the server only drops a command file for the watcher and changes no queue itself, and a refusal is shown beside the queue's header. Everything else is the CLI's (`sail watch`, `sail unwatch`, `sail queue …`, `sail stop`).
 _Avoid_: UI, console, monitor, board
 
 **Stage card**:

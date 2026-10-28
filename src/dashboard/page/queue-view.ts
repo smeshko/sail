@@ -1,8 +1,9 @@
 // The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
 // its recent events from the queue's own stream, folded until the person opens them. A failed or parked item shows the
-// commands that requeue or drop it, to copy, and an item whose run the rail lists opens it: the dashboard changes
-// nothing itself.
+// commands that requeue or drop it, to copy, and an item whose run the rail lists opens it. A waiting item shows its
+// priority and has ▲ and ▼ buttons to move it before or after its waiting neighbour: the dashboard's first control,
+// which asks the watcher and changes nothing itself. A refused move shows its reason beside the header.
 import type { QueueEvent } from '../../events/types';
 import type { QueueItemState } from '../../watch/queue-store';
 import { parkedCommands } from './commands';
@@ -60,6 +61,20 @@ function commands(panel: QueuePanel, item: PanelItem): SafeHtml {
   )}</span>`;
 }
 
+/** A waiting row's ▲ or ▼: `target` is the waiting neighbour the item moves before or after. */
+function moveButton(panel: QueuePanel, item: PanelItem, dir: 'up' | 'down', target: PanelItem): SafeHtml {
+  return html`<button class="btn mv" data-action="move-item" data-dir="${dir}" data-repo="${panel.repo}" data-workflow="${panel.workflow}" data-key="${item.dedupKey}" data-target="${target.dedupKey}" title="move ${dir === 'up' ? 'up, before' : 'down, after'} ${target.dedupKey}">${dir === 'up' ? '▲' : '▼'}</button>`;
+}
+
+function moveButtons(panel: QueuePanel, item: PanelItem): SafeHtml | '' {
+  if (item.state !== 'queued') return '';
+  const waiting = panel.items.filter((each) => each.state === 'queued');
+  const at = waiting.indexOf(item);
+  const above = waiting[at - 1];
+  const below = waiting[at + 1];
+  return html`<span class="mvs">${above === undefined ? '' : moveButton(panel, item, 'up', above)}${below === undefined ? '' : moveButton(panel, item, 'down', below)}</span>`;
+}
+
 function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
   const href = safeHref(item.url);
   const title =
@@ -73,10 +88,12 @@ function itemRow(panel: QueuePanel, item: PanelItem, ui: UiState): SafeHtml {
         ? html`<button class="run-link" data-action="select-run" data-repo="${panel.repo}" data-run="${item.runId}" title="open ${item.runId}">${item.runId} ›</button>`
         : html`<span class="c-run">${item.runId}</span>`;
   return html`<div class="qrow2${item.state === 'done' ? ' done' : ''}"><span class="c-dot"><i class="${item.state}"></i></span><span class="c-ref">${item.dedupKey}</span><span class="c-main">${title}<span class="c-sub">${item.state} · ${plural(item.attempts, 'attempt')}${
+    item.priority === undefined || item.priority === 'none' ? '' : ` · priority ${item.priority}`
+  }${item.moved === true ? ' · moved' : ''}${
     item.retryAt === undefined ? '' : html` · retry at ${clock(item.retryAt, ui.tz)}`
   }${item.reason === undefined ? '' : html` · <span class="why">${item.reason}</span>`}</span>${
     item.state === 'parked' || item.state === 'failed' ? commands(panel, item) : ''
-  }</span>${run}</div>`;
+  }</span>${moveButtons(panel, item)}${run}</div>`;
 }
 
 /** What each state is called in the view: what it means to the person, rather than the queue file's word. */
@@ -111,7 +128,7 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
       : html`<span class="dt">label ${polling.label} · polled ${ago(polling.lastPolledAt, now)} · ${polling.failures} failed polls</span>`
   }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
     held === undefined ? '' : html`<span class="warnchip">held until ${clock(held.until, ui.tz)}: ${held.reason}</span>`
-  }</div>
+  }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}</div>
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 <div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>
 ${

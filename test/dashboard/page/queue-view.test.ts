@@ -166,3 +166,77 @@ test('a held queue shows a held until chip with its reason, and queue:held and q
     'ticket:FAKE-7 moved after ticket:FAKE-6: moved by hand',
   ]);
 });
+
+/** beta's panel with three waiting items, the first urgent and the last moved by hand, and the other states as they are. */
+function waiting() {
+  const [panel] = queuePanels(index(m.registryDir));
+  const queued = panel?.items.find((item) => item.state === 'queued');
+  if (panel === undefined || queued === undefined) throw new Error('beta has no waiting item');
+  const copy = (key: string, fields: Record<string, unknown> = {}) => ({
+    ...queued,
+    priority: undefined,
+    dedupKey: `ticket:${key}`,
+    ...fields,
+  });
+  const items = [
+    ...panel.items.filter((item) => item.state !== 'queued'),
+    copy('FAKE-5', { priority: 'urgent' }),
+    copy('FAKE-7'),
+    copy('FAKE-8', { moved: true }),
+  ];
+  return { ...panel, items, counts: { ...panel.counts, queued: 3 } };
+}
+
+/** The rows of the waiting box, each as its key and the buttons it has. */
+function waitingRows(markup: string) {
+  return [...markup.matchAll(/<div class="qrow2[^"]*">((?:(?!<\/div>).)*)<\/div>/gs)]
+    .filter(([, row]) => row?.includes('data-dir=') || row?.includes('>queued ·'))
+    .map(([, row]) => ({
+      key: /class="c-ref">([^<]+)</.exec(row ?? '')?.[1],
+      buttons: [
+        ...(row ?? '').matchAll(
+          /data-dir="(\w+)" data-repo="beta" data-workflow="ticket-to-pr" data-key="([^"]+)" data-target="([^"]+)"/g,
+        ),
+      ].map(([, dir, key, target]) => `${dir} ${key} -> ${target}`),
+    }));
+}
+
+test('a waiting item shows priority <name> unless it is none, and moved once moved by hand', () => {
+  const markup = renderQueue(waiting(), undefined, initialUi(0), NOW).value;
+  expect(
+    [...markup.matchAll(/<span class="c-ref">(ticket:FAKE-[578])<\/span>.*?<span class="c-sub">([^<]*)</gs)].map(
+      ([, key, sub]) => `${key}: ${sub}`,
+    ),
+  ).toEqual([
+    'ticket:FAKE-5: queued · 0 attempts · priority urgent',
+    'ticket:FAKE-7: queued · 0 attempts',
+    'ticket:FAKE-8: queued · 0 attempts · moved',
+  ]);
+});
+
+test('the first waiting row has a down button only, the last an up button only, a middle one both, and no other state has any', () => {
+  const markup = renderQueue(waiting(), undefined, initialUi(0), NOW).value;
+  expect(waitingRows(markup).filter((row) => row.buttons.length > 0)).toEqual([
+    { key: 'ticket:FAKE-5', buttons: ['down ticket:FAKE-5 -> ticket:FAKE-7'] },
+    { key: 'ticket:FAKE-7', buttons: ['up ticket:FAKE-7 -> ticket:FAKE-5', 'down ticket:FAKE-7 -> ticket:FAKE-8'] },
+    { key: 'ticket:FAKE-8', buttons: ['up ticket:FAKE-8 -> ticket:FAKE-7'] },
+  ]);
+  expect(markup.match(/data-action="move-item"/g)).toHaveLength(4);
+  expect(markup).toContain('data-action="move-item" data-dir="down"');
+  const [panel] = queuePanels(index(m.registryDir));
+  if (panel === undefined) throw new Error('beta has no queue');
+  expect(renderQueue(panel, undefined, initialUi(0), NOW).value).not.toContain('move-item');
+});
+
+test("the panel's notice is drawn as a warn chip beside its header, and not when there is none", () => {
+  const panel = waiting();
+  const plain = renderQueue(panel, undefined, initialUi(0), NOW).value;
+  const noticed = renderQueue(
+    panel,
+    undefined,
+    { ...initialUi(0), queueNotice: 'no watcher is running <now>' },
+    NOW,
+  ).value;
+  expect(plain).not.toContain('no watcher is running');
+  expect(noticed).toContain('<span class="warnchip">no watcher is running &lt;now&gt;</span>');
+});

@@ -18,7 +18,8 @@
       "url": "fake://tickets/FAKE-5",
       "state": "queued",
       "attempts": 0,
-      "addedAt": "2026-09-24T10:55:00.000Z"
+      "addedAt": "2026-09-24T10:55:00.000Z",
+      "priority": "urgent"
     },
     {
       "dedupKey": "ticket:FAKE-3",

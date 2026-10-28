@@ -23,7 +23,9 @@
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
 //   by one flush at most every 100 ms.
 //
-// It controls nothing: the only actions change what is shown, and `copy` puts a CLI command on the clipboard.
+// It controls one thing: `move-item` asks the dashboard's server to have the watcher move a waiting queue item, and a
+// refusal is shown in the queue view. The other actions change what is shown, and `copy` puts a CLI command on the
+// clipboard.
 import type { QueueEvent, SailEvent } from '../../events/types';
 import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
@@ -90,6 +92,18 @@ const enc = encodeURIComponent;
 
 /** The keys that move the card cursor, and by how much. */
 const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1, k: -1, ArrowUp: -1, ArrowLeft: -1 };
+
+/** Why a move was refused: the `error` its answer carries, else its status. */
+function refusal(status: number, body: string): string {
+  if (status === 0) return 'the move could not be sent: the dashboard did not answer';
+  try {
+    const { error } = JSON.parse(body) as { error?: unknown };
+    if (typeof error === 'string' && error !== '') return error;
+  } catch {
+    // An answer that isn't JSON is told by its status.
+  }
+  return `the move was refused (${status})`;
+}
 
 function parse(text: string): Message | undefined {
   try {
@@ -596,6 +610,7 @@ export function boot(host: PageHost): Page {
     'select-queue': (data) => {
       if (data.queue === undefined) return;
       ui.queue = data.queue;
+      delete ui.queueNotice;
       mark('rail', 'main');
     },
     'select-card': (data) => selectCard(data.key, undefined, true),
@@ -661,6 +676,18 @@ export function boot(host: PageHost): Page {
       const group = data.group ?? '';
       ui.closed = ui.closed.includes(group) ? ui.closed.filter((closed) => closed !== group) : [...ui.closed, group];
       mark('rail');
+    },
+    'move-item': (data) => {
+      const { dir, repo, workflow, key, target } = data;
+      if (repo === undefined || workflow === undefined || key === undefined || target === undefined) return;
+      const path = `/api/repos/${enc(repo)}/queues/${enc(workflow)}/move`;
+      const body = dir === 'up' ? { dedupKey: key, before: target } : { dedupKey: key, after: target };
+      void host.post(path, body).then(({ status, body: answer }) => {
+        if (stopped) return;
+        if (status >= 200 && status < 300) delete ui.queueNotice;
+        else ui.queueNotice = refusal(status, answer);
+        mark('main');
+      });
     },
     'toggle-queue-events': () => {
       ui.queueEvents = !ui.queueEvents;

@@ -79,7 +79,7 @@ function fakeWindow(
 ) {
   const listeners: Record<string, ((event: EventLike) => void)[]> = {};
   const elements: Record<string, ReturnType<typeof element>> = { rail: element(), body: element() };
-  const fetched: { url: string; headers: Record<string, string> }[] = [];
+  const fetched: { url: string; headers: Record<string, string>; method?: string; body?: string }[] = [];
   const sockets: FakeSocket[] = [];
   const timers: number[] = [];
   const cleared: number[] = [];
@@ -99,7 +99,12 @@ function fakeWindow(
     },
     location: { host: '127.0.0.1:4100', search: options.search ?? '' },
     async fetch(url, init) {
-      fetched.push({ url, headers: init.headers });
+      fetched.push({
+        url,
+        headers: init.headers,
+        ...(init.method === undefined ? {} : { method: init.method }),
+        ...(init.body === undefined ? {} : { body: init.body }),
+      });
       if (options.fetch === 'fails') throw new Error('offline');
       return { status: 200, text: async () => `body of ${url}` };
     },
@@ -321,4 +326,19 @@ test('render passes on no offset to a box that is gone, and renders a region wit
 
   host.render('rail', '<b>alpha</b>');
   expect(fake.elements.rail?.innerHTML).toBe('<b>alpha</b>');
+});
+
+test('post sends the method, the client header, a JSON content type and the JSON body, and gives the status and body, or status 0 when the request fails', async () => {
+  const fake = fakeWindow();
+  const answer = await browserHost(fake.win).post('/api/repos/alpha/queues/a/move', { dedupKey: 'ticket:FAKE-1' });
+  expect(answer).toEqual({ status: 200, body: 'body of /api/repos/alpha/queues/a/move' });
+  expect(fake.fetched).toEqual([
+    {
+      url: '/api/repos/alpha/queues/a/move',
+      headers: { 'X-Sail-Dashboard': '1', 'Content-Type': 'application/json' },
+      method: 'POST',
+      body: '{"dedupKey":"ticket:FAKE-1"}',
+    },
+  ]);
+  expect(await browserHost(fakeWindow({ fetch: 'fails' }).win).post('/x', {})).toEqual({ status: 0, body: '' });
 });

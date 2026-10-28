@@ -43,6 +43,8 @@ export interface UiState {
   folded: string[];
   /** Whether the queue view shows its recent events. */
   queueEvents: boolean;
+  /** Why the last move was refused, shown in the queue view until the next move succeeds. */
+  queueNotice?: string;
   theme: Theme;
   inspector: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */

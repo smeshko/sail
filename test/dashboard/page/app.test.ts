@@ -2,7 +2,7 @@
 // hand, and REST reads answered from the seeded fixtures' own files through the dashboard's file module. Every
 // assertion is on what the shell rendered into a region, or on the sockets and reads it asked the host for.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
 import { boot, FILTER_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
@@ -79,6 +79,13 @@ class FakeHost implements PageHost {
       this.reads.push(read);
       if (!this.hold) read.resolve();
     });
+  }
+  /** The POSTs made, and what the dashboard answers them. */
+  posts: { path: string; body: unknown }[] = [];
+  postAnswer: { status: number; body: string } = { status: 202, body: '{"file":"x"}' };
+  async post(path: string, body: unknown) {
+    this.posts.push({ path, body });
+    return this.postAnswer;
   }
   /** What the dashboard would answer for a call's result or log: the file, or 404. */
   private answer(path: string): { status: number; body: string } {
@@ -1055,4 +1062,44 @@ test('a repository or workflow closes and opens again from its header, and openi
   host.advance(100);
   expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
   expect(host.sockets.filter((socket) => socket.query.startsWith('run='))).toHaveLength(1);
+});
+
+test("a click on a waiting row's down button posts the move to the queue's move route, a 409 shows its error as the notice, and a 202 clears it", async () => {
+  const file = join(queueDirOf(m), 'queue.json');
+  const queue = JSON.parse(readFileSync(file, 'utf8'));
+  const waiting = queue.items.find((item: { state: string }) => item.state === 'queued');
+  queue.items.push({ ...waiting, dedupKey: 'ticket:FAKE-7', source: { kind: 'ticket', ticketKey: 'FAKE-7' } });
+  writeFileSync(file, JSON.stringify(queue));
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.advance(100);
+  const row = { repo: 'beta', workflow: QUEUE_WORKFLOW };
+  host.postAnswer = { status: 409, body: JSON.stringify({ error: "no watcher is running for 'beta'" }) };
+  host.click({ action: 'move-item', dir: 'down', ...row, key: 'ticket:FAKE-5', target: 'ticket:FAKE-7' });
+  await settle();
+  host.advance(100);
+  const refused = host.regions.main;
+  host.postAnswer = { status: 202, body: '{"file":"x"}' };
+  host.click({ action: 'move-item', dir: 'up', ...row, key: 'ticket:FAKE-7', target: 'ticket:FAKE-5' });
+  await settle();
+  host.advance(100);
+  expect({
+    posts: host.posts,
+    refused: refused?.includes('<span class="warnchip">no watcher is running for &#39;beta&#39;</span>'),
+    cleared: [page.ui.queueNotice, host.regions.main?.includes('no watcher is running')],
+  }).toEqual({
+    posts: [
+      {
+        path: `/api/repos/beta/queues/${QUEUE_WORKFLOW}/move`,
+        body: { dedupKey: 'ticket:FAKE-5', after: 'ticket:FAKE-7' },
+      },
+      {
+        path: `/api/repos/beta/queues/${QUEUE_WORKFLOW}/move`,
+        body: { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' },
+      },
+    ],
+    refused: true,
+    cleared: [undefined, false],
+  });
 });
