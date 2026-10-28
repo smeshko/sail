@@ -24,7 +24,7 @@ export const implement = agent('implement', {
     feedback: value(PassFeedback).optional(),
   },
   output: Implemented,
-  model: 'default',
+  model: 'terra',
   permissions: {
     read: ['**'],
     write: [
