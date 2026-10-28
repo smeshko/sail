@@ -461,6 +461,16 @@ test('sail queue move a FAKE-3 --before FAKE-2, with the watcher live, puts the 
   });
 }, 30_000);
 
+test('the usage lists sail queue move with its description in the same column as the other commands (review R10)', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  const column = (start: string, description: string) =>
+    stdout
+      .split('\n')
+      .find((line) => line.startsWith(`  ${start}`))
+      ?.indexOf(description);
+  expect(column('sail queue move ', 'Move a queued item')).toBe(column('sail queue ls|poll ', 'List a watched'));
+});
+
 test('sail queue move a FAKE-2 --after FAKE-3 puts the item directly after its target in the queue file (review R6)', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));

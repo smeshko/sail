@@ -60,7 +60,10 @@ function queueOf(runs: string, workflow: string): QueueFile | undefined {
   return queue;
 }
 
-/** One item: `<state> <dedup key> <title>`, then what applies of its run, attempts, retry time, `forced` and reason. */
+/**
+ * One item: `<state> <dedup key> <title>`, then what applies of its priority (unless none), run, attempts, retry time,
+ * `forced`, `moved` and reason.
+ */
 function itemLine(item: QueueItem): string {
   const details = [
     item.priority === undefined || item.priority === 'none' ? undefined : `priority ${item.priority}`,
