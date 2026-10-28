@@ -8,7 +8,6 @@ import { createPiHarness } from './harness';
 import { keyNames } from './providers';
 
 export { createPiHarness } from './harness';
-export { PROVIDER_KEYS } from './providers';
 
 /** The SDK's version, which `package.json` pins exactly: the SDK exports no way to read it. */
 export const PI_VERSION = '0.73.1';
