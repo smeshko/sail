@@ -14,9 +14,12 @@
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { isAlive } from '../engine/process';
 import { readStatus } from '../engine/run-dir';
 import { PortError } from '../ports/errors';
 import { Lease, LeaseHolder, type LeaseResult, type Released } from '../ports/types';
+
+export { isAlive };
 
 /** Where leases live unless a caller names a directory. Computed per call, so importing this reads nothing. */
 export function defaultLeasesDir(): string {
@@ -62,16 +65,6 @@ function readFile(file: string): Lease | undefined {
 /** The lease on `remote` and `branch`, or undefined when there is none. A file that isn't a lease, or one that can't be read, throws. */
 export function readLease(dir: string, remote: string, branch: string): Lease | undefined {
   return readFile(leaseFile(dir, remote, branch));
-}
-
-/** Whether `pid` names a live process: one this process may not signal is alive all the same. */
-export function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
 }
 
 /** Whether `lease`'s run no longer holds it: its run has ended, or it isn't suspended and its pid is dead. */

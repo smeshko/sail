@@ -8,7 +8,7 @@ import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { isAlive } from '../adapters/leases';
+import { isAlive } from './process';
 
 export const SlotHolder = z.object({
   runId: z.string().min(1),
