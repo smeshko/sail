@@ -95,11 +95,15 @@ async function running(repo: TempRepo, tickets: SeedTicket[], extra?: (sail: str
   }
   const queue = (argv: string[], force = false) => {
     const other = io(repo.dir, world.env);
+    const values: Record<string, boolean | string> = force ? { force: true } : {};
+    const positionals: string[] = [];
+    for (let at = 0; at < argv.length; at += 1) {
+      const arg = argv[at] ?? '';
+      if (arg === '--before' || arg === '--after') values[arg.slice(2)] = argv[++at] ?? '';
+      else positionals.push(arg);
+    }
     const done = Promise.resolve(
-      queueCommand({ isAlive, pollMs: 5, applyTimeoutMs: 5000 })(
-        { values: force ? { force: true } : {}, positionals: argv },
-        other.io,
-      ),
+      queueCommand({ isAlive, pollMs: 5, applyTimeoutMs: 5000 })({ values, positionals }, other.io),
     );
     return { done, printed: other.printed };
   };
@@ -192,8 +196,8 @@ test('sail queue with no operation, an unknown one, no workflow, a workflow that
     for (const argv of cases) results.push(await runCaptured(argv, repo.dir, { env }));
     expect(results.map(({ code, stderr }) => ({ code, stderr }))).toEqual(
       [
-        'name an operation: ls, add, requeue, drop, poll',
-        "unknown operation 'list': the operations are ls, add, requeue, drop, poll",
+        'name an operation: ls, add, requeue, drop, poll, move',
+        "unknown operation 'list': the operations are ls, add, requeue, drop, poll, move",
         'name the workflow: sail queue ls <workflow>',
         "'A/b' is not a workflow's name: sail queue ls <workflow>",
         'name the item: sail queue requeue <workflow> <item>',
@@ -434,5 +438,96 @@ test('sail queue ls a prints dispatch held until <time> on its first line while 
     expect(listed.stdout.split('\n')[0]).toBe(
       `a: label sail-a, last polled ${START}, paused: key expired, dispatch held until 2026-10-28T14:20:00.000Z`,
     );
+  });
+});
+
+test('sail queue move a FAKE-3 --before FAKE-2, with the watcher live, puts the item first among the queued, prints it as moved, and exits 0', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
+    await w.timers.advance(1000);
+    const moved = await w.applied(['move', 'a', 'FAKE-3', '--before', 'FAKE-2']);
+    const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8')).items;
+    const back = await w.applied(['move', 'a', 'ticket:FAKE-3', '--after', 'ticket:FAKE-2']);
+    expect({
+      moved,
+      items: items.map((item: Record<string, unknown>) => `${item.dedupKey} ${item.state}`),
+      back,
+    }).toEqual({
+      moved: { code: EXIT_OK, stdout: 'sail queue: queued ticket:FAKE-3 Ticket FAKE-3 · moved\n', stderr: '' },
+      items: ['ticket:FAKE-1 dispatched', 'ticket:FAKE-3 queued', 'ticket:FAKE-2 queued'],
+      back: { code: EXIT_OK, stdout: 'sail queue: queued ticket:FAKE-3 Ticket FAKE-3 · moved\n', stderr: '' },
+    });
+    await w.stop();
+  });
+}, 30_000);
+
+test('sail queue move is refused with exit 3 before any command is dropped: neither or both of --before and --after, either on another operation, an item or target not queued or unknown, or the item itself as target', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
+    await w.timers.advance(1000);
+    const cases: string[][] = [
+      ['move', 'a', 'FAKE-3'],
+      ['move', 'a', 'FAKE-3', '--before', 'FAKE-2', '--after', 'FAKE-2'],
+      ['drop', 'a', 'FAKE-3', '--before', 'FAKE-2'],
+      ['move', 'a', 'FAKE-1', '--before', 'FAKE-2'],
+      ['move', 'a', 'FAKE-3', '--after', 'FAKE-1'],
+      ['move', 'a', 'FAKE-3', '--after', 'FAKE-9'],
+      ['move', 'a', 'FAKE-3', '--after', 'ticket:FAKE-3'],
+    ];
+    const results = [];
+    for (const argv of cases) results.push(await w.refused(argv));
+    expect(results.map(({ code, stdout, stderr, inbox }) => ({ code, stdout, stderr, inbox }))).toEqual(
+      [
+        'name exactly one of --before and --after: sail queue move <workflow> <item> --before <item> | --after <item>',
+        'name exactly one of --before and --after: sail queue move <workflow> <item> --before <item> | --after <item>',
+        '--before and --after belong to sail queue move: sail queue drop <workflow> <item>',
+        'ticket:FAKE-1 is dispatched: only a queued item is moved',
+        'ticket:FAKE-1 is dispatched: only a queued item is moved',
+        "a's queue has no item FAKE-9",
+        "ticket:FAKE-3 can't be moved next to itself",
+      ].map((message) => ({ code: EXIT_REFUSED, stdout: '', stderr: `sail queue: ${message}\n`, inbox: [] })),
+    );
+    await w.stop();
+  });
+}, 30_000);
+
+test('with no watcher running, sail queue move exits 3 naming sail watch, and drops no command', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    const runs = join(repo.dir, '.sail-runs');
+    const path = writeQueue(runs);
+    const queue = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(
+      path,
+      `${JSON.stringify({ ...queue, items: [queue.items[0], { ...queue.items[0], dedupKey: 'ticket:FAKE-5' }] })}\n`,
+    );
+    const result = await runCaptured(['queue', 'move', 'a', 'FAKE-1', '--before', 'FAKE-5'], repo.dir, { env });
+    expect({ result, inbox: existsSync(commandsDir(runs)) }).toEqual({
+      result: {
+        code: EXIT_REFUSED,
+        stdout: '',
+        stderr: "sail queue: no watcher is running for 'stub' here: sail watch a first\n",
+      },
+      inbox: false,
+    });
+  });
+});
+
+test('sail queue ls a prints priority <name> for an item with one other than none, and moved for a moved item', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    const path = writeQueue(join(repo.dir, '.sail-runs'));
+    const queue = JSON.parse(readFileSync(path, 'utf8'));
+    const [first, ...rest] = queue.items;
+    const items = [
+      { ...first, priority: 'urgent', moved: true },
+      ...rest.map((item: object) => ({ ...item, priority: 'none' })),
+    ];
+    writeFileSync(path, `${JSON.stringify({ ...queue, items })}\n`);
+    const listed = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+    expect(listed.stdout.split('\n').slice(1, 3)).toEqual([
+      'queued ticket:FAKE-1 Add a greeting · priority urgent, forced, moved',
+      `dispatched ticket:FAKE-2 Add a farewell · run ${RUN}, 1 attempt`,
+    ]);
   });
 });

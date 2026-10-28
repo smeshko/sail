@@ -56,6 +56,7 @@ Usage:
   sail queue ls|poll <workflow>                              List a watched workflow's queue, or have its watcher poll it now
   sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
   sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher
+  sail queue move <workflow> <item> --before|--after <item>   Move a queued item through the watcher
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
   sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]
                                                              List the team's tickets by state and label, as JSON
@@ -254,7 +255,14 @@ const commands = new Map<string, CommandSpec>([
   ],
   ['watch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: watch }],
   ['unwatch', { options: {}, positionals: Number.POSITIVE_INFINITY, command: unwatch }],
-  ['queue', { options: { force: { type: 'boolean' } }, positionals: 3, command: queue }],
+  [
+    'queue',
+    {
+      options: { force: { type: 'boolean' }, before: { type: 'string' }, after: { type: 'string' } },
+      positionals: 3,
+      command: queue,
+    },
+  ],
   ['stop', { options: {}, positionals: 1, command: stop }],
   ['--help', bare(help)],
   ['-h', bare(help)],

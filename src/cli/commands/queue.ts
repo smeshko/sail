@@ -1,9 +1,12 @@
-// `sail queue ls|add|requeue|drop|poll <workflow> [<item>|<ticket>] [--force]`: a watched workflow's queue from the CLI
-// (DECISIONS D8, D9).
+// `sail queue ls|add|requeue|drop|poll|move <workflow> [<item>|<ticket>] [--force] [--before|--after <item>]`: a
+// watched workflow's queue from the CLI (DECISIONS D8, D9).
 //
 // - `ls` reads its queue file, with or without a watcher: the workflow's polling, then each item in queue order with its
-//   state, its dedup key, its title and what applies of its run, attempts, retry time, `forced` and reason.
-// - `add`, `requeue`, `drop` and `poll` change the queue only through the live watcher of this repository, and only for
+//   state, its dedup key, its title and what applies of its priority (unless none), run, attempts, retry time,
+//   `forced`, `moved` and reason.
+// - `move` puts a queued item directly before or after another queued one, exactly one of `--before` and `--after`;
+//   the two flags belong to it alone. It is refused unless both items are queued and different.
+// - `add`, `requeue`, `drop`, `poll` and `move` change the queue only through the live watcher of this repository, and only for
 //   a workflow in its set: the watcher alone writes its queue file. Each checks what it can first, so the refusal shows
 //   in this terminal: `add` the ticket as a start checks it, designated and in a pick-up state unless `--force`, and not already
 //   queued, for a workflow that polls tickets only; `requeue` an item that is parked or failed and whose last run has ended; `drop` an item that isn't
@@ -32,7 +35,7 @@ import { at, findProject, refuseAs } from './run-workflow';
 import { findWatcher, liveSet, taken, type WatchDeps } from './watch';
 
 const COMMAND = 'sail queue';
-const OPS = ['ls', 'add', 'requeue', 'drop', 'poll'] as const;
+const OPS = ['ls', 'add', 'requeue', 'drop', 'poll', 'move'] as const;
 type Op = (typeof OPS)[number];
 
 /** A workflow's name, as a folder under `.sail/workflows/` takes it. */
@@ -44,6 +47,7 @@ const USAGE: Record<Op, string> = {
   requeue: 'sail queue requeue <workflow> <item>',
   drop: 'sail queue drop <workflow> <item>',
   poll: 'sail queue poll <workflow>',
+  move: 'sail queue move <workflow> <item> --before <item> | --after <item>',
 };
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -58,10 +62,12 @@ function queueOf(runs: string, workflow: string): QueueFile | undefined {
 /** One item: `<state> <dedup key> <title>`, then what applies of its run, attempts, retry time, `forced` and reason. */
 function itemLine(item: QueueItem): string {
   const details = [
+    item.priority === undefined || item.priority === 'none' ? undefined : `priority ${item.priority}`,
     item.runId === undefined ? undefined : `run ${item.runId}`,
     item.attempts === 0 ? undefined : plural(item.attempts, 'attempt'),
     item.retryAt === undefined ? undefined : `retry at ${item.retryAt}`,
     item.forced === true ? 'forced' : undefined,
+    item.moved === true ? 'moved' : undefined,
     item.reason === undefined ? undefined : clean(item.reason),
   ].filter((detail) => detail !== undefined);
   const line = `${item.state} ${item.dedupKey} ${clean(item.title)}`;
@@ -105,8 +111,13 @@ function streamLines(runs: string, workflow: string): (Record<string, unknown> |
 }
 
 /** The event each change emits when the watcher applies it. */
-const APPLIED_AS = { add: 'queue:item_added', requeue: 'queue:requeued', drop: 'queue:dropped' } as const;
-const DONE_AS = { add: 'added', requeue: 'requeued', drop: 'dropped' } as const;
+const APPLIED_AS = {
+  add: 'queue:item_added',
+  requeue: 'queue:requeued',
+  drop: 'queue:dropped',
+  move: 'queue:moved',
+} as const;
+const DONE_AS = { add: 'added', requeue: 'requeued', drop: 'dropped', move: 'moved' } as const;
 
 /** How the run `runId` stands, `<status>[ <stop reason>]`, when it has not ended; undefined when it has, or has none. */
 function unended(runs: string, runId: string | undefined): string | undefined {
@@ -130,11 +141,24 @@ export function queueCommand(deps: WatchDeps = {}): Command {
     if (op === undefined) return refuse(`unknown operation '${given}': the operations are ${OPS.join(', ')}`);
     if (workflow === undefined) return refuse(`name the workflow: ${USAGE[op]}`);
     if (!WORKFLOW_NAME.test(workflow)) return refuse(`'${workflow}' is not a workflow's name: ${USAGE[op]}`);
-    const takesRef = op === 'add' || op === 'requeue' || op === 'drop';
+    const takesRef = op === 'add' || op === 'requeue' || op === 'drop' || op === 'move';
     if (takesRef && ref === undefined) return refuse(`name the ${op === 'add' ? 'ticket' : 'item'}: ${USAGE[op]}`);
     if (!takesRef && ref !== undefined) return refuse(`unknown argument '${ref}': ${USAGE[op]}`);
     const force = args.values.force === true;
     if (force && op !== 'add') return refuse(`--force belongs to sail queue add: ${USAGE[op]}`);
+    const { before, after: behind } = args.values;
+    const sides = [before, behind].filter((side) => side !== undefined);
+    if (op === 'move' ? sides.length !== 1 : sides.length > 0) {
+      return refuse(
+        op === 'move'
+          ? `name exactly one of --before and --after: ${USAGE.move}`
+          : `--before and --after belong to sail queue move: ${USAGE[op]}`,
+      );
+    }
+    const side = typeof before === 'string' ? before : behind;
+    if (op === 'move' && (typeof side !== 'string' || side === '')) {
+      return refuse(`name the item to move it next to: ${USAGE.move}`);
+    }
 
     const project = await findProject(io, COMMAND, { ports: op === 'add' ? ['ticketSource'] : [] });
     if (typeof project === 'number') return project;
@@ -186,7 +210,22 @@ export function queueCommand(deps: WatchDeps = {}): Command {
           );
         }
       }
-      command = { op, workflow, dedupKey: key };
+      if (op === 'move') {
+        const target = itemOf(queue, String(side));
+        if (target === undefined) return refuse(`${workflow}'s queue has no item ${side}`);
+        if (target === item) return refuse(`${key} can't be moved next to itself`);
+        for (const each of [item, target]) {
+          if (each.state !== 'queued') return refuse(`${each.dedupKey} is ${each.state}: only a queued item is moved`);
+        }
+        command = {
+          op,
+          workflow,
+          dedupKey: key,
+          ...(typeof before === 'string' ? { before: target.dedupKey } : { after: target.dedupKey }),
+        };
+      } else {
+        command = { op, workflow, dedupKey: key };
+      }
     }
 
     // What the watcher did is read from the events it emits for the item after the command is dropped, not from the
