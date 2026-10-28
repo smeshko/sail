@@ -35,6 +35,7 @@ function entryLines(entry: RosterEntry | StepRosterEntry, indent: string): strin
     if (values !== undefined && values.length > 0) lines.push(field(indent, label, values.join(', ')));
   };
   if (entry.model !== undefined) lines.push(field(indent, 'model', entry.model));
+  if (entry.harness !== undefined) lines.push(field(indent, 'harness', entry.harness));
   if (entry.budget !== undefined) lines.push(field(indent, 'budget', budgetOf(entry.budget)));
   list('produces', entry.produces);
   const { permissions } = entry;
@@ -81,7 +82,11 @@ export function rosterText(
   const lines = [`${workflow.name}@${workflow.version} on ${on}: ${from.title} (${state})`];
   lines.push(field('  ', 'branch', branch));
   if (source.kind === 'pr') lines.push(field('  ', 'head', source.headSha));
-  const used = Object.entries(adapters).map(([port, entry]) => `${port} ${entry.use} (${entry.origin})`);
+  const { harnesses, ...ports } = adapters;
+  const used = [
+    ...Object.entries(ports).map(([port, entry]) => `${port} ${entry.use} (${entry.origin})`),
+    ...Object.entries(harnesses ?? {}).map(([name, entry]) => `harnesses.${name} ${entry.use} (${entry.origin})`),
+  ];
   lines.push(field('  ', 'adapters', used.join(', ')));
   if (budget !== undefined) lines.push(field('  ', 'budget', `run ${budgetOf(budget)}`));
   if (source.forced.length > 0) lines.push(field('  ', 'forced', source.forced.join(', ')));

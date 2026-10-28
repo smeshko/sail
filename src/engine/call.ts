@@ -273,7 +273,7 @@ export interface TrySite {
 function callSite(request: CallRequest, definition: AgentStep): TrySite {
   const { runDir, stageIndex, call } = request;
   const stage = definition.name;
-  const model = (request.agent as AgentExecution).model;
+  const { model, harnessName } = request.agent as AgentExecution;
   return {
     key: `${stage}#${call}`,
     paths: (tryNumber) => callPaths(runDir, stageIndex, stage, call, tryNumber),
@@ -285,6 +285,7 @@ function callSite(request: CallRequest, definition: AgentStep): TrySite {
       try: tryNumber,
       kind: 'agent',
       model,
+      ...(harnessName === undefined ? {} : { harness: harnessName }),
       consumed: suppliedFrom(definition, request.supplied),
       permissions: definition.permissions,
       budget: definition.budget,

@@ -107,6 +107,12 @@ export function formatSize(bytes: number): string {
 }
 
 /** `text`'s lines, cleaned and without trailing whitespace, the blank ones after the first left out. */
+/** A start line's model, then the named harness it ran on: ` · <model> on <harness>`. */
+function modelOn(event: { model?: string; harness?: string }): string {
+  if (event.model === undefined) return '';
+  return ` · ${event.model}${event.harness === undefined ? '' : ` on ${event.harness}`}`;
+}
+
 function textLines(text: string): string[] {
   const [first = '', ...more] = text.split('\n').map((line) => clean(line).trimEnd());
   return [first, ...more.filter((line) => line !== '')];
@@ -385,12 +391,12 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         return [head(event.key, ['cyan', '▶'], 'intake ', ['bold', event.intake], ` · ${event.kind}`)];
       case 'stage:start': {
         const what = event.kind === 'stage' ? `${event.steps?.length ?? 0} steps` : event.kind;
-        const model = event.model === undefined ? '' : ` · ${event.model}`;
+        const model = modelOn(event);
         const again = event.try > 1 ? ` · try ${event.try}` : '';
         return [head(event.key, ['cyan', '▶'], ['bold', event.stage], ` · ${what}${model}${again}`)];
       }
       case 'step:start': {
-        const model = event.model === undefined ? '' : ` · ${event.model}`;
+        const model = modelOn(event);
         const at = ` · step ${event.index}/${event.of} · ${event.kind}${model}`;
         return [head(event.key, ['cyan', '▶'], ['bold', event.step], at)];
       }

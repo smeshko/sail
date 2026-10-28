@@ -1246,6 +1246,26 @@ test('at normal, a multi-step call prints its start with its step count, each st
   expect(twoStep('quiet')).toEqual([TITLE]);
 });
 
+test('a call and a step on a named harness end their start line with on <harness>, after the model', () => {
+  const lines = render(
+    stream([
+      stageStart('spec#1', 'agent', { model: 'claude-opus-5-5', harness: 'second' }),
+      stageStart('implement#1', 'agent', { model: 'claude-sonnet-5' }),
+      { ...(TWO_STEP_CALL[2] as object), harness: 'second' } as unknown as NewEvent,
+    ]),
+    'normal',
+    { runsDir: runsWith({}) },
+  )
+    .trimEnd()
+    .split('\n');
+  const texts = lines.filter((line) => line.includes('▶')).map((line) => line.slice(line.indexOf('▶')));
+  expect(texts).toEqual([
+    '▶ spec · agent · claude-opus-5-5 on second',
+    '▶ implement · agent · claude-sonnet-5',
+    '▶ describe · step 1/2 · agent · claude-sonnet-5 on second',
+  ]);
+});
+
 test('at normal, a repository intake of several steps prints its start as intake <name> · stage', () => {
   const lines = render(
     stream([

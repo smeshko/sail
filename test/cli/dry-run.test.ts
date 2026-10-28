@@ -237,3 +237,23 @@ test('the usage lists --dry-run among the options of a start from a ticket', asy
     /^ {2}--dry-run {2,}Runs every check a start runs and prints the roster it would freeze; writes nothing$/m,
   );
 });
+
+test('--dry-run prints a harness field under the model of a stage whose alias names a named harness, and none for the others', async () => {
+  const { code, stdout } = await dryIn(['FAKE-1', '--dry-run'], (repo) => {
+    const sail = join(repo.dir, '.sail');
+    edit(
+      sail,
+      'project.yaml',
+      'harness: { use: fake }',
+      'harness: { use: fake }\n  harnesses: { second: { use: fake } }',
+    );
+    edit(sail, 'project.yaml', 'deep: claude-opus-5-5', 'deep: { harness: second, model: claude-opus-5-5 }');
+  });
+  expect(code).toBe(EXIT_OK);
+  expect(stdout).toBe(
+    ROSTER.replaceAll('  model     claude-opus-5-5\n', '  model     claude-opus-5-5\n  harness   second\n').replace(
+      'workspace fake (builtin)\n',
+      'workspace fake (builtin), harnesses.second fake (builtin)\n',
+    ),
+  );
+}, 60_000);

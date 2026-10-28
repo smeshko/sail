@@ -359,6 +359,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
     if (request.signal?.aborted) return { result: {}, paths: callPaths(runDir, stageIndex, name, call), stopped: true };
 
     const key = `${callKey}/${step.name}`;
+    const onHarness = request.agent?.steps?.[step.name]?.name;
     const start = (tryNumber: number): CallEvent => ({
       type: 'step:start',
       stage: name,
@@ -368,7 +369,10 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
       kind: step.kind,
       try: tryNumber,
       ...(step.kind === 'agent'
-        ? { model: modelOf(request.agent, step) }
+        ? {
+            model: modelOf(request.agent, step),
+            ...(onHarness === undefined ? {} : { harness: onHarness }),
+          }
         : { command: checkoutPath(request.root, request.runDir, join(dirname(request.stageFile), step.run)) }),
     });
     const end = (tryNumber: number, result: Record<string, unknown>, resultPath: string): CallEvent => ({

@@ -34,6 +34,8 @@ type Outcome = JournalEntry['outcome'];
 export interface StepEntry {
   key: string;
   kind: 'agent' | 'script';
+  /** The named harness the step ran on. Left out for the default harness. */
+  harness?: string;
   outcome: Outcome;
   durationMs: number;
   turns?: number;
@@ -50,6 +52,8 @@ export interface StepEntry {
 export interface CallEntry {
   key: string;
   kind?: 'agent' | 'script' | 'builtin';
+  /** The named harness the call ran on. Left out for the default harness. */
+  harness?: string;
   outcome: Outcome;
   durationMs: number;
   turns?: number;
@@ -135,6 +139,7 @@ interface Ended {
 interface StepState {
   key: string;
   kind: 'agent' | 'script';
+  harness?: string;
   startedAt: string;
   end?: Ended;
   facts: Facts;
@@ -145,6 +150,7 @@ interface StepState {
 interface CallState {
   key: string;
   kind: 'agent' | 'script' | 'stage' | 'builtin';
+  harness?: string;
   startedAt: string;
   end?: Ended & { resultPath?: string };
   /** The run a reused call was taken from: it ran there, not in this run. */
@@ -326,6 +332,7 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
   state.calls.set(event.key, {
     key: event.key,
     kind: event.kind,
+    ...(event.type === 'stage:start' && event.harness !== undefined ? { harness: event.harness } : {}),
     startedAt: event.ts,
     facts: {},
     ...(feedback === undefined ? {} : { feedback }),
@@ -370,9 +377,14 @@ function reuseCall(state: SummaryState, event: EventOf<'journal:append'>, fromRu
 }
 
 function startStep(state: SummaryState, event: EventOf<'step:start'>): void {
-  state.calls
-    .get(callKeyOf(event.key))
-    ?.steps.set(event.key, { key: event.key, kind: event.kind, startedAt: event.ts, facts: {}, files: [] });
+  state.calls.get(callKeyOf(event.key))?.steps.set(event.key, {
+    key: event.key,
+    kind: event.kind,
+    ...(event.harness === undefined ? {} : { harness: event.harness }),
+    startedAt: event.ts,
+    facts: {},
+    files: [],
+  });
 }
 
 function endStep(state: SummaryState, event: EventOf<'step:end'>): void {
@@ -498,6 +510,7 @@ function callEntry(state: SummaryState, call: CallState): CallEntry {
   return defined<CallEntry>({
     key: call.key,
     kind: call.kind === 'stage' ? undefined : call.kind,
+    harness: call.harness,
     outcome: end.outcome,
     durationMs: end.durationMs,
     turns: facts.turns,
@@ -516,6 +529,7 @@ function stepEntry(step: StepState & { end: Ended }): StepEntry {
   return defined<StepEntry>({
     key: step.key,
     kind: step.kind,
+    harness: step.harness,
     outcome: step.end.outcome,
     durationMs: step.end.durationMs,
     turns: step.facts.turns,

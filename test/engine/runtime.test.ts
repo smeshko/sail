@@ -2411,6 +2411,12 @@ test('an agent call runs on the harness its alias names, and every other on the 
     });
     expect(end).toMatchObject({ status: 'completed' });
     expect(keys).toEqual(['spec#1']);
+    const starts = ofType(events(end.dir), 'stage:start').map((event) => [event.key, event.harness]);
+    expect(starts).toEqual([
+      ['brief#1', undefined],
+      ['spec#1', 'second'],
+      ['publish#1', undefined],
+    ]);
     expect(specResult(end.dir, 1)).toMatchObject({ harness: { adapter: 'spy', model: 'claude-opus-5-5' } });
     const header = JSON.parse(readFileSync(join(end.dir, RUN_HEADER_FILE), 'utf8'));
     expect(header.adapters.harnesses).toEqual({ second: { use: 'spy', origin: 'builtin' } });

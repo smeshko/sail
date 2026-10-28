@@ -133,6 +133,8 @@ interface Payloads {
     kind: 'agent' | 'script' | 'stage';
     consumed: Consumed;
     model?: string;
+    /** The named harness the call ran on. Left out for the default harness. */
+    harness?: string;
     permissions?: Permissions;
     budget?: Budget;
     steps?: string[];
@@ -168,6 +170,8 @@ interface Payloads {
     /** The step's try: 1, unless an interruption or a correction gave it a later one. */
     try: number;
     model?: string;
+    /** The named harness the step ran on. Left out for the default harness. */
+    harness?: string;
     command?: string;
   };
   'step:end': {

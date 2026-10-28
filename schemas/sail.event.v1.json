@@ -762,6 +762,7 @@
         "kind": { "enum": ["agent", "script", "stage"] },
         "consumed": { "$ref": "#/$defs/consumed" },
         "model": { "type": "string" },
+        "harness": { "type": "string", "description": "the named harness the call ran on, left out for the default" },
         "permissions": { "$ref": "#/$defs/permissions" },
         "budget": { "$ref": "#/$defs/budget" },
         "steps": { "type": "array", "minItems": 2, "items": { "type": "string" } }
@@ -804,6 +805,7 @@
         "kind": { "enum": ["agent", "script"] },
         "try": { "type": "integer", "minimum": 1 },
         "model": { "type": "string" },
+        "harness": { "type": "string", "description": "the named harness the step ran on, left out for the default" },
         "command": { "type": "string" }
       },
       "required": ["stage", "step", "index", "of", "kind", "try"],
