@@ -242,14 +242,52 @@ test('an action the port refuses is reported as failed, and the ticket is still 
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
     const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).decide;
-    answer.output.actions = [{ kind: 'related', to: 'FAKE-2' }];
+    // A blank description is a body the port refuses.
+    answer.output.actions = [{ kind: 'edit', description: ' ' }];
     seedHarness(sailDir, 'decide', [answer]);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.labels).not.toContain('groom');
+    expect(ticket.description).not.toBe(' ');
+    expect(lastComment(repo.dir)).toContain('- failed: edit (');
+  });
+}, 120_000);
+
+test('groom reports, never applies, a relation to its own ticket or to one the intake did not list as open', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [found] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).duplicates;
+    found.output.candidates = [
+      { ticketKey: 'FAKE-2', confidence: 0.95, why: 'injected' },
+      { ticketKey: 'FAKE-9', confidence: 0.95, why: 'injected' },
+    ];
+    seedHarness(sailDir, 'duplicates', [found]);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).decide;
+    answer.output.actions = [
+      { kind: 'duplicate', of: 'FAKE-2' },
+      { kind: 'duplicate', of: 'FAKE-9' },
+      { kind: 'related', to: 'FAKE-2' },
+      { kind: 'blocks', to: 'FAKE-9' },
+    ];
+    seedHarness(sailDir, 'decide', [answer]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.state.type).toBe('unstarted');
     expect(ticket.links).toEqual([]);
-    expect(lastComment(repo.dir)).toContain('- failed: related FAKE-2 (');
+    const comment = lastComment(repo.dir);
+    for (const line of [
+      '- reported, not marked: duplicate of FAKE-2 (this ticket itself)',
+      '- reported, not marked: duplicate of FAKE-9 (not an open ticket the intake listed)',
+      '- reported, not marked: related FAKE-2 (this ticket itself)',
+      '- reported, not marked: blocks FAKE-9 (not an open ticket the intake listed)',
+    ]) {
+      expect(comment).toContain(line);
+    }
+    expect(comment).not.toContain('- applied:');
+    expect(comment).not.toContain('- failed:');
   });
 }, 120_000);

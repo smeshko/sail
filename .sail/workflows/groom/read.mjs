@@ -1,6 +1,7 @@
 // Reads the ticket in $INPUT_SOURCE through `sail port ticket-source get`, and the team's unstarted and started tickets
 // through `list`. Writes ticket.json, brief.md (the ticket, with every passage a person wrote wrapped as untrusted
-// input) and others.md (the other open tickets, their titles wrapped the same way). Makes no claim. Prints the GroomInput.
+// input) and others.md (the other open tickets, their titles wrapped the same way). Makes no claim. Prints the GroomInput,
+// with the other open tickets' keys.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,17 +51,23 @@ const brief = [
 ];
 writeFileSync(join(out, 'brief.md'), brief.join('\n'));
 
-const others = [
+const open = [
   ...json(['ticket-source', 'list', '--state', 'unstarted']),
   ...json(['ticket-source', 'list', '--state', 'started']),
-]
-  .filter((other) => other.ticketKey !== ticketKey)
-  .map(
-    (other) => `- ${other.ticketKey} (${other.state.name}): ${wrap(other.title, `ticket ${other.ticketKey}, title`)}`,
-  );
+].filter((other) => other.ticketKey !== ticketKey);
+const others = open.map(
+  (other) => `- ${other.ticketKey} (${other.state.name}): ${wrap(other.title, `ticket ${other.ticketKey}, title`)}`,
+);
 writeFileSync(
   join(out, 'others.md'),
   ['# Other open tickets', '', ...(others.length === 0 ? ['None.'] : others), ''].join('\n'),
 );
 
-console.log(JSON.stringify({ ticketKey: ticket.ticketKey, title: ticket.title, state: ticket.state }));
+console.log(
+  JSON.stringify({
+    ticketKey: ticket.ticketKey,
+    title: ticket.title,
+    state: ticket.state,
+    others: open.map((other) => other.ticketKey),
+  }),
+);

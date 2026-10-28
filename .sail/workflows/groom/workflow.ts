@@ -23,17 +23,34 @@ const DUPLICATE_CONFIDENCE = 0.8;
 /**
  * Splits the judge's actions into those to apply and those to report. A `duplicate` is applied when the check named its
  * ticket at `DUPLICATE_CONFIDENCE` or more, and only the first such; any other is reported with the reason, as is an
- * `edit` that names nothing to change.
+ * `edit` that names nothing to change. A relation of any kind is applied only to one of `others`, the open tickets the
+ * intake listed, never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key.
  */
 function limit(
   actions: z.infer<typeof Decision>['actions'],
   candidates: z.infer<typeof Duplicates>['candidates'],
+  ticketKey: string,
+  others: readonly string[],
 ): z.infer<typeof Plan> {
   const apply: z.infer<typeof Plan>['apply'] = [];
   const reported: string[] = [];
   for (const action of actions) {
-    if (action.kind === 'edit' && action.title === undefined && action.description === undefined) {
-      reported.push('edit (names neither a title nor a description)');
+    if (action.kind === 'edit') {
+      if (action.title === undefined && action.description === undefined) {
+        reported.push('edit (names neither a title nor a description)');
+      } else {
+        apply.push(action);
+      }
+      continue;
+    }
+    const other = action.kind === 'duplicate' ? action.of : action.to;
+    const what = action.kind === 'duplicate' ? `duplicate of ${other}` : `${action.kind} ${other}`;
+    if (other === ticketKey) {
+      reported.push(`${what} (this ticket itself)`);
+      continue;
+    }
+    if (!others.includes(other)) {
+      reported.push(`${what} (not an open ticket the intake listed)`);
       continue;
     }
     if (action.kind !== 'duplicate') {
@@ -91,7 +108,7 @@ export default workflow(
     const acted = await run.stage(act, {
       ticketKey,
       report: decided.files['report.md'],
-      actions: limit(decided.output.actions, dup.output.candidates),
+      actions: limit(decided.output.actions, dup.output.candidates, ticketKey, run.input.others),
       label: LABEL,
     });
     return acted.output;

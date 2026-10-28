@@ -6,6 +6,8 @@ export const GroomInput = z.object({
   ticketKey: z.string(),
   title: untrusted(),
   state: z.object({ type: z.string(), name: z.string() }),
+  /** The ticket keys of the team's other open tickets, the only ones an action may relate the ticket to. */
+  others: z.array(z.string()),
 });
 
 /** Other tickets the groomed one may duplicate, each with how sure the check is. */
