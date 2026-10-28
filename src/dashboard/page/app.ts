@@ -193,8 +193,9 @@ export function boot(host: PageHost): Page {
         markup = html`<div class="code bad">this part of the page could not be drawn</div>`.value;
       }
       host.render(region, markup);
-      // A running call's timeline, followed, shows its newest entry.
-      if (region === 'main' && ui.follow && opened()?.state === 'running') host.scrollToEnd(region);
+      // A running call's timeline, followed, shows its newest entry: not while the queue holds the centre.
+      if (region === 'main' && ui.follow && openQueue() === undefined && opened()?.state === 'running')
+        host.scrollToEnd(region);
     }
   };
 

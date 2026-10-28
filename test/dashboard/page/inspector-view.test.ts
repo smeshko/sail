@@ -120,6 +120,16 @@ test("the overview shows the call's facts, output, consumed bindings, errors and
   );
 });
 
+test("a running call's overview leaves out its cost, known only once its session ends", () => {
+  const model = foldRun(readEvents(GOLDEN_RUN));
+  const card = model.cards.find((entry) => entry.key === 'implement#2');
+  expect(card?.costUsd).toBeNumber();
+  const ui = { ...initialUi(0), key: 'implement#2', tab: 'overview' as const };
+  const running = { ...(card as StageCard), state: 'running' as const };
+  const markup = renderInspector(running, model.roster, undefined, undefined, ui).value;
+  expect(markup).toContain('<dt>model</dt><dd>claude-sonnet-5</dd><dt>turns</dt><dd>4</dd>');
+});
+
 test('a script call has no permissions tab, a call with no files no files tab, and a tab the call lacks shows its overview', () => {
   const tabs = (markup: string) => [...markup.matchAll(/data-action="tab" data-tab="([a-z]+)"/g)].map(([, tab]) => tab);
   const script = inspect(GOLDEN_RUN, 'tests#1', 'permissions');

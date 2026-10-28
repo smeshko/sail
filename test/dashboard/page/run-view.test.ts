@@ -87,7 +87,9 @@ test('a running card shows running and its time so far, a PR link is drawn only 
   expect(markup).toMatch(
     /data-key="tests#1">\n<div class="c-top"><span class="c-n">04<\/span><span class="c-name">tests#1<\/span><span class="pill p-run">running<\/span>/,
   );
-  expect(markup).toContain('<div class="facts"><div><b>2.5s</b>');
+  expect(markup).toContain(
+    '<div class="facts"><div><b>2.5s</b><span class="lbl">duration</span></div><div><b>0</b><span class="lbl">tool calls</span></div></div>',
+  );
   expect(markup).toContain('<span class="pill p-run">running</span><span class="d-agent">');
   expect(markup).toContain(`<code>sail show ${GOLDEN_RUN_ID} --follow</code>`);
   expect(renderStatus(model, undefined).value).toBe(
@@ -131,6 +133,20 @@ test("while a call runs, the footer's tokens count its live usage over a summary
   const current = renderStatus(foldRun(slice), stale).value;
   expect(current).toContain('tokens <b>7.2k</b> in · <b>2.2k</b> out · <b>31.2k</b> cached');
   expect(current).not.toContain('<b>5.2k</b> in');
+});
+
+test('while the run runs, its duration and cost tiles count from the cards over a summary written after an earlier call', () => {
+  const events = readEvents(GOLDEN_RUN);
+  const journals = events.flatMap((event, at) => (event.type === 'journal:append' ? [at] : []));
+  const journaled = journals[1] ?? -1;
+  const stale = summarize(events.slice(0, journaled + 1));
+  const slice = events.slice(0, (journals[2] ?? -1) + 1);
+  const tiles = (summary: Summary | undefined) =>
+    renderRun(foldRun(slice), summary, initialUi(0), NOW).value.match(
+      /<div class="stats totals">[\s\S]*?\n<\/div>/,
+    )?.[0];
+  expect(tiles(stale)).toBe(tiles(undefined));
+  expect(renderStatus(foldRun(slice), stale).value).toBe(renderStatus(foldRun(slice), undefined).value);
 });
 
 const FAKE_4 = join(DASHBOARD_FIXTURES, 'beta', FAKE_4_ID);

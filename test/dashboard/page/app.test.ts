@@ -338,6 +338,9 @@ test('live: opening a running card shows its timeline in the centre, which grows
   push({ seq: 1002, type: 'tool:start', callId: 'c1', tool: 'Bash', input: { command: 'bun test\nsecond line' } });
   host.scrolls = [];
   host.advance(100);
+  expect(host.scrolls).toEqual([]);
+  host.click({ action: 'toggle-follow' });
+  host.advance(100);
   expect(host.scrolls).toEqual(['main']);
   expect(host.regions.main).toContain(
     '<div class="ev tht"><span class="ts">09:00:04</span><div class="col"><p>The &lt;spec&gt; asks for a flag.</p>',
@@ -380,6 +383,29 @@ test('live: opening a running card shows its timeline in the centre, which grows
   expect(host.regions.inspector).toContain('<span>implement#1</span>');
   host.click({ action: 'open', repo: 'alpha', run: RUNNING_ID, key: 'spec#1', tab: 'files' });
   expect([page.ui.key, page.ui.timeline, page.ui.tab]).toEqual(['spec#1', false, 'files']);
+});
+
+test('a queue opened over a followed running timeline is not scrolled to its end', () => {
+  const { dir, rest } = runningCopy(m, 1);
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, dir, false);
+  const lines = rest.map((line) => JSON.parse(line));
+  const start = lines.findIndex((event) => event.type === 'stage:start' && event.key === 'implement#1');
+  for (const event of lines.slice(0, start + 1)) host.push(socket, { kind: 'event', event });
+  host.click({ action: 'select-card', key: 'implement#1' });
+  host.click({ action: 'toggle-follow' });
+  host.advance(100);
+  expect(host.scrolls).toEqual(['main']);
+  host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
+  host.scrolls = [];
+  host.advance(100);
+  const at = { runId: RUNNING_ID, key: 'implement#1', ts: '2026-09-25T09:00:04.500Z' };
+  host.push(socket, { kind: 'event', event: { ...at, seq: 1001, type: 'agent:thinking', text: 'more' } });
+  host.advance(100);
+  expect(host.regions.main).toStartWith('<div class="d-h"><span class="d-title">ticket-to-pr queue</span>');
+  expect(host.scrolls).toEqual([]);
 });
 
 test('a run socket closed without end reconnects after 2 s into a fresh model, one closed after end stays closed, and the index socket reconnects', () => {
@@ -590,8 +616,9 @@ test('the theme cycles and is saved, a section toggles, copy copies, follow togg
   host.click({ action: 'select-card', key: 'tests#1' });
   host.click({ action: 'tab', tab: 'log' });
   host.click({ action: 'stream', stream: 'stderr' });
-  host.click({ action: 'toggle-follow' });
   expect(page.ui.follow).toBe(false);
+  host.click({ action: 'toggle-follow' });
+  expect(page.ui.follow).toBe(true);
   expect(host.reads.map((read) => read.path).filter((path) => path.includes('/log?'))).toEqual([
     `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls/tests%231/log?stream=stdout`,
     `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls/tests%231/log?stream=stderr`,
