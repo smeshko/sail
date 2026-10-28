@@ -72,6 +72,8 @@ export const ENV_ALLOWLIST: readonly string[] = [
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'NO_PROXY',
+  // Jev's key, so a session can prove the Jev adapter with a live call.
+  'TYPESAFE_API_KEY',
 ];
 
 const allowed = (name: string): boolean =>
