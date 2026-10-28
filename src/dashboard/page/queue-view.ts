@@ -44,6 +44,10 @@ export function queueEventLine(event: QueueEvent): string {
       return `until ${text(fields.until)}: ${text(fields.reason)}`;
     case 'queue:released':
       return 'dispatch released';
+    case 'queue:moved': {
+      const place = typeof fields.before === 'string' ? `before ${fields.before}` : `after ${text(fields.after)}`;
+      return `${text(fields.dedupKey)} moved ${place}: ${text(fields.reason)}`;
+    }
     default:
       return '';
   }

@@ -66,6 +66,10 @@ function textOf(event: QueueEvent, afterError: boolean): { text: string; alert?:
     }
     case 'queue:requeued':
       return { text: `${keyOf(event.dedupKey)} requeued: ${event.reason}` };
+    case 'queue:moved': {
+      const place = event.before !== undefined ? `before ${keyOf(event.before)}` : `after ${keyOf(event.after ?? '')}`;
+      return { text: `${keyOf(event.dedupKey)} moved ${place}: ${event.reason}` };
+    }
     case 'queue:held':
       return { text: `dispatch held until ${event.until}: ${event.reason}`, alert: true };
     case 'queue:released':

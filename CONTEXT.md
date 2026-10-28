@@ -532,7 +532,7 @@ The sources waiting for a run, kept per workflow and deduplicated. A queued item
 _Avoid_: backlog, inbox, buffer
 
 **Queue order**:
-The order a queue dispatches its items in, and the order `queue.json` keeps them: by priority (urgent, high, medium, low, none), oldest first within one. A pull request ranks as none. A poll that finds a queued ticket at another priority moves it to its new place.
+The order a queue dispatches its items in, and the order `queue.json` keeps them: by priority (urgent, high, medium, low, none), oldest first within one. A pull request ranks as none. A poll that finds a queued ticket at another priority moves it to its new place. A person can move a queued item next to another by hand (`sail queue move`, or the dashboard's arrows): it keeps that place, whatever its priority, until it is dispatched or dropped.
 _Avoid_: ranking, sort, schedule
 
 **Queue event stream**:
@@ -552,7 +552,7 @@ A queue item's state once it has failed its last attempt: kept with the reason, 
 _Avoid_: dead-lettered, stuck, quarantined
 
 **Command file**:
-A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/commands/`. The watcher applies it and deletes it, so it stays the only writer of its own state (ADR-0019). Every command is safe to apply twice.
+A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/commands/`. The watcher applies it and deletes it, so it stays the only writer of its own state (ADR-0019). Its operations are poll, watch, unwatch, add, requeue, drop and move. Every command is safe to apply twice.
 _Avoid_: message, signal, IPC
 
 **Dispatch**:

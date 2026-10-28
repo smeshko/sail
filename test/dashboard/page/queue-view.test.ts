@@ -157,4 +157,12 @@ test('a held queue shows a held until chip with its reason, and queue:held and q
     queueEventLine({ ...at, type: 'queue:held', until: held.until, run: 'r', reason: held.reason } as QueueEvent),
   ).toBe(`until ${held.until}: spec#1 hit the usage limit`);
   expect(queueEventLine({ ...at, type: 'queue:released' } as QueueEvent)).toBe('dispatch released');
+  const moved = { ...at, type: 'queue:moved', dedupKey: 'ticket:FAKE-7', reason: 'moved by hand' };
+  expect([
+    queueEventLine({ ...moved, before: 'ticket:FAKE-5' } as QueueEvent),
+    queueEventLine({ ...moved, after: 'ticket:FAKE-6' } as QueueEvent),
+  ]).toEqual([
+    'ticket:FAKE-7 moved before ticket:FAKE-5: moved by hand',
+    'ticket:FAKE-7 moved after ticket:FAKE-6: moved by hand',
+  ]);
 });

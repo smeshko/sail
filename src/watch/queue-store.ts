@@ -29,6 +29,8 @@
 // - A run that hit the usage limit holds the workflow's dispatch: `hold()` keeps the later `until` in `held` and emits
 //   `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
 //   changed: no attempt is counted, and nothing is failed or parked.
+// - `move()` places a queued item next to another queued one and marks it `moved`: add, a priority change and a retry
+//   leave a moved item where it is, and its dispatch clears the mark. It emits `queue:moved`.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
 //   hook that throws is ignored, so the terminal never breaks the queue.
@@ -201,6 +203,12 @@ export interface QueueStore {
    * naming it.
    */
   requeue(key: string, reason: string): void;
+  /**
+   * Places the queued item `key` directly before or after another queued item, marks it moved so a later add or
+   * priority change leaves it there until it is dispatched or dropped, and emits `queue:moved`. A move that leaves it
+   * where it is changes nothing and still emits. An item or target that is missing or not queued throws, naming why.
+   */
+  move(key: string, to: { before: string } | { after: string }, reason: string): void;
   /** Takes the item out of the queue, and emits `queue:dropped` with the reason. An unknown key throws. */
   drop(key: string, reason: string): void;
   /**
@@ -440,6 +448,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.state = 'dispatched';
         item.attempts += 1;
         item.runId = runId;
+        delete item.moved;
         delete item.retryAt;
         delete item.pid;
       });
@@ -492,6 +501,23 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         place(next, item);
       });
       stream.emit({ type: 'queue:requeued', workflow, dedupKey: key, reason });
+    },
+    move(key, to, reason) {
+      const targetKey = 'before' in to ? to.before : to.after;
+      change((next) => {
+        const item = find(next, key);
+        const target = find(next, targetKey);
+        if (item === target) throw new Error(`${workflow}'s item ${key} can't be moved next to itself`);
+        for (const each of [item, target]) {
+          if (each.state !== 'queued') {
+            throw new Error(`${workflow}'s item ${each.dedupKey} is ${each.state}: only a queued item is moved`);
+          }
+        }
+        next.items.splice(next.items.indexOf(item), 1);
+        next.items.splice(next.items.indexOf(target) + ('before' in to ? 0 : 1), 0, item);
+        item.moved = true;
+      });
+      stream.emit({ type: 'queue:moved', workflow, dedupKey: key, ...to, reason });
     },
     drop(key, reason) {
       change((next) => {
