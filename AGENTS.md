@@ -93,7 +93,7 @@ including as examples in this file.
 - `src/engine`: loads `project.yaml`, claims a source, leases its branch, runs intake and stages, validates and
   journals.
 - `src/ports`: the interfaces to outside systems: TicketSource, CodeHost, Harness, Workspace, and the optional Jev.
-- `src/adapters`: one per port (linear, github, claude-code, git-worktree, typesafe), plus a fake of each.
+- `src/adapters`: at least one per port (linear, github, claude-code and pi, git-worktree, typesafe), plus a fake of each.
 - `src/kinds`: step kinds, agent and script. `StepKind` is the extension point.
 - `src/events`: the event bus and its consumers: `events.ndjson`, the terminal, `summary.json`.
 - `src/watch`: the per-repository watcher: poll, queue, claim, and dispatch detached runs. `registry.ts` reads and writes

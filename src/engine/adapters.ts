@@ -14,7 +14,7 @@ import {
   type PortAdapters,
 } from '../ports/adapter';
 import type { Harness } from '../ports/harness';
-import { type AdapterConfig, PORTS, type Port, type ProjectConfig, type RunPort } from './config';
+import { type AdapterConfig, aliasOf, PORTS, type Port, type ProjectConfig, type RunPort } from './config';
 import { registerSail } from './definitions';
 import { origin } from './roster';
 import { runsDir } from './run-dir';
@@ -138,12 +138,21 @@ async function find(port: Port, use: string, options: ResolveOptions<Port>): Pro
   return { definition, origin: origin(root, path) };
 }
 
+/** The model ids `config`'s aliases route to the named harness `harness`, or to the default one when it is undefined. */
+function modelsOf(config: ProjectConfig, harness: string | undefined): string[] {
+  const ids = Object.keys(config.models).flatMap((alias) => {
+    const routed = aliasOf(config, alias);
+    return routed !== undefined && routed.harness === harness ? [routed.model] : [];
+  });
+  return [...new Set(ids)];
+}
+
 /** Pass 2: the issues for each environment variable `found` needs and `env` lacks, or none of the alternatives it lists. */
-function preflight(use: string, found: Found, options: AdapterOptions, env: Env): string[] {
+function preflight(use: string, found: Found, options: AdapterOptions, env: Env, models: readonly string[]): string[] {
   if (found.definition.requires === undefined) return [];
   let names: unknown;
   try {
-    names = unawaited(found.definition.requires(options, env));
+    names = unawaited(found.definition.requires(options, env, models));
   } catch (error) {
     return [`${use}'s requires() failed: ${message(error)}`];
   }
@@ -263,7 +272,8 @@ export async function resolveAdapters<P extends Port = RunPort>(
 
   for (const port of wanted) {
     const { use } = configs[port];
-    for (const text of preflight(use, found[port], optionsOf(configs[port]), options.env)) issue(port, text);
+    const models = port === 'harness' ? modelsOf(options.config, undefined) : [];
+    for (const text of preflight(use, found[port], optionsOf(configs[port]), options.env, models)) issue(port, text);
   }
   if (issues.length > 0) return { issues };
 
@@ -321,7 +331,8 @@ async function resolveHarnesses(
   if (issues.length > 0) return { issues };
 
   for (const name of names) {
-    for (const text of preflight(configOf(name).use, found[name] as Found, optionsOf(name), options.env))
+    const models = modelsOf(options.config, name);
+    for (const text of preflight(configOf(name).use, found[name] as Found, optionsOf(name), options.env, models))
       issue(name, text);
   }
   if (issues.length > 0) return { issues };

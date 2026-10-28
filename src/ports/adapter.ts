@@ -32,10 +32,11 @@ export interface AdapterContext extends ProviderOptions {
 
 export interface AdapterDefinition<A> {
   /**
-   * The environment variables this adapter needs, given its options and the environment. An entry that is a list is
-   * met by any one of its variables.
+   * The environment variables this adapter needs, given its options, the environment and, for a harness, the model ids
+   * the config's aliases route to it (none, or left out, for another port). An entry that is a list is met by any one of its
+   * variables.
    */
-  requires?(options: AdapterOptions, env: Env): readonly (string | readonly string[])[];
+  requires?(options: AdapterOptions, env: Env, models?: readonly string[]): readonly (string | readonly string[])[];
   versions?(): Readonly<Record<string, string>>;
   create(options: AdapterOptions, context: AdapterContext): A | Promise<A>;
 }
