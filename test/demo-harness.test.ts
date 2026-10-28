@@ -28,6 +28,8 @@ test("new --own holds the repository's own .sail/ with every adapter, named harn
     const own = Bun.YAML.parse(readFileSync(join(ROOT, '.sail', 'project.yaml'), 'utf8')) as {
       adapters: { harnesses?: Record<string, unknown> } & Record<string, unknown>;
     };
+    const jev = JSON.parse(readFileSync(join(dir, 'repo', '.sail', 'fake', 'jev.json'), 'utf8'));
+    expect(jev.error?.status).toBe(503);
     const { harnesses, ...ports } = own.adapters;
     expect({
       code,
