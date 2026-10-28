@@ -8,7 +8,7 @@ export const demonstrate = agent('demonstrate', {
   prompt: './prompt.md',
   consumes: { brief: file('brief.md'), requirements: file('requirements.md'), base: value(z.string()) },
   output: Demonstrated,
-  model: 'default',
+  model: 'terra',
   permissions: {
     read: ['**'],
     write: ['$STAGE_OUT/**'],

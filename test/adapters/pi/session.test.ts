@@ -2,7 +2,7 @@
 // stream. It checks the model and key refusals, that a
 // session is made with an id of its own, that it carries sail's gate and bash and none of the workspace's own pi, and
 // that disposing it removes the temp directory it made.
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,30 @@ import { rejection } from '../../helpers/ports';
 
 const runner = createBashRunner({ env: { PATH: process.env.PATH ?? '' } });
 
+/** pi.dev's catalog, served locally: groq lists one model pi's built-in catalog lacks, and no other provider has one. */
+const catalogRequests: string[] = [];
+const catalog = Bun.serve({
+  port: 0,
+  fetch(request) {
+    const { pathname } = new URL(request.url);
+    catalogRequests.push(pathname);
+    if (pathname !== '/api/models/providers/groq') return new Response('not found', { status: 404 });
+    const model = {
+      id: 'served-only',
+      name: 'Served only',
+      api: 'openai-completions',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      reasoning: false,
+      input: ['text'],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 131072,
+      maxTokens: 32768,
+    };
+    return Response.json([model], { headers: { 'last-modified': new Date().toUTCString() } });
+  },
+});
+afterAll(() => catalog.stop(true));
+
 const params = (extra: Partial<PiSessionParams> = {}): PiSessionParams => ({
   cwd: process.cwd(),
   model: 'groq/llama-3.3-70b-versatile',
@@ -25,6 +49,7 @@ const params = (extra: Partial<PiSessionParams> = {}): PiSessionParams => ({
   submit: submitTool({ type: 'object' }, () => undefined),
   bash: runner.operations,
   env: { GROQ_API_KEY: 'gsk_test' },
+  catalogBaseUrl: catalog.url.href,
   ...extra,
 });
 
@@ -37,6 +62,27 @@ test('a model without a provider, or one pi does not know, is refused by name', 
   const bare = await rejection(createPiSession(params({ model: 'llama' })));
   const unknown = await rejection(createPiSession(params({ model: 'groq/no-such-model' })));
   expect([String(bare), String(unknown)]).toEqual(['Error: no model llama', 'Error: no model groq/no-such-model']);
+});
+
+test("a model only the provider's pi.dev catalog lists is found there, and one the built-in catalog has fetches nothing", async () => {
+  catalogRequests.length = 0;
+  const builtIn = await createPiSession(params());
+  await builtIn.dispose();
+  const fetchedForBuiltIn = catalogRequests.length;
+  const served = await createPiSession(params({ model: 'groq/served-only' }));
+  await served.dispose();
+  expect({ fetchedForBuiltIn, served: served.sessionId !== '', requests: catalogRequests }).toEqual({
+    fetchedForBuiltIn: 0,
+    served: true,
+    requests: ['/api/models/providers/groq'],
+  });
+});
+
+test("a provider's catalog that cannot be fetched leaves its model refused by name", async () => {
+  const error = await rejection(
+    createPiSession(params({ model: 'groq/served-only', catalogBaseUrl: 'http://127.0.0.1:1' })),
+  );
+  expect(String(error)).toBe('Error: no model groq/served-only');
 });
 
 test('a provider whose key is not set is refused naming the variable', async () => {

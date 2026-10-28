@@ -24,7 +24,7 @@ export const implement = agent('implement', {
     feedback: value(PassFeedback).optional(),
   },
   output: Implemented,
-  model: 'default',
+  model: 'terra',
   permissions: {
     read: ['**'],
     write: [
@@ -73,6 +73,12 @@ export const implement = agent('implement', {
       'git grep *',
       'git rev-parse *',
       'git restore *',
+      // A new script stage's run.sh is run directly, and the Write tool creates it 0644.
+      'chmod +x .sail/*',
+      'chmod +x bin/*',
+      // A task that deletes or moves files: `rm` is the run's to deny.
+      'git rm *',
+      'git mv *',
     ],
     // An adapter is written against its API's docs: the wire format, auth and errors.
     tools: ['WebFetch'],

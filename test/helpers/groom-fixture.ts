@@ -14,6 +14,7 @@ const FAKE_ADAPTERS = [
   '  harness: { use: fake }',
   '  workspace: { use: fake }',
   '  jev: { use: fake, seed: ./fake/jev.json }',
+  '  harnesses: { codex: { use: fake } }',
   '',
 ].join('\n');
 
