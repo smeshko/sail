@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/smeshko/sail/main/schemas/sail.event.v1.json",
   "title": "sail event: one line of a run's or a queue's event stream",
   "description": "One NDJSON line in events.ndjson: the envelope ({ seq, ts, type, runId, key? }) with the event's payload beside it. The type vocabulary is exhaustive. The families the engine and the port adapters emit have closed payloads, and a call-level event requires the key of its call. A ticket or codehost event carries its call's key when a call emitted it, and a workspace event carries none. A watched workflow's queue event stream, .sail-runs/queue/<workflow>/events.ndjson, uses the same envelope without runId or key, with the workflow it belongs to: its watch set changes, polls, items and dispatches, and the runs the watcher adopted or resumed.",
-  "$comment": "Closed: every type of a run's stream: run:start, run:end, run:suspended, intake:*, stage:*, step:*, input:materialised, prompt:rendered, script:*, output:*, file:*, journal:append, loop:*, all:*, workflow:route, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* (budget:raised among them), error:*, ticket:*, codehost:* and workspace:*. The queue family follows error:port in the enum, alone may leave out runId, and is closed: watch:*, queue:polled, queue:item_added, queue:dispatched, queue:skipped_leased, queue:dropped, queue:parked, queue:error, run:adopted, run:resumed, queue:requeued, queue:held and queue:released. The root validates the envelope and allows additional properties, which each closed payload then refuses. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
+  "$comment": "Closed: every type of a run's stream: run:start, run:end, run:suspended, intake:*, stage:*, step:*, input:materialised, prompt:rendered, script:*, output:*, file:*, journal:append, loop:*, all:*, workflow:route, agent:*, harness:*, tool:*, permission:denied, usage:update, budget:* (budget:raised among them), error:*, ticket:*, codehost:* and workspace:*. The queue family follows error:port in the enum, alone may leave out runId, and is closed: watch:*, queue:polled, queue:item_added, queue:dispatched, queue:skipped_leased, queue:dropped, queue:parked, queue:error, run:adopted, run:resumed, queue:requeued, queue:held, queue:released and queue:moved. The root validates the envelope and allows additional properties, which each closed payload then refuses. Each closed payload $refs #/$defs/envelope, so that its unevaluatedProperties counts the envelope's names as its own. A payload's own if/then/else sits inside an allOf: beside the $ref, Ajv drops the envelope's names whenever the if fails.",
   "type": "object",
   "properties": {
     "seq": { "type": "integer", "minimum": 1 },
@@ -84,7 +84,8 @@
         "run:resumed",
         "queue:requeued",
         "queue:held",
-        "queue:released"
+        "queue:released",
+        "queue:moved"
       ]
     },
     "runId": { "type": "string" },
@@ -355,7 +356,8 @@
               "run:resumed",
               "queue:requeued",
               "queue:held",
-              "queue:released"
+              "queue:released",
+              "queue:moved"
             ]
           }
         },
@@ -418,6 +420,10 @@
     {
       "if": { "properties": { "type": { "const": "queue:released" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/queueReleased" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "queue:moved" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/queueMoved" }
     }
   ],
   "$defs": {
@@ -1748,6 +1754,26 @@
       "description": "a workflow's held dispatch released: its hold has passed",
       "type": "object",
       "$ref": "#/$defs/queueEnvelope",
+      "unevaluatedProperties": false
+    },
+    "queueMoved": {
+      "description": "a queued item put directly before or after another queued item by hand: exactly one of before and after",
+      "type": "object",
+      "$ref": "#/$defs/queueEnvelope",
+      "properties": {
+        "dedupKey": { "$ref": "#/$defs/dedupKey" },
+        "before": { "$ref": "#/$defs/dedupKey" },
+        "after": { "$ref": "#/$defs/dedupKey" },
+        "reason": { "type": "string", "pattern": "\\S" }
+      },
+      "required": ["dedupKey", "reason"],
+      "allOf": [
+        {
+          "if": { "properties": { "before": true }, "required": ["before"] },
+          "then": { "properties": { "after": false } },
+          "else": { "required": ["after"] }
+        }
+      ],
       "unevaluatedProperties": false
     }
   }

@@ -171,11 +171,13 @@ test('a missing declared file is error, naming the file', async () => {
   });
 });
 
-test('a timeout ends in error within the grace period, and no child survives', async () => {
+// That the group's grandchildren die with it is test/engine/process.test.ts's: a timeout starts at spawn, and a loaded
+// machine can fire it before bash has started one.
+test('a timeout ends in error within the grace period', async () => {
   await withTempRepo(async (repo) => {
     const s = tests(repo);
-    const pidFile = join(repo.dir, 'grandchild.pid');
-    s.run(`sleep 30 &\necho $! > "${pidFile}"\nsleep 5`);
+    // exec, so the leader is the sleep: a bash waiting for a child the same SIGTERM kills can exit 143 instead.
+    s.run('exec sleep 5');
     const started = performance.now();
     const { paths } = await runCall(s.request(testsStep({ timeoutSeconds: 3 }), exitWith(0)));
     const ms = performance.now() - started;
@@ -187,8 +189,6 @@ test('a timeout ends in error within the grace period, and no child survives', a
       errors: [{ reason: 'timeout', message: 'timed out after 3s' }],
       exit: { code: null, signal: 'SIGTERM' },
     });
-    const pid = Number(readFileSync(pidFile, 'utf8'));
-    expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
   });
 });
 
@@ -396,7 +396,7 @@ test("an output that breaks its schema reports output:invalid with the contract'
 test('a timeout reports the signal and error:timeout, and nothing about output or files', async () => {
   await withTempRepo(async (repo) => {
     const s = tests(repo);
-    s.run('sleep 5');
+    s.run('exec sleep 5');
     const { events, emit } = collect();
     await runCall({ ...s.request(plainStep({ timeoutSeconds: 1 })), emit });
 

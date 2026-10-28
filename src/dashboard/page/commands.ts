@@ -1,5 +1,5 @@
-// The CLI commands the page shows to copy. The dashboard controls nothing: what a person would do about a run or a
-// parked item, they do in a terminal, and the page only says how. A run id, a workflow and a dedup key come from run
+// The CLI commands the page shows to copy. The dashboard's one control moves a queued item: what a person would do
+// about a run or a parked item, they do in a terminal, and the page only says how. A run id, a workflow and a dedup key come from run
 // and queue files, so each is quoted for the shell unless it is a plain word: a pasted command runs only what it says.
 
 export interface Command {

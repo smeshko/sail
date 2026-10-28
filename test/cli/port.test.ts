@@ -24,7 +24,7 @@ import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
 
-const USAGE = 'usage: sail port ticket-source get|links|attachments <ticket>';
+const USAGE = 'usage: sail port ticket-source get|links|attachments|claim <ticket>';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -192,8 +192,8 @@ test.each<[string, string[], string]>([
   ['no operation', ['ticket-source'], 'no operation given for ticket-source'],
   [
     'an operation outside this phase',
-    ['ticket-source', 'claim', 'FAKE-1'],
-    "unknown operation 'claim' of ticket-source",
+    ['ticket-source', 'transfer', 'FAKE-1'],
+    "unknown operation 'transfer' of ticket-source",
   ],
   ['no ticket', ['ticket-source', 'get'], 'ticket-source get needs a ticket'],
 ])('sail port given %s exits 3, saying so, with the usage', async (_, argv, problem) => {
@@ -804,7 +804,13 @@ test("what render prints for a ticket's description is, byte for byte, what the 
   const out = join(dir, 'out');
   mkdirSync(out);
   const ticketSource = createFakeTicketSource({ seed: join(dir, 'tickets.json'), state: join(dir, 'state.json') });
-  await ticketIntake({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] }, ticketSource, out });
+  await ticketIntake({
+    source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+    ticketSource,
+    runId: 'FAKE-1-RUN',
+    record: () => undefined,
+    out,
+  });
 
   const { code, stdout } = await runCaptured(render(), dir, { stdin: description, env: {} });
   expect(code).toBe(EXIT_OK);
@@ -1144,5 +1150,109 @@ test('with SAIL_EVENTS set, an attach appends one ticket:attached with its name,
         url: 'fake://tickets/FAKE-1/attachments/1',
       },
     ]);
+  });
+});
+
+// `sail port ticket-source claim`: the bare port operation, the port's ClaimResult as one line of JSON.
+
+test('claim of FAKE-1 prints claimed true with the state In Progress, and a second claim prints claimed false with the same state, both exiting 0', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const inProgress = { type: 'started', name: 'In Progress' };
+    const first = await runCaptured(['port', 'ticket-source', 'claim', 'FAKE-1'], repo.dir);
+    expect({ code: first.code, stderr: first.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const { raw: _first, ...firstPrinted } = oneLine(first.stdout) as Record<string, unknown>;
+    expect(firstPrinted).toEqual({ claimed: true, state: inProgress });
+    const second = await runCaptured(['port', 'ticket-source', 'claim', 'FAKE-1'], repo.dir);
+    expect({ code: second.code, stderr: second.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const { raw: _second, ...secondPrinted } = oneLine(second.stdout) as Record<string, unknown>;
+    expect(secondPrinted).toEqual({ claimed: false, state: inProgress });
+    expect(fake1(repo.dir)).toEqual(inProgress);
+  });
+});
+
+test('with SAIL_EVENTS set, the first claim appends one ticket:claimed to the port events file and the second appends none', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const env = { SAIL_EVENTS: file };
+    await runCaptured(['port', 'ticket-source', 'claim', 'FAKE-1'], repo.dir, { env });
+    const read = () => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').slice(0, -1) : []);
+    expect(read().map((line) => JSON.parse(line))).toEqual([
+      { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: { type: 'started', name: 'In Progress' } },
+    ]);
+    await runCaptured(['port', 'ticket-source', 'claim', 'FAKE-1'], repo.dir, { env });
+    expect(read()).toHaveLength(1);
+  });
+});
+
+test("with RUN_ID set, a claim that takes comments with the run id, the run's own later claim prints claimed true, and another run's prints claimed false", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const runId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const claim = (id: string) =>
+      runCaptured(['port', 'ticket-source', 'claim', 'FAKE-1'], repo.dir, { env: { RUN_ID: id } });
+    const printed = async (id: string) => {
+      const { code, stdout, stderr } = await claim(id);
+      expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+      return (oneLine(stdout) as { claimed: boolean }).claimed;
+    };
+    expect(await printed(runId)).toBe(true);
+    const held = JSON.parse(readFileSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'), 'utf8'));
+    const comments = held.tickets.find((ticket: { ticketKey: string }) => ticket.ticketKey === 'FAKE-1').comments;
+    expect(comments.map((comment: { body: string }) => comment.body)).toContain(`sail run ${runId} started`);
+    expect(await printed(runId)).toBe(true);
+    expect(await printed('FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P')).toBe(false);
+  });
+});
+
+test('claim of a ref that is no ticket exits 3 naming it, and claim without a ticket exits 3 with the usage, which lists claim', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const notTicket = await runCaptured(['port', 'ticket-source', 'claim', 'ADW-7'], repo.dir);
+    expect({ code: notTicket.code, stdout: notTicket.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(notTicket.stderr).toStartWith("sail port: 'ADW-7' is not a ticket of the fake ticket source");
+    const bare = await runCaptured(['port', 'ticket-source', 'claim'], repo.dir);
+    expect([bare.code, bare.stderr]).toEqual([EXIT_REFUSED, expect.stringContaining('claim needs a ticket')]);
+    expect(bare.stderr).toContain('\nusage: sail port ticket-source get|links|attachments|claim <ticket>\n');
+    expect(fake1(repo.dir)).toEqual({ type: 'unstarted', name: 'Todo' });
+  });
+});
+
+test('an answer that is no ClaimResult exits 1 naming the port and the operation, and with SAIL_EVENTS set leaves an error:port', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureWithLinked(repo.dir);
+    const fake = join(import.meta.dir, '..', '..', 'src', 'adapters', 'fake', 'ticket-source');
+    write(
+      sail,
+      'adapters/odd-tickets.ts',
+      `import { createFakeTicketSource } from '${fake}';
+export default {
+  create(_options, context) {
+    const fake = createFakeTicketSource({ seed: \`\${context.sailDir}/fake/tickets.json\`, state: \`\${context.runsDir}/fake/tickets.json\` });
+    return { ...fake, name: 'odd', claim: async () => ({ claimed: 'yes' }) };
+  },
+};
+`,
+    );
+    edit(
+      sail,
+      'project.yaml',
+      'ticketSource: { use: fake, seed: ./fake/tickets.json }',
+      'ticketSource: { use: ./adapters/odd-tickets.ts }',
+    );
+    const file = join(repo.dir, 'port-events.ndjson');
+    const { code, stdout, stderr } = await runCaptured(['port', 'ticket-source', 'claim', 'FAKE-5'], repo.dir, {
+      env: { SAIL_EVENTS: file },
+    });
+    expect({ code, stdout }).toEqual({ code: EXIT_FAILED, stdout: '' });
+    expect(stderr).toStartWith('sail port: ticketSource.claim: its answer is not a ClaimResult: claimed ');
+    expect(stderr).toEndWith(' (invalid)\n');
+    expect(JSON.parse(readFileSync(file, 'utf8').trim())).toMatchObject({
+      type: 'error:port',
+      port: 'ticketSource',
+      op: 'claim',
+      code: 'invalid',
+    });
   });
 });

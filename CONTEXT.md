@@ -36,6 +36,10 @@ _Avoid_: issue, work item, task, story (each is one provider's word)
 The ticket's human-readable identifier, such as `ADW-23`. Always say "ticket key" in full; a bare "key" names a call or step.
 _Avoid_: ticket id (the provider's internal id), ref
 
+**Priority**:
+A ticket's urgency as its ticket system ranks it: urgent, high, medium, low or none. TicketSource reports it, and a ticket without one has none.
+_Avoid_: importance, severity
+
 **Designated ticket**:
 A ticket its team has marked for sail with a label (`sail` by default, configurable). It is the only kind an intake accepts unless forced. A poll collects it only while it is also in a pick-up state, because a claim moves it to In Progress (ADR-0015).
 _Avoid_: tagged ticket, eligible ticket, allowlisted ticket
@@ -53,7 +57,7 @@ The hidden `<!-- sail:ticket KEY -->` line in a pull request's body. It names th
 _Avoid_: ticket tag, PR link
 
 **Claim**:
-Moving a designated ticket to In Progress through TicketSource before its run starts: at dispatch for a run the watcher starts, and at its start for a run started by hand. sail then comments on the ticket with the run id. After a claim the ticket is no longer in a pick-up state, so a restart cannot pick it up twice. A forced run of a ticket that is not in a pick-up state makes no claim: it moves the ticket to In Progress through `update`.
+Moving a designated ticket to In Progress through TicketSource, and commenting on it with the run id. The intake makes it, not the start: the built-in `ticket` intake claims inside `intake#1` and records the claim in that call's `result.json`, and a repository intake claims only when a step runs `sail port ticket-source claim`. Opening a run moves nothing, so a workflow that only reads its ticket, such as a grooming one, leaves it where it is. After a claim the ticket is no longer in a pick-up state, so a restart cannot pick it up twice. A claim another start took first fails the run. A forced run of a ticket that is not in a pick-up state makes no claim: it moves the ticket to In Progress through `update`.
 _Avoid_: lock, reserve, take
 
 **Forced run**:
@@ -275,7 +279,7 @@ A command's end before a run starts, with exit code 3: an invalid config, missin
 _Avoid_: rejection, abort, error (an outcome)
 
 **Dry run**:
-`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease, claim or comment. It exits 0, or 3 with the start's own refusal.
+`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease or comment, and no claim. It exits 0, or 3 with the start's own refusal.
 _Avoid_: preview, simulation, plan
 
 **Keep-awake**:
@@ -532,8 +536,12 @@ One timed sweep for eligible designated tickets and designated pull requests, ap
 _Avoid_: sweep, scan, sync
 
 **Queue**:
-The sources waiting for a run, kept per workflow and deduplicated. A queued item is always a source, never a resolved input.
+The sources waiting for a run, kept per workflow and deduplicated. A queued item is always a source, never a resolved input. Its order is the queue order.
 _Avoid_: backlog, inbox, buffer
+
+**Queue order**:
+The order a queue dispatches its items in, and the order `queue.json` keeps them: by priority (urgent, high, medium, low, none), oldest first within one. A pull request counts as none. A poll that finds a queued ticket at another priority moves it to its new place. A person can move a queued item next to another by hand (`sail queue move`, or the dashboard's arrows): it keeps that place, whatever its priority, until it is dispatched or dropped.
+_Avoid_: ranking, sort, schedule
 
 **Queue event stream**:
 A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, parking and errors, in the run's envelope without `runId`, and append-only across restarts.
@@ -552,15 +560,15 @@ A queue item's state once it has failed its last attempt: kept with the reason, 
 _Avoid_: dead-lettered, stuck, quarantined
 
 **Command file**:
-A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/commands/`. The watcher applies it and deletes it, so it stays the only writer of its own state (ADR-0019). Every command is safe to apply twice.
+A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/commands/`. The watcher applies it and deletes it, so it stays the only writer of its own state (ADR-0019). Its operations are poll, watch, unwatch, add, requeue, drop and move. Every command is safe to apply twice.
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run claims the ticket as it starts, after its branch is leased and its workspace made, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:
-The live, read-only view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. It controls nothing; the CLI does (`sail watch`, `sail unwatch`, `sail queue …`, `sail stop`).
+The live view `sail dashboard` serves on localhost for the whole machine: every watcher in the registry, with its runs, stage cards from the roster, the inspector, what needs attention, and its queues. It reads the run directories and queue files in each registered clone. Its one control is the ▲ and ▼ on a waiting queue item, which posts a move to the local server; the server only drops a command file for the watcher and changes no queue itself, and a refusal is shown beside the queue's header. Everything else is the CLI's (`sail watch`, `sail unwatch`, `sail queue …`, `sail stop`).
 _Avoid_: UI, console, monitor, board
 
 **Stage card**:

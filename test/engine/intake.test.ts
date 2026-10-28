@@ -38,6 +38,7 @@ import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
 import type { Consumer, Emit, NewEvent, SailEvent } from '../../src/events/types';
+import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import { agent, file, fromStep, intake, script, value, z } from '../../src/sdk';
 import * as intakes from '../../src/sdk/intakes';
@@ -159,6 +160,7 @@ test('its result.json is a valid builtin result: the call, the output as TicketI
     kind: 'builtin',
     outcome: 'passed',
     output: GOLDEN_OUTPUT,
+    claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
     files: {
       'ticket.json': recorded(runDir, '00-intake/call-1/ticket.json'),
       'brief.md': recorded(runDir, '00-intake/call-1/brief.md'),
@@ -233,7 +235,7 @@ test("a body that throws a PortError ends the try in error with one error: the r
     key: 'intake#1',
     kind: 'builtin',
     outcome: 'error',
-    errors: [{ reason: 'port', message: 'ticketSource.get: no ticket FAKE-9 (not_found)' }],
+    errors: [{ reason: 'port', message: 'ticketSource.claim: no ticket FAKE-9 (not_found)' }],
     output: null,
     files: {},
   });
@@ -247,6 +249,29 @@ test("a body that throws a PortError ends the try in error with one error: the r
     resultPath: '00-intake/call-1/result.json',
   });
   expect(eventIssues(events)).toEqual([]);
+});
+
+test('what a body recorded before it threw a PortError is kept in its result: a claim that took, then a failed get, leaves the claim in result.json', async () => {
+  const { runDir, ticketSource } = world();
+  const claim = { claimed: true, state: { type: 'started', name: 'In Progress' } };
+  const { result, paths } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: async ({ record }) => {
+      record({ claim });
+      throw new PortError('ticketSource', 'get', 'unavailable', 'the provider is down');
+    },
+    source: SOURCE,
+    ticketSource,
+  });
+  expect(result).toMatchObject({
+    outcome: 'error',
+    errors: [{ reason: 'port', message: 'ticketSource.get: the provider is down (unavailable)' }],
+    claim,
+  });
+  expect(validateDocument('sail.result.v1', result).map(formatIssue)).toEqual([]);
+  expect(JSON.parse(readFileSync(paths.result, 'utf8'))).toEqual(result);
 });
 
 test("an output the intake's schema refuses is invalid_output with Zod's message, reported as output:invalid, and the files the body left are still recorded", async () => {
@@ -372,7 +397,14 @@ test("the body is given the request's source, ticket source and signal, and the 
     return leaving(BOTH, VALID)(context);
   };
   await runIntake({ runDir, runId: RUN_ID, intake: LOADED, body, source: SOURCE, ticketSource, signal });
-  expect(given).toEqual({ source: SOURCE, ticketSource, out: join(runDir, '00-intake', 'call-1'), signal });
+  expect(given).toEqual({
+    source: SOURCE,
+    ticketSource,
+    runId: RUN_ID,
+    record: expect.any(Function),
+    out: join(runDir, '00-intake', 'call-1'),
+    signal,
+  });
   expect(given?.ticketSource).toBe(ticketSource);
   expect(given?.signal).toBe(signal);
 });
@@ -657,7 +689,7 @@ test('a run journals intake#1 as its first line before the workflow function is 
   });
 });
 
-test("its events start with run:start, the lease and workspace and what the claim did, with no key, then the intake's, each keyed intake#1, its ticket:fetched the stream's only one; no route leaves intake#1, and the intake adds no replay", async () => {
+test("its events start with run:start, the lease and workspace, with no key, then the intake's, each keyed intake#1, the claim among them and its ticket:fetched the stream's only one; no route leaves intake#1, and the intake adds no replay", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ticketRun(repo.dir);
@@ -666,10 +698,10 @@ test("its events start with run:start, the lease and workspace and what the clai
       'run:start',
       'workspace:leased',
       'workspace:created',
-      'ticket:claimed',
-      'ticket:commented',
       'run:keep_awake',
       'intake:start intake#1',
+      'ticket:claimed intake#1',
+      'ticket:commented intake#1',
       'ticket:fetched intake#1',
       'output:validated intake#1',
       'file:produced intake#1',
@@ -678,7 +710,7 @@ test("its events start with run:start, the lease and workspace and what the clai
       'journal:append intake#1',
       'stage:start spec#1',
     ]);
-    expect(list[6]).toMatchObject({ intake: 'ticket', kind: 'builtin', origin: 'builtin' });
+    expect(list[4]).toMatchObject({ intake: 'ticket', kind: 'builtin', origin: 'builtin' });
     // The intake fetched the ticket after the claim, so it counts the claim's comment beside the ticket's own.
     expect(list[7]).toMatchObject({ ticketKey: 'FAKE-1', comments: 2, links: 0, attachments: 0 });
     expect(list.filter((event) => event.type === 'ticket:fetched')).toHaveLength(1);
@@ -785,24 +817,24 @@ test("a resume replays intake#1 from the journal: it fetches nothing, the stream
   });
 }, 30_000);
 
-test('an abort seen once the ticket is claimed, before the intake starts, suspends the run with an empty journal, no intake directory and no fetch in its stream', async () => {
+test('an abort seen once the workspace is made, before the intake starts, suspends the run with an empty journal, no intake directory and no claim or fetch in its stream', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    const adapters = await fakeAdapters(repo.dir);
     const controller = new AbortController();
-    // Aborted as the claim's comment is posted: an abort seen before the claim starts no run at all.
-    const { ticketSource } = adapters.ports;
-    const comment = ticketSource.comment.bind(ticketSource);
-    ticketSource.comment = (ticketKey, body) => {
-      controller.abort();
-      return comment(ticketKey, body);
+    const stop: Consumer = {
+      name: 'stop',
+      onEvent: (event) => {
+        if (event.type === 'run:keep_awake') controller.abort();
+      },
     };
-    const end = await ticketRun(repo.dir, { adapters, signal: controller.signal });
+    const end = await ticketRun(repo.dir, { signal: controller.signal, consumers: [stop] });
     expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped before intake#1' });
     expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
     expect(keys(end.dir)).toEqual([]);
     expect(existsSync(join(end.dir, '00-intake'))).toBe(false);
-    expect(events(end.dir).filter((event) => event.type === 'ticket:fetched')).toEqual([]);
+    expect(
+      events(end.dir).filter((event) => ['ticket:claimed', 'ticket:commented', 'ticket:fetched'].includes(event.type)),
+    ).toEqual([]);
     expect(workflowEntries(repo.dir)).toBe(0);
   });
 });
@@ -841,7 +873,18 @@ test("an abort seen once the intake has returned leaves it unjournaled, and the 
     });
     expect(resultOf(dir, '01-spec/call-1').consumed).toEqual({ brief: '00-intake/call-1/try-2/brief.md' });
     const fetched = events(dir).filter((event) => event.type === 'ticket:fetched');
-    expect(fetched.map((event) => ('key' in event ? event.key : undefined))).toEqual(['intake#1', 'intake#1']);
+    // Try 2 finds the ticket claimed by this run, which reads it once, then fetches it for the brief.
+    expect(fetched.map((event) => ('key' in event ? event.key : undefined))).toEqual([
+      'intake#1',
+      'intake#1',
+      'intake#1',
+    ]);
+    const claims = events(dir).filter((event) => event.type === 'ticket:claimed' || event.type === 'ticket:commented');
+    expect(claims.map((event) => event.type)).toEqual(['ticket:claimed', 'ticket:commented']);
+    expect(resultOf(dir, '00-intake/call-1/try-2').claim).toEqual({
+      claimed: true,
+      state: { type: 'started', name: 'In Progress' },
+    });
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 30_000);

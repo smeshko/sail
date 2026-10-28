@@ -294,7 +294,6 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     loaded,
     workspace: { path: made.workspace.path, branch, baseSha: made.workspace.baseSha, remote: made.repository.url },
     started,
-    claimed: [],
     ...(options.continue === true ? {} : { until: stage }),
     firstSeq: 1,
     seeded: { fromRun, stage, entries: journaled, ...(ticket === undefined ? {} : { ticket }) },

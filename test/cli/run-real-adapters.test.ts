@@ -222,13 +222,15 @@ test('in Linear ADW-1 is In Progress, moved once, and its comments end with the 
   ]);
 }, 90_000);
 
-test('the claim and its comment come before the intake, the push, the pull request and the link comment are under publish#1/open, and the worktree and the lease are released before run:end', async () => {
+test('the claim and its comment come inside the intake, the push, the pull request and the link comment are under publish#1/open, and the worktree and the lease are released before run:end', async () => {
   const run = await completed();
   const types = run.events.map((event) => event.type);
   const intake = types.indexOf('intake:start');
-  expect(types.indexOf('ticket:claimed')).toBeGreaterThan(-1);
-  expect(types.indexOf('ticket:claimed')).toBeLessThan(intake);
-  expect(types.indexOf('ticket:commented')).toBeLessThan(intake);
+  const intakeEnd = types.indexOf('intake:end');
+  expect(types.indexOf('ticket:claimed')).toBeGreaterThan(intake);
+  expect(types.indexOf('ticket:claimed')).toBeLessThan(intakeEnd);
+  expect(types.indexOf('ticket:commented')).toBeGreaterThan(intake);
+  expect(types.indexOf('ticket:commented')).toBeLessThan(intakeEnd);
   const own = run.events.filter((event) => 'key' in event && event.key === 'publish#1/open').map((event) => event.type);
   expect(own.filter((type) => /^(codehost|ticket):/.test(type))).toEqual([
     'codehost:pushed',
@@ -345,21 +347,20 @@ test('a link comment Linear fails three times fails open after its third try, an
   );
 }, 90_000);
 
-test('a claim whose move Linear fails exits 3 and leaves no run directory, no worktree and no lease, and the ticket as it was', async () => {
+test('a claim whose move Linear fails ends the run failed at intake#1 and leaves no worktree and no lease, and the ticket as it was', async () => {
   await withClone(
     async (clone) => {
       const ran = await sail(clone, ['ADW-1']);
-      expect(ran.code).toBe(EXIT_REFUSED);
-      expect(ran.stderr).toStartWith('sail ADW-1: ');
+      expect(ran.code).toBe(EXIT_FAILED);
       expect({
-        runs: runIds(clone.repo),
+        runs: runIds(clone.repo).length,
         worktrees: worktrees(clone.repo),
         leases: leases(clone.repo),
         state: clone.linear.ticket(1).state,
         pulls: clone.github.pullRequests,
         head: clone.repo.git('rev-parse', 'HEAD'),
       }).toEqual({
-        runs: [],
+        runs: 1,
         worktrees: [`worktree ${clone.repo.dir}`],
         leases: [],
         state: 'Todo',

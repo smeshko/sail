@@ -31,12 +31,16 @@ export type Link = z.infer<typeof Link>;
 export const Attachment = z.object({ name: z.string(), url: z.string(), mimeType: z.string().optional() });
 export type Attachment = z.infer<typeof Attachment>;
 
+export const TicketPriority = z.enum(['urgent', 'high', 'medium', 'low', 'none']);
+export type TicketPriority = z.infer<typeof TicketPriority>;
+
 export const Ticket = z.object({
   ticketKey: z.string(),
   title: z.string(),
   url: z.string(),
   description: z.string(),
   state: TicketState,
+  priority: TicketPriority.optional(),
   labels: z.array(z.string()),
   comments: z.array(Comment),
   links: z.array(Link),

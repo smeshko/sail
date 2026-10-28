@@ -114,7 +114,6 @@ test('it holds nothing a run cannot write yet: no tool, thinking or denial event
     'schema',
     'runId',
     'source',
-    'claim',
     'workflow',
     'sail',
     'adapters',
@@ -169,28 +168,37 @@ test('events are numbered without a gap, never go back in time, and all belong t
   expect(text('STATUS')).toBe('completed\n');
 });
 
-test('the golden run records its claim: run.json holds it, the stream reports it after run:start and the workspace with no key, and the ticket the intake fetched carries its comment', () => {
+test("the golden run's intake records its claim: run.json holds none, the stream reports it under intake#1, and the ticket the intake fetched carries its comment", () => {
   const inProgress = { type: 'started', name: 'In Progress' };
   const comment = `sail run ${RUN_ID} started`;
   const header = JSON.parse(text('run.json'));
-  expect([header.source.forced, header.claim]).toEqual([[], { claimed: true, state: inProgress }]);
+  expect([header.source.forced, header.claim]).toEqual([[], undefined]);
+  expect(JSON.parse(text('00-intake/call-1/result.json')).claim).toEqual({ claimed: true, state: inProgress });
 
   const events = lines('events.ndjson');
-  expect(events.slice(0, 6).map((event) => event.type)).toEqual([
+  expect(events.slice(0, 7).map((event) => event.type)).toEqual([
     'run:start',
     'workspace:leased',
     'workspace:created',
+    'run:keep_awake',
+    'intake:start',
     'ticket:claimed',
     'ticket:commented',
-    'run:keep_awake',
   ]);
   expect(events.filter((event) => event.type === 'run:keep_awake')).toEqual([
-    expect.objectContaining({ seq: 6, ts: '2026-09-25T09:00:01.200Z', held: true, by: 'fake' }),
+    expect.objectContaining({ seq: 4, ts: '2026-09-25T09:00:00.900Z', held: true, by: 'fake' }),
   ]);
-  const envelope = (seq: number, ts: string, type: string) => ({ seq, ts, type, runId: RUN_ID, ticketKey: 'FAKE-1' });
-  expect(events.slice(3, 5)).toEqual([
-    { ...envelope(4, '2026-09-25T09:00:01.000Z', 'ticket:claimed'), state: inProgress },
-    { ...envelope(5, '2026-09-25T09:00:01.100Z', 'ticket:commented'), body: comment },
+  const envelope = (seq: number, ts: string, type: string) => ({
+    seq,
+    ts,
+    type,
+    runId: RUN_ID,
+    key: 'intake#1',
+    ticketKey: 'FAKE-1',
+  });
+  expect(events.slice(5, 7)).toEqual([
+    { ...envelope(6, '2026-09-25T09:00:01.200Z', 'ticket:claimed'), state: inProgress },
+    { ...envelope(7, '2026-09-25T09:00:01.400Z', 'ticket:commented'), body: comment },
   ]);
   expect(events[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] } });
 
@@ -202,7 +210,7 @@ test('the golden run records its claim: run.json holds it, the stream reports it
   const ticket = JSON.parse(text('00-intake/call-1/ticket.json'));
   expect([ticket.state, ticket.comments.at(-1)]).toEqual([
     inProgress,
-    { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:00.600Z' },
+    { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:01.300Z' },
   ]);
   expect(text('00-intake/call-1/brief.md')).toEndWith(
     `<untrusted-input source="ticket FAKE-1, comment 2">\n${comment}\n</untrusted-input>\n`,

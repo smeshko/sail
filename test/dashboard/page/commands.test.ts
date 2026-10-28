@@ -1,4 +1,4 @@
-// The CLI commands the page shows to copy, since the dashboard controls nothing (D11). A run id, a workflow and a dedup
+// The CLI commands the page shows to copy, since the dashboard's only control moves a queued item (D11). A run id, a workflow and a dedup
 // key come from run and queue files, so one that isn't a plain word is quoted: a pasted command runs only what it says.
 import { expect, test } from 'bun:test';
 import { parkedCommands, runCommands } from '../../../src/dashboard/page/commands';

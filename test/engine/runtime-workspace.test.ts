@@ -80,9 +80,9 @@ const IMPLEMENT_BODY = "echo 'diff --git a/src/greet.ts b/src/greet.ts'";
 const TESTS_SCRIPT = 'stages/tests/run.sh';
 const TESTS_BODY = 'pass_at=2';
 
-// The start: lease, run directory and workspace, claim, run.json.
+// The start: lease, run directory and workspace, run.json. The intake claims later.
 
-test('a fresh run leases its branch before its run directory exists and makes its workspace before the claim, and run.json records the branch, the repository and the workspace', async () => {
+test('a fresh run leases its branch before its run directory exists and opens without a claim, and run.json records the branch, the repository and the workspace', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const adapters = await fakeAdapters(repo.dir);
@@ -95,10 +95,7 @@ test('a fresh run leases its branch before its run directory exists and makes it
     };
     const claim = ticketSource.claim.bind(ticketSource);
     ticketSource.claim = async (ticketKey) => {
-      const [id] = runIds(repo.dir);
-      const dir = join(repo.dir, '.sail-runs', id ?? '');
-      seen.push(`claim: worktree ${existsSync(join(dir, 'workspace', '.git')) ? 'made' : 'not made'}`);
-      seen.push(`claim: run.json ${existsSync(join(dir, RUN_HEADER_FILE)) ? 'written' : 'not written'}`);
+      seen.push('claim');
       return claim(ticketKey);
     };
     const opened = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', ticket: 'FAKE-1', adapters });
@@ -111,7 +108,7 @@ test('a fresh run leases its branch before its run directory exists and makes it
       workspace: opened.workspace,
       started: opened.started,
     }).toEqual({
-      seen: ['lease: run directory not made', 'claim: worktree made', 'claim: run.json not written'],
+      seen: ['lease: run directory not made'],
       header: { branch: BRANCH, repository: { url: REMOTE, defaultBranch: 'main', baseSha }, workspace: 'workspace' },
       workspace: { path: join(opened.dir, 'workspace'), branch: BRANCH, baseSha, remote: REMOTE },
       started: [
@@ -187,7 +184,7 @@ async function refusedStart(change: (adapters: ResolvedAdapters, abort: () => vo
   });
 }
 
-test('a start refused at a claim lost to another start, or aborted once its workspace exists, leaves no run directory, no worktree and no lease, and the ticket as it was', async () => {
+test('a claim lost to another start fails the run at its intake, keeping the run directory but releasing the worktree and the lease, and an abort once the workspace exists leaves no run directory, no worktree and no lease; the ticket is as it was in both', async () => {
   const lostClaim = await refusedStart((adapters) => {
     adapters.ports.ticketSource.claim = async () => ({
       claimed: false,
@@ -207,48 +204,48 @@ test('a start refused at a claim lost to another start, or aborted once its work
   const left = { runs: [], worktrees: [], lease: null, ticket: { state: 'Todo', comments: 1 } };
   expect({ lostClaim, aborted }).toEqual({
     lostClaim: {
-      end: {
-        refused: 'the ticket is already claimed: it became In Progress while sail was starting. --force runs it anyway',
-      },
+      end: expect.objectContaining({
+        status: 'failed',
+        stopReason: 'stage_error',
+        message: expect.stringContaining(
+          'ticketSource.claim: the ticket is already claimed: it became In Progress while sail was starting. --force runs it anyway (conflict)',
+        ),
+      }),
       ...left,
+      runs: [expect.stringMatching(/^FAKE-1-/)],
     },
-    aborted: { end: { refused: 'stopped before the ticket was claimed' }, ...left },
+    aborted: { end: { refused: 'stopped before the run was opened' }, ...left },
   });
 });
 
-test('a run.json that cannot be written once the ticket has moved throws, and leaves no run directory, no worktree and no lease (review #1.11)', async () => {
+// The end: a suspended run keeps both, a run that ended for good releases both.
+
+test('a run.json that cannot be written once the workspace is made throws, and leaves no run directory, no worktree and no lease (review #1.11)', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const adapters = await fakeAdapters(repo.dir);
-    const { ticketSource } = adapters.ports;
-    const comment = ticketSource.comment.bind(ticketSource);
-    // Once the comment is posted, run.json's name is taken by a directory: writing it fails.
-    ticketSource.comment = async (ticketKey, body) => {
-      const posted = await comment(ticketKey, body);
-      for (const id of runIds(repo.dir)) mkdirSync(join(repo.dir, '.sail-runs', id, RUN_HEADER_FILE));
-      return posted;
+    const { workspace } = adapters.ports;
+    const create = workspace.create.bind(workspace);
+    // Once the workspace is made, run.json's name is taken by a directory: writing it fails.
+    workspace.create = async (run, options) => {
+      const made = await create(run, options);
+      mkdirSync(join(run.runDir, RUN_HEADER_FILE), { recursive: true });
+      return made;
     };
     let thrown = 'opened';
     try {
       await openRun({ cwd: repo.dir, adapters, workflow: 'ticket-to-pr', ticket: 'FAKE-1' });
     } catch (error) {
-      thrown = (error as Error).message.replace(/: .*$/s, '');
+      thrown = (error as Error).message.replace(/'s directory .*$/s, '');
     }
     expect({
       thrown,
       runs: runIds(repo.dir),
       worktrees: worktrees(repo),
       lease: readLease(leasesOf(repo.dir), REMOTE, BRANCH) ?? null,
-    }).toEqual({
-      thrown: expect.stringMatching(/^the ticket is now In Progress and its comment names run FAKE-1-/),
-      runs: [],
-      worktrees: [],
-      lease: null,
-    });
+    }).toEqual({ thrown: expect.stringMatching(/^run FAKE-1-\w+$/), runs: [], worktrees: [], lease: null });
   });
 });
-
-// The end: a suspended run keeps both, a run that ended for good releases both.
 
 test('a suspended run keeps its worktree and its lease, and a failed run releases both', async () => {
   await withTempRepo(async (repo) => {

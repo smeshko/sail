@@ -1020,6 +1020,75 @@ test('an add, a requeue and a drop for a workflow outside the set are each rejec
   });
 });
 
+test('a move command reorders the queue with queue:moved, and one next to a dispatched item is rejected and changes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a', 'FAKE-3': 'sail-a' }),
+    );
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    const file = join(queueDir(w.runs, 'a'), 'queue.json');
+    const order = () =>
+      JSON.parse(readFileSync(file, 'utf8')).items.map((item: Record<string, unknown>) => `${item.dedupKey}`);
+    const start = order();
+    dropCommand(w.runs, { op: 'move', workflow: 'a', dedupKey: 'ticket:FAKE-3', before: 'ticket:FAKE-2' });
+    await w.timers.advance(1000);
+    const moved = order();
+    const bytes = readFileSync(file, 'utf8');
+    dropCommand(w.runs, { op: 'move', workflow: 'a', dedupKey: 'ticket:FAKE-3', after: 'ticket:FAKE-1' });
+    await w.timers.advance(1000);
+    expect({
+      start,
+      moved,
+      events: w
+        .events('a')
+        .filter((event) => event.type === 'queue:moved')
+        .map(({ dedupKey, before, reason }) => ({ dedupKey, before, reason })),
+      rejected: rejections(w.out),
+      unchanged: readFileSync(file, 'utf8') === bytes,
+    }).toEqual({
+      start: ['ticket:FAKE-1', 'ticket:FAKE-2', 'ticket:FAKE-3'],
+      moved: ['ticket:FAKE-1', 'ticket:FAKE-3', 'ticket:FAKE-2'],
+      events: [{ dedupKey: 'ticket:FAKE-3', before: 'ticket:FAKE-2', reason: 'moved by hand' }],
+      rejected: ["a's item ticket:FAKE-1 is dispatched: only a queued item is moved\n"],
+      unchanged: true,
+    });
+    await watcher.stop();
+  });
+});
+
+test('a move command with after puts the item directly after its target, with queue:moved naming after (review R6)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [{ name: 'a', label: 'sail-a', cap: 1 }],
+      tickets({ 'FAKE-1': 'sail-a', 'FAKE-2': 'sail-a', 'FAKE-3': 'sail-a', 'FAKE-4': 'sail-a' }),
+    );
+    const watcher = await w.start(['a']);
+    await w.timers.advance(1000);
+    const file = join(queueDir(w.runs, 'a'), 'queue.json');
+    const order = () =>
+      JSON.parse(readFileSync(file, 'utf8')).items.map((item: Record<string, unknown>) => `${item.dedupKey}`);
+    dropCommand(w.runs, { op: 'move', workflow: 'a', dedupKey: 'ticket:FAKE-2', after: 'ticket:FAKE-3' });
+    await w.timers.advance(1000);
+    expect({
+      order: order(),
+      events: w
+        .events('a')
+        .filter((event) => event.type === 'queue:moved')
+        .map(({ dedupKey, before, after }) => ({ dedupKey, before, after })),
+      rejected: rejections(w.out),
+    }).toEqual({
+      order: ['ticket:FAKE-1', 'ticket:FAKE-3', 'ticket:FAKE-2', 'ticket:FAKE-4'],
+      events: [{ dedupKey: 'ticket:FAKE-2', before: undefined, after: 'ticket:FAKE-3' }],
+      rejected: [],
+    });
+    await watcher.stop();
+  });
+});
+
 test('a ticket workflow and a pull-request workflow that both poll sail open under one watcher, and the registry claims sail once, for the ticket source (ADW-235)', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail', cap: 1 }], tickets({ 'FAKE-1': 'sail' }));

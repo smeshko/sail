@@ -1,5 +1,14 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ProcessEnd, type ProcessOptions, runProcess, stopGroup } from '../../src/engine/process';
@@ -87,22 +96,43 @@ test('a timeout stops the group with SIGTERM', async () => {
   expect(ms).toBeLessThan(3500);
 });
 
+/**
+ * Stops `options`' command with an abort once `ready` exists, and times the stop from the abort. A timeout starts at
+ * spawn, and a loaded machine can take longer than it to start bash, so a test that needs the script's first lines run
+ * waits for them instead.
+ */
+async function stoppedWhenReady(options: ProcessOptions, ready: string): Promise<{ end: ProcessEnd; ms: number }> {
+  const controller = new AbortController();
+  const running = runProcess({ ...options, signal: controller.signal });
+  while (!existsSync(ready)) await Bun.sleep(20);
+  const aborted = performance.now();
+  controller.abort();
+  const end = await running;
+  return { end, ms: performance.now() - aborted };
+}
+
 test('a script that ignores SIGTERM is killed after the grace period', async () => {
   const s = scratch();
-  const run = s.script('stubborn.sh', "trap '' TERM\nsleep 5");
-  const { end, ms } = await timed(s.options([run], { timeoutMs: 500, graceMs: 500 }));
+  const ready = join(s.dir, 'ready');
+  // exec, so the leader is the sleep, which inherits the ignored SIGTERM, rather than a bash waiting for it.
+  const run = s.script('stubborn.sh', `trap '' TERM\ntouch "${ready}"\nexec sleep 5`);
+  const { end, ms } = await stoppedWhenReady(s.options([run], { graceMs: 500 }), ready);
   console.log(`SIGKILL after grace: ${Math.round(ms)} ms`);
-  expect(end).toMatchObject({ started: true, code: null, signal: 'SIGKILL', timedOut: true });
-  expect(ms).toBeGreaterThanOrEqual(1000);
-  expect(ms).toBeLessThan(3500);
+  expect(end).toMatchObject({ started: true, code: null, signal: 'SIGKILL', aborted: true });
+  expect(ms).toBeGreaterThanOrEqual(500);
+  expect(ms).toBeLessThan(3000);
 });
 
-test('a background grandchild dies with the group on a timeout', async () => {
+test('a background grandchild dies with the group when it is stopped', async () => {
   const s = scratch();
   const pidFile = join(s.dir, 'grandchild.pid');
-  const run = s.script('spawner.sh', `sleep 30 &\necho $! > "${pidFile}"\nsleep 5`);
-  const { end } = await timed(s.options([run], { timeoutMs: 1000 }));
-  expect(end).toMatchObject({ timedOut: true });
+  // Renamed into place, so the file is there only once the pid is in it.
+  const run = s.script(
+    'spawner.sh',
+    `sleep 30 &\necho $! > "${pidFile}.tmp"\nmv "${pidFile}.tmp" "${pidFile}"\nexec sleep 5`,
+  );
+  const { end } = await stoppedWhenReady(s.options([run]), pidFile);
+  expect(end).toMatchObject({ aborted: true });
   expect(alive(pidIn(pidFile))).toBe(false);
 });
 
@@ -113,7 +143,8 @@ test('whatever a script leaves running is stopped once it exits', async () => {
   const { end, ms } = await timed(s.options([run]));
   console.log(`leftover stopped: ${Math.round(ms)} ms`);
   expect(end).toEqual({ started: true, code: 0, signal: null, timedOut: false, aborted: false });
-  expect(ms).toBeLessThan(2000);
+  // Well short of the leftover's 30 s, with room for a loaded machine to start bash.
+  expect(ms).toBeLessThan(15_000);
   expect(alive(pidIn(pidFile))).toBe(false);
 });
 

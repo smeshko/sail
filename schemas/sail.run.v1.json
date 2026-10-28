@@ -17,7 +17,7 @@
     },
     "fromRun": { "description": "the run a seeded run reused calls from", "type": "string", "minLength": 1 },
     "claim": {
-      "description": "what the run's start did to its ticket: whether the claim took, and the state the provider reported after sail's move. A seeded run makes none",
+      "description": "written only by runs from before the claim moved into the intake: whether the claim took, and the state the provider reported after sail's move. A newer run records its claim in intake#1's result.json",
       "type": "object",
       "properties": {
         "claimed": { "type": "boolean" },
@@ -97,28 +97,6 @@
   },
   "required": ["schema", "runId", "source", "workflow", "sail", "adapters", "intake", "stages", "startedAt"],
   "additionalProperties": false,
-  "allOf": [
-    {
-      "$comment": "a seeded run claims nothing: claim is required unless fromRun is present, and refused when it is",
-      "if": { "properties": { "fromRun": true }, "required": ["fromRun"] },
-      "then": { "properties": { "claim": false } },
-      "else": { "properties": { "claim": true } }
-    },
-    {
-      "$comment": "a pull-request run moves no ticket, so it claims nothing; a ticket run without fromRun has a claim",
-      "if": {
-        "properties": {
-          "source": { "type": "object", "properties": { "kind": { "const": "pr" } }, "required": ["kind"] }
-        },
-        "required": ["source"]
-      },
-      "then": { "properties": { "claim": false } },
-      "else": {
-        "if": { "properties": { "fromRun": true }, "required": ["fromRun"] },
-        "else": { "required": ["claim"] }
-      }
-    }
-  ],
   "$defs": {
     "forced": {
       "description": "the checks --force overrode: empty for a run nobody forced",

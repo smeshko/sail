@@ -1,7 +1,11 @@
-// The dashboard's server: the registry's run files, read-only, on 127.0.0.1. Every request passes the guard first:
+// The dashboard's server: the registry's run files and queues, read-only but for one request, on 127.0.0.1. Every
+// request passes the guard first:
 //
 // 1. `Host` must be this server's (`127.0.0.1:<port>` or `localhost:<port>`), so a DNS-rebinding page gets 403.
-// 2. Only GET: anything else is 405, OPTIONS included, so a cross-origin preflight fails.
+// 2. Only GET: anything else is 405, OPTIONS included, so a cross-origin preflight fails. The one exception is a POST to
+//    `/api/repos/<repo>/queues/<workflow>/move`, which needs the client header (403), `Content-Type: application/json`
+//    (415) and an `Origin` that is absent or this server's own (403). It never writes a queue: it drops a move command
+//    in the watcher's inbox, as `sail queue move` does, and answers 409 when no watcher of that clone watches it.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -12,10 +16,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
+import { z } from 'zod';
+import { runsDir } from '../engine/run-dir';
+import { dropCommand } from '../watch/inbox';
+import { liveSet, liveWatcher } from '../watch/registry';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
 import { createPage } from './page';
-import { queueViews } from './queues';
+import { findQueueDir, queueViews, readQueue } from './queues';
 import { createIndexFeed, openQueueFollow, openRunStream, resolveTarget } from './streams';
 
 export interface DashboardOptions {
@@ -44,13 +52,90 @@ const messageOf = (thrown: unknown) => (thrown instanceof Error ? thrown.message
 
 const origins = (port: number) => [`127.0.0.1:${port}`, `localhost:${port}`];
 
+/** The one path a POST is served at: `/api/repos/<repo>/queues/<workflow>/move`. */
+const MOVE_PATH = /^\/api\/repos\/[^/]+\/queues\/[^/]+\/move$/;
+
+const MoveBody = z
+  .strictObject({
+    dedupKey: z.string().min(1),
+    before: z.string().min(1).optional(),
+    after: z.string().min(1).optional(),
+  })
+  .refine((move) => (move.before === undefined) !== (move.after === undefined), {
+    message: 'give exactly one of before and after',
+  });
+
+/**
+ * Asks the repository's live watcher to move a queued item, by dropping a move command in its inbox: the watcher alone
+ * writes the queue. Refused unless the item and its target are both queued, and the repository's live watcher runs in
+ * its `.sail/` and watches the workflow, as `sail queue move` checks.
+ */
+async function moveRoute(registryDir: string, segments: string[], request: Request): Promise<Response> {
+  const [, , name = '', , workflow = ''] = segments;
+  const entry = findRepo(registryDir, name);
+  if (entry === undefined) return error(404, `no repository '${name}'`);
+  const dir = findQueueDir(entry, workflow);
+  if (typeof dir !== 'string') return error(404, dir.missing);
+  const text = await request.text();
+  let data: unknown;
+  try {
+    data = text.length > 4096 ? undefined : JSON.parse(text);
+  } catch {
+    return error(400, 'the body is not JSON');
+  }
+  const parsed = MoveBody.safeParse(data);
+  if (!parsed.success) {
+    const [issue] = parsed.error.issues;
+    return error(400, `not a move: ${[issue?.path.join('.'), issue?.message].filter(Boolean).join(' ')}`);
+  }
+  const { dedupKey, before, after } = parsed.data;
+  const target = before ?? after ?? '';
+  if (dedupKey === target) return error(409, `${dedupKey} can't be moved next to itself`);
+  const { queue, problem } = readQueue(dir);
+  if (queue === undefined) return error(409, problem ?? `${workflow} has no queue yet`);
+  for (const key of [dedupKey, target]) {
+    const item = queue.items.find((each) => each.dedupKey === key);
+    if (item === undefined) return error(409, `${workflow}'s queue has no item ${key}`);
+    if (item.state !== 'queued') return error(409, `${key} is ${item.state}: only a queued item is moved`);
+  }
+  const watcher = liveWatcher(entry);
+  if (watcher === undefined) {
+    return error(409, `no watcher is running for '${entry.name}': sail watch ${workflow} first`);
+  }
+  const named = `the watcher of '${entry.name}' (pid ${watcher.pid})`;
+  if (watcher.sailDir !== entry.sailDir) return error(409, `${named} runs in another clone: ${watcher.sailDir}`);
+  if (!liveSet(entry.sailDir, watcher.pid).some((each) => each.workflow === workflow)) {
+    return error(409, `${named} does not watch '${workflow}': sail watch ${workflow} first`);
+  }
+  const file = dropCommand(runsDir(entry.sailDir), {
+    op: 'move',
+    workflow,
+    dedupKey,
+    ...(before === undefined ? { after: target } : { before: target }),
+  });
+  return Response.json({ file }, { status: 202 });
+}
+
 /** The refusal of a request the dashboard doesn't serve, or undefined to let it through. */
 export function guard(request: Request, port: number): Response | undefined {
   const allowed = origins(port);
   if (!allowed.includes(request.headers.get('host') ?? ''))
     return error(403, 'this dashboard answers only its own host');
-  if (request.method !== 'GET') return error(405, 'the dashboard is read-only', { Allow: 'GET' });
   const client = request.headers.get(CLIENT_HEADER) === '1';
+  if (request.method !== 'GET') {
+    if (request.method !== 'POST' || !MOVE_PATH.test(new URL(request.url).pathname)) {
+      return error(405, 'the dashboard answers only GET, and POST to a queue move', { Allow: 'GET' });
+    }
+    if (!client) return error(403, `send ${CLIENT_HEADER}: 1`);
+    if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
+      return error(415, 'send the move as application/json');
+    }
+    const origin = request.headers.get('origin');
+    if (origin !== null && !allowed.some((host) => origin === `http://${host}`)) {
+      return error(403, 'a move needs this dashboard as its origin');
+    }
+    return undefined;
+  }
   if (request.headers.get('upgrade')?.toLowerCase() === 'websocket') {
     const origin = request.headers.get('origin');
     const ok = origin === null ? client : allowed.some((host) => origin === `http://${host}`);
@@ -170,6 +255,7 @@ export function startDashboard(options: DashboardOptions): Dashboard | { refused
         }
         const segments = segmentsOf(url);
         if (segments === undefined) return error(400, 'the path is not percent-encoded properly');
+        if (request.method === 'POST') return moveRoute(registryDir, segments, request);
         return route(registryDir, segments, url);
       },
       websocket: {

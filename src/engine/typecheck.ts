@@ -86,13 +86,13 @@ export function parseDiagnostics(output: string, cwd: string): Diagnostic[] {
 
 /**
  * Runs `tsc` under the house rules on `dir`'s TypeScript, or `files` and their imports, from `dirname(dir)`, with
- * `args` after its own. The config is a temp file, removed afterwards. Throws when `tsc` can't be spawned.
+ * `args` after its own. The config is a temp file under `tmp`, `tmpdir()` unless given, removed afterwards. Throws when `tsc` can't be spawned.
  */
 export async function spawnTsc(
   dir: string,
-  options: { tsc?: string; files?: string[]; args?: string[] } = {},
+  options: { tsc?: string; files?: string[]; args?: string[]; tmp?: string } = {},
 ): Promise<{ code: number; stdout: string; stderr: string; cwd: string }> {
-  const configDir = mkdtempSync(join(tmpdir(), 'sail-check-'));
+  const configDir = mkdtempSync(join(options.tmp ?? tmpdir(), 'sail-check-'));
   try {
     const config = join(configDir, 'tsconfig.json');
     // The include is absolute because `tsc` skips dot-directories under a pattern, unless the literal base path holds
@@ -122,7 +122,7 @@ export async function spawnTsc(
  */
 export async function typecheck(
   dir: string,
-  options: { tsc?: string; files?: string[] } = {},
+  options: { tsc?: string; files?: string[]; tmp?: string } = {},
 ): Promise<TypecheckResult> {
   // `tsc` fails an empty include with TS18003, and the `.sail/` that `sail init` writes has no TypeScript yet.
   const files = options.files?.length ?? [...new Bun.Glob('**/*.ts').scanSync({ cwd: dir })].length;

@@ -177,7 +177,6 @@ export interface RunModel {
   openLoops: string[];
   /** Each group, in the order its first `all:start` came: its keys in declaration order, and whether it has ended. */
   groups: { keys: string[]; ended: boolean }[];
-  routes: { at: string; value: string; took: string }[];
   end?: { status: string; stopReason?: string; message?: string };
   /** The `ts` of the `run:end` in `end`. */
   endedAt?: string;
@@ -204,7 +203,6 @@ export function emptyRun(): RunModel {
     loops: dict(),
     openLoops: [],
     groups: [],
-    routes: [],
     lastSeq: 0,
     unreadable: 0,
     other: dict(),
@@ -233,6 +231,7 @@ const PASSED_OVER = new Set([
   'prompt:rendered',
   'output:validated',
   'run:keep_awake',
+  'workflow:route',
   'workspace:leased',
   'workspace:lease_released',
   'workspace:created',
@@ -524,13 +523,6 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
         if (known === undefined) return false;
         known.ended = true;
       } else if (known === undefined) model.groups.push({ keys, ended: false });
-      return true;
-    }
-    case 'workflow:route': {
-      const at = str(e.at);
-      const took = str(e.took);
-      if (at === undefined || took === undefined) return false;
-      model.routes.push({ at, value: text(e.value), took });
       return true;
     }
     case 'harness:session_start': {

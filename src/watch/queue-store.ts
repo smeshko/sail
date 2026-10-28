@@ -10,6 +10,11 @@
 //   memory of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run. A pull request's
 //   key carries its head sha, so a done one stays taken while the item is kept: the same sha is never reviewed twice.
 //   Only the same full sha keeps it: a done item at another sha that shares its first 7 is replaced.
+// - Pending items (queued, and failed awaiting a retry) are kept in queue order in `items`, and `due()` reads them in
+//   that order: by the ticket's priority (urgent, high, medium, low, none), oldest first within one. A pull request
+//   counts as none. An unmoved pending item goes before the first unmoved pending item dispatched after it, on add, on
+//   a priority change a re-add finds, on a retry and on a requeue. A queue.json without priorities keeps the order it
+//   has, which is the order of `addedAt`.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
 //   requeues or drops it. `parked()` parks whatever the attempts: a stopped run's item is a person's decision, not a
 //   failure to retry. `requeue()` puts a parked or failed item back as queued with no attempts.
@@ -24,6 +29,8 @@
 // - A run that hit the usage limit holds the workflow's dispatch: `hold()` keeps the later `until` in `held` and emits
 //   `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
 //   changed: no attempt is counted, and nothing is failed or parked.
+// - `move()` places a queued item next to another queued one and marks it `moved`: add, a priority change and a retry
+//   leave a moved item where it is, and its dispatch clears the mark. It emits `queue:moved`.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
 //   hook that throws is ignored, so the terminal never breaks the queue.
@@ -33,7 +40,7 @@ import { z } from 'zod';
 import { replaceFile } from '../engine/durable';
 import type { NewQueueEvent, QueueEvent, ResumedFrom } from '../events/types';
 import { PORT_ERROR_CODES, type PortErrorCode } from '../ports/errors';
-import type { PullRequest, Ticket } from '../ports/types';
+import { type PullRequest, type Ticket, TicketPriority } from '../ports/types';
 import { openQueueStream } from './queue-events';
 
 export const QUEUE_DIR = 'queue';
@@ -79,6 +86,10 @@ export const QueueItem = z.strictObject({
   finishedAt: z.string().optional(),
   /** Added with `--force`: first dispatched without the re-check of designation and state, and started with `--force`. */
   forced: z.literal(true).optional(),
+  /** The ticket's priority, as the last poll saw it. A pull request has none. */
+  priority: TicketPriority.optional(),
+  /** Placed by hand: it keeps its place, whatever its priority, until it is dispatched or dropped. */
+  moved: z.literal(true).optional(),
 });
 export type QueueItem = z.infer<typeof QueueItem>;
 
@@ -144,6 +155,17 @@ export function dedupKey(source: QueueSource): string {
   return source.kind === 'ticket' ? `ticket:${source.ticketKey}` : `pr:${source.number}@${source.headSha.slice(0, 7)}`;
 }
 
+const PRIORITY_ORDER: Record<TicketPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
+
+/** Where an item's priority puts it in the queue order: `none` for a pull request or a ticket without one. */
+const priorityOrder = (item: QueueItem): number => PRIORITY_ORDER[item.priority ?? 'none'];
+
+/** Whether `a` is dispatched after `b` by (priority, addedAt). Equal keys keep the order they are in. */
+const dispatchedAfter = (a: QueueItem, b: QueueItem): boolean =>
+  priorityOrder(a) !== priorityOrder(b)
+    ? priorityOrder(a) > priorityOrder(b)
+    : Date.parse(a.addedAt) > Date.parse(b.addedAt);
+
 /** A poll that failed, as `pollFailed()` records it. */
 export interface PollFailure {
   port: 'ticketSource' | 'codeHost';
@@ -166,7 +188,7 @@ export interface QueueStore {
    * is done stays taken: the same sha is never queued twice.
    */
   addPullRequests(pullRequests: readonly PullRequest[]): number;
-  /** The items a dispatch may start: queued ones, and failed ones past their `retryAt`, oldest first. */
+  /** The items a dispatch may start: queued ones, and failed ones past their `retryAt`, in the order `items` holds. */
   due(): QueueItem[];
   /** Records a dispatch of the item, which counts an attempt. */
   dispatched(key: string, runId: string): void;
@@ -183,6 +205,12 @@ export interface QueueStore {
    * naming it.
    */
   requeue(key: string, reason: string): void;
+  /**
+   * Places the queued item `key` directly before or after another queued item, marks it moved so a later add or
+   * priority change leaves it there until it is dispatched or dropped, and emits `queue:moved`. A move that leaves it
+   * where it is changes nothing and still emits. An item or target that is missing or not queued throws, naming why.
+   */
+  move(key: string, to: { before: string } | { after: string }, reason: string): void;
   /** Takes the item out of the queue, and emits `queue:dropped` with the reason. An unknown key throws. */
   drop(key: string, reason: string): void;
   /**
@@ -325,6 +353,28 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         title: item.title,
       })),
     );
+  /**
+   * Puts `item` in `next.items` before the first unmoved pending item that is dispatched after it, or at the end when
+   * none is. Moved items are never compared with, so they keep their places.
+   */
+  const place = (next: QueueFile, item: QueueItem): void => {
+    const unmoved = (each: QueueItem) => (each.state === 'queued' || each.state === 'failed') && each.moved !== true;
+    const at = next.items.indexOf(item);
+    if (at >= 0) {
+      // An item whose neighbours among the unmoved ones already bracket it stays, so equal keys keep their order.
+      const after = next.items.slice(at + 1).find(unmoved);
+      const behind = next.items.slice(0, at).findLast(unmoved);
+      if (
+        (behind === undefined || !dispatchedAfter(behind, item)) &&
+        (after === undefined || !dispatchedAfter(item, after))
+      )
+        return;
+      next.items.splice(at, 1);
+    }
+    const before = next.items.findIndex((each) => unmoved(each) && dispatchedAfter(each, item));
+    if (before < 0) next.items.push(item);
+    else next.items.splice(before, 0, item);
+  };
   const isDue = (item: QueueItem, at: number) =>
     item.state === 'queued' || (item.state === 'failed' && Date.parse(item.retryAt ?? '') <= at);
 
@@ -336,7 +386,14 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         for (const ticket of tickets) {
           const key = dedupKey({ kind: 'ticket', ticketKey: ticket.ticketKey });
           const taken = next.items.find((item) => item.dedupKey === key);
-          if (taken !== undefined && taken.state !== 'done') continue;
+          if (taken !== undefined && taken.state !== 'done') {
+            if ((taken.state === 'queued' || taken.state === 'failed') && taken.priority !== ticket.priority) {
+              if (ticket.priority === undefined) delete taken.priority;
+              else taken.priority = ticket.priority;
+              if (taken.moved !== true) place(next, taken);
+            }
+            continue;
+          }
           if (taken !== undefined) next.items.splice(next.items.indexOf(taken), 1);
           const item: QueueItem = {
             dedupKey: key,
@@ -347,8 +404,9 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
             attempts: 0,
             addedAt: now().toISOString(),
             ...(options.forced === true ? { forced: true as const } : {}),
+            ...(ticket.priority === undefined ? {} : { priority: ticket.priority }),
           };
-          next.items.push(item);
+          place(next, item);
           queued.push(item);
         }
         return queued;
@@ -377,7 +435,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
             attempts: 0,
             addedAt: now().toISOString(),
           };
-          next.items.push(item);
+          place(next, item);
           queued.push(item);
         }
         return queued;
@@ -387,9 +445,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
     },
     due() {
       const at = now().getTime();
-      return structuredClone(queue.items.filter((item) => isDue(item, at))).sort(
-        (a, b) => Date.parse(a.addedAt) - Date.parse(b.addedAt),
-      );
+      return structuredClone(queue.items.filter((item) => isDue(item, at)));
     },
     dispatched(key, runId) {
       change((next) => {
@@ -397,6 +453,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.state = 'dispatched';
         item.attempts += 1;
         item.runId = runId;
+        delete item.moved;
         delete item.retryAt;
         delete item.pid;
       });
@@ -446,8 +503,26 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         item.state = 'queued';
         item.attempts = 0;
         for (const field of ['reason', 'retryAt', 'finishedAt', 'runId', 'pid'] as const) delete item[field];
+        place(next, item);
       });
       stream.emit({ type: 'queue:requeued', workflow, dedupKey: key, reason });
+    },
+    move(key, to, reason) {
+      const targetKey = 'before' in to ? to.before : to.after;
+      change((next) => {
+        const item = find(next, key);
+        const target = find(next, targetKey);
+        if (item === target) throw new Error(`${workflow}'s item ${key} can't be moved next to itself`);
+        for (const each of [item, target]) {
+          if (each.state !== 'queued') {
+            throw new Error(`${workflow}'s item ${each.dedupKey} is ${each.state}: only a queued item is moved`);
+          }
+        }
+        next.items.splice(next.items.indexOf(item), 1);
+        next.items.splice(next.items.indexOf(target) + ('before' in to ? 0 : 1), 0, item);
+        item.moved = true;
+      });
+      stream.emit({ type: 'queue:moved', workflow, dedupKey: key, ...to, reason });
     },
     drop(key, reason) {
       change((next) => {
@@ -506,6 +581,7 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
           const delay = delays[Math.min(Math.max(0, failing.attempts - 1), delays.length - 1)] ?? 0;
           failing.state = 'failed';
           failing.retryAt = new Date(now().getTime() + delay).toISOString();
+          place(next, failing);
         }
         return { ...failing };
       });

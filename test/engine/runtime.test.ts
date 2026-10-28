@@ -612,17 +612,17 @@ const callOutline = (key: string, bindings: number, files: number): string[] => 
 const route = (at: string, took: string) => `workflow:route ${at}→${took}`;
 
 /**
- * How every run's stream opens: its start, its lease and workspace, what the claim did to the ticket, then the intake,
- * to its journal line.
+ * How every run's stream opens: its start, its lease and workspace, then the intake, which claims the ticket and
+ * fetches it, to its journal line.
  */
 const OPENING = [
   'run:start',
   'workspace:leased',
   'workspace:created',
-  'ticket:claimed',
-  'ticket:commented',
   'run:keep_awake',
   'intake:start intake#1',
+  'ticket:claimed intake#1',
+  'ticket:commented intake#1',
   'ticket:fetched intake#1',
   'output:validated intake#1',
   'file:produced intake#1',
@@ -680,11 +680,11 @@ test("the stub's run writes its whole event stream to events.ndjson, numbered fr
     budget: header.budget,
   });
   expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
-  // What the claim did, as the engine reports it: neither event belongs to a call, so neither has a key.
-  const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-1' };
-  expect(list.slice(3, 5)).toEqual([
-    { seq: 4, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
-    { seq: 5, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+  // What the claim did, as the intake's call reports it.
+  const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-1', key: 'intake#1' };
+  expect(list.slice(5, 7)).toEqual([
+    { seq: 6, ...reported, type: 'ticket:claimed', state: { type: 'started', name: 'In Progress' } },
+    { seq: 7, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
   ]);
   expect(list.at(-1)).toEqual({
     seq: list.length,
@@ -775,20 +775,22 @@ test("a forced run of a ticket that is not unstarted reports the move in the cla
     const end = await ran(repo.dir, { ticket: 'FAKE-4', force: true });
     expect([end.status, end.runId.slice(0, 7)]).toEqual(['completed', 'FAKE-4-']);
     const list = events(end.dir);
-    expect(outline(list.slice(0, 7))).toEqual([
+    expect(outline(list.slice(0, 9))).toEqual([
       'run:start',
       'workspace:leased',
       'workspace:created',
-      'ticket:updated',
-      'ticket:commented',
       'run:keep_awake',
       'intake:start intake#1',
+      'ticket:fetched intake#1',
+      'ticket:updated intake#1',
+      'ticket:commented intake#1',
+      'ticket:fetched intake#1',
     ]);
-    const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-4' };
+    const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-4', key: 'intake#1' };
     const inProgress = { type: 'started', name: 'In Progress' } as const;
-    expect(list.slice(3, 5)).toEqual([
-      { seq: 4, ...reported, type: 'ticket:updated', change: { state: 'in-progress' }, state: inProgress },
-      { seq: 5, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
+    expect(list.slice(6, 8)).toEqual([
+      { seq: 7, ...reported, type: 'ticket:updated', change: { state: 'in-progress' }, state: inProgress },
+      { seq: 8, ...reported, type: 'ticket:commented', body: `sail run ${end.runId} started` },
     ]);
     expect(list[0]).toMatchObject({ source: { kind: 'ticket', ticketKey: 'FAKE-4', via: 'cli', forced: ['state'] } });
     expect(outline(list)).not.toContain('ticket:claimed');
@@ -801,7 +803,7 @@ test('a resume reports nothing of the claim again: across both processes the str
   const { dir, end } = await resumed();
   expect(end).toMatchObject({ status: 'completed' });
   const ticket = outline(events(dir)).filter((line) => line.startsWith('ticket:'));
-  expect(ticket).toEqual(['ticket:claimed', 'ticket:commented', 'ticket:fetched intake#1']);
+  expect(ticket).toEqual(['ticket:claimed intake#1', 'ticket:commented intake#1', 'ticket:fetched intake#1']);
 }, 30_000);
 
 test('a torn tail is cut before a resume, and seq continues from the last complete line', async () => {
@@ -2119,7 +2121,12 @@ test("a call of a group that ends in error lets its siblings end and be journale
       stopReason: 'stage_error',
       message: 'b#1 ended in error: harness: b broke',
     });
-    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 error', 'c#1 done', 'a#1 done']);
+    // The order a group's calls complete in follows the fake's delays, which a loaded machine reorders.
+    const [first, ...group] = journaled(end.dir);
+    expect({ first, group: group.sort() }).toEqual({
+      first: 'intake#1 passed',
+      group: ['a#1 done', 'b#1 error', 'c#1 done'],
+    });
     const ends = ofType(events(end.dir), 'all:end');
     expect(ends.map((event) => event.outcomes)).toEqual([{ 'a#1': 'done', 'b#1': 'error', 'c#1': 'done' }]);
   });

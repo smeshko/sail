@@ -829,3 +829,229 @@ test('a new head sha that shares its first 7 with a done item is queued in its p
     after: [['queued', { kind: 'pr', number: 12, headSha: collides, branch: 'sail/FAKE-12-x' }]],
   });
 });
+
+/** The dedup keys `due()` gives, and the order `queue.json` holds them in. */
+const dueOrder = (store: QueueStore) => store.due().map((item) => item.dedupKey.replace('ticket:', ''));
+const fileOrder = (store: QueueStore) => store.snapshot().items.map((item) => item.dedupKey.replace('ticket:', ''));
+
+test('tickets added together and across polls come out urgent, high, medium, low, then none, oldest first within a priority', () => {
+  const clock = manualClock(START);
+  const store = open(runsDir(), clock);
+  store.add([
+    ticket('FAKE-1'),
+    ticket('FAKE-2', { priority: 'low' }),
+    ticket('FAKE-3', { priority: 'medium' }),
+    ticket('FAKE-4', { priority: 'none' }),
+  ]);
+  clock.advance(1_000);
+  store.add([ticket('FAKE-5', { priority: 'urgent' }), ticket('FAKE-6', { priority: 'low' }), ticket('FAKE-7')]);
+  clock.advance(1_000);
+  store.add([ticket('FAKE-8', { priority: 'high' }), ticket('FAKE-9', { priority: 'urgent' })]);
+  const expected = ['FAKE-5', 'FAKE-9', 'FAKE-8', 'FAKE-3', 'FAKE-2', 'FAKE-6', 'FAKE-1', 'FAKE-4', 'FAKE-7'];
+  expect({ due: dueOrder(store), file: fileOrder(store) }).toEqual({ due: expected, file: expected });
+  expect(store.snapshot().items.map((item) => item.priority)).toEqual([
+    'urgent',
+    'urgent',
+    'high',
+    'medium',
+    'low',
+    'low',
+    undefined,
+    'none',
+    undefined,
+  ]);
+});
+
+test('a re-add that finds a queued ticket at another priority updates the item and moves it, and is not counted as added', () => {
+  const clock = manualClock(START);
+  const runs = runsDir();
+  const store = open(runs, clock);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3', { priority: 'low' })]);
+  clock.advance(1_000);
+  const added = store.add([
+    ticket('FAKE-1'),
+    ticket('FAKE-2', { priority: 'urgent' }),
+    ticket('FAKE-3', { priority: 'low' }),
+  ]);
+  expect({ added, due: dueOrder(store), events: typesIn(runs) }).toEqual({
+    added: 0,
+    due: ['FAKE-2', 'FAKE-3', 'FAKE-1'],
+    events: ['queue:item_added', 'queue:item_added', 'queue:item_added'],
+  });
+  expect(store.snapshot().items[0]?.priority).toBe('urgent');
+  store.add([ticket('FAKE-2')]);
+  expect({
+    due: dueOrder(store),
+    priority: store.snapshot().items.find((item) => item.dedupKey === 'ticket:FAKE-2')?.priority,
+  }).toEqual({
+    due: ['FAKE-3', 'FAKE-1', 'FAKE-2'],
+    priority: undefined,
+  });
+});
+
+test('pull requests take the queue order of unprioritised tickets and stay oldest first, behind prioritised tickets', () => {
+  const clock = manualClock(START);
+  const store = open(runsDir(), clock);
+  store.addPullRequests([pullRequest(12, 'c'.repeat(40))]);
+  clock.advance(1_000);
+  store.addPullRequests([pullRequest(13, 'd'.repeat(40))]);
+  clock.advance(1_000);
+  store.add([ticket('FAKE-1', { priority: 'low' })]);
+  expect(store.due().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-1', 'pr:12@ccccccc', 'pr:13@ddddddd']);
+});
+
+test('a failed item that retries and a requeued item are placed by their priority again', () => {
+  const retried = open(runsDir(), manualClock(START));
+  retried.add([ticket('FAKE-1', { priority: 'low' })]);
+  retried.dispatched('ticket:FAKE-1', 'run');
+  retried.add([ticket('FAKE-2', { priority: 'urgent' })]);
+  expect(fileOrder(retried)).toEqual(['FAKE-1', 'FAKE-2']);
+  retried.failed('ticket:FAKE-1', 'tests failed');
+  expect(fileOrder(retried)).toEqual(['FAKE-2', 'FAKE-1']);
+
+  const requeued = open(runsDir(), manualClock(START));
+  requeued.add([ticket('FAKE-3', { priority: 'low' })]);
+  requeued.dispatched('ticket:FAKE-3', 'run');
+  requeued.parked('ticket:FAKE-3', 'by hand');
+  requeued.add([ticket('FAKE-4', { priority: 'medium' })]);
+  expect(fileOrder(requeued)).toEqual(['FAKE-3', 'FAKE-4']);
+  requeued.requeue('ticket:FAKE-3', 'requeued by hand');
+  expect(fileOrder(requeued)).toEqual(['FAKE-4', 'FAKE-3']);
+});
+
+test('a queue.json written before priorities existed reads and dispatches in the order it holds', () => {
+  const runs = runsDir();
+  const dir = queueDir(runs, 'ticket-to-pr');
+  mkdirSync(dir, { recursive: true });
+  // No priority on any item, and the file's order is not the order of addedAt: FAKE-2 was added after FAKE-1.
+  const item = (key: string, addedAt: string) => ({
+    dedupKey: `ticket:${key}`,
+    source: { kind: 'ticket', ticketKey: key },
+    title: `Ticket ${key}`,
+    url: `fake://tickets/${key}`,
+    state: 'queued',
+    attempts: 0,
+    addedAt,
+  });
+  writeFileSync(
+    join(dir, 'queue.json'),
+    `${JSON.stringify({
+      version: 1,
+      workflow: 'ticket-to-pr',
+      updatedAt: START,
+      polling: { label: 'sail', failures: 0 },
+      items: [item('FAKE-2', '2026-09-24T10:56:00.000Z'), item('FAKE-1', '2026-09-24T10:55:00.000Z')],
+    })}\n`,
+  );
+  const reopened = open(runs);
+  expect({
+    items: reopened.snapshot().items.map((item) => [item.dedupKey, item.priority, item.moved]),
+    due: dueOrder(reopened),
+  }).toEqual({
+    items: [
+      ['ticket:FAKE-2', undefined, undefined],
+      ['ticket:FAKE-1', undefined, undefined],
+    ],
+    due: ['FAKE-2', 'FAKE-1'],
+  });
+});
+
+test('move puts a queued item before or after another, marks it moved, and emits queue:moved with the place and the reason', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3'), ticket('FAKE-4')]);
+  store.move('ticket:FAKE-4', { before: 'ticket:FAKE-1' }, 'moved by hand');
+  expect(fileOrder(store)).toEqual(['FAKE-4', 'FAKE-1', 'FAKE-2', 'FAKE-3']);
+  store.move('ticket:FAKE-1', { after: 'ticket:FAKE-3' }, 'moved by hand');
+  expect(fileOrder(store)).toEqual(['FAKE-4', 'FAKE-2', 'FAKE-3', 'FAKE-1']);
+  expect(dueOrder(store)).toEqual(['FAKE-4', 'FAKE-2', 'FAKE-3', 'FAKE-1']);
+  expect(store.snapshot().items.map((item) => item.moved)).toEqual([true, undefined, undefined, true]);
+  expect(
+    queueEvents(queueDir(runs, 'ticket-to-pr'))
+      .filter((event) => event.type === 'queue:moved')
+      .map(({ seq, ts, ...event }) => event),
+  ).toEqual([
+    {
+      type: 'queue:moved',
+      workflow: 'ticket-to-pr',
+      dedupKey: 'ticket:FAKE-4',
+      before: 'ticket:FAKE-1',
+      reason: 'moved by hand',
+    },
+    {
+      type: 'queue:moved',
+      workflow: 'ticket-to-pr',
+      dedupKey: 'ticket:FAKE-1',
+      after: 'ticket:FAKE-3',
+      reason: 'moved by hand',
+    },
+  ]);
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
+});
+
+test('a moved item keeps its place when a later add raises another ticket or changes its own priority', () => {
+  const clock = manualClock(START);
+  const store = open(runsDir(), clock);
+  store.add([ticket('FAKE-5'), ticket('FAKE-7')]);
+  store.move('ticket:FAKE-7', { before: 'ticket:FAKE-5' }, 'moved by hand');
+  clock.advance(1_000);
+  store.add([ticket('FAKE-9', { priority: 'urgent' })]);
+  expect(dueOrder(store)).toEqual(['FAKE-7', 'FAKE-9', 'FAKE-5']);
+  store.add([ticket('FAKE-7', { priority: 'low' })]);
+  expect(dueOrder(store)).toEqual(['FAKE-7', 'FAKE-9', 'FAKE-5']);
+  expect(store.snapshot().items[0]).toMatchObject({ dedupKey: 'ticket:FAKE-7', priority: 'low', moved: true });
+});
+
+test('dispatching a moved item clears moved, and a retry after a failure is placed by priority again', () => {
+  const store = open(runsDir(), manualClock(START));
+  store.add([ticket('FAKE-1', { priority: 'high' }), ticket('FAKE-2'), ticket('FAKE-3')]);
+  store.move('ticket:FAKE-3', { before: 'ticket:FAKE-1' }, 'moved by hand');
+  expect(fileOrder(store)).toEqual(['FAKE-3', 'FAKE-1', 'FAKE-2']);
+  store.dispatched('ticket:FAKE-3', 'run');
+  expect(store.snapshot().items[0]?.moved).toBeUndefined();
+  store.failed('ticket:FAKE-3', 'tests failed');
+  expect(fileOrder(store)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+});
+
+test('move throws naming the state when the item or the target is not queued, when they are the same, or when one is missing, and changes nothing', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3')]);
+  store.dispatched('ticket:FAKE-1', 'run');
+  const before = JSON.stringify(store.snapshot().items);
+  const attempts = [
+    () => store.move('ticket:FAKE-1', { before: 'ticket:FAKE-2' }, 'moved by hand'),
+    () => store.move('ticket:FAKE-2', { after: 'ticket:FAKE-1' }, 'moved by hand'),
+    () => store.move('ticket:FAKE-2', { after: 'ticket:FAKE-2' }, 'moved by hand'),
+    () => store.move('ticket:FAKE-9', { after: 'ticket:FAKE-2' }, 'moved by hand'),
+    () => store.move('ticket:FAKE-2', { after: 'ticket:FAKE-9' }, 'moved by hand'),
+  ];
+  expect(
+    attempts.map((attempt) => {
+      try {
+        attempt();
+        return 'moved';
+      } catch (error) {
+        return (error as Error).message;
+      }
+    }),
+  ).toEqual([
+    "ticket-to-pr's item ticket:FAKE-1 is dispatched: only a queued item is moved",
+    "ticket-to-pr's item ticket:FAKE-1 is dispatched: only a queued item is moved",
+    "ticket-to-pr's item ticket:FAKE-2 can't be moved next to itself",
+    "ticket-to-pr's queue has no item ticket:FAKE-9",
+    "ticket-to-pr's queue has no item ticket:FAKE-9",
+  ]);
+  expect(JSON.stringify(store.snapshot().items)).toBe(before);
+  expect(typesIn(runs).filter((type) => type === 'queue:moved')).toEqual([]);
+});
+
+test('a move that leaves the item where it is changes nothing but still emits queue:moved, so a repeated move is safe', () => {
+  const runs = runsDir();
+  const store = open(runs);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3')]);
+  store.move('ticket:FAKE-3', { after: 'ticket:FAKE-1' }, 'moved by hand');
+  store.move('ticket:FAKE-3', { after: 'ticket:FAKE-1' }, 'moved by hand');
+  expect(fileOrder(store)).toEqual(['FAKE-1', 'FAKE-3', 'FAKE-2']);
+  expect(typesIn(runs).filter((type) => type === 'queue:moved')).toHaveLength(2);
+});

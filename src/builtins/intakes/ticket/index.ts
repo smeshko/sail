@@ -1,5 +1,7 @@
-// The built-in `ticket` intake's body: it fetches the run's ticket through the TicketSource, splits the description into
-// the request and the acceptance criteria, and leaves `ticket.json` and `brief.md` in the call directory. Every string
+// The built-in `ticket` intake's body: it claims the run's ticket and comments with the run id, reporting the claim's
+// record to the call's result, then fetches the ticket through the TicketSource, so the brief shows it claimed. It
+// splits the description into the request and the acceptance criteria, and leaves `ticket.json` and `brief.md` in the
+// call directory. A claim lost to another start is a PortError, so the intake ends in `error`. Every string
 // the provider returned is wrapped as untrusted input in the brief. It returns the run's input, unvalidated: the engine
 // checks it against `TicketInput`.
 //
@@ -8,6 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { render, untrustedInput } from '../../../engine/render';
+import { claimSource } from '../../../engine/source';
 import { getTicket } from '../../../ports/ticket-source';
 import type { Ticket } from '../../../ports/types';
 import type { IntakeContext } from '../index';
@@ -45,14 +48,21 @@ function briefValues(key: string, ticket: Ticket, request: string, criteria: rea
 }
 
 /**
- * Runs the `ticket` intake once: one `get`, the two files, the output. A failed port call leaves it as a PortError, and
- * so does an answer that is no Ticket, before any file is written.
+ * Runs the `ticket` intake once: the claim and its comment, one `get`, the two files, the output. A failed port call
+ * leaves it as a PortError, and so does an answer that is no Ticket, before any file is written.
  */
 export async function ticketIntake(context: IntakeContext): Promise<unknown> {
   const { source } = context;
   if (source.kind !== 'ticket')
     throw new Error(`the ticket intake reads a ticket, not a source of kind ${source.kind}`);
   const key = source.ticketKey;
+  const claim = await claimSource({
+    ticketKey: key,
+    runId: context.runId,
+    ticketSource: context.ticketSource,
+    forced: source.forced,
+  });
+  context.record({ claim });
   const ticket = await getTicket(context.ticketSource, key);
   const { request, criteria } = splitDescription(ticket.description);
 

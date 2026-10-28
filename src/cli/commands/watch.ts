@@ -17,21 +17,20 @@
 // prints is read back from the queue event streams: each workflow whose last `watch:*` event of the live watcher's pid
 // is `watch:added`.
 //
-// `sail queue` shares the live watcher's lookup, the set read back from the queue streams, and the wait for a command
-// to be taken: `findWatcher()`, `liveSet()` and `taken()`.
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+// `sail queue` shares the live watcher's lookup and the wait for a command to be taken: `findWatcher()` and `taken()`.
+// The set read back from the queue streams is `liveSet()`, which the dashboard shares too.
+import { existsSync } from 'node:fs';
 import { isAlive as processIsAlive } from '../../adapters/leases';
 import type { ProjectConfig } from '../../engine/config';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { sameLabel } from '../../ports/labels';
 import { dropCommand } from '../../watch/inbox';
 import { readWatch, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
-import { QUEUE_DIR } from '../../watch/queue-store';
 import {
   findHolder,
   type Holder,
   type IsAlive,
+  liveSet,
   machineDir,
   type RegistryEntry,
   readRegistry,
@@ -62,40 +61,6 @@ export interface WatchDeps {
 
 const APPLY_TIMEOUT_MS = 15_000;
 const POLL_MS = 100;
-
-/** A workflow in the live watcher's set: its name, its label and when it was added. */
-export interface Watched {
-  workflow: string;
-  label: string;
-  seq: number;
-  ts: string;
-}
-
-/** The live watcher's set, read from the queue event streams beside `sailDir`, in the order it was formed. */
-export function liveSet(sailDir: string, pid: number): Watched[] {
-  const dir = join(runsDirOf(sailDir), QUEUE_DIR);
-  if (!existsSync(dir)) return [];
-  const set: Watched[] = [];
-  for (const workflow of readdirSync(dir)) {
-    const file = join(dir, workflow, 'events.ndjson');
-    if (!existsSync(file)) continue;
-    let last: Record<string, unknown> | undefined;
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      // The live watcher's own events: one that lost the registry to it may have written after them (keepWatcher).
-      if ((event.type === 'watch:added' || event.type === 'watch:removed') && event.pid === pid) last = event;
-    }
-    if (last?.type === 'watch:added') {
-      set.push({ workflow, label: String(last.label), seq: Number(last.seq), ts: String(last.ts) });
-    }
-  }
-  return set.sort((a, b) => a.ts.localeCompare(b.ts) || a.workflow.localeCompare(b.workflow));
-}
 
 /** The environment without its unset variables, for the runs the watcher spawns. */
 function definedEnv(env: Readonly<Record<string, string | undefined>>): Record<string, string> {

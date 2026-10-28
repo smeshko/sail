@@ -6,6 +6,8 @@
 //   sail port ticket-source list [--state <type>] [--label <name>]    the team's tickets, as an array of ListedTicket
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
+//   sail port ticket-source claim <ticket>    moves it to in progress if in a pick-up state, and says whether that took:
+//                                                   under a run, a claim that takes comments with RUN_ID
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
 //                                                   files a new ticket: its description from the file or stdin
 //   sail port ticket-source add-label <ticket> <label>       adds the team's label to it
@@ -43,13 +45,14 @@ import type { Port } from '../../engine/config';
 import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
 import { findSailDir } from '../../engine/sail-dir';
-import { notATicket } from '../../engine/source';
+import { claimComment, claimedBy, notATicket } from '../../engine/source';
 import type { PortErrorEvent, ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
 import {
   Attached,
+  ClaimResult,
   Created,
   Edited,
   ListedTicket,
@@ -93,6 +96,8 @@ export interface PortCall {
   positionals: readonly string[];
   /** Its options, as parsed. */
   values: Parsed['values'];
+  /** The run the command runs under: `RUN_ID`, as the preamble sets it for every script step. */
+  runId?: string;
   /**
    * Its body, from `--body-file` or stdin, read when called: an operation calls it last before its port. An empty one
    * is refused there, and never returned.
@@ -204,6 +209,31 @@ const updateOperation: PortOperation<TicketSource> = {
     const [issue] = moved.error.issues;
     const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
     throw new PortError('ticketSource', 'update', 'invalid', `its answer is not a Moved: ${where}`);
+  },
+};
+
+/**
+ * A claim of the ticket `<ticket>` names: the port's `ClaimResult`, parsed before it is printed. A claim that didn't
+ * take, because the ticket was already claimed, is an answer, not a failure. Under a run, with `RUN_ID` set, it is the
+ * ticket intake's claim: one that takes comments with the run id, and one that didn't take is the run's own earlier
+ * claim, and printed as claimed, when the ticket's latest claim comment names the run.
+ */
+const claimOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  async run(source, { positionals: [ref = ''], runId }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const claimed = ClaimResult.safeParse(await source.claim(ticketKey));
+    if (!claimed.success) {
+      const [issue] = claimed.error.issues;
+      const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+      throw new PortError('ticketSource', 'claim', 'invalid', `its answer is not a ClaimResult: ${where}`);
+    }
+    if (runId === undefined) return { value: claimed.data };
+    if (claimed.data.claimed) await source.comment(ticketKey, claimComment(runId));
+    else if (claimedBy(await getTicket(source, ticketKey)) === runId)
+      return { value: { ...claimed.data, claimed: true } };
+    return { value: claimed.data };
   },
 };
 
@@ -348,6 +378,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     list: listOperation,
     comment: commentOperation,
     update: updateOperation,
+    claim: claimOperation,
     create: createOperation,
     'add-label': relabelOperation('addLabel'),
     'remove-label': relabelOperation('removeLabel'),
@@ -538,10 +569,12 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
   // The body is read when the operation asks for it, once it has refused what only its adapter can read. An empty one
   // is no body: a script step's stdin is there and holds nothing, so a script that left --body-file out would
   // otherwise post a blank.
+  const runId = (io.env ?? process.env).RUN_ID;
   const call: PortCall = {
     cwd: io.cwd,
     positionals: given,
     values: args.values,
+    ...(runId === undefined || runId === '' ? {} : { runId }),
     async body() {
       const text = (await body?.()) ?? '';
       if (text.trim() !== '') return text;

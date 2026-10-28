@@ -4,11 +4,11 @@
 // with exit code 3, and comes before the run directory exists: the config and its adapters, the workflow, its types,
 // and then what the engine refuses of the workflow and of the ticket. This module parses, hands the run's events to
 // the terminal view and maps the run's status to an exit code; the run is the engine's, and so are the ticket's checks
-// and its claim. Everything the command prints during the run comes from its events.
+// and, in `intake#1`, its claim. Everything the command prints during the run comes from its events.
 //
 // Ctrl-C or SIGTERM while the run runs stops the running call and suspends the run, and the command prints how to
-// resume it. One that arrives while the run is being opened, before its ticket is claimed, is a refusal: the ticket is
-// as it was, and nothing exists to resume. Earlier still, during the type-check, it ends sail the default way.
+// resume it. One that arrives while the run is being opened is a refusal: the ticket is as it was, and nothing exists
+// to resume. Earlier still, during the type-check, it ends sail the default way.
 //
 // `--dispatch <run id>` is the watcher's, and not in the usage: the run it dispatches runs under the id it minted, as
 // a start `via` the watcher. So is `--head-sha <sha>`, which pins a run from a pull request to the head sha the watcher

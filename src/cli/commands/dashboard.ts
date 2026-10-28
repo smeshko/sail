@@ -1,5 +1,5 @@
-// `sail dashboard [--port N]`: serves every registered repository's runs read-only on 127.0.0.1, in the foreground,
-// until Ctrl-C. The default port is 3400, and 0 picks a free one. A port that isn't a whole number from 0 to 65535, or
+// `sail dashboard [--port N]`: serves every registered repository's runs and queues on 127.0.0.1, in the foreground,
+// until Ctrl-C. It writes nothing but a move command in a live watcher's inbox, when a person moves a queued item. The default port is 3400, and 0 picks a free one. A port that isn't a whole number from 0 to 65535, or
 // one in use, is refused with exit code 3.
 
 import { startDashboard } from '../../dashboard/server';

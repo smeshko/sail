@@ -3,8 +3,9 @@
 //
 // - A command is applied, then deleted. A crash between the two applies it again at the next drain, so every command
 //   is safe to apply twice: a poll, a `watch` or `unwatch` of workflows already in or out of the set, an `add` of a
-//   ticket already queued, a `requeue` of an item already queued, and a `drop` of an item already gone. An apply that returns a promise is awaited before its file is deleted, so a `watch`
-//   has opened its workflows by then.
+//   ticket already queued, a `requeue` of an item already queued, a `drop` of an item already gone, and a `move` of an
+//   item already next to its target. An apply that returns a promise is awaited before its file is deleted, so a
+//   `watch` has opened its workflows by then.
 // - A watcher empties its inbox as it starts (`clearCommands`): a command a stopped watcher left never changes a watch
 //   set nobody asked for.
 // - A command is written to a dot-prefixed temp file and renamed into place, so a drain never reads half of one: the
@@ -54,6 +55,19 @@ export const Command = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('requeue'), workflow: z.string().min(1), dedupKey: z.string().min(1) }),
   /** Takes an item out of the queue. */
   z.strictObject({ op: z.literal('drop'), workflow: z.string().min(1), dedupKey: z.string().min(1) }),
+  /** Puts a queued item directly before or after another queued one: exactly one of `before` and `after`. */
+  z
+    .strictObject({
+      op: z.literal('move'),
+      workflow: z.string().min(1),
+      dedupKey: z.string().min(1),
+      before: z.string().min(1).optional(),
+      after: z.string().min(1).optional(),
+    })
+    .refine((move) => (move.before === undefined) !== (move.after === undefined), {
+      message: 'needs exactly one of before and after',
+      path: ['after'],
+    }),
 ]);
 export type Command = z.infer<typeof Command>;
 

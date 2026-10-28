@@ -1,5 +1,5 @@
 // What the page needs from a browser, as one interface: regions to render into, delegated actions and keys, reads with
-// the client header, sockets, timers, storage and the clipboard. `boot()` takes a `PageHost`, so the whole shell runs
+// the client header, the one POST (a queue move), sockets, timers, storage and the clipboard. `boot()` takes a `PageHost`, so the whole shell runs
 // in a test against a fake one, and `browserHost()` adapts a real window to it. The window is typed here, by the few
 // members the page uses, since the project's TypeScript has no DOM library.
 
@@ -26,6 +26,8 @@ export interface PageHost {
   onKey(handler: (key: string, inInput: boolean) => void): void;
   /** A GET of `path` on the dashboard, with the client header. A failed request answers status 0. */
   get(path: string): Promise<{ status: number; body: string }>;
+  /** A POST of `body` as JSON to `path`, with the client header. A failed request answers status 0. */
+  post(path: string, body: unknown): Promise<{ status: number; body: string }>;
   /** A WebSocket on `/ws?<query>`. */
   connect(query: string, handlers: ConnectHandlers): Connection;
   now(): number;
@@ -79,7 +81,10 @@ export interface BrowserWindow {
     documentElement: { dataset: Record<string, string | undefined> };
   };
   location: { host: string; search: string };
-  fetch(url: string, init: { headers: Record<string, string> }): Promise<{ status: number; text(): Promise<string> }>;
+  fetch(
+    url: string,
+    init: { headers: Record<string, string>; method?: string; body?: string },
+  ): Promise<{ status: number; text(): Promise<string> }>;
   WebSocket: new (url: string) => SocketLike;
   localStorage: { getItem(key: string): string | null; setItem(key: string, value: string): void };
   navigator: { clipboard?: { writeText(text: string): Promise<void> } };
@@ -174,6 +179,18 @@ export function browserHost(win: BrowserWindow): PageHost {
     async get(path) {
       try {
         const response = await win.fetch(path, { headers: { 'X-Sail-Dashboard': '1' } });
+        return { status: response.status, body: await response.text() };
+      } catch {
+        return { status: 0, body: '' };
+      }
+    },
+    async post(path, body) {
+      try {
+        const response = await win.fetch(path, {
+          method: 'POST',
+          headers: { 'X-Sail-Dashboard': '1', 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
         return { status: response.status, body: await response.text() };
       } catch {
         return { status: 0, body: '' };

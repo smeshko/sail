@@ -242,3 +242,19 @@ test('a settled pull-request item is named #<number>@<sha7>: done, or when it is
     '08:09:10 r  #12@abc1234 failed: the host is down; due again in 5m 0s\n',
   ]);
 });
+
+test('queue:moved prints the item, which side of the other item it went, and the reason', () => {
+  const events: QueueEvent[] = [
+    { ...envelope, type: 'queue:moved', dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5', reason: 'moved by hand' },
+    { ...envelope, type: 'queue:moved', dedupKey: 'ticket:FAKE-7', after: 'ticket:FAKE-6', reason: 'moved by hand' },
+  ];
+  const lines = events.map((event) => {
+    const line = queueLine(event);
+    if (line === undefined) throw new Error('queue:moved prints a line');
+    return utc(line);
+  });
+  expect(lines).toEqual([
+    '08:09:10 a  FAKE-7 moved before FAKE-5: moved by hand\n',
+    '08:09:10 a  FAKE-7 moved after FAKE-6: moved by hand\n',
+  ]);
+});

@@ -7,6 +7,7 @@
 //   clears the pause (DECISIONS D8). Any other failure backs off, never more often than `every`.
 // - The answer is checked and filtered again: a repository's own adapter is untrusted code, so one that over-answers
 //   still can't queue a started or undesignated ticket (D10), or a draft, closed or unlabelled pull request.
+// - A poll that finds a ticket already queued at another priority updates the item and its place in the queue's order.
 // - One poll at a time per workflow: a poll asked for while one is in flight joins it (D11).
 // - A poll that throws, as a queue write on a full disk does, is retried at the backoff all the same. `pollNow` rejects
 //   with it, and a poll nobody awaits (a timer's, a command's, the start's) hands it to `onError`, never to an unhandled
