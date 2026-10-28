@@ -7,9 +7,11 @@
 # between the two is refused by the host. From the fetch to the merge's answer it holds the clone's merge lock, an
 # flock on a file in the git dir every run's worktree shares, so two runs can't both pass the main check before either
 # merges. The lock belongs to this shell's open file, so it goes when the step ends, killed or not, and nothing is left
-# to take over. It waits up to 120 s for it, and refuses when the wait runs out. A merge the host rejects exits 1 and ends
-# the step in error, unless a re-read of the pull request finds it merged anyway: a merge answered pending, or whose call
-# failed, such as a lost response, is read again, and one that merged is reported `merged` with its sha. Its last stdout line is the merge result as the code host gave it, or the refusal.
+# to take over. It waits up to 120 s for it, and refuses when the wait runs out. A merge the host rejects exits 1 and
+# ends the step in error, unless a re-read of the pull request finds it merged anyway: a merge answered pending, or
+# whose call failed, such as a lost response, is read again, and one that merged is reported `merged` with its sha. Its
+# last stdout line is the merge result as the code host gave it, the refusal, or, after a re-read that found it merged,
+# a `merged` result of its own, with the merge commit's sha and a reason that says how.
 set -euo pipefail
 
 pr=$(cat "$INPUT_PR")
