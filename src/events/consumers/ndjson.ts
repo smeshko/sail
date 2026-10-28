@@ -114,35 +114,29 @@ function* linesFromTail(path: string): Generator<string> {
   const fd = openSync(path, 'r');
   try {
     let from = fstatSync(fd).size;
-    /** The bytes read from `from` on, up to the newline that ends the last whole line not given yet. */
-    let pending = Buffer.alloc(0);
+    /** The bytes read back so far of the line being collected, newest read last. Joined once, when the line is given. */
+    const parts: Buffer[] = [];
     let torn = true;
-    while (from > 0 || pending.length > 0) {
-      if (from > 0) {
-        const start = Math.max(0, from - TAIL_CHUNK);
-        const chunk = Buffer.alloc(from - start);
-        readSync(fd, chunk, 0, chunk.length, start);
-        pending = Buffer.concat([chunk, pending]);
-        from = start;
-      }
-      if (torn) {
-        const last = pending.lastIndexOf(0x0a);
-        if (last === -1) {
-          if (from === 0) return;
-          continue;
+    while (from > 0) {
+      const start = Math.max(0, from - TAIL_CHUNK);
+      const chunk = Buffer.alloc(from - start);
+      readSync(fd, chunk, 0, chunk.length, start);
+      from = start;
+      let end = chunk.length;
+      for (let nl = chunk.lastIndexOf(0x0a); nl !== -1; nl = end === 0 ? -1 : chunk.lastIndexOf(0x0a, end - 1)) {
+        if (torn) {
+          torn = false;
+          parts.length = 0;
+        } else {
+          parts.push(chunk.subarray(nl + 1, end));
+          yield Buffer.concat(parts.reverse()).toString('utf8');
+          parts.length = 0;
         }
-        pending = pending.subarray(0, last + 1);
-        torn = false;
+        end = nl;
       }
-      // Each line whose start has been read: the newline before it, or the file's start.
-      while (pending.length > 0) {
-        const end = pending.length - 1;
-        const before = end === 0 ? -1 : pending.lastIndexOf(0x0a, end - 1);
-        if (before === -1 && from > 0) break;
-        yield pending.subarray(before + 1, end).toString('utf8');
-        pending = pending.subarray(0, before + 1);
-      }
+      if (end > 0) parts.push(chunk.subarray(0, end));
     }
+    if (!torn) yield Buffer.concat(parts.reverse()).toString('utf8');
   } finally {
     closeSync(fd);
   }
