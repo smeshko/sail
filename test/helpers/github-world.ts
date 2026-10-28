@@ -123,6 +123,8 @@ export interface WorldResponse {
   /** Sent as JSON, or as it is when a string. */
   readonly body?: unknown;
   readonly headers?: Readonly<Record<string, string>>;
+  /** The world handles the request first, so its effect lands, and this response replaces its answer. */
+  readonly applied?: boolean;
 }
 
 export interface WorldRequest {
@@ -147,7 +149,8 @@ export interface GitHubWorld {
   /**
    * Answers the next `times` requests of `route` with `response`: a route as `<METHOD> <path pattern>`, such as
    * `POST /pulls`, the path taken after `/repos/{owner}/{repo}` (`GET /` for the repository itself), or `*` for every
-   * request.
+   * request. A response with `applied` lets the world handle the request first, so its effect lands, and answers the
+   * canned response in place of the world's own.
    */
   inject(route: string, response: WorldResponse, times?: number): void;
   /** The pull requests as the world holds them now. */
@@ -494,6 +497,9 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     );
     if (failure !== undefined) {
       failure.left--;
+      if (failure.response.applied === true && tokenMatched && path !== undefined) {
+        route(method, path, parsed.searchParams, body);
+      }
       return failure.response;
     }
     if (!tokenMatched) {
