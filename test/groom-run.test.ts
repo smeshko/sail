@@ -1,7 +1,7 @@
 // sail's own `groom` workflow, end to end through the CLI on the fakes: `sail FAKE-2 --workflow groom` in a temporary
 // repository that holds a copy of the repository's own `.sail/`, its ports all fake (.sail/fake/*.json).
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFakeCodeHost } from '../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../src/adapters/fake/ticket-source';
@@ -295,3 +295,24 @@ test('groom reports, never applies, a relation to its own ticket or to one the i
     expect(comment).not.toContain('- failed:');
   });
 }, 120_000);
+
+test("groom's intake names the sail port command when sail can't start, rather than throwing a TypeError", async () => {
+  await withTempRepo(async (repo) => {
+    const source = join(repo.home, 'source.json');
+    const out = join(repo.home, 'out');
+    const empty = join(repo.home, 'no-sail');
+    mkdirSync(out);
+    mkdirSync(empty);
+    writeFileSync(source, JSON.stringify({ ticketKey: 'FAKE-2' }));
+    const child = Bun.spawnSync(
+      [process.execPath, join(import.meta.dir, '..', '.sail', 'workflows', 'groom', 'read.mjs')],
+      {
+        env: { ...repo.env, PATH: empty, INPUT_SOURCE: source, STAGE_OUT: out },
+      },
+    );
+    const stderr = child.stderr.toString();
+    expect(child.exitCode).not.toBe(0);
+    expect(stderr).toContain('sail port ticket-source get FAKE-2: ');
+    expect(stderr).not.toContain('TypeError');
+  });
+});
