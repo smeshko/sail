@@ -76,3 +76,14 @@ test('a queue/ linked out of .sail-runs/, a workflow directory linked out, a que
   }
   expect(findQueueDir(entryOf(m.alpha), QUEUE_WORKFLOW)).toEqual({ missing: `no queue '${QUEUE_WORKFLOW}' in alpha` });
 });
+
+test('a queue.json with a held dispatch parses, and keeps it', () => {
+  const held = {
+    until: '2026-10-28T14:20:00.000Z',
+    runId: 'r',
+    reason: 'spec#1 hit the usage limit',
+    at: '2026-10-28T10:00:00.000Z',
+  };
+  writeFileSync(join(queueDirOf(m), 'queue.json'), JSON.stringify({ ...queueFile(), held }));
+  expect(queueViews(entryOf(m.beta)).find((view) => view.workflow === QUEUE_WORKFLOW)?.queue?.held).toEqual(held);
+});
