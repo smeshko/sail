@@ -1,9 +1,11 @@
 // The real pi SDK session, built offline: nothing here calls a model. It checks the model and key refusals, that a
-// session is made with an id of its own, and that disposing it removes the temp directory it made.
+// session is made with an id of its own, that it carries sail's gate and bash and none of the workspace's own pi, and
+// that disposing it removes the temp directory it made.
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ExtensionHost } from '../../../src/adapters/pi/gate';
 import { createBashRunner } from '../../../src/adapters/pi/process';
 import { createPiSession, type PiSessionParams } from '../../../src/adapters/pi/session';
 import { submitTool } from '../../../src/adapters/pi/submission';
@@ -47,6 +49,45 @@ test("the workspace's .pi/SYSTEM.md never becomes the session's system prompt", 
     expect({ planted: prompt.includes('PLANTED'), ours: prompt.includes('## Where you work') }).toEqual({
       planted: false,
       ours: true,
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+/** A gate that keeps the host pi hands it, to read the session's tools back. */
+function keptHost() {
+  const kept: { host?: ExtensionHost & { getAllTools(): { name: string; sourceInfo: { source: string } }[] } } = {};
+  return { kept, gate: (host: ExtensionHost) => Object.assign(kept, { host }) };
+}
+
+test("the gate is put on the session's tool calls, and bash is sail's tool, not pi's own", async () => {
+  const { kept, gate } = keptHost();
+  const session = await createPiSession(params({ gate }));
+  const tools = Object.fromEntries(kept.host?.getAllTools().map((tool) => [tool.name, tool.sourceInfo.source]) ?? []);
+  await session.dispose();
+  expect({ on: typeof kept.host?.on, tools }).toEqual({
+    on: 'function',
+    tools: { read: 'builtin', grep: 'builtin', find: 'builtin', ls: 'builtin', bash: 'sdk', submit: 'sdk' },
+  });
+});
+
+test("the workspace's own pi extensions and context files are not loaded", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'sail-test-pi-cwd-'));
+  try {
+    mkdirSync(join(cwd, '.pi', 'extensions'), { recursive: true });
+    const marker = join(cwd, 'loaded');
+    writeFileSync(
+      join(cwd, '.pi', 'extensions', 'planted.ts'),
+      `import { writeFileSync } from 'node:fs';\nexport default () => writeFileSync(${JSON.stringify(marker)}, '');\n`,
+    );
+    writeFileSync(join(cwd, 'AGENTS.md'), 'PLANTED context.');
+    const session = await createPiSession(params({ cwd }));
+    const prompt = session.systemPrompt;
+    await session.dispose();
+    expect({ extension: existsSync(marker), context: prompt.includes('PLANTED') }).toEqual({
+      extension: false,
+      context: false,
     });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
