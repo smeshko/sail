@@ -10,9 +10,9 @@
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended unwatched` | adopted under its lease's pid when a live process holds its lease, else resumed, once |
 // | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before |
+// | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
 //
 // A limit with no event to date it by is dated by when the dispatcher first saw it (`limitedAt`).
-// | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
 //
 // The lease comes before a resume because the item's pid is the process the watcher started last: a resume another
 // process started, or one a watcher spawned and died before recording, holds the run's lease with a live pid. Adopting
