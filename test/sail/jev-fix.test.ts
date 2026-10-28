@@ -78,7 +78,8 @@ interface Asked {
 }
 
 /** Runs the stage's run.sh in `repo`'s copy of `.sail/`: its exit code, and its last stdout line parsed. */
-function runStage(repo: TempRepo, findings: Finding[]): { code: number; stderr: string; output: Asked } {
+function runStage(repo: TempRepo, findings: Finding[], port?: string): { code: number; stderr: string; output: Asked } {
+  if (port) writeFileSync(join(repo.home, 'sail'), port, { mode: 0o755 });
   const stageDir = join(repo.dir, '.sail', 'workflows', 'review', 'stages', '12-jev-fix');
   const out = join(repo.home, 'stage-out');
   mkdirSync(out);
@@ -94,7 +95,7 @@ function runStage(repo: TempRepo, findings: Finding[]): { code: number; stderr: 
     cwd: repo.dir,
     env: {
       ...repo.env,
-      PATH: `${join(ROOT, 'bin')}:${repo.env.PATH ?? ''}`,
+      PATH: `${port ? repo.home : join(ROOT, 'bin')}:${repo.env.PATH ?? ''}`,
       SAIL_BUN: process.execPath,
       SAIL_CONFIG: join(repo.dir, '.sail', 'project.yaml'),
       INPUT_FINDINGS: files.findings,
@@ -106,6 +107,19 @@ function runStage(repo: TempRepo, findings: Finding[]): { code: number; stderr: 
   const lines = child.stdout.toString().trim().split('\n');
   return { code: child.exitCode ?? -1, stderr: child.stderr.toString(), output: JSON.parse(lines.at(-1) ?? 'null') };
 }
+
+test('partial finding answers retain asked true and explain the unanswered finding', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    const { output } = runStage(repo, FINDINGS, `#!/bin/sh\necho '{"answers":{"V1":{"type":"noul","noul":1}}}'\n`);
+    expect(output).toMatchObject({
+      asked: true,
+      checked: null,
+      answers: [{ id: 'V1', yes: 1 }],
+      note: 'Jev left a finding unanswered',
+    });
+  });
+});
 
 const IDS = FINDINGS.map((finding) => finding.id);
 const seed = (overrides: Record<string, number> = {}) =>

@@ -128,7 +128,12 @@ interface Asked {
 }
 
 /** Runs the stage's run.sh in `repo`'s copy of `.sail/`, on `plan`: its exit code, and its last stdout line parsed. */
-function runStage(repo: TempRepo, plan: string): { code: number; stderr: string; output: Asked; out: string } {
+function runStage(
+  repo: TempRepo,
+  plan: string,
+  port?: string,
+): { code: number; stderr: string; output: Asked; out: string } {
+  if (port) writeFileSync(join(repo.home, 'sail'), port, { mode: 0o755 });
   const stageDir = join(repo.dir, '.sail', 'workflows', 'factory', 'stages', '03-jev-tasks');
   const out = join(repo.home, 'stage-out');
   mkdirSync(out);
@@ -138,7 +143,7 @@ function runStage(repo: TempRepo, plan: string): { code: number; stderr: string;
     cwd: repo.dir,
     env: {
       ...repo.env,
-      PATH: `${join(ROOT, 'bin')}:${repo.env.PATH ?? ''}`,
+      PATH: `${port ? repo.home : join(ROOT, 'bin')}:${repo.env.PATH ?? ''}`,
       SAIL_BUN: process.execPath,
       SAIL_CONFIG: join(repo.dir, '.sail', 'project.yaml'),
       INPUT_PLAN: planFile,
@@ -167,6 +172,43 @@ test.each(['#### TASK-002: Second', '### TASK-002 Second', ''])(
   },
   60_000,
 );
+
+test('partial task answers retain asked true, available answers and an unanswered note', async () => {
+  await withTempRepo(async (repo) => {
+    writeOwnSail(repo);
+    const { output } = runStage(repo, PLAN, `#!/bin/sh\necho '{"answers":{"TASK-001":{"type":"noul","noul":1}}}'\n`);
+    expect(output).toMatchObject({
+      asked: true,
+      checked: null,
+      answers: [{ id: 'TASK-001', yes: 1 }],
+      note: 'Jev left a task unanswered',
+    });
+  });
+});
+
+test.each([
+  ['nonzero', '#!/bin/sh\necho unavailable >&2\nexit 1\n', 'unavailable'],
+  ['non-JSON', '#!/bin/sh\necho nope\n', 'printed no JSON answer'],
+  ['spawn error', '', 'did not start'],
+])('askNouls falls back on %s', async (_name, port, note) => {
+  await withTempRepo(async (repo) => {
+    if (port) writeFileSync(join(repo.home, 'sail'), port, { mode: 0o755 });
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        '-e',
+        `import { askNouls } from ${JSON.stringify(join(ROOT, '.sail/lib/jev-check.mjs'))}; console.log(JSON.stringify(askNouls({}, {}, ${JSON.stringify(repo.home)})));`,
+      ],
+      {
+        env: { ...repo.env, PATH: repo.home },
+      },
+    );
+    expect(child.exitCode).toBe(0);
+    const output = JSON.parse(child.stdout.toString());
+    expect(output.asked).toBe(false);
+    expect(output.note).toContain(note);
+  });
+});
 
 const ALL = ['TASK-001', 'TASK-002', 'TASK-003'];
 const seed = (overrides: Record<string, number> = {}) =>
