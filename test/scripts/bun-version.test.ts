@@ -1,7 +1,7 @@
 // scripts/bun-version.ts warns when the Bun running verify or gate is not the one CI's verify workflow pins: CI runs on
 // the pin, and a failure only that Bun shows used to surface after review.
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bunVersionWarning, checkBunVersion, pinnedBunVersion } from '../../scripts/bun-version';
@@ -44,6 +44,24 @@ test('the script exits 0 and warns exactly when this Bun is not the pin', () => 
   const warning = bunVersionWarning(pin, Bun.version);
   expect(proc.exitCode).toBe(0);
   expect(proc.stderr.toString()).toBe(warning === undefined ? '' : `${warning}\n`);
+});
+
+test('the script warns on stderr and exits 0 in a checkout whose workflow pins another Bun', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'bun-version-'));
+  try {
+    mkdirSync(join(dir, 'scripts'));
+    mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+    copyFileSync(join(CHECKOUT, 'scripts', 'bun-version.ts'), join(dir, 'scripts', 'bun-version.ts'));
+    writeFileSync(join(dir, '.github', 'workflows', 'verify.yml'), "with:\n  bun-version: '0.0.1'\n");
+    const proc = Bun.spawnSync([process.execPath, join(dir, 'scripts', 'bun-version.ts')]);
+    expect(proc.exitCode).toBe(0);
+    expect(proc.stdout.toString()).toBe('');
+    expect(proc.stderr.toString()).toBe(
+      `bun-version: this is Bun ${Bun.version}, and CI's verify pins Bun 0.0.1 (.github/workflows/verify.yml). Run the check on CI's Bun: SAIL_FULL_SUITE=1 bunx bun@0.0.1 run verify\n`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('verify and gate check the Bun version first', () => {
