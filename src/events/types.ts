@@ -1,9 +1,9 @@
 // The event union: every line of a run's event stream, typed. It mirrors `sail.event.v1`, and
 // test/events/types.test.ts keeps the two in step. Each event is the envelope `{ seq, ts, type, runId }` with its
 // payload beside it. Every type has a closed payload here, and a call-level event carries the key of the call it belongs
-// to. So do the provider families the port adapters emit: ticket:*, codehost:* and workspace:*, and the families a
-// harness emits, which the agent kind stamps with its call's key. A group's all:start and all:end carry its keys and no
-// key of their own: a group is not a call. The schema still leaves some families open for the adapters to come
+// to. So do the provider families the port adapters emit: ticket:*, codehost:*, jev:* and workspace:*, and the families
+// a harness emits, which the agent kind stamps with its call's key. A group's all:start and all:end carry its keys and
+// no key of their own: a group is not a call. The schema still leaves some families open for the adapters to come
 // (ADR-0012), but nothing emits them other than as typed here. Types only, apart from `EVENT_TYPES` and
 // `QUEUE_EVENT_TYPES`, so importing this module does nothing.
 import type { ContractError } from '../engine/contract';
@@ -311,8 +311,8 @@ interface Payloads {
     code: PortErrorCode;
     message: string;
   };
-  // The provider families (D10). A ticket or codehost event carries its call's key when a call emitted it, and none at
-  // dispatch; a workspace event carries none.
+  // The provider families (D10). A ticket, codehost or jev event carries its call's key when a call emitted it, and none
+  // at dispatch; a workspace event carries none.
   'ticket:fetched': {
     key?: string;
     ticketKey: string;
