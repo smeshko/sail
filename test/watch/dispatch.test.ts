@@ -447,6 +447,32 @@ test('a resumed run that hits the usage limit again is held again and resumed ag
   });
 });
 
+test('a resumed run that hits the usage limit again with no event to date it by is held for the back-off from when it was seen again, not from the first limit', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'usage_limit' });
+    await dispatcher.tick();
+    const run1 = w.spawner.run('FAKE-1').runId;
+    // A resume started by hand while the dispatch was held ends interrupted: past the hold, the dispatcher resumes it.
+    writeStatus(join(w.runs, run1), 'suspended', 'interrupted');
+    w.clock.advance(16 * 60_000);
+    await dispatcher.tick();
+    // That resume hits the limit again at 09:20, leaving no event.
+    w.clock.advance(4 * 60_000);
+    w.spawner.endResume(run1, { status: 'suspended', stopReason: 'usage_limit' });
+    await dispatcher.tick();
+    expect({
+      held: eventsOf(w.runs, 'queue:held').map(({ until }) => until),
+      resumes: w.spawner.resumes.map(({ runId }) => runId),
+    }).toEqual({
+      held: ['2026-10-15T09:15:00.000Z', '2026-10-15T09:35:00.000Z'],
+      resumes: [run1],
+    });
+  });
+});
+
 test('a dispatcher started again over the same queue, with the runs still alive, spawns nothing for them and counts them against the cap', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 3, 2);
