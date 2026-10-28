@@ -1186,6 +1186,26 @@ test('with SAIL_EVENTS set, the first claim appends one ticket:claimed to the po
   });
 });
 
+test("with RUN_ID set, a claim that takes comments with the run id, the run's own later claim prints claimed true, and another run's prints claimed false", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const runId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const claim = (id: string) =>
+      runCaptured(['port', 'ticket-source', 'claim', 'FAKE-1'], repo.dir, { env: { RUN_ID: id } });
+    const printed = async (id: string) => {
+      const { code, stdout, stderr } = await claim(id);
+      expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+      return (oneLine(stdout) as { claimed: boolean }).claimed;
+    };
+    expect(await printed(runId)).toBe(true);
+    const held = JSON.parse(readFileSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'), 'utf8'));
+    const comments = held.tickets.find((ticket: { ticketKey: string }) => ticket.ticketKey === 'FAKE-1').comments;
+    expect(comments.map((comment: { body: string }) => comment.body)).toContain(`sail run ${runId} started`);
+    expect(await printed(runId)).toBe(true);
+    expect(await printed('FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P')).toBe(false);
+  });
+});
+
 test('claim of a ref that is no ticket exits 3 naming it, and claim without a ticket exits 3 with the usage, which lists claim', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);

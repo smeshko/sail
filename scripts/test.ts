@@ -23,8 +23,9 @@ const home = realpathSync(mkdtempSync(join(tmpdir(), 'sail-test-home-')));
 
 // Git exports GIT_DIR and friends to hooks; inherited, they would point a test's git calls at the real checkout. A
 // sail script step exports SAIL_CONFIG and friends; inherited, a test's sail would read the run's project.yaml
-// instead of its temp repository's. The opt-in SAIL_LIVE* switches pass through.
-const STEP_VARIABLES = new Set(['SAIL_CONFIG', 'SAIL_EVENTS', 'SAIL_BUN']);
+// instead of its temp repository's, and a test's claim would comment with the run's RUN_ID. The opt-in SAIL_LIVE*
+// switches pass through.
+const STEP_VARIABLES = new Set(['SAIL_CONFIG', 'SAIL_EVENTS', 'SAIL_BUN', 'RUN_ID']);
 const env: Record<string, string> = {};
 for (const [key, value] of Object.entries(process.env)) {
   if (value !== undefined && !key.startsWith('GIT_') && !STEP_VARIABLES.has(key)) env[key] = value;
