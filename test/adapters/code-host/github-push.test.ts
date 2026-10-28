@@ -255,24 +255,39 @@ test("the repository's own config can't steer a push: no proxy it names is asked
   });
 });
 
+/**
+ * A stub `ssh` that logs the token's three names as it sees them, then fails as an unreachable host. The returned
+ * environment makes git run it whatever a config says: GIT_SSH_COMMAND outranks every core.sshCommand and GIT_SSH, and
+ * its directory first on PATH covers git's default `ssh`, so no case reaches a real ssh or the network.
+ */
+function loggingSsh(repo: TempRepo): { env: Record<string, string>; seen: () => string[] } {
+  const bin = join(repo.home, 'bin');
+  const log = join(repo.home, 'ssh-names.log');
+  const ssh = join(bin, 'ssh');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(ssh, `#!/bin/sh\necho "$SAIL_GIT_TOKEN|$GITHUB_TOKEN|$SAIL_GITHUB_TOKEN" >>${log}\nexit 255\n`);
+  chmodSync(ssh, 0o755);
+  return {
+    env: { GIT_SSH_COMMAND: ssh, PATH: `${bin}:${repo.env.PATH ?? ''}` },
+    seen: () => [...new Set((existsSync(log) ? readFileSync(log, 'utf8') : '').split('\n').filter(Boolean))],
+  };
+}
+
+const SSH_TIMEOUT_MS = 10_000;
+
 test("an ssh remote is offered no token: the push's environment holds none, under any name, and no user helper is asked (review R1-2, R2-2)", async () => {
   await withServed(TOKEN, async ({ repo, log }) => {
     detachedCommit(repo, 'a.txt');
-    const seen = join(repo.home, 'ssh.log');
-    // The user's own ssh program, from the environment: it records what it inherits and fails, as an unreachable host.
-    const ssh = join(repo.home, 'ssh.sh');
-    writeFileSync(ssh, `#!/bin/sh\necho "ssh $SAIL_GIT_TOKEN|$GITHUB_TOKEN|$SAIL_GITHUB_TOKEN" >>${seen}\nexit 255\n`);
-    chmodSync(ssh, 0o755);
+    const { env: ssh, seen } = loggingSsh(repo);
     repo.git('remote', 'add', 'ssh', 'ssh://git@example.invalid/o/r.git');
     // The operator's own variables hold the token too, as the definition's environment does (review R2-2).
-    const env = { ...repo.env, GIT_SSH: ssh, GITHUB_TOKEN: TOKEN, SAIL_GITHUB_TOKEN: TOKEN };
-    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env }));
+    const env = { ...repo.env, ...ssh, GITHUB_TOKEN: TOKEN, SAIL_GITHUB_TOKEN: TOKEN };
+    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env, timeoutMs: SSH_TIMEOUT_MS }));
     expect({
       code: failure(error).code,
-      // git may start the ssh program more than once, to learn which ssh it is: every start counts.
-      seen: [...new Set((existsSync(seen) ? readFileSync(seen, 'utf8') : '').split('\n').filter(Boolean))],
+      seen: seen(),
       helperLog: existsSync(log) ? readFileSync(log, 'utf8') : '',
-    }).toEqual({ code: 'unavailable', seen: ['ssh ||'], helperLog: '' });
+    }).toEqual({ code: 'unavailable', seen: ['||'], helperLog: '' });
   });
 });
 
@@ -366,27 +381,20 @@ test("neither a global remote config nor the caller's -c variables reroute a pus
   });
 });
 
-/** An ssh program for GIT_SSH that logs the token's three names as it sees them, then fails as an unreachable host. */
-function loggingSsh(repo: TempRepo): { ssh: string; seen: () => string[] } {
-  const log = join(repo.home, 'ssh-names.log');
-  const ssh = join(repo.home, 'ssh-names.sh');
-  writeFileSync(ssh, `#!/bin/sh\necho "$SAIL_GIT_TOKEN|$GITHUB_TOKEN|$SAIL_GITHUB_TOKEN" >>${log}\nexit 255\n`);
-  chmodSync(ssh, 0o755);
-  return {
-    ssh,
-    seen: () => [...new Set((existsSync(log) ? readFileSync(log, 'utf8') : '').split('\n').filter(Boolean))],
-  };
-}
-
 test('a global rewrite that only the rewritten URL matches sends the push to ssh with no token: the token follows the URL git uses (review R3-1)', async () => {
   await withServed(TOKEN, async ({ repo, http, config }) => {
     detachedCommit(repo, 'a.txt');
-    const { ssh, seen } = loggingSsh(repo);
+    const { env: ssh, seen } = loggingSsh(repo);
     const rewrites = `[url "${http.base}/"]\n\tinsteadOf = gh:\n[url "ssh://git@example.invalid/"]\n\tpushInsteadOf = ${http.base}/\n`;
     writeFileSync(join(repo.home, '.gitconfig'), `${config}${rewrites}`);
     repo.git('remote', 'add', 'gh', 'gh:origin.git');
     const error = await rejection(
-      push(repo, 'sail/x', { remote: 'gh', webUrl: http.base, env: { ...repo.env, GIT_SSH: ssh } }),
+      push(repo, 'sail/x', {
+        remote: 'gh',
+        webUrl: http.base,
+        env: { ...repo.env, ...ssh },
+        timeoutMs: SSH_TIMEOUT_MS,
+      }),
     );
     expect({ code: failure(error).code, seen: seen(), served: http.requests.length }).toEqual({
       code: 'unavailable',
@@ -399,13 +407,18 @@ test('a global rewrite that only the rewritten URL matches sends the push to ssh
 test('a URL that a URL parser reads as the web host but git reads as scp-like ssh gets no token (review R3-2)', async () => {
   await withServed(TOKEN, async ({ repo, http }) => {
     detachedCommit(repo, 'a.txt');
-    const { ssh, seen } = loggingSsh(repo);
+    const { env: ssh, seen } = loggingSsh(repo);
     const loose = [http.url.replace('://', ':'), http.url.replace('://', ':/')];
     const codes = [];
     for (const [n, url] of loose.entries()) {
       repo.git('remote', 'add', `loose${n}`, url);
       const error = await rejection(
-        push(repo, 'sail/x', { remote: `loose${n}`, webUrl: http.base, env: { ...repo.env, GIT_SSH: ssh } }),
+        push(repo, 'sail/x', {
+          remote: `loose${n}`,
+          webUrl: http.base,
+          env: { ...repo.env, ...ssh },
+          timeoutMs: SSH_TIMEOUT_MS,
+        }),
       );
       codes.push(failure(error).code);
     }
@@ -420,10 +433,10 @@ test('a URL that a URL parser reads as the web host but git reads as scp-like ss
 test("a GITHUB_TOKEN that differs from the token in use reaches no git either: both names leave every git's environment (review R3-3)", async () => {
   await withServed(TOKEN, async ({ repo }) => {
     detachedCommit(repo, 'a.txt');
-    const { ssh, seen } = loggingSsh(repo);
+    const { env: ssh, seen } = loggingSsh(repo);
     repo.git('remote', 'add', 'ssh', 'ssh://git@example.invalid/o/r.git');
-    const env = { ...repo.env, GIT_SSH: ssh, GITHUB_TOKEN: 'ghp_MARKER_other_77aa', SAIL_GITHUB_TOKEN: TOKEN };
-    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env }));
+    const env = { ...repo.env, ...ssh, GITHUB_TOKEN: 'ghp_MARKER_other_77aa', SAIL_GITHUB_TOKEN: TOKEN };
+    const error = await rejection(push(repo, 'sail/x', { remote: 'ssh', env, timeoutMs: SSH_TIMEOUT_MS }));
     expect({
       code: failure(error).code,
       seen: seen(),
