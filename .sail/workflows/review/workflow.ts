@@ -1,6 +1,7 @@
 // review: a factory-labelled pull request in, merged out. Validation, the leak check, the demonstration and six
 // reviewers look at it at once; a judge decides what each finding becomes (fixed here, filed as a ticket, or dropped)
-// and which reviews are too thin to trust. Up to three fix passes follow, each reviewed beside a fresh validation. Then
+// and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
+// fresh validation. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
 // request merged once its checks pass. A review that leaves findings open, or one too thin to trust, comments why,
 // takes the label off and fails, leaving the pull request to a human.
@@ -150,8 +151,8 @@ export default workflow(
     }
     const { thin } = judgement;
 
-    // Fix, then review the fixes beside a fresh validation, up to FIX_PASSES passes. What is still open, what the fixes
-    // broke at medium or above, and a failed validation go to the next pass.
+    // Fix, then ask Jev about the targets, falling back to the agent unless all are clear yeses, up to FIX_PASSES passes.
+    // Always validate afresh. Open targets, new agent findings at medium or above, and failed validation go to the next pass.
     const rounds: z.infer<typeof ReviewRecord>['rounds'] = [];
     let open: z.infer<typeof ReviewRecord>['open'] = [];
     let resolved = targets.length === 0;
