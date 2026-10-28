@@ -372,6 +372,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
       step: step.name,
       try: tryNumber,
       outcome: result.outcome as JournalEntry['outcome'],
+      durationMs: result.durationMs as number,
       resultPath,
       ...(result.outcome === 'error' ? { errors: (result.errors ?? []) as ContractError[] } : {}),
     });

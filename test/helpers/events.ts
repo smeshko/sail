@@ -98,12 +98,19 @@ export const stepStart = (
 });
 
 /** A step's `step:end`, as its try `tryNumber`: a later try's result sits in `try-M/` below the step's directory. */
-export const stepEnd = (key: string, index: number, outcome: Outcome, tryNumber = 1): NewEvent => ({
+export const stepEnd = (
+  key: string,
+  index: number,
+  outcome: Outcome,
+  tryNumber = 1,
+  durationMs?: number,
+): NewEvent => ({
   type: 'step:end',
   key,
   step: key.split('/')[1] ?? '',
   try: tryNumber,
   outcome,
+  ...(durationMs === undefined ? {} : { durationMs }),
   resultPath: `${stageOf(key)}/call-${callOf(key)}/steps/${index}-${key.split('/')[1]}/${tryNumber > 1 ? `try-${tryNumber}/` : ''}result.json`,
 });
 

@@ -175,6 +175,8 @@ interface Payloads {
     step: string;
     try: number;
     outcome: Outcome;
+    /** The step's result's `durationMs`, which its call's sums; absent only from events written before it existed. */
+    durationMs?: number;
     /** Relative to the run directory. */
     resultPath: string;
     /** Exactly when the outcome is `error`. */

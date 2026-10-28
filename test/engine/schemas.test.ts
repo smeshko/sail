@@ -302,6 +302,7 @@ const CLOSED: NewEvent[] = [
     step: 'open',
     try: 1,
     outcome: 'passed',
+    durationMs: 1000,
     resultPath: '05-publish/call-1/steps/2-open/result.json',
   },
   {
@@ -1250,6 +1251,15 @@ test('event: a step:end carries its errors exactly when the step ended in error'
   expect(paths('sail.event.v1', { ...stamped(stepEndEvent(OPEN, 2, 'passed')), errors: [portError] })).toEqual([
     '/errors',
   ]);
+});
+
+test("event: a step:end's durationMs is optional, and a number of 0 or more", () => {
+  const end = stamped(stepEndEvent(OPEN, 2, 'passed'));
+  expect(paths('sail.event.v1', end)).toEqual([]);
+  expect(paths('sail.event.v1', { ...end, durationMs: 0 })).toEqual([]);
+  expect(paths('sail.event.v1', { ...end, durationMs: 1250 })).toEqual([]);
+  expect(paths('sail.event.v1', { ...end, durationMs: -1 })).toEqual(['/durationMs']);
+  expect(paths('sail.event.v1', { ...end, durationMs: '1250' })).toEqual(['/durationMs']);
 });
 
 test('event: stage:end takes the reason port in its errors, and every other reason a result may give', () => {
