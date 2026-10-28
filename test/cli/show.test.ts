@@ -549,3 +549,46 @@ test("sail show lists a run's intake#1 first, with its kind, its outcome and its
     expect(normaliseDurations(replayed.stdout)).toBe(normaliseDurations(ran.stdout.toString()));
   });
 }, 30_000);
+
+test('a run with Jev calls shows a jev row after its totals: calls, questions, latency and tokens, and a run without shows none', async () => {
+  await withTempRepo(async (repo) => {
+    emptySailDir(repo.dir);
+    const asked = (questions: number, latencyMs: number, usage?: { inputTokens: number; outputTokens: number }) =>
+      ({
+        type: 'jev:asked',
+        key: 'spec#1',
+        model: 'jev-latest',
+        questions,
+        latencyMs,
+        ...(usage === undefined ? {} : { usage }),
+      }) as const;
+    runWith(
+      repo.dir,
+      ndjson(
+        stamp(
+          [0, runStart()],
+          [50, start('spec#1')],
+          [100, asked(3, 400, { inputTokens: 100, outputTokens: 5 })],
+          [200, asked(1, 250, { inputTokens: 60, outputTokens: 4 })],
+          [1450, end('spec#1', 'passed', 1400)],
+          [1460, journal('spec#1', 1, 'passed')],
+          [1500, runEnd('completed', 2)],
+        ),
+      ),
+    );
+    expect(await runCaptured(['show', GOLDEN_RUN_ID], repo.dir)).toEqual({
+      code: EXIT_OK,
+      stdout: text(
+        `${GOLDEN_RUN_ID} · ticket-to-pr@1 · completed · 1.5s`,
+        '',
+        'key     kind    outcome  duration  cost  next',
+        'spec#1  script  passed   1.4s',
+        '',
+        'totals  1 call · 1 step · 0 tool calls · 0 denials · 2 replays',
+        'jev     2 calls · 4 questions · 650ms · 160 in / 9 out tokens',
+        'cost    $0.00',
+      ),
+      stderr: '',
+    });
+  });
+});

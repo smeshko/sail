@@ -862,3 +862,58 @@ test("a seeded run's reused step lines add no call: its reused multi-step call i
     1,
   ]);
 });
+
+const asked = (
+  key: string | undefined,
+  questions: number,
+  latencyMs: number,
+  usage?: { inputTokens: number; outputTokens: number },
+): NewEvent =>
+  ({
+    type: 'jev:asked',
+    ...(key === undefined ? {} : { key }),
+    model: 'jev-latest',
+    questions,
+    latencyMs,
+    ...(usage === undefined ? {} : { usage }),
+  }) as NewEvent;
+
+test('jev:asked events sum per call, per step and in the totals, usage included, and the summary validates', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [110, stepStart('publish#1/describe', 1, 2, 'agent')],
+      [200, stepEnd('publish#1/describe', 1, 'done')],
+      [210, stepStart('publish#1/open', 2, 2, 'script')],
+      [220, asked('publish#1/open', 3, 400, { inputTokens: 100, outputTokens: 5 })],
+      [230, asked('publish#1/open', 2, 250, { inputTokens: 60, outputTokens: 4 })],
+      [300, stepEnd('publish#1/open', 2, 'passed')],
+      [310, end('publish#1', 'passed', 210)],
+      [320, start('review#1')],
+      [330, asked('review#1', 1, 90)],
+      [340, end('review#1', 'passed', 20)],
+    ),
+  );
+  const [publish, review] = summary?.calls ?? [];
+  expect(publish?.jev).toEqual({ calls: 2, questions: 5, latencyMs: 650, inputTokens: 160, outputTokens: 9 });
+  expect(publish?.steps?.map((step) => [step.key, step.jev])).toEqual([
+    ['publish#1/describe', undefined],
+    ['publish#1/open', { calls: 2, questions: 5, latencyMs: 650, inputTokens: 160, outputTokens: 9 }],
+  ]);
+  expect(review?.jev).toEqual({ calls: 1, questions: 1, latencyMs: 90 });
+  expect(summary?.totals.jev).toEqual({ calls: 3, questions: 6, latencyMs: 740, inputTokens: 160, outputTokens: 9 });
+});
+
+test('a jev:asked with no key counts in the totals alone', () => {
+  const summary = folded(
+    stamp([0, runStart()], [100, start('spec#1')], [110, asked(undefined, 2, 70)], [200, end('spec#1', 'passed', 100)]),
+  );
+  expect(summary?.calls[0]).not.toHaveProperty('jev');
+  expect(summary?.totals.jev).toEqual({ calls: 1, questions: 2, latencyMs: 70 });
+});
+
+test('a run without a jev:asked has no jev in any call, step or total', () => {
+  const summary = folded(stamp([0, runStart()], [100, start('spec#1')], [200, end('spec#1', 'passed', 100)]));
+  expect(JSON.stringify(summary)).not.toContain('jev');
+});

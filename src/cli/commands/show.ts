@@ -13,7 +13,7 @@ import { readEventsFrom } from '../../events/consumers/ndjson';
 import { rebuildSummary } from '../../events/consumers/summary';
 import type { Verbosity } from '../../events/consumers/terminal';
 import { followEvents } from '../../events/follow';
-import { type Summary, summarize } from '../../events/summary';
+import { type JevTotals, type Summary, summarize } from '../../events/summary';
 import type { SailEvent } from '../../events/types';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import { count, formatDuration, formatUsd, table } from '../format';
@@ -40,6 +40,14 @@ function callRows(summary: Summary): string[][] {
   ]);
 }
 
+/** The run's Jev calls on one line: how many, the questions, the time they took, and the tokens when Jev reported them. */
+function jevText(jev: JevTotals): string {
+  const tokens = jev.inputTokens === undefined ? [] : [`${jev.inputTokens} in / ${jev.outputTokens ?? 0} out tokens`];
+  return [count(jev.calls, 'call'), count(jev.questions, 'question'), formatDuration(jev.latencyMs), ...tokens].join(
+    ' · ',
+  );
+}
+
 /** The run as `sail show` prints it: a title, the calls, then how the run stopped, its loops, totals and cost. */
 function render(summary: Summary): string[] {
   const { stopReason, message, totals } = summary;
@@ -64,6 +72,7 @@ function render(summary: Summary): string[] {
         count(totals.replays, 'replay'),
       ].join(' · '),
     ],
+    ...(totals.jev === undefined ? [] : [['jev', jevText(totals.jev)]]),
     [
       'cost',
       `${formatUsd(totals.usage.costUsd)}${budget === undefined ? '' : ` of ${formatUsd(budget.maxUsd)} (${budget.usedPct}%)`}`,

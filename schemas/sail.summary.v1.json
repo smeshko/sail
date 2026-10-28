@@ -125,6 +125,7 @@
         "denials": { "type": "integer", "minimum": 0 },
         "replays": { "type": "integer", "minimum": 0 },
         "usage": { "$ref": "#/$defs/usage" },
+        "jev": { "$ref": "#/$defs/jevTotals" },
         "budget": {
           "description": "the run's dollar budget and how much of it the run used; present exactly when the run has a budget.maxUsd",
           "type": "object",
@@ -164,6 +165,19 @@
       "required": ["costUsd"],
       "additionalProperties": false
     },
+    "jevTotals": {
+      "description": "the Jev calls of a call, a step or the run: how many, the questions asked, their latency, and the tokens where Jev reported usage; present only when a call was made",
+      "type": "object",
+      "properties": {
+        "calls": { "type": "integer", "minimum": 1 },
+        "questions": { "type": "integer", "minimum": 0 },
+        "latencyMs": { "type": "number", "minimum": 0 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["calls", "questions", "latencyMs"],
+      "additionalProperties": false
+    },
     "callEntry": {
       "type": "object",
       "properties": {
@@ -181,6 +195,7 @@
         "denials": { "type": "integer", "minimum": 0 },
         "costUsd": { "type": "number", "minimum": 0 },
         "commits": { "type": "integer", "minimum": 0 },
+        "jev": { "$ref": "#/$defs/jevTotals" },
         "feedbackFrom": { "type": "string" },
         "files": { "type": "array", "items": { "type": "string" } },
         "summary": { "type": "string" },
@@ -206,6 +221,7 @@
         "turns": { "type": "integer", "minimum": 0 },
         "toolCalls": { "type": "integer", "minimum": 0 },
         "costUsd": { "type": "number", "minimum": 0 },
+        "jev": { "$ref": "#/$defs/jevTotals" },
         "files": { "type": "array", "items": { "type": "string" } },
         "summary": { "type": "string" }
       },

@@ -57,6 +57,7 @@ const SHOWN_FROM: Partial<Record<EventType, Verbosity>> = {
   'all:start': 'normal',
   'all:end': 'normal',
   'workflow:route': 'verbose',
+  'jev:asked': 'verbose',
   'journal:append': 'trace',
   'budget:raised': 'normal',
   'run:end': 'quiet',
@@ -435,6 +436,13 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         return [head(event.at, '→', `${event.took} · on ${event.value}`)];
       case 'journal:append':
         return [detail(event.key, `journal line ${event.line}`)];
+      case 'jev:asked': {
+        const questions = `${event.questions} question${event.questions === 1 ? '' : 's'}`;
+        const tokens =
+          event.usage === undefined ? [] : [`${event.usage.inputTokens} in / ${event.usage.outputTokens} out tokens`];
+        const text = [`jev ${event.model}`, questions, formatDuration(event.latencyMs), ...tokens].join(' · ');
+        return [head(event.key, '≈', text)];
+      }
       case 'loop:iteration': {
         const feedback = event.feedback === undefined ? '' : ` · feedback from ${source(event.feedback.from)}`;
         return [head(event.loop, '↻', `iteration ${event.iteration}/${event.max}${feedback}`)];
