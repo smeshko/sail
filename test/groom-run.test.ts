@@ -185,6 +185,18 @@ test('groom marks a duplicate the check named at or above the threshold', async 
   });
 }, 120_000);
 
+test('groom marks a duplicate the check named at exactly the threshold', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedDuplicate(sailDir, 0.8);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe('canceled');
+    expect(lastComment(repo.dir)).toContain('- applied: duplicate FAKE-1');
+  });
+}, 120_000);
+
 test('an action the port refuses is reported as failed, and the ticket is still commented and unlabelled', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
