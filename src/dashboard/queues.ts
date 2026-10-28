@@ -32,7 +32,7 @@ function queueDirOf(entry: RegistryEntry, workflow: string): string | undefined 
 }
 
 /** `queue.json` of the queue in `dir`, parsed, or why it can't be. */
-function readQueue(dir: string): { queue?: QueueFile; problem?: string } {
+export function readQueue(dir: string): { queue?: QueueFile; problem?: string } {
   const path = join(dir, QUEUE_FILE);
   try {
     lstatSync(path);

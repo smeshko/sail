@@ -2,7 +2,17 @@
 // request, no CORS, and the REST routes over two registered clones that each hold a copy of the golden run. Every
 // server starts on port 0 and is stopped after its test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { type Dashboard, guard, startDashboard } from '../../src/dashboard/server';
@@ -317,3 +327,143 @@ test('GET / answers the page with no client header, a foreign Host gets 403 and 
   expect((await get(server, '/index.html', { headers: {} })).status).toBe(403);
   expect(treeHash(m.root)).toBe(before);
 }, 30_000);
+
+const MOVE = '/api/repos/beta/queues/ticket-to-pr/move';
+const JSON_HEADERS = { ...HEADER, 'Content-Type': 'application/json' };
+
+/** beta's queue: FAKE-5, FAKE-7 and FAKE-8 queued, FAKE-3 dispatched. Gives the queue file, and the inbox's files. */
+function betaQueue(watcher: boolean) {
+  const runs = join(m.beta.clone, '.sail-runs');
+  const dir = join(runs, 'queue', 'ticket-to-pr');
+  mkdirSync(dir, { recursive: true });
+  const item = (key: string, state: string) => ({
+    dedupKey: `ticket:${key}`,
+    source: { kind: 'ticket', ticketKey: key },
+    title: `Ticket ${key}`,
+    url: `fake://tickets/${key}`,
+    state,
+    attempts: 0,
+    addedAt: '2026-10-14T09:00:00.000Z',
+  });
+  const file = join(dir, 'queue.json');
+  writeFileSync(
+    file,
+    `${JSON.stringify({
+      version: 1,
+      workflow: 'ticket-to-pr',
+      updatedAt: '2026-10-14T09:00:00.000Z',
+      polling: { label: 'sail', failures: 0 },
+      items: [
+        item('FAKE-3', 'dispatched'),
+        item('FAKE-5', 'queued'),
+        item('FAKE-7', 'queued'),
+        item('FAKE-8', 'queued'),
+      ],
+    })}\n`,
+  );
+  const live = {
+    pid: process.pid,
+    startedAt: '2026-10-14T09:00:00.000Z',
+    sailDir: m.beta.sailDir,
+    ticketSource: 'fake',
+    labels: ['sail'],
+  };
+  writeFileSync(
+    join(m.registryDir, 'beta.json'),
+    `${JSON.stringify({ ...entryOf(m.beta), ...(watcher ? { watcher: live } : {}) })}\n`,
+  );
+  const inboxDir = join(runs, 'watcher', 'commands');
+  return { file, inboxDir, inbox: () => (existsSync(inboxDir) ? readdirSync(inboxDir) : []) };
+}
+
+const post = (server: Dashboard, path: string, init: RequestInit) =>
+  fetch(`http://127.0.0.1:${server.port}${path}`, { method: 'POST', ...init });
+
+test('a POST to a queue move route with the client header, a JSON body and no foreign Origin drops exactly that move command for the live watcher, and writes no queue state', async () => {
+  const queue = betaQueue(true);
+  const before = readFileSync(queue.file, 'utf8');
+  const server = start();
+  const body = { dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' };
+  const response = await post(server, MOVE, {
+    headers: { ...JSON_HEADERS, Origin: `http://127.0.0.1:${server.port}` },
+    body: JSON.stringify(body),
+  });
+  const answer = (await response.json()) as { file: string };
+  const files = queue.inbox();
+  expect({
+    status: response.status,
+    cors: response.headers.get('access-control-allow-origin'),
+    files: files.length,
+    answered: answer.file === join(queue.inboxDir, files[0] ?? ''),
+    command: JSON.parse(readFileSync(join(queue.inboxDir, files[0] ?? ''), 'utf8')),
+    queue: readFileSync(queue.file, 'utf8') === before,
+  }).toEqual({
+    status: 202,
+    cors: null,
+    files: 1,
+    answered: true,
+    command: { op: 'move', workflow: 'ticket-to-pr', ...body },
+    queue: true,
+  });
+});
+
+test.each([
+  ['no client header', MOVE, { headers: { 'Content-Type': 'application/json' } }, 403],
+  ['a text/plain body', MOVE, { headers: { ...HEADER, 'Content-Type': 'text/plain' } }, 415],
+  ['no content type', MOVE, { headers: HEADER }, 415],
+  ['a foreign Origin', MOVE, { headers: { ...JSON_HEADERS, Origin: 'http://evil.example' } }, 403],
+  ['another path', '/api/repos/beta/runs', { headers: JSON_HEADERS }, 405],
+  ['the move route of a longer path', `${MOVE}/x`, { headers: JSON_HEADERS }, 405],
+  ['an unregistered repository', '/api/repos/gamma/queues/ticket-to-pr/move', { headers: JSON_HEADERS }, 404],
+  ['a workflow with no queue', '/api/repos/beta/queues/other/move', { headers: JSON_HEADERS }, 404],
+] as const)('a POST with %s is refused with %i, and drops no command', async (_, path, init, status) => {
+  const queue = betaQueue(true);
+  const server = start();
+  const body = JSON.stringify({ dedupKey: 'ticket:FAKE-7', before: 'ticket:FAKE-5' });
+  const response = await post(server, path, { ...init, body });
+  expect([response.status, response.headers.get('access-control-allow-origin'), queue.inbox()]).toEqual([
+    status,
+    null,
+    [],
+  ]);
+});
+
+test('an OPTIONS to the move route is 405 with Allow: GET, and drops no command', async () => {
+  const queue = betaQueue(true);
+  const server = start();
+  const response = await fetch(`http://127.0.0.1:${server.port}${MOVE}`, { method: 'OPTIONS', headers: JSON_HEADERS });
+  expect([response.status, response.headers.get('allow'), queue.inbox()]).toEqual([405, 'GET', []]);
+});
+
+const moveBody = (fields: Record<string, unknown>) => JSON.stringify({ dedupKey: 'ticket:FAKE-7', ...fields });
+
+test.each([
+  ['a body that is not JSON', 'not json', 400],
+  ['neither before nor after', moveBody({}), 400],
+  ['both before and after', moveBody({ before: 'ticket:FAKE-5', after: 'ticket:FAKE-8' }), 400],
+  ['a field it does not take', moveBody({ before: 'ticket:FAKE-5', force: true }), 400],
+  ['an item that is dispatched', moveBody({ dedupKey: 'ticket:FAKE-3', before: 'ticket:FAKE-5' }), 409],
+  ['a target that is dispatched', moveBody({ after: 'ticket:FAKE-3' }), 409],
+  ['an item the queue lacks', moveBody({ dedupKey: 'ticket:FAKE-9', before: 'ticket:FAKE-5' }), 409],
+  ['the item as its own target', moveBody({ before: 'ticket:FAKE-7' }), 409],
+] as const)('a move with %s is refused with %i as JSON, and drops no command', async (_, body, status) => {
+  const queue = betaQueue(true);
+  const server = start();
+  const response = await post(server, MOVE, { headers: JSON_HEADERS, body });
+  expect([response.status, queue.inbox()]).toEqual([status, []]);
+  expect(await response.json()).toEqual({ error: expect.any(String) });
+});
+
+test('a move for a repository with no live watcher is 409 naming sail watch, and drops no command', async () => {
+  const queue = betaQueue(false);
+  const server = start();
+  const response = await post(server, MOVE, {
+    headers: JSON_HEADERS,
+    body: moveBody({ before: 'ticket:FAKE-5' }),
+  });
+  expect([response.status, await response.json(), queue.inbox()]).toEqual([
+    409,
+    { error: "no watcher is running for 'beta': sail watch ticket-to-pr first" },
+    [],
+  ]);
+});
