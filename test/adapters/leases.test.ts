@@ -187,19 +187,24 @@ test.each([
   expect(messageOf(error)).toContain('EISDIR');
 });
 
-test.skipIf(asRoot)('taking a free branch in a read-only lease directory is unavailable, naming EACCES', () => {
-  const dir = tempDir();
-  chmodSync(dir, 0o555);
-  try {
-    const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
-    expect(portFailure(error)).toEqual(unavailable);
-    expect(messageOf(error)).toContain(leaseFile(dir, REMOTE, BRANCH));
-    expect(messageOf(error)).toContain('EACCES');
-  } finally {
-    chmodSync(dir, 0o755);
-  }
-  expect(readdirSync(dir)).toEqual([]);
-});
+test.skipIf(asRoot)(
+  'taking a free branch in a read-only lease directory is unavailable, naming the temp file and EACCES',
+  () => {
+    const dir = tempDir();
+    chmodSync(dir, 0o555);
+    try {
+      const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
+      expect(portFailure(error)).toEqual(unavailable);
+      expect(messageOf(error)).toStartWith(
+        `workspace.lease: ${leaseFile(dir, REMOTE, BRANCH)}.r1.${process.pid}.tmp: `,
+      );
+      expect(messageOf(error)).toContain('EACCES');
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    expect(readdirSync(dir)).toEqual([]);
+  },
+);
 
 test('a lease whose temp-file write fails half way is unavailable, and leaves nothing in the lease directory', () => {
   const dir = tempDir();
@@ -220,6 +225,55 @@ test('a lease whose temp-file write fails half way is unavailable, and leaves no
   expect(readdirSync(dir)).toEqual([]);
   takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW);
   expect(readdirSync(dir)).toEqual([basename(leaseFile(dir, REMOTE, BRANCH))]);
+});
+
+const errno = (code: string, message: string): Error => Object.assign(new Error(`${code}: ${message}`), { code });
+
+test('taking a free branch whose link fails with an error other than EEXIST is unavailable, naming the lease file, and leaves no temp file', () => {
+  const dir = tempDir();
+  const file = leaseFile(dir, REMOTE, BRANCH);
+  const real = fs.linkSync;
+  const link = spyOn(fs, 'linkSync').mockImplementation((from, to) => {
+    if (String(to) === file) throw errno('EPERM', 'operation not permitted, link');
+    return real(from, to);
+  });
+  try {
+    const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
+    expect(link).toHaveBeenCalled();
+    expect(portFailure(error)).toEqual(unavailable);
+    expect(messageOf(error)).toStartWith(`workspace.lease: ${file}: `);
+    expect(messageOf(error)).toContain('EPERM');
+  } finally {
+    link.mockRestore();
+  }
+  expect(readdirSync(dir)).toEqual([]);
+});
+
+test("a release that moves aside another taker's lease and can't link it back is unavailable, naming the lease file", () => {
+  const dir = tempDir();
+  const file = leaseFile(dir, REMOTE, BRANCH);
+  takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW);
+  const realRename = fs.renameSync;
+  const realLink = fs.linkSync;
+  const rename = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+    if (String(from) === file) writeFileSync(file, JSON.stringify(leaseOf(run('r2', process.pid, 'running'), LATER)));
+    return realRename(from, to);
+  });
+  const link = spyOn(fs, 'linkSync').mockImplementation((from, to) => {
+    if (String(to) === file) throw errno('EIO', 'i/o error, link');
+    return realLink(from, to);
+  });
+  try {
+    const error = caught(() => releaseLease(dir, REMOTE, BRANCH, 'r1'));
+    expect(rename).toHaveBeenCalled();
+    expect(link).toHaveBeenCalled();
+    expect(portFailure(error)).toEqual(unavailable);
+    expect(messageOf(error)).toStartWith(`workspace.lease: ${file}: `);
+    expect(messageOf(error)).toContain('EIO');
+  } finally {
+    link.mockRestore();
+    rename.mockRestore();
+  }
 });
 
 test.skipIf(asRoot)(
