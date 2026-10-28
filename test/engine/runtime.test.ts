@@ -2436,6 +2436,14 @@ test("a multi-step stage's agent step runs on the harness its alias names, besid
     expect(end).toMatchObject({ status: 'completed' });
     expect(keys).toEqual(['publish#1/describe']);
     expect(specResult(end.dir, 1)).toMatchObject({ harness: { adapter: 'fake' } });
+    const steps = ofType(events(end.dir), 'step:start').map((event) => [event.key, event.harness]);
+    expect(steps).toEqual([
+      ['publish#1/describe', 'second'],
+      ['publish#1/open', undefined],
+    ]);
+    const summary: Summary = JSON.parse(readFileSync(join(end.dir, 'summary.json'), 'utf8'));
+    const publish = summary.calls.find((call) => call.key === 'publish#1');
+    expect(publish?.steps?.map((step) => [step.key, step.harness])).toEqual(steps);
     expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 60_000);
