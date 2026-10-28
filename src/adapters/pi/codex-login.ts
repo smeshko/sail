@@ -132,7 +132,8 @@ export function keychainStore(options: KeychainStoreOptions): CredentialStore {
   const only = (providerId: string) => {
     if (providerId !== CODEX_PROVIDER) throw new Error(`the keychain holds the Codex login, not ${providerId}'s`);
   };
-  async function read(): Promise<Credential | undefined> {
+  /** The login, or undefined when there is none; an item that isn't one throws unless `unreadable` is `none`. */
+  async function read(unreadable: 'throw' | 'none' = 'throw'): Promise<Credential | undefined> {
     const end = await security(['find-generic-password', '-a', account, '-s', KEYCHAIN_SERVICE, '-w']);
     if (end.exitCode === NOT_FOUND) return undefined;
     if (end.exitCode !== 0) throw refused(end);
@@ -144,6 +145,7 @@ export function keychainStore(options: KeychainStoreOptions): CredentialStore {
     }
     const credential = OAuthCredential.safeParse(parsed);
     if (!credential.success) {
+      if (unreadable === 'none') return undefined;
       throw new Error(`the keychain's ${KEYCHAIN_SERVICE} item is not a Codex login: run sail login codex`);
     }
     return credential.data;
@@ -176,7 +178,8 @@ export function keychainStore(options: KeychainStoreOptions): CredentialStore {
       return withLock(
         options.lockFile,
         async () => {
-          const current = await read();
+          // An item that isn't a login is no current one: a new login replaces it.
+          const current = await read('none');
           const next = await fn(current);
           if (next === undefined) return current;
           await write(next);

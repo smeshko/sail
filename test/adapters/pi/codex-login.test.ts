@@ -134,6 +134,18 @@ test('through the PATH security a login is listed, read back, deleted, and delet
   });
 });
 
+test('an item that is not a login is no current one to modify: a new login replaces it', async () => {
+  const keychain = fakeKeychain(fresh());
+  writeFileSync(keychain.env.FAKE_KEYCHAIN, '{"access":"a","refresh":"r","expires":1}\n');
+  const store = storeOver(systemSecurity(keychain.env));
+  const seen: (Credential | undefined)[] = [];
+  await store.modify('openai-codex', async (current) => {
+    seen.push(current);
+    return LOGIN;
+  });
+  expect({ seen, held: keychain.held() }).toEqual({ seen: [undefined], held: LOGIN });
+});
+
 test('a delete security refuses rejects, naming its message', async () => {
   const store = storeOver(async () => ({ exitCode: 51, stdout: '', stderr: 'User interaction is not allowed.\n' }));
   expect(String(await rejection(store.delete('openai-codex')))).toBe(
