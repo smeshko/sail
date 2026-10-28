@@ -104,6 +104,18 @@ export const FixChecked = z.object({
   findings: z.array(Finding),
 });
 
+/**
+ * What jev-fix asked Jev: whether it could, why not when it couldn't, the clear-yes threshold, each finding's
+ * probability of yes, and the FixChecked it stands in for when every finding is a clear yes (null otherwise).
+ */
+export const FixAsked = z.object({
+  asked: z.boolean(),
+  note: z.string(),
+  threshold: z.number(),
+  answers: z.array(z.object({ id: z.string(), yes: z.number() })),
+  checked: FixChecked.nullable(),
+});
+
 /** Why the last fix pass didn't stand: what is still open, what the fixes broke, and a failed validation. */
 export const FixFeedback = z.object({
   open: z.array(z.object({ finding: z.string(), detail: z.string() })),

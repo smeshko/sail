@@ -2,6 +2,10 @@ Review the fixes made to this pull request since its review began: `git log {{si
 `git diff {{since}}..HEAD`. `$STAGE_IN/findings.json` holds every finding the fixes target, and
 `$STAGE_IN/fixed.json` what the last fix pass says it did for each: its commit, or why it made none.
 
+`$STAGE_IN/jev.json` holds what Jev answered about each finding before you were called: its probability that the finding
+is resolved, or why it could not be asked. Read it as a hint where to look first, a low answer being a finding to
+examine closely. It is never a verdict: judge every finding yourself from the code.
+
 You review only. Don't change any file. Validation runs the tests beside you.
 
 ## For each finding
