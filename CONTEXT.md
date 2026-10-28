@@ -57,7 +57,7 @@ Moving a designated ticket to In Progress through TicketSource before its run st
 _Avoid_: lock, reserve, take
 
 **Forced run**:
-A run started with `--force` on a ticket that is not designated, not unstarted, or both. Its run header lists the checks `--force` overrode, `designation` and `state`.
+A run started with `--force` on a ticket that is not designated, not in a pick-up state, or both. Its run header lists the checks `--force` overrode, `designation` and `state`.
 _Avoid_: bypass, skip, unsafe run
 
 **Brief**:
