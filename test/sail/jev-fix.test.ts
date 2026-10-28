@@ -54,6 +54,11 @@ test('fixState puts each finding with its fix note under its id, null for a find
   expect(calls).toEqual([['diff', 'cb9c6b5..HEAD']]);
 });
 
+test('fixState keeps the full fixes diff beyond 40,000 characters', () => {
+  const diff = 'x'.repeat(40_100);
+  expect(lib.fixState(FINDINGS, FIXED, 'base', () => diff).diff).toBe(diff);
+});
+
 test('fixQuestions asks one noul per finding, named by its id', () => {
   const questions = lib.fixQuestions(FINDINGS);
   expect(Object.keys(questions)).toEqual(['V1', 'R2', 'D1']);

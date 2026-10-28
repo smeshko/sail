@@ -114,14 +114,14 @@ export function parseTasks(planText) {
 
 /** The state Jev judges tasks on: the branch's commits once, and each task's text with the diff of the files it names. */
 export function tasksState(tasks, run = git) {
-  const commits = cut(run(['log', `${BASE}..HEAD`, '--format=%h %s']));
+  const commits = run(['log', `${BASE}..HEAD`, '--format=%h %s']);
   let whole;
   const state = { commits, tasks: {} };
   for (const task of tasks) {
     let diff;
     if (task.paths.length > 0) diff = run(['diff', `${BASE}...HEAD`, '--', ...task.paths]);
     else diff = whole ??= run(['diff', `${BASE}...HEAD`]);
-    state.tasks[task.id] = { text: task.text, diff: cut(diff) };
+    state.tasks[task.id] = { text: task.text, diff };
   }
   return state;
 }
@@ -145,7 +145,7 @@ export function taskQuestions(tasks) {
 /** The state Jev judges fixes on: the diff since the review began once, and each finding with the fix pass's note. */
 export function fixState(findings, fixed, since, run = git) {
   const notes = new Map(fixed.fixes.map((each) => [each.finding, each]));
-  const state = { diff: cut(run(['diff', `${since}..HEAD`])), findings: {} };
+  const state = { diff: run(['diff', `${since}..HEAD`]), findings: {} };
   for (const finding of findings) {
     const fix = notes.get(finding.id);
     state.findings[finding.id] = { finding, fix: fix ?? null };

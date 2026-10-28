@@ -95,13 +95,18 @@ test('tasksState diffs the files a task names, the whole diff for one that names
   expect(calls.filter((args) => args[0] === 'log')).toHaveLength(1);
 });
 
-test('tasksState cuts a diff longer than MAX_DIFF with a marker, and a git that fails gives an empty text', () => {
+test('tasksState keeps a long diff, and a git that fails gives an empty text', () => {
   const [task] = lib.parseTasks(PLAN);
   const long = lib.tasksState([task as Task], () => 'x'.repeat(lib.MAX_DIFF + 10));
   const diff = long.tasks['TASK-001']?.diff ?? '';
   expect(diff.startsWith('x'.repeat(lib.MAX_DIFF))).toBe(true);
-  expect(diff).toContain('… cut: 10 more characters');
+  expect(diff).toBe('x'.repeat(lib.MAX_DIFF + 10));
   expect(lib.tasksState([task as Task], () => '').tasks['TASK-001']?.diff).toBe('');
+});
+
+test('tasksState keeps the full relevant diff even beyond MAX_DIFF', () => {
+  const diff = 'x'.repeat(lib.MAX_DIFF + 100);
+  expect(lib.tasksState(lib.parseTasks(PLAN), () => diff).tasks['TASK-001']?.diff).toBe(diff);
 });
 
 test('clearYes needs every id answered at or above the threshold', () => {
