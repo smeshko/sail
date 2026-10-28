@@ -6,7 +6,7 @@
 //   sail port ticket-source list [--state <type>] [--label <name>]    the team's tickets, as an array of ListedTicket
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
-//   sail port ticket-source claim <ticket>    moves it to in progress if unstarted, and says whether that took:
+//   sail port ticket-source claim <ticket>    moves it to in progress if in a pick-up state, and says whether that took:
 //                                                   under a run, a claim that takes comments with RUN_ID
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
 //                                                   files a new ticket: its description from the file or stdin

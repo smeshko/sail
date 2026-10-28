@@ -48,7 +48,7 @@ export interface ResolvedSource {
   ticketKey: string;
   /** The ticket as fetched for the checks. The intake fetches it again, after the claim. */
   ticket: Ticket;
-  /** The checks `--force` overrode: `designation` for a missing label, then `state` for a ticket that isn't unstarted. */
+  /** The checks `--force` overrode: `designation` for a missing label, then `state` for a ticket not in a pick-up state. */
   forced: Forced[];
 }
 
