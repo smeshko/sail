@@ -48,6 +48,8 @@ export interface GitHubCodeHostOptions extends ProviderOptions {
 const NUMBER = /^#?([1-9]\d*)$/;
 
 const SHA = /^[0-9a-f]{40}$/;
+// A dot segment collapses the DELETE's path onto the labels collection, which GitHub reads as removing every label.
+const DOTS = /^\.\.?$/;
 
 /** A page of a list GitHub pages, and how many pages are read at most: 1000 items. */
 const PAGE = 100;
@@ -292,6 +294,14 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
       }),
     removeLabel: (number, label) =>
       guarded(async (): Promise<Labelled> => {
+        if (DOTS.test(label)) {
+          throw new PortError(
+            'codeHost',
+            'removeLabel',
+            'invalid',
+            `the label "${label}" is a path segment of dots: its DELETE would reach the pull request's labels collection`,
+          );
+        }
         const pr = await read('removeLabel', number);
         const held = pr.labels.find((each) => sameLabel(each, label));
         if (held === undefined) return { number, labels: pr.labels, raw: pr.raw };

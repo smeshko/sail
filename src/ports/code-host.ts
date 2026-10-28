@@ -52,7 +52,10 @@ export interface CodeHost {
   merge(number: number, request: MergeRequest): Promise<MergeResult>;
   /** Emits `codehost:labelled` only when the labels changed. */
   addLabel(number: number, label: string): Promise<Labelled>;
-  /** Emits `codehost:labelled` only when the labels changed. */
+  /**
+   * Emits `codehost:labelled` only when the labels changed. A label named `.` or `..` is refused, `invalid`, with
+   * nothing sent.
+   */
   removeLabel(number: number, label: string): Promise<Labelled>;
   /** Emits `codehost:commented`. */
   comment(number: number, body: string): Promise<Posted>;
