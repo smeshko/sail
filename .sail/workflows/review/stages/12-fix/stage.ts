@@ -14,7 +14,7 @@ export const fix = agent('fix', {
     base: value(z.string()),
   },
   output: Fixed,
-  model: 'deep',
+  model: 'sol',
   permissions: {
     read: ['**'],
     write: [
