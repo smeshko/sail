@@ -2,7 +2,7 @@
 // inbox's watch, unwatch and poll commands, its registry field and its stop. On the stub's file-backed fakes in a temp
 // repository, fake timers, a temporary registry, and a fake spawner whose runs claim their tickets as they start.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { branchFor } from '../../src/engine/branch';
 import { readConfig } from '../../src/engine/config';
@@ -79,6 +79,64 @@ const tickets = (labels: Record<string, string>): SeedTicket[] =>
 
 /** Whether `watcher` stopped within a second of real time. */
 const stopped = (watcher: Watcher) => Promise.race([watcher.done.then(() => true), Bun.sleep(1000).then(() => false)]);
+
+test('a watcher whose start throws after its queue lease drops the pollers it started, clears its registry field and gives back its lease (ADW-212)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    const dir = queueDir(w.runs, 'b');
+    mkdirSync(dir, { recursive: true });
+    const events = join(dir, 'events.ndjson');
+    writeFileSync(events, '');
+    chmodSync(events, 0o444);
+    try {
+      expect(await w.start(['a', 'b']).catch(String)).toContain('EACCES');
+      expect(readEntry(w.registryDir, 'stub')?.watcher).toBeUndefined();
+      expect(w.timers.pending()).toEqual([]);
+      expect(w.events('a').at(-1)?.type).toBe('watch:removed');
+    } finally {
+      chmodSync(events, 0o644);
+    }
+    const next = await w.start(['a']);
+    expect(next.watching()).toEqual(['a']);
+    await next.stop();
+  });
+});
+
+test("a watcher whose workflow can't record watch:removed still stops, giving back its lease and registry field (ADW-212)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail-a', cap: 1 },
+        { name: 'b', label: 'sail-b', cap: 1 },
+      ],
+      [],
+    );
+    const watcher = await w.start(['a', 'b']);
+    const events = join(queueDir(w.runs, 'a'), 'events.ndjson');
+    chmodSync(events, 0o444);
+    try {
+      await watcher.stop();
+      expect(await stopped(watcher)).toBe(true);
+      expect(w.out.some((line) => line.includes('a') && line.includes('EACCES'))).toBe(true);
+      expect(w.events('b').at(-1)?.type).toBe('watch:removed');
+      expect(readEntry(w.registryDir, 'stub')?.watcher).toBeUndefined();
+      expect(w.timers.pending()).toEqual([]);
+    } finally {
+      chmodSync(events, 0o644);
+    }
+    const next = await w.start(['a']);
+    expect(next.watching()).toEqual(['a']);
+    await next.stop();
+  });
+});
 
 test('two workflows at caps 2 and 1 dispatch six tickets once each, in queue order, never over their caps, a leased ticket last and only after its lease is released', async () => {
   await withTempRepo(async (repo) => {
