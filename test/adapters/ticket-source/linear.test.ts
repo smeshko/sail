@@ -1173,6 +1173,12 @@ test('with pickUp [Ready], the unstarted move lands on Ready, though Todo comes 
   expect([moved.state, world.ticket(2).state]).toEqual([{ type: 'unstarted', name: 'Ready' }, 'Ready']);
 });
 
+test('with pickUp [Ready, Todo], the unstarted move lands on Todo, the first of them by position', async () => {
+  const { world, adapter } = pickingUp(['Ready', 'Todo']);
+  const moved = await adapter.update('ADW-2', { state: 'unstarted' });
+  expect([moved.state, world.ticket(2).state]).toEqual([{ type: 'unstarted', name: 'Todo' }, 'Todo']);
+});
+
 test('without pickUp, the unstarted move still lands on the first unstarted state by position', async () => {
   const world = createLinearWorld(PICK_UP_SEED);
   const adapter = createLinearTicketSource({ team: 'ADW', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch: world.fetch });
