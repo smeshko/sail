@@ -20,6 +20,10 @@ export interface IntakeContext {
   readonly workspace?: { readonly port: WorkspacePort; readonly path: string };
   /** The prefix a ticket's branch is named with, which a pull request's ticket marker is checked against. */
   readonly branchPrefix?: string;
+  /** The run's id, which a claim names in its comment. */
+  readonly runId: string;
+  /** Adds fields to the call's `result.json`, such as a claim's record. They are kept when the body fails, too. */
+  readonly record: (fields: Record<string, unknown>) => void;
   /** The absolute call directory, where the body leaves its files. */
   readonly out: string;
   readonly signal?: AbortSignal;

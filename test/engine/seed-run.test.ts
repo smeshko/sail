@@ -210,9 +210,8 @@ test('a seeded run reads no ticket and claims nothing: the fake ticket state is 
     const opened = openedFrom(await seed(repo, { fromRun: from.runId }));
     expect({
       tickets: readFileSync(tickets, 'utf8'),
-      claimed: opened.claimed,
       started: opened.started.map((event) => event.type),
-    }).toEqual({ tickets: before, claimed: [], started: ['workspace:leased', 'workspace:created'] });
+    }).toEqual({ tickets: before, started: ['workspace:leased', 'workspace:created'] });
   });
 }, 60_000);
 

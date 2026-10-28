@@ -75,7 +75,7 @@ test('dryRun on a designated, unstarted ticket answers with the header a start t
     ]);
     expect([header.source, header.claim]).toEqual([
       { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
-      { claimed: false, state: { type: 'unstarted', name: 'Todo' } },
+      undefined,
     ]);
     const frozen = ({ workflow, adapters, intake, stages, budget }: typeof header) =>
       JSON.stringify({ workflow, adapters, intake, stages, budget });

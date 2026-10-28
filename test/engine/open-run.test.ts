@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import {
   appendFileSync,
-  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -23,7 +22,6 @@ import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } fro
 import { validateRunDir } from '../../src/engine/schemas';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
-import type { TicketState } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { fakeAdapters } from '../helpers/adapters';
 import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, steppingClock } from '../helpers/clock';
@@ -303,7 +301,7 @@ test("findRun throws on a STATUS it can't read: sail's own files are broken", as
   });
 });
 
-test('reopenRun reopens a suspended run with the header on disk, nothing a claim did, and STATUS running again', async () => {
+test('reopenRun reopens a suspended run with the header on disk and STATUS running again', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);
     const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
@@ -314,7 +312,6 @@ test('reopenRun reopens a suspended run with the header on disk, nothing a claim
       header: run.header,
       sailDir: join(repo.dir, '.sail'),
       loaded: { workflow: { name: 'ticket-to-pr' } },
-      claimed: [],
     });
     expect(readStatus(dir)).toEqual({ status: 'running' });
   });
@@ -605,10 +602,8 @@ test('reopenRun refuses a workflow that has come to reach a stage named intake, 
   });
 });
 
-// A run from a ticket (D7, D8, D9), on the stub: what openRun() checks of the ticket, and the claim it makes before
-// the run directory exists.
+// A run from a ticket (D7, D8, D9), on the stub: what openRun() checks of the ticket. It claims nothing: the intake does.
 
-const IN_PROGRESS: TicketState = { type: 'started', name: 'In Progress' };
 const ULID = '[0-9A-HJKMNP-TV-Z]{26}';
 /** Where the fake TicketSource keeps what changed: the file exists only once a ticket was written to. */
 const stateFile = (repoDir: string) => join(repoDir, '.sail-runs', 'fake', 'tickets.json');
@@ -639,18 +634,6 @@ async function ticketIn(repoDir: string, ticketKey: string) {
   return (await fakeAdapters(repoDir)).ports.ticketSource.get(ticketKey);
 }
 
-/** The repository's adapters, with `instead` answering in place of the ticket source's own `op`. */
-async function adaptersWith<Op extends 'claim' | 'comment'>(
-  repoDir: string,
-  op: Op,
-  instead: (own: TicketSource[Op]) => TicketSource[Op],
-): Promise<ResolvedAdapters> {
-  const adapters = await fakeAdapters(repoDir);
-  const { ticketSource } = adapters.ports;
-  ticketSource[op] = instead(ticketSource[op].bind(ticketSource) as TicketSource[Op]);
-  return adapters;
-}
-
 /** The repository's adapters, with `instead` answering in place of the Workspace port's own `op`. */
 async function workspaceWith<Op extends 'lease' | 'releaseLease'>(
   repoDir: string,
@@ -663,33 +646,20 @@ async function workspaceWith<Op extends 'lease' | 'releaseLease'>(
   return adapters;
 }
 
-test('openRun from a ticket claims it once its workspace exists and before run.json is written: run.json holds the source with nothing forced and the claim, and the ticket is In Progress with a comment naming the run', async () => {
+test('openRun from a ticket leaves the ticket as it was: run.json holds the source with nothing forced and no claim, the ticket is still Todo, and no comment names the run', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    const runsAtComment: string[][] = [];
-    const adapters = await adaptersWith(repo.dir, 'comment', (comment) => (ticketKey, body) => {
-      const runs = join(repo.dir, '.sail-runs');
-      runsAtComment.push(runIds(repo.dir).flatMap((id) => readdirSync(join(runs, id)).map((name) => `${id}/${name}`)));
-      return comment(ticketKey, body);
-    });
-    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
+    const before = await ticketIn(repo.dir, 'FAKE-1');
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' });
     if ('refused' in run) throw new Error(run.refused);
 
     expect(run.runId).toMatch(new RegExp(`^FAKE-1-${ULID}$`));
-    const body = `sail run ${run.runId} started`;
     const header = readRunHeader(run.dir);
-    expect([header.source, header.claim]).toEqual([
-      { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
-      { claimed: true, state: IN_PROGRESS },
-    ]);
+    expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
+    expect('claim' in header).toBe(false);
     expect(run.header).toEqual(header);
-    expect(run.claimed).toEqual([
-      { type: 'ticket:claimed', ticketKey: 'FAKE-1', state: IN_PROGRESS },
-      { type: 'ticket:commented', ticketKey: 'FAKE-1', body },
-    ]);
-    const ticket = await ticketIn(repo.dir, 'FAKE-1');
-    expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, body]);
-    expect([runsAtComment, runIds(repo.dir)]).toEqual([[[`${run.runId}/workspace`]], [run.runId]]);
+    expect(await ticketIn(repo.dir, 'FAKE-1')).toEqual(before);
+    expect(runIds(repo.dir)).toEqual([run.runId]);
   });
 });
 
@@ -701,7 +671,7 @@ test('a URL the ticket source owns opens the run of the ticket it names', async 
       runId: expect.stringMatching(new RegExp(`^FAKE-1-${ULID}$`)),
       header: { source: { ticketKey: 'FAKE-1' } },
     });
-    expect((await ticketIn(repo.dir, 'FAKE-1')).state).toEqual(IN_PROGRESS);
+    expect((await ticketIn(repo.dir, 'FAKE-1')).state.type).toBe('unstarted');
   });
 });
 
@@ -746,129 +716,48 @@ test('a ref neither adapter reads, for an intake that takes no ticket, is refuse
   });
 });
 
-test.each<[string, string, Forced[], boolean, string]>([
-  ['an undesignated ticket', 'FAKE-3', ['designation'], true, 'ticket:claimed'],
-  ['a started ticket', 'FAKE-4', ['state'], false, 'ticket:updated'],
-  ['an undesignated, completed ticket', 'FAKE-5', ['designation', 'state'], false, 'ticket:updated'],
+test.each<[string, string, Forced[]]>([
+  ['an undesignated ticket', 'FAKE-3', ['designation']],
+  ['a started ticket', 'FAKE-4', ['state']],
+  ['an undesignated, completed ticket', 'FAKE-5', ['designation', 'state']],
 ])(
-  'forced, %s opens: the header lists what --force overrode and whether the claim took, and the ticket is In Progress with the comment',
-  async (_, ticket, forced, claimed, moved) => {
+  'forced, %s opens: the header lists what --force overrode, and the ticket is left as it was',
+  async (_, ticket, forced) => {
     await withTempRepo(async (repo) => {
       writeStub(repo.dir);
+      const before = await ticketIn(repo.dir, ticket);
       const run = await openStub(repo.dir, { ticket, force: true });
       if ('refused' in run) throw new Error(run.refused);
-      expect([run.header.source, run.header.claim, run.claimed.map((event): string => event.type)]).toEqual([
+      expect([run.header.source, run.header.claim]).toEqual([
         { kind: 'ticket', ticketKey: ticket, via: 'cli', forced },
-        { claimed, state: IN_PROGRESS },
-        [moved, 'ticket:commented'],
+        undefined,
       ]);
       expect(readRunHeader(run.dir)).toEqual(run.header);
-      const now = await ticketIn(repo.dir, ticket);
-      expect([now.state, now.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${run.runId} started`]);
+      expect(await ticketIn(repo.dir, ticket)).toEqual(before);
     });
   },
 );
 
-/** Adapters whose claim loses a race: another start, on a fake of its own over the same state, claims first. */
-async function racing(repoDir: string): Promise<ResolvedAdapters> {
-  const other = (await fakeAdapters(repoDir)).ports.ticketSource;
-  return adaptersWith(repoDir, 'claim', (claim) => async (ticketKey) => {
-    await other.claim(ticketKey);
-    return claim(ticketKey);
-  });
-}
-
-test('a claim that does not take, for a ticket the fetch showed unstarted, is refused with no run directory', async () => {
+test('opening a run never calls the ticket source to claim, update or comment', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, await racing(repo.dir));
-    expect([run, runIds(repo.dir)]).toEqual([
-      {
-        refused: 'the ticket is already claimed: it became In Progress while sail was starting. --force runs it anyway',
-      },
-      [],
-    ]);
-    expect((await ticketIn(repo.dir, 'FAKE-1')).comments.map((comment) => comment.author)).toEqual(['stub-user']);
-  });
-});
-
-test('forced, a claim that does not take opens the run, which records the state check as the one overridden', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const run = await openStub(repo.dir, { ticket: 'FAKE-1', force: true }, await racing(repo.dir));
-    expect(run).toMatchObject({
-      header: { source: { forced: ['state'] }, claim: { claimed: false, state: IN_PROGRESS } },
-      claimed: [{ type: 'ticket:updated' }, { type: 'ticket:commented' }],
-    });
-  });
-});
-
-test('a comment that fails once the ticket has moved is refused, naming the state it is in and the run, with no run directory', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const adapters = await adaptersWith(repo.dir, 'comment', () => async () => {
-      throw new PortError('ticketSource', 'comment', 'unavailable', 'comments are closed');
-    });
-    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
-    expect(run).toEqual({
-      refused: expect.stringMatching(
-        new RegExp(
-          `^the ticket is now In Progress, but the comment naming run FAKE-1-${ULID} failed: ticketSource\\.comment: comments are closed \\(unavailable\\)\\. --force runs it$`,
-        ),
-      ),
-    });
-    expect([runIds(repo.dir), (await ticketIn(repo.dir, 'FAKE-1')).state]).toEqual([[], IN_PROGRESS]);
-  });
-});
-
-test("a claim whose answer carries more than the state's type and name opens the run, and run.json holds those two", async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const adapters = await adaptersWith(repo.dir, 'claim', (claim) => async (ticketKey) => {
-      const answer = await claim(ticketKey);
-      return { ...answer, state: Object.assign({ id: 'state-7' }, answer.state) };
-    });
+    const adapters = await fakeAdapters(repo.dir);
+    const { ticketSource } = adapters.ports;
+    const calls: string[] = [];
+    for (const op of ['claim', 'update', 'comment'] as const) {
+      const own = ticketSource[op].bind(ticketSource) as (...args: unknown[]) => Promise<unknown>;
+      (ticketSource as unknown as Record<string, unknown>)[op] = (...args: unknown[]) => {
+        calls.push(op);
+        return own(...args);
+      };
+    }
     const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
     if ('refused' in run) throw new Error(run.refused);
-    expect(readRunHeader(run.dir).claim).toEqual({ claimed: true, state: IN_PROGRESS });
-    expect(validateRunDir(run.dir).issues).toEqual([]);
+    expect([calls, existsSync(stateFile(repo.dir))]).toEqual([[], false]);
   });
 });
 
-test('a run directory that cannot be written once the ticket has moved throws, naming the state it is in and the run its comment names', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const runs = join(repo.dir, '.sail-runs');
-    const runDirs = () => runIds(repo.dir).map((id) => join(runs, id));
-    // Read-only once the comment is posted: the run directory and its workspace exist by then, and run.json is left.
-    const adapters = await adaptersWith(repo.dir, 'comment', (comment) => async (ticketKey, body) => {
-      const posted = await comment(ticketKey, body);
-      for (const dir of runDirs()) chmodSync(dir, 0o555);
-      return posted;
-    });
-    const thrown = await rejection(openStub(repo.dir, { ticket: 'FAKE-1' }, adapters)).finally(() => {
-      for (const dir of runDirs()) chmodSync(dir, 0o755);
-    });
-    expect(thrown).toMatchObject({
-      message: expect.stringMatching(
-        new RegExp(
-          `^the ticket is now In Progress and its comment names run FAKE-1-${ULID}, but the run directory was not written: EACCES.+\\. --force runs the ticket in a new run$`,
-        ),
-      ),
-      cause: { code: 'EACCES' },
-    });
-    const ticket = await ticketIn(repo.dir, 'FAKE-1');
-    const headers = runDirs().map((dir) => existsSync(join(dir, RUN_HEADER_FILE)));
-    expect([headers, ticket.state, ticket.comments.at(-1)?.body]).toEqual([
-      [false],
-      IN_PROGRESS,
-      expect.stringMatching(new RegExp(`^sail run FAKE-1-${ULID} started$`)),
-    ]);
-  });
-});
-
-// An abort: seen before the claim it ends the start with the ticket as it was, and once the ticket is claimed the start
-// goes on to its comment and its run directory, for the run to be suspended there.
+// An abort seen before the run is opened ends the start with the ticket as it was.
 
 test.each<[string, (source: TicketSource, abort: () => void) => void]>([
   ['before the start', (_, abort) => abort()],
@@ -883,7 +772,7 @@ test.each<[string, (source: TicketSource, abort: () => void) => void]>([
     },
   ],
 ])(
-  'an abort seen %s is refused before the claim, with no run directory and the ticket never written to',
+  'an abort seen %s is refused before the run is opened, with no run directory and the ticket never written to',
   async (_, arrange) => {
     await withTempRepo(async (repo) => {
       writeStub(repo.dir);
@@ -892,32 +781,12 @@ test.each<[string, (source: TicketSource, abort: () => void) => void]>([
       arrange(adapters.ports.ticketSource, () => controller.abort());
       const run = await openStub(repo.dir, { ticket: 'FAKE-1', signal: controller.signal }, adapters);
       expect([run, existsSync(join(repo.dir, '.sail-runs'))]).toEqual([
-        { refused: 'stopped before the ticket was claimed' },
+        { refused: 'stopped before the run was opened' },
         false,
       ]);
     });
   },
 );
-
-test('an abort seen once the ticket is claimed still comments and opens the run', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir);
-    const controller = new AbortController();
-    const adapters = await adaptersWith(repo.dir, 'claim', (claim) => async (ticketKey) => {
-      const result = await claim(ticketKey);
-      controller.abort();
-      return result;
-    });
-    const run = await openStub(repo.dir, { ticket: 'FAKE-1', signal: controller.signal }, adapters);
-    if ('refused' in run) throw new Error(run.refused);
-    const ticket = await ticketIn(repo.dir, 'FAKE-1');
-    expect([runIds(repo.dir), ticket.state, ticket.comments.at(-1)?.body]).toEqual([
-      [run.runId],
-      IN_PROGRESS,
-      `sail run ${run.runId} started`,
-    ]);
-  });
-});
 
 test("the label checked is project.yaml's, and sail's own when it sets none", async () => {
   const refusedFor = (ticket: string, label: string) =>
@@ -1022,7 +891,7 @@ async function leftBehind(repoDir: string, ticketKey = 'FAKE-1') {
   };
 }
 
-test('a dispatched start runs under the run id it is given, records its source via watch, and claims the ticket with a comment naming that id', async () => {
+test('a dispatched start runs under the run id it is given, and records its source via watch, with no claim', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const run = await openStub(repo.dir, { ticket: 'FAKE-1', dispatch: { runId: DISPATCHED } });
@@ -1032,11 +901,9 @@ test('a dispatched start runs under the run id it is given, records its source v
     expect([header.runId, header.source, header.claim]).toEqual([
       DISPATCHED,
       { kind: 'ticket', ticketKey: 'FAKE-1', via: 'watch', forced: [] },
-      { claimed: true, state: IN_PROGRESS },
+      undefined,
     ]);
-    expect(run.claimed.map((event) => event.type)).toEqual(['ticket:claimed', 'ticket:commented']);
-    const ticket = await ticketIn(repo.dir, 'FAKE-1');
-    expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${DISPATCHED} started`]);
+    expect(await leftBehind(repo.dir)).toMatchObject({ state: 'Todo', comments: 1 });
   });
 });
 
@@ -1064,27 +931,27 @@ test.each<[string, StubRun, string]>([
   });
 });
 
-test('a forced dispatched start opens an undesignated ticket under the dispatched id, via watch with designation overridden, and claims it', async () => {
+test('a forced dispatched start opens an undesignated ticket under the dispatched id, via watch with designation overridden, and leaves the ticket as it was', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
     const runId = 'FAKE-3-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const before = await ticketIn(repo.dir, 'FAKE-3');
     const run = await openStub(repo.dir, { ticket: 'FAKE-3', force: true, dispatch: { runId } });
     expect('refused' in run ? run.refused : 'opened').toBe('opened');
     if ('refused' in run) return;
     const header = readRunHeader(run.dir);
-    const ticket = await ticketIn(repo.dir, 'FAKE-3');
     expect({
       runId: run.runId,
       dir: run.dir,
       source: header.source,
       claim: header.claim,
-      ticket: [ticket.state, ticket.comments.at(-1)?.body],
+      ticket: await ticketIn(repo.dir, 'FAKE-3'),
     }).toEqual({
       runId,
       dir: join(repo.dir, '.sail-runs', runId),
       source: { kind: 'ticket', ticketKey: 'FAKE-3', via: 'watch', forced: ['designation'] },
-      claim: { claimed: true, state: IN_PROGRESS },
-      ticket: [IN_PROGRESS, `sail run ${runId} started`],
+      claim: undefined,
+      ticket: before,
     });
   });
 });

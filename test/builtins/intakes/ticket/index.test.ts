@@ -32,6 +32,12 @@ afterEach(() => {
 
 const lines = (...each: string[]): string => each.join('\n');
 const sourceOf = (ticketKey: string): Source => ({ kind: 'ticket', ticketKey, via: 'cli', forced: [] });
+const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+/** The context's run id and record, which collects what the body reports for its call's result. */
+const running = (records: Record<string, unknown>[] = []) => ({
+  runId: RUN_ID,
+  record: (fields: Record<string, unknown>) => void records.push(fields),
+});
 
 /** A ticket as the fake's seed holds it, with a marker in every string a provider returns. */
 const SEED = {
@@ -82,8 +88,11 @@ function world(ticket: typeof SEED): Omit<Ran, 'output'> {
   mkdirSync(out);
   const fake = createFakeTicketSource({ seed: join(dir, 'tickets.json'), state: join(dir, 'state', 'tickets.json') });
   const gets: Ran['gets'] = [];
+  // The claim is stood in for here, so these tests read the body's fetch and files on the seed as it is.
   const ticketSource: TicketSource = {
     ...fake,
+    claim: async () => ({ claimed: true, state: ticket.state as Ticket['state'], raw: null }),
+    comment: async () => ({ id: 'stub', raw: null }),
     async get(ticketKey) {
       const fetched = await fake.get(ticketKey);
       gets.push({ ticketKey, ticket: fetched });
@@ -100,6 +109,7 @@ async function ran(ticket: typeof SEED = SEED): Promise<Ran> {
     source: sourceOf(ticket.ticketKey),
     ticketSource: made.ticketSource,
     out: made.out,
+    ...running(),
   });
   return { ...made, output };
 }
@@ -251,12 +261,14 @@ test('a ticket with no description, labels, links, attachments or comments rende
 
 test("a PortError from get reaches the caller as it is, an answer that is no Ticket becomes one naming the port's get, and neither leaves a file", async () => {
   const { ticketSource, out } = world(SEED);
-  const missing = await rejection(ticketIntake({ source: sourceOf('FAKE-9'), ticketSource, out }));
+  const missing = await rejection(ticketIntake({ source: sourceOf('FAKE-9'), ticketSource, out, ...running() }));
   expect(portFailure(missing)).toEqual({ port: 'ticketSource', op: 'get', code: 'not_found' });
   expect((missing as Error).message).toBe('ticketSource.get: no ticket FAKE-9');
 
   const untitled: TicketSource = { ...ticketSource, get: async () => ({ ...SEED, url: URL, title: 7 }) as never };
-  const invalid = await rejection(ticketIntake({ source: sourceOf('FAKE-7'), ticketSource: untitled, out }));
+  const invalid = await rejection(
+    ticketIntake({ source: sourceOf('FAKE-7'), ticketSource: untitled, out, ...running() }),
+  );
   expect(portFailure(invalid)).toEqual({ port: 'ticketSource', op: 'get', code: 'invalid' });
   expect((invalid as Error).message).toContain('FAKE-7');
   expect(readdirSync(out)).toEqual([]);
@@ -274,16 +286,47 @@ test("on the fixture's FAKE-1, once it is claimed and commented on as the golden
     state: join(dir, 'state.json'),
     now: () => new Date('2026-09-25T09:00:00.600Z'),
   });
-  await ticketSource.claim('FAKE-1');
-  await ticketSource.comment('FAKE-1', 'sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N started');
-
-  const output = await ticketIntake({ source: sourceOf('FAKE-1'), ticketSource, out });
+  const records: Record<string, unknown>[] = [];
+  const output = await ticketIntake({ source: sourceOf('FAKE-1'), ticketSource, out, ...running(records) });
   const golden = JSON.parse(readFileSync(join(GOLDEN_CALL, 'result.json'), 'utf8'));
   expect(output).toEqual(golden.output);
+  expect(records).toEqual([{ claim: { claimed: true, state: { type: 'started', name: 'In Progress' } } }]);
   for (const name of ['ticket.json', 'brief.md']) {
     expect(readFileSync(join(out, name), 'utf8')).toBe(readFileSync(join(GOLDEN_CALL, name), 'utf8'));
   }
   // The golden call holds what a built-in's call leaves, and nothing a script's did.
   expect(readdirSync(GOLDEN_CALL).sort()).toEqual(['brief.md', 'result.json', 'ticket.json']);
   expect(golden).toMatchObject({ key: 'intake#1', kind: 'builtin', outcome: 'passed' });
+});
+
+function unclaimed(state: 'unstarted' | 'started') {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-ticket-intake-'));
+  dirs.push(dir);
+  const ticket = { ...SEED, state: { type: state, name: state === 'unstarted' ? 'Todo' : 'In Progress' } };
+  writeFileSync(join(dir, 'tickets.json'), JSON.stringify({ tickets: [ticket] }));
+  const out = join(dir, 'out');
+  mkdirSync(out);
+  const ticketSource = createFakeTicketSource({ seed: join(dir, 'tickets.json'), state: join(dir, 'state.json') });
+  return { out, ticketSource };
+}
+
+test('the body claims the ticket and comments with the run id before it fetches, and reports the claim record', async () => {
+  const { out, ticketSource } = unclaimed('unstarted');
+  const records: Record<string, unknown>[] = [];
+  await ticketIntake({ source: sourceOf('FAKE-7'), ticketSource, out, ...running(records) });
+  expect(records).toEqual([{ claim: { claimed: true, state: { type: 'started', name: 'In Progress' } } }]);
+  const ticket = await ticketSource.get('FAKE-7');
+  expect(ticket.state.type).toBe('started');
+  expect(ticket.comments.at(-1)?.body).toBe(`sail run ${RUN_ID} started`);
+  expect(readFileSync(join(out, 'ticket.json'), 'utf8')).toContain(`sail run ${RUN_ID} started`);
+});
+
+test('a ticket another start claimed is a lost claim: the body throws a PortError, records nothing and writes no file', async () => {
+  const { out, ticketSource } = unclaimed('started');
+  const records: Record<string, unknown>[] = [];
+  const lost = await rejection(ticketIntake({ source: sourceOf('FAKE-7'), ticketSource, out, ...running(records) }));
+  expect(portFailure(lost)).toEqual({ port: 'ticketSource', op: 'claim', code: 'conflict' });
+  expect(records).toEqual([]);
+  expect(readdirSync(out)).toEqual([]);
+  expect((await ticketSource.get('FAKE-7')).comments.some((each) => each.body.startsWith('sail run '))).toBe(false);
 });

@@ -8,7 +8,7 @@ import { leasedBy, type OpenRunOptions, preflightRun } from './open-run';
 import type { RunHeader } from './run-header';
 
 /**
- * What a start would freeze: its unclaimed header, the ticket or the pull request as fetched, and the branch it would
+ * What a start would freeze: its header before the workspace, the ticket or the pull request as fetched, and the branch it would
  * lease.
  */
 export interface DryRun {

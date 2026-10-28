@@ -1315,20 +1315,15 @@ test('run: claim holds whether the claim took and the state the provider reporte
   ).toEqual(['/claim/state/type']);
 });
 
-test('run: a header with no claim is refused, naming claim', () => {
-  expect(validateDocument('sail.run.v1', omit(run, 'claim'))).toEqual([
-    { schema: 'sail.run.v1', path: '/claim', message: 'is required' },
-  ]);
+test('run: a header with no claim is valid, since opening a run claims nothing', () => {
+  expect(validateDocument('sail.run.v1', omit(run, 'claim'))).toEqual([]);
 });
 
-// A seeded run (D5): its header names the run it reused calls from, and records no claim.
+// A seeded run (D5): its header names the run it reused calls from.
 
-test('run: a seeded header names its fromRun and has no claim; one with a claim beside fromRun, or an empty fromRun, is refused', () => {
+test('run: a seeded header names its fromRun; an empty fromRun is refused', () => {
   const seeded = { ...omit(run, 'claim'), fromRun: RUN_ID };
   expect(validateDocument('sail.run.v1', seeded)).toEqual([]);
-  expect(validateDocument('sail.run.v1', { ...run, fromRun: RUN_ID })).toEqual([
-    { schema: 'sail.run.v1', path: '/claim', message: 'is not allowed' },
-  ]);
   expect(paths('sail.run.v1', { ...seeded, fromRun: '' })).toEqual(['/fromRun']);
 });
 
@@ -1716,17 +1711,15 @@ const HEAD_SHA = 'c'.repeat(40);
 const prSource = { kind: 'pr', number: 12, headSha: HEAD_SHA, via: 'watch', forced: ['state'] };
 const prRun = { ...omit(run, 'claim'), runId: 'pr-12-01M3BWNZM08Q4T6V2XRJ5KWD3N', source: prSource };
 
-test('run: a pull-request header has no claim; one with a claim, a ticketKey, a short headSha or a number of 0 is refused, naming each', () => {
+test('run: a pull-request header is valid; one with a ticketKey, a short headSha or a number of 0 is refused, naming each', () => {
   const withSource = (change: Record<string, unknown>) => ({ ...prRun, source: { ...prSource, ...change } });
   expect({
     valid: paths('sail.run.v1', prRun),
-    claim: validateDocument('sail.run.v1', { ...prRun, claim: run.claim }),
     ticketKey: paths('sail.run.v1', withSource({ ticketKey: 'FAKE-1' })),
     headSha: paths('sail.run.v1', withSource({ headSha: 'abc1234' })),
     number: paths('sail.run.v1', withSource({ number: 0 })),
   }).toEqual({
     valid: [],
-    claim: [{ schema: 'sail.run.v1', path: '/claim', message: 'is not allowed' }],
     ticketKey: ['/source/ticketKey'],
     headSha: ['/source/headSha'],
     number: ['/source/number'],

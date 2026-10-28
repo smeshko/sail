@@ -200,8 +200,13 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
   const startedAt = clock();
   let returned: unknown;
   let failure: ContractError | undefined;
+  const recorded: Record<string, unknown> = {};
   try {
     returned = await request.body({
+      runId,
+      record: (fields) => {
+        Object.assign(recorded, fields);
+      },
       source: request.source,
       ticketSource: request.ticketSource,
       ...(request.codeHost === undefined ? {} : { codeHost: request.codeHost }),
@@ -219,6 +224,7 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
     failure === undefined
       ? recordTry(intake, returned, stageOut(paths), runDir, emit)
       : { outcome: 'error', output: null, files: {}, errors: [failure], record: {} };
+  run.record = { ...run.record, ...recorded };
   const finishedAt = clock();
 
   const result = buildResult({

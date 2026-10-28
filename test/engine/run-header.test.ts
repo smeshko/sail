@@ -9,7 +9,6 @@ import type { Source } from '../../src/engine/run-dir';
 import {
   type AdapterEntry,
   buildRunHeader,
-  type ClaimRecord,
   type HeaderWorkspace,
   RUN_HEADER_FILE,
   type RunHeader,
@@ -55,8 +54,6 @@ async function hashAfter(change: (sail: string) => void = () => {}): Promise<str
 
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const FAKE_1: Source = { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] };
-/** What a claim that took leaves in the header. */
-const CLAIMED: ClaimRecord = { claimed: true, state: { type: 'started', name: 'In Progress' } };
 const FAKE: AdapterEntry = { use: 'fake', origin: 'builtin' };
 const FAKE_ENTRIES: Record<Port, AdapterEntry> = { ticketSource: FAKE, codeHost: FAKE, harness: FAKE, workspace: FAKE };
 
@@ -71,7 +68,6 @@ async function fixtureHeader(
     return buildRunHeader({
       runId: RUN_ID,
       source: FAKE_1,
-      claim: CLAIMED,
       sailDir: sail,
       loaded,
       config,
@@ -184,7 +180,6 @@ test("a workflow's budget overrides project.yaml's field by field, and stands al
       return buildRunHeader({
         runId: RUN_ID,
         source: FAKE_1,
-        claim: CLAIMED,
         sailDir: sail,
         loaded,
         config,
@@ -212,7 +207,6 @@ test('a workflow without a version is version 1, and a config without a run budg
     const header = buildRunHeader({
       runId: 'FAKE-1-1',
       source: FAKE_1,
-      claim: CLAIMED,
       sailDir: sail,
       loaded,
       config,
@@ -272,16 +266,14 @@ test("the golden run's run.json reads, and one missing runId or not JSON throws 
   expect(() => readRunHeader(tempDir())).toThrow(expect.objectContaining({ code: 'ENOENT' }));
 });
 
-test('a header holds the claim it is given and the checks its source lists, as copies, and run.json holds both', async () => {
+test('a header holds the checks its source lists, as a copy, and no claim, and run.json holds the same', async () => {
   const forced: Source = { ...FAKE_1, forced: ['designation', 'state'] };
-  const moved: ClaimRecord = { claimed: false, state: { type: 'started', name: 'In Review' } };
   const header = await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const { loaded, config } = await load(sail);
     return buildRunHeader({
       runId: RUN_ID,
       source: forced,
-      claim: moved,
       sailDir: sail,
       loaded,
       config,
@@ -289,21 +281,18 @@ test('a header holds the claim it is given and the checks its source lists, as c
       now: NOW,
     });
   });
-  expect([header.source, header.claim]).toEqual([forced, moved]);
+  expect(header.source).toEqual(forced);
+  expect('claim' in header).toBe(false);
   expect(validateRunHeader(header)).toEqual([]);
   // The header is the run's own: a later change to what it was built from doesn't reach it.
   forced.forced.push('state');
-  moved.state.name = 'Done';
-  expect([header.source.forced, header.claim?.state.name]).toEqual([['designation', 'state'], 'In Review']);
+  expect(header.source.forced).toEqual(['designation', 'state']);
 
   const dir = tempDir();
   writeRunHeader(dir, header);
   const written = JSON.parse(readFileSync(join(dir, RUN_HEADER_FILE), 'utf8'));
-  expect([written.source.forced, written.claim]).toEqual([
-    ['designation', 'state'],
-    { claimed: false, state: { type: 'started', name: 'In Review' } },
-  ]);
-  expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'source', 'claim']);
+  expect(written.source.forced).toEqual(['designation', 'state']);
+  expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'source', 'workflow']);
 });
 
 test("a header built with the run's workspace records its branch, repository and base, and validates; one built without it holds none of them", async () => {

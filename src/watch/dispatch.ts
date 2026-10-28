@@ -30,8 +30,8 @@
 //   started is that dispatch, so once it has an attempt its retry is re-checked as any item's is, and a ticket another
 //   run moved on meanwhile is dropped rather than run a second time.
 // - **The start** is recorded before the process exists (`dispatched`, which counts the attempt and names the run),
-//   and its pid after (`spawned`, which emits `queue:dispatched`). The run claims its own ticket as it starts (D2): the
-//   dispatch only reads the ticket.
+//   and its pid after (`spawned`, which emits `queue:dispatched`). The run's intake claims the ticket (D2), in `intake#1`:
+//   the dispatch only reads the ticket.
 // - Any other port that fails (`PortError`) fails the item without counting an attempt, so trouble at the provider
 //   never parks a ticket, and the other due items wait for the next tick. A port that fails while a dispatched item is
 //   settled leaves that item as it was, says so once, and settles the rest. Anything else thrown is a bug, for the

@@ -11,7 +11,7 @@ import { claimComment, claimedBy, claimSource, resolveSource } from '../../src/e
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import type { Ticket, TicketState } from '../../src/ports/types';
-import { eventIssues, rejection } from '../helpers/ports';
+import { rejection } from '../helpers/ports';
 
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const NOW = new Date('2026-10-08T09:00:00.000Z');
@@ -103,12 +103,12 @@ test.each<[string, string, boolean, Forced[]]>([
   ['a designated, unstarted ticket', 'FAKE-1', false, []],
   ['a designated, unstarted ticket, forced', 'FAKE-1', true, []],
   ['an undesignated ticket, forced', 'FAKE-3', true, ['designation']],
-  ['a started ticket, forced', 'FAKE-2', true, []],
-  ['a canceled ticket, forced', 'FAKE-4', true, []],
-  ['a completed ticket, forced', 'FAKE-6', true, []],
-  ['an undesignated, completed ticket, forced', 'FAKE-5', true, ['designation']],
+  ['a started ticket, forced', 'FAKE-2', true, ['state']],
+  ['a canceled ticket, forced', 'FAKE-4', true, ['state']],
+  ['a completed ticket, forced', 'FAKE-6', true, ['state']],
+  ['an undesignated, completed ticket, forced', 'FAKE-5', true, ['designation', 'state']],
 ])(
-  '%s resolves to its key and the ticket fetched, listing designation only when --force overrode the label',
+  '%s resolves to its key and the ticket fetched, listing the checks --force overrode: designation, then state',
   async (_, ticketKey, force, forced) => {
     const { source, calls, state, fake } = world();
     const resolved = await resolveSource({ ref: ticketKey, ticketSource: source, label: 'sail', force });
@@ -187,41 +187,54 @@ test('anything get throws that is no PortError is thrown on: a bug, never a refu
   expect(thrown).toBeInstanceOf(TypeError);
 });
 
-// claimSource(): the claim or the forced move, then the comment (D3, D5, D6, D9).
+// claimSource(): the claim the ticket intake makes, then the comment with the run id.
 
 const COMMENT = `sail run ${RUN_ID} started`;
-const COMMENTED = { type: 'ticket:commented', ticketKey: 'FAKE-1', body: COMMENT } as const;
-/** The events as the bus would stamp them, with no key: the claim belongs to no call. */
-const stamped = (events: readonly object[]) =>
-  events.map((event, index) => ({ seq: index + 1, ts: NOW.toISOString(), runId: RUN_ID, ...event }));
+const claim = (ticketKey: string, source: TicketSource, forced: Forced[] = []) =>
+  claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, forced });
 
-test('an unstarted ticket is claimed and commented on with the run id, with no update, and the events say both', async () => {
+test('an unstarted ticket is claimed and commented on with the run id, with no update, and the record says it took', async () => {
   const { source, calls, fake } = world();
-  const claimed = await claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source });
-  expect(claimed).toEqual({
-    claim: { claimed: true, state: IN_PROGRESS },
-    forced: [],
-    events: [{ type: 'ticket:claimed', ticketKey: 'FAKE-1', state: IN_PROGRESS }, COMMENTED],
-  });
+  expect(await claim('FAKE-1', source)).toEqual({ claimed: true, state: IN_PROGRESS });
   expect(calls).toEqual(['claim', 'comment']);
   const ticket = await fake.get('FAKE-1');
   expect([ticket.state, ticket.comments]).toEqual([
     IN_PROGRESS,
     [{ author: 'sail', body: COMMENT, createdAt: NOW.toISOString() }],
   ]);
-  expect(eventIssues(stamped('events' in claimed ? claimed.events : []))).toEqual([]);
 });
 
-test('a ticket whose claim did not take is refused unless forced, and is neither moved nor commented on', async () => {
+test('a ticket whose claim did not take, unforced, throws a conflict PortError with the lost-claim text, and is neither moved nor commented on', async () => {
   const { source, calls, fake } = world();
-  const refused = await claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source });
-  expect([refused, calls]).toEqual([
-    {
-      refused: 'the ticket is already claimed: it became In Progress while sail was starting. --force runs it anyway',
-    },
-    ['claim'],
-  ]);
+  const thrown = await rejection(claim('FAKE-2', source));
+  expect(thrown).toBeInstanceOf(PortError);
+  expect(thrown).toMatchObject({
+    port: 'ticketSource',
+    op: 'claim',
+    code: 'conflict',
+    message:
+      'ticketSource.claim: the ticket is already claimed: it became In Progress while sail was starting. --force runs it anyway',
+  });
+  expect(calls).toEqual(['claim', 'get']);
   expect((await fake.get('FAKE-2')).comments).toEqual([]);
+});
+
+test('a ticket claimed by another run is lost even when its latest claim comment names that run', async () => {
+  const { source, fake } = world();
+  await fake.claim('FAKE-1');
+  await fake.comment('FAKE-1', claimComment('FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3O'));
+  const thrown = await rejection(claim('FAKE-1', source));
+  expect(thrown).toMatchObject({ code: 'conflict' });
+  expect((await fake.get('FAKE-1')).comments).toHaveLength(1);
+});
+
+test('a claim that did not take on a ticket whose latest claim comment names this run is this run’s own earlier claim: recorded as taken, with no second comment', async () => {
+  const { source, calls, fake } = world();
+  await fake.claim('FAKE-1');
+  await fake.comment('FAKE-1', COMMENT);
+  expect(await claim('FAKE-1', source)).toEqual({ claimed: true, state: IN_PROGRESS });
+  expect(calls).toEqual(['claim', 'get']);
+  expect((await fake.get('FAKE-1')).comments).toHaveLength(1);
 });
 
 test.each<[string, string]>([
@@ -229,34 +242,30 @@ test.each<[string, string]>([
   ['a completed ticket', 'FAKE-6'],
   ['a canceled ticket', 'FAKE-4'],
 ])(
-  'forced, %s is moved to In Progress through update and commented on: the claim is recorded as not taken, with the state update reported',
+  'forced for its state, %s is moved to In Progress through update and commented on: the claim is recorded as not taken',
   async (_, ticketKey) => {
     const { source, calls, fake } = world();
-    const claimed = await claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, force: true });
-    expect(claimed).toEqual({
-      claim: { claimed: false, state: IN_PROGRESS },
-      forced: ['state'],
-      events: [
-        { type: 'ticket:updated', ticketKey, change: { state: 'in-progress' }, state: IN_PROGRESS },
-        { ...COMMENTED, ticketKey },
-      ],
-    });
-    expect(calls).toEqual(['claim', 'update in-progress', 'comment']);
+    expect(await claim(ticketKey, source, ['state'])).toEqual({ claimed: false, state: IN_PROGRESS });
+    expect(calls).toEqual(['claim', 'get', 'update in-progress', 'comment']);
     const ticket = await fake.get(ticketKey);
     expect([ticket.state, ticket.comments.map((comment) => comment.body)]).toEqual([IN_PROGRESS, [COMMENT]]);
-    expect(eventIssues(stamped('events' in claimed ? claimed.events : []))).toEqual([]);
   },
 );
+
+test('forced for its designation alone, a claim that did not take is still lost', async () => {
+  const { source } = world();
+  expect(await rejection(claim('FAKE-2', source, ['designation']))).toMatchObject({ code: 'conflict' });
+});
 
 /** A state as an adapter may hand it on: the port's two fields, and one of the provider's own. */
 const withId = (state: TicketState): TicketState => Object.assign({ id: 'state-7' }, state);
 
-test.each<[string, string, boolean]>([
-  ['a claim', 'FAKE-1', true],
-  ['a forced move', 'FAKE-6', false],
+test.each<[string, string, boolean, Forced[]]>([
+  ['a claim', 'FAKE-1', true, []],
+  ['a forced move', 'FAKE-6', false, ['state']],
 ])(
-  "the state %s answers with is recorded and reported by its type and name alone, whatever else the adapter's answer carries",
-  async (_, ticketKey, taken) => {
+  "the state %s answers with is recorded by its type and name alone, whatever else the adapter's answer carries",
+  async (_, ticketKey, taken, forced) => {
     const { source, fake } = world({
       claim: async (key) => {
         const answer = await fake.claim(key);
@@ -267,44 +276,38 @@ test.each<[string, string, boolean]>([
         return { ...answer, state: withId(answer.state) };
       },
     });
-    const claimed = await claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, force: true });
-    if ('refused' in claimed) throw new Error(claimed.refused);
-    expect([claimed.claim, claimed.events[0]]).toEqual([
-      { claimed: taken, state: IN_PROGRESS },
-      taken
-        ? { type: 'ticket:claimed', ticketKey, state: IN_PROGRESS }
-        : { type: 'ticket:updated', ticketKey, change: { state: 'in-progress' }, state: IN_PROGRESS },
-    ]);
-    expect(eventIssues(stamped(claimed.events))).toEqual([]);
+    expect(await claim(ticketKey, source, forced)).toEqual({ claimed: taken, state: IN_PROGRESS });
   },
 );
 
-test('a claim that fails is refused with its message and code, and nothing else is called', async () => {
+test('a claim that fails throws its PortError, and nothing else is called', async () => {
   const { source, calls } = world({ claim: failing('claim', 'the provider is down') });
-  const refused = await claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source, force: true });
-  expect([refused, calls]).toEqual([{ refused: 'ticketSource.claim: the provider is down (unavailable)' }, ['claim']]);
+  const thrown = await rejection(claim('FAKE-1', source, ['state']));
+  expect(thrown).toMatchObject({ message: 'ticketSource.claim: the provider is down', code: 'unavailable' });
+  expect(calls).toEqual(['claim']);
 });
 
-test('a forced move that fails is refused with its message and code, and no comment is posted', async () => {
+test('a forced move that fails throws its PortError, and no comment is posted', async () => {
   const { source, calls, fake } = world({ update: failing('update', 'the provider is down') });
-  const refused = await claimSource({ ticketKey: 'FAKE-6', runId: RUN_ID, ticketSource: source, force: true });
-  expect([refused, calls]).toEqual([
-    { refused: 'ticketSource.update: the provider is down (unavailable)' },
-    ['claim', 'update in-progress'],
-  ]);
+  const thrown = await rejection(claim('FAKE-6', source, ['state']));
+  expect(thrown).toMatchObject({ message: 'ticketSource.update: the provider is down', code: 'unavailable' });
+  expect(calls).toEqual(['claim', 'get', 'update in-progress']);
   expect((await fake.get('FAKE-6')).comments).toEqual([]);
 });
 
-test.each<[string, string, boolean]>([
-  ['the claim took', 'FAKE-1', false],
-  ['a forced move of a completed ticket', 'FAKE-6', true],
+test.each<[string, string, Forced[]]>([
+  ['the claim took', 'FAKE-1', []],
+  ['a forced move of a completed ticket', 'FAKE-6', ['state']],
 ])(
-  'a comment that fails after %s is refused, saying the state the ticket is in now, the run and why',
-  async (_, ticketKey, force) => {
+  'a comment that fails after %s throws a PortError saying the state the ticket is in now, the run and why, keeping the code',
+  async (_, ticketKey, forced) => {
     const { source, fake } = world({ comment: failing('comment', 'comments are closed') });
-    const refused = await claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, force });
-    expect(refused).toEqual({
-      refused: `the ticket is now In Progress, but the comment naming run ${RUN_ID} failed: ticketSource.comment: comments are closed (unavailable). --force runs it`,
+    const thrown = await rejection(claim(ticketKey, source, forced));
+    expect(thrown).toBeInstanceOf(PortError);
+    expect(thrown).toMatchObject({
+      op: 'comment',
+      code: 'unavailable',
+      message: `ticketSource.comment: the ticket is now In Progress, but the comment naming run ${RUN_ID} failed: ticketSource.comment: comments are closed (unavailable). --force runs it`,
     });
     // Nothing is moved back.
     expect((await fake.get(ticketKey)).state).toEqual(IN_PROGRESS);
@@ -315,9 +318,9 @@ test.each<[string, Partial<Calls>, string]>([
   ['claim', { claim: broken }, 'FAKE-1'],
   ['update', { update: broken }, 'FAKE-2'],
   ['comment', { comment: broken }, 'FAKE-1'],
-])('anything %s throws that is no PortError is thrown on: a bug, never a refusal', async (_, instead, ticketKey) => {
+])('anything %s throws that is no PortError is thrown on: a bug', async (_, instead, ticketKey) => {
   const { source } = world(instead);
-  const thrown = await rejection(claimSource({ ticketKey, runId: RUN_ID, ticketSource: source, force: true }));
+  const thrown = await rejection(claim(ticketKey, source, ['state']));
   expect(thrown).toBeInstanceOf(TypeError);
 });
 
@@ -368,7 +371,7 @@ function pickUpWorld() {
   return createFakeTicketSource({ seed, state: join(dir, 'state.json'), now: () => NOW, pickUp: ['Todo'] });
 }
 
-test('with pickUp [Todo], a start refuses the Backlog ticket, accepts the Todo one, and force accepts the Backlog one', async () => {
+test('with pickUp [Todo], a start refuses the Backlog ticket, accepts the Todo one, and force accepts the Backlog one, recording state as forced', async () => {
   const source = pickUpWorld();
   const start = (ref: string, force?: boolean) =>
     resolveSource({ ref, ticketSource: source, label: 'sail', ...(force === undefined ? {} : { force }) });
@@ -376,16 +379,15 @@ test('with pickUp [Todo], a start refuses the Backlog ticket, accepts the Todo o
     refused: 'the ticket is not in a pick-up state: it is Backlog. --force runs it anyway',
   });
   expect('refused' in (await start('FAKE-1'))).toBe(false);
-  expect(await start('FAKE-2', true)).toMatchObject({ ticketKey: 'FAKE-2', forced: [] });
+  expect(await start('FAKE-1', true)).toMatchObject({ ticketKey: 'FAKE-1', forced: [] });
+  expect(await start('FAKE-2', true)).toMatchObject({ ticketKey: 'FAKE-2', forced: ['state'] });
 });
 
-test('with pickUp [Todo], a forced claim of the Backlog ticket moves it to In Progress and records the state as forced', async () => {
+test('with pickUp [Todo], a claim of the Backlog ticket with state forced moves it to In Progress, and without it is lost', async () => {
   const source = pickUpWorld();
-  const claimed = await claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source, force: true });
-  if ('refused' in claimed) throw new Error(claimed.refused);
-  expect([claimed.claim, claimed.forced, (await source.get('FAKE-2')).state]).toEqual([
-    { claimed: false, state: IN_PROGRESS },
-    ['state'],
-    IN_PROGRESS,
-  ]);
+  const lost = claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source, forced: [] });
+  expect(await rejection(lost)).toMatchObject({ code: 'conflict' });
+  expect((await source.get('FAKE-2')).state).toEqual({ type: 'unstarted', name: 'Backlog' });
+  const claimed = await claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source, forced: ['state'] });
+  expect([claimed, (await source.get('FAKE-2')).state]).toEqual([{ claimed: false, state: IN_PROGRESS }, IN_PROGRESS]);
 });
