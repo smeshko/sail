@@ -45,6 +45,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile, nextSeq, readEvents } from '../events/consumers/ndjson';
+import type { Summary } from '../events/summary';
 import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import { PortError } from '../ports/errors';
@@ -123,8 +124,16 @@ export interface OpenedRun {
   until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
   firstSeq: number;
-  /** A seeded run's reused calls, as its journal holds them, the run they were taken from, and the stage it runs. */
-  seeded?: { fromRun: string; stage: string; entries: readonly JournalEntry[] };
+  /**
+   * A seeded run's reused calls, as its journal holds them, the run they were taken from, the stage it runs, and the
+   * ticket the source's events name, when they do.
+   */
+  seeded?: {
+    fromRun: string;
+    stage: string;
+    entries: readonly JournalEntry[];
+    ticket?: Required<NonNullable<Summary['ticket']>>;
+  };
   /** What a resume adds to the run's budget, recorded before anything runs. */
   raise?: Raise;
 }

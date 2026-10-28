@@ -18,6 +18,8 @@
 //
 // The run's ticket is the one its intake fetched: the first `ticket:fetched` under the intake's key. A script step's
 // `sail port ticket-source get` emits one too, under its own key, and names another fetch, not the run's ticket.
+// A seeded run fetches nothing: its reused intake's `journal:append` carries the ticket instead, and names it the
+// same way.
 import { INTAKE_KEY } from '../engine/intake';
 import type { JournalEntry } from '../engine/journal';
 import type { StopReason } from '../engine/run-dir';
@@ -279,6 +281,7 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
       // A step's line is its call's: the replay makes no move after it, so a route the resume reports again repeats.
       if (!event.key.includes('/')) state.journaledSinceRoute = true;
       if (event.fromRun !== undefined) reuseCall(state, event, event.fromRun);
+      if (event.key === INTAKE_KEY && event.ticket !== undefined) state.ticket ??= { ...event.ticket };
       break;
     case 'budget:raised':
       // The budget is the raised one from here on: `totals.budget` follows it.

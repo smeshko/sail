@@ -2,7 +2,7 @@
 // `sail FAKE-1` run to its end once in a repository of its own, and each case seeds from a copy of it: a process opens
 // one run per `.sail/`, so a resume runs in a copy of the seeded run's repository.
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../../src/engine/journal';
 import { type RunEnd, resumeWorkflow, runSeededWorkflow, runWorkflow } from '../../src/engine/runtime';
@@ -22,6 +22,12 @@ const source = sharedSource();
 afterAll(() => source.release());
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
+
+const FAKE_TICKET = {
+  ticketKey: 'FAKE-1',
+  title: 'Add a --shout flag to the greet command',
+  url: expect.stringContaining('FAKE-1'),
+};
 
 const journaled = (dir: string) => readJournal(dir).entries.map((entry) => `${entry.key} ${entry.outcome}`);
 const issuesOf = (dir: string) => validateRunDir(dir).issues.map(formatIssue);
@@ -51,8 +57,15 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
     );
     const order = (find: (event: (typeof events)[number]) => boolean) => events.findIndex(find);
     const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+    const sourceSummary: Summary = JSON.parse(readFileSync(join(from.dir, 'summary.json'), 'utf8'));
+    const reusedIntake = events.find((event) => event.type === 'journal:append' && event.key === 'intake#1');
     expect({
       journal: journaled(dir),
+      ticket: summary.ticket,
+      sourceTicket: sourceSummary.ticket,
+      sameTicket: summary.ticket?.url !== undefined && summary.ticket.url === sourceSummary.ticket?.url,
+      intakeTicket: reusedIntake?.type === 'journal:append' ? reusedIntake.ticket : undefined,
+      fetched: events.some((event) => event.type === 'ticket:fetched'),
       start: [start.type, start.fromRun],
       appended,
       intakeStarted: events.some((event) => event.type === 'intake:start'),
@@ -67,6 +80,11 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
       issues: issuesOf(dir),
     }).toEqual({
       journal: ['intake#1 passed', 'spec#1 done'],
+      ticket: FAKE_TICKET,
+      sourceTicket: FAKE_TICKET,
+      sameTicket: true,
+      intakeTicket: FAKE_TICKET,
+      fetched: false,
       start: ['run:start', from.runId],
       appended: [
         { key: 'intake#1', line: 1, fromRun: from.runId },
@@ -78,6 +96,41 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
       stageCalls: 1,
       issues: [],
     });
+  });
+}, 60_000);
+
+test('a run seeded from a seeded run names the same ticket in its summary, though neither fetched it', async () => {
+  await withTempRepo(async (first) => {
+    const from = await source.copyInto(first.dir);
+    const stopped = await seeded(first, from.runId, 'spec');
+    expect(endOf(stopped)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const middle = 'refused' in stopped ? '' : stopped.runId;
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const end = await seeded(second, middle, 'spec');
+      expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+      const dir = dirOf(end);
+      const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+      const original: Summary = JSON.parse(readFileSync(join(from.dir, 'summary.json'), 'utf8'));
+      expect([summary.ticket, summary.ticket?.url, issuesOf(dir)]).toEqual([FAKE_TICKET, original.ticket?.url, []]);
+    });
+  });
+}, 90_000);
+
+test('a run seeded from a source whose events are gone names no ticket in its summary, and validates', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    rmSync(join(from.dir, 'events.ndjson'));
+    const end = await seeded(repo, from.runId, 'spec');
+    expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const dir = dirOf(end);
+    const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+    const reusedIntake = readEvents(dir).find((event) => event.type === 'journal:append' && event.key === 'intake#1');
+    expect([summary.ticket, reusedIntake !== undefined && 'ticket' in reusedIntake, issuesOf(dir)]).toEqual([
+      undefined,
+      false,
+      [],
+    ]);
   });
 }, 60_000);
 
@@ -250,10 +303,14 @@ test("a run seeded for the stage after a two-step call reuses the call's step li
     const reused = readEvents(dir).flatMap((event) =>
       event.type === 'journal:append' && event.fromRun !== undefined ? [event.key] : [],
     );
+    const ticketed = readEvents(dir).flatMap((event) =>
+      event.type === 'journal:append' && event.ticket !== undefined ? [event.key] : [],
+    );
     const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
     expect({
       journal: journaled(dir),
       reused,
+      ticketed,
       calls: summary.calls.map(({ key, fromRun }) => (fromRun === undefined ? key : `${key} reused`)),
       issues: issuesOf(dir),
     }).toEqual({
@@ -267,6 +324,7 @@ test("a run seeded for the stage after a two-step call reuses the call's step li
         'notify#1 passed',
       ],
       reused: ['intake#1', 'brief#1', 'spec#1', 'publish#1/describe', 'publish#1/open', 'publish#1'],
+      ticketed: ['intake#1'],
       calls: ['intake#1 reused', 'brief#1 reused', 'spec#1 reused', 'publish#1 reused', 'notify#1'],
       issues: [],
     });

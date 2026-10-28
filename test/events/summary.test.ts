@@ -562,6 +562,38 @@ test("a ticket:fetched with no key, or under a step's key alone, sets no ticket:
   expect(folded(stamp([0, runStart()], [100, fetched('intake#1', 'Named')]))?.ticket?.title).toBe('Named');
 });
 
+const SOURCE_RUN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
+const reusedIntake = (key: string, ticket = TICKET): NewEvent => ({
+  type: 'journal:append',
+  key,
+  line: 1,
+  outcome: 'passed',
+  fromRun: SOURCE_RUN,
+  ticket,
+});
+
+test("a reused intake's journal:append carrying a ticket names the run's ticket, and validates as an event", () => {
+  const summary = folded(stamp([0, runStart()], [10, reusedIntake('intake#1')]));
+  expect(summary?.ticket).toEqual(TICKET);
+  expect(validateDocument('sail.summary.v1', summary).map(formatIssue)).toEqual([]);
+  const [event] = stamp([10, reusedIntake('intake#1')]);
+  expect(validateDocument('sail.event.v1', event).map(formatIssue)).toEqual([]);
+});
+
+test('a ticket on a journal:append under another key names no ticket', () => {
+  expect(folded(stamp([0, runStart()], [10, reusedIntake('spec#1')]))).not.toHaveProperty('ticket');
+});
+
+test("a ticket:fetched under the intake's key before a ticketed journal:append still wins", () => {
+  const other = { ticketKey: 'FAKE-9', title: 'Another', url: 'fake://tickets/FAKE-9' };
+  const stream = stamp(
+    [0, runStart()],
+    [100, fetched('intake#1', TICKET.title)],
+    [200, reusedIntake('intake#1', other)],
+  );
+  expect(folded(stream)?.ticket).toEqual(TICKET);
+});
+
 test('a reused call is listed where its journal:append comes, with its fromRun and no duration, and counts in no total', () => {
   const source = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M';
   const summary = folded(
