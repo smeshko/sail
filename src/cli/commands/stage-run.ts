@@ -26,6 +26,7 @@ import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue, type SchemaIssue } from '../../engine/schemas';
 import { stepProblems } from '../../engine/stage-call';
 import { typecheck } from '../../engine/typecheck';
+import type { Harness } from '../../ports/harness';
 import type { AgentStep, StageDefinition, Step } from '../../sdk/steps';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
@@ -98,13 +99,28 @@ async function executionOf(
     ports: ['harness'],
   });
   if ('issues' in adapters) return adapters;
+  const onNamed = Object.fromEntries(
+    agents.flatMap((step) => {
+      const harness = aliasOf(config, step.model ?? 'default')?.harness;
+      return harness === undefined ? [] : [[step.name, harness] as const];
+    }),
+  );
+  const named = await adapters.harnesses([...new Set(Object.values(onNamed))].sort());
+  if ('issues' in named) return named;
   const { conventions } = config;
-  return {
+  const base = {
     harness: adapters.ports.harness,
     model: Object.values(models)[0] as string,
-    ...(definition.kind === 'stage' && definition.steps.length > 1 ? { models } : {}),
     ...(conventions === undefined ? {} : { conventions }),
   };
+  const [only] = Object.values(onNamed);
+  if (definition.kind !== 'stage' || definition.steps.length <= 1) {
+    return only === undefined ? base : { ...base, harness: named.ports[only] as Harness, harnessName: only };
+  }
+  const own = Object.fromEntries(
+    Object.entries(onNamed).map(([step, name]) => [step, { harness: named.ports[name] as Harness, name }]),
+  );
+  return { ...base, models, ...(Object.keys(own).length === 0 ? {} : { steps: own }) };
 }
 
 export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
