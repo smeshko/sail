@@ -3,14 +3,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Ticket } from '../../src/ports/types';
-import { writeOwnSail } from './own-sail';
-import type { TempRepo } from './temp-repo';
-
-/** Copies the repository's own `.sail/` into `repo`, points its ports at the fakes, commits, and returns the copy. */
-export function writeGroomRepo(repo: TempRepo): string {
-  return writeOwnSail(repo);
-}
-
 /** The ticket as the fake holds it after a run: its state file, or the seed while nothing has changed it. */
 export function fakeTicket(repoDir: string, ticketKey: string): Ticket {
   const state = join(repoDir, '.sail-runs', 'fake', 'tickets.json');
