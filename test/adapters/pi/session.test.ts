@@ -1,0 +1,50 @@
+// The real pi SDK session, built offline: nothing here calls a model. It checks the model and key refusals, that a
+// session is made with an id of its own, and that disposing it removes the temp directory it made.
+import { expect, test } from 'bun:test';
+import { readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createBashRunner } from '../../../src/adapters/pi/process';
+import { createPiSession, type PiSessionParams } from '../../../src/adapters/pi/session';
+import { submitTool } from '../../../src/adapters/pi/submission';
+import { rejection } from '../../helpers/ports';
+
+const runner = createBashRunner({ env: { PATH: process.env.PATH ?? '' } });
+
+const params = (extra: Partial<PiSessionParams> = {}): PiSessionParams => ({
+  cwd: process.cwd(),
+  model: 'groq/llama-3.3-70b-versatile',
+  systemPrompt: '## Where you work',
+  tools: ['read', 'grep', 'find', 'ls', 'bash'],
+  gate: () => undefined,
+  submit: submitTool({ type: 'object' }, () => undefined),
+  bash: runner.operations,
+  env: { GROQ_API_KEY: 'gsk_test' },
+  ...extra,
+});
+
+const leftovers = () => readdirSync(tmpdir()).filter((name) => name.startsWith('sail-pi-'));
+
+test('a model without a provider, or one pi does not know, is refused by name', async () => {
+  const bare = await rejection(createPiSession(params({ model: 'llama' })));
+  const unknown = await rejection(createPiSession(params({ model: 'groq/no-such-model' })));
+  expect([String(bare), String(unknown)]).toEqual(['Error: no model llama', 'Error: no model groq/no-such-model']);
+});
+
+test('a provider whose key is not set is refused naming the variable', async () => {
+  const error = await rejection(createPiSession(params({ env: {} })));
+  expect(String(error)).toBe('Error: needs GROQ_API_KEY, which is not set');
+});
+
+test('a session is made without a model call, has an id, and its dispose removes its directory', async () => {
+  const before = leftovers();
+  const session = await createPiSession(params());
+  const during = leftovers();
+  const stop = session.subscribe(() => undefined);
+  stop();
+  await session.dispose();
+  expect({ id: session.sessionId !== '', made: during.length - before.length, after: leftovers().length }).toEqual({
+    id: true,
+    made: 1,
+    after: before.length,
+  });
+});

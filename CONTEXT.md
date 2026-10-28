@@ -466,7 +466,7 @@ The head sha a merge names: the one the workflow checked. The host merges the pu
 _Avoid_: base sha, review sha
 
 **Harness**:
-The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. A step runs on the config's default harness, or on the named harness its model alias names. v1 adapter: Claude Code.
+The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. A step runs on the config's default harness, or on the named harness its model alias names. v1 adapters: Claude Code, and pi, whose providers include non-Anthropic and local models.
 _Avoid_: agent provider, runner, executor, model
 
 **Workspace port**:

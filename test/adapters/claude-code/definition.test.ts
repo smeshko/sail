@@ -103,8 +103,8 @@ test("the SDK version it declares is the installed package's", () => {
   expect([SDK_VERSION, definition.versions?.()]).toEqual([version, { '@anthropic-ai/claude-agent-sdk': version }]);
 });
 
-test('BUILTINS holds the fake, linear, claude-code, git-worktree and github, the claude-code one filling the harness alone, with a preflight and a version', () => {
-  expect(Object.keys(BUILTINS)).toEqual(['fake', 'linear', 'claude-code', 'git-worktree', 'github']);
+test('BUILTINS holds the fake, linear, claude-code, pi, git-worktree and github, the claude-code one filling the harness alone, with a preflight and a version', () => {
+  expect(Object.keys(BUILTINS)).toEqual(['fake', 'linear', 'claude-code', 'pi', 'git-worktree', 'github']);
   const ports = Object.entries(BUILTINS['claude-code'] ?? {}).map(([port, found]) => [port, Object.keys(found).sort()]);
   expect(ports).toEqual([['harness', ['create', 'requires', 'versions']]]);
 });

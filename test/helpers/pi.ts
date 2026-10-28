@@ -1,5 +1,6 @@
 // pi session events as the SDK hands them over (`session.subscribe`), in the shapes of a recorded session.
 import type { PiEvent } from '../../src/adapters/pi/messages';
+import type { PiSession, PiSessionFactory, PiSessionParams } from '../../src/adapters/pi/session';
 
 export const PI_SESSION_ID = '0198f1c2-7d5b-7a3e-9a31-5b2f6a0c9d11';
 export const PI_MODEL = 'groq/llama-3.3-70b-versatile';
@@ -65,3 +66,78 @@ export const toolEnd = (toolCallId: string, toolName: string, text: string, isEr
 });
 
 export const turnEnd = (): PiEvent => ({ type: 'turn_end', message: {}, toolResults: [] });
+
+// A scripted pi session: the factory the harness is given in place of the SDK, playing steps in order.
+export type Step =
+  | { act: 'emit'; event: PiEvent }
+  | { act: 'submit'; params: unknown }
+  | { act: 'gate'; id: string; name: string; input: unknown }
+  | { act: 'bash'; command: string }
+  | { act: 'waitForAbort' }
+  | { act: 'throw'; message: string };
+
+export interface ScriptedCall {
+  readonly params: PiSessionParams;
+  aborted: boolean;
+  disposed: boolean;
+  /** What the gate answered, per `gate` step. */
+  readonly blocks: unknown[];
+  /** What the submit tool replied, per `submit` step. */
+  readonly replies: string[];
+}
+
+export function scriptedSessions(scripts: (prompt: string) => readonly Step[]) {
+  const calls: ScriptedCall[] = [];
+  const createSession: PiSessionFactory = async (params) => {
+    const call: ScriptedCall = { params, aborted: false, disposed: false, blocks: [], replies: [] };
+    calls.push(call);
+    const listeners: ((event: PiEvent) => void)[] = [];
+    const controller = new AbortController();
+    let handler: ((event: { toolCallId: string; toolName: string; input: unknown }) => unknown) | undefined;
+    params.gate({
+      on: (_name, fn) => {
+        handler = fn;
+      },
+    });
+    const idle = () => new Promise<void>((done) => controller.signal.addEventListener('abort', () => done()));
+    const session: PiSession = {
+      sessionId: PI_SESSION_ID,
+      subscribe(listener) {
+        listeners.push(listener);
+        return () => {
+          listeners.splice(listeners.indexOf(listener), 1);
+        };
+      },
+      async prompt(text) {
+        for (const step of scripts(text)) {
+          if (controller.signal.aborted) return;
+          if (step.act === 'emit') {
+            for (const listener of [...listeners]) listener(step.event);
+          } else if (step.act === 'submit') {
+            const reply = await params.submit.execute('submit-1', step.params);
+            call.replies.push(reply.content.map((block) => block.text).join('\n'));
+          } else if (step.act === 'gate') {
+            call.blocks.push(handler?.({ toolCallId: step.id, toolName: step.name, input: step.input }));
+          } else if (step.act === 'bash') {
+            await params.bash
+              .exec(step.command, params.cwd, { onData: () => undefined, signal: controller.signal })
+              .catch(() => undefined);
+          } else if (step.act === 'waitForAbort') {
+            await idle();
+          } else {
+            throw new Error(step.message);
+          }
+        }
+      },
+      async abort() {
+        call.aborted = true;
+        controller.abort();
+      },
+      async dispose() {
+        call.disposed = true;
+      },
+    };
+    return session;
+  };
+  return { createSession, calls };
+}
