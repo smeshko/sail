@@ -17,7 +17,8 @@
 // The lease comes before a resume because the item's pid is the process the watcher started last: a resume another
 // process started, or one a watcher spawned and died before recording, holds the run's lease with a live pid. Adopting
 // it then, rather than resuming the run a second time, keeps two processes off one workspace. A run this dispatcher has
-// already resumed, found unended with its resume's process gone, is parked with why: its resume failed, by the last
+// already resumed, found unended with its resume's process gone, and not on a usage limit hit since, is parked with
+// why: its resume failed, by the last
 // line the resume itself logged (the log after the offset the spawn reported) or, with none, by its exit. A new
 // dispatcher, a restart or the workflow watched again, starts with none resumed, so it gets one more chance.
 import { existsSync, readFileSync } from 'node:fs';
