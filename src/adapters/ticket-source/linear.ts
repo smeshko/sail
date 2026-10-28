@@ -377,9 +377,11 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
           ? ofType('started').find((state) => state.name !== inReview)
           : move === 'done'
             ? ofType('completed')[0]
-            : pickUp === undefined
-              ? (ofType('unstarted')[0] ?? ofType('backlog')[0])
-              : all.find((state) => pickUp.includes(state.name));
+            : move === 'canceled'
+              ? ofType('canceled')[0]
+              : pickUp === undefined
+                ? (ofType('unstarted')[0] ?? ofType('backlog')[0])
+                : all.find((state) => pickUp.includes(state.name));
     if (chosen === undefined)
       throw new PortError('ticketSource', op, 'invalid', `team ${team} has no state for ${move}`);
     return chosen.id;
@@ -672,7 +674,13 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
       comments: true,
       links: true,
       attachments: true,
-      moves: ['unstarted', 'in-progress', ...(inReview === undefined ? [] : (['in-review'] as const)), 'done'],
+      moves: [
+        'unstarted',
+        'in-progress',
+        ...(inReview === undefined ? [] : (['in-review'] as const)),
+        'done',
+        'canceled',
+      ],
     }),
   };
 

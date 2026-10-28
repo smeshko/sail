@@ -15,7 +15,8 @@ import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const TICKET_USAGE =
   'usage: sail port ticket-source get|links|attachments|claim <ticket>\n       sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]\n       sail port ticket-source comment <ticket> [--body-file <path>]\n';
-const UPDATE_USAGE = '       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>\n';
+const UPDATE_USAGE =
+  '       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done|canceled>\n';
 const CREATE_USAGE = '       sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]\n';
 const RELABEL_USAGE =
   '       sail port ticket-source add-label|remove-label <ticket> <label>\n       sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>\n       sail port ticket-source edit <ticket> [--title <text>] [--body-file <path>]\n';

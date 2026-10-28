@@ -18,8 +18,8 @@ export type TicketStateType = z.infer<typeof TicketStateType>;
 export const TicketState = z.object({ type: TicketStateType, name: z.string() });
 export type TicketState = z.infer<typeof TicketState>;
 
-/** The moves ADR-0015 names, which each adapter maps to its provider's states. */
-export const TicketMove = z.enum(['unstarted', 'in-progress', 'in-review', 'done']);
+/** The moves ADR-0015 names, and `canceled` for a ticket groomed away, which each adapter maps to its provider's states. */
+export const TicketMove = z.enum(['unstarted', 'in-progress', 'in-review', 'done', 'canceled']);
 export type TicketMove = z.infer<typeof TicketMove>;
 
 export const Comment = z.object({ author: z.string(), body: z.string(), createdAt: z.string().optional() });

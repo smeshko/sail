@@ -83,6 +83,7 @@ const STATES: Record<TicketMove, TicketState> = {
   'in-progress': { type: 'started', name: 'In Progress' },
   'in-review': { type: 'started', name: 'In Review' },
   done: { type: 'completed', name: 'Done' },
+  canceled: { type: 'canceled', name: 'Canceled' },
 };
 
 /** The state `relate` leaves a duplicate in. */
@@ -308,7 +309,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       comments: true,
       links: true,
       attachments: true,
-      moves: ['unstarted', 'in-progress', 'in-review', 'done'],
+      moves: ['unstarted', 'in-progress', 'in-review', 'done', 'canceled'],
     }),
   };
 }

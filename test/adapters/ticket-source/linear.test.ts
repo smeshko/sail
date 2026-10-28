@@ -608,6 +608,23 @@ test('update lands each move by state type: done on the lowest-position complete
   ]);
 });
 
+test('update lands canceled on the lowest-position canceled-type state, and a team with none refuses it as invalid', async () => {
+  const states: WorldState[] = [
+    { id: 's-doing', name: 'Doing', type: 'started', position: 1 },
+    { id: 's-dropped', name: 'Dropped', type: 'canceled', position: 6 },
+    { id: 's-wontfix', name: "Won't fix", type: 'canceled', position: 5 },
+  ];
+  const { world, adapter } = linear(seedOf(states, [{ number: 1, title: 'One', state: 'Doing', labels: ['sail'] }]));
+  const canceled = await adapter.update('ADW-1', { state: 'canceled' });
+  expect([canceled.state, world.ticket(1).state]).toEqual([{ type: 'canceled', name: "Won't fix" }, "Won't fix"]);
+
+  const none = linear(seedOf(states.slice(0, 1), [{ number: 1, title: 'One', state: 'Doing', labels: ['sail'] }]));
+  expect(failure(await rejection(none.adapter.update('ADW-1', { state: 'canceled' })))).toEqual([
+    { port: 'ticketSource', op: 'update', code: 'invalid' },
+    'ticketSource.update: team ADW has no state for canceled',
+  ]);
+});
+
 test('without inReview, capabilities leave in-review out and update to it is invalid, naming the option; an inReview that names no started state is invalid too', async () => {
   const plain = linear(SEED);
   const misnamed = linear(SEED, { inReview: 'Shipped' });
@@ -619,7 +636,7 @@ test('without inReview, capabilities leave in-review out and update to it is inv
     comments: true,
     links: true,
     attachments: true,
-    moves: ['unstarted', 'in-progress', 'done'],
+    moves: ['unstarted', 'in-progress', 'done', 'canceled'],
   });
   expect(errors.map(failure)).toEqual([
     [
@@ -965,7 +982,7 @@ test('the definition creates the adapter from team and inReview without a reques
     const adapter = await linearTicketSource.create({ team: 'ADW', inReview: 'Code Review' }, context(env));
     expect([adapter.name, adapter.capabilities().moves, world.requests.length]).toEqual([
       'linear',
-      ['unstarted', 'in-progress', 'in-review', 'done'],
+      ['unstarted', 'in-progress', 'in-review', 'done', 'canceled'],
       0,
     ]);
     const ticket = await adapter.get('ADW-1');
