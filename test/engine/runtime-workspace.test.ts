@@ -10,7 +10,7 @@ import { leaseFile, readLease, takeLease } from '../../src/adapters/leases';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import { openRun } from '../../src/engine/open-run';
 import { writeStatus } from '../../src/engine/run-dir';
-import { readRunHeader } from '../../src/engine/run-header';
+import { RUN_HEADER_FILE, readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
@@ -219,6 +219,33 @@ test('a claim lost to another start fails the run at its intake, keeping the run
 });
 
 // The end: a suspended run keeps both, a run that ended for good releases both.
+
+test('a run.json that cannot be written once the workspace is made throws, and leaves no run directory, no worktree and no lease (review #1.11)', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const { workspace } = adapters.ports;
+    const create = workspace.create.bind(workspace);
+    // Once the workspace is made, run.json's name is taken by a directory: writing it fails.
+    workspace.create = async (run, options) => {
+      const made = await create(run, options);
+      mkdirSync(join(run.runDir, RUN_HEADER_FILE), { recursive: true });
+      return made;
+    };
+    let thrown = 'opened';
+    try {
+      await openRun({ cwd: repo.dir, adapters, workflow: 'ticket-to-pr', ticket: 'FAKE-1' });
+    } catch (error) {
+      thrown = (error as Error).message.replace(/'s directory .*$/s, '');
+    }
+    expect({
+      thrown,
+      runs: runIds(repo.dir),
+      worktrees: worktrees(repo),
+      lease: readLease(leasesOf(repo.dir), REMOTE, BRANCH) ?? null,
+    }).toEqual({ thrown: expect.stringMatching(/^run FAKE-1-\w+$/), runs: [], worktrees: [], lease: null });
+  });
+});
 
 test('a suspended run keeps its worktree and its lease, and a failed run releases both', async () => {
   await withTempRepo(async (repo) => {
