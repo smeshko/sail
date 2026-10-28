@@ -197,6 +197,47 @@ test('groom marks a duplicate the check named at exactly the threshold', async (
   });
 }, 120_000);
 
+test('groom reports, never marks, a duplicate of a ticket the check did not name', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).duplicates;
+    answer.output.candidates = [];
+    seedHarness(sailDir, 'duplicates', [answer]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.state.type).toBe('unstarted');
+    expect(ticket.links).toEqual([]);
+    expect(lastComment(repo.dir)).toContain(
+      '- reported, not marked: duplicate of FAKE-1 (not named by the duplicates check)',
+    );
+  });
+}, 120_000);
+
+test('groom marks only the first duplicate, and reports a second', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedDuplicate(sailDir, 0.95);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).decide;
+    answer.output.actions = [
+      { kind: 'duplicate', of: 'FAKE-1' },
+      { kind: 'duplicate', of: 'FAKE-1' },
+    ];
+    seedHarness(sailDir, 'decide', [answer]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const related = readEvents(onlyRun(repo.dir)).filter((event) => event.type === 'ticket:related');
+    expect(related).toHaveLength(1);
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- applied: duplicate FAKE-1');
+    expect(comment).toContain(
+      '- reported, not marked: duplicate of FAKE-1 (confidence 0.95, a duplicate is already marked)',
+    );
+  });
+}, 120_000);
+
 test('an action the port refuses is reported as failed, and the ticket is still commented and unlabelled', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
