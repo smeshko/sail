@@ -50,7 +50,7 @@ Usage:
   sail runs                                                  List the runs in .sail-runs/
   sail show <run> [--events|--follow|--rebuild] [-q|-v|-vv]  Show a run's calls, loops, routes and totals
   sail stage run <stage-dir> [--bind name=value]...          Run one stage in isolation
-  sail dashboard [--port <n>]                                Serve every repository's runs read-only on localhost
+  sail dashboard [--port <n>]                                Serve every repository's runs and queues on localhost
   sail watch <workflow>...                                   Watch these workflows: start this repository's watcher, or add them to it
   sail unwatch <workflow>...                                 Stop watching them. The watcher exits when it watches none
   sail queue ls|poll <workflow>                              List a watched workflow's queue, or have its watcher poll it now
