@@ -530,6 +530,7 @@
         "kind": { "enum": ["agent", "script"] },
         "origin": { "$ref": "#/$defs/origin" },
         "model": { "type": "string" },
+        "harness": { "type": "string" },
         "output": { "type": "string" },
         "produces": { "type": "array", "items": { "type": "string" } },
         "network": { "type": "array", "items": { "type": "string" } },
@@ -545,6 +546,7 @@
               "step": { "type": "string" },
               "kind": { "enum": ["agent", "script"] },
               "model": { "type": "string" },
+              "harness": { "type": "string" },
               "output": { "type": "string" },
               "produces": { "type": "array", "items": { "type": "string" } },
               "permissions": { "$ref": "#/$defs/permissions" },
@@ -627,7 +629,12 @@
             "ticketSource": { "$ref": "#/$defs/adapterEntry" },
             "codeHost": { "$ref": "#/$defs/adapterEntry" },
             "harness": { "$ref": "#/$defs/adapterEntry" },
-            "workspace": { "$ref": "#/$defs/adapterEntry" }
+            "workspace": { "$ref": "#/$defs/adapterEntry" },
+            "harnesses": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": { "$ref": "#/$defs/adapterEntry" }
+            }
           },
           "required": ["ticketSource", "codeHost", "harness", "workspace"],
           "additionalProperties": false

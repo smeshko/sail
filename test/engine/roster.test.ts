@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { type ProjectConfig, readConfig } from '../../src/engine/config';
 import { type LoadedWorkflow, loadWorkflow } from '../../src/engine/load-workflow';
-import { buildRoster, modelProblems, origin } from '../../src/engine/roster';
+import { buildRoster, harnessesReached, modelProblems, origin } from '../../src/engine/roster';
 import { validateDocument } from '../../src/engine/schemas';
 import { agent, intake, type StageDefinition, script, stage, type Workflow, z } from '../../src/sdk/index';
 import * as intakes from '../../src/sdk/intakes';
@@ -350,4 +350,47 @@ test('problems come with the intake first, then the stages sorted by name', () =
     undefinedAlias("stage 'alpha'", 'a'),
     undefinedAlias("stage 'zeta'", 'z'),
   ]);
+});
+
+const NAMED: ProjectConfig = {
+  ...CONFIG,
+  adapters: { ...CONFIG.adapters, harnesses: { second: { use: 'fake' }, third: { use: 'fake' } } },
+  models: {
+    default: 'model-default',
+    deep: { harness: 'second', model: 'model-deep' },
+    spare: { harness: 'third', model: 'model-spare' },
+  },
+};
+
+test('an agent whose alias names a harness records it beside its model, and one on a string alias records none', () => {
+  expect(entryOf(agentOf('deep', 'deep'), NAMED)).toMatchObject({ model: 'model-deep', harness: 'second' });
+  expect(entryOf(agentOf('plain'), NAMED)).not.toHaveProperty('harness');
+  expect(entryOf(agentOf('plain'), CONFIG)).not.toHaveProperty('harness');
+});
+
+test('the steps of a multi-step stage each record their own harness', () => {
+  const first = agent('first', { prompt: './p.md', output: Out, permissions, budget, model: 'deep' });
+  const last = agent('last', { prompt: './p.md', output: Out, permissions, budget });
+  const two = stage('two', { output: Out, steps: [first, last] });
+  expect(entryOf(two, NAMED)?.steps).toEqual([
+    { step: 'first', kind: 'agent', model: 'model-deep', harness: 'second', output: 'Out', permissions, budget },
+    { step: 'last', kind: 'agent', model: 'model-default', output: 'Out', permissions, budget },
+  ]);
+});
+
+test('harnessesReached lists each named harness the intake and stages reach once, sorted, and none for string aliases', () => {
+  const own: LoadedWorkflow['intake'] = {
+    definition: intake('brief', { accepts: ['ticket'], output: Out, steps: [agentOf('brief', 'spare')] }),
+    module: {},
+  };
+  const loaded = loadedOf([agentOf('a', 'deep'), agentOf('b', 'deep'), agentOf('c')], { Out }, own);
+  expect(harnessesReached(loaded, NAMED)).toEqual(['second', 'third']);
+  expect(harnessesReached(loadedOf([agentOf('c')]), NAMED)).toEqual([]);
+  expect(harnessesReached(loadedOf([agentOf('a', 'deep')]), CONFIG)).toEqual([]);
+});
+
+test('harnessesReached counts the agent steps of a multi-step stage and ignores a script step', () => {
+  const first = agent('first', { prompt: './p.md', output: Out, permissions, budget, model: 'spare' });
+  const last = script('last', { run: './r.sh', output: Out, network: 'none' });
+  expect(harnessesReached(loadedOf([stage('two', { output: Out, steps: [first, last] })]), NAMED)).toEqual(['third']);
 });

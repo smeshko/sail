@@ -27,7 +27,7 @@ import { readEvents } from '../../src/events/consumers/ndjson';
 import { rebuildSummary } from '../../src/events/consumers/summary';
 import type { Summary } from '../../src/events/summary';
 import type { Consumer, ProviderEvent, SailEvent } from '../../src/events/types';
-import { fakeAdapters } from '../helpers/adapters';
+import { fakeAdapters, spyBuiltins } from '../helpers/adapters';
 import {
   AGENT_WORKFLOW,
   entryOf,
@@ -2394,6 +2394,42 @@ test('a two-step stage journals each step as it finishes, then its call, and run
       step: 'open',
       resultPath: `${PUBLISH_CALL}/steps/2-open/result.json`,
     });
+    expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 60_000);
+
+const SPY_HARNESSES = 'harness: { use: fake }\n  harnesses: { second: { use: spy } }';
+
+test('an agent call runs on the harness its alias names, and every other on the default', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeAgentFixture(repo.dir, [submits(SPEC, 0.25)]);
+    edit(sail, 'project.yaml', 'harness: { use: fake }', SPY_HARNESSES);
+    edit(sail, 'project.yaml', 'deep: claude-opus-5-5', 'deep: { harness: second, model: claude-opus-5-5 }');
+    const keys: string[] = [];
+    const end = await ranAgent(repo.dir, {
+      adapters: await fakeAdapters(repo.dir, {}, { builtins: spyBuiltins(keys) }),
+    });
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(keys).toEqual(['spec#1']);
+    expect(specResult(end.dir, 1)).toMatchObject({ harness: { adapter: 'spy', model: 'claude-opus-5-5' } });
+    const header = JSON.parse(readFileSync(join(end.dir, RUN_HEADER_FILE), 'utf8'));
+    expect(header.adapters.harnesses).toEqual({ second: { use: 'spy', origin: 'builtin' } });
+    expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 20_000);
+
+test("a multi-step stage's agent step runs on the harness its alias names, beside a stage on the default", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeTwoStep(repo.dir);
+    edit(sail, 'project.yaml', 'harness: { use: fake }', SPY_HARNESSES);
+    edit(sail, 'project.yaml', 'default: claude-sonnet-5', 'default: { harness: second, model: claude-sonnet-5 }');
+    const keys: string[] = [];
+    const end = await ranAgent(repo.dir, {
+      adapters: await fakeAdapters(repo.dir, {}, { builtins: spyBuiltins(keys) }),
+    });
+    expect(end).toMatchObject({ status: 'completed' });
+    expect(keys).toEqual(['publish#1/describe']);
+    expect(specResult(end.dir, 1)).toMatchObject({ harness: { adapter: 'fake' } });
     expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 60_000);

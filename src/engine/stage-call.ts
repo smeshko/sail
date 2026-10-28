@@ -286,7 +286,11 @@ function unstarted(
   const paths = stepPaths(runDir, stageIndex, stage, call, index, step.name, tryNumber);
   const now = (request.clock ?? (() => new Date()))();
   const errors: ContractError[] = [{ reason: 'not_started', message: why.message }];
-  const harness = { adapter: request.agent?.harness.name ?? 'none', model: modelOf(request.agent, step), turns: 0 };
+  const harness = {
+    adapter: (request.agent?.steps?.[step.name]?.harness ?? request.agent?.harness)?.name ?? 'none',
+    model: modelOf(request.agent, step),
+    turns: 0,
+  };
   const record =
     step.kind === 'agent'
       ? {
@@ -398,7 +402,16 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
         starts: 'step:start',
       };
       const agent = request.agent as AgentExecution;
-      ran = await runAgentTries(request, step as AgentStep, { ...agent, model: modelOf(agent, step) }, site, supplied);
+      const own = agent.steps?.[step.name];
+      const { harnessName: _stage, steps: _steps, ...rest } = agent;
+      const onName = own === undefined ? agent.harnessName : own.name;
+      const on: AgentExecution = {
+        ...rest,
+        model: modelOf(agent, step),
+        harness: own?.harness ?? agent.harness,
+        ...(onName === undefined ? {} : { harnessName: onName }),
+      };
+      ran = await runAgentTries(request, step as AgentStep, on, site, supplied);
     } else {
       const tryNumber = nextStepTry(runDir, stageIndex, name, call, index, step.name);
       ran = await runScriptTry(request, step as ScriptStep, supplied, {

@@ -39,7 +39,10 @@ export interface RunHeader {
   claim?: ClaimRecord;
   workflow: { name: string; version: number; origin: string; sha256: string };
   sail: { version: string; runtime: string };
-  adapters: Record<Port, AdapterEntry>;
+  adapters: Record<Port, AdapterEntry> & {
+    /** The named harnesses the run reached. Absent when it reached none. */
+    harnesses?: Record<string, AdapterEntry>;
+  };
   intake: IntakeEntry;
   stages: Record<string, RosterEntry>;
   budget?: { maxUsd?: number; maxMinutes?: number };
@@ -99,6 +102,8 @@ export interface HeaderFields {
   loaded: LoadedWorkflow;
   config: ProjectConfig;
   adapters: Record<Port, AdapterEntry>;
+  /** The named harnesses the run reached, which the header records beside the ports. Left out when empty. */
+  harnesses?: Record<string, AdapterEntry>;
   now: Date;
   /** The run's workspace, once it exists. Left out, the header holds no `branch`, `repository` or `workspace`. */
   workspace?: HeaderWorkspace;
@@ -118,7 +123,7 @@ export function workspaceFields(
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
 export function buildRunHeader(fields: HeaderFields): RunHeader {
-  const { runId, source, claim, fromRun, sailDir, loaded, config, adapters, now } = fields;
+  const { runId, source, claim, fromRun, sailDir, loaded, config, adapters, harnesses: named, now } = fields;
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
   const budget = runBudgetOf(config.budgets.run, loaded.workflow.budget);
@@ -135,7 +140,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
       sha256: workflowHash(sailDir, loaded),
     },
     sail: { version: pkg.version, runtime: `bun ${Bun.version}` },
-    adapters,
+    adapters: { ...adapters, ...(named === undefined || Object.keys(named).length === 0 ? {} : { harnesses: named }) },
     intake,
     stages,
     ...(budget === undefined ? {} : { budget }),

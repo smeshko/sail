@@ -36,6 +36,10 @@ export interface AgentExecution {
    * name runs on `model`.
    */
   models?: Readonly<Record<string, string>>;
+  /** The name of `harness` in `adapters.harnesses`. Left out, it is the default harness. */
+  harnessName?: string;
+  /** A multi-step stage's: the harness of each agent step that runs on a named one other than `harness`, by step name. */
+  steps?: Readonly<Record<string, { harness: Harness; name?: string }>>;
   /** `project.yaml`'s `conventions`. Left out, the defaults are appended. */
   conventions?: readonly string[];
 }

@@ -684,3 +684,100 @@ test('resolving a subset of the ports gives a relay too, which the adapters reso
   expect(() => harness.relay.attach(() => undefined)).toThrow(/already attached/);
   detach();
 });
+
+// Named harnesses: resolved on reach, from `adapters.harnesses`, with issues at /adapters/harnesses/<name>.
+
+function withHarnesses(harnesses: Record<string, AdapterConfig>): ProjectConfig {
+  const config = configOf({});
+  return { ...config, adapters: { ...config.adapters, harnesses } };
+}
+
+test('a named harness on the fake resolves to a harness and a builtin entry, and a name no one asks for is never loaded', async () => {
+  const { sailDir } = repo();
+  const resolved = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir,
+      config: withHarnesses({ second: { use: 'fake' }, broken: { use: './adapters/missing.ts' } }),
+      builtins: BUILTINS,
+      env: {},
+    }),
+  );
+  const named = await resolved.harnesses(['second']);
+  if ('issues' in named) throw new Error(JSON.stringify(named.issues));
+  expect(Object.keys(named.ports)).toEqual(['second']);
+  expect(named.ports.second?.name).toBe('fake');
+  expect(named.entries).toEqual({ second: FAKE });
+});
+
+test('a named harness whose requires() lacks a variable is an issue at /adapters/harnesses/<name> naming it, and one that is set resolves', async () => {
+  const { sailDir } = repo();
+  write(sailDir, 'adapters/echo.ts', harnessModule("requires: () => ['ECHO_TOKEN'],"));
+  const resolveWith = async (env: Env) => {
+    const resolved = resolvedOrThrow(
+      await resolveAdapters({
+        sailDir,
+        config: withHarnesses({ echo: { use: './adapters/echo.ts' } }),
+        builtins: BUILTINS,
+        env,
+      }),
+    );
+    return resolved.harnesses(['echo']);
+  };
+  expect(await resolveWith({})).toEqual({
+    issues: [{ path: '/adapters/harnesses/echo', message: 'needs ECHO_TOKEN, which is not set' }],
+  });
+  const named = await resolveWith({ ECHO_TOKEN: 'x' });
+  if ('issues' in named) throw new Error(JSON.stringify(named.issues));
+  expect(named.ports.echo?.name).toBe('echo');
+  expect(named.entries.echo).toEqual({ use: './adapters/echo.ts', origin: 'repo:.sail/adapters/echo.ts' });
+});
+
+test('a named harness that cannot be found is an issue at /adapters/harnesses/<name>', async () => {
+  const { sailDir } = repo();
+  const resolved = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir,
+      config: withHarnesses({ codex: { use: 'codex' } }),
+      builtins: BUILTINS,
+      env: {},
+    }),
+  );
+  const result = await resolved.harnesses(['codex']);
+  expect(result).toEqual({
+    issues: [
+      {
+        path: '/adapters/harnesses/codex',
+        message: expect.stringContaining("no built-in adapter 'codex' fills harness"),
+      },
+    ],
+  });
+});
+
+test('a named harness emits into the relay a run attaches, and into the emit the registry was given', async () => {
+  const { sailDir } = repo();
+  write(
+    sailDir,
+    'adapters/emitting.ts',
+    `export default { create(options, context) {
+      return { name: 'emitting', capabilities: () => (${HARNESS_CAPABILITIES}), run: async () => { context.emit({ type: 'workspace:leased', remote: 'r', branch: 'b' }); return {}; } };
+    } };`,
+  );
+  const emitted: unknown[] = [];
+  const resolved = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir,
+      config: withHarnesses({ emitting: { use: './adapters/emitting.ts' } }),
+      builtins: BUILTINS,
+      env: {},
+      emit: (event) => emitted.push(event),
+    }),
+  );
+  const seen: ProviderEvent[] = [];
+  resolved.relay.attach((event) => seen.push(event));
+  const named = await resolved.harnesses(['emitting']);
+  if ('issues' in named) throw new Error(JSON.stringify(named.issues));
+  await named.ports.emitting?.run({} as never);
+  const leased = { type: 'workspace:leased', remote: 'r', branch: 'b' };
+  expect(seen).toEqual([leased as never]);
+  expect(emitted).toEqual([leased]);
+});
