@@ -14,11 +14,14 @@ export type ErrorReason =
   | 'not_started'
   | 'budget_exceeded'
   | 'harness'
+  | 'usage_limit'
   | 'port';
 
 export interface ContractError {
   reason: ErrorReason;
   message: string;
+  /** When a `usage_limit` resets, if the provider said. */
+  resetsAt?: string;
 }
 
 /** A produced file as `result.json` records it. `path` is relative to the run directory. */

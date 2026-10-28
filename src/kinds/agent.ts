@@ -323,7 +323,9 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
 
   if (failure !== undefined) {
     const reason = result?.outcome === 'error' ? (result.reason ?? 'harness') : 'harness';
-    return ended([{ reason, message: failure }], { ...record, validationFailed: false });
+    const resetsAt = result?.outcome === 'error' ? result.resetsAt : undefined;
+    const error = resetsAt === undefined ? { reason, message: failure } : { reason, message: failure, resetsAt };
+    return ended([error], { ...record, validationFailed: false });
   }
   if (reasonless) {
     const message = 'a blocked agent must give its reason: one with nothing in it was submitted';
