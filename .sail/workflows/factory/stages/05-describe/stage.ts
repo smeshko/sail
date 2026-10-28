@@ -17,7 +17,7 @@ export const describe = agent('describe', {
   consumes: { ticket: value(TicketInput), plan: file('plan.md') },
   produces: { 'pr-body.md': 'file' },
   output: PrDescription,
-  model: 'default',
+  model: 'luna',
   permissions: {
     read: ['**'],
     write: ['$STAGE_OUT/**'],

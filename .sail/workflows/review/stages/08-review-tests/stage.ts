@@ -3,4 +3,4 @@
 // finding becomes.
 import { reviewer } from '../../reviewer';
 
-export const reviewTests = reviewer('review-tests');
+export const reviewTests = reviewer('review-tests', 'default');

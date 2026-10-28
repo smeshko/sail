@@ -16,13 +16,20 @@ adapters:
   ticketSource: { use: linear, team: ADW, inReview: In Review }
   codeHost: { use: github }
   harness: { use: claude-code }
+  # pi runs the OpenAI Codex models on the ChatGPT subscription `sail login codex` keeps.
+  harnesses: { codex: { use: pi } }
   # Each run's workspace is a fresh worktree: its setup installs the dependencies before any stage runs.
   workspace: { use: git-worktree, setup: bun install --frozen-lockfile }
   # Jev answers check-tasks and check-fix before their agents run. Without TYPESAFE_API_KEY it cannot be asked, and the
   # check agents run as before.
   jev: { use: typesafe }
 
-models: { default: claude-sonnet-5-5, deep: claude-opus-5-5 }
+models:
+  default: claude-sonnet-5-5
+  deep: claude-opus-5-5
+  luna: { harness: codex, model: openai-codex/gpt-6-luna }
+  terra: { harness: codex, model: openai-codex/gpt-6.1-terra }
+  sol: { harness: codex, model: openai-codex/gpt-6.1-sol }
 # No dollar cap on the run: each agent stage carries its own.
 budgets: { run: { maxMinutes: 120 } }
 # AGENTS.md carries the conventions, and CONTEXT.md the vocabulary every identifier and commit message uses.
