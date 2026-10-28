@@ -359,12 +359,16 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
       if (ticket === undefined) return graphqlError(400, 'INPUT_ERROR', `Entity not found: Issue - ${String(id)}`);
       return ok({ issue: { comments: page((ticket.comments ?? []).map(commentNode), 250, after) } });
     },
-    SailDesignated: ({ team: key, label, types, after }) => {
+    SailDesignated: ({ team: key, label, types, names, after }) => {
       const wanted = Array.isArray(types) ? types : [];
+      const named = Array.isArray(names) ? names : undefined;
       const found =
         key === team.key
           ? tickets.filter(
-              (ticket) => (ticket.labels ?? []).includes(String(label)) && wanted.includes(stateOf(ticket).type),
+              (ticket) =>
+                (ticket.labels ?? []).includes(String(label)) &&
+                wanted.includes(stateOf(ticket).type) &&
+                (named === undefined || named.includes(stateOf(ticket).name)),
             )
           : [];
       return ok({ issues: page(found.map(node), 50, after) });
