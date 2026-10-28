@@ -76,8 +76,8 @@ export interface WorldSeedPull {
   readonly checkRuns?: readonly WorldCheckRun[];
   /** The commit statuses on its head sha. */
   readonly statuses?: readonly WorldStatus[];
-  /** The GitHub Actions workflow runs on its head sha. */
-  readonly workflowRuns?: readonly WorldWorkflowRun[];
+  /** The GitHub Actions workflow runs on its head sha, or the status GitHub refuses them with. */
+  readonly workflowRuns?: readonly WorldWorkflowRun[] | 403 | 404;
   /** Its author's login: `sail-bot` unless given. */
   readonly user?: string;
   /** A head in another repository, `true`, or in a fork since deleted. Its head sha is then the seed's, or zeros. */
@@ -444,9 +444,12 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     }
     if (method === 'GET' && path === '/actions/runs') {
       const headSha = query.get('head_sha');
-      const runs = (seed.pullRequests ?? []).flatMap((pr, i) =>
-        pullRequests[i]?.headSha === headSha ? (pr.workflowRuns ?? []) : [],
+      const seeded = (seed.pullRequests ?? []).flatMap((pr, i) =>
+        pullRequests[i]?.headSha === headSha && pr.workflowRuns !== undefined ? [pr.workflowRuns] : [],
       );
+      const refused = seeded.find((runs) => typeof runs === 'number');
+      if (refused !== undefined) return json(refused, { message: 'Resource not accessible by integration' });
+      const runs = seeded.flatMap((runs) => (typeof runs === 'number' ? [] : runs));
       return json(200, { total_count: runs.length, workflow_runs: page(runs, query) });
     }
     const status = /^\/commits\/([^/]+)\/status$/.exec(path);

@@ -155,6 +155,40 @@ export function latestRuns(
 }
 
 /**
+ * The workflow of each check suite on `sha`, from its GitHub Actions workflow runs. A token GitHub refuses them to, one
+ * without Actions read access or on a repository without Actions, gets each suite as a workflow of its own: a later
+ * event's run then no longer supersedes an earlier one, but no run of one workflow ever hides another's failure.
+ */
+async function readWorkflows(
+  client: GitHubClient,
+  op: string,
+  sha: string,
+  checkRuns: readonly GitHubCheckRun[],
+): Promise<Map<number, number>> {
+  let workflowRuns: GitHubWorkflowRun[];
+  try {
+    workflowRuns = await readPaged<GitHubWorkflowRun>(
+      client,
+      op,
+      sha,
+      'actions/runs',
+      'workflow_runs',
+      'check_suite_id',
+    );
+  } catch (error) {
+    if (!(error instanceof PortError && (error.code === 'forbidden' || error.code === 'not_found'))) throw error;
+    return new Map(
+      checkRuns.flatMap((run) => (run.check_suite?.id === undefined ? [] : [[run.check_suite.id, run.check_suite.id]])),
+    );
+  }
+  return new Map(
+    workflowRuns.flatMap((run) =>
+      Number.isInteger(run.workflow_id) ? [[run.check_suite_id, run.workflow_id as number] as const] : [],
+    ),
+  );
+}
+
+/**
  * The checks on `sha`: its latest check run of each name, app and workflow, then its commit statuses, each in GitHub's
  * order. A run a later one of its name, app and workflow superseded is dropped from `checks` and kept in `raw`. The
  * workflows are read only when one app's runs of a name sit in more than one check suite.
@@ -166,14 +200,7 @@ export async function readChecks(
 ): Promise<{ checks: Check[]; raw: { checkRuns: GitHubCheckRun[]; statuses: GitHubStatus[] } }> {
   const checkRuns = await readPaged<GitHubCheckRun>(client, op, sha, 'check-runs', 'check_runs', 'name');
   // A name repeated across check suites may be two workflows' jobs: their workflow runs tell which suite is which.
-  const workflowRuns = suitesShareNames(checkRuns)
-    ? await readPaged<GitHubWorkflowRun>(client, op, sha, 'actions/runs', 'workflow_runs', 'check_suite_id')
-    : [];
-  const workflowOf = new Map(
-    workflowRuns.flatMap((run) =>
-      Number.isInteger(run.workflow_id) ? [[run.check_suite_id, run.workflow_id as number] as const] : [],
-    ),
-  );
+  const workflowOf = suitesShareNames(checkRuns) ? await readWorkflows(client, op, sha, checkRuns) : new Map();
   const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses', 'context');
   const runUrl = (run: GitHubCheckRun) => run.html_url ?? run.details_url ?? undefined;
   const checks: Check[] = [

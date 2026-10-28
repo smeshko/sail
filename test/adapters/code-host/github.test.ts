@@ -997,6 +997,42 @@ test("runs of one name from one workflow's later runs collapse to the latest, th
   expect('rejected' in read ? read : read.checks).toEqual([{ name: 'test', status: 'passed' }]);
 });
 
+test.each([403, 404] as const)(
+  'workflow runs GitHub refuses with %d leave each check suite a check of its own, so an earlier failure stays',
+  async (refused) => {
+    const run = (id: number, suite: number, conclusion: string) => ({
+      id,
+      app: { id: 15368 },
+      check_suite: { id: suite },
+      name: 'test',
+      status: 'completed',
+      conclusion,
+    });
+    const on = world({
+      pullRequests: [
+        {
+          number: 7,
+          head: 'sail/designated',
+          checkRuns: [
+            run(10, 100, 'failure'),
+            run(11, 100, 'success'),
+            run(12, 200, 'failure'),
+            run(13, 300, 'success'),
+          ],
+          workflowRuns: refused,
+        },
+      ],
+    });
+    const read = await settle(host(on).checks(7));
+    // Suite 100's re-run supersedes its failure; suite 200's failure is no other suite's to supersede.
+    expect('rejected' in read ? read : read.checks).toEqual([
+      { name: 'test', status: 'passed' },
+      { name: 'test', status: 'failed' },
+      { name: 'test', status: 'passed' },
+    ]);
+  },
+);
+
 test('a workflow runs answer that lists no check suite id reads as unavailable', async () => {
   const on = world({
     pullRequests: [
