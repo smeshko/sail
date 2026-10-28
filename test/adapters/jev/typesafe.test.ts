@@ -121,6 +121,19 @@ test('an answer without usage leaves usage out of the result and the event', asy
   expect(capture.events.map((event) => 'usage' in event)).toEqual([false]);
 });
 
+test('an answer naming an empty model is the model asked, in the result and the event (review R4)', async () => {
+  const capture = captureEvents();
+  const answered = await createTypesafeJev({
+    apiKey: KEY,
+    fetch: scripted(() => json({ ...DOCS_ANSWER, model: '' })).fetch,
+    emit: capture.emit,
+  }).ask({ ...THREE_QUESTIONS, model: 'jev-request' });
+  expect([answered.model, capture.events.map((event) => event.type === 'jev:asked' && event.model)]).toEqual([
+    'jev-request',
+    ['jev-request'],
+  ]);
+});
+
 test('the request is a POST to /v1/systemone with a bearer key, a JSON body, and the model jev-latest by default', async () => {
   const { fetch, sent } = scripted(() => json(DOCS_ANSWER));
   await asking(fetch).ask(THREE_QUESTIONS);

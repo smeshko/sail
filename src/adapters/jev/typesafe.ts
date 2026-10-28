@@ -121,7 +121,8 @@ export function createTypesafeJev(options: TypesafeJevOptions): Jev {
         : { inputTokens: reply.data.usage.input_tokens, outputTokens: reply.data.usage.output_tokens };
     const latencyMs = Math.max(0, now().getTime() - started);
     const answered: JevAnswered = {
-      model: reply.data.model,
+      // An empty model names none, and the event needs one: the model asked answered.
+      model: reply.data.model === '' ? model : reply.data.model,
       answers: reply.data.answers,
       ...(usage === undefined ? {} : { usage }),
       latencyMs,
