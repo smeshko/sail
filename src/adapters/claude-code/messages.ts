@@ -243,6 +243,9 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
           const { status, resetsAt } = message.rate_limit_info;
           if (status === 'rejected') {
             limited = { ...limited, ...(resetsAt === undefined ? {} : { resetsAt: resetsFromEpoch(resetsAt) }) };
+          } else {
+            // Allowed again, as on overage or a new window: a later failure is not the limit's.
+            limited = undefined;
           }
           return [];
         }

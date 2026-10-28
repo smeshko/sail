@@ -127,6 +127,24 @@ test('a rejected rate limit event gives usage_limit, and its reset time wins ove
   expect(bare.result).not.toHaveProperty('resetsAt');
 });
 
+test('a rejected rate limit event gives usage_limit to a session that then failed during execution or ended without a result, and not once a later event allowed it again', () => {
+  const rejected = rateLimitEvent('rejected', 1_793_200_800);
+  const during = ending(resultError('error_during_execution'), [init(), rejected], { now: NOW });
+  const none = ending(undefined, [init(), rejected], { now: NOW });
+  const allowedAgain = resultSuccess({ isError: true, result: 'API Error: 529 Overloaded', cost: 0, models: {} });
+  const recovered = ending(allowedAgain, [init(), rejected, rateLimitEvent('allowed')], { now: NOW });
+  const reasons = [during, none, recovered].map(({ result, endReason }) => [
+    result.outcome,
+    'reason' in result && result.reason,
+    endReason,
+  ]);
+  expect(reasons).toEqual([
+    ['error', 'usage_limit', 'usage_limit'],
+    ['error', 'usage_limit', 'usage_limit'],
+    ['error', 'harness', 'failed'],
+  ]);
+});
+
 test('a limit text with a time that cannot be read still gives usage_limit, with no reset time', () => {
   const limited = resultSuccess({ isError: true, result: "You've hit your usage limit", cost: 0, models: {} });
   const ended = ending(limited, [init()], { now: NOW });

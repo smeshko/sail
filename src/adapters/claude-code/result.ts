@@ -69,7 +69,7 @@ export function toHarnessResult(input: ResultInput): Ended {
     const text = messageOf(input.thrown.error);
     return failure(`claude-code: ${text}`, text);
   }
-  if (result === undefined) return failed('the session ended without a result', 'failed');
+  if (result === undefined) return failure('the session ended without a result', '');
 
   /** `text`, then what an error result said after a colon, when it said anything. */
   const saying = (text: string, errors: readonly string[]) => {
@@ -92,7 +92,7 @@ export function toHarnessResult(input: ResultInput): Ended {
     case 'error_max_structured_output_retries':
       return failed(saying('the output never matched its schema', result.errors), 'max_structured_output_retries');
     case 'error_during_execution':
-      return failed(saying('the session failed during execution', result.errors), 'failed');
+      return failure(saying('the session failed during execution', result.errors), result.errors.join('; '));
   }
 
   if (result.is_error) {

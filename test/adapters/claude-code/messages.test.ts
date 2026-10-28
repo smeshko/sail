@@ -323,6 +323,14 @@ test('a rejected rate limit event marks the session limited with its reset time,
   ]);
 });
 
+test('a rate limit event that allows the session again after a rejected one clears its limit', () => {
+  const { reader: allowed } = reader();
+  const { reader: warned } = reader();
+  readAll(allowed, [rateLimitEvent('rejected', 1_793_197_200), rateLimitEvent('allowed')]);
+  readAll(warned, [rateLimitEvent('rejected', 1_793_197_200), rateLimitEvent('allowed_warning', 1_793_197_200)]);
+  expect([allowed.state().limited, warned.state().limited]).toEqual([undefined, undefined]);
+});
+
 test('an assistant message with the rate_limit error marks the session limited, and a later rejected event adds its reset time', () => {
   const { reader: r } = reader();
   readAll(r, [assistantText('m1', "You've hit your session limit", { error: 'rate_limit' })]);
