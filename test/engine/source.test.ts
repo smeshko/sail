@@ -147,6 +147,17 @@ test('an answer of get that is no Ticket is refused as invalid, saying where it 
   });
 });
 
+test('an unstarted ticket outside the pick-up states is refused with its own text unless forced', async () => {
+  const { source } = world();
+  const picky: TicketSource = { ...source, canPickUp: () => false };
+  const refused = await resolveSource({ ref: 'FAKE-1', ticketSource: picky, label: 'sail' });
+  const forced = await resolveSource({ ref: 'FAKE-1', ticketSource: picky, label: 'sail', force: true });
+  expect([refused, 'refused' in forced]).toEqual([
+    { refused: 'the ticket is not in a pick-up state: it is Todo. --force runs it anyway' },
+    false,
+  ]);
+});
+
 test.each<[string, string, string, string]>([
   ['an undesignated ticket', 'FAKE-3', 'sail', "the ticket is not designated: it carries no 'sail' label"],
   [

@@ -143,6 +143,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       return ticket;
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
+    canPickUp: (ticket) => ticket.state.type === 'unstarted',
     async listDesignated(label) {
       return store
         .read()

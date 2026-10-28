@@ -32,6 +32,7 @@ export const OPERATIONS: Record<Port, string[]> = {
   ticketSource: [
     'addLabel',
     'attach',
+    'canPickUp',
     'capabilities',
     'claim',
     'comment',

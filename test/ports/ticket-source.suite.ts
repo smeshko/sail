@@ -146,6 +146,13 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     ]).toEqual([true, false, false]);
   });
 
+  test(`${label}: canPickUp holds for the designated, unstarted ticket and not for the started one`, async () => {
+    const { adapter, world } = await start();
+    const unstarted = await adapter.get(world.designated);
+    const started = await adapter.get(world.started);
+    expect([adapter.canPickUp(unstarted), adapter.canPickUp(started)]).toEqual([true, false]);
+  });
+
   test(`${label}: listDesignated holds the designated ticket, but not a started or an undesignated one`, async () => {
     const { adapter, world } = await start();
     const listed = await adapter.listDesignated(world.label);

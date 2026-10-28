@@ -148,7 +148,7 @@ async function pollSources(target: WatchTarget): Promise<() => { found: number; 
   return () => {
     const { ticketSource, label } = target;
     const tickets = answered.filter(
-      (ticket) => ticketSource.isDesignated(ticket, label) && ticket.state.type === 'unstarted',
+      (ticket) => ticketSource.isDesignated(ticket, label) && ticketSource.canPickUp(ticket),
     );
     return { found: tickets.length, added: target.store.add(tickets) };
   };

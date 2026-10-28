@@ -429,6 +429,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       return ticket;
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
+    canPickUp: (ticket) => ticket.state.type === 'unstarted',
     async listDesignated(label) {
       const keys: string[] = [];
       const seen = new Set<string>();

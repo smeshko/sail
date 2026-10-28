@@ -89,14 +89,16 @@ export interface TicketSource {
   /** The ticket with its comments, links and attachments. Emits `ticket:fetched`. */
   get(ticketKey: string): Promise<Ticket>;
   isDesignated(ticket: Ticket, label: string): boolean;
-  /** The designated tickets that are still unstarted. */
+  /** Whether the ticket is in one of this source's pick-up states: by default any state it reads as unstarted. */
+  canPickUp(ticket: Ticket): boolean;
+  /** The designated tickets that are in a pick-up state. */
   listDesignated(label: string): Promise<Ticket[]>;
   /**
    * The team's tickets in a state of the filter's type and carrying its label, sorted by ticket number. A state that
    * isn't a `TicketStateType` rejects as `invalid`. Emits nothing.
    */
   list(filter: TicketFilter): Promise<ListedTicket[]>;
-  /** Moves an unstarted ticket to in progress. Emits `ticket:claimed` only when the claim took (D4). */
+  /** Moves a ticket in a pick-up state to in progress. Emits `ticket:claimed` only when the claim took (D4). */
   claim(ticketKey: string): Promise<ClaimResult>;
   /** Moves the ticket, and returns the state the provider reports. Emits `ticket:updated`. */
   update(ticketKey: string, change: { readonly state: TicketMove }): Promise<Moved>;
