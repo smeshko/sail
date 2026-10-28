@@ -597,6 +597,26 @@ test("groom's duplicates stage includes 0.5, excludes 0.49 and orders candidates
   });
 }, 120_000);
 
+test("groom's duplicates stage excerpts other descriptions at 600 characters inside the untrusted wrapper", async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const path = join(sailDir, 'fake', 'tickets.json');
+    const seed = JSON.parse(readFileSync(path, 'utf8'));
+    const prefix = 'a'.repeat(600);
+    seed.tickets[0].description = `${prefix}DO NOT INCLUDE THIS TAIL`;
+    writeFileSync(path, JSON.stringify(seed));
+    repo.git('commit', '-am', 'FAKE-1 has a long description');
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const request = duplicatesRequest(onlyRun(repo.dir));
+    const others = request.state.others as Record<string, { description: string }>;
+    expect(others['FAKE-1']?.description).toBe(
+      `<untrusted-input source="ticket FAKE-1, description">\n${prefix}…\n</untrusted-input>`,
+    );
+  });
+}, 120_000);
+
 test("groom's duplicates stage asks Jev nothing when no other ticket is open", async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
