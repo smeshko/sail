@@ -93,7 +93,7 @@ test('the usage lists sail <ticket> first among the commands, and says what --fo
   const { stdout } = await runCaptured(['--help']);
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect(commands[0]).toBe(`  ${TICKET_USAGE}`);
-  expect(stdout).toMatch(/^ {2}--force {2,}\S.*designated.*unstarted/m);
+  expect(stdout).toMatch(/^ {2}--force {2,}\S.*designated.*pick-up state/m);
   expect(stdout).toMatch(/^ {2}--until <stage> {2,}\S.*first call.*sail resume/m);
 });
 
