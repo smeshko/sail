@@ -8,7 +8,7 @@
 //
 // A fresh run's checks, in order: the config, the workflow and its definitions, the model aliases, a stage named
 // `intake`, an intake that accepts tickets and is a built-in, the stage `--until` names, then the ticket itself, which
-// the ticket source must parse, hold, and show designated and unstarted unless `--force`. The run's header is built and
+// the ticket source must parse, hold, and show designated and in a pick-up state unless `--force`. The run's header is built and
 // checked before anything is written. Then, in order (D1):
 //   1. the lease on the run's branch, which a live run holding it refuses, naming that run;
 //   2. the run directory, then the workspace inside it;
@@ -155,7 +155,7 @@ export interface OpenRunOptions {
   workflow: string;
   /** The ticket the run starts from, as typed: a ticket key, or a URL the ticket source owns. */
   ticket: string;
-  /** Runs a ticket that is not designated or not unstarted, and records which check it overrode. */
+  /** Runs a ticket that is not designated or not in a pick-up state, and records which check it overrode. */
   force?: boolean;
   /** The stage after whose first call the run stops, suspended. One the workflow doesn't reach is refused. */
   until?: string;

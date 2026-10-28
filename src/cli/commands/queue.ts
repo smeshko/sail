@@ -5,7 +5,7 @@
 //   state, its dedup key, its title and what applies of its run, attempts, retry time, `forced` and reason.
 // - `add`, `requeue`, `drop` and `poll` change the queue only through the live watcher of this repository, and only for
 //   a workflow in its set: the watcher alone writes its queue file. Each checks what it can first, so the refusal shows
-//   in this terminal: `add` the ticket as a start checks it, designated and unstarted unless `--force`, and not already
+//   in this terminal: `add` the ticket as a start checks it, designated and in a pick-up state unless `--force`, and not already
 //   queued, for a workflow that polls tickets only; `requeue` an item that is parked or failed and whose last run has ended; `drop` an item that isn't
 //   dispatched. Then it drops the command, waits up to 15 s for the watcher to take it, and prints the item as
 //   its queue file holds it then. A command not taken in time waits in the inbox, and the command exits 0 saying so, as

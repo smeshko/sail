@@ -118,7 +118,7 @@ export interface ClaimedSource {
 /**
  * Claims the ticket, moves it to In Progress through `update` when the claim didn't take and `force` is set, then
  * comments with the run id. The claim's own answer decides, not an earlier fetch: two starts can both read a ticket as
- * unstarted, and one claim takes. Each port call that fails refuses, and nothing is moved back.
+ * in a pick-up state, and one claim takes. Each port call that fails refuses, and nothing is moved back.
  */
 export async function claimSource(options: ClaimSourceOptions): Promise<ClaimedSource | { refused: string }> {
   const { ticketKey, runId, ticketSource, force = false } = options;
