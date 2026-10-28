@@ -36,11 +36,21 @@ export interface WorldPull {
 
 /** A check run on a head sha, as GitHub's check-runs endpoint lists it. */
 export interface WorldCheckRun {
+  readonly id?: number | string | null;
+  readonly app?: { readonly id: number };
+  readonly check_suite?: { readonly id: number };
   readonly name: string;
   readonly status: string;
   readonly conclusion?: string | null;
   readonly html_url?: string | null;
   readonly details_url?: string | null;
+}
+
+/** A GitHub Actions workflow run on a head sha, as GitHub's `actions/runs` endpoint lists it. */
+export interface WorldWorkflowRun {
+  readonly id: number;
+  readonly workflow_id: number;
+  readonly check_suite_id: number;
 }
 
 /** A commit status on a head sha, as GitHub's combined status lists it. */
@@ -66,6 +76,8 @@ export interface WorldSeedPull {
   readonly checkRuns?: readonly WorldCheckRun[];
   /** The commit statuses on its head sha. */
   readonly statuses?: readonly WorldStatus[];
+  /** The GitHub Actions workflow runs on its head sha, or the status GitHub refuses them with. */
+  readonly workflowRuns?: readonly WorldWorkflowRun[] | 403 | 404;
   /** Its author's login: `sail-bot` unless given. */
   readonly user?: string;
   /** A head in another repository, `true`, or in a fork since deleted. Its head sha is then the seed's, or zeros. */
@@ -429,6 +441,16 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
     if (method === 'GET' && checkRuns !== null) {
       const runs = checksOf(String(checkRuns[1]), true)?.checkRuns ?? [];
       return json(200, { total_count: runs.length, check_runs: page(runs, query) });
+    }
+    if (method === 'GET' && path === '/actions/runs') {
+      const headSha = query.get('head_sha');
+      const seeded = (seed.pullRequests ?? []).flatMap((pr, i) =>
+        pullRequests[i]?.headSha === headSha && pr.workflowRuns !== undefined ? [pr.workflowRuns] : [],
+      );
+      const refused = seeded.find((runs) => typeof runs === 'number');
+      if (refused !== undefined) return json(refused, { message: 'Resource not accessible by integration' });
+      const runs = seeded.flatMap((runs) => (typeof runs === 'number' ? [] : runs));
+      return json(200, { total_count: runs.length, workflow_runs: page(runs, query) });
     }
     const status = /^\/commits\/([^/]+)\/status$/.exec(path);
     if (method === 'GET' && status !== null) {

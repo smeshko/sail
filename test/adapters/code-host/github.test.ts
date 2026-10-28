@@ -24,7 +24,9 @@ import {
   type GitHubWorld,
   type GitHubWorldSeed,
   WORLD_API,
+  type WorldCheckRun,
   type WorldSeedPull,
+  type WorldWorkflowRun,
   worldMergeSha,
 } from '../../helpers/github-world';
 import { holdTempRepo } from '../../helpers/held-repo';
@@ -803,6 +805,297 @@ test('a read of checks asks for pull request 7, then the check runs and the stat
       },
     ],
   });
+});
+
+/** A world whose pull request 7 holds `checkRuns` and `statuses` on its head. */
+const checksWorld = (checkRuns: WorldCheckRun[], statuses: { context: string; state: string }[] = []) =>
+  world({ pullRequests: [{ number: 7, head: 'sail/designated', checkRuns, statuses }] });
+
+test('a check re-run reads as its latest run: failed then passed twice reads as one passed check, in the event too, and raw keeps all three', async () => {
+  const on = checksWorld([
+    { id: 1, name: 'test', status: 'completed', conclusion: 'failure' },
+    { id: 2, name: 'test', status: 'completed', conclusion: 'success' },
+    { id: 3, name: 'test', status: 'completed', conclusion: 'success' },
+  ]);
+  const capture = captureEvents();
+  const read = await settle(host(on, capture.emit).checks(7));
+  expect({
+    checks: 'rejected' in read ? read : read.checks,
+    events: capture.events.map((event) => ('checks' in event ? event.checks : event)),
+    rawRuns: 'rejected' in read ? read : (read.raw as { checkRuns: unknown[] }).checkRuns.length,
+  }).toEqual({
+    checks: [{ name: 'test', status: 'passed' }],
+    events: [[{ name: 'test', status: 'passed' }]],
+    rawRuns: 3,
+  });
+});
+
+test.each<[string, WorldCheckRun[], CheckStatus]>([
+  [
+    'a later pending run supersedes an earlier failure',
+    [
+      { id: 1, name: 'test', status: 'completed', conclusion: 'failure' },
+      { id: 2, name: 'test', status: 'in_progress' },
+    ],
+    'pending',
+  ],
+  [
+    'a later failed run supersedes an earlier success',
+    [
+      { id: 1, name: 'test', status: 'completed', conclusion: 'success' },
+      { id: 2, name: 'test', status: 'completed', conclusion: 'failure' },
+    ],
+    'failed',
+  ],
+  [
+    'the greatest id wins whatever its position in the list',
+    [
+      { id: 9, name: 'test', status: 'completed', conclusion: 'success' },
+      { id: 4, name: 'test', status: 'completed', conclusion: 'failure' },
+      { id: 2, name: 'test', status: 'completed', conclusion: 'failure' },
+    ],
+    'passed',
+  ],
+])('%s', async (_name, runs, status) => {
+  const read = await settle(host(checksWorld(runs)).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([{ name: 'test', status }]);
+});
+
+test("runs of different names are each kept in GitHub's order, beside the latest of a repeated one", async () => {
+  const on = checksWorld(
+    [
+      { id: 1, name: 'build', status: 'completed', conclusion: 'success' },
+      { id: 2, name: 'test', status: 'completed', conclusion: 'failure' },
+      { id: 3, name: 'lint', status: 'completed', conclusion: 'success' },
+      { id: 4, name: 'test', status: 'completed', conclusion: 'success' },
+    ],
+    [{ context: 'ci/legacy', state: 'success' }],
+  );
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'build', status: 'passed' },
+    { name: 'lint', status: 'passed' },
+    { name: 'test', status: 'passed' },
+    { name: 'ci/legacy', status: 'passed' },
+  ]);
+});
+
+test('a repeated name with a run lacking an id keeps every run of that name', async () => {
+  const on = checksWorld([
+    { id: 5, name: 'test', status: 'completed', conclusion: 'success' },
+    { name: 'test', status: 'completed', conclusion: 'failure' },
+    { id: 1, name: 'build', status: 'completed', conclusion: 'success' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'test', status: 'passed' },
+    { name: 'test', status: 'failed' },
+    { name: 'build', status: 'passed' },
+  ]);
+});
+
+test.each<[string, string | null | number]>([
+  ['a string', '5'],
+  ['null', null],
+  ['a fraction', 2.5],
+])('a repeated name with a run whose id is %s keeps every run of that name', async (_name, id) => {
+  const on = checksWorld([
+    { id: 1, name: 'test', status: 'completed', conclusion: 'success' },
+    { id, name: 'test', status: 'completed', conclusion: 'failure' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'test', status: 'passed' },
+    { name: 'test', status: 'failed' },
+  ]);
+});
+
+test('a repeated name whose runs all have ids collapses beside a name with a run lacking one', async () => {
+  const on = checksWorld([
+    { id: 1, name: 'build', status: 'completed', conclusion: 'failure' },
+    { name: 'test', status: 'completed', conclusion: 'success' },
+    { id: 2, name: 'build', status: 'completed', conclusion: 'success' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'test', status: 'passed' },
+    { name: 'build', status: 'passed' },
+  ]);
+});
+
+test("runs of one name from different apps are distinct checks: an earlier app's failure is kept beside a later app's pass", async () => {
+  const on = checksWorld([
+    { id: 10, app: { id: 15368 }, name: 'build', status: 'completed', conclusion: 'failure' },
+    { id: 11, app: { id: 99 }, name: 'build', status: 'completed', conclusion: 'success' },
+    { id: 12, app: { id: 15368 }, name: 'build', status: 'completed', conclusion: 'failure' },
+  ]);
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([
+    { name: 'build', status: 'passed' },
+    { name: 'build', status: 'failed' },
+  ]);
+});
+
+test("runs of one name from two workflows are distinct checks: one workflow's failure is kept beside the other's later pass", async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [
+          {
+            id: 10,
+            app: { id: 15368 },
+            check_suite: { id: 100 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            id: 11,
+            app: { id: 15368 },
+            check_suite: { id: 200 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        workflowRuns: [
+          { id: 1000, workflow_id: 1, check_suite_id: 100 },
+          { id: 2000, workflow_id: 2, check_suite_id: 200 },
+        ],
+      },
+    ],
+  });
+  const read = await settle(host(on).checks(7));
+  const sha = headOf7(on);
+  expect({ read: 'rejected' in read ? read : read.checks, sent: on.routes() }).toEqual({
+    read: [
+      { name: 'test', status: 'failed' },
+      { name: 'test', status: 'passed' },
+    ],
+    sent: [
+      'GET /repos/o/r/pulls/7',
+      `GET /repos/o/r/commits/${sha}/check-runs?per_page=100&page=1`,
+      `GET /repos/o/r/actions/runs?head_sha=${sha}&per_page=100&page=1`,
+      `GET /repos/o/r/commits/${sha}/status?per_page=100&page=1`,
+    ],
+  });
+});
+
+test("runs of one name from one workflow's later runs collapse to the latest, though each run is a check suite of its own", async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [
+          {
+            id: 10,
+            app: { id: 15368 },
+            check_suite: { id: 100 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            id: 11,
+            app: { id: 15368 },
+            check_suite: { id: 200 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+          {
+            id: 12,
+            app: { id: 15368 },
+            check_suite: { id: 300 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        workflowRuns: [
+          { id: 1000, workflow_id: 1, check_suite_id: 100 },
+          { id: 2000, workflow_id: 1, check_suite_id: 200 },
+          { id: 3000, workflow_id: 1, check_suite_id: 300 },
+        ],
+      },
+    ],
+  });
+  const read = await settle(host(on).checks(7));
+  expect('rejected' in read ? read : read.checks).toEqual([{ name: 'test', status: 'passed' }]);
+});
+
+test.each([403, 404] as const)(
+  'workflow runs GitHub refuses with %d leave each check suite a check of its own, so an earlier failure stays',
+  async (refused) => {
+    const run = (id: number, suite: number, conclusion: string) => ({
+      id,
+      app: { id: 15368 },
+      check_suite: { id: suite },
+      name: 'test',
+      status: 'completed',
+      conclusion,
+    });
+    const on = world({
+      pullRequests: [
+        {
+          number: 7,
+          head: 'sail/designated',
+          checkRuns: [
+            run(10, 100, 'failure'),
+            run(11, 100, 'success'),
+            run(12, 200, 'failure'),
+            run(13, 300, 'success'),
+          ],
+          workflowRuns: refused,
+        },
+      ],
+    });
+    const read = await settle(host(on).checks(7));
+    // Suite 100's re-run supersedes its failure; suite 200's failure is no other suite's to supersede.
+    expect('rejected' in read ? read : read.checks).toEqual([
+      { name: 'test', status: 'passed' },
+      { name: 'test', status: 'failed' },
+      { name: 'test', status: 'passed' },
+    ]);
+  },
+);
+
+test('a workflow runs answer that lists no check suite id reads as unavailable', async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [
+          {
+            id: 10,
+            app: { id: 15368 },
+            check_suite: { id: 100 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'failure',
+          },
+          {
+            id: 11,
+            app: { id: 15368 },
+            check_suite: { id: 200 },
+            name: 'test',
+            status: 'completed',
+            conclusion: 'success',
+          },
+        ],
+        workflowRuns: [{ id: 1000, workflow_id: 1 } as WorldWorkflowRun],
+      },
+    ],
+  });
+  const error = await rejection(host(on).checks(7));
+  expect(error instanceof PortError ? [error.code, error.message] : String(error)).toEqual([
+    'unavailable',
+    `codeHost.checks: GitHub's actions/runs answer for ${headOf7(on)} lists an entry without a check_suite_id`,
+  ]);
 });
 
 /** A world whose pull request 7 has `count` passing check runs. */
