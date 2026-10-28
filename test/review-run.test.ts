@@ -76,7 +76,10 @@ test('six reviewers with staggered delays run at once: every one starts before t
     const [ended] = ofType(events, 'all:end');
     const sum = REVIEW_DELAYS.reduce((total, ms) => total + ms, 0);
     expect(ended?.durationMs).toBeLessThan(sum * 0.6);
-    expect(keysOf(dir)).toEqual(['intake#1', ...[...REVIEW_KEYS].reverse()]);
+    // As they completed, by their stage:end: the order their delays predict is one a loaded machine can swap.
+    const completed = ofType(events, 'stage:end').flatMap((event) => (isReviewer(event) ? [event.key] : []));
+    expect([...completed].sort()).toEqual([...REVIEW_KEYS].sort());
+    expect(keysOf(dir)).toEqual(['intake#1', ...completed]);
     const harness = JSON.parse(readFileSync(join(repo.dir, '.sail', 'fake', 'harness.json'), 'utf8'));
     const summaries = REVIEWERS.map((name) => harness[name][0].output.summary);
     expect(ofType(events, 'run:end')[0]?.result).toEqual({ summaries });

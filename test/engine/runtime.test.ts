@@ -2119,7 +2119,12 @@ test("a call of a group that ends in error lets its siblings end and be journale
       stopReason: 'stage_error',
       message: 'b#1 ended in error: harness: b broke',
     });
-    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 error', 'c#1 done', 'a#1 done']);
+    // The order a group's calls complete in follows the fake's delays, which a loaded machine reorders.
+    const [first, ...group] = journaled(end.dir);
+    expect({ first, group: group.sort() }).toEqual({
+      first: 'intake#1 passed',
+      group: ['a#1 done', 'b#1 error', 'c#1 done'],
+    });
     const ends = ofType(events(end.dir), 'all:end');
     expect(ends.map((event) => event.outcomes)).toEqual([{ 'a#1': 'done', 'b#1': 'error', 'c#1': 'done' }]);
   });

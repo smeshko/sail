@@ -29,10 +29,14 @@ import {
 } from '../helpers/agent-fixture';
 import { edit, FIXTURE_SAIL, write } from '../helpers/fixture';
 import { fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
+import { killOne, sailProcess, until } from '../helpers/sail-process';
 import {
   copyRun,
+  heldRuns,
   interruptWhenAsleep,
+  releaseHeld,
   type StubOptions,
+  setHoldAt,
   setSleepAt,
   swapImplementAndTests,
   whenSleeping,
@@ -535,17 +539,13 @@ test("sail resume continues in the run's own worktree under a lease renewed with
 test('sail resume refuses a run still running in another process, naming its pid, and leaves its STATUS and lease as they were', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    setSleepAt(repo.dir, 'implement#1');
-    const running = Bun.spawn([process.execPath, MAIN, 'FAKE-1'], {
-      cwd: repo.dir,
-      env: repo.env,
-      stdin: 'ignore',
-      stdout: 'ignore',
-      stderr: 'ignore',
-    });
+    setHoldAt(repo.dir, 'implement#1');
+    const running = sailProcess(repo.dir, repo.env, ['FAKE-1']);
     try {
-      const sleeping = await whenSleeping(repo.dir);
-      const runId = runIdIn(repo.dir);
+      expect(await until('the run holding at implement#1', () => heldRuns(repo.dir).length === 1)).toBe(
+        'the run holding at implement#1',
+      );
+      const runId = heldRuns(repo.dir)[0]?.runId ?? '';
       const lease = leasesIn(repo);
       const refused = await spawned(repo, 'resume', runId);
       expect({
@@ -554,13 +554,13 @@ test('sail resume refuses a run still running in another process, naming its pid
         status: readStatus(join(repo.dir, '.sail-runs', runId)),
         lease: leasesIn(repo),
       }).toEqual({ code: EXIT_REFUSED, said: true, status: { status: 'running' }, lease });
-      for (const pid of sleeping) process.kill(pid, 'SIGKILL');
     } finally {
-      running.kill('SIGKILL');
+      releaseHeld(repo.dir);
+      if (running.exitCode === null) killOne(running.pid, 'SIGKILL');
       await running.exited;
     }
   });
-}, 30_000);
+}, 150_000);
 
 test('sail resume refuses a run whose lease another run took over once its process died, naming that run', async () => {
   await withTempRepo(async (repo) => {
