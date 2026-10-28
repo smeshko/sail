@@ -86,7 +86,8 @@ export function parseDiagnostics(output: string, cwd: string): Diagnostic[] {
 
 /**
  * Runs `tsc` under the house rules on `dir`'s TypeScript, or `files` and their imports, from `dirname(dir)`, with
- * `args` after its own. The config is a temp file under `tmp`, `tmpdir()` unless given, removed afterwards. Throws when `tsc` can't be spawned.
+ * `args` after its own. The config is a temp file under `tmp`, `tmpdir()` unless given, removed afterwards. Throws
+ * when `tsc` can't be spawned.
  */
 export async function spawnTsc(
   dir: string,

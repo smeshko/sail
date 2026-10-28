@@ -627,7 +627,10 @@ const PUSHED = { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'a'.re
 const LABELLED = { type: 'codehost:labelled', number: 5, label: 'sail', change: 'added' } as const;
 /** A script line that appends `event` to the port events file, as a `sail port` would. */
 const reports = (event: object) => `echo '${JSON.stringify(event)}' >> "$SAIL_EVENTS"`;
-/** Puts `event` in the port events file before the script starts: the timeout starts at spawn, and a loaded machine can take longer than it to start bash. */
+/**
+ * Puts `event` in the port events file before the script starts: the timeout starts at spawn, and a loaded machine can
+ * take longer than it to start bash.
+ */
 const reportedBefore = (s: Setup, event: object) =>
   writeFileSync(join(s.context.paths.dir, PORT_EVENTS), `${JSON.stringify(event)}\n`);
 const typesOf = (events: readonly CallEvent[]) => events.map((event) => event.type);
