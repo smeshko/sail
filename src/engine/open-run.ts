@@ -1,6 +1,7 @@
 // Opens a run. `openRun()` opens a fresh one from a ticket: every check that can refuse comes first, then the run's
-// branch is leased, its run directory and workspace are made, and its ticket is claimed. Only then is `run.json`
-// written, with the journal, the events file and STATUS `running`. `reopenRun()` opens an existing one to resume it:
+// branch is leased, and its run directory and workspace are made. Only then is `run.json` written, with the journal, the
+// events file and STATUS `running`. Opening claims nothing: the ticket moves in `intake#1`, where the built-in `ticket`
+// intake claims it and a repository intake claims only through `sail port ticket-source claim`. `reopenRun()` opens an existing one to resume it:
 // every check that can refuse comes first, its lease renewed and its workspace reopened among them, and only then is its
 // STATUS set back to `running`. So a refusal leaves no run directory, no workspace and no lease behind, and a refused
 // resume leaves the run as it was, down to the torn tail of its events file, which is cut only once no refusal remains.
@@ -13,15 +14,13 @@
 //   1. the lease on the run's branch, which a live run holding it refuses, naming that run;
 //   2. the run directory, then the workspace inside it;
 //   3. a check that the start hasn't been aborted;
-//   4. the claim: the ticket moves to In Progress and gets a comment naming the run;
-//   5. `run.json`, the journal, the events file and STATUS.
-// A refusal at 2 to 4 undoes what came before it, in reverse: the workspace is released, the run directory removed and
-// the lease released. So a fetch that fails, or a claim lost to another start, costs no `--force`. A crash between the
-// run directory and `run.json` leaves a directory with no header and a worktree no sweep removes; its lease goes stale
-// with the pid. That window is an accepted risk.
+//   4. `run.json`, the journal, the events file and STATUS.
+// A refusal at 2 or 3 undoes what came before it, in reverse: the workspace is released, the run directory removed and
+// the lease released. A crash between the run directory and `run.json` leaves a directory with no header and a worktree
+// no sweep removes; its lease goes stale with the pid. That window is an accepted risk.
 //
-// What the Workspace adapter emits from the lease to the claim is kept, with each path made relative to the repository
-// root, and the run's stream reports it after `run:start`, since no stream exists yet to hear it.
+// What the Workspace adapter emits from the lease to the abort check is kept, with each path made relative to the
+// repository root, and the run's stream reports it after `run:start`, since no stream exists yet to hear it.
 //
 // A resume reads the branch and the base from `run.json`, never deriving them again (D8). It renews the lease with this
 // process's pid, which a run that is still alive in another process refuses, and so does a lease another run has taken
@@ -31,8 +30,8 @@
 // workspace to resume in, and is refused.
 //
 // A dispatched start (`dispatch`) is the run the watcher started: it runs under the run id the watcher minted and named
-// in its queue, and records `via: 'watch'`. It takes every step above, the claim included, in this order: the watcher
-// only reads before it spawns the run, so everything a start can refuse still comes before the ticket moves. An id
+// in its queue, and records `via: 'watch'`. It takes every step above in this order: the watcher only reads before it
+// spawns the run, so everything a start can refuse still comes before anything is written. An id
 // that isn't one of this ticket's, or whose run directory exists, is refused. A forced queue item is dispatched with
 // `force`, and records the checks it overrode as a forced manual run does.
 //
@@ -77,7 +76,6 @@ import {
   type AdapterEntry,
   assertRunHeader,
   buildRunHeader,
-  type ClaimRecord,
   RUN_HEADER_FILE,
   type RunHeader,
   readRunHeader,
@@ -87,7 +85,7 @@ import {
 import { isRunIdOf, newRunId } from './run-id';
 import { findSailDir } from './sail-dir';
 import { formatIssue } from './schemas';
-import { type ClaimedSource, claimSource, type ResolvedSource, resolveSource } from './source';
+import { type ResolvedSource, resolveSource } from './source';
 import { watchLabel } from './watchable';
 
 /** The realpaths of the `.sail/` directories a run has been opened from in this process. */
@@ -115,11 +113,6 @@ export interface OpenedRun {
    * repository root: the lease and the workspace for a fresh run, the renewed lease for a resume.
    */
   started: readonly ProviderEvent[];
-  /**
-   * What the claim did to the ticket, in order, for a fresh run's stream: the adapter's own events found no run
-   * attached. Empty for a reopened run.
-   */
-  claimed: readonly ProviderEvent[];
   /** The stage `--until` named, for a fresh run that was given one. A resume takes none. */
   until?: string;
   /** The `seq` the run's next event takes: 1 for a fresh run, where its events file stopped for a resumed one. */
@@ -167,8 +160,8 @@ export interface OpenRunOptions {
   /** Fills the run id's random part. Random by default: a run that must be reproduced passes its bytes. */
   random?: (bytes: Uint8Array) => Uint8Array;
   /**
-   * Refuses the start when it has aborted by the time the ticket would be claimed. Once the ticket is claimed the run
-   * is opened whatever the signal says, and stopping it is its caller's.
+   * Refuses the start when it has aborted by the time its workspace exists. Once the run is opened it is opened
+   * whatever the signal says, and stopping it is its caller's.
    */
   signal?: AbortSignal;
   /** The four adapters, resolved from the config before anything else. */
@@ -304,16 +297,15 @@ export async function undoOpened(port: WorkspacePort, run: RunRef, remote: strin
   await quietly(() => port.releaseLease(remote, branch, run.runId));
 }
 
-/** What a fresh start made before its claim, for the claim to build on, or to undo. */
+/** What a fresh start made: the repository it leased a branch in, and the workspace. */
 export interface Made {
   repository: Repository;
   workspace: Workspace;
 }
 
 /**
- * Leases `branch`, makes the run directory and the workspace at `base`, the default branch's tip when left out, checks
- * for an abort, and claims the ticket, in that order. A seeded run passes no `claim`, and claims nothing. A refusal at
- * any step undoes the ones before it, in reverse.
+ * Leases `branch`, makes the run directory and the workspace at `base`, the default branch's tip when left out, and
+ * checks for an abort, in that order. A refusal at any step undoes the ones before it, in reverse.
  */
 export async function startWorkspace(options: {
   port: WorkspacePort;
@@ -322,8 +314,7 @@ export async function startWorkspace(options: {
   branch: string;
   base?: string;
   signal: AbortSignal | undefined;
-  claim?: () => Promise<ClaimedSource | { refused: string }>;
-}): Promise<{ made: Made; claimed: ClaimedSource | undefined } | { refused: string }> {
+}): Promise<{ made: Made } | { refused: string }> {
   const { port, run, sailDir, branch, base, signal } = options;
   let repository: Repository;
   try {
@@ -360,14 +351,8 @@ export async function startWorkspace(options: {
     }
     return undo(`the workspace could not be made: ${portRefusal(error)}`);
   }
-  if (options.claim === undefined) {
-    if (signal?.aborted) return undo('stopped before the run was opened');
-    return { made: { repository, workspace }, claimed: undefined };
-  }
-  if (signal?.aborted) return undo('stopped before the ticket was claimed');
-  const claimed = await options.claim();
-  if ('refused' in claimed) return undo(claimed.refused);
-  return { made: { repository, workspace }, claimed };
+  if (signal?.aborted) return undo('stopped before the run was opened');
+  return { made: { repository, workspace } };
 }
 
 /** What a start's preflight found: everything `openRun()` goes on with once nothing has refused. */
@@ -382,13 +367,13 @@ export interface Preflight {
   source: Source;
   runId: string;
   branch: string;
-  /** The header built before the claim, with the state as fetched standing in for the claim's answer. */
+  /** The header built before anything is written, with no workspace fields yet. */
   header: RunHeader;
 }
 
 /**
  * A start's preflight: every check that can refuse, in the order the header comment gives, then the run id, the branch
- * and the unclaimed header, built and checked. It writes nothing, but it claims the `.sail/` for the process.
+ * and the header, built and checked. It writes nothing, but it claims the `.sail/` for the process.
  */
 export async function preflightRun(options: OpenRunOptions): Promise<Preflight | { refused: string }> {
   const { cwd, workflow, ticket, force = false, dispatch } = options;
@@ -424,11 +409,10 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   const label = watchLabel(loaded.workflow, config);
   const branchPrefix = config.branchPrefix ?? DEFAULT_BRANCH_PREFIX;
   const via = dispatch === undefined ? 'cli' : 'watch';
-  const headerOf = (runId: string, source: Source, claimed?: ClaimRecord): RunHeader => {
+  const headerOf = (runId: string, source: Source): RunHeader => {
     const header = buildRunHeader({
       runId,
       source,
-      ...(claimed === undefined ? {} : { claim: claimed }),
       sailDir: found.dir,
       loaded,
       config,
@@ -465,7 +449,6 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
     if (typeof runId !== 'string') return runId;
     const { pr } = pullRequest;
     const source: Source = { kind: 'pr', number: pr.number, headSha: pr.headSha, via, forced: pullRequest.forced };
-    // A pull-request run moves no ticket, so its header has no claim.
     const header = headerOf(runId, source);
     return { sailDir: found.dir, config, loaded, pullRequest, source, runId, branch: pr.head, header };
   }
@@ -479,9 +462,9 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   const runId = runIdOf(ticketKey);
   if (typeof runId !== 'string') return runId;
   const branch = branchFor(branchPrefix, ticketKey, resolved.ticket.title);
-  // Built and checked before anything is written, with the state as fetched standing in for the claim's answer.
+  // Built and checked before anything is written. Opening a run claims nothing, so it has no claim.
   const source: Source = { kind: 'ticket', ticketKey, via, forced: resolved.forced };
-  const header = headerOf(runId, source, { claimed: false, state: resolved.ticket.state });
+  const header = headerOf(runId, source);
   return { sailDir: found.dir, config, loaded, resolved, source, runId, branch, header };
 }
 
@@ -489,12 +472,10 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
  * Runs the start's preflight, `preflightRun()`, which finds `.sail/`, reads its config, loads the workflow and checks the
  * ticket, refusing at the first that fails, then mints the run id, names the branch, builds the run header and checks
  * it. A start whose `signal` has aborted by then is refused with nothing written. Then it leases the branch, makes the run
- * directory and the workspace, and claims the ticket, refusing and undoing what it made when any of them fails, or when
- * the start aborts before the claim. A claim, a forced move or a comment that fails refuses too, saying where the
- * ticket stands. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a refusal. Last, it writes the
- * header, the journal and STATUS. A failure there throws too, and its message says where the ticket stands: it has
- * moved, and no run is behind it. So the workspace, the run directory and the lease are undone first, as far as they
- * still can be.
+ * directory and the workspace, refusing and undoing what it made when either fails, or when the start aborts. The
+ * ticket is not touched. A header that breaks `sail.run.v1` throws: that is a bug in sail, not a refusal. Last, it
+ * writes the header, the journal and STATUS. A failure there throws too, after the workspace, the run directory and the
+ * lease are undone, as far as they still can be.
  *
  * A `.sail/` is claimed for the process once its config reads, before the workflow is imported, so even a refused load
  * claims it. Opening a second run from a claimed `.sail/` throws: that is a bug in the caller, never a refusal.
@@ -502,16 +483,11 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
   const preflight = await preflightRun(options);
   if ('refused' in preflight) return preflight;
-  const { config, loaded, source, runId, branch, header: unclaimed } = preflight;
+  const { config, loaded, source, runId, branch, header: preflighted } = preflight;
   const found = { dir: preflight.sailDir };
-  const { force = false, until } = options;
-  const { ticketSource } = options.adapters.ports;
+  const { until } = options;
   // The last moment nothing is written. Everything up to here only read, so one check covers an abort at any of it.
-  if (options.signal?.aborted) {
-    return {
-      refused: source.kind === 'pr' ? 'stopped before the run was opened' : 'stopped before the ticket was claimed',
-    };
-  }
+  if (options.signal?.aborted) return { refused: 'stopped before the run was opened' };
   const root = dirname(found.dir);
   const run: RunRef = { runId, runDir: join(runsDir(found.dir), runId) };
   const { relay } = options.adapters;
@@ -524,24 +500,17 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       sailDir: found.dir,
       branch,
       signal: options.signal,
-      // A pull-request run starts at the head sha it was resolved at, and claims nothing (D4, D5).
-      ...(source.kind === 'pr'
-        ? { base: source.headSha }
-        : { claim: () => claimSource({ ticketKey: source.ticketKey, runId, ticketSource, force }) }),
+      // A pull-request run starts at the head sha it was resolved at (D4).
+      ...(source.kind === 'pr' ? { base: source.headSha } : {}),
     });
   });
   if ('refused' in opened) return opened;
   const { made } = opened;
-  // Given a claim, startWorkspace() answers with what it did.
-  const took = opened.claimed;
   const header: RunHeader = {
-    ...unclaimed,
-    source: { ...source, forced: [...source.forced, ...(took?.forced ?? [])] },
-    ...(took === undefined ? {} : { claim: took.claim }),
+    ...preflighted,
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
   };
-  // The ticket has moved, so whatever fails from here says where it stands. It is still thrown on, not refused: these
-  // are sail's own files.
+  // A failure from here is thrown, not refused: these are sail's own files.
   const dir = run.runDir;
   try {
     assertRunHeader(header);
@@ -551,14 +520,10 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     createEventsFile(dir);
     writeStatus(dir, 'running');
   } catch (error) {
-    // No run is behind the claim, so nothing may hold its branch: undone as a refusal would, as far as it still can.
+    // No run is behind the workspace, so nothing may hold its branch: undone as a refusal would, as far as it still can.
     await undoOpened(options.adapters.ports.workspace, run, made.repository.url, branch);
     const why = error instanceof Error ? error.message : String(error);
-    if (took === undefined) throw new Error(`run ${runId}'s directory was not written: ${why}`, { cause: error });
-    throw new Error(
-      `the ticket is now ${took.claim.state.name} and its comment names run ${runId}, but the run directory was not written: ${why}. --force runs the ticket in a new run`,
-      { cause: error },
-    );
+    throw new Error(`run ${runId}'s directory was not written: ${why}`, { cause: error });
   }
   return {
     runId,
@@ -571,7 +536,6 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     loaded,
     workspace: { path: made.workspace.path, branch, baseSha: made.workspace.baseSha, remote: made.repository.url },
     started,
-    claimed: took?.events ?? [],
     ...(until === undefined ? {} : { until }),
     firstSeq: 1,
   };
@@ -716,7 +680,6 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     loaded,
     workspace,
     started,
-    claimed: [],
     firstSeq,
     ...(options.raise === undefined ? {} : { raise: options.raise }),
   };

@@ -82,8 +82,8 @@ test('a fresh run acquires before anything is written, releases after run:end, a
       expect.objectContaining({ type: 'run:keep_awake', held: true, by: 'fake' }),
     ]);
     expect(awake).toBeGreaterThan(types.lastIndexOf('workspace:created'));
-    expect(awake).toBeGreaterThan(types.lastIndexOf('ticket:commented'));
     expect(awake).toBeLessThan(types.indexOf('intake:start'));
+    expect(awake).toBeLessThan(types.indexOf('ticket:claimed'));
   });
 });
 

@@ -94,7 +94,11 @@ async function started(repoDir: string, argv: string[], ticketKey = 'FAKE-1') {
   const ran = captured.code !== EXIT_REFUSED && runId !== '';
   const header: Partial<RunHeader> = ran ? JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) : {};
   const ticket = await (await fakeAdapters(repoDir)).ports.ticketSource.get(ticketKey);
-  return { ...captured, runs, runId, dir, header, events: ran ? readEvents(dir) : [], ticket };
+  const intake = join(dir, '00-intake', 'call-1', 'result.json');
+  const claim: { claimed: boolean; state: unknown } | undefined = existsSync(intake)
+    ? JSON.parse(readFileSync(intake, 'utf8')).claim
+    : undefined;
+  return { ...captured, runs, runId, dir, header, claim, events: ran ? readEvents(dir) : [], ticket };
 }
 
 /** A head line and a detail line of the stub's terminal view: its key column is 13 wide, for `self-review#1`. */
@@ -240,8 +244,8 @@ test("sail FAKE-1 -v adds each command, where it runs and the tail of every scri
   expect(trace.view).toContain(`\n${specTail}\n`);
   expect(trace.view).toContain(`\n${detail('intake#1', 'journal line 1')}\n${head('spec#1', '▶ spec · script')}\n`);
   expect(trace.view).toContain(`\n${detail('spec#1', 'journal line 2')}\n`);
-  // The lease, the workspace and the claim belong to no call: their events print as generic lines with no key, right
-  // under the header.
+  // The lease and the workspace belong to no call: their events print as generic lines with no key, right under the
+  // header.
   const [traced] = trace.runs;
   const branch = 'sail/FAKE-1-add-a-greeting';
   expect(
@@ -253,10 +257,12 @@ test("sail FAKE-1 -v adds each command, where it runs and the tail of every scri
     `${' '.repeat(15)}· workspace:leased {"remote":"fake://origin","branch":"${branch}"}`,
     `${' '.repeat(15)}· workspace:created {"path":".sail-runs/${traced}/workspace","branch":"${branch}",…}`,
   ]);
-  expect(trace.view.split('\n').slice(3, 6)).toEqual([
-    `${' '.repeat(15)}· ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}`,
-    `${' '.repeat(15)}· ticket:commented {"ticketKey":"FAKE-1","body":"sail run ${traced} started"}`,
+  // The claim is the intake's: its events print under its key, after its start.
+  expect(trace.view.split('\n').slice(3, 7)).toEqual([
     `${' '.repeat(15)}keep-awake · none: SAIL_KEEP_AWAKE is off`,
+    head('intake#1', '▶ intake ticket · builtin'),
+    head('intake#1', '· ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}'),
+    head('intake#1', `· ticket:commented {"ticketKey":"FAKE-1","body":"sail run ${traced} started"}`),
   ]);
 });
 
@@ -406,22 +412,24 @@ test('a tsc that cannot run exits 4, says so, and starts no run', async () => {
 
 // The ticket: claimed as the run starts, forced past its checks, and stopped by --until.
 
-test('sail FAKE-1 claims the ticket for its one run: run.json records nothing forced and the claim, the stream reports it, and the ticket is In Progress with a comment naming the run', async () => {
+test("sail FAKE-1 claims the ticket for its one run in its intake: run.json records nothing forced and no claim, the intake's result does, the stream reports it, and the ticket is In Progress with a comment naming the run", async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
-    const { code, stderr, runs, runId, header, events, ticket } = await started(repo.dir, ['FAKE-1']);
+    const { code, stderr, runs, runId, header, claim, events, ticket } = await started(repo.dir, ['FAKE-1']);
     expect({ code, stderr, runs: runs.length }).toEqual({ code: EXIT_OK, stderr: '', runs: 1 });
-    expect([header.source, header.claim]).toEqual([
+    expect([header.source, header.claim, claim]).toEqual([
       { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
+      undefined,
       { claimed: true, state: IN_PROGRESS },
     ]);
-    expect(events.slice(0, 6).map((event) => event.type)).toEqual([
+    expect(events.slice(0, 7).map((event) => event.type)).toEqual([
       'run:start',
       'workspace:leased',
       'workspace:created',
+      'run:keep_awake',
+      'intake:start',
       'ticket:claimed',
       'ticket:commented',
-      'run:keep_awake',
     ]);
     expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${runId} started`]);
   });
@@ -447,10 +455,10 @@ test.each<[string, string, Forced[]]>([
 ])('sail --force runs %s, and run.json lists what it overrode', async (_, ticketKey, forced) => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
-    const { code, stderr, header, ticket } = await started(repo.dir, [ticketKey, '--force'], ticketKey);
+    const { code, stderr, header, claim, ticket } = await started(repo.dir, [ticketKey, '--force'], ticketKey);
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
     expect(header.source).toEqual({ kind: 'ticket', ticketKey, via: 'cli', forced });
-    expect([header.claim?.claimed, ticket.state]).toEqual([forced.length === 1, IN_PROGRESS]);
+    expect([claim?.claimed, ticket.state]).toEqual([forced.length === 1, IN_PROGRESS]);
   });
 });
 
@@ -479,7 +487,7 @@ test('a second sail FAKE-1 is refused with exit 3 as already claimed, and adds n
   });
 });
 
-test('a second sail FAKE-1 --force runs: it moves the ticket through update, records the state check as overridden and the claim as not taken, and comments again', async () => {
+test('a second sail FAKE-1 --force runs: it moves the ticket through update, records the state check as overridden and, in the result of the intake, the claim as not taken, and comments again', async () => {
   await withTempRepo(async (repo) => {
     const first = await afterFirstRun(repo.dir);
     const second = await started(repo.dir, ['FAKE-1', '--force']);
@@ -488,11 +496,13 @@ test('a second sail FAKE-1 --force runs: it moves the ticket through update, rec
       stderr: '',
       runs: 2,
     });
-    expect([second.header.source?.forced, second.header.claim]).toEqual([
-      ['state'],
-      { claimed: false, state: IN_PROGRESS },
+    expect([second.header.source?.forced, second.claim]).toEqual([['state'], { claimed: false, state: IN_PROGRESS }]);
+    expect(second.events.slice(4, 8).map((event) => event.type)).toEqual([
+      'intake:start',
+      'ticket:fetched',
+      'ticket:updated',
+      'ticket:commented',
     ]);
-    expect(second.events.slice(3, 5).map((event) => event.type)).toEqual(['ticket:updated', 'ticket:commented']);
     expect(second.ticket.comments.map((comment) => comment.body).slice(1)).toEqual([
       `sail run ${first} started`,
       `sail run ${second.runId} started`,
@@ -630,7 +640,7 @@ test('Ctrl-C during sail FAKE-1 ends the running call in error, suspends the run
   });
 }, 20_000);
 
-test('Ctrl-C before the ticket is claimed is refused in one line with exit 3, and leaves no run directory and the ticket as it was', async () => {
+test('Ctrl-C before the run is opened is refused in one line with exit 3, and leaves no run directory and the ticket as it was', async () => {
   // Interrupted as the handler is registered, while the run is still being opened.
   const interrupted: CaptureOptions = {
     onInterrupt: (handler) => {
@@ -642,7 +652,7 @@ test('Ctrl-C before the ticket is claimed is refused in one line with exit 3, an
   expect({ code, stdout, stderr, touched }).toEqual({
     code: EXIT_REFUSED,
     stdout: '',
-    stderr: 'sail FAKE-1: stopped before the ticket was claimed\n',
+    stderr: 'sail FAKE-1: stopped before the run was opened\n',
     touched: false,
   });
 });
@@ -1045,7 +1055,7 @@ test("sail FAKE-1 whose workspace can't be made exits 3, with the ticket untouch
 // `--dispatch <run id>`: the watcher's start of a run it minted the id of (DECISIONS D3).
 const DISPATCHED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 
-test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, its claim before its intake', async () => {
+test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, its claim inside its intake', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const { code, stderr, runs, header, events, ticket } = await started(repo.dir, [
@@ -1059,8 +1069,8 @@ test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, 
       { kind: 'ticket', ticketKey: 'FAKE-1', via: 'watch', forced: [] },
     ]);
     const types = events.map((event) => event.type);
-    expect(types.indexOf('ticket:claimed')).toBeGreaterThan(-1);
-    expect(types.indexOf('ticket:claimed')).toBeLessThan(types.indexOf('intake:start'));
+    expect(types.indexOf('ticket:claimed')).toBeGreaterThan(types.indexOf('intake:start'));
+    expect(types.indexOf('ticket:claimed')).toBeLessThan(types.indexOf('ticket:fetched'));
     expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${DISPATCHED} started`]);
     expect(readStatus(join(repo.dir, '.sail-runs', DISPATCHED))).toEqual({ status: 'completed' });
   });

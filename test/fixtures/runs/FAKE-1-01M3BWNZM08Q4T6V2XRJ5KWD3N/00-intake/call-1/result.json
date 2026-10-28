@@ -25,7 +25,7 @@
     "ticket.json": {
       "path": "00-intake/call-1/ticket.json",
       "bytes": 1786,
-      "sha256": "7ef3b7cecb4bb7a23f05cdc7879a9afc577e5e382bc6dffe82a48bb25d640c9a"
+      "sha256": "88e922933376d4351dba75bb0c0f183b74c617d0712f356405be23a8003458b7"
     },
     "brief.md": {
       "path": "00-intake/call-1/brief.md",
@@ -36,7 +36,14 @@
   "consumed": {
     "source": "run.json#/source"
   },
-  "startedAt": "2026-09-25T09:00:01.400Z",
+  "startedAt": "2026-09-25T09:00:01.100Z",
   "finishedAt": "2026-09-25T09:00:02.100Z",
-  "durationMs": 700
+  "durationMs": 1000,
+  "claim": {
+    "claimed": true,
+    "state": {
+      "type": "started",
+      "name": "In Progress"
+    }
+  }
 }

@@ -57,7 +57,7 @@ The hidden `<!-- sail:ticket KEY -->` line in a pull request's body. It names th
 _Avoid_: ticket tag, PR link
 
 **Claim**:
-Moving a designated ticket to In Progress through TicketSource before its run starts: at dispatch for a run the watcher starts, and at its start for a run started by hand. sail then comments on the ticket with the run id. After a claim the ticket is no longer in a pick-up state, so a restart cannot pick it up twice. A forced run of a ticket that is not in a pick-up state makes no claim: it moves the ticket to In Progress through `update`.
+Moving a designated ticket to In Progress through TicketSource, and commenting on it with the run id. The intake makes it, not the start: the built-in `ticket` intake claims inside `intake#1` and records the claim in that call's `result.json`, and a repository intake claims only when a step runs `sail port ticket-source claim`. Opening a run moves nothing, so a workflow that only reads its ticket, such as a grooming one, leaves it where it is. After a claim the ticket is no longer in a pick-up state, so a restart cannot pick it up twice. A claim another start took first fails the run. A forced run of a ticket that is not in a pick-up state makes no claim: it moves the ticket to In Progress through `update`.
 _Avoid_: lock, reserve, take
 
 **Forced run**:
@@ -271,7 +271,7 @@ A command's end before a run starts, with exit code 3: an invalid config, missin
 _Avoid_: rejection, abort, error (an outcome)
 
 **Dry run**:
-`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease, claim or comment. It exits 0, or 3 with the start's own refusal.
+`sail <ticket> --dry-run`: the start's whole preflight (the config, credentials, the type check, the ticket and its designation, the branch lease) and the roster the run would freeze, printed. It writes nothing: no run directory, workspace, lease or comment, and no claim. It exits 0, or 3 with the start's own refusal.
 _Avoid_: preview, simulation, plan
 
 **Keep-awake**:
@@ -556,7 +556,7 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run claims the ticket as it starts, after its branch is leased and its workspace made, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:

@@ -19,11 +19,12 @@
 // otherwise.
 //
 // What the adapters emit while the run is going reaches its stream through the relay, stamped with the key of the call
-// that is running. A workspace event carries none, and its path is made relative to the repository root. The lease, the
-// workspace and the claim are made before the run directory holds anything, so a fresh run reports them from what
-// opening it collected, right after `run:start` and with no key: `workspace:leased` and `workspace:created`, then
-// `ticket:claimed`, or `ticket:updated` for a forced move, then `ticket:commented`. A resume reports its renewed
-// lease first, and none of the rest again.
+// that is running. A workspace event carries none, and its path is made relative to the repository root. The lease and
+// the workspace are made before the run directory holds anything, so a fresh run reports them from what opening it
+// collected, right after `run:start` and with no key: `workspace:leased` and `workspace:created`. Opening claims
+// nothing: the built-in `ticket` intake's claim reaches the stream through the relay under `intake#1`, as
+// `ticket:claimed`, or `ticket:updated` for a forced move, then `ticket:commented`. A resume reports its renewed lease
+// first, and none of the rest again.
 //
 // A gitDiff binding is resolved just before its call, through the Workspace port's `diff()` on the run's workspace, and
 // handed to the call as a patch. A diff that fails fails the run with `workflow_failed`, before the call is written.
@@ -57,7 +58,7 @@
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
 // Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
-// ticket is claimed, refuses the start instead: nothing was written, so there is no run to suspend.
+// workspace is made, refuses the start instead: nothing was written, so there is no run to suspend.
 //
 // A call (or a step of one) that hit the provider's usage limit suspends the run with `usage_limit`, `run:suspended`
 // naming the call and the reset time when the provider gave one. The call is left unjournaled, like an interrupted one,
@@ -170,7 +171,7 @@ interface Limited {
 
 export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
   /**
-   * Stops the running call when it aborts, and suspends the run. Aborted before the ticket is claimed, it refuses the
+   * Stops the running call when it aborts, and suspends the run. Aborted before the run is opened, it refuses the
    * start.
    */
   signal?: AbortSignal;
@@ -665,11 +666,10 @@ async function drive(
         ...(header.fromRun === undefined ? {} : { fromRun: header.fromRun }),
       });
     }
-    // What opening the run did, before this stream existed to hear it: the lease and the workspace, then what the claim
-    // did to the ticket. No call was running, so no key.
+    // What opening the run did, before this stream existed to hear it: the lease and the workspace. No call was
+    // running, so no key.
     for (const event of opened.started) bus.emit(event);
     if (opened.raise !== undefined) tracker?.raise(opened.raise);
-    for (const event of opened.claimed) bus.emit(event);
     // A seeded run's reused calls, each once: they were journaled as the run opened, with no stream to hear them.
     if (opened.seeded !== undefined) {
       const { fromRun, entries, ticket } = opened.seeded;

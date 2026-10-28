@@ -22,7 +22,7 @@ export interface AdapterEntry {
   versions?: Record<string, string>;
 }
 
-/** What a run's start did to its ticket: whether the claim took, and the state the provider reported after sail's move. */
+/** What a claim did to its ticket: whether the claim took, and the state the provider reported after sail's move. */
 export interface ClaimRecord {
   claimed: boolean;
   state: TicketState;
@@ -35,7 +35,7 @@ export interface RunHeader {
   source: Source;
   /** The run a seeded run reused calls from. */
   fromRun?: string;
-  /** What the start did to the ticket. A seeded run makes no claim, and has none. */
+  /** What the start did to the ticket. Only runs from before the claim moved into `intake#1` have it: they recorded it here. */
   claim?: ClaimRecord;
   workflow: { name: string; version: number; origin: string; sha256: string };
   sail: { version: string; runtime: string };
@@ -91,8 +91,6 @@ export function workflowHash(sailDir: string, loaded: LoadedWorkflow): string {
 export interface HeaderFields {
   runId: string;
   source: Source;
-  /** Left out for a seeded run, which claims nothing. */
-  claim?: ClaimRecord;
   /** The run a seeded run reused calls from. */
   fromRun?: string;
   sailDir: string;
@@ -118,7 +116,7 @@ export function workspaceFields(
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
 export function buildRunHeader(fields: HeaderFields): RunHeader {
-  const { runId, source, claim, fromRun, sailDir, loaded, config, adapters, now } = fields;
+  const { runId, source, fromRun, sailDir, loaded, config, adapters, now } = fields;
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
   const budget = runBudgetOf(config.budgets.run, loaded.workflow.budget);
@@ -127,7 +125,6 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
     runId,
     source: { ...source, forced: [...source.forced] },
     ...(fromRun === undefined ? {} : { fromRun }),
-    ...(claim === undefined ? {} : { claim: { claimed: claim.claimed, state: { ...claim.state } } }),
     workflow: {
       name: loaded.name,
       version: loaded.workflow.version ?? 1,

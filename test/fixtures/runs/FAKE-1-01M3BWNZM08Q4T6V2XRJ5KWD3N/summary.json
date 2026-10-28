@@ -13,9 +13,9 @@
     "url": "fake://tickets/FAKE-1"
   },
   "status": "completed",
-  "startedAt": "2026-09-25T09:00:00.700Z",
+  "startedAt": "2026-09-25T09:00:00.600Z",
   "endedAt": "2026-09-25T09:00:17.200Z",
-  "durationMs": 16500,
+  "durationMs": 16600,
   "result": {
     "pr": {
       "number": 5,
@@ -28,7 +28,7 @@
       "key": "intake#1",
       "kind": "builtin",
       "outcome": "passed",
-      "durationMs": 900,
+      "durationMs": 1200,
       "files": [
         "ticket.json",
         "brief.md"

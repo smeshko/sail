@@ -886,6 +886,7 @@ test('a ticket its own run claimed and then failed is retried with --force, not 
     await dispatcher.tick();
     w.clock.advance(FIVE_MINUTES);
     await dispatcher.tick();
+    await w.spawner.claims();
     expect(w.spawner.runs.map((run) => [run.ticketKey, run.force])).toEqual([
       ['FAKE-1', false],
       ['FAKE-1', true],
@@ -906,6 +907,7 @@ test('a parked item whose run claimed its ticket and was stopped runs again with
     expect(states(w.store)).toEqual(['FAKE-1 parked 1']);
     w.store.requeue('ticket:FAKE-1', 'requeued by hand');
     await dispatcher.tick();
+    await w.spawner.claims();
     expect(w.spawner.runs.map((run) => [run.ticketKey, run.force])).toEqual([
       ['FAKE-1', false],
       ['FAKE-1', true],
