@@ -101,6 +101,41 @@ test('a merge answered pending that GitHub reports merged without its merge comm
   });
 });
 
+test('a merge answered pending whose re-read fails hands back with merge pending', async () => {
+  let failed = false;
+  const run = await observe(
+    {
+      pulls: [{ number: 7, branch: 'sail/ADW-1-chain', ticket: 'ADW-1' }],
+      github: (world) =>
+        world.inject('PUT /pulls/7/merge', {
+          status: 200,
+          // Read as the merge is answered: the re-read after it, and only that, fails.
+          get body() {
+            if (!failed) world.inject('GET /pulls/7', LOST);
+            failed = true;
+            return PENDING.body;
+          },
+        }),
+    },
+    ['#7', '--workflow', 'pr-to-main'],
+  );
+  expect({
+    code: run.code,
+    message: run.end.message,
+    done: ended(run).includes('done#1'),
+    merge: outputOf(run, 'merge#1'),
+    reread: run.routes[run.routes.findIndex((each) => each.endsWith('/pulls/7/merge')) + 1]?.endsWith('/pulls/7'),
+    merges: merges(run, 7).length,
+  }).toEqual({
+    code: EXIT_FAILED,
+    message: 'handed back: merge pending',
+    done: false,
+    merge: { state: 'pending', reason: 'Merge pending' },
+    reread: true,
+    merges: 1,
+  });
+});
+
 test('a failed merge call that did not happen still ends merge#1 in error and hands back with merge failed', async () => {
   const run = await answered(LOST);
   expect({
