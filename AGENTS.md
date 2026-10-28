@@ -18,8 +18,9 @@ Bun `>=1.4.2` is the only runtime. No command needs Node.
   suite, refused locally as above. Each test gets 60 s unless you pass `--timeout`. The files run in parallel, a worker
   per core, slowest first by the timings the last runs recorded; `--parallel=1` runs them one at a time.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
-- `bun run gate`: like `verify`, it first warns when the running Bun is not CI's pin; then typecheck, lint, then only the tests the branch affects, with no coverage gate. It's what the pre-push
-  hook runs. `bun scripts/affected-tests.ts --list` prints the selection: each change since the merge-base with
+- `bun run gate`: like `verify`, it first warns when the running Bun is not CI's pin; then typecheck, lint, then only
+  the tests the branch affects, with no coverage gate. It's what the pre-push hook runs.
+  `bun scripts/affected-tests.ts --list` prints the selection: each change since the merge-base with
   `origin/staging` selects its nearest tests. A changed test file selects itself; any other file selects the test files
   that reach it through imports or a path they name, such as a helper or a fixture, at the fewest steps that reach any.
   The tests further out are CI's. A change to `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `scripts/test.ts`, `test/setup.ts`
