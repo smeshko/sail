@@ -19,7 +19,13 @@ const session = { sessionId: z.string(), usage: Usage, transcript: z.string() };
 const RecordedResult = z.discriminatedUnion('outcome', [
   z.object({ outcome: z.literal('done'), output: z.unknown(), ...session }),
   z.object({ outcome: z.literal('blocked'), reason: z.string(), ...session }),
-  z.object({ outcome: z.literal('error'), message: z.string(), reason: HarnessFailure.optional(), ...session }),
+  z.object({
+    outcome: z.literal('error'),
+    message: z.string(),
+    reason: HarnessFailure.optional(),
+    resetsAt: z.iso.datetime().optional(),
+    ...session,
+  }),
 ]);
 
 const RecordedTry = z.object({

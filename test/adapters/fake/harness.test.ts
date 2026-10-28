@@ -251,6 +251,25 @@ test('an error answer, or one over maxTurns, ends as error with its message, aft
   ]);
 });
 
+test('an error answer scripted with usage_limit and resetsAt returns both, and its session ends with reason usage_limit', async () => {
+  const resetsAt = '2026-10-28T14:20:00.000Z';
+  const harness = createFakeHarness({
+    script: {
+      spec: [{ outcome: 'error', reason: 'usage_limit', message: "You've hit your session limit", resetsAt }],
+    },
+  });
+  const capture = captureEvents<HarnessEvent>();
+  const result = await harness.run({ ...request('spec#1'), onEvent: capture.emit });
+  expect(result).toMatchObject({
+    outcome: 'error',
+    message: "You've hit your session limit",
+    reason: 'usage_limit',
+    resetsAt,
+  });
+  const end = capture.events.at(-1);
+  expect(end).toMatchObject({ type: 'harness:session_end', outcome: 'error', reason: 'usage_limit' });
+});
+
 test('a done, blocked or failed session ends with its session id, its outcome, the turns it ran and all it spent', async () => {
   const usage = { costUsd: 0.25, inputTokens: 1200, outputTokens: 900 };
   const harness = createFakeHarness({

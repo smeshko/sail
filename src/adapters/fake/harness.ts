@@ -1,5 +1,5 @@
 // The fake Harness: answers scripted per call key and try, keeping no state, so a resume, a parallel call or a new
-// process gets the same answer (D2). It writes an answer's files into `$STAGE_OUT`, honours `maxTurns`, `maxUsd`,
+// process gets the same answer (D2). An `error` answer may name its `reason` and, for `usage_limit`, `resetsAt`. It writes an answer's files into `$STAGE_OUT`, honours `maxTurns`, `maxUsd`,
 // `maxMinutes` and an abort, and never rejects. As `claude-code` does, it refuses a `maxUsd` of 0 before any session
 // starts, and it ends a session once a turn before its last
 // has spent `maxUsd`, so a session's last turn may pass it, and it ends a scripted delay at `maxMinutes`. It never
@@ -11,7 +11,7 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
-import { type HarnessFailure, type HarnessResult, Usage } from '../../ports/types';
+import { HarnessFailure, type HarnessResult, Usage } from '../../ports/types';
 
 const messages = z.array(z.string()).optional();
 const turns = z.number().int().min(1).optional();
@@ -29,7 +29,12 @@ const ScriptedAnswer = z.discriminatedUnion('outcome', [
     delayMs: z.number().int().min(0).optional(),
   }),
   z.object({ outcome: z.literal('blocked'), reason: z.string().min(1), messages, turns, usage: Usage.optional() }),
-  z.object({ outcome: z.literal('error'), message: z.string().min(1) }),
+  z.object({
+    outcome: z.literal('error'),
+    message: z.string().min(1),
+    reason: HarnessFailure.optional(),
+    resetsAt: z.iso.datetime().optional(),
+  }),
 ]);
 export type ScriptedAnswer = z.infer<typeof ScriptedAnswer>;
 
@@ -127,10 +132,16 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
   };
 
   async function session(request: HarnessRequest, sessionId: string, progress: Progress): Promise<HarnessResult> {
-    const fail = (message: string, raw: HarnessResult['raw'] = null, reason?: HarnessFailure): HarnessResult => ({
+    const fail = (
+      message: string,
+      raw: HarnessResult['raw'] = null,
+      reason?: HarnessFailure,
+      resetsAt?: string,
+    ): HarnessResult => ({
       outcome: 'error',
       message,
       ...(reason === undefined ? {} : { reason }),
+      ...(resetsAt === undefined ? {} : { resetsAt }),
       sessionId,
       usage: progress.spent,
       transcript: transcriptOf(progress.said),
@@ -154,9 +165,9 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
       return result;
     };
     /** Fails with what the session has spent so far, so a failure after turns still counts their cost. */
-    const failed = (message: string, reason?: HarnessFailure): HarnessResult => {
+    const failed = (message: string, reason?: HarnessFailure, resetsAt?: string): HarnessResult => {
       emit({ type: 'error:harness', message });
-      return end(fail(message, answer, reason), reason ?? 'failed');
+      return end(fail(message, answer, reason, resetsAt), reason ?? 'failed');
     };
 
     // An abort can come from anything the session awaits or calls back into: a scripted delay, or the caller's onEvent.
@@ -166,7 +177,7 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     progress.started = true;
     emit({ type: 'harness:session_start', adapter: 'fake', sessionId, model: request.model });
     if (stopped()) return failed('aborted');
-    if (answer.outcome === 'error') return failed(answer.message);
+    if (answer.outcome === 'error') return failed(answer.message, answer.reason, answer.resetsAt);
 
     for (const text of answer.messages ?? []) {
       progress.said.push(text);

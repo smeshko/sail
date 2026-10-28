@@ -143,7 +143,7 @@ The agent outcome for "I cannot complete this", submitted with a reason. It hono
 _Avoid_: failed, stuck, gave up, incomplete
 
 **Error**:
-The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event.
+The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `usage_limit`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event.
 _Avoid_: crash, exception, failed
 
 **Output**:
@@ -255,7 +255,7 @@ Where a run is in its life: `running`, `suspended`, `completed` or `failed`. It 
 _Avoid_: outcome, state, phase
 
 **Stop reason**:
-The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped` or `interrupted`. Every failed or suspended run carries exactly one.
+The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted` or `usage_limit`. Every failed or suspended run carries exactly one.
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
@@ -271,7 +271,7 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
@@ -423,6 +423,10 @@ _Avoid_: lock, mutex, semaphore
 The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
 _Avoid_: limit, quota, cap, allowance
 
+**Usage limit**:
+The provider refusing more sessions until a reset time. A harness reports it as the error reason `usage_limit`, with `resetsAt` when the provider says when. It is a limit on the account, not a budget of the run.
+_Avoid_: rate limit, quota, session limit
+
 ### Ports
 
 **Port**:
@@ -508,7 +512,7 @@ A run's exclusive hold on its git branch, from workspace creation to release, ke
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:
-A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A stopped run's item is parked too.
+A restarted watcher taking charge again of a run that is still alive, counting it against its cap. A run whose process died is resumed from its journal instead, once, as a detached `sail resume` of its own; a resume that leaves the run unended parks its item with the reason. A run suspended on the usage limit is the exception: it is held until the limit resets, then resumed, and again each time a resume hits the limit anew; only a resume that leaves it on the same limit parks its item. A stopped run's item is parked too.
 _Avoid_: reattach, recovery, takeover
 
 **Poll**:
@@ -526,6 +530,10 @@ _Avoid_: queue log, daemon log
 **Dedup key**:
 The key a queue item is known by, minted from its source: `ticket:<ticket key>`, and `pr:<number>@<sha7>` so a new push is a new item. A key already queued, dispatched, waiting to retry or parked is not queued again.
 _Avoid_: item id, queue key
+
+**Held dispatch**:
+A watched workflow's dispatch stopped until a time, because one of its runs hit the usage limit. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none, and no item's attempt is counted.
+_Avoid_: paused (the poll's word), throttled, frozen
 
 **Parked**:
 A queue item's state once it has failed its last attempt: kept with the reason, never retried, until a person requeues or drops it.

@@ -40,12 +40,12 @@ test("EVENT_TYPES holds a run's 61 types, error:consumer, error:port, prompt:ren
   expect(EVENT_TYPES.indexOf('prompt:rendered')).toBe(EVENT_TYPES.indexOf('input:materialised') + 1);
 });
 
-test("sail.event.v1's type enum is EVENT_TYPES, then the 12 QUEUE_EVENT_TYPES from error:port on, queue:dropped after queue:skipped_leased, and run:adopted, run:resumed and queue:requeued last", async () => {
+test("sail.event.v1's type enum is EVENT_TYPES, then the 14 QUEUE_EVENT_TYPES from error:port on, queue:dropped after queue:skipped_leased, and run:adopted, run:resumed, queue:requeued, queue:held and queue:released last", async () => {
   const schema = await Bun.file(join(import.meta.dir, '..', '..', 'schemas', 'sail.event.v1.json')).json();
   const types = typeEnum(schema) as string[];
   expect(types).toEqual([...EVENT_TYPES, ...QUEUE_EVENT_TYPES]);
-  expect(QUEUE_EVENT_TYPES).toHaveLength(12);
-  expect(types.slice(-3)).toEqual(['run:adopted', 'run:resumed', 'queue:requeued']);
+  expect(QUEUE_EVENT_TYPES).toHaveLength(14);
+  expect(types.slice(-5)).toEqual(['run:adopted', 'run:resumed', 'queue:requeued', 'queue:held', 'queue:released']);
   expect(types.indexOf('watch:added')).toBe(types.indexOf('error:port') + 1);
   expect(types.indexOf('queue:dropped')).toBe(types.indexOf('queue:skipped_leased') + 1);
 });

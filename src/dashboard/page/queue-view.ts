@@ -40,6 +40,10 @@ export function queueEventLine(event: QueueEvent): string {
       return `${text(fields.dedupKey)} after ${count(fields.attempts)} attempts: ${text(fields.reason)}`;
     case 'queue:error':
       return `${text(fields.port)} ${text(fields.adapter)}: ${text(fields.message)}${fields.paused === true ? ' (paused)' : ''}`;
+    case 'queue:held':
+      return `until ${text(fields.until)}: ${text(fields.reason)}`;
+    case 'queue:released':
+      return 'dispatch released';
     default:
       return '';
   }
@@ -95,12 +99,15 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
   const watch = stream?.watch ?? 'unknown';
   const polling = panel.queue?.polling;
   const paused = polling?.paused;
+  const held = panel.queue?.held;
   return html`<section class="qpanel">
 <div class="srcbar"><span class="h${watch === 'watched' ? '' : ' held'}"></span><span class="nm">${panel.repo} / ${panel.workflow}</span><span class="pill ${watch === 'watched' ? 'p-pass' : 'p-skip'}">${watch}</span>${
     polling === undefined
       ? ''
       : html`<span class="dt">label ${polling.label} · polled ${ago(polling.lastPolledAt, now)} · ${polling.failures} failed polls</span>`
-  }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}</div>
+  }${paused === undefined ? '' : html`<span class="warnchip">paused: ${paused.port} ${paused.adapter}: ${paused.message}</span>`}${
+    held === undefined ? '' : html`<span class="warnchip">held until ${clock(held.until, ui.tz)}: ${held.reason}</span>`
+  }</div>
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
 <div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>
 ${

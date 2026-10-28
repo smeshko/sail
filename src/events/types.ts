@@ -116,8 +116,13 @@ interface Payloads {
     /** The replays this process ran. */
     replays: number;
   };
-  /** A run suspended on its budget, right before its `run:end`: which budget, its limit and what was used. */
-  'run:suspended': { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number };
+  /**
+   * A run suspended right before its `run:end`: on its budget (which budget, its limit and what was used), or on the
+   * provider's usage limit (the call that hit it, and when it resets if the provider said).
+   */
+  'run:suspended':
+    | { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number }
+    | { stopReason: 'usage_limit'; key: string; resetsAt?: string };
   /** Whether the process driving the run holds a keep-awake: once per process, with no key. */
   'run:keep_awake': { held: true; by: string } | { held: false; reason: string };
   'stage:start': {
@@ -396,6 +401,8 @@ export const QUEUE_EVENT_TYPES = [
   'run:adopted',
   'run:resumed',
   'queue:requeued',
+  'queue:held',
+  'queue:released',
 ] as const;
 export type QueueEventType = (typeof QUEUE_EVENT_TYPES)[number];
 
@@ -457,10 +464,16 @@ export interface QueuePayloads {
   'run:resumed': { workflow: string; dedupKey: string; run: string; pid: number; from: ResumedFrom };
   /** A parked or failed item put back in the queue by hand, with no attempts. */
   'queue:requeued': { workflow: string; dedupKey: string; reason: string };
+  /** A workflow's dispatch held until a time because run `run` hit the usage limit: the queue is unchanged. */
+  'queue:held': { workflow: string; until: string; run: string; reason: string };
+  /** A workflow's held dispatch released, its hold passed. */
+  'queue:released': { workflow: string };
 }
 
 /** Where a resumed run was: running with its process gone, or suspended, with why. */
-export type ResumedFrom = { status: 'running' } | { status: 'suspended'; stopReason: 'interrupted' | 'unwatched' };
+export type ResumedFrom =
+  | { status: 'running' }
+  | { status: 'suspended'; stopReason: 'interrupted' | 'unwatched' | 'usage_limit' };
 
 type QueuePayloadOf<T extends QueueEventType> = QueuePayloads[T];
 

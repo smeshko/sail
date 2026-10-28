@@ -420,3 +420,19 @@ test('sail queue add of a ticket to a pull-request workflow exits 3, naming what
     await w.stop();
   });
 }, 30_000);
+
+test('sail queue ls a prints dispatch held until <time> on its first line while the queue is held, and not otherwise', async () => {
+  await withTempRepo(async (repo) => {
+    const { env } = repository(repo, []);
+    const path = writeQueue(join(repo.dir, '.sail-runs'));
+    const plain = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+    const queue = JSON.parse(readFileSync(path, 'utf8'));
+    const held = { until: '2026-10-28T14:20:00.000Z', runId: RUN, reason: 'spec#1 hit the usage limit', at: START };
+    writeFileSync(path, `${JSON.stringify({ ...queue, held })}\n`);
+    const listed = await runCaptured(['queue', 'ls', 'a'], repo.dir, { env });
+    expect(plain.stdout.split('\n')[0]).toBe(`a: label sail-a, last polled ${START}, paused: key expired`);
+    expect(listed.stdout.split('\n')[0]).toBe(
+      `a: label sail-a, last polled ${START}, paused: key expired, dispatch held until 2026-10-28T14:20:00.000Z`,
+    );
+  });
+});

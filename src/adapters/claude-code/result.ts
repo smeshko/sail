@@ -1,11 +1,13 @@
 // How a Claude Code session ended, as one HarnessResult. A submission is `done` or `blocked`; everything else is
 // `error`, with the provider's text kept: an error subtype, an API error, no submission, no usage, no result, a throw or
-// an abort. A session that reports no tokens never counts as a success, whatever it submitted (ADR-0008).
+// an abort. A session that met the usage limit (a rejected rate limit event, a `rate_limit` error, or the limit's own
+// text) is `usage_limit`, with `resetsAt` when the SDK or the text gave one. A session that reports no tokens never counts as a success, whatever it submitted (ADR-0008).
 import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Budget, HarnessFailure, HarnessResult } from '../../ports/types';
 import type { ReaderState } from './messages';
 import { resultTokens } from './messages';
 import { readSubmission } from './submission';
+import { limitText, resetsFromText } from './usage-limit';
 
 export interface ResultInput {
   /** The session's result message, when one came. */
@@ -18,6 +20,8 @@ export interface ResultInput {
   readonly overMinutes?: boolean;
   /** What the session threw, when it threw. */
   readonly thrown?: { readonly error: unknown };
+  /** The clock a reset time in the provider's text is read against. */
+  readonly now?: Date;
 }
 
 export interface Ended {
@@ -40,18 +44,32 @@ export function toHarnessResult(input: ResultInput): Ended {
   const costEstimate = isEstimate(result);
   const raw = result === undefined ? null : costEstimate ? { ...result, costEstimate: true } : result;
   const session = { sessionId: reader.sessionId ?? result?.session_id ?? '', usage: reader.spent, transcript: '', raw };
-  const failed = (message: string, endReason: string, reason: HarnessFailure = 'harness'): Ended => ({
-    result: { outcome: 'error', message, reason, ...session },
+  const failed = (
+    message: string,
+    endReason: string,
+    reason: HarnessFailure = 'harness',
+    resetsAt?: string,
+  ): Ended => ({
+    result: { outcome: 'error', message, reason, ...(resetsAt === undefined ? {} : { resetsAt }), ...session },
     endReason,
     costEstimate,
   });
+  /** A failure that is the usage limit when the reader saw it or `text` says it, with the reset time found. */
+  const failure = (message: string, text: string): Ended => {
+    if (reader.limited === undefined && !limitText(text)) return failed(message, 'failed');
+    const resetsAt = reader.limited?.resetsAt ?? resetsFromText(text, input.now ?? new Date());
+    return failed(message, 'usage_limit', 'usage_limit', resetsAt);
+  };
 
   if (input.overMinutes === true) {
     return failed(`budget exceeded: maxMinutes ${budget.maxMinutes}`, 'max_minutes', 'budget_exceeded');
   }
   if (input.aborted) return failed('aborted', 'aborted');
-  if (input.thrown !== undefined) return failed(`claude-code: ${messageOf(input.thrown.error)}`, 'failed');
-  if (result === undefined) return failed('the session ended without a result', 'failed');
+  if (input.thrown !== undefined) {
+    const text = messageOf(input.thrown.error);
+    return failure(`claude-code: ${text}`, text);
+  }
+  if (result === undefined) return failure('the session ended without a result', '');
 
   /** `text`, then what an error result said after a colon, when it said anything. */
   const saying = (text: string, errors: readonly string[]) => {
@@ -74,14 +92,14 @@ export function toHarnessResult(input: ResultInput): Ended {
     case 'error_max_structured_output_retries':
       return failed(saying('the output never matched its schema', result.errors), 'max_structured_output_retries');
     case 'error_during_execution':
-      return failed(saying('the session failed during execution', result.errors), 'failed');
+      return failure(saying('the session failed during execution', result.errors), result.errors.join('; '));
   }
 
   if (result.is_error) {
     const said = [result.result, ...reader.failures.filter((text) => text !== result.result)].filter(
       (text) => text !== '',
     );
-    return failed(`the session failed${said.length === 0 ? '' : `: ${said.join('; ')}`}`, 'failed');
+    return failure(`the session failed${said.length === 0 ? '' : `: ${said.join('; ')}`}`, said.join('; '));
   }
   const tokens = resultTokens(result);
   if (tokens.input + tokens.cacheRead + tokens.cacheWrite + tokens.output === 0) {

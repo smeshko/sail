@@ -14,6 +14,7 @@ import {
   init,
   MODEL,
   modelUsage,
+  rateLimitEvent,
   resultError,
   resultSuccess,
   SESSION_ID,
@@ -98,6 +99,74 @@ test("an API error keeps the provider's text, once, with any other failure the s
       issues: [],
     },
   ]);
+});
+
+const LIMIT = "You've hit your session limit · resets 4:20pm (Europe/Sofia)";
+const NOW = new Date('2026-10-28T10:00:00Z');
+
+test('an error result whose text says the user hit a limit gives usage_limit with the reset time of the text', () => {
+  const limited = resultSuccess({ isError: true, result: LIMIT, cost: 0, models: {} });
+  const ended = ending(limited, [init()], { now: NOW });
+  expect(summary(ended)).toEqual({
+    said: `the session failed: ${LIMIT}`,
+    outcome: 'error',
+    reason: 'usage_limit',
+    endReason: 'usage_limit',
+    issues: [],
+  });
+  expect(ended.result).toMatchObject({ resetsAt: '2026-10-28T14:20:00.000Z' });
+});
+
+test('a rejected rate limit event gives usage_limit, and its reset time wins over the text', () => {
+  const limited = resultSuccess({ isError: true, result: LIMIT, cost: 0, models: {} });
+  const ended = ending(limited, [init(), rateLimitEvent('rejected', 1_793_200_800)], { now: NOW });
+  expect(ended.result).toMatchObject({ reason: 'usage_limit', resetsAt: '2026-10-28T15:20:00.000Z' });
+  const silent = resultSuccess({ isError: true, result: 'Credit balance too low', cost: 0, models: {} });
+  const bare = ending(silent, [init(), rateLimitEvent('rejected')], { now: NOW });
+  expect(bare.result.outcome === 'error' && bare.result.reason).toBe('usage_limit');
+  expect(bare.result).not.toHaveProperty('resetsAt');
+});
+
+test('a rejected rate limit event gives usage_limit to a session that then failed during execution or ended without a result, and not once a later event allowed it again', () => {
+  const rejected = rateLimitEvent('rejected', 1_793_200_800);
+  const during = ending(resultError('error_during_execution'), [init(), rejected], { now: NOW });
+  const none = ending(undefined, [init(), rejected], { now: NOW });
+  const allowedAgain = resultSuccess({ isError: true, result: 'API Error: 529 Overloaded', cost: 0, models: {} });
+  const recovered = ending(allowedAgain, [init(), rejected, rateLimitEvent('allowed')], { now: NOW });
+  const reasons = [during, none, recovered].map(({ result, endReason }) => [
+    result.outcome,
+    'reason' in result && result.reason,
+    endReason,
+  ]);
+  expect(reasons).toEqual([
+    ['error', 'usage_limit', 'usage_limit'],
+    ['error', 'usage_limit', 'usage_limit'],
+    ['error', 'harness', 'failed'],
+  ]);
+});
+
+test('a limit text with a time that cannot be read still gives usage_limit, with no reset time', () => {
+  const limited = resultSuccess({ isError: true, result: "You've hit your usage limit", cost: 0, models: {} });
+  const ended = ending(limited, [init()], { now: NOW });
+  expect(ended.result.outcome === 'error' && ended.result.reason).toBe('usage_limit');
+  expect(ended.result).not.toHaveProperty('resetsAt');
+});
+
+test('a thrown session whose message says the user hit a limit gives usage_limit', () => {
+  const ended = ending(undefined, [init()], { now: NOW, thrown: { error: new Error(LIMIT) } });
+  expect(ended.result).toMatchObject({ outcome: 'error', reason: 'usage_limit', resetsAt: '2026-10-28T14:20:00.000Z' });
+  expect(ended.endReason).toBe('usage_limit');
+});
+
+test('any other is_error result stays a harness failure', () => {
+  const other = resultSuccess({ isError: true, result: 'API Error: 500', cost: 0, models: {} });
+  expect(summary(ending(other, [init()], { now: NOW }))).toEqual({
+    said: 'the session failed: API Error: 500',
+    outcome: 'error',
+    reason: 'harness',
+    endReason: 'failed',
+    issues: [],
+  });
 });
 
 const failure = (said: string, endReason = 'failed', reason = 'harness') => ({

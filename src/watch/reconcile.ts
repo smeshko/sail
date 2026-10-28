@@ -9,18 +9,23 @@
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended unwatched` | adopted under its lease's pid when a live process holds its lease, else resumed, once |
+// | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
 // | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
+//
+// A limit with no event to date it by is dated by when the dispatcher first saw it (`limitedAt`).
 //
 // The lease comes before a resume because the item's pid is the process the watcher started last: a resume another
 // process started, or one a watcher spawned and died before recording, holds the run's lease with a live pid. Adopting
 // it then, rather than resuming the run a second time, keeps two processes off one workspace. A run this dispatcher has
-// already resumed, found unended with its resume's process gone, is parked with why: its resume failed, by the last
+// already resumed, found unended with its resume's process gone, and not on a usage limit hit since, is parked with
+// why: its resume failed, by the last
 // line the resume itself logged (the log after the offset the spawn reported) or, with none, by its exit. A new
 // dispatcher, a restart or the workflow watched again, starts with none resumed, so it gets one more chance.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type RunStatus, readStatus } from '../engine/run-dir';
 import { RUN_HEADER_FILE } from '../engine/run-header';
+import { readEvents } from '../events/consumers/ndjson';
 import type { ResumedFrom } from '../events/types';
 import type { WorkspacePort } from '../ports/workspace';
 import type { QueueItem } from './queue-store';
@@ -32,10 +37,18 @@ export interface ReconcileContext {
   isAlive: (pid: number) => boolean;
   /** Where the run's lease is read, before a resume. */
   workspace: Pick<WorkspacePort, 'holder'>;
+  /** The time a usage limit's hold is measured against. */
+  now: Date;
+  /** How long a usage limit holds the dispatch when the run names no reset time. */
+  backoffMs: number;
+  /** When this dispatcher first saw the run on its usage limit: dates a limit whose run left no event for it. */
+  limitedAt?: Date;
   /** The dispatcher's first settle: a live run is adopted. */
   first: boolean;
   /** Whether this dispatcher has already resumed the item's run. */
   resumed: boolean;
+  /** When this dispatcher last resumed the item's run from its usage limit: a limit not hit since means it failed. */
+  resumedAt?: Date;
   /** How the process this dispatcher last started for the item exited, once it has. */
   exited?: number | null;
   /** Where the output of the process this dispatcher last started for the item begins in its dispatch log. */
@@ -50,7 +63,8 @@ export type Reconciled =
   | { kind: 'park'; reason: string }
   | { kind: 'wait' }
   | { kind: 'adopt'; pid: number }
-  | { kind: 'resume'; from: ResumedFrom };
+  | { kind: 'resume'; from: ResumedFrom }
+  | { kind: 'held'; until: string; reason: string };
 
 function statusOf(runDir: string): RunStatus | undefined {
   try {
@@ -58,6 +72,27 @@ function statusOf(runDir: string): RunStatus | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * When the usage limit the run suspended on lets it go on, and why it waits: the reset time its last `run:suspended`
+ * names when that is after the event, else that event's time plus the back-off, else now plus the back-off.
+ */
+function usageLimitOf(
+  runDir: string,
+  context: Pick<ReconcileContext, 'now' | 'backoffMs' | 'limitedAt'>,
+): { until: string; reason: string; at?: number } {
+  const last = readEvents(runDir)
+    .filter((event) => event.type === 'run:suspended' && event.stopReason === 'usage_limit')
+    .at(-1);
+  const key = last?.type === 'run:suspended' && last.stopReason === 'usage_limit' ? last.key : undefined;
+  const resetsAt = last?.type === 'run:suspended' && last.stopReason === 'usage_limit' ? last.resetsAt : undefined;
+  const base = last === undefined ? (context.limitedAt ?? context.now).getTime() : Date.parse(last.ts);
+  // A reset time not after the limit was hit, as from a skewed clock, would resume the run into the limit again at once.
+  const until =
+    resetsAt !== undefined && Date.parse(resetsAt) > base ? resetsAt : new Date(base + context.backoffMs).toISOString();
+  const call = key === undefined ? 'a run' : key;
+  return { until, reason: `${call} hit the usage limit`, ...(last === undefined ? {} : { at: Date.parse(last.ts) }) };
 }
 
 /** Where a run stands that a resume takes on, or undefined for any other. */
@@ -124,6 +159,16 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   if (status.status === 'failed') {
     if (status.stopReason === 'stopped') return { kind: 'park', reason: `run ${runId} was stopped` };
     return { kind: 'failed', reason: `run ${runId} failed (${status.stopReason})` };
+  }
+  if (status.status === 'suspended' && status.stopReason === 'usage_limit') {
+    const holder = await liveHolder(runDir, runId, context);
+    if (holder !== undefined) return { kind: 'adopt', pid: holder };
+    const { until, reason, at } = usageLimitOf(runDir, context);
+    if (context.resumedAt !== undefined && (at === undefined || at <= context.resumedAt.getTime())) {
+      return { kind: 'park', reason: why(context, runId, 'its resume failed') ?? 'its resume failed' };
+    }
+    if (context.now.getTime() < Date.parse(until)) return { kind: 'held', until, reason };
+    return { kind: 'resume', from: { status: 'suspended', stopReason: 'usage_limit' } };
   }
   const from = resumable(status);
   if (from === undefined) return { kind: 'wait' };

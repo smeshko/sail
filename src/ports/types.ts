@@ -236,7 +236,7 @@ export type Usage = z.infer<typeof Usage>;
 const session = { sessionId: z.string(), usage: Usage, transcript: z.string(), raw: Raw };
 
 /** Why a session ended in `error`. Left out, it is `harness`. */
-export const HarnessFailure = z.enum(['harness', 'budget_exceeded', 'timeout']);
+export const HarnessFailure = z.enum(['harness', 'budget_exceeded', 'timeout', 'usage_limit']);
 export type HarnessFailure = z.infer<typeof HarnessFailure>;
 
 /** A blocked reason says something: whitespace alone is no reason. */
@@ -250,6 +250,8 @@ export const HarnessResult = z.discriminatedUnion('outcome', [
     outcome: z.literal('error'),
     message: z.string().min(1),
     reason: HarnessFailure.optional(),
+    /** When a `usage_limit` resets, if the provider said. */
+    resetsAt: z.iso.datetime().optional(),
     ...session,
   }),
 ]);

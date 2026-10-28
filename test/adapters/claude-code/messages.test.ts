@@ -14,6 +14,7 @@ import {
   init,
   MODEL,
   modelUsage,
+  rateLimitEvent,
   resultSuccess,
   SESSION_ID,
   streamEvent,
@@ -306,6 +307,36 @@ test("the session's failures are kept in order with the provider's text: an assi
     assistantText('m2', '', { error: 'billing_error' }),
   ]);
   expect(r.state().failures).toEqual(['Invalid API key · Fix external API key', 'token expired', 'billing_error']);
+});
+
+test('a rejected rate limit event marks the session limited with its reset time, and an allowed warning does not', () => {
+  const { reader: warned } = reader();
+  const { reader: rejected } = reader();
+  const { reader: undated } = reader();
+  readAll(warned, [rateLimitEvent('allowed_warning', 1_793_197_200)]);
+  readAll(rejected, [rateLimitEvent('rejected', 1_793_197_200)]);
+  readAll(undated, [rateLimitEvent('rejected')]);
+  expect([warned.state().limited, rejected.state().limited, undated.state().limited]).toEqual([
+    undefined,
+    { resetsAt: '2026-10-28T14:20:00.000Z' },
+    {},
+  ]);
+});
+
+test('a rate limit event that allows the session again after a rejected one clears its limit', () => {
+  const { reader: allowed } = reader();
+  const { reader: warned } = reader();
+  readAll(allowed, [rateLimitEvent('rejected', 1_793_197_200), rateLimitEvent('allowed')]);
+  readAll(warned, [rateLimitEvent('rejected', 1_793_197_200), rateLimitEvent('allowed_warning', 1_793_197_200)]);
+  expect([allowed.state().limited, warned.state().limited]).toEqual([undefined, undefined]);
+});
+
+test('an assistant message with the rate_limit error marks the session limited, and a later rejected event adds its reset time', () => {
+  const { reader: r } = reader();
+  readAll(r, [assistantText('m1', "You've hit your session limit", { error: 'rate_limit' })]);
+  const first = r.state().limited;
+  readAll(r, [rateLimitEvent('rejected', 1_793_197_200_000)]);
+  expect([first, r.state().limited]).toEqual([{}, { resetsAt: '2026-10-28T14:20:00.000Z' }]);
 });
 
 test('settling with no result closes the open turn and fails every open tool, with no result update', () => {

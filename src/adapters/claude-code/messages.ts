@@ -7,6 +7,7 @@ import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthrop
 import type { HarnessEvent } from '../../ports/harness';
 import type { Usage } from '../../ports/types';
 import type { Denial } from './tool-call';
+import { resetsFromEpoch } from './usage-limit';
 
 type TurnUsage = SDKAssistantMessage['message']['usage'];
 
@@ -38,6 +39,8 @@ export interface ReaderState {
   readonly spent: Usage;
   /** The provider's text of every failure the session reported before its result, in order. */
   readonly failures: readonly string[];
+  /** Set once the session met the usage limit, with the reset time the SDK gave when it did. */
+  readonly limited?: { readonly resetsAt?: string };
   /** Every event read or settled, in order. */
   readonly events: readonly HarnessEvent[];
 }
@@ -124,6 +127,7 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
   const failures: string[] = [];
   const open = new Map<string, number>();
   const denied = new Set<string>();
+  let limited: { resetsAt?: string } | undefined;
   /** The denials not yet emitted, by call id. */
   const held = new Map<string, Denial>();
   let sessionId: string | undefined;
@@ -184,6 +188,7 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
       turnUsage.set(openTurn, message.message.usage);
     }
     if (message.error !== undefined) failures.push(textOf(message) || message.error);
+    if (message.error === 'rate_limit') limited ??= {};
     for (const block of message.message.content) {
       switch (block.type) {
         case 'text':
@@ -234,6 +239,16 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
         case 'auth_status':
           if (message.error !== undefined) failures.push(message.error);
           return [];
+        case 'rate_limit_event': {
+          const { status, resetsAt } = message.rate_limit_info;
+          if (status === 'rejected') {
+            limited = { ...limited, ...(resetsAt === undefined ? {} : { resetsAt: resetsFromEpoch(resetsAt) }) };
+          } else {
+            // Allowed again, as on overage or a new window: a later failure is not the limit's.
+            limited = undefined;
+          }
+          return [];
+        }
         default:
           return [];
       }
@@ -258,6 +273,7 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
       denials: denied.size,
       spent,
       failures: [...failures],
+      ...(limited === undefined ? {} : { limited }),
       events: [...events],
     }),
     markDenied(toolUseId, denial) {

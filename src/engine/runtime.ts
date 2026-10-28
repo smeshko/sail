@@ -59,6 +59,10 @@
 // Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
 // ticket is claimed, refuses the start instead: nothing was written, so there is no run to suspend.
 //
+// A call (or a step of one) that hit the provider's usage limit suspends the run with `usage_limit`, `run:suspended`
+// naming the call and the reset time when the provider gave one. The call is left unjournaled, like an interrupted one,
+// and the workspace and lease are kept; in a group the members that passed are journaled first.
+//
 // A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
 // and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
 // reported once, right after what opening the run did, as a `journal:append` with `fromRun`; the intake's also carries
@@ -154,6 +158,14 @@ export interface RunEnd {
   result?: unknown;
   /** The budget a run suspended with `budget_exceeded` used up. */
   budget?: 'usd' | 'minutes';
+  /** When the usage limit a run suspended with `usage_limit` hit resets, when the provider said. */
+  resetsAt?: string;
+}
+
+/** A call that hit the provider's usage limit. */
+interface Limited {
+  key: string;
+  resetsAt?: string;
 }
 
 export interface RunWorkflowOptions extends OpenRunOptions, EventOptions {
@@ -496,6 +508,33 @@ async function drive(
     tracker?.narrowed(result.key as string) === true &&
     result.outcome === 'error' &&
     ((result.errors ?? []) as { reason: string }[]).some((error) => error.reason === 'budget_exceeded');
+  /** A call (or a step of one) that hit the provider's usage limit: its call's key, and the reset time if given. */
+  const limitedOf = (result: Record<string, unknown>): Limited | undefined => {
+    if (result.outcome !== 'error') return undefined;
+    const hit = ((result.errors ?? []) as { reason: string; resetsAt?: string }[]).find(
+      (error) => error.reason === 'usage_limit',
+    );
+    if (hit === undefined) return undefined;
+    return { key: callKeyOf(String(result.key)), ...(hit.resetsAt === undefined ? {} : { resetsAt: hit.resetsAt }) };
+  };
+  /** Suspends the run on the usage limit `limit`: the limited call is left unjournaled, and the workspace kept. */
+  const limitReached = (limit: Limited): Promise<RunEnd> => {
+    const { key, resetsAt } = limit;
+    bus.emit({
+      type: 'run:suspended',
+      stopReason: 'usage_limit',
+      key,
+      ...(resetsAt === undefined ? {} : { resetsAt }),
+    });
+    return finish({
+      runId,
+      dir,
+      status: 'suspended',
+      stopReason: 'usage_limit',
+      message: `${key} hit the usage limit${resetsAt === undefined ? '' : `: it resets at ${resetsAt}`}`,
+      ...(resetsAt === undefined ? {} : { resetsAt }),
+    });
+  };
   const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
   /** How the run ends at the boundary before `key`, when its control file asks it to, or undefined to go on. */
   const controlled = (key: string): Promise<RunEnd> | undefined => {
@@ -550,7 +589,7 @@ async function drive(
         // from that step. The budget is checked before each further step as before each call: once a step that passed
         // has used it up, the next doesn't start, and the boundary before the call suspends the run.
         onStep: (result, paths) => {
-          if (callSignal?.aborted || ranOut(result)) return false;
+          if (callSignal?.aborted || ranOut(result) || limitedOf(result) !== undefined) return false;
           journal(result, paths);
           if (callSignal?.aborted) return false;
           return !(
@@ -773,6 +812,11 @@ async function drive(
         const [one] = ready as [Ready];
         const { result, paths, stopped } = await launch(one, signal);
         if (signal?.aborted) return await interrupted(`stopped during ${first}`);
+        const limit = limitedOf(result);
+        if (limit !== undefined) {
+          running = undefined;
+          return await limitReached(limit);
+        }
         // Stopped short of its last step, the call is left for the next replay to ask for again.
         if (stopped === true || ranOut(result)) {
           running = undefined;
@@ -792,6 +836,8 @@ async function drive(
       const live = new Set(calls.map((call) => call.key));
       /** The calls this process journaled: once it holds them all, the journal holds the group whole. */
       let journaledNow = 0;
+      /** The first call of the group that hit the usage limit. */
+      let usageLimited: Limited | undefined;
       // A resume may run one call of a group, and it isn't the group's first.
       running = live.size === 1 ? [...live][0] : undefined;
       /** The relay's key is the running call's while exactly one of the group's runs, and none otherwise. */
@@ -804,7 +850,13 @@ async function drive(
           try {
             const { result, paths, stopped } = await launch(each, groupSignal);
             // A call that returns once the run is stopping isn't journaled: a resume runs it again.
-            if (groupSignal.aborted || stopped === true || ranOut(result)) return;
+            if (groupSignal.aborted) return;
+            const limit = limitedOf(result);
+            if (limit !== undefined) {
+              usageLimited ??= limit;
+              return;
+            }
+            if (stopped === true || ranOut(result)) return;
             const journaled = journal(result, paths, keys);
             journaledNow++;
             settle(each);
@@ -833,6 +885,7 @@ async function drive(
       }
       if (rejected !== undefined) throw rejected.reason;
       if (signal?.aborted) return await interrupted(`stopped during ${what}`);
+      if (usageLimited !== undefined) return await limitReached(usageLimited);
     }
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });

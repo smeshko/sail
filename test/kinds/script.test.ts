@@ -743,7 +743,8 @@ test("a script whose sail port call fails, and which carries on to exit 0, has t
 });
 
 test.each<[string, string, number | undefined, string, string[]]>([
-  ['times out', 'sleep 5', 1, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
+  // Five seconds, so a loaded machine still starts the script and reports the event before the timeout.
+  ['times out', 'sleep 30', 5, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
   [
     'exits with a failing code',
     `${JUNIT}\necho '${FAILING}'\nexit 1`,
@@ -807,9 +808,9 @@ test('a bad line joins the errors the step already has: a script that timed out,
     message: 'port-events.ndjson line 1 is not a provider event: it carries seq, which the run stamps',
   };
   const timedOut = setup();
-  timedOut.run(`${reports(forged)}\nsleep 5`);
-  expect((await scriptKind.run(tests({ timeoutSeconds: 1 }), timedOut.context)).errors).toEqual([
-    { reason: 'timeout', message: 'timed out after 1s' },
+  timedOut.run(`${reports(forged)}\nsleep 30`);
+  expect((await scriptKind.run(tests({ timeoutSeconds: 5 }), timedOut.context)).errors).toEqual([
+    { reason: 'timeout', message: 'timed out after 5s' },
     port,
   ]);
   const noFile = setup();
@@ -943,9 +944,9 @@ test("the wait for the slot doesn't count toward timeoutSeconds", async () => {
   takeSlot(slots, 'verify', HOLDER);
   const b = slotted(slots, 'RUN-B');
   b.s.run("echo '{}'");
-  // Two seconds to start under a loaded machine, and a wait longer than that.
-  const waiting = scriptKind.run(verify({ timeoutSeconds: 2 }), b.context);
-  await Bun.sleep(3000);
+  // Five seconds to start under a loaded machine, and a wait longer than that.
+  const waiting = scriptKind.run(verify({ timeoutSeconds: 5 }), b.context);
+  await Bun.sleep(6000);
   releaseSlot(slots, 'verify', HOLDER);
   const run = await waiting;
   expect([run.outcome, run.errors]).toEqual(['passed', []]);

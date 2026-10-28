@@ -25,6 +25,7 @@ import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helper
 
 const START = '2026-10-15T09:00:00.000Z';
 const FIVE_MINUTES = 5 * 60_000;
+const BACKOFF = 15 * 60_000;
 
 /** FAKE-1 to FAKE-n, designated and Todo. */
 const designated = (count: number) =>
@@ -87,6 +88,7 @@ async function world(
       workspace,
       env: repo.env,
       now: clock,
+      usageLimitBackoffMs: BACKOFF,
       spawn: spawner.spawn,
       resume: spawner.resume,
       isAlive: spawner.isAlive,
@@ -321,6 +323,152 @@ test('a run whose process is gone while it reads suspended interrupted or runnin
       ],
       settled: [],
       issues: [],
+    });
+  });
+});
+
+test('a run suspended on the usage limit holds the workflow: nothing starts and an interrupted run is not resumed, no attempt is counted and nothing is parked; past the hold, queue:released, the runs are resumed and the queued item starts', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 4, 3);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'usage_limit' });
+    await w.spawner.end('FAKE-2', { status: 'suspended', stopReason: 'interrupted' });
+    await w.spawner.end('FAKE-3');
+    await dispatcher.tick();
+    await dispatcher.tick();
+    const held = {
+      spawned: spawnedKeys(w.spawner),
+      resumes: w.spawner.resumes.length,
+      items: w.store.snapshot().items.map((item) => [sourceKey(item), item.state, item.attempts]),
+      held: eventsOf(w.runs, 'queue:held').map(({ until, run, reason }) => ({ until, run, reason })),
+      settled: w.settled,
+    };
+    w.clock.advance(16 * 60_000);
+    await dispatcher.tick();
+    const run1 = w.spawner.run('FAKE-1').runId;
+    expect({
+      held,
+      after: {
+        spawned: spawnedKeys(w.spawner),
+        resumes: w.spawner.resumes.map(({ runId }) => runId),
+        released: eventsOf(w.runs, 'queue:released').length,
+        resumed: eventsOf(w.runs, 'run:resumed').map(({ dedupKey, from }) => [dedupKey, from]),
+        stillHeld: w.store.snapshot().held,
+        items: w.store.snapshot().items.map((item) => [sourceKey(item), item.state, item.attempts]),
+      },
+      issues: queueEventIssues(queueDir(w.runs, 'a')),
+    }).toEqual({
+      held: {
+        spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
+        resumes: 0,
+        items: [
+          ['FAKE-1', 'dispatched', 1],
+          ['FAKE-2', 'dispatched', 1],
+          ['FAKE-3', 'done', 1],
+          ['FAKE-4', 'queued', 0],
+        ],
+        held: [{ until: '2026-10-15T09:15:00.000Z', run: run1, reason: 'a run hit the usage limit' }],
+        settled: [
+          { dedupKey: 'ticket:FAKE-3', ticketKey: 'FAKE-3', runId: w.spawner.run('FAKE-3').runId, outcome: 'done' },
+        ],
+      },
+      after: {
+        spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4'],
+        resumes: [run1, w.spawner.run('FAKE-2').runId],
+        released: 1,
+        resumed: [
+          ['ticket:FAKE-1', { status: 'suspended', stopReason: 'usage_limit' }],
+          ['ticket:FAKE-2', { status: 'suspended', stopReason: 'interrupted' }],
+        ],
+        stillHeld: undefined,
+        items: [
+          ['FAKE-1', 'dispatched', 1],
+          ['FAKE-2', 'dispatched', 1],
+          ['FAKE-3', 'done', 1],
+          ['FAKE-4', 'dispatched', 1],
+        ],
+      },
+      issues: [],
+    });
+  });
+});
+
+test('a resumed run that hits the usage limit again is held again and resumed again past it; one whose resume left it on the same limit is parked; and once held again, it is not a run this dispatcher resumed', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'usage_limit' });
+    await w.spawner.end('FAKE-2', { status: 'suspended', stopReason: 'usage_limit' });
+    await dispatcher.tick();
+    w.clock.advance(16 * 60_000);
+    await dispatcher.tick();
+    const [run1, run2] = [w.spawner.run('FAKE-1').runId, w.spawner.run('FAKE-2').runId];
+    // FAKE-1's resume hits the limit again, at 09:20; FAKE-2's is refused, leaving its run as it was.
+    w.clock.advance(4 * 60_000);
+    const limit = {
+      seq: 1,
+      ts: w.clock().toISOString(),
+      runId: run1,
+      type: 'run:suspended',
+      stopReason: 'usage_limit',
+      key: 'spec#1',
+      resetsAt: '2026-10-15T10:00:00.000Z',
+    };
+    writeFileSync(join(w.runs, run1, 'events.ndjson'), `${JSON.stringify(limit)}\n`);
+    w.spawner.endResume(run1, { status: 'suspended', stopReason: 'usage_limit' });
+    w.spawner.endResume(run2, { log: 'sail resume: LINEAR_API_KEY is not set', code: 3 });
+    await dispatcher.tick();
+    const held = eventsOf(w.runs, 'queue:held').map(({ until }) => until);
+    const parked = w.store.snapshot().items.map((item) => [sourceKey(item), item.state, item.reason]);
+    // A resume started by hand while the dispatch was held ends interrupted: past the hold, it is resumed, not parked.
+    writeStatus(join(w.runs, run1), 'suspended', 'interrupted');
+    w.clock.advance(41 * 60_000);
+    await dispatcher.tick();
+    expect({
+      held,
+      parked,
+      resumes: w.spawner.resumes.map(({ runId }) => runId),
+      resumed: eventsOf(w.runs, 'run:resumed').map(({ dedupKey, from }) => [dedupKey, from]),
+    }).toEqual({
+      held: ['2026-10-15T09:15:00.000Z', '2026-10-15T10:00:00.000Z'],
+      parked: [
+        ['FAKE-1', 'dispatched', undefined],
+        ['FAKE-2', 'parked', 'its resume failed: sail resume: LINEAR_API_KEY is not set'],
+      ],
+      resumes: [run1, run2, run1],
+      resumed: [
+        ['ticket:FAKE-1', { status: 'suspended', stopReason: 'usage_limit' }],
+        ['ticket:FAKE-2', { status: 'suspended', stopReason: 'usage_limit' }],
+        ['ticket:FAKE-1', { status: 'suspended', stopReason: 'interrupted' }],
+      ],
+    });
+  });
+});
+
+test('a resumed run that hits the usage limit again with no event to date it by is held for the back-off from when it was seen again, not from the first limit', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'usage_limit' });
+    await dispatcher.tick();
+    const run1 = w.spawner.run('FAKE-1').runId;
+    // A resume started by hand while the dispatch was held ends interrupted: past the hold, the dispatcher resumes it.
+    writeStatus(join(w.runs, run1), 'suspended', 'interrupted');
+    w.clock.advance(16 * 60_000);
+    await dispatcher.tick();
+    // That resume hits the limit again at 09:20, leaving no event.
+    w.clock.advance(4 * 60_000);
+    w.spawner.endResume(run1, { status: 'suspended', stopReason: 'usage_limit' });
+    await dispatcher.tick();
+    expect({
+      held: eventsOf(w.runs, 'queue:held').map(({ until }) => until),
+      resumes: w.spawner.resumes.map(({ runId }) => runId),
+    }).toEqual({
+      held: ['2026-10-15T09:15:00.000Z', '2026-10-15T09:35:00.000Z'],
+      resumes: [run1],
     });
   });
 });
@@ -674,6 +822,7 @@ test('a dispatcher whose cap was lowered resumes dead runs within it: one at a t
       workspace: w.adapters.ports.workspace,
       env: repo.env,
       now: w.clock,
+      usageLimitBackoffMs: BACKOFF,
       spawn: w.spawner.spawn,
       resume: w.spawner.resume,
       isAlive: w.spawner.isAlive,
@@ -866,6 +1015,7 @@ async function prWorld(repo: TempRepo) {
     workspace: adapters.ports.workspace,
     env: repo.env,
     now: clock,
+    usageLimitBackoffMs: BACKOFF,
     spawn: spawner.spawn,
     resume: spawner.resume,
     isAlive: spawner.isAlive,

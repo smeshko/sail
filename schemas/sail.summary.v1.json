@@ -55,7 +55,8 @@
         "until",
         "unwatched",
         "stopped",
-        "interrupted"
+        "interrupted",
+        "usage_limit"
       ]
     },
     "message": {

@@ -552,6 +552,15 @@ test('a failed session, a harness that rejects or throws, and an answer that is 
   }
 });
 
+test("a session that hit the usage limit ends the call in error with reason usage_limit and resetsAt, valid against the result's schema", async () => {
+  const resetsAt = '2026-10-28T14:20:00.000Z';
+  const message = "You've hit your session limit · resets 4:20pm (Europe/Sofia)";
+  const { run } = await tried(spec(), scripted({ resolves: failed(message, { reason: 'usage_limit', resetsAt }) }));
+  expect(run.outcome).toBe('error');
+  expect(run.errors).toEqual([{ reason: 'usage_limit', message, resetsAt }]);
+  expect(resultIssues(run)).toEqual([]);
+});
+
 const TOKENS = { input: 60, cacheRead: 0, cacheWrite: 0, output: 12 };
 const WORKING: HarnessEvent[] = [
   { type: 'harness:session_start', adapter: 'scripted', sessionId: 'session-7', model: MODEL },

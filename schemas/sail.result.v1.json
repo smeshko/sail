@@ -131,10 +131,12 @@
               "not_started",
               "budget_exceeded",
               "harness",
+              "usage_limit",
               "port"
             ]
           },
-          "message": { "type": "string", "minLength": 1 }
+          "message": { "type": "string", "minLength": 1 },
+          "resetsAt": { "$ref": "#/$defs/ts" }
         },
         "required": ["reason", "message"],
         "additionalProperties": false
