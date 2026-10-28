@@ -66,6 +66,7 @@ export const EVENT_TYPES = [
   'codehost:pushed',
   'codehost:pr_opened',
   'codehost:checks',
+  'codehost:checks_rerun',
   'codehost:labelled',
   'codehost:commented',
   'codehost:merged',
@@ -356,6 +357,8 @@ interface Payloads {
     ticketKey?: string;
   };
   'codehost:checks': { key?: string; number: number; headSha: string; checks: { name: string; status: CheckStatus }[] };
+  /** The failed checks `rerunChecks` ran again on the head, by name: never empty. */
+  'codehost:checks_rerun': { key?: string; number: number; headSha: string; checks: string[] };
   'codehost:labelled': { key?: string; number: number; label: string; change: 'added' | 'removed' };
   'codehost:commented': { key?: string; number: number; body: string };
   'codehost:merged': { key?: string; number: number; method: MergeMethod; sha: string };

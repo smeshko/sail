@@ -86,6 +86,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'parseRef',
     'push',
     'removeLabel',
+    'rerunChecks',
   ],
   harness: ['capabilities', 'run'],
   workspace: [

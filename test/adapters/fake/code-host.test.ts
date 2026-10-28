@@ -61,7 +61,11 @@ const rejecting = (seed: { pullRequests: Record<string, unknown>[] }) => {
 /** The fixture seed with 4's merges rejected, an unlabelled pull request, 5, and a closed one that keeps its label, 6. */
 const suiteSeed = (seed: { pullRequests: Record<string, unknown>[] }) => {
   rejecting(seed);
-  seed.pullRequests.push(seeded(5, { labels: [] }), seeded(6, { state: 'closed' }));
+  seed.pullRequests.push(
+    seeded(5, { labels: [] }),
+    seeded(6, { state: 'closed' }),
+    seeded(7, { checks: [{ name: 'verify', statuses: ['failed', 'passed'] }] }),
+  );
 };
 
 codeHostSuite('fake', async (emit) => ({
@@ -76,6 +80,7 @@ codeHostSuite('fake', async (emit) => ({
     missing: 99,
     pendingMerge: 3,
     rejectedMerge: 4,
+    failedCheck: { number: 7, name: 'verify' },
     mergeable: async () => ({ number: 1, headSha: PR_1_HEAD }),
     refs: [
       ['12', 12],
@@ -114,6 +119,46 @@ test('checks scripted pending then failed read pending, then failed from then on
     [{ name: 'ci', status: 'failed' }],
     [{ name: 'ci', status: 'failed' }],
   ]);
+});
+
+test('checks scripted failed then passed read passed after the failed one is rerun, whether or not it was read first', async () => {
+  const script = (seed: { pullRequests: Record<string, unknown>[] }) =>
+    seed.pullRequests.push(seeded(7, { checks: [{ name: 'verify', statuses: ['failed', 'passed'] }] }));
+  const unread = createFakeCodeHost(files(script));
+  const read = createFakeCodeHost(files(script));
+  const afterRerun = async (host: ReturnType<typeof createFakeCodeHost>, readFirst: boolean) => {
+    const before = readFirst ? (await host.checks(7)).checks[0]?.status : undefined;
+    const { rerun } = await host.rerunChecks(7);
+    return { before, rerun, after: (await host.checks(7)).checks[0]?.status };
+  };
+  expect([await afterRerun(unread, false), await afterRerun(read, true)]).toEqual([
+    { before: undefined, rerun: ['verify'], after: 'passed' },
+    { before: 'failed', rerun: ['verify'], after: 'passed' },
+  ]);
+});
+
+test('rerunChecks names only the checks whose current status is failed, and a passed one is left alone and not announced', async () => {
+  const capture = captureEvents();
+  const host = createFakeCodeHost({
+    ...files((seed) =>
+      seed.pullRequests.push(
+        seeded(7, {
+          checks: [
+            { name: 'lint', statuses: ['passed'] },
+            { name: 'unit', statuses: ['failed'] },
+            { name: 'e2e', statuses: ['pending', 'failed'] },
+          ],
+        }),
+      ),
+    ),
+    emit: capture.emit,
+  });
+  await host.checks(7);
+  const { rerun } = await host.rerunChecks(7);
+  expect({ rerun, events: capture.events.filter((event) => event.type === 'codehost:checks_rerun') }).toEqual({
+    rerun: ['unit'],
+    events: [{ type: 'codehost:checks_rerun', number: 7, headSha: '7'.repeat(40), checks: ['unit'] }],
+  });
 });
 
 test('a merge scripted pending or refused says so, leaves the pull request open, and emits nothing', async () => {

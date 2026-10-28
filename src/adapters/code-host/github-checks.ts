@@ -27,6 +27,7 @@ export interface GitHubStatus {
 
 /** A GitHub Actions workflow run as the `actions/runs` endpoint lists it: the fields the adapter reads. */
 export interface GitHubWorkflowRun {
+  readonly id?: number;
   readonly check_suite_id: number;
   readonly workflow_id?: number;
 }
@@ -193,18 +194,71 @@ async function readWorkflows(
  * order. A run a later one of its name, app and workflow superseded is dropped from `checks` and kept in `raw`. The
  * workflows are read only when one app's runs of a name sit in more than one check suite.
  */
+async function readRuns(client: GitHubClient, op: string, sha: string) {
+  const checkRuns = await readPaged<GitHubCheckRun>(client, op, sha, 'check-runs', 'check_runs', 'name');
+  // A name repeated across check suites may be two workflows' jobs: their workflow runs tell which suite is which.
+  const workflowOf = suitesShareNames(checkRuns) ? await readWorkflows(client, op, sha, checkRuns) : new Map();
+  const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses', 'context');
+  return { checkRuns, statuses, latest: latestRuns(checkRuns, workflowOf) };
+}
+
+/**
+ * Runs the failed jobs of each GitHub Actions workflow run that holds a failed latest check run of `sha`, once per
+ * workflow run, and names the failed checks that were rerun. A failed commit status, a check run of another app and a
+ * workflow run GitHub won't rerun (no Actions access, still running) are left out.
+ */
+export async function rerunFailed(client: GitHubClient, op: string, sha: string): Promise<string[]> {
+  const { latest } = await readRuns(client, op, sha);
+  const failed = latest.filter((run) => checkRunStatus(run) === 'failed' && Number.isInteger(run.check_suite?.id));
+  if (failed.length === 0) return [];
+  let workflowRuns: GitHubWorkflowRun[];
+  try {
+    workflowRuns = await readPaged<GitHubWorkflowRun>(
+      client,
+      op,
+      sha,
+      'actions/runs',
+      'workflow_runs',
+      'check_suite_id',
+    );
+  } catch (error) {
+    if (error instanceof PortError && (error.code === 'forbidden' || error.code === 'not_found')) return [];
+    throw error;
+  }
+  const rerunnable = new Set(['forbidden', 'not_found', 'conflict']);
+  const names: string[] = [];
+  const rerunSuites = new Map<number, boolean>();
+  for (const run of failed) {
+    const suite = run.check_suite?.id as number;
+    const workflowRun = workflowRuns.find((each) => each.check_suite_id === suite);
+    if (workflowRun === undefined || !Number.isInteger(workflowRun.id)) continue;
+    if (!rerunSuites.has(suite)) {
+      try {
+        await client.request<undefined>(
+          op,
+          'POST',
+          client.repoPath('actions', 'runs', workflowRun.id as number, 'rerun-failed-jobs'),
+        );
+        rerunSuites.set(suite, true);
+      } catch (error) {
+        if (!(error instanceof PortError && rerunnable.has(error.code))) throw error;
+        rerunSuites.set(suite, false);
+      }
+    }
+    if (rerunSuites.get(suite) === true && !names.includes(run.name)) names.push(run.name);
+  }
+  return names;
+}
+
 export async function readChecks(
   client: GitHubClient,
   op: string,
   sha: string,
 ): Promise<{ checks: Check[]; raw: { checkRuns: GitHubCheckRun[]; statuses: GitHubStatus[] } }> {
-  const checkRuns = await readPaged<GitHubCheckRun>(client, op, sha, 'check-runs', 'check_runs', 'name');
-  // A name repeated across check suites may be two workflows' jobs: their workflow runs tell which suite is which.
-  const workflowOf = suitesShareNames(checkRuns) ? await readWorkflows(client, op, sha, checkRuns) : new Map();
-  const statuses = await readPaged<GitHubStatus>(client, op, sha, 'status', 'statuses', 'context');
+  const { checkRuns, statuses, latest } = await readRuns(client, op, sha);
   const runUrl = (run: GitHubCheckRun) => run.html_url ?? run.details_url ?? undefined;
   const checks: Check[] = [
-    ...latestRuns(checkRuns, workflowOf).map((run) => {
+    ...latest.map((run) => {
       const url = runUrl(run);
       return { name: run.name, status: checkRunStatus(run), ...(url === undefined ? {} : { url }) };
     }),

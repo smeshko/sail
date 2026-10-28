@@ -578,7 +578,7 @@
 {"seq":578,"ts":"2026-09-25T09:01:01.700Z","type":"codehost:pr_opened","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1","number":5,"url":"fake://codehost/fixture/pull/5","draft":false,"base":"main","head":"sail/FAKE-1-add-a-shout-flag-to-the-greet-command","ticketKey":"FAKE-1"}
 {"seq":579,"ts":"2026-09-25T09:01:01.800Z","type":"codehost:labelled","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1","number":5,"label":"sail","change":"added"}
 {"seq":580,"ts":"2026-09-25T09:01:01.900Z","type":"ticket:commented","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1","ticketKey":"FAKE-1","body":"sail run FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N opened fake://codehost/fixture/pull/5"}
-{"seq":581,"ts":"2026-09-25T09:01:02.000Z","type":"script:exit","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1","code":0,"outcome":"passed","durationMs":100,"stdoutBytes":1621}
+{"seq":581,"ts":"2026-09-25T09:01:02.000Z","type":"script:exit","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1","code":0,"outcome":"passed","durationMs":100,"stdoutBytes":1632}
 {"seq":582,"ts":"2026-09-25T09:01:02.100Z","type":"output:validated","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1"}
 {"seq":583,"ts":"2026-09-25T09:01:02.300Z","type":"stage:end","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1","stage":"open","call":1,"try":1,"outcome":"passed","durationMs":1000,"resultPath":"06-open/call-1/result.json"}
 {"seq":584,"ts":"2026-09-25T09:01:02.500Z","type":"journal:append","runId":"FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N","key":"open#1","line":9,"outcome":"passed"}

@@ -137,6 +137,8 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
           throw transport(op, error, `the answer from GitHub at ${host} broke off`);
         }
         let parsed: Body;
+        // An empty 2xx body, such as the 201 of a rerun, answers undefined.
+        if (response.ok && text === '') return undefined as T;
         try {
           parsed = { json: JSON.parse(text) };
         } catch {

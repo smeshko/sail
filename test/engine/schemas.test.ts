@@ -590,6 +590,7 @@ const PROVIDER: NewEvent[] = [
     ticketKey: 'FAKE-1',
   },
   { type: 'codehost:checks', number: 1, headSha: SHA, checks: [{ name: 'ci', status: 'passed' }] },
+  { type: 'codehost:checks_rerun', key: OPEN, number: 1, headSha: SHA, checks: ['ci'] },
   { type: 'codehost:labelled', key: OPEN, number: 1, label: 'sail', change: 'added' },
   { type: 'codehost:commented', number: 1, body: 'Checks passed.' },
   { type: 'codehost:merged', number: 1, method: 'squash', sha: 'f569e7f50659194ebd39f2f141e95091f40791da' },
@@ -634,6 +635,11 @@ test('provider events: a key where D10 allows one, and the rules each payload ad
     issue('/sha', 'must match pattern "^[0-9a-f]{40}$"'),
   );
   expect(check({ type: 'codehost:merged', key: OPEN, number: 1, method: 'squash', sha: SHA })).toEqual([]);
+  expect([
+    check({ type: 'codehost:checks_rerun', number: 1, headSha: SHA, checks: ['ci'] }),
+    check({ type: 'codehost:checks_rerun', number: 1, headSha: SHA, checks: ['ci'], extra: true }),
+    check({ type: 'codehost:checks_rerun', number: 1, headSha: SHA, checks: [] }),
+  ]).toEqual([[], issue('/extra', 'is not allowed'), issue('/checks', 'must NOT have fewer than 1 items')]);
 });
 
 test('event: a run:suspended on the usage limit names its call and may carry the reset time, and takes no budget field', () => {

@@ -8,6 +8,7 @@
 //   get-pull-request <pr>
 //   list-designated <label>
 //   checks <pr>
+//   rerun-checks <pr>
 //   merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
 //   add-label <pr> <label>
 //   remove-label <pr> <label>
@@ -30,6 +31,7 @@ import {
   PullRequest,
   PullRequestDetails,
   Pushed,
+  Rerun,
 } from '../../ports/types';
 import type { PortCall, PortOperation, PortTable } from './port';
 
@@ -111,6 +113,9 @@ export const CODEHOST: PortTable<'codeHost'> = {
     },
     checks: onPullRequest({ positionals: ['pr'] }, async (host, number) =>
       answered('checks', 'Checks', Checks, await host.checks(number)),
+    ),
+    'rerun-checks': onPullRequest({ positionals: ['pr'] }, async (host, number) =>
+      answered('rerunChecks', 'Rerun', Rerun, await host.rerunChecks(number)),
     ),
     merge: onPullRequest(
       {

@@ -59,6 +59,7 @@
         "codehost:pushed",
         "codehost:pr_opened",
         "codehost:checks",
+        "codehost:checks_rerun",
         "codehost:labelled",
         "codehost:commented",
         "codehost:merged",
@@ -258,6 +259,10 @@
     {
       "if": { "properties": { "type": { "const": "codehost:checks" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/codehostChecks" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "codehost:checks_rerun" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/codehostChecksRerun" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:labelled" } }, "required": ["type"] },
@@ -1286,6 +1291,19 @@
             "additionalProperties": false
           }
         }
+      },
+      "required": ["number", "headSha", "checks"],
+      "unevaluatedProperties": false
+    },
+    "codehostChecksRerun": {
+      "description": "failed checks the host was asked to run again on the head, by name",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "number": { "type": "integer", "minimum": 1 },
+        "headSha": { "$ref": "#/$defs/sha" },
+        "checks": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
       },
       "required": ["number", "headSha", "checks"],
       "unevaluatedProperties": false

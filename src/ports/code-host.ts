@@ -10,6 +10,7 @@ import type {
   PullRequest,
   PullRequestDetails,
   Pushed,
+  Rerun,
 } from './types';
 
 export interface OpenPullRequest {
@@ -44,6 +45,11 @@ export interface CodeHost {
   getPullRequest(number: number): Promise<PullRequestDetails>;
   /** The checks on the pull request's head sha. Emits `codehost:checks`. */
   checks(number: number): Promise<Checks>;
+  /**
+   * Runs the failed checks on the pull request's head again, and names them. Only a check the host can rerun is rerun:
+   * a failed commit status is left out. Emits `codehost:checks_rerun` only when it reran a check.
+   */
+  rerunChecks(number: number): Promise<Rerun>;
   /**
    * Merges the pull request by `request.method`, only while its head is `request.expectedHeadSha`. It is `refused`, with
    * nothing sent, when the pull request is closed, a draft, or at another head. A rejection by the host is a PortError.

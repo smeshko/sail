@@ -16,6 +16,7 @@ import {
   PullRequest,
   PullRequestDetails,
   Pushed,
+  Rerun,
 } from '../../src/ports/types';
 import {
   type Captured,
@@ -50,6 +51,11 @@ export interface CodeHostWorld {
   readonly pendingMerge?: number;
   /** One whose merge the host rejects. Where that can't be arranged, it is left out and named unarranged. */
   readonly rejectedMerge?: number;
+  /**
+   * An open pull request with a failed check the host can rerun, and that check's name. Where that can't be arranged,
+   * it is left out and named unarranged.
+   */
+  readonly failedCheck?: { readonly number: number; readonly name: string };
   /** Refs the adapter accepts, each with the number it names. */
   readonly refs: readonly (readonly [string, number])[];
   /** A checkout holding a new commit, a branch no pull request uses, and that commit's sha. */
@@ -62,7 +68,7 @@ export interface CodeHostWorld {
 }
 
 /** The cases a world may be unable to arrange. */
-export type Unarranged = 'pendingMerge' | 'rejectedMerge';
+export type Unarranged = 'pendingMerge' | 'rejectedMerge' | 'failedCheck';
 
 export type MakeCodeHost = (emit: ProviderEmit) => Promise<{ adapter: CodeHost; world: CodeHostWorld }>;
 
@@ -269,6 +275,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
     const calls: [string, () => Promise<unknown>][] = [
       ['getPullRequest', () => adapter.getPullRequest(missing)],
       ['checks', () => adapter.checks(missing)],
+      ['rerunChecks', () => adapter.rerunChecks(missing)],
       ['merge', () => adapter.merge(missing, { method: 'squash', expectedHeadSha: 'a'.repeat(40) })],
       ['addLabel', () => adapter.addLabel(missing, world.label)],
       ['removeLabel', () => adapter.removeLabel(missing, world.label)],
@@ -298,6 +305,33 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
       },
     ]);
     expectValidEvents(capture);
+  });
+
+  test.skipIf(unarranged.includes('failedCheck'))(
+    `${label}: rerunChecks runs a failed check again, names it, and emits codehost:checks_rerun`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const failed = world.failedCheck;
+      if (failed === undefined) throw new Error('no failedCheck in the world, and none named unarranged');
+      const rerun = await adapter.rerunChecks(failed.number);
+      const { headSha } = await adapter.getPullRequest(failed.number);
+      expect(parseIssues(Rerun, rerun)).toEqual([]);
+      expect({ number: rerun.number, headSha: rerun.headSha, rerun: rerun.rerun }).toEqual({
+        number: failed.number,
+        headSha,
+        rerun: [failed.name],
+      });
+      expect(capture.events).toEqual([
+        { type: 'codehost:checks_rerun', number: failed.number, headSha, checks: [failed.name] },
+      ]);
+      expectValidEvents(capture);
+    },
+  );
+
+  test(`${label}: rerunChecks on a pull request whose checks have not failed reruns nothing and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const rerun = await adapter.rerunChecks(world.designated);
+    expect({ rerun: rerun.rerun, events: capture.events }).toEqual({ rerun: [], events: [] });
   });
 
   test(`${label}: a merge the host reports reads merged, and merging again gives the same merge with no second event`, async () => {

@@ -455,6 +455,13 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
       const runs = seeded.flatMap((runs) => (typeof runs === 'number' ? [] : runs));
       return json(200, { total_count: runs.length, workflow_runs: page(runs, query) });
     }
+    const rerun = /^\/actions\/runs\/(\d+)\/rerun-failed-jobs$/.exec(path);
+    if (method === 'POST' && rerun !== null) {
+      const known = (seed.pullRequests ?? []).some(
+        (pr) => typeof pr.workflowRuns === 'object' && pr.workflowRuns.some((run) => run.id === Number(rerun[1])),
+      );
+      return known ? { status: 201 } : notFound();
+    }
     const status = /^\/commits\/([^/]+)\/status$/.exec(path);
     if (method === 'GET' && status !== null) {
       const sha = String(status[1]);
