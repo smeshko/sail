@@ -22,6 +22,7 @@ type Answered =
   | { asked: false; note: string };
 interface Lib {
   git: Run;
+  yesses(answers: Record<string, unknown>, ids: string[]): { id: string; yes: number }[];
   askNouls(questions: object, state: object, out: string): Answered;
   parseTasks(planText: string): Task[];
   tasksState(tasks: Task[], run: Run): object;
@@ -91,10 +92,12 @@ function collect(runDir: string, lib: Lib, out: string, notes: string[]): Call[]
       notes.push(`${entry.key} in ${runDir}: ${asked.note}`);
       continue;
     }
-    const items = verdicts(entry.stage, entry.output).flatMap(([id, agent]) => {
-      const answer = asked.answers[id];
-      return answer?.type === 'noul' && typeof answer.noul === 'number' ? [{ id, agent, yes: answer.noul }] : [];
-    });
+    const agents = new Map(verdicts(entry.stage, entry.output));
+    const items = lib.yesses(asked.answers, [...agents.keys()]).map(({ id, yes }) => ({
+      id,
+      agent: agents.get(id) as boolean,
+      yes,
+    }));
     calls.push({
       stage: entry.stage,
       items,
