@@ -54,6 +54,7 @@
         "ticket:attached",
         "ticket:labelled",
         "ticket:unlabelled",
+        "ticket:related",
         "codehost:pushed",
         "codehost:pr_opened",
         "codehost:checks",
@@ -232,6 +233,10 @@
     {
       "if": { "properties": { "type": { "const": "ticket:unlabelled" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/ticketLabelled" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:related" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketRelated" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:pushed" } }, "required": ["type"] },
@@ -1143,6 +1148,20 @@
         "labels": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["ticketKey", "label", "labels"],
+      "unevaluatedProperties": false
+    },
+    "ticketRelated": {
+      "description": "a relation of the ticket to another, and the ticket's state afterwards",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "kind": { "enum": ["related", "blocks", "duplicate"] },
+        "to": { "type": "string" },
+        "state": { "$ref": "#/$defs/ticketState" }
+      },
+      "required": ["ticketKey", "kind", "to", "state"],
       "unevaluatedProperties": false
     },
     "codehostPushed": {

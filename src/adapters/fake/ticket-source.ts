@@ -11,6 +11,7 @@ import {
   type ListedTicket,
   type Ticket,
   TicketMove,
+  TicketRelation,
   TicketState,
   TicketStateType,
 } from '../../ports/types';
@@ -54,6 +55,16 @@ const STATES: Record<TicketMove, TicketState> = {
   'in-progress': { type: 'started', name: 'In Progress' },
   'in-review': { type: 'started', name: 'In Review' },
   done: { type: 'completed', name: 'Done' },
+};
+
+/** The state `relate` leaves a duplicate in. */
+const DUPLICATE: TicketState = { type: 'canceled', name: 'Duplicate' };
+
+/** What the other ticket's link calls a relation, read from its side. */
+const INVERSE: Record<TicketRelation, string> = {
+  related: 'related',
+  blocks: 'blocked by',
+  duplicate: 'duplicated by',
 };
 
 const KEY = /^FAKE-\d+$/;
@@ -207,6 +218,27 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     },
     addLabel: (ticketKey, label) => relabel('addLabel', ticketKey, label),
     removeLabel: (ticketKey, label) => relabel('removeLabel', ticketKey, label),
+    async relate(ticketKey, { kind, to }) {
+      if (!TicketRelation.safeParse(kind).success) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${String(kind)} is not a relation`);
+      }
+      if (to === ticketKey) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${ticketKey} can't be related to itself`);
+      }
+      const related = store.change((world) => {
+        const ticket = find(world, 'relate', ticketKey);
+        const other = find(world, 'relate', to);
+        ticket.links.push({ url: `fake://tickets/${to}`, title: `${kind} ${to}: ${other.title}` });
+        other.links.push({
+          url: `fake://tickets/${ticketKey}`,
+          title: `${INVERSE[kind]} ${ticketKey}: ${ticket.title}`,
+        });
+        if (kind === 'duplicate') ticket.state = { ...DUPLICATE };
+        return { state: { ...ticket.state }, raw: structuredClone(ticket) };
+      });
+      emit({ type: 'ticket:related', ticketKey, kind, to, state: related.state });
+      return { ticketKey, kind, to, ...related };
+    },
     async attach(ticketKey, file) {
       checkAttachment(file);
       const name = file.title ?? file.name;

@@ -568,6 +568,14 @@ const PROVIDER: NewEvent[] = [
   },
   { type: 'ticket:labelled', key: OPEN, ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail', 'Bug'] },
   { type: 'ticket:unlabelled', key: OPEN, ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail'] },
+  {
+    type: 'ticket:related',
+    key: OPEN,
+    ticketKey: 'FAKE-2',
+    kind: 'duplicate',
+    to: 'FAKE-1',
+    state: { type: 'canceled', name: 'Duplicate' },
+  },
   { type: 'codehost:pushed', key: OPEN, branch: 'sail/FAKE-1', headSha: SHA },
   {
     type: 'codehost:pr_opened',

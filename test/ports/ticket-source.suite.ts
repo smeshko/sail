@@ -12,6 +12,7 @@ import {
   Moved,
   Posted,
   Relabelled,
+  Related,
   Ticket,
   type TicketMove,
   TicketSourceCapabilities,
@@ -106,6 +107,8 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
 
   test(`${label}: every operation on an unknown ticket key rejects with not_found, naming the operation`, async () => {
     const { adapter, world, capture } = await start();
+    const links = (await adapter.get(world.designated)).links;
+    capture.events.length = 0;
     const failures = [
       portFailure(await rejection(adapter.get(world.missing))),
       portFailure(await rejection(adapter.claim(world.missing))),
@@ -114,15 +117,18 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       portFailure(await rejection(adapter.attach(world.missing, TRANSCRIPT))),
       portFailure(await rejection(adapter.addLabel(world.missing, world.spareLabel))),
       portFailure(await rejection(adapter.removeLabel(world.missing, world.label))),
+      portFailure(await rejection(adapter.relate(world.missing, { kind: 'related', to: world.designated }))),
+      portFailure(await rejection(adapter.relate(world.designated, { kind: 'related', to: world.missing }))),
     ];
     expect(failures).toEqual(
-      ['get', 'claim', 'update', 'comment', 'attach', 'addLabel', 'removeLabel'].map((op) => ({
+      ['get', 'claim', 'update', 'comment', 'attach', 'addLabel', 'removeLabel', 'relate', 'relate'].map((op) => ({
         port: 'ticketSource',
         op,
         code: 'not_found',
       })),
     );
     expect(capture.events).toEqual([]);
+    expect((await adapter.get(world.designated)).links).toEqual(links);
   });
 
   test(`${label}: isDesignated holds for a ticket carrying the label, and only that label`, async () => {
@@ -224,6 +230,57 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     ]);
     expect((await adapter.get(world.designated)).labels).toEqual(before);
     expect(capture.events.map((event) => event.type)).toEqual(['ticket:fetched', 'ticket:fetched']);
+  });
+
+  test(`${label}: relate with duplicate closes the ticket in a canceled state and links it to the other, and emits one ticket:related`, async () => {
+    const { adapter, world, capture } = await start();
+    const other = await adapter.get(world.designated);
+    const related = await adapter.relate(world.undesignated, { kind: 'duplicate', to: world.designated });
+    expect(parseIssues(Related, related)).toEqual([]);
+    expect([related.ticketKey, related.kind, related.to, related.state.type]).toEqual([
+      world.undesignated,
+      'duplicate',
+      world.designated,
+      'canceled',
+    ]);
+    const read = await adapter.get(world.undesignated);
+    expect(read.state).toEqual(related.state);
+    expect(read.links.map((link) => link.url)).toContain(other.url);
+    expect(capture.events.filter((event) => event.type !== 'ticket:fetched')).toEqual([
+      {
+        type: 'ticket:related',
+        ticketKey: world.undesignated,
+        kind: 'duplicate',
+        to: world.designated,
+        state: related.state,
+      },
+    ]);
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: relate with related or blocks leaves the ticket's state alone`, async () => {
+    const { adapter, world } = await start();
+    const before = (await adapter.get(world.undesignated)).state;
+    const related = await adapter.relate(world.undesignated, { kind: 'related', to: world.designated });
+    const blocks = await adapter.relate(world.undesignated, { kind: 'blocks', to: world.started });
+    expect([related.state, blocks.state, (await adapter.get(world.undesignated)).state]).toEqual([
+      before,
+      before,
+      before,
+    ]);
+  });
+
+  test(`${label}: relate of a ticket to itself, or with a kind that isn't one, rejects as invalid, naming relate, and changes and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const failures = [
+      portFailure(await rejection(adapter.relate(world.designated, { kind: 'related', to: world.designated }))),
+      portFailure(await rejection(adapter.relate(world.designated, { kind: 'twin' as never, to: world.undesignated }))),
+    ];
+    expect(failures).toEqual([
+      { port: 'ticketSource', op: 'relate', code: 'invalid' },
+      { port: 'ticketSource', op: 'relate', code: 'invalid' },
+    ]);
+    expect(capture.events).toEqual([]);
   });
 
   test(`${label}: a claim starts the ticket and takes it off listDesignated, and a second claim is not taken`, async () => {

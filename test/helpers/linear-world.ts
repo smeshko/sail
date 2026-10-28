@@ -38,7 +38,7 @@ export interface WorldTicket {
   labels?: readonly string[];
   comments?: WorldComment[];
   /** This ticket's relations to other tickets of the world, by number. Their inverse is derived. */
-  readonly relations?: readonly { readonly type: string; readonly number: number }[];
+  relations?: readonly { readonly type: string; readonly number: number }[];
   attachments?: readonly { readonly title: string; readonly url: string }[];
   readonly priority?: number;
   readonly assignee?: { readonly name: string; readonly email: string } | null;
@@ -121,6 +121,7 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'Int',
   'Boolean',
   'ID',
+  'IssueRelationType',
   // Query and mutation roots.
   'issues',
   'issue',
@@ -130,6 +131,7 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'issueCreate',
   'issueAddLabel',
   'issueRemoveLabel',
+  'issueRelationCreate',
   'issueLabels',
   'fileUpload',
   'attachmentCreate',
@@ -149,6 +151,7 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'teamId',
   'labelIds',
   'labelId',
+  'relatedIssueId',
   'contentType',
   'filename',
   'size',
@@ -189,6 +192,7 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'success',
   'comment',
   'attachment',
+  'issueRelation',
   'uploadFile',
   'uploadUrl',
   'assetUrl',
@@ -204,6 +208,7 @@ const MUTATIONS = new Set([
   'SailAttach',
   'SailAddLabel',
   'SailRemoveLabel',
+  'SailRelate',
 ]);
 
 /** The header `fileUpload` signs an upload with, which the PUT must carry back. */
@@ -423,6 +428,17 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
     },
     SailAddLabel: ({ id, labelId }) => relabel('issueAddLabel', id, labelId, true),
     SailRemoveLabel: ({ id, labelId }) => relabel('issueRemoveLabel', id, labelId, false),
+    SailRelate: ({ id, relatedId, type }) => {
+      const ticket = byId(id);
+      const other = byId(relatedId);
+      if (ticket === undefined || other === undefined) {
+        return graphqlError(400, 'INPUT_ERROR', `Entity not found: ${ticket === undefined ? 'Issue' : 'RelatedIssue'}`);
+      }
+      ticket.relations = [...(ticket.relations ?? []), { type: String(type), number: other.number }];
+      return ok({
+        issueRelationCreate: { success: true, issueRelation: { id: `relation-${ticket.relations.length}` } },
+      });
+    },
     SailUpload: ({ contentType, filename, size }) => {
       const number = String(signed.size + 1);
       signed.set(number, { contentType: String(contentType), size: Number(size), filename: String(filename) });

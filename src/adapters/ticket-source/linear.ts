@@ -13,6 +13,7 @@ import {
   type Relabelled,
   type Ticket,
   TicketMove,
+  TicketRelation,
   type TicketState,
   TicketStateType,
 } from '../../ports/types';
@@ -97,6 +98,10 @@ const ADD_LABEL = `mutation SailAddLabel($id: String!, $labelId: String!) {
 
 const REMOVE_LABEL = `mutation SailRemoveLabel($id: String!, $labelId: String!) {
   issueRemoveLabel(id: $id, labelId: $labelId) { success issue { labels(first: 250) { nodes { name } } } }
+}`;
+
+const RELATE = `mutation SailRelate($id: String!, $relatedId: String!, $type: IssueRelationType!) {
+  issueRelationCreate(input: { issueId: $id, relatedIssueId: $relatedId, type: $type }) { success issueRelation { id } }
 }`;
 
 // A signed URL to PUT the file's bytes to, with the headers the PUT must carry, and the URL the file is served at.
@@ -387,7 +392,10 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   }
 
   async function move(op: string, id: string, to: TicketMove): Promise<{ state: TicketState; raw: object }> {
-    const stateId = await target(op, to);
+    return moveTo(op, id, await target(op, to));
+  }
+
+  async function moveTo(op: string, id: string, stateId: string): Promise<{ state: TicketState; raw: object }> {
     const data = await client.request<{
       issueUpdate: { success: boolean; issue: { state: { name: string; type: string } } | null };
     }>(op, 'SailMove', MOVE, { id, stateId });
@@ -535,6 +543,42 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     },
     addLabel: (ticketKey, label) => relabel('addLabel', ticketKey, label),
     removeLabel: (ticketKey, label) => relabel('removeLabel', ticketKey, label),
+    async relate(ticketKey, { kind, to }) {
+      if (!TicketRelation.safeParse(kind).success) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${String(kind)} is not a relation`);
+      }
+      if (to === ticketKey) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${ticketKey} can't be related to itself`);
+      }
+      const { node } = await lookup('relate', ticketKey);
+      const { node: other } = await lookup('relate', to);
+      const current = (node as unknown as { state: { name: string; type: string } }).state;
+      // The state a duplicate closes in is chosen before the relation is made, so a team without one changes nothing.
+      let closing: LinearState | undefined;
+      if (kind === 'duplicate' && !['canceled', 'duplicate'].includes(current.type)) {
+        const all = await states('relate');
+        closing = all.find((state) => state.type === 'duplicate') ?? all.find((state) => state.type === 'canceled');
+        if (closing === undefined) {
+          throw new PortError('ticketSource', 'relate', 'invalid', `team ${team} has no state for duplicate`);
+        }
+      }
+      const data = await client.request<{
+        issueRelationCreate: { success: boolean; issueRelation: { id: string } | null };
+      }>('relate', 'SailRelate', RELATE, { id: node.id, relatedId: other.id, type: kind });
+      if (!data.issueRelationCreate.success || data.issueRelationCreate.issueRelation === null) {
+        throw new PortError(
+          'ticketSource',
+          'relate',
+          'conflict',
+          `Linear did not relate ${ticketKey} to ${to} as ${kind}`,
+          data,
+        );
+      }
+      const moved = closing === undefined ? undefined : await moveTo('relate', node.id, closing.id);
+      const state = moved?.state ?? portState(current, 'relate');
+      emit({ type: 'ticket:related', ticketKey, kind, to, state });
+      return { ticketKey, kind, to, state, raw: moved === undefined ? data : { relation: data, move: moved.raw } };
+    },
     async attach(ticketKey, file) {
       checkAttachment(file);
       const { node } = await lookup('attach', ticketKey);

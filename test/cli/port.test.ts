@@ -18,7 +18,8 @@ import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { wrapUntrusted } from '../../src/engine/render';
-import { Attached, Created, ListedTicket, Posted, Relabelled, Ticket } from '../../src/ports/types';
+import { notATicket } from '../../src/engine/source';
+import { Attached, Created, ListedTicket, Posted, Relabelled, Related, Ticket } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -999,6 +1000,66 @@ test('add-label without its label, or for a ticket that is none, exits 3 before 
     expect([bare.code, bare.stderr]).toEqual([EXIT_REFUSED, expect.stringContaining('add-label needs a label')]);
     expect(none.code).toBe(EXIT_REFUSED);
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+// `sail port ticket-source relate`: the port's Related as one line of JSON.
+
+test('relate --kind duplicate prints the port’s Related with the ticket canceled, and get then shows a link to the other ticket', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const related = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-3', '--kind', 'duplicate', '--to', 'FAKE-1'],
+      repo.dir,
+    );
+    expect({ code: related.code, stderr: related.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(Related.parse(oneLine(related.stdout))).toMatchObject({
+      ticketKey: 'FAKE-3',
+      kind: 'duplicate',
+      to: 'FAKE-1',
+      state: { type: 'canceled', name: 'Duplicate' },
+    });
+    const got = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-3'], repo.dir);
+    const ticket = Ticket.parse(oneLine(got.stdout));
+    expect(ticket.state.type).toBe('canceled');
+    expect(ticket.links.map((link) => [link.url, link.title?.startsWith('duplicate FAKE-1')])).toEqual([
+      ['fake://tickets/FAKE-1', true],
+    ]);
+  });
+});
+
+test('relate without --to, or with a --to that is no ticket, or with no --kind, exits 3 before any port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const noTo = await runCaptured(['port', 'ticket-source', 'relate', 'FAKE-1', '--kind', 'related'], repo.dir);
+    const badTo = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-1', '--kind', 'related', '--to', 'nope'],
+      repo.dir,
+    );
+    const noKind = await runCaptured(['port', 'ticket-source', 'relate', 'FAKE-1', '--to', 'FAKE-3'], repo.dir);
+    expect([noTo.code, badTo.code, noKind.code]).toEqual([EXIT_REFUSED, EXIT_REFUSED, EXIT_REFUSED]);
+    expect(noTo.stderr).toStartWith('sail port: ticket-source relate needs --to <ticket>\n');
+    expect(badTo.stderr).toStartWith(`sail port: ${notATicket('nope', 'fake')}\n`);
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('relate of a ticket the seed lacks, on either side, exits 1 as not_found and changes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const first = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-99', '--kind', 'related', '--to', 'FAKE-1'],
+      repo.dir,
+    );
+    const second = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-1', '--kind', 'related', '--to', 'FAKE-99'],
+      repo.dir,
+    );
+    expect([first, second]).toEqual([
+      { code: EXIT_FAILED, stdout: '', stderr: 'sail port: ticketSource.relate: no ticket FAKE-99 (not_found)\n' },
+      { code: EXIT_FAILED, stdout: '', stderr: 'sail port: ticketSource.relate: no ticket FAKE-99 (not_found)\n' },
+    ]);
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
   });
 });
 

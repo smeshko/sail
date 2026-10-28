@@ -67,6 +67,8 @@ Usage:
                                                              File a new ticket, the description from the file or stdin
   sail port ticket-source add-label|remove-label <ticket> <label>
                                                              Add the team's label to a ticket, or remove it
+  sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>
+                                                             Relate a ticket to another; a duplicate is closed
   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
                                                              Upload a file and attach it to a ticket
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
@@ -241,6 +243,8 @@ const commands = new Map<string, CommandSpec>([
         state: { type: 'string' },
         file: { type: 'string' },
         'content-type': { type: 'string' },
+        kind: { type: 'string' },
+        to: { type: 'string' },
       },
       positionals: 4,
       command: port,

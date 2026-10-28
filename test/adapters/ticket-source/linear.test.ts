@@ -12,9 +12,10 @@ import { type Fetch, LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source
 import type { ProviderEmit, ProviderEvent } from '../../../src/events/types';
 import type { AdapterContext, Env } from '../../../src/ports/adapter';
 import type { TicketSource } from '../../../src/ports/ticket-source';
-import { Created, ListedTicket, Relabelled, Ticket, type TicketMove } from '../../../src/ports/types';
+import { Created, ListedTicket, Relabelled, Related, Ticket, type TicketMove } from '../../../src/ports/types';
 import {
   createLinearWorld,
+  DEFAULT_STATES,
   type LinearWorld,
   type LinearWorldSeed,
   RENAMED_STATES,
@@ -805,6 +806,97 @@ test('addLabel answering success: false is a conflict, and emits nothing', async
     { port: 'ticketSource', op: 'addLabel', code: 'conflict' },
     [],
   ]);
+});
+
+const TWO_TICKETS = [
+  { number: 1, title: 'One', state: 'Todo', labels: [] },
+  { number: 2, title: 'Two', state: 'Todo', labels: [] },
+];
+
+test('relate sends both lookups, then one SailRelate of the ticket to the other by id and kind, and a related or blocks relation moves nothing', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const related = await adapter.relate('ADW-1', { kind: 'blocks', to: 'ADW-2' });
+  expect(parseIssues(Related, related)).toEqual([]);
+  expect([related.kind, related.to, related.state]).toEqual(['blocks', 'ADW-2', { type: 'unstarted', name: 'Todo' }]);
+  expect(world.operations()).toEqual(['SailTicket', 'SailTicket', 'SailRelate']);
+  expect(world.requests[2]?.variables).toEqual({ id: 'issue-1', relatedId: 'issue-2', type: 'blocks' });
+  expect(capture.events).toEqual([
+    { type: 'ticket:related', ticketKey: 'ADW-1', kind: 'blocks', to: 'ADW-2', state: related.state },
+  ]);
+  const read = await adapter.get('ADW-2');
+  expect(read.links.map((link) => link.url)).toEqual([URL_OF('ADW-1')]);
+});
+
+test('relate with duplicate moves the ticket to the first duplicate-type state, or else the first canceled-type one, whatever they are called', async () => {
+  const defaults = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const renamed = linear(
+    seedOf(RENAMED_STATES, [
+      { number: 1, title: 'One', state: 'Ready', labels: [] },
+      { number: 2, title: 'Two', state: 'Ready', labels: [] },
+    ]),
+  );
+  const first = await defaults.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' });
+  const second = await renamed.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' });
+  expect([first.state, second.state]).toEqual([
+    { type: 'canceled', name: 'Duplicate' },
+    { type: 'canceled', name: 'Dropped' },
+  ]);
+  expect(defaults.world.operations()).toEqual(['SailTicket', 'SailTicket', 'SailTeam', 'SailRelate', 'SailMove']);
+  expect(defaults.world.requests[4]?.variables).toEqual({ id: 'issue-1', stateId: 'state-duplicate' });
+  expect(defaults.world.ticket(1).state).toBe('Duplicate');
+  expect(renamed.world.ticket(1).state).toBe('Dropped');
+});
+
+test('relate with duplicate on a team with neither state is invalid, naming the team, and sends no SailRelate; a ticket already canceled is not moved again', async () => {
+  const none = linear(
+    seedOf(
+      [
+        { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 0 },
+        { id: 'state-done', name: 'Done', type: 'completed', position: 1 },
+      ],
+      TWO_TICKETS,
+    ),
+  );
+  const error = await rejection(none.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' }));
+  expect(failure(error)).toEqual([
+    { port: 'ticketSource', op: 'relate', code: 'invalid' },
+    'ticketSource.relate: team ADW has no state for duplicate',
+  ]);
+  expect(none.world.operations()).not.toContain('SailRelate');
+  expect(none.capture.events).toEqual([]);
+
+  const closed = linear(
+    seedOf(DEFAULT_STATES, [
+      { number: 1, title: 'One', state: 'Canceled', labels: [] },
+      { number: 2, title: 'Two', state: 'Todo', labels: [] },
+    ]),
+  );
+  const done = await closed.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' });
+  expect(done.state).toEqual({ type: 'canceled', name: 'Canceled' });
+  expect(closed.world.operations()).not.toContain('SailMove');
+});
+
+test('relate of a ticket to itself, or with a kind that isn’t one, is invalid before any request', async () => {
+  const { world, adapter } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const errors = [
+    await rejection(adapter.relate('ADW-1', { kind: 'related', to: 'ADW-1' })),
+    await rejection(adapter.relate('ADW-1', { kind: 'twin' as never, to: 'ADW-2' })),
+  ];
+  expect(errors.map(portFailure)).toEqual([
+    { port: 'ticketSource', op: 'relate', code: 'invalid' },
+    { port: 'ticketSource', op: 'relate', code: 'invalid' },
+  ]);
+  expect(world.operations()).toEqual([]);
+});
+
+test('relate answering success: false is a conflict, and emits nothing', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  world.failNext('SailRelate', {
+    status: 200,
+    body: { data: { issueRelationCreate: { success: false, issueRelation: null } } },
+  });
+  const error = await rejection(adapter.relate('ADW-1', { kind: 'related', to: 'ADW-2' }));
+  expect([portFailure(error), capture.events]).toEqual([{ port: 'ticketSource', op: 'relate', code: 'conflict' }, []]);
 });
 
 test('create in a team Linear doesn’t have is not_found, and Linear answering success: false to it is a conflict; neither emits', async () => {

@@ -10,6 +10,8 @@
 //                                                   files a new ticket: its description from the file or stdin
 //   sail port ticket-source add-label <ticket> <label>       adds the team's label to it
 //   sail port ticket-source remove-label <ticket> <label>    removes the label from it
+//   sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>
+//                                                   relates it to another: a duplicate is closed
 //   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
 //                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
@@ -51,8 +53,10 @@ import {
   Moved,
   Posted,
   Relabelled,
+  Related,
   type Ticket,
   type TicketMove,
+  type TicketRelation,
   type TicketStateType,
 } from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
@@ -217,6 +221,31 @@ const relabelOperation = (op: 'addLabel' | 'removeLabel'): PortOperation<TicketS
   },
 });
 
+/**
+ * A relation of the ticket `<ticket>` names to the one `--to` names: the port's `Related`, parsed before it is printed.
+ * The kind is passed on as given, and the adapter refuses one it doesn't know.
+ */
+const relateOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: {
+    kind: { value: 'related|blocks|duplicate', required: true, filled: true },
+    to: { value: 'ticket', required: true, filled: true },
+  },
+  async run(source, { positionals: [ref = ''], values }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const target = typeof values.to === 'string' ? values.to : '';
+    const to = source.parseKey(target);
+    if (to === undefined) return { refused: notATicket(target, source.name) };
+    const kind = (typeof values.kind === 'string' ? values.kind : '') as TicketRelation;
+    const related = Related.safeParse(await source.relate(ticketKey, { kind, to }));
+    if (related.success) return { value: related.data };
+    const [issue] = related.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'relate', 'invalid', `its answer is not a Related: ${where}`);
+  },
+};
+
 /** A new ticket, its description the body: the port's `Created`, parsed before it is printed. */
 const createOperation: PortOperation<TicketSource> = {
   positionals: [],
@@ -295,6 +324,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     create: createOperation,
     'add-label': relabelOperation('addLabel'),
     'remove-label': relabelOperation('removeLabel'),
+    relate: relateOperation,
     attach: attachOperation,
   },
 };

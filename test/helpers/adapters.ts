@@ -41,6 +41,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'list',
     'listDesignated',
     'parseKey',
+    'relate',
     'removeLabel',
     'update',
   ],

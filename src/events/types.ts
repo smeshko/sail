@@ -12,7 +12,7 @@ import type { IntakeEntry, RosterEntry } from '../engine/roster';
 import type { StopReason } from '../engine/run-dir';
 import type { RunHeader } from '../engine/run-header';
 import type { PortErrorCode } from '../ports/errors';
-import type { CheckStatus, MergeMethod, TicketMove, TicketState, Usage } from '../ports/types';
+import type { CheckStatus, MergeMethod, TicketMove, TicketRelation, TicketState, Usage } from '../ports/types';
 import type { Budget, Permissions } from '../sdk/steps';
 
 /** Every type a run's event stream carries, in `sail.event.v1`'s order. A queue's follow in the schema's enum. */
@@ -61,6 +61,7 @@ export const EVENT_TYPES = [
   'ticket:attached',
   'ticket:labelled',
   'ticket:unlabelled',
+  'ticket:related',
   'codehost:pushed',
   'codehost:pr_opened',
   'codehost:checks',
@@ -312,6 +313,14 @@ interface Payloads {
   'ticket:labelled': { key?: string; ticketKey: string; label: string; labels: string[] };
   /** A label `removeLabel` removed: the label and the ticket's labels afterwards. */
   'ticket:unlabelled': { key?: string; ticketKey: string; label: string; labels: string[] };
+  /** A relation `relate` made: the ticket's kind of relation to another, and the ticket's state afterwards. */
+  'ticket:related': {
+    key?: string;
+    ticketKey: string;
+    kind: TicketRelation;
+    to: string;
+    state: TicketState;
+  };
   'codehost:pushed': { key?: string; branch: string; headSha: string };
   'codehost:pr_opened': {
     key?: string;

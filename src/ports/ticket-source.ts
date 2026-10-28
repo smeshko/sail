@@ -10,8 +10,10 @@ import {
   type Moved,
   type Posted,
   type Relabelled,
+  type Related,
   Ticket,
   type TicketMove,
+  type TicketRelation,
   type TicketSourceCapabilities,
   type TicketStateType,
 } from './types';
@@ -44,6 +46,12 @@ export interface NewAttachment {
 export interface TicketFilter {
   readonly state?: TicketStateType;
   readonly label?: string;
+}
+
+/** A relation `relate` makes: its kind, and the key of the other ticket. */
+export interface TicketRelationChange {
+  readonly kind: TicketRelation;
+  readonly to: string;
 }
 
 /** The largest file `attach` takes: 20 MiB. */
@@ -99,6 +107,12 @@ export interface TicketSource {
    * nothing and emits nothing. A label the team lacks rejects as `invalid` before any change. Emits `ticket:unlabelled`.
    */
   removeLabel(ticketKey: string, label: string): Promise<Relabelled>;
+  /**
+   * Relates the ticket to another: `blocks` means the ticket blocks `to`, `duplicate` that it duplicates `to`, which also
+   * moves the ticket to a canceled state. Both tickets must exist (`not_found`); relating a ticket to itself, or a kind
+   * that isn't a `TicketRelation`, rejects as `invalid`, and nothing changes. Emits `ticket:related`.
+   */
+  relate(ticketKey: string, change: TicketRelationChange): Promise<Related>;
   /**
    * Uploads the file and attaches it to the ticket, after `checkAttachment()` passes it. Emits `ticket:attached`.
    */
