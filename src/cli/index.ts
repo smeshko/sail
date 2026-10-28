@@ -77,6 +77,7 @@ Usage:
   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
                                                              Upload a file and attach it to a ticket
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
+  sail port jev ask [--model <id>] [--body-file <path>]      Ask Jev the questions in a JSON body; typed answers on stdout
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
   sail --version                                             Print the version
   sail --help                                                Print this help
@@ -251,6 +252,7 @@ const commands = new Map<string, CommandSpec>([
         'content-type': { type: 'string' },
         kind: { type: 'string' },
         to: { type: 'string' },
+        model: { type: 'string' },
       },
       positionals: 4,
       command: port,

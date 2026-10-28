@@ -5,8 +5,15 @@ import type { z } from 'zod';
 import type { Port } from '../engine/config';
 import type { CodeHost } from './code-host';
 import type { Harness } from './harness';
+import type { Jev } from './jev';
 import type { ProviderOptions, TicketSource } from './ticket-source';
-import { CodeHostCapabilities, HarnessCapabilities, TicketSourceCapabilities, WorkspaceCapabilities } from './types';
+import {
+  CodeHostCapabilities,
+  HarnessCapabilities,
+  JevCapabilities,
+  TicketSourceCapabilities,
+  WorkspaceCapabilities,
+} from './types';
 import type { WorkspacePort } from './workspace';
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -39,6 +46,7 @@ export interface PortAdapters {
   codeHost: CodeHost;
   harness: Harness;
   workspace: WorkspacePort;
+  jev: Jev;
 }
 
 /** The built-in adapters by name, each with one definition per port it fills. */
@@ -104,6 +112,7 @@ export const PORT_OPERATIONS = {
     'sweep',
     'capabilities',
   ]),
+  jev: operations<Jev>()(['ask', 'capabilities']),
 } as const;
 
 /** Each port's capabilities schema. */
@@ -112,4 +121,5 @@ export const PORT_CAPABILITIES: { readonly [P in Port]: z.ZodType } = {
   codeHost: CodeHostCapabilities,
   harness: HarnessCapabilities,
   workspace: WorkspaceCapabilities,
+  jev: JevCapabilities,
 };

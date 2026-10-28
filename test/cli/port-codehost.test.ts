@@ -401,6 +401,7 @@ const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${RELABEL_USAGE}${AT
        sail port codehost merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
        sail port codehost add-label|remove-label <pr> <label>
        sail port codehost comment <pr> [--body-file <path>]
+       sail port jev ask [--model <id>] [--body-file <path>]
        sail port render --untrusted --source <text> [--inline]
 `;
 
@@ -733,7 +734,7 @@ test.each<[string, string[], string]>([
   [
     '--body-file given to add-label',
     ['add-label', '1', 'x', '--body-file', 'note.md'],
-    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port ticket-source edit or sail port codehost open-pull-request or sail port codehost comment",
+    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port ticket-source edit or sail port codehost open-pull-request or sail port codehost comment or sail port jev ask",
   ],
 ])('%s exits 3, naming where the option belongs', async (_, args, problem) => {
   await withTempRepo(async (repo) => {

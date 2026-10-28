@@ -23,7 +23,7 @@ import { BUILTINS } from '../../adapters/index';
 import { recordingHarness, writeJournalKeys } from '../../adapters/recording';
 import { type ResolvedAdapters, resolveAdapters } from '../../engine/adapters';
 import { raiseFlag } from '../../engine/budget';
-import { type Port, type ProjectConfig, readConfig } from '../../engine/config';
+import { type Port, type ProjectConfig, type RunPort, readConfig } from '../../engine/config';
 import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { runsDir } from '../../engine/run-dir';
@@ -68,7 +68,7 @@ export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | 
  * each and refuses. `only` narrows it for a command that needs less: a `.sail/` it found its own way, and the ports to
  * resolve, so no other adapter is loaded or asked for its credentials. Its `emit` receives what the adapters emit.
  */
-export async function findProject<P extends Port = Port>(
+export async function findProject<P extends Port = RunPort>(
   io: Io,
   command: string,
   only: { found?: { dir: string } | { refused: string }; ports?: readonly P[]; emit?: ProviderEmit } = {},

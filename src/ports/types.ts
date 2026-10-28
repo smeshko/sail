@@ -290,3 +290,77 @@ export type HarnessCapabilities = z.infer<typeof HarnessCapabilities>;
 
 export const WorkspaceCapabilities = z.object({ keep: z.boolean(), sweep: z.boolean() });
 export type WorkspaceCapabilities = z.infer<typeof WorkspaceCapabilities>;
+
+// Jev
+
+/** What Jev reports as a probability: one number per option or level, keyed by its name or in the order asked. */
+const JevProbabilities = z.union([z.record(z.string(), z.number()), z.array(z.number())]);
+
+/** A question about a state: its question type, its instructions and the criteria its answer is chosen among. */
+export const JevQuestion = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('choice'),
+    instructions: z.string(),
+    criteria: z
+      .record(z.string(), z.string())
+      .refine((options) => Object.keys(options).length >= 1 && Object.keys(options).length <= 255, {
+        message: 'needs 1 to 255 options',
+      }),
+  }),
+  z.object({
+    type: z.literal('score'),
+    instructions: z.string(),
+    criteria: z.array(z.string()).min(1).max(10),
+  }),
+  z.object({
+    type: z.literal('noul'),
+    instructions: z.string(),
+    criteria: z.object({ true: z.string(), false: z.string() }),
+  }),
+]);
+export type JevQuestion = z.infer<typeof JevQuestion>;
+
+export const JevRequest = z.object({
+  state: z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())]),
+  questions: z
+    .record(z.string(), JevQuestion)
+    .refine((questions) => Object.keys(questions).length >= 1, { message: 'needs at least one question' }),
+  model: z.string().min(1).optional(),
+});
+export type JevRequest = z.infer<typeof JevRequest>;
+
+/** Jev's reply to one question. Confidence and probabilities are kept where Jev reports them. */
+export const JevAnswer = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('choice'),
+    choice: z.string(),
+    confidence: z.number().optional(),
+    probabilities: JevProbabilities.optional(),
+  }),
+  z.object({
+    type: z.literal('score'),
+    score: z.number(),
+    confidence: z.number().optional(),
+    probabilities: JevProbabilities.optional(),
+    legend: z.unknown().optional(),
+  }),
+  z.object({ type: z.literal('noul'), noul: z.number() }),
+]);
+export type JevAnswer = z.infer<typeof JevAnswer>;
+
+export const JevUsage = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+});
+export type JevUsage = z.infer<typeof JevUsage>;
+
+export const JevAnswered = z.object({
+  model: z.string(),
+  answers: z.record(z.string(), JevAnswer),
+  usage: JevUsage.optional(),
+  latencyMs: z.number().nonnegative(),
+});
+export type JevAnswered = z.infer<typeof JevAnswered>;
+
+export const JevCapabilities = z.object({ questionTypes: z.array(z.enum(['choice', 'score', 'noul'])) });
+export type JevCapabilities = z.infer<typeof JevCapabilities>;

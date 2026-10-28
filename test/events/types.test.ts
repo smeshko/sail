@@ -23,8 +23,8 @@ function typeEnum(schema: unknown): unknown {
   return undefined;
 }
 
-test("EVENT_TYPES holds a run's 61 types, error:consumer, error:port, prompt:rendered, run:suspended, run:keep_awake, budget:raised, step:queued, ticket:created, ticket:attached, ticket:labelled, ticket:unlabelled, ticket:related and ticket:edited included", () => {
-  expect(EVENT_TYPES).toHaveLength(61);
+test("EVENT_TYPES holds a run's 62 types, error:consumer, error:port, prompt:rendered, run:suspended, run:keep_awake, budget:raised, step:queued, ticket:created, ticket:attached, ticket:labelled, ticket:unlabelled, ticket:related, ticket:edited and jev:asked included", () => {
+  expect(EVENT_TYPES).toHaveLength(62);
   const types: readonly string[] = EVENT_TYPES;
   expect(types.indexOf('run:suspended')).toBe(types.indexOf('run:end') + 1);
   expect(types.indexOf('run:keep_awake')).toBe(types.indexOf('run:suspended') + 1);

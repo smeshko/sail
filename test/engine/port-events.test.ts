@@ -1,6 +1,6 @@
 // The port events file: what a `sail port` under a script step appends, and what the engine takes from it when the
-// step ends. Only a whole line that is a `ticket:*` or `codehost:*` event, or an `error:port`, with no envelope, is
-// taken from it.
+// step ends. Only a whole line that is a `ticket:*`, `codehost:*` or `jev:*` event, or an `error:port`, with no
+// envelope, is taken from it.
 import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -87,6 +87,36 @@ test.each([
   },
 );
 
+const ASKED: ProviderEvent = {
+  type: 'jev:asked',
+  model: 'jev-latest',
+  questions: 3,
+  latencyMs: 40,
+  usage: { inputTokens: 412, outputTokens: 9 },
+};
+
+test('a jev:asked line is read back as it was appended, and one that breaks its shape is a problem', () => {
+  const path = eventsFile();
+  writeFileSync(path, `${line(ASKED)}${line({ ...ASKED, questions: '3' })}${line(PUSHED)}`);
+  expect(readPortEvents(path, ENVELOPE)).toEqual({
+    events: [ASKED, PUSHED],
+    problems: [problem(2, '/questions must be integer')],
+  });
+});
+
+test('an error:port of the jev port is read back as it was appended', () => {
+  const path = eventsFile();
+  const failed: PortErrorEvent = {
+    type: 'error:port',
+    port: 'jev',
+    op: 'ask',
+    code: 'unavailable',
+    message: 'jev.ask: TypeSafe answered 429 Too Many Requests: slow down',
+  };
+  appendPortEvent(path, failed);
+  expect(readPortEvents(path, ENVELOPE)).toEqual({ events: [failed], problems: [] });
+});
+
 test('an error:port is read back as it was appended, between provider events, and validates once enveloped', () => {
   const path = eventsFile();
   for (const event of [PUSHED, FAILED, LABELLED]) appendPortEvent(path, event);
@@ -97,23 +127,23 @@ test.each([
   [
     'a line with no type',
     line({ branch: 'sail/FAKE-1' }),
-    'its type is missing: it is no ticket:*, codehost:* or error:port event',
+    'its type is missing: it is no ticket:*, codehost:*, jev:* or error:port event',
   ],
-  ['a type that is no string', line({ type: 7 }), 'its type 7 is no ticket:*, codehost:* or error:port event'],
+  ['a type that is no string', line({ type: 7 }), 'its type 7 is no ticket:*, codehost:*, jev:* or error:port event'],
   [
     "an event of the run's own",
     line({ type: 'run:end', status: 'completed', replays: 1 }),
-    'its type "run:end" is no ticket:*, codehost:* or error:port event',
+    'its type "run:end" is no ticket:*, codehost:*, jev:* or error:port event',
   ],
   [
     'a workspace event',
     line({ type: 'workspace:released', path: '/tmp/x', kept: false }),
-    'its type "workspace:released" is no ticket:*, codehost:* or error:port event',
+    'its type "workspace:released" is no ticket:*, codehost:*, jev:* or error:port event',
   ],
   [
     'an error of any other kind',
     line({ type: 'error:crash', message: 'boom' }),
-    'its type "error:crash" is no ticket:*, codehost:* or error:port event',
+    'its type "error:crash" is no ticket:*, codehost:*, jev:* or error:port event',
   ],
   ['an error:port without its code', line({ ...FAILED, code: undefined }), '/code is required'],
 ])(

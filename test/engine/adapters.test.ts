@@ -92,7 +92,9 @@ const issue = (port: Port, message: string): { issues: SchemaIssue[] } => ({
   issues: [{ path: `/adapters/${port}`, message } as SchemaIssue],
 });
 
-const resolvedOrThrow = (result: ResolvedAdapters | { issues: SchemaIssue[] }): ResolvedAdapters => {
+const resolvedOrThrow = <P extends Port>(
+  result: ResolvedAdapters<P> | { issues: SchemaIssue[] },
+): ResolvedAdapters<P> => {
   if ('issues' in result) throw new Error(JSON.stringify(result.issues));
   return result;
 };
@@ -109,6 +111,35 @@ test('all four ports on the fake resolve to four adapters named fake, and four b
   const resolved = resolvedOrThrow(await resolve(sailDir, {}));
   expect(PORTS.map((port) => resolved.ports[port]?.name)).toEqual(['fake', 'fake', 'fake', 'fake']);
   expect(resolved.entries).toEqual({ ticketSource: FAKE, codeHost: FAKE, harness: FAKE, workspace: FAKE });
+});
+
+test('asking for jev with no adapters.jev entry is one issue at /adapters/jev, and nothing else is resolved', async () => {
+  const { sailDir } = repo();
+  const result = await resolveAdapters({
+    sailDir,
+    config: configOf({}),
+    builtins: BUILTINS,
+    env: {},
+    ports: ['jev'],
+  });
+  expect(result).toEqual(issue('jev', 'is not set: name the adapter that fills jev, such as { use: typesafe }'));
+});
+
+test('asking for jev with { use: fake } resolves it alone, and the default four ports leave it out', async () => {
+  const { sailDir } = repo();
+  const asked = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir,
+      config: configOf({ jev: { use: 'fake' } }),
+      builtins: BUILTINS,
+      env: {},
+      ports: ['jev'],
+    }),
+  );
+  expect(Object.keys(asked.ports)).toEqual(['jev']);
+  expect(asked.entries).toEqual({ jev: FAKE });
+  const all = resolvedOrThrow(await resolve(sailDir, { jev: { use: 'fake' } }));
+  expect(Object.keys(all.ports).sort()).toEqual(['codeHost', 'harness', 'ticketSource', 'workspace']);
 });
 
 test("a module harness gets its entry's options and a context, and its entry names the module as its origin", async () => {

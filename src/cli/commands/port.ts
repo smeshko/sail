@@ -5,7 +5,7 @@
 //   sail port ticket-source attachments <ticket>    its attachments
 //   sail port ticket-source list [--state <type>] [--label <name>]    the team's tickets, as an array of ListedTicket
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
-//   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
+//   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review, done or canceled
 //   sail port ticket-source claim <ticket>    moves it to in progress if in a pick-up state, and says whether that took:
 //                                                   under a run, a claim that takes comments with RUN_ID
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
@@ -19,6 +19,7 @@
 //   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
 //                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
+//   sail port jev ask [--model <id>] [--body-file <path>]    asks Jev the questions in the JSON body: port-jev.ts
 //   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
 //
 // Arguments go in as positionals and flags, and a result comes out as one line of JSON on stdout, so a bash script
@@ -68,6 +69,7 @@ import {
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { CODEHOST } from './port-codehost';
+import { JEV } from './port-jev';
 import { findProject, refuseAs } from './run-workflow';
 
 const COMMAND = 'sail port';
@@ -401,7 +403,7 @@ interface AnyTable {
 }
 
 /** Each port by its name on the command line: the one place a port or an operation is named. */
-const PORTS: Readonly<Record<string, AnyTable>> = { 'ticket-source': TICKET_SOURCE, codehost: CODEHOST };
+const PORTS: Readonly<Record<string, AnyTable>> = { 'ticket-source': TICKET_SOURCE, codehost: CODEHOST, jev: JEV };
 
 /** An option as the usage prints it: `--base <branch>`, `[--draft]`, `[--label <name>]...`. */
 function optionUsage(name: string, use: OptionUse): string {
@@ -485,7 +487,7 @@ function portEmit(io: Io): { emit?: ProviderEmit; file?: string } | { refused: s
 
 /** The `error:port` a failed call of `error`'s port leaves: none for a port no script calls through this command. */
 function portErrorEvent(error: PortError): PortErrorEvent | undefined {
-  if (error.port !== 'ticketSource' && error.port !== 'codeHost') return undefined;
+  if (error.port !== 'ticketSource' && error.port !== 'codeHost' && error.port !== 'jev') return undefined;
   return { type: 'error:port', port: error.port, op: error.op, code: error.code, message: error.message };
 }
 

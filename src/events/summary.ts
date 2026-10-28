@@ -23,12 +23,26 @@
 // `sail port ticket-source get` emits one too, under its own key, and names another fetch, not the run's ticket.
 // A seeded run fetches nothing: its reused intake's `journal:append` carries the ticket instead, and names it the
 // same way.
+//
+// A script step's `sail port jev ask` emits a `jev:asked` under its key. Each one is summed into its call, its step when
+// the key holds one, and the run's totals; one with no key counts in the totals alone. A call that starts again starts
+// its count over, as it does its other facts, from the steps it keeps. A run that asked Jev nothing has no `jev`
+// anywhere.
 import { INTAKE_KEY } from '../engine/intake';
 import type { JournalEntry } from '../engine/journal';
 import type { StopReason } from '../engine/run-dir';
 import type { SailEvent } from './types';
 
 type Outcome = JournalEntry['outcome'];
+
+/** What the Jev calls of a call, a step or a run came to: how many, the questions asked, the time they took, and usage. */
+export interface JevTotals {
+  calls: number;
+  questions: number;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+}
 
 /** One step of a multi-step call. */
 export interface StepEntry {
@@ -41,6 +55,7 @@ export interface StepEntry {
   turns?: number;
   toolCalls?: number;
   costUsd?: number;
+  jev?: JevTotals;
   files?: string[];
   summary?: string;
 }
@@ -61,6 +76,7 @@ export interface CallEntry {
   denials?: number;
   costUsd?: number;
   commits?: number;
+  jev?: JevTotals;
   feedbackFrom?: string;
   files?: string[];
   summary?: string;
@@ -114,6 +130,7 @@ export interface Summary {
     denials: number;
     replays: number;
     usage: Usage;
+    jev?: JevTotals;
     budget?: { maxUsd: number; usedPct: number };
   };
   version: number;
@@ -144,6 +161,7 @@ interface StepState {
   end?: Ended;
   facts: Facts;
   files: string[];
+  jev?: JevTotals;
 }
 
 /** A call at its latest try: a new try starts it over, in the same place. */
@@ -160,6 +178,7 @@ interface CallState {
   feedback?: string;
   files: string[];
   steps: Map<string, StepState>;
+  jev?: JevTotals;
 }
 
 /** The fold so far. Opaque: start it with emptyState(), feed it with foldEvent() and read it with toSummary(). */
@@ -193,6 +212,7 @@ export interface SummaryState {
     replays: number;
     tokens: Partial<Record<(typeof TOKENS)[number], number>>;
     costUsd: number;
+    jev?: JevTotals;
   };
 }
 
@@ -264,6 +284,9 @@ export function foldEvent(state: SummaryState, event: SailEvent): void {
     case 'harness:session_end':
       foldSession(state, event);
       break;
+    case 'jev:asked':
+      foldJev(state, event);
+      break;
     case 'ticket:fetched':
       if (event.key === INTAKE_KEY) state.ticket ??= { ticketKey: event.ticketKey, title: event.title, url: event.url };
       break;
@@ -329,6 +352,10 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
   const feedback = Object.values(event.consumed).find((from): from is string => from !== null && held.has(from));
   const earlier = event.kind === 'stage' ? state.calls.get(event.key) : undefined;
   const kept = earlier === undefined ? [] : [...earlier.steps].filter(([, step]) => step.end !== undefined);
+  const jev = kept.reduce<JevTotals | undefined>(
+    (sum, [, step]) => (step.jev === undefined ? sum : sumJev(sum, step.jev)),
+    undefined,
+  );
   state.calls.set(event.key, {
     key: event.key,
     kind: event.kind,
@@ -338,6 +365,7 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
     ...(feedback === undefined ? {} : { feedback }),
     files: [...new Set(kept.flatMap(([, step]) => step.files))],
     steps: new Map(kept),
+    ...(jev === undefined ? {} : { jev }),
   });
 }
 
@@ -425,6 +453,37 @@ function foldSession(state: SummaryState, event: EventOf<'harness:session_end'>)
   if (owner !== undefined) owner.facts = facts;
 }
 
+/** `into` with one Jev call added: usage is summed only once a call has reported it. */
+function addJev(into: JevTotals | undefined, event: EventOf<'jev:asked'>): JevTotals {
+  const one: JevTotals = { calls: 1, questions: event.questions, latencyMs: event.latencyMs };
+  return sumJev(into, event.usage === undefined ? one : { ...one, ...event.usage });
+}
+
+/** `into`, which may be none, and `more` summed: usage is summed only once either has reported it. */
+function sumJev(into: JevTotals | undefined, more: JevTotals): JevTotals {
+  const next: JevTotals = {
+    calls: (into?.calls ?? 0) + more.calls,
+    questions: (into?.questions ?? 0) + more.questions,
+    latencyMs: (into?.latencyMs ?? 0) + more.latencyMs,
+  };
+  if (into?.inputTokens !== undefined || more.inputTokens !== undefined) {
+    next.inputTokens = (into?.inputTokens ?? 0) + (more.inputTokens ?? 0);
+    next.outputTokens = (into?.outputTokens ?? 0) + (more.outputTokens ?? 0);
+  }
+  return next;
+}
+
+/** A Jev call counts in the run's totals, and in the call and step its key names. */
+function foldJev(state: SummaryState, event: EventOf<'jev:asked'>): void {
+  state.totals.jev = addJev(state.totals.jev, event);
+  if (event.key === undefined) return;
+  const call = state.calls.get(callKeyOf(event.key));
+  if (call === undefined) return;
+  call.jev = addJev(call.jev, event);
+  const step = call.steps.get(event.key);
+  if (step !== undefined) step.jev = addJev(step.jev, event);
+}
+
 /** Frontier events repeat after a resume, so a loop keeps the highest iteration any of them reported. */
 function raiseLoop(state: SummaryState, name: string, iterations: number, max: number): void {
   state.loops.set(name, { iterations: Math.max(state.loops.get(name)?.iterations ?? 0, iterations), max });
@@ -474,6 +533,7 @@ export function toSummary(state: SummaryState): Summary | undefined {
       denials: totals.denials,
       replays: totals.replays,
       usage: defined<Usage>({ ...totals.tokens, costUsd }),
+      jev: totals.jev === undefined ? undefined : { ...totals.jev },
       budget:
         run.maxUsd === undefined
           ? undefined
@@ -517,6 +577,7 @@ function callEntry(state: SummaryState, call: CallState): CallEntry {
     toolCalls: facts.toolCalls,
     denials: facts.denials,
     costUsd: facts.costUsd,
+    jev: call.jev === undefined ? undefined : { ...call.jev },
     // A pointer names a result and a place in it: the call is the one whose result it names.
     feedbackFrom: pointer === undefined ? undefined : (state.results.get(pointer.split('#')[0] ?? '') ?? pointer),
     files: call.files.length > 0 ? [...call.files] : undefined,
@@ -535,6 +596,7 @@ function stepEntry(step: StepState & { end: Ended }): StepEntry {
     turns: step.facts.turns,
     toolCalls: step.facts.toolCalls,
     costUsd: step.facts.costUsd,
+    jev: step.jev === undefined ? undefined : { ...step.jev },
     files: step.files.length > 0 ? [...step.files] : undefined,
   });
 }

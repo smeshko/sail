@@ -912,6 +912,10 @@ test('at trace, an event of every type prints a line of its own', () => {
       head('', '· codehost:merged {"number":1,"method":"squash","sha":"f569e7f"}', w),
     ],
     [
+      { type: 'jev:asked', key: 'tests#1', model: 'jev-latest', questions: 3, latencyMs: 40 },
+      head('tests#1', '≈ jev jev-latest · 3 questions · 40ms', w),
+    ],
+    [
       { type: 'workspace:leased', remote: 'origin', branch: 'sail/FAKE-1' },
       head('', '· workspace:leased {"remote":"origin","branch":"sail/FAKE-1"}', w),
     ],
@@ -1421,3 +1425,24 @@ test("at normal, a step that ends in error prints each of its errors under the s
     detail('publish#1/describe', "missing_file: 'pr-body.md' was not produced in $STAGE_OUT", w),
   ]);
 });
+
+test.each<[Verbosity, string]>([
+  ['normal', ''],
+  ['verbose', view(head('tests#1', '≈ jev jev-latest · 1 question · 1.2s · 412 in / 9 out tokens'))],
+  ['trace', view(head('tests#1', '≈ jev jev-latest · 1 question · 1.2s · 412 in / 9 out tokens'))],
+])(
+  'at %s, a jev:asked prints its model, questions, latency and tokens under its key only from verbose',
+  (verbosity, expected) => {
+    const events = stream([
+      {
+        type: 'jev:asked',
+        key: 'tests#1',
+        model: 'jev-latest',
+        questions: 1,
+        latencyMs: 1200,
+        usage: { inputTokens: 412, outputTokens: 9 },
+      },
+    ]);
+    expect(render(events, verbosity)).toBe(expected);
+  },
+);

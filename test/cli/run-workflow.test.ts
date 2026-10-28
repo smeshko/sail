@@ -6,9 +6,9 @@ import { expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { verbosityOf } from '../../src/cli/commands/run-workflow';
+import { findProject, verbosityOf } from '../../src/cli/commands/run-workflow';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
-import type { Parsed } from '../../src/cli/index';
+import type { Io, Parsed } from '../../src/cli/index';
 import { readJournal } from '../../src/engine/journal';
 import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { type Forced, readStatus } from '../../src/engine/run-dir';
@@ -577,6 +577,19 @@ test('a project.yaml that breaks its schema is refused with its issues', async (
   );
   expect(stderr).toContain('.sail/project.yaml  [sail.project.v1]  /adapters is required');
   expect({ code, touched }).toEqual({ code: EXIT_REFUSED, touched: false });
+});
+
+test("findProject with no ports resolves the run's four, not jev, and its type says so", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    edit(sail, 'project.yaml', '  workspace: { use: fake }\n', '  workspace: { use: fake }\n  jev: { use: fake }\n');
+    const io: Io = { cwd: repo.dir, stdout: () => {}, stderr: () => {}, env: repo.env };
+    const project = await findProject(io, 'sail FAKE-1');
+    if (typeof project === 'number') throw new Error(`refused with ${project}`);
+    // @ts-expect-error TS2339: a findProject that names no ports resolves no jev
+    expect(project.adapters.ports.jev).toBeUndefined();
+    expect(Object.keys(project.adapters.entries).sort()).toEqual(['codeHost', 'harness', 'ticketSource', 'workspace']);
+  });
 });
 
 test('outside a git repository, sail FAKE-1 is refused', async () => {

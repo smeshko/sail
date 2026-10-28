@@ -21,7 +21,7 @@
 // The set read back from the queue streams is `liveSet()`, which the dashboard shares too.
 import { existsSync } from 'node:fs';
 import { isAlive as processIsAlive } from '../../adapters/leases';
-import type { ProjectConfig } from '../../engine/config';
+import type { ProjectConfig, RunPort } from '../../engine/config';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
 import { sameLabel } from '../../ports/labels';
 import { dropCommand } from '../../watch/inbox';
@@ -68,7 +68,7 @@ function definedEnv(env: Readonly<Record<string, string | undefined>>): Record<s
 }
 
 interface Located {
-  project: Exclude<Awaited<ReturnType<typeof findProject>>, ExitCode>;
+  project: Exclude<Awaited<ReturnType<typeof findProject<RunPort>>>, ExitCode>;
   names: string[];
   registryDir: string;
   entry: Awaited<ReturnType<typeof repositoryEntry>>;

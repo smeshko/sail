@@ -2,13 +2,21 @@ import type { Builtins } from '../ports/adapter';
 import { claudeCodeAdapters } from './claude-code/index';
 import { githubCodeHost } from './code-host/github';
 import { fakeAdapters } from './fake/index';
+import { typesafeJev } from './jev/typesafe';
 import { piAdapters } from './pi/index';
 import { linearTicketSource } from './ticket-source/linear';
 import { gitWorktreeDefinition } from './workspace/git-worktree';
 
 export { createClaudeCodeHarness } from './claude-code/index';
 export { createGitHubCodeHost } from './code-host/github';
-export { createFakeCodeHost, createFakeHarness, createFakeTicketSource, createFakeWorkspace } from './fake/index';
+export {
+  createFakeCodeHost,
+  createFakeHarness,
+  createFakeJev,
+  createFakeTicketSource,
+  createFakeWorkspace,
+} from './fake/index';
+export { createTypesafeJev } from './jev/typesafe';
 export { createPiHarness } from './pi/index';
 export { createLinearTicketSource } from './ticket-source/linear';
 export { createGitWorktreeWorkspace } from './workspace/git-worktree';
@@ -21,4 +29,5 @@ export const BUILTINS: Builtins = {
   pi: piAdapters,
   'git-worktree': { workspace: gitWorktreeDefinition },
   github: { codeHost: githubCodeHost },
+  typesafe: { jev: typesafeJev },
 };

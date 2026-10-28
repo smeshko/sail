@@ -365,7 +365,7 @@ The ordered events of one run, written to `events.ndjson` and handed to every co
 _Avoid_: log, feed, bus (the bus is the mechanism)
 
 **Provider event**:
-An event an adapter emits about a call to its provider, in the families `ticket:*`, `codehost:*` and `workspace:*`.
+An event an adapter emits about a call to its provider, in the families `ticket:*`, `codehost:*`, `jev:*` and `workspace:*`.
 _Avoid_: adapter event, port event (the file's name is the one exception), side effect
 
 **Consumer**:
@@ -406,7 +406,7 @@ The rolled-up view of a run derived from its events: calls, loops, totals, and c
 _Avoid_: report, status file, digest
 
 **Usage**:
-The tokens and cost an agent step consumed, reported per turn by the harness. A harness that cannot report usage does not qualify.
+The tokens and cost an agent step consumed, reported per turn by the harness. A harness that cannot report usage does not qualify. A Jev call reports its tokens too, on its `jev:asked`, when its adapter has them.
 _Avoid_: consumption, spend, billing, metering
 
 ### Guardrails
@@ -469,6 +469,10 @@ _Avoid_: base sha, review sha
 The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. A step runs on the config's default harness, or on the named harness its model alias names. v1 adapters: Claude Code, and pi, whose providers include non-Anthropic and local models.
 _Avoid_: agent provider, runner, executor, model
 
+**Jev port**:
+The optional port to Jev: `ask` a state's typed questions and get their answers keyed by name. A script step reaches it with `sail port jev ask`, and each answered call leaves a `jev:asked` event. Unlike the other four ports, no run resolves it: only `sail port jev` does, and the config may leave `adapters.jev` out. v1 adapter: `typesafe`.
+_Avoid_: judge port, oracle port, LLM port
+
 **Codex login**:
 The ChatGPT subscription the pi harness runs `openai-codex` models on. `sail login codex` keeps its OAuth tokens in sail's own macOS keychain item, and pi refreshes the access token there when it has under five minutes left, under a lock every sail process shares, as each refresh token is good for one refresh.
 _Avoid_: Codex key, Codex API key
@@ -482,7 +486,7 @@ One implementation of a port for one provider, selected in the config: by name f
 _Avoid_: plugin, driver, connector, integration, backend
 
 **Port command**:
-`sail port <port> <operation>`: how a script step reaches the configured adapter of a port, with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
+`sail port <port> <operation>`: how a script step reaches the configured adapter of a port (`ticket-source`, `codehost` or `jev`), with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
 _Avoid_: port helper, port CLI, bridge
 
 **Adapter registry**:
@@ -506,8 +510,26 @@ What an adapter declares it can do, such as the ticket moves it supports or the 
 _Avoid_: features, support flags
 
 **Provider**:
-The external system behind an adapter: Linear, GitHub, Anthropic, Jira.
+The external system behind an adapter: Linear, GitHub, Anthropic, TypeSafe, Jira.
 _Avoid_: vendor, platform, service
+
+### Judgments
+
+**Jev**:
+TypeSafe's System One model, asked typed questions about a state. It answers in calibrated probabilities, fast enough to ask in the middle of a step.
+_Avoid_: oracle, classifier, LLM call
+
+**System One**:
+TypeSafe's API for Jev's fast, typed, calibrated answers. It names the provider's product, never a sail thing.
+_Avoid_: using it for the Jev port or its adapter
+
+**Question**:
+A named, typed question about a state: its question type, its instructions and its criteria. The question types are `choice` (one of the named options), `score` (one of the ordered levels) and `noul` (a probability that the answer is yes).
+_Avoid_: prompt, query, question kind (Kind is a step's word)
+
+**Answer**:
+Jev's typed reply to one question, with its confidence and probabilities where Jev reports them. A call's answers are keyed by their questions' names.
+_Avoid_: output, result, verdict
 
 ### Watching
 

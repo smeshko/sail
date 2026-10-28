@@ -57,7 +57,7 @@ import { branchFor, DEFAULT_BRANCH_PREFIX } from './branch';
 import { type Raise, raiseProblem } from './budget';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
-import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
+import { PORTS, type ProjectConfig, type RunPort, readConfig } from './config';
 import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
@@ -100,7 +100,7 @@ export interface OpenedRun {
   /** The absolute `.sail/` the run started from. */
   sailDir: string;
   /** The adapters the run was opened with, one per port. */
-  adapters: PortAdapters;
+  adapters: Pick<PortAdapters, RunPort>;
   /** The named harnesses the run reached, by name. Empty when it reached none. */
   harnesses: Record<string, Harness>;
   /** Where those adapters emit: the runtime attaches the run's stream to it. */
@@ -613,7 +613,7 @@ function endedRefusal(runId: string, status: RunStatus): string | undefined {
  */
 export function changedAdapters(
   header: RunHeader,
-  entries: Record<Port, AdapterEntry>,
+  entries: Record<RunPort, AdapterEntry>,
   harnesses: Record<string, AdapterEntry> = {},
 ): string[] {
   const named = ({ use, origin }: AdapterEntry) => `${use} (${origin})`;

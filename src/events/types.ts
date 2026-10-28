@@ -1,9 +1,9 @@
 // The event union: every line of a run's event stream, typed. It mirrors `sail.event.v1`, and
 // test/events/types.test.ts keeps the two in step. Each event is the envelope `{ seq, ts, type, runId }` with its
 // payload beside it. Every type has a closed payload here, and a call-level event carries the key of the call it belongs
-// to. So do the provider families the port adapters emit: ticket:*, codehost:* and workspace:*, and the families a
-// harness emits, which the agent kind stamps with its call's key. A group's all:start and all:end carry its keys and no
-// key of their own: a group is not a call. The schema still leaves some families open for the adapters to come
+// to. So do the provider families the port adapters emit: ticket:*, codehost:*, jev:* and workspace:*, and the families
+// a harness emits, which the agent kind stamps with its call's key. A group's all:start and all:end carry its keys and
+// no key of their own: a group is not a call. The schema still leaves some families open for the adapters to come
 // (ADR-0012), but nothing emits them other than as typed here. Types only, apart from `EVENT_TYPES` and
 // `QUEUE_EVENT_TYPES`, so importing this module does nothing.
 import type { ContractError } from '../engine/contract';
@@ -69,6 +69,7 @@ export const EVENT_TYPES = [
   'codehost:labelled',
   'codehost:commented',
   'codehost:merged',
+  'jev:asked',
   'workspace:leased',
   'workspace:lease_released',
   'workspace:created',
@@ -303,9 +304,15 @@ interface Payloads {
   'error:crash': { message: string; key?: string };
   'error:consumer': { consumer: string; failed: { seq: number; type: EventType }; message: string };
   /** A port call of a script step's `sail port` that failed, with the port's own message (DECISIONS D3). */
-  'error:port': { key?: string; port: 'ticketSource' | 'codeHost'; op: string; code: PortErrorCode; message: string };
-  // The provider families (D10). A ticket or codehost event carries its call's key when a call emitted it, and none at
-  // dispatch; a workspace event carries none.
+  'error:port': {
+    key?: string;
+    port: 'ticketSource' | 'codeHost' | 'jev';
+    op: string;
+    code: PortErrorCode;
+    message: string;
+  };
+  // The provider families (D10). A ticket, codehost or jev event carries its call's key when a call emitted it, and none
+  // at dispatch; a workspace event carries none.
   'ticket:fetched': {
     key?: string;
     ticketKey: string;
@@ -352,6 +359,14 @@ interface Payloads {
   'codehost:labelled': { key?: string; number: number; label: string; change: 'added' | 'removed' };
   'codehost:commented': { key?: string; number: number; body: string };
   'codehost:merged': { key?: string; number: number; method: MergeMethod; sha: string };
+  /** A Jev call that was answered: the model, how many questions it held, how long it took and what it used. */
+  'jev:asked': {
+    key?: string;
+    model: string;
+    questions: number;
+    latencyMs: number;
+    usage?: { inputTokens: number; outputTokens: number };
+  };
   /** `took` is the stale run whose lease this one replaced. */
   'workspace:leased': { remote: string; branch: string; took?: string };
   'workspace:lease_released': { remote: string; branch: string };
@@ -375,7 +390,10 @@ export type Emit = (event: NewEvent) => void;
 
 export type CallEmit = (event: CallEvent) => void;
 
-type ProviderType = Extract<EventType, `ticket:${string}` | `codehost:${string}` | `workspace:${string}`>;
+type ProviderType = Extract<
+  EventType,
+  `ticket:${string}` | `codehost:${string}` | `jev:${string}` | `workspace:${string}`
+>;
 
 /** An event as an adapter emits it, without the key: its caller stamps one. */
 export type ProviderEvent = Extract<CallEvent, { type: ProviderType }>;
