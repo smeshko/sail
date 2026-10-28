@@ -24,7 +24,7 @@
       "labels": ["groom"],
       "comments": [
         {
-          "author": "ivo",
+          "author": "fixture-user",
           "body": "Probably the same footer line FAKE-1 asks for.",
           "createdAt": "2026-10-01T09:00:00.000Z"
         }
