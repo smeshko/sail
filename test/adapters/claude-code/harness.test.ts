@@ -366,6 +366,14 @@ test('a failed session emits error:harness once with its message, then its end w
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
 });
 
+test("a session that hit the usage limit ends usage_limit, with the reset time in its text read against the harness's clock", async () => {
+  const limit = "You've hit your session limit · resets 4:20pm (Europe/Sofia)";
+  const query = scriptedQuery([[init(), resultSuccess({ isError: true, result: limit, cost: 0, models: {} })]]);
+  const harness = createClaudeCodeHarness({ env: {}, query, now: () => Date.parse('2030-01-01T15:00:00Z') });
+  const result = await harness.run({ ...request(), onEvent: () => {} });
+  expect(result).toMatchObject({ outcome: 'error', reason: 'usage_limit', resetsAt: '2030-01-02T14:20:00.000Z' });
+});
+
 // Live run 1: the SDK's throw after an error result named no budget, and it took the result's place.
 test('a throw after an error result leaves the result to decide, but an onEvent that throws after it still fails the session', async () => {
   const late = [
