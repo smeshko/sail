@@ -1,5 +1,5 @@
 // A run's events folded into the run view's model (D6, D7): one stage card per call in the order calls start, pending
-// cards for the roster stages not called yet, loop iterations, routes, denials with their command, and a fold that
+// cards for the roster stages not called yet, loop iterations, denials with their command, and a fold that
 // counts what it can't read rather than throwing. The golden run and the recorded fixtures are the inputs.
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
