@@ -67,6 +67,11 @@
 // ends the run, the run ends that way, and if it asks for another call the run is suspended with `until` instead, where
 // an abort seen before a call suspends it. A resume takes none and runs to the end.
 //
+// A run holds a keep-awake (`keep-awake.ts`) from before it opens until it has ended, whatever the end: completed,
+// failed, suspended, refused or an exception, through `awake()` in each of the three exports. Each reports its hold once
+// as `run:keep_awake`, after what opening the run did and before the intake: a resume's comes after its renewed lease, so
+// the budget's segment still starts there.
+//
 // An exception inside sail, such as a journal that can't be trusted or a bug in a call, propagates and leaves STATUS
 // `running`: writing it may be what failed, and a `running` run with no process is how a dead one looks.
 //
@@ -100,6 +105,7 @@ import {
   type NewJournalEntry,
   readJournal,
 } from './journal';
+import { type KeepAwake, type KeepAwakeHold, systemKeepAwake } from './keep-awake';
 import {
   type OpenedRun,
   type OpenRunOptions,
@@ -118,6 +124,8 @@ interface EventOptions {
   consumers?: readonly Consumer[];
   /** Where a consumer's throw on an `error:consumer` event goes. Stderr by default. */
   unreported?: (error: unknown, consumer: Consumer, event: SailEvent) => void;
+  /** What holds the machine awake while the run's process drives it. The system's by default. */
+  keepAwake?: KeepAwake;
 }
 
 /** How a run ended. */
@@ -336,9 +344,24 @@ async function gitDiffs(
 
 /** Opens a run of the workflow and runs it to its end. A refusal to open passes through, and nothing is written. */
 export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd | { refused: string }> {
-  const opened = await openRun(options);
-  if ('refused' in opened) return opened;
-  return drive(opened, options, { start: true });
+  return awake(options, async (hold) => {
+    const opened = await openRun(options);
+    if ('refused' in opened) return opened;
+    return drive(opened, options, { start: true, hold });
+  });
+}
+
+/**
+ * Holds the run's keep-awake around `body`, from before the run opens until it has ended, whatever the end. A hold that
+ * isn't held is no refusal: the run goes on, and says so.
+ */
+async function awake<T>(options: EventOptions, body: (hold: KeepAwakeHold) => Promise<T>): Promise<T> {
+  const hold = (options.keepAwake ?? systemKeepAwake(process.env)).acquire();
+  try {
+    return await body(hold);
+  } finally {
+    hold.release();
+  }
 }
 
 /**
@@ -349,7 +372,11 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunEnd |
  * A run has one step before the loop: its intake, run and journaled as a call is unless the journal already starts
  * with it. The run goes on only if that entry passed.
  */
-async function drive(opened: OpenedRun, options: DriveOptions, { start }: { start: boolean }): Promise<RunEnd> {
+async function drive(
+  opened: OpenedRun,
+  options: DriveOptions,
+  { start, hold }: { start: boolean; hold: KeepAwakeHold },
+): Promise<RunEnd> {
   const { runId, dir, sailDir, loaded, header } = opened;
   const { signal, clock = systemClock } = options;
   const bus = createBus({
@@ -553,6 +580,12 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
       for (const { key, seq, outcome } of entries)
         bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun });
     }
+    // After the opening's events, so a resume's budget segment still starts at its renewed lease.
+    bus.emit(
+      hold.held
+        ? { type: 'run:keep_awake', held: true, by: hold.by }
+        : { type: 'run:keep_awake', held: false, reason: hold.reason },
+    );
     await options.onOpened?.();
     // The intake, before any workflow code: taken from the head of the journal, or run and journaled there.
     let [intake] = readJournal(dir).entries;
@@ -754,14 +787,18 @@ async function drive(opened: OpenedRun, options: DriveOptions, { start }: { star
  * with `continue`, to its end. A refusal to open passes through, and nothing is written.
  */
 export async function runSeededWorkflow(options: SeededWorkflowOptions): Promise<RunEnd | { refused: string }> {
-  const opened = await openSeededRun(options);
-  if ('refused' in opened) return opened;
-  return drive(opened, options, { start: true });
+  return awake(options, async (hold) => {
+    const opened = await openSeededRun(options);
+    if ('refused' in opened) return opened;
+    return drive(opened, options, { start: true, hold });
+  });
 }
 
 /** Reopens a suspended or crashed run and runs it to its end from its journal. A refusal passes through. */
 export async function resumeWorkflow(options: ResumeWorkflowOptions): Promise<RunEnd | { refused: string }> {
-  const opened = await reopenRun(options);
-  if ('refused' in opened) return opened;
-  return drive(opened, options, { start: false });
+  return awake(options, async (hold) => {
+    const opened = await reopenRun(options);
+    if ('refused' in opened) return opened;
+    return drive(opened, options, { start: false, hold });
+  });
 }

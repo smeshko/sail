@@ -621,6 +621,7 @@ const OPENING = [
   'workspace:created',
   'ticket:claimed',
   'ticket:commented',
+  'run:keep_awake',
   'intake:start intake#1',
   'ticket:fetched intake#1',
   'output:validated intake#1',
@@ -755,13 +756,14 @@ test("a resume appends to the interrupted run's events, continuing seq with no m
   const list = events(dir);
   expect(seqs(list)).toEqual(gapless(list));
   const after = list.slice(interrupted.length);
-  expect(outline(after.slice(0, 4))).toEqual([
+  expect(outline(after.slice(0, 5))).toEqual([
     'workspace:leased',
+    'run:keep_awake',
     'loop:iteration',
     'workflow:route tests#1→implement#2',
     'stage:start implement#2',
   ]);
-  expect(after[3]).toMatchObject({ try: 2 });
+  expect(after[4]).toMatchObject({ try: 2 });
   expect(outline(after).filter((line) => line.startsWith('run:start'))).toEqual([]);
   expect(after.at(-1)).toMatchObject({ type: 'run:end', status: 'completed', replays: 5 });
   expect(validateRunDir(dir).issues).toEqual([]);
@@ -773,12 +775,13 @@ test("a forced run of a ticket that is not unstarted reports the move in the cla
     const end = await ran(repo.dir, { ticket: 'FAKE-4', force: true });
     expect([end.status, end.runId.slice(0, 7)]).toEqual(['completed', 'FAKE-4-']);
     const list = events(end.dir);
-    expect(outline(list.slice(0, 6))).toEqual([
+    expect(outline(list.slice(0, 7))).toEqual([
       'run:start',
       'workspace:leased',
       'workspace:created',
       'ticket:updated',
       'ticket:commented',
+      'run:keep_awake',
       'intake:start intake#1',
     ]);
     const reported = { ts: expect.any(String), runId: end.runId, ticketKey: 'FAKE-4' };

@@ -45,8 +45,8 @@
   "consumed": {
     "spec": "01-spec/call-1/spec.md"
   },
-  "startedAt": "2026-09-25T09:00:53.700Z",
-  "finishedAt": "2026-09-25T09:00:56.900Z",
+  "startedAt": "2026-09-25T09:00:53.800Z",
+  "finishedAt": "2026-09-25T09:00:57.000Z",
   "durationMs": 3200,
   "try": 1,
   "validationTry": 1,

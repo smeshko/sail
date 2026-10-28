@@ -179,7 +179,7 @@ test('onOpened runs once the run start and the reused calls are in the events fi
     });
     expect([endOf(end), seen.filter((type) => type !== 'workspace:leased' && type !== 'workspace:created')]).toEqual([
       { status: 'suspended', stopReason: 'until' },
-      [`run:start ${from.runId}`, `journal:append ${from.runId}`],
+      [`run:start ${from.runId}`, `journal:append ${from.runId}`, 'run:keep_awake'],
     ]);
   });
 }, 60_000);

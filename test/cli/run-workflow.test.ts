@@ -10,6 +10,7 @@ import { verbosityOf } from '../../src/cli/commands/run-workflow';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import type { Parsed } from '../../src/cli/index';
 import { readJournal } from '../../src/engine/journal';
+import { recordingKeepAwake } from '../../src/engine/keep-awake';
 import { type Forced, readStatus } from '../../src/engine/run-dir';
 import type { RunHeader } from '../../src/engine/run-header';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
@@ -99,6 +100,30 @@ async function started(repoDir: string, argv: string[], ticketKey = 'FAKE-1') {
 /** A head line and a detail line of the stub's terminal view: its key column is 13 wide, for `self-review#1`. */
 const head = (key: string, text: string) => `${key.padEnd(13)}  ${text}`;
 const detail = (key: string, text: string) => `${key.padEnd(13)}    ${text}`;
+
+test('sail FAKE-1 holds the keep-awake for the run and releases it at its end, the run reporting it once', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const { keepAwake, calls } = recordingKeepAwake();
+    const captured = await runCaptured(['FAKE-1'], repo.dir, { keepAwake });
+    const dir = join(repo.dir, '.sail-runs', runIds(repo.dir)[0] ?? '');
+    const held = readEvents(dir).filter((event) => event.type === 'run:keep_awake');
+    expect({ code: captured.code, calls }).toEqual({ code: EXIT_OK, calls: ['acquire', 'release'] });
+    expect(held).toEqual([expect.objectContaining({ held: true, by: 'fake' })]);
+  });
+});
+
+test("sail FAKE-1 with no keep-awake injected holds the system's from its own environment: SAIL_KEEP_AWAKE=off reports none", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const env = { ...repo.env, SAIL_KEEP_AWAKE: 'off' };
+    const captured = await runCaptured(['FAKE-1'], repo.dir, { env });
+    const dir = join(repo.dir, '.sail-runs', runIds(repo.dir)[0] ?? '');
+    const held = readEvents(dir).filter((event) => event.type === 'run:keep_awake');
+    expect(captured.code).toBe(EXIT_OK);
+    expect(held).toEqual([expect.objectContaining({ held: false, reason: 'SAIL_KEEP_AWAKE is off' })]);
+  });
+});
 
 test('sail FAKE-1 prints the run as the terminal view: the intake, each call, its exit, its output, the loop, a failure tail and the final block', async () => {
   const { code, view, stderr, runs } = await sailIn(['FAKE-1']);
@@ -231,7 +256,7 @@ test("sail FAKE-1 -v adds each command, where it runs and the tail of every scri
   expect(trace.view.split('\n').slice(3, 6)).toEqual([
     `${' '.repeat(15)}· ticket:claimed {"ticketKey":"FAKE-1","state":{"type":"started","name":"In Progress"}}`,
     `${' '.repeat(15)}· ticket:commented {"ticketKey":"FAKE-1","body":"sail run ${traced} started"}`,
-    head('intake#1', '▶ intake ticket · builtin'),
+    `${' '.repeat(15)}keep-awake · none: SAIL_KEEP_AWAKE is off`,
   ]);
 });
 
@@ -396,7 +421,7 @@ test('sail FAKE-1 claims the ticket for its one run: run.json records nothing fo
       'workspace:created',
       'ticket:claimed',
       'ticket:commented',
-      'intake:start',
+      'run:keep_awake',
     ]);
     expect([ticket.state, ticket.comments.at(-1)?.body]).toEqual([IN_PROGRESS, `sail run ${runId} started`]);
   });

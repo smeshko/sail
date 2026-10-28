@@ -20,6 +20,7 @@ export const EVENT_TYPES = [
   'run:start',
   'run:end',
   'run:suspended',
+  'run:keep_awake',
   'intake:start',
   'intake:end',
   'stage:start',
@@ -113,6 +114,8 @@ interface Payloads {
   };
   /** A run suspended on its budget, right before its `run:end`: which budget, its limit and what was used. */
   'run:suspended': { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number };
+  /** Whether the process driving the run holds a keep-awake: once per process, with no key. */
+  'run:keep_awake': { held: true; by: string } | { held: false; reason: string };
   'stage:start': {
     key: string;
     stage: string;

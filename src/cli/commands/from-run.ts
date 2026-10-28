@@ -10,6 +10,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { isPlainName } from '../../engine/call-dir';
+import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { runsDir } from '../../engine/run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from '../../engine/run-header';
@@ -71,6 +72,7 @@ export async function fromRun(args: Parsed, io: Io): Promise<ExitCode> {
       continue: args.values.continue === true,
       adapters: project.adapters,
       signal,
+      keepAwake: io.keepAwake ?? systemKeepAwake(io.env ?? process.env),
       consumers: [terminal],
       // Registered once the run is open, so a refusal writes nothing, the registry included.
       onOpened: () => registerRepository(io, COMMAND, project),

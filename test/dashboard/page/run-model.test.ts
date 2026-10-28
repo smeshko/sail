@@ -63,6 +63,12 @@ test("the golden run folds into eight settled cards with its summary's outcomes,
   expect([model.unreadable, model.loops]).toEqual([0, { fix: { iteration: 2, max: 3, exited: 'break' } }]);
 });
 
+test("the golden run's run-level events, run:keep_awake among them, count no type the fold doesn't handle (review R4)", () => {
+  const events = golden();
+  expect(events.some((event) => event.type === 'run:keep_awake')).toBe(true);
+  expect(foldRun(events).other).toEqual({});
+});
+
 test("each card records the loop iteration open when its call started: fix 1 of 3 for implement#1 and tests#1, and 2 for the second pass's three", () => {
   const iterations = foldRun(golden()).cards.map((card) =>
     card.iteration === undefined ? '-' : `${card.iteration.loop} ${card.iteration.iteration}/${card.iteration.max}`,
@@ -367,14 +373,14 @@ test("a card's timeline holds its messages, steps and script commands with their
   expect(timeline('spec#1')).toEqual([
     {
       kind: 'message',
-      ts: '2026-09-25T09:00:02.900Z',
+      ts: '2026-09-25T09:00:03.000Z',
       text: 'Spec written: two tasks, greet() and the CLI first, then the tests.',
     },
   ]);
   expect(timeline('tests#1')).toEqual([
     {
       kind: 'script',
-      ts: '2026-09-25T09:00:06.500Z',
+      ts: '2026-09-25T09:00:06.600Z',
       command: '.sail/stages/tests/run.sh',
       durationMs: 100,
       code: 1,

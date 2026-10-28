@@ -14,8 +14,8 @@
   },
   "status": "completed",
   "startedAt": "2026-09-25T09:00:00.700Z",
-  "endedAt": "2026-09-25T09:00:17.100Z",
-  "durationMs": 16400,
+  "endedAt": "2026-09-25T09:00:17.200Z",
+  "durationMs": 16500,
   "result": {
     "pr": {
       "number": 5,

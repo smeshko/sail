@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import pkg from '../../package.json' with { type: 'json' };
+import type { KeepAwake } from '../engine/keep-awake';
 import type { Tty } from '../events/consumers/screen';
 import { check } from './commands/check';
 import { dashboard } from './commands/dashboard';
@@ -31,6 +32,8 @@ export interface Io {
   stdin?: () => Promise<string>;
   /** The `tsc` the type-check runs. Falls back to TypeScript's own. */
   tsc?: string;
+  /** What holds the machine awake while a run, or a stage run alone, is going. Falls back to `systemKeepAwake(io.env)`. */
+  keepAwake?: KeepAwake;
 }
 
 const USAGE = `sail: a software factory. A ticket goes in and a pull request comes out.

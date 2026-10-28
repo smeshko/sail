@@ -34,6 +34,7 @@ const LEVEL: Record<Verbosity, number> = { quiet: 0, normal: 1, verbose: 2, trac
  */
 const SHOWN_FROM: Partial<Record<EventType, Verbosity>> = {
   'run:start': 'quiet',
+  'run:keep_awake': 'verbose',
   'intake:start': 'normal',
   'stage:start': 'normal',
   'step:start': 'normal',
@@ -376,6 +377,8 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
     switch (event.type) {
       case 'run:start':
         return [[`sail · ${workflow} · ${event.runId}`]];
+      case 'run:keep_awake':
+        return [head(undefined, 'keep-awake ·', event.held ? `held by ${event.by}` : `none: ${event.reason}`)];
       case 'run:end':
         return finalBlock(event);
       case 'intake:start':

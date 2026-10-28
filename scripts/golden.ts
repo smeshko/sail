@@ -39,6 +39,7 @@ import { renderTimeline } from '../src/dashboard/page/timeline-view';
 import { type InspectorTab, initialUi, type UiState } from '../src/dashboard/page/ui-state';
 import { resolveAdapters } from '../src/engine/adapters';
 import { type AdapterConfig, readConfig } from '../src/engine/config';
+import { recordingKeepAwake } from '../src/engine/keep-awake';
 import { runWorkflow } from '../src/engine/runtime';
 import { formatIssue } from '../src/engine/schemas';
 import { readEvents } from '../src/events/consumers/ndjson';
@@ -167,6 +168,7 @@ export async function generateGoldenRun(outDir: string, options: GoldenOptions =
       ticket: 'FAKE-1',
       adapters,
       clock,
+      keepAwake: recordingKeepAwake().keepAwake,
       random: (bytes) => {
         bytes.set(RANDOM);
         return bytes;
