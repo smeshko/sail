@@ -14,5 +14,5 @@ label: "{{label}}"
 adapters:
   ticketSource: { use: fake } # or: linear
   codeHost: { use: fake } # or: github
-  harness: { use: fake } # or: claude-code
+  harness: { use: fake } # or: claude-code, pi
   workspace: { use: fake } # or: git-worktree

@@ -466,8 +466,12 @@ The head sha a merge names: the one the workflow checked. The host merges the pu
 _Avoid_: base sha, review sha
 
 **Harness**:
-The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. A step runs on the config's default harness, or on the named harness its model alias names. v1 adapter: Claude Code.
+The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. A step runs on the config's default harness, or on the named harness its model alias names. v1 adapters: Claude Code, and pi, whose providers include non-Anthropic and local models.
 _Avoid_: agent provider, runner, executor, model
+
+**Codex login**:
+The ChatGPT subscription the pi harness runs `openai-codex` models on. `sail login codex` keeps its OAuth tokens in sail's own macOS keychain item, and pi refreshes the access token there when it has under five minutes left, under a lock every sail process shares, as each refresh token is good for one refresh.
+_Avoid_: Codex key, Codex API key
 
 **Workspace port**:
 The port that gives a run its workspace and takes it away again. v1 adapter: `git-worktree`, one worktree per run, so runs execute in parallel.

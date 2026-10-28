@@ -23,7 +23,7 @@ export interface Gate {
 }
 
 /** The rule a call of `kind` is denied under. */
-function ruleOf(kind: ToolKind): DenialRule {
+export function ruleOf(kind: ToolKind): DenialRule {
   if (kind === 'read') return 'read';
   if (kind === 'write' || kind === 'edit') return 'write';
   if (kind === 'execute') return 'commands';
@@ -48,7 +48,7 @@ function subtreeOf(glob: string): string | undefined {
  * the workspace, and a read glob that matches the folder alone doesn't cover them. A folder runs only below a glob
  * that matches all of it; a file, or a folder in `$STAGE_IN` or `$STAGE_OUT`, is decide()'s alone.
  */
-function uncoveredSearch(call: ToolCall, permissions: Permissions, ctx: DecideContext): string | undefined {
+export function uncoveredSearch(call: ToolCall, permissions: Permissions, ctx: DecideContext): string | undefined {
   const at = roots(ctx);
   const from = resolvePhysical(call.cwd ?? ctx.worktree, '/');
   if (!from.ok) return `${call.tool}: ${from.reason}`;

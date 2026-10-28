@@ -1,7 +1,6 @@
 // A session's three budgets, watched (D13): `budget:warning` once when what is used first reaches 80% of a budget, and
 // `budget:exceeded` once when it is used up. Turns are counted as each one closes and dollars are known only at the
 // result (7.2 D3); the minute budget is a timer of its own, which ends the session when it runs out (D6).
-import type { SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessEvent } from '../../ports/harness';
 import type { Budget } from '../../ports/types';
 
@@ -36,8 +35,8 @@ export interface BudgetWatch {
   start(): void;
   /** Clears whatever timer is still set. */
   stop(): void;
-  /** The session's result: the dollar warning, and a turn or dollar overrun. */
-  result(result: SDKResultMessage): void;
+  /** The session's end: the dollar warning, and a turn or dollar overrun when `over` names one. */
+  settle(spent: { usd: number; turns: number; over?: 'turns' | 'usd' | undefined }): void;
 }
 
 type Name = 'turns' | 'usd' | 'minutes';
@@ -78,12 +77,12 @@ export function createBudgetWatch(options: BudgetWatchOptions): BudgetWatch {
     stop() {
       for (const handle of handles.splice(0)) timers.clear(handle);
     },
-    result(result) {
-      warnAt('usd', result.total_cost_usd);
-      if (result.subtype === 'error_max_budget_usd') once('usd', 'exceeded', result.total_cost_usd);
-      if (result.subtype === 'error_max_turns') {
-        once('turns', 'warning', result.num_turns);
-        once('turns', 'exceeded', result.num_turns);
+    settle({ usd, turns, over }) {
+      warnAt('usd', usd);
+      if (over === 'usd') once('usd', 'exceeded', usd);
+      if (over === 'turns') {
+        once('turns', 'warning', turns);
+        once('turns', 'exceeded', turns);
       }
     },
   };

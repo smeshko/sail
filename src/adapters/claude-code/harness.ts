@@ -111,8 +111,15 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
  * A session with one has them in its environment too (D16).
  */
 export function appendedSystemPrompt(request: HarnessRequest): string {
+  return [whereYouWork(request, sessionTools(request.permissions).tools.includes('Bash')), '', SUBMIT_CONTRACT].join(
+    '\n',
+  );
+}
+
+/** Where the session works, the same text for any harness: `hasShell` is whether the session is offered a shell. */
+export function whereYouWork(request: HarnessRequest, hasShell: boolean): string {
   const variables = Object.entries(request.env).map(([name, value]) => `- \`$${name}\`: ${value}`);
-  const shell = sessionTools(request.permissions).tools.includes('Bash')
+  const shell = hasShell
     ? [
         `Your working directory is the workspace, ${request.cwd}. Where a prompt names one of these environment`,
         'variables, it means the value given: the same values are in your environment.',
@@ -130,8 +137,6 @@ export function appendedSystemPrompt(request: HarnessRequest): string {
     '',
     'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
     'directory below it.',
-    '',
-    SUBMIT_CONTRACT,
   ].join('\n');
 }
 
@@ -268,7 +273,11 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
     const state = reader.state();
     // Budget events go out before the error and the end (D12).
     watch.turn(state.turns);
-    if (result !== undefined) watch.result(result);
+    if (result !== undefined) {
+      const over =
+        result.subtype === 'error_max_turns' ? 'turns' : result.subtype === 'error_max_budget_usd' ? 'usd' : undefined;
+      watch.settle({ usd: result.total_cost_usd, turns: result.num_turns, over });
+    }
     const ended = toHarnessResult({
       result,
       reader: state,

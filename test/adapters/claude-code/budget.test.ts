@@ -3,7 +3,6 @@
 import { expect, test } from 'bun:test';
 import { createBudgetWatch } from '../../../src/adapters/claude-code/budget';
 import type { HarnessEvent } from '../../../src/ports/harness';
-import { resultError, resultSuccess } from '../../helpers/claude-code';
 import { fakeTimers } from '../../helpers/fake-timers';
 
 /** A watch over `budget` on fake timers, with every event it emitted and each time the minutes ran out. */
@@ -26,7 +25,7 @@ function watch(budget = { maxTurns: 10, maxUsd: 0.05, maxMinutes: 1 }) {
 test('turns warn once, at the first close that reaches 80%, and their overrun follows at the result without a second warning', () => {
   const { watch: w, events } = watch();
   for (const n of [1, 7, 8, 9]) w.turn(n);
-  w.result(resultError('error_max_turns', { numTurns: 10, cost: 0.001 }));
+  w.settle({ usd: 0.001, turns: 10, over: 'turns' });
   expect(events).toEqual([
     { type: 'budget:warning', budget: 'turns', limit: 10, used: 8 },
     { type: 'budget:exceeded', budget: 'turns', limit: 10, used: 10 },
@@ -36,20 +35,20 @@ test('turns warn once, at the first close that reaches 80%, and their overrun fo
 test('a turns overrun with no warning yet gives the warning first', () => {
   const { watch: w, events } = watch();
   w.turn(1);
-  w.result(resultError('error_max_turns', { numTurns: 10, cost: 0.001 }));
+  w.settle({ usd: 0.001, turns: 10, over: 'turns' });
   expect(events.map((event) => `${event.type} ${'budget' in event ? event.budget : ''}`)).toEqual([
     'budget:warning turns',
     'budget:exceeded turns',
   ]);
 });
 
-test('dollars warn at a result that reaches 80%, overrun only on error_max_budget_usd, and stay quiet below', () => {
+test('dollars warn when settled at 80%, overrun only with over: usd, and stay quiet below', () => {
   const below = watch();
-  below.watch.result(resultSuccess({ cost: 0.01 }));
+  below.watch.settle({ usd: 0.01, turns: 1 });
   const near = watch();
-  near.watch.result(resultSuccess({ cost: 0.045 }));
+  near.watch.settle({ usd: 0.045, turns: 1 });
   const over = watch();
-  over.watch.result(resultError('error_max_budget_usd', { cost: 0.051 }));
+  over.watch.settle({ usd: 0.051, turns: 1, over: 'usd' });
   expect({ below: below.events, near: near.events, over: over.events }).toEqual({
     below: [],
     near: [{ type: 'budget:warning', budget: 'usd', limit: 0.05, used: 0.045 }],
@@ -57,6 +56,20 @@ test('dollars warn at a result that reaches 80%, overrun only on error_max_budge
       { type: 'budget:warning', budget: 'usd', limit: 0.05, used: 0.051 },
       { type: 'budget:exceeded', budget: 'usd', limit: 0.05, used: 0.051 },
     ],
+  });
+});
+
+test('settling over turns gives the warning then the overrun, and over dollars below 80% gives the overrun alone', () => {
+  const turns = watch();
+  turns.watch.settle({ usd: 0, turns: 3, over: 'turns' });
+  const usd = watch();
+  usd.watch.settle({ usd: 0.02, turns: 1, over: 'usd' });
+  expect({ turns: turns.events, usd: usd.events }).toEqual({
+    turns: [
+      { type: 'budget:warning', budget: 'turns', limit: 10, used: 3 },
+      { type: 'budget:exceeded', budget: 'turns', limit: 10, used: 3 },
+    ],
+    usd: [{ type: 'budget:exceeded', budget: 'usd', limit: 0.05, used: 0.02 }],
   });
 });
 
