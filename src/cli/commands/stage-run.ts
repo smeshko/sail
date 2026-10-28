@@ -2,9 +2,10 @@
 // into `.sail-runs/<stage>-<ulid>/00-<stage>/call-1/` beside its `.sail/`. Every refusal comes before anything is
 // written. This module parses, prints and maps the outcome to an exit code; the work is the engine's.
 //
-// An agent stage runs on the harness `project.yaml` names, with the model its alias names there, and each agent step of
-// a multi-step stage on its own. Only the harness is resolved: a stage in isolation reaches no ticket source, code host
-// or workspace, so it needs none of their credentials. A script stage resolves no adapter at all. A multi-step stage
+// An agent stage runs on the harness `project.yaml` names, or on the named harness its alias names, with the model its
+// alias names there, and each agent step of a multi-step stage on its own. Only the harness and the named harnesses the
+// stage's aliases name are resolved: a stage in isolation reaches no ticket source, code host or workspace, so it needs
+// none of their credentials. A script stage resolves no adapter at all. A multi-step stage
 // runs its steps in order, with no journal and no resume, and a step that declares a `gitDiff()` can't start: a stage
 // in isolation has no workspace to take one from.
 //
@@ -16,7 +17,7 @@ import { BUILTINS } from '../../adapters/index';
 import { resolveAdapters } from '../../engine/adapters';
 import type { Supplied } from '../../engine/bindings';
 import { type AgentExecution, callProblems, runCall } from '../../engine/call';
-import { type ProjectConfig, readConfig } from '../../engine/config';
+import { aliasOf, type ProjectConfig, readConfig } from '../../engine/config';
 import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
 import { systemKeepAwake } from '../../engine/keep-awake';
 import { modelProblemsOf } from '../../engine/roster';
@@ -26,6 +27,7 @@ import { findSailDir } from '../../engine/sail-dir';
 import { formatIssue, type SchemaIssue } from '../../engine/schemas';
 import { stepProblems } from '../../engine/stage-call';
 import { typecheck } from '../../engine/typecheck';
+import type { Harness } from '../../ports/harness';
 import type { AgentStep, StageDefinition, Step } from '../../sdk/steps';
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED, type ExitCode } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
@@ -88,7 +90,7 @@ async function executionOf(
   const steps: readonly Step[] = definition.kind === 'stage' ? definition.steps : [definition];
   const agents = steps.filter((step): step is AgentStep => step.kind === 'agent');
   const models = Object.fromEntries(
-    agents.map((step) => [step.name, config.models[step.model ?? 'default'] as string]),
+    agents.map((step) => [step.name, aliasOf(config, step.model ?? 'default')?.model as string]),
   );
   const adapters = await resolveAdapters({
     sailDir,
@@ -98,13 +100,28 @@ async function executionOf(
     ports: ['harness'],
   });
   if ('issues' in adapters) return adapters;
+  const onNamed = Object.fromEntries(
+    agents.flatMap((step) => {
+      const harness = aliasOf(config, step.model ?? 'default')?.harness;
+      return harness === undefined ? [] : [[step.name, harness] as const];
+    }),
+  );
+  const named = await adapters.harnesses([...new Set(Object.values(onNamed))].sort());
+  if ('issues' in named) return named;
   const { conventions } = config;
-  return {
+  const base = {
     harness: adapters.ports.harness,
     model: Object.values(models)[0] as string,
-    ...(definition.kind === 'stage' && definition.steps.length > 1 ? { models } : {}),
     ...(conventions === undefined ? {} : { conventions }),
   };
+  const [only] = Object.values(onNamed);
+  if (definition.kind !== 'stage' || definition.steps.length <= 1) {
+    return only === undefined ? base : { ...base, harness: named.ports[only] as Harness, harnessName: only };
+  }
+  const own = Object.fromEntries(
+    Object.entries(onNamed).map(([step, name]) => [step, { harness: named.ports[name] as Harness, name }]),
+  );
+  return { ...base, models, ...(Object.keys(own).length === 0 ? {} : { steps: own }) };
 }
 
 export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {

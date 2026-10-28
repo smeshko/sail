@@ -1102,6 +1102,25 @@ test('project.yaml: adapter options are open, and every other object is closed',
   expect(projectIssues(text.replace('name: fixture', 'name: Fixture'))).toEqual(['/name']);
 });
 
+test('project.yaml: models take a model id or a { harness, model } object, and adapters.harnesses takes adapter entries', async () => {
+  const text = await Bun.file(fixtureProject).text();
+  const withDeep = (deep: string) => text.replace('deep: claude-opus-5-5', `deep: ${deep}`);
+  const withHarnesses = (deep: string, harnesses: string) =>
+    withDeep(deep).replace('  workspace: { use: fake }\n', `  workspace: { use: fake }\n  harnesses: ${harnesses}\n`);
+  expect(projectIssues(withHarnesses('{ harness: second, model: x }', '{ second: { use: fake } }'))).toEqual([]);
+  expect(projectIssues(withDeep('{ harness: second }'))).toContain('/models/deep/model');
+  expect(projectIssues(withDeep('{ model: x }'))).toContain('/models/deep/harness');
+  expect(projectIssues(withDeep('{ harness: second, model: x, effort: high }'))).toContain('/models/deep/effort');
+  expect(projectIssues(withDeep('{ harness: Second, model: x }'))).toContain('/models/deep/harness');
+  expect(projectIssues(withDeep('""'))).toContain('/models/deep');
+  expect(projectIssues(withHarnesses('claude-opus-5-5', '{ Second: { use: fake } }'))).toEqual([
+    '/adapters/harnesses/Second',
+  ]);
+  expect(projectIssues(withHarnesses('claude-opus-5-5', '{ second: { model: x } }'))).toEqual([
+    '/adapters/harnesses/second/use',
+  ]);
+});
+
 test('project.yaml: invalid YAML or an unreadable file is one issue, not a throw', () => {
   expect(projectIssues('name: [unclosed\n')).toEqual(['/']);
   const [issue] = validateProjectFile(join(tempDir({}), 'missing.yaml'));

@@ -48,10 +48,11 @@ import type { Summary } from '../events/summary';
 import type { ProviderEvent } from '../events/types';
 import type { PortAdapters } from '../ports/adapter';
 import { PortError } from '../ports/errors';
+import type { Harness } from '../ports/harness';
 import type { Repository, Workspace } from '../ports/types';
 import type { RunRef, WorkspacePort } from '../ports/workspace';
 import type { SourceKind } from '../sdk/intake';
-import type { ProviderRelay, ResolvedAdapters } from './adapters';
+import type { NamedHarnesses, ProviderRelay, ResolvedAdapters } from './adapters';
 import { branchFor, DEFAULT_BRANCH_PREFIX } from './branch';
 import { type Raise, raiseProblem } from './budget';
 import { isPlainName } from './call-dir';
@@ -61,7 +62,7 @@ import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
-import { modelProblems } from './roster';
+import { harnessesReached, modelProblems } from './roster';
 import {
   copyStageFolders,
   createRunDir,
@@ -100,6 +101,8 @@ export interface OpenedRun {
   sailDir: string;
   /** The adapters the run was opened with, one per port. */
   adapters: PortAdapters;
+  /** The named harnesses the run reached, by name. Empty when it reached none. */
+  harnesses: Record<string, Harness>;
   /** Where those adapters emit: the runtime attaches the run's stream to it. */
   relay: ProviderRelay;
   /** `project.yaml` as it reads now. What the run froze of it, such as each stage's model, is in `header`. */
@@ -238,6 +241,22 @@ export function portRefusal(error: unknown): string {
   return `${error.message} (${error.code})`;
 }
 
+/**
+ * Resolves the named harnesses `names` name through `adapters`, or refuses with each issue as a line of `project.yaml`'s.
+ * A harness no name asks for is never loaded or asked for its credentials.
+ */
+export async function resolveNamed(
+  adapters: ResolvedAdapters,
+  sailDir: string,
+  names: readonly string[],
+): Promise<NamedHarnesses | { refused: string }> {
+  if (names.length === 0) return { ports: {}, entries: {} };
+  const named = await adapters.harnesses(names);
+  if (!('issues' in named)) return named;
+  const file = relative(dirname(sailDir), join(sailDir, 'project.yaml'));
+  return { refused: named.issues.map((issue) => formatIssue({ ...issue, file })).join('\n') };
+}
+
 /** `event` with its `path`, which an adapter gives absolute, made relative to the repository `root`. */
 export function rootRelative(event: ProviderEvent, root: string): ProviderEvent {
   if (!('path' in event) || typeof event.path !== 'string') return event;
@@ -369,6 +388,8 @@ export interface Preflight {
   branch: string;
   /** The header built before anything is written, with no workspace fields yet. */
   header: RunHeader;
+  /** The named harnesses the workflow reaches, created. */
+  harnesses: Record<string, Harness>;
 }
 
 /**
@@ -387,6 +408,8 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   if ('refused' in loaded) return loaded;
   const models = modelProblems(loaded, config);
   if (models.length > 0) return { refused: models.join('\n') };
+  const named = await resolveNamed(options.adapters, found.dir, harnessesReached(loaded, config));
+  if ('refused' in named) return named;
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
   const { ticketSource, codeHost } = options.adapters.ports;
@@ -417,6 +440,7 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
       loaded,
       config,
       adapters: options.adapters.entries,
+      harnesses: named.entries,
       now,
     });
     assertRunHeader(header);
@@ -450,7 +474,8 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
     const { pr } = pullRequest;
     const source: Source = { kind: 'pr', number: pr.number, headSha: pr.headSha, via, forced: pullRequest.forced };
     const header = headerOf(runId, source);
-    return { sailDir: found.dir, config, loaded, pullRequest, source, runId, branch: pr.head, header };
+    const harnesses = named.ports;
+    return { sailDir: found.dir, config, loaded, pullRequest, source, runId, branch: pr.head, header, harnesses };
   }
 
   if (options.headSha !== undefined) {
@@ -465,7 +490,7 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   // Built and checked before anything is written. Opening a run claims nothing, so it has no claim.
   const source: Source = { kind: 'ticket', ticketKey, via, forced: resolved.forced };
   const header = headerOf(runId, source);
-  return { sailDir: found.dir, config, loaded, resolved, source, runId, branch, header };
+  return { sailDir: found.dir, config, loaded, resolved, source, runId, branch, header, harnesses: named.ports };
 }
 
 /**
@@ -483,7 +508,7 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
 export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { refused: string }> {
   const preflight = await preflightRun(options);
   if ('refused' in preflight) return preflight;
-  const { config, loaded, source, runId, branch, header: preflighted } = preflight;
+  const { config, loaded, source, runId, branch, header: preflighted, harnesses } = preflight;
   const found = { dir: preflight.sailDir };
   const { until } = options;
   // The last moment nothing is written. Everything up to here only read, so one check covers an abort at any of it.
@@ -531,6 +556,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    harnesses,
     relay,
     config,
     loaded,
@@ -581,16 +607,30 @@ function endedRefusal(runId: string, status: RunStatus): string | undefined {
   return undefined;
 }
 
-/** One line per port whose adapter, by `use` or `origin`, differs from the one the run started with. */
-export function changedAdapters(header: RunHeader, entries: Record<Port, AdapterEntry>): string[] {
+/**
+ * One line per port, then per named harness the run reached, whose adapter, by `use` or `origin`, differs from the one
+ * the run started with. A named harness the config no longer defines has no entry in `harnesses`.
+ */
+export function changedAdapters(
+  header: RunHeader,
+  entries: Record<Port, AdapterEntry>,
+  harnesses: Record<string, AdapterEntry> = {},
+): string[] {
   const named = ({ use, origin }: AdapterEntry) => `${use} (${origin})`;
-  return PORTS.filter((port) => {
-    const was = header.adapters[port];
-    return was.use !== entries[port].use || was.origin !== entries[port].origin;
-  }).map(
+  const differs = (was: AdapterEntry, now: AdapterEntry) => was.use !== now.use || was.origin !== now.origin;
+  const ports = PORTS.filter((port) => differs(header.adapters[port], entries[port])).map(
     (port) =>
       `${port}: the run started with ${named(header.adapters[port])}, and .sail/project.yaml now names ${named(entries[port])}`,
   );
+  const reached = Object.entries(header.adapters.harnesses ?? {}).flatMap(([name, was]) => {
+    const now = harnesses[name];
+    if (now === undefined) {
+      return [`harnesses.${name}: the run started with ${named(was)}, and .sail/project.yaml no longer defines it`];
+    }
+    if (!differs(was, now)) return [];
+    return [`harnesses.${name}: the run started with ${named(was)}, and .sail/project.yaml now names ${named(now)}`];
+  });
+  return [...ports, ...reached];
 }
 
 /**
@@ -650,7 +690,12 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in run) return run;
   const budget = raiseProblem(runId, run.header.budget, readEvents(run.dir), options.raise);
   if (budget !== undefined) return { refused: budget };
-  const changed = changedAdapters(run.header, options.adapters.entries);
+  // The named harnesses the run reached, as its header froze them: one the config has dropped is changed, not resolved.
+  const reached = Object.keys(run.header.adapters.harnesses ?? {});
+  const defined = reached.filter((name) => Object.hasOwn(found.config.adapters.harnesses ?? {}, name));
+  const named = await resolveNamed(options.adapters, found.dir, defined);
+  if ('refused' in named) return named;
+  const changed = changedAdapters(run.header, options.adapters.entries, named.entries);
   if (changed.length > 0) return { refused: `run ${runId} can't resume on different adapters:\n${changed.join('\n')}` };
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, run.header.workflow.name);
@@ -675,6 +720,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     header: run.header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    harnesses: named.ports,
     relay,
     config: found.config,
     loaded,

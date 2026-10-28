@@ -45,6 +45,54 @@ const loopIteration = (loop: string, iteration: number, max: number, from?: stri
   ...(from === undefined ? {} : { feedback: { from } }),
 });
 
+test('a call and a step carry the named harness their start events name, and one that names none carries none', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart({ maxMinutes: 90 })],
+      [100, { ...start('spec#1', { kind: 'agent' }), harness: 'second' } as NewEvent],
+      [200, end('spec#1', 'done', 100)],
+      [210, start('implement#1', { kind: 'agent' })],
+      [300, end('implement#1', 'done', 90)],
+      [310, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [320, { ...stepStart('publish#1/describe', 1, 2, 'agent'), harness: 'second' } as NewEvent],
+      [400, stepEnd('publish#1/describe', 1, 'done')],
+      [410, stepStart('publish#1/open', 2, 2, 'script')],
+      [500, stepEnd('publish#1/open', 2, 'passed')],
+      [510, end('publish#1', 'passed', 200)],
+    ),
+  );
+  const calls = summary?.calls ?? [];
+  expect(calls.map((call) => [call.key, call.harness])).toEqual([
+    ['spec#1', 'second'],
+    ['implement#1', undefined],
+    ['publish#1', undefined],
+  ]);
+  expect(calls[2]?.steps?.map((step) => [step.key, step.harness])).toEqual([
+    ['publish#1/describe', 'second'],
+    ['publish#1/open', undefined],
+  ]);
+});
+
+test('an intake call carries the named harness its intake:start names', () => {
+  const intakeStart: NewEvent = {
+    type: 'intake:start',
+    key: 'intake#1',
+    intake: 'groom',
+    kind: 'agent',
+    origin: 'repo:.sail/workflows/groom',
+    consumed: { source: 'run.json#/source' },
+    harness: 'second',
+  };
+  const summary = folded(
+    stamp(
+      [0, runStart({ maxMinutes: 90 })],
+      [100, intakeStart],
+      [200, { type: 'intake:end', key: 'intake#1', outcome: 'done', resultPath: '00-intake/call-1/result.json' }],
+    ),
+  );
+  expect(summary?.calls.map((call) => [call.key, call.harness])).toEqual([['intake#1', 'second']]);
+});
+
 test('a run with no run:end is running, and lasts until its latest event', () => {
   const summary = folded(
     stamp(

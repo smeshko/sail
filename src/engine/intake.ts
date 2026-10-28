@@ -122,6 +122,7 @@ export function intakeEmit(emit: Emit, own: Intake, origin: string): Emit {
         ...(event.steps === undefined ? {} : { steps: event.steps }),
         origin,
         consumed: event.consumed,
+        ...(event.harness === undefined ? {} : { harness: event.harness }),
       });
     }
     if (event.type === 'stage:end' && event.key === INTAKE_KEY) {

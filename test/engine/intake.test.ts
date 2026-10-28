@@ -488,6 +488,18 @@ test("intakeEmit reports the call intake#1 as the intake's events, and passes ev
   });
 });
 
+test("intakeEmit keeps the named harness an agent intake's stage:start names on its intake:start, which validates", () => {
+  const seen: NewEvent[] = [];
+  const emit = intakeEmit((event) => seen.push(event), groom, 'repo:.sail/workflows/groom/intake.ts');
+  const consumed = { source: 'run.json#/source' };
+  const call = { type: 'stage:start', key: 'intake#1', stage: 'intake', call: 1, try: 1, kind: 'agent' } as const;
+  emit({ ...call, consumed, model: 'claude-opus-5-5', harness: 'second' });
+  emit({ ...call, consumed });
+  expect(seen.map((event) => (event as { harness?: string }).harness)).toEqual(['second', undefined]);
+  const envelope = { seq: 1, ts: '2026-09-25T09:00:00.000Z', runId: 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N' };
+  expect(validateDocument('sail.event.v1', { ...envelope, ...seen[0] }).map(formatIssue)).toEqual([]);
+});
+
 test('intakeFailure names the intake, its call, the outcome and the reason', () => {
   expect(intakeFailure('groom', 'blocked', 'the ticket says nothing')).toBe(
     "the intake 'groom' (intake#1) ended in blocked: the ticket says nothing",

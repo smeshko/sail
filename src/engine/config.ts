@@ -19,6 +19,16 @@ export interface AdapterConfig {
 /** sail's own designation label: what `sail.project.v1`'s `label` falls back to when `project.yaml` sets none. */
 export const DEFAULT_LABEL = 'sail';
 
+/** A model id on the default harness, or a model id on the harness `adapters.harnesses` names. */
+export type ModelAlias = string | { harness: string; model: string };
+
+/** The model id `alias` names, and its named harness when it has one. Undefined when `models` doesn't define it. */
+export function aliasOf(config: ProjectConfig, alias: string): { model: string; harness?: string } | undefined {
+  if (!Object.hasOwn(config.models, alias)) return undefined;
+  const value = config.models[alias] as ModelAlias;
+  return typeof value === 'string' ? { model: value } : { model: value.model, harness: value.harness };
+}
+
 export interface ProjectConfig {
   name: string;
   /** The sail versions the repository accepts, as a semver range. */
@@ -28,9 +38,12 @@ export interface ProjectConfig {
   defaultWorkflow?: string;
   /** What a run's branch starts with. `DEFAULT_BRANCH_PREFIX` applies when it is left out. */
   branchPrefix?: string;
-  adapters: Record<Port, AdapterConfig>;
-  /** Model aliases: alias → model id. Empty when `project.yaml` has none. */
-  models: Record<string, string>;
+  adapters: Record<Port, AdapterConfig> & {
+    /** The named harnesses, which a model alias may name. Each is preflighted only when a run reaches it. */
+    harnesses?: Record<string, AdapterConfig>;
+  };
+  /** Model aliases: alias → model id, or the model id on a named harness. Empty when `project.yaml` has none. */
+  models: Record<string, ModelAlias>;
   /** Empty when `project.yaml` has none. */
   budgets: { run?: { maxUsd?: number; maxMinutes?: number } };
   /**
@@ -81,5 +94,16 @@ export function readConfig(sailDir: string, version: string = pkg.version): Proj
   const data = Bun.YAML.parse(readFileSync(join(sailDir, 'project.yaml'), 'utf8')) as AsWritten;
   const range = rangeIssue(data.sail, version);
   if (range) return { issues: [range] };
-  return { ...data, models: data.models ?? {}, budgets: data.budgets ?? {} };
+  const config = { ...data, models: data.models ?? {}, budgets: data.budgets ?? {} };
+  const undefinedHarness = Object.keys(config.models).flatMap((alias): SchemaIssue[] => {
+    const { harness } = aliasOf(config, alias) ?? {};
+    if (harness === undefined || Object.hasOwn(config.adapters.harnesses ?? {}, harness)) return [];
+    return [
+      {
+        path: `/models/${alias}/harness`,
+        message: `names the harness '${harness}', which adapters.harnesses doesn't define`,
+      },
+    ];
+  });
+  return undefinedHarness.length > 0 ? { issues: undefinedHarness } : config;
 }

@@ -33,6 +33,7 @@ import { formatIssue } from '../../engine/schemas';
 import { typecheck } from '../../engine/typecheck';
 import { type TerminalConsumer, terminalConsumer, type Verbosity } from '../../events/consumers/terminal';
 import type { ProviderEmit, SailEvent } from '../../events/types';
+import type { Harness } from '../../ports/harness';
 import { EXIT_INTERNAL, EXIT_REFUSED, type ExitCode, exitCodeFor } from '../exit-codes';
 import { count, formatDiagnostic } from '../format';
 import type { Io, Parsed } from '../index';
@@ -228,9 +229,16 @@ export function recorded(
   };
   // The login, as a word: it names the home folder under any root, and the owner in `ls -l`, even when HOME is another.
   const names = { $USER: env.USER ?? userInfo().username };
-  const harness = recordingHarness(project.adapters.ports.harness, { dir, secrets, roots, names });
+  const record = (inner: Harness) => recordingHarness(inner, { dir, secrets, roots, names });
+  const harness = record(project.adapters.ports.harness);
+  const harnesses: ResolvedAdapters['harnesses'] = async (wanted) => {
+    const named = await project.adapters.harnesses(wanted);
+    if ('issues' in named) return named;
+    const ports = Object.fromEntries(Object.entries(named.ports).map(([name, inner]) => [name, record(inner)]));
+    return { ...named, ports };
+  };
   return {
-    adapters: { ...project.adapters, ports: { ...project.adapters.ports, harness } },
+    adapters: { ...project.adapters, ports: { ...project.adapters.ports, harness }, harnesses },
     finish: (runDir) => writeJournalKeys(dir, runDir),
   };
 }

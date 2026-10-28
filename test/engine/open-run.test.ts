@@ -167,6 +167,11 @@ test.each<[string, (sail: string) => void, string]>([
     },
     "reaches two stages named 'tests'",
   ],
+  [
+    'a model alias naming a harness adapters.harnesses does not define',
+    (sail) => nameHarness(sail, 'codex', 'gpt-5.5'),
+    ".sail/project.yaml  /models/deep/harness names the harness 'codex', which adapters.harnesses doesn't define",
+  ],
 ])('%s is refused, and no run directory is created', async (_, breakIt, reason) => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
@@ -1032,5 +1037,113 @@ test("a start whose lease throws is refused, naming the branch and the port's er
         .split('\n')
         .filter((line) => line.startsWith('worktree ')),
     ).toHaveLength(1);
+  });
+});
+
+// Named harnesses (ADW-296): resolved on reach, frozen in run.json, and kept on resume.
+
+const SECOND =
+  '  workspace: { use: fake }\n  harnesses: { second: { use: fake }, echo: { use: ./adapters/echo-harness.ts } }\n';
+
+/** Makes `deep` name the harness `harness`, which the copy's config defines beside `second` and the credentialed `echo`. */
+function nameHarness(sail: string, harness: string, model = 'claude-opus-5-5'): void {
+  edit(sail, 'project.yaml', '  workspace: { use: fake }\n', SECOND);
+  edit(sail, 'project.yaml', 'deep: claude-opus-5-5', `deep: { harness: ${harness}, model: ${model} }`);
+}
+
+test('openRun reaching a named harness records it in run.json with the roster entries that name it, and creates it alone: echo, which needs a credential, is never asked for', async () => {
+  await withTempRepo(async (repo) => {
+    nameHarness(copyFixture(repo.dir), 'second');
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' });
+    if ('refused' in run) throw new Error(run.refused);
+    expect(readRunHeader(run.dir).adapters.harnesses).toEqual({ second: { use: 'fake', origin: 'builtin' } });
+    expect(Object.keys(run.harnesses)).toEqual(['second']);
+    expect(run.header.stages.spec).toMatchObject({ model: 'claude-opus-5-5', harness: 'second' });
+    expect(run.header.stages['self-review']).toMatchObject({ harness: 'second' });
+    expect(run.header.stages.implement).not.toHaveProperty('harness');
+    expect(validateRunDir(run.dir).issues).toEqual([]);
+  });
+});
+
+test('openRun on a config with no named harness leaves adapters.harnesses and every roster harness out of run.json', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' });
+    if ('refused' in run) throw new Error(run.refused);
+    expect(run.header.adapters).not.toHaveProperty('harnesses');
+    expect(run.harnesses).toEqual({});
+    expect(JSON.stringify(run.header.stages)).not.toContain('"harness"');
+  });
+});
+
+test('openRun reaching a named harness whose adapter needs a variable that is not set is refused naming /adapters/harnesses/<name> and the variable, with no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    nameHarness(copyFixture(repo.dir), 'echo', 'echo-1');
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' });
+    expect(run).toEqual({
+      refused: '.sail/project.yaml  /adapters/harnesses/echo needs ECHO_HARNESS_TOKEN, which is not set',
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('openRun reaching a named harness whose variable is set records its origin and versions', async () => {
+  await withTempRepo(async (repo) => {
+    nameHarness(copyFixture(repo.dir), 'echo', 'echo-1');
+    const adapters = await fakeAdapters(repo.dir, { ECHO_HARNESS_TOKEN: 'x' });
+    const run = await openStub(repo.dir, { ticket: 'FAKE-1' }, adapters);
+    if ('refused' in run) throw new Error(run.refused);
+    expect(run.header.adapters.harnesses).toEqual({ echo: ECHO });
+  });
+});
+
+/** A suspended run that reached `second`, copied into `to` with its `.sail/`. */
+async function suspendedOnSecond(to: string): Promise<OpenedRun> {
+  return withTempRepo(async (from) => {
+    nameHarness(copyFixture(from.dir), 'second');
+    const run = await openStub(from.dir, { ticket: 'FAKE-1' });
+    if ('refused' in run) throw new Error(run.refused);
+    writeStatus(run.dir, 'suspended', 'budget_exceeded');
+    copyRun(from.dir, to);
+    return run;
+  });
+}
+
+test('reopenRun resolves the named harnesses the run reached, from its header, and hands them on', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedOnSecond(repo.dir);
+    const reopened = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
+    if ('refused' in reopened) throw new Error(reopened.refused);
+    expect(Object.keys(reopened.harnesses)).toEqual(['second']);
+  });
+});
+
+test('reopenRun refuses a run whose named harness now names another adapter, naming the harness and both', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedOnSecond(repo.dir);
+    edit(
+      join(repo.dir, '.sail'),
+      'project.yaml',
+      'second: { use: fake }',
+      'second: { use: ./adapters/echo-harness.ts }',
+    );
+    const adapters = await fakeAdapters(repo.dir, { ECHO_HARNESS_TOKEN: 'x' });
+    const refused = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters });
+    expect(refused).toEqual({
+      refused: `run ${run.runId} can't resume on different adapters:\nharnesses.second: the run started with fake (builtin), and .sail/project.yaml now names ./adapters/echo-harness.ts (repo:.sail/adapters/echo-harness.ts)`,
+    });
+  });
+});
+
+test('reopenRun refuses a run whose named harness the config no longer defines', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedOnSecond(repo.dir);
+    const sail = join(repo.dir, '.sail');
+    edit(sail, 'project.yaml', 'deep: { harness: second, model: claude-opus-5-5 }', 'deep: claude-opus-5-5');
+    edit(sail, 'project.yaml', 'second: { use: fake }, ', '');
+    const refused = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
+    expect(refused).toEqual({
+      refused: `run ${run.runId} can't resume on different adapters:\nharnesses.second: the run started with fake (builtin), and .sail/project.yaml no longer defines it`,
+    });
   });
 });

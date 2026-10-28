@@ -70,7 +70,13 @@
         "ticketSource": { "$ref": "#/$defs/adapterEntry" },
         "codeHost": { "$ref": "#/$defs/adapterEntry" },
         "harness": { "$ref": "#/$defs/adapterEntry" },
-        "workspace": { "$ref": "#/$defs/adapterEntry" }
+        "workspace": { "$ref": "#/$defs/adapterEntry" },
+        "harnesses": {
+          "description": "the named harnesses the run reached: name → adapter; absent when it reached none",
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/adapterEntry" }
+        }
       },
       "required": ["ticketSource", "codeHost", "harness", "workspace"],
       "additionalProperties": false
@@ -199,6 +205,11 @@
         "kind": { "enum": ["agent", "script"] },
         "origin": { "$ref": "#/$defs/origin" },
         "model": { "type": "string" },
+        "harness": {
+          "description": "the named harness the step's model alias names; absent for the default harness",
+          "type": "string",
+          "minLength": 1
+        },
         "output": { "type": "string" },
         "produces": { "type": "array", "items": { "type": "string" } },
         "network": { "type": "array", "items": { "type": "string" } },
@@ -221,6 +232,11 @@
         "kind": { "enum": ["agent", "script"] },
         "origin": { "$ref": "#/$defs/origin" },
         "model": { "type": "string" },
+        "harness": {
+          "description": "the named harness the step's model alias names; absent for the default harness",
+          "type": "string",
+          "minLength": 1
+        },
         "output": { "type": "string" },
         "produces": { "type": "array", "items": { "type": "string" } },
         "network": { "type": "array", "items": { "type": "string" } },
@@ -243,6 +259,11 @@
         "step": { "type": "string" },
         "kind": { "enum": ["agent", "script"] },
         "model": { "type": "string" },
+        "harness": {
+          "description": "the named harness the step's model alias names; absent for the default harness",
+          "type": "string",
+          "minLength": 1
+        },
         "output": { "type": "string" },
         "produces": { "type": "array", "items": { "type": "string" } },
         "permissions": { "$ref": "#/$defs/permissions" },

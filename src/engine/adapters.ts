@@ -13,7 +13,8 @@ import {
   PORT_OPERATIONS,
   type PortAdapters,
 } from '../ports/adapter';
-import { PORTS, type Port, type ProjectConfig } from './config';
+import type { Harness } from '../ports/harness';
+import { type AdapterConfig, PORTS, type Port, type ProjectConfig } from './config';
 import { registerSail } from './definitions';
 import { origin } from './roster';
 import { runsDir } from './run-dir';
@@ -46,6 +47,14 @@ export interface ResolvedAdapters<P extends Port = Port> {
   entries: Record<P, AdapterEntry>;
   /** What every adapter created here emits into. */
   relay: ProviderRelay;
+  /** Resolves, preflights and creates the named harnesses `names` name, emitting into the same relay. */
+  harnesses(names: readonly string[]): Promise<NamedHarnesses | { issues: SchemaIssue[] }>;
+}
+
+/** The named harnesses a run reached, each created, with its entry for the run header. */
+export interface NamedHarnesses {
+  ports: Record<string, Harness>;
+  entries: Record<string, AdapterEntry>;
 }
 
 /** A relay with no sink attached. */
@@ -271,5 +280,64 @@ export async function resolveAdapters<P extends Port = Port>(
     };
   }
   if (issues.length > 0) return { issues };
-  return { ports: ports as unknown as Pick<PortAdapters, P>, entries, relay };
+  const harnesses = (names: readonly string[]) => resolveHarnesses(options, names, emit);
+  return { ports: ports as unknown as Pick<PortAdapters, P>, entries, relay, harnesses };
+}
+
+/**
+ * Resolves, preflights and creates the named harnesses `names` name in `adapters.harnesses`, or gives every issue the
+ * first failing pass found, at `/adapters/harnesses/<name>`. No other named harness is loaded, asked for its
+ * credentials or created.
+ */
+async function resolveHarnesses(
+  options: ResolveOptions,
+  names: readonly string[],
+  emit: ProviderEmit,
+): Promise<NamedHarnesses | { issues: SchemaIssue[] }> {
+  const issues: SchemaIssue[] = [];
+  const issue = (name: string, text: string) => issues.push({ path: `/adapters/harnesses/${name}`, message: text });
+  const configOf = (name: string) => options.config.adapters.harnesses?.[name] as AdapterConfig;
+  const optionsOf = (name: string): AdapterOptions => {
+    const { use: _use, ...rest } = configOf(name);
+    return rest;
+  };
+
+  const found: Record<string, Found> = {};
+  for (const name of names) {
+    const result = await find('harness', configOf(name).use, options);
+    if (typeof result === 'string') issue(name, result);
+    else found[name] = result;
+  }
+  if (issues.length > 0) return { issues };
+
+  for (const name of names) {
+    for (const text of preflight(configOf(name).use, found[name] as Found, optionsOf(name), options.env))
+      issue(name, text);
+  }
+  if (issues.length > 0) return { issues };
+
+  const ports: Record<string, Harness> = {};
+  const entries: Record<string, AdapterEntry> = {};
+  for (const name of names) {
+    const { use } = configOf(name);
+    const at = found[name] as Found;
+    const read = declared(use, at);
+    if ('issue' in read) {
+      issue(name, read.issue);
+      continue;
+    }
+    const built = await build('harness', use, at, optionsOf(name), options, emit);
+    if ('issue' in built) {
+      issue(name, built.issue);
+      continue;
+    }
+    ports[name] = built.adapter as Harness;
+    entries[name] = {
+      use,
+      origin: at.origin,
+      ...(Object.keys(read.versions).length === 0 ? {} : { versions: read.versions }),
+    };
+  }
+  if (issues.length > 0) return { issues };
+  return { ports, entries };
 }

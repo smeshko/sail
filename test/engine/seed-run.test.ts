@@ -19,6 +19,7 @@ import { readStatus } from '../../src/engine/run-dir';
 import { type RunHeader, readRunHeader } from '../../src/engine/run-header';
 import { openSeededRun, type SeededRunOptions } from '../../src/engine/seed-run';
 import { fakeAdapters } from '../helpers/adapters';
+import { edit } from '../helpers/fixture';
 import { TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
 import { cutJournal, runIds, SOURCE_BRANCH, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
@@ -113,6 +114,40 @@ test('seeding self-review journals every call of the source before self-review#1
       review: false,
       seeded: ['intake#1', 'spec#1', 'implement#1', 'tests#1', 'implement#2', 'tests#2'],
     });
+  });
+}, 60_000);
+
+/** Makes `deep` name the harness `harness` in `repo`'s config, which defines `second` and the credentialed `echo`. */
+function nameHarness(repo: TempRepo, harness: string, model = 'claude-opus-5-5'): void {
+  const sail = join(repo.dir, '.sail');
+  edit(
+    sail,
+    'project.yaml',
+    '  workspace: { use: fake }\n',
+    '  workspace: { use: fake }\n  harnesses: { second: { use: fake }, echo: { use: ./adapters/echo-harness.ts } }\n',
+  );
+  edit(sail, 'project.yaml', 'deep: claude-opus-5-5', `deep: { harness: ${harness}, model: ${model} }`);
+}
+
+test('a seeded run reaching a named harness records it in run.json and hands it on, and creates no other', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    nameHarness(repo, 'second');
+    const opened = openedFrom(await seed(repo, { fromRun: from.runId }));
+    expect(readRunHeader(opened.dir).adapters.harnesses).toEqual({ second: { use: 'fake', origin: 'builtin' } });
+    expect(Object.keys(opened.harnesses)).toEqual(['second']);
+  });
+}, 60_000);
+
+test('a seeded run reaching a named harness whose adapter needs a variable that is not set is refused, naming it', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    nameHarness(repo, 'echo', 'echo-1');
+    const before = runIds(repo.dir);
+    expect(await seed(repo, { fromRun: from.runId })).toEqual({
+      refused: '.sail/project.yaml  /adapters/harnesses/echo needs ECHO_HARNESS_TOKEN, which is not set',
+    });
+    expect(runIds(repo.dir)).toEqual(before);
   });
 }, 60_000);
 

@@ -36,6 +36,10 @@ export interface AgentExecution {
    * name runs on `model`.
    */
   models?: Readonly<Record<string, string>>;
+  /** The name of `harness` in `adapters.harnesses`. Left out, it is the default harness. */
+  harnessName?: string;
+  /** A multi-step stage's: the harness of each agent step that runs on a named one other than `harness`, by step name. */
+  steps?: Readonly<Record<string, { harness: Harness; name?: string }>>;
   /** `project.yaml`'s `conventions`. Left out, the defaults are appended. */
   conventions?: readonly string[];
 }
@@ -269,7 +273,7 @@ export interface TrySite {
 function callSite(request: CallRequest, definition: AgentStep): TrySite {
   const { runDir, stageIndex, call } = request;
   const stage = definition.name;
-  const model = (request.agent as AgentExecution).model;
+  const { model, harnessName } = request.agent as AgentExecution;
   return {
     key: `${stage}#${call}`,
     paths: (tryNumber) => callPaths(runDir, stageIndex, stage, call, tryNumber),
@@ -281,6 +285,7 @@ function callSite(request: CallRequest, definition: AgentStep): TrySite {
       try: tryNumber,
       kind: 'agent',
       model,
+      ...(harnessName === undefined ? {} : { harness: harnessName }),
       consumed: suppliedFrom(definition, request.supplied),
       permissions: definition.permissions,
       budget: definition.budget,

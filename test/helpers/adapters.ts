@@ -6,7 +6,7 @@ import type { Port } from '../../src/engine/config';
 import { readConfig } from '../../src/engine/config';
 import { findSailDir } from '../../src/engine/sail-dir';
 import { formatIssue } from '../../src/engine/schemas';
-import type { Env } from '../../src/ports/adapter';
+import type { Builtins, Env } from '../../src/ports/adapter';
 
 /**
  * The adapters of the `.sail/` found from `cwd`, whose `project.yaml` must be valid and name only built-ins. It throws
@@ -15,16 +15,43 @@ import type { Env } from '../../src/ports/adapter';
 export async function fakeAdapters(
   cwd: string,
   env: Env = {},
-  options: { now?: () => Date } = {},
+  options: { now?: () => Date; builtins?: Builtins } = {},
 ): Promise<ResolvedAdapters> {
   const found = findSailDir(cwd);
   if ('refused' in found) throw new Error(found.refused);
   const sailDir = found.dir;
   const config = readConfig(sailDir);
   if ('issues' in config) throw new Error(`${sailDir}/project.yaml: ${config.issues.map(formatIssue).join('; ')}`);
-  const resolved = await resolveAdapters({ sailDir, config, builtins: BUILTINS, env, ...options });
+  const resolved = await resolveAdapters({ sailDir, config, ...options, builtins: options.builtins ?? BUILTINS, env });
   if ('issues' in resolved) throw new Error(`adapters: ${resolved.issues.map(formatIssue).join('; ')}`);
   return resolved;
+}
+
+/**
+ * The built-ins plus a `spy` adapter whose harness is the fake one under another name, pushing each call key it is
+ * asked to run into `keys`.
+ */
+export function spyBuiltins(keys: string[]): Builtins {
+  const fake = BUILTINS.fake?.harness;
+  if (fake === undefined) throw new Error('the built-ins have no fake harness');
+  return {
+    ...BUILTINS,
+    spy: {
+      harness: {
+        async create(options, context) {
+          const inner = await fake.create(options, context);
+          return {
+            name: 'spy',
+            capabilities: () => ({ ...inner.capabilities(), permissions: true }),
+            run: (request) => {
+              keys.push(request.key);
+              return inner.run(request);
+            },
+          };
+        },
+      },
+    },
+  };
 }
 
 /** Each port's operations as the design names them: its methods, `capabilities` included, `name` left out. */

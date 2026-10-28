@@ -22,7 +22,7 @@ import {
   writeScriptedClaudeCode,
   writeScriptedStreams,
 } from '../helpers/claude-code';
-import { copyFixture, FIXTURE_SAIL } from '../helpers/fixture';
+import { copyFixture, edit, FIXTURE_SAIL } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { copyRun } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -152,6 +152,25 @@ test('sail FAKE-1 --record rec completes and writes one recording per agent call
   expect(Object.keys(record.files).sort()).toEqual([...KEYS.map(fileOf), 'journal.txt'].sort());
   expect(record.files['journal.txt']).toBe(record.journal);
 });
+
+test('--record also records the calls that run on a named harness, under their call keys', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    edit(
+      sail,
+      'project.yaml',
+      'harness: { use: fake }',
+      'harness: { use: fake }\n  harnesses: { second: { use: fake } }',
+    );
+    edit(sail, 'project.yaml', 'deep: claude-opus-5-5', 'deep: { harness: second, model: claude-opus-5-5 }');
+    const ended = await runCaptured(['FAKE-1', '-q', '--record', 'rec'], repo.dir, { env: repo.env });
+    expect({ code: ended.code, stderr: ended.stderr }).toEqual({ code: 0, stderr: '' });
+    const files = readdirSync(join(repo.dir, 'rec'));
+    expect(files).toContain(fileOf('spec#1'));
+    expect(files).toContain(fileOf('self-review#1'));
+    expect(files).toContain(fileOf('implement#1'));
+  });
+}, 60_000);
 
 test('each recording holds the events, the provider messages with a tool result, the output, usage and produced files', async () => {
   const { record } = await scenario();

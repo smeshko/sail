@@ -96,6 +96,7 @@ import { ndjsonConsumer, readEvents } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
+import type { Harness } from '../ports/harness';
 import type { StageDefinition } from '../sdk/steps';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
@@ -239,7 +240,7 @@ function entryFrom(
 }
 
 /**
- * What an agent call runs on: the run's harness, the conventions `project.yaml` lists now, and the model the run's
+ * What an agent call runs on: the run's harness, or the named harness its roster entry names, the conventions `project.yaml` lists now, and the model the run's
  * roster froze at its start, which a resume keeps whatever the alias names by then.
  */
 function executionOf(
@@ -249,21 +250,34 @@ function executionOf(
   tracker: BudgetTracker | undefined,
 ): AgentExecution {
   const { conventions } = opened.config;
-  // A multi-step stage's agent steps run on this harness too, so each of their requests is narrowed as a call's is.
-  const harness = tracker === undefined ? opened.adapters.harness : tracker.harness(opened.adapters.harness);
-  const on = { harness, ...(conventions === undefined ? {} : { conventions }) };
+  // A multi-step stage's agent steps run on these harnesses too, so each of their requests is narrowed as a call's is.
+  const tracked = (harness: Harness) => (tracker === undefined ? harness : tracker.harness(harness));
+  const named = (name: string): Harness => {
+    const harness = opened.harnesses[name];
+    if (harness === undefined) throw new Error(`the run holds no harness named '${name}', which its roster names`);
+    return tracked(harness);
+  };
+  const on = { harness: tracked(opened.adapters.harness), ...(conventions === undefined ? {} : { conventions }) };
   if (entry?.steps !== undefined) {
-    // A multi-step stage's roster holds each step's own model.
+    // A multi-step stage's roster holds each step's own model, and the named harness it runs on.
     const models = Object.fromEntries(
       entry.steps.flatMap((step) => (step.model === undefined ? [] : [[step.step, step.model] as const])),
     );
+    const steps = Object.fromEntries(
+      entry.steps.flatMap((step) =>
+        step.harness === undefined ? [] : [[step.step, { harness: named(step.harness), name: step.harness }] as const],
+      ),
+    );
     const [first] = Object.values(models);
     if (first === undefined) throw new Error(`run.json's roster holds no model for an agent step of '${stage}'`);
-    return { ...on, model: first, models };
+    return { ...on, model: first, models, ...(Object.keys(steps).length === 0 ? {} : { steps }) };
   }
   const model = entry?.model;
   if (model === undefined) throw new Error(`run.json's roster holds no model for the agent stage '${stage}'`);
-  return { ...on, model };
+  return {
+    ...(entry?.harness === undefined ? on : { ...on, harness: named(entry.harness), harnessName: entry.harness }),
+    model,
+  };
 }
 
 /** Whether a definition runs an agent anywhere: as itself, or as a step of its stage. */

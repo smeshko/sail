@@ -12,7 +12,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
@@ -691,6 +691,28 @@ test('an isolated agent stage needs its harness and nothing else: a ticket sourc
   });
 }, 40_000);
 
+test('an isolated agent stage runs on the harness its alias names, and refuses naming the credential that harness lacks', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = agentRepo(repo, [submits(SPEC, 0.25)]);
+    edit(
+      sail,
+      'project.yaml',
+      'harness: { use: fake }',
+      'harness: { use: fake }\n  harnesses: { echo: { use: ./adapters/echo-harness.ts } }',
+    );
+    edit(sail, 'project.yaml', 'deep: claude-opus-5-5', 'deep: { harness: echo, model: claude-opus-5-5 }');
+    const refused = await runCaptured(SPEC_ARGV, repo.dir, { env: {} });
+    expect(refused.code).toBe(EXIT_REFUSED);
+    expect(refused.stderr).toContain('/adapters/harnesses/echo');
+    expect(refused.stderr).toContain('ECHO_HARNESS_TOKEN');
+
+    const { code, stdout } = await runCaptured(SPEC_ARGV, repo.dir, { env: { ECHO_HARNESS_TOKEN: 'set' } });
+    expect(code).toBe(EXIT_FAILED);
+    const result = readResult(callDirOf(stdout, repo.dir));
+    expect(result).toMatchObject({ harness: { adapter: 'echo', model: 'claude-opus-5-5' } });
+  });
+}, 40_000);
+
 const PUBLISH_DIR = '.sail/workflows/ticket-to-pr/stages/publish';
 /** `publish`'s bindings on the command line: the ticket, the spec `fixtureCopy()` writes, and the ticket key. */
 const PUBLISH_BINDS = [
@@ -726,6 +748,31 @@ test("a multi-step stage whose describe is blocked prints the call's line and de
       true,
       false,
     ]);
+  });
+}, 60_000);
+
+test("an isolated multi-step stage runs its agent step on the harness the step's alias names", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureCopy(repo);
+    edit(
+      sail,
+      'project.yaml',
+      'harness: { use: fake }',
+      'harness: { use: fake }\n  harnesses: { echo: { use: ./adapters/echo-harness.ts } }',
+    );
+    edit(sail, 'project.yaml', 'default: claude-sonnet-5', 'default: { harness: echo, model: claude-sonnet-5 }');
+    const { code, stdout } = await runCaptured(['stage', 'run', PUBLISH_DIR, ...PUBLISH_BINDS], repo.dir, {
+      env: { ...repo.env, ECHO_HARNESS_TOKEN: 'set' },
+    });
+    expect(code).toBe(EXIT_FAILED);
+    const steps = join(callDirOf(stdout, repo.dir), 'steps');
+    const results = [...new Bun.Glob('1-describe/**/result.json').scanSync({ cwd: steps })];
+    expect(results.length).toBeGreaterThan(0);
+    for (const path of results) {
+      expect(readResult(dirname(join(steps, path)))).toMatchObject({
+        harness: { adapter: 'echo', model: 'claude-sonnet-5' },
+      });
+    }
   });
 }, 60_000);
 

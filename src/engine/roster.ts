@@ -6,7 +6,7 @@ import { relative, sep } from 'node:path';
 import { exitCodeMap } from '../kinds/script';
 import type { Intake } from '../sdk/intake';
 import type { Budget, Permissions, ScriptStep, StageDefinition, Step } from '../sdk/steps';
-import type { ProjectConfig } from './config';
+import { aliasOf, type ProjectConfig } from './config';
 import type { LoadedWorkflow } from './load-workflow';
 
 /** One step of a multi-step stage or intake. */
@@ -14,6 +14,8 @@ export interface StepRosterEntry {
   step: string;
   kind: 'agent' | 'script';
   model?: string;
+  /** The named harness the step's model alias names. Left out for the default harness. */
+  harness?: string;
   output?: string;
   produces?: string[];
   network?: readonly string[];
@@ -28,6 +30,8 @@ export interface RosterEntry {
   kind?: 'agent' | 'script';
   origin: string;
   model?: string;
+  /** The named harness the step's model alias names. Left out for the default harness. */
+  harness?: string;
   output?: string;
   produces?: string[];
   network?: readonly string[];
@@ -103,6 +107,20 @@ export function modelProblems(loaded: LoadedWorkflow, config: ProjectConfig): st
   ];
 }
 
+/** The named harnesses the agent steps of `loaded` reach through their model aliases: sorted, each once. */
+export function harnessesReached(loaded: LoadedWorkflow, config: ProjectConfig): string[] {
+  const definitions = [loaded.intake.definition, ...loaded.stages.map((stage) => stage.definition)];
+  const names = definitions.flatMap((definition) => {
+    const steps: readonly Step[] =
+      definition.kind === 'agent' || definition.kind === 'script' ? [definition] : (definition.steps ?? []);
+    return steps.flatMap((step) => {
+      const harness = step.kind === 'agent' ? aliasOf(config, step.model ?? 'default')?.harness : undefined;
+      return harness === undefined ? [] : [harness];
+    });
+  });
+  return [...new Set(names)].sort();
+}
+
 /** A step's own fields, as a multi-step entry records them. `produces` may add files its stage or intake declares. */
 function stepFields(
   step: Step,
@@ -112,12 +130,13 @@ function stepFields(
 ): Omit<StepRosterEntry, 'step'> {
   const own = { ...field('output', name(step.output)), ...field('produces', produces) };
   if (step.kind === 'agent') {
-    const model = config.models[step.model ?? 'default'];
+    const { model, harness } = aliasOf(config, step.model ?? 'default') ?? {};
     // An empty list is recorded: it appends none, where a step that names none gets the project's.
     const conventions = step.conventions === undefined ? {} : { conventions: [...step.conventions] };
     return {
       kind: 'agent',
       ...field('model', model),
+      ...field('harness', harness),
       ...own,
       permissions: step.permissions,
       budget: step.budget,

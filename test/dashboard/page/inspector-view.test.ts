@@ -120,6 +120,39 @@ test("the overview shows the call's facts, output, consumed bindings, errors and
   );
 });
 
+test('the overview shows a harness row for a call on a named harness, after its model, and none for a call on the default', () => {
+  const events = readEvents(GOLDEN_RUN).map((event) =>
+    event.type === 'stage:start' && event.key === 'spec#1' ? { ...event, harness: 'second' } : event,
+  );
+  const model = foldRun(events);
+  const drawn = (key: string) =>
+    renderInspector(
+      model.cards.find((entry) => entry.key === key),
+      model.roster,
+      undefined,
+      undefined,
+      { ...initialUi(0), key, tab: 'overview' },
+    ).value;
+  expect(drawn('spec#1')).toContain('<dt>model</dt><dd>claude-opus-5-5</dd><dt>harness</dt><dd>second</dd>');
+  expect(drawn('implement#1')).not.toContain('<dt>harness</dt>');
+});
+
+test("a multi-step call's overview shows the named harness each of its steps ran on, and none for a step on the default", () => {
+  const events = readEvents(GOLDEN_RUN).map((event) =>
+    event.type === 'step:start' && event.key === 'publish#1/describe' ? { ...event, harness: 'second' } : event,
+  );
+  const model = foldRun(events);
+  const markup = renderInspector(
+    model.cards.find((entry) => entry.key === 'publish#1'),
+    model.roster,
+    undefined,
+    undefined,
+    { ...initialUi(0), key: 'publish#1', tab: 'overview' },
+  ).value;
+  expect(markup).toContain('<dt>harness · describe</dt><dd>second</dd>');
+  expect(markup).not.toContain('harness · open');
+});
+
 test("a running call's overview leaves out its cost, known only once its session ends", () => {
   const model = foldRun(readEvents(GOLDEN_RUN));
   const card = model.cards.find((entry) => entry.key === 'implement#2');

@@ -46,10 +46,11 @@ import {
   findConfigured,
   intakeNameTaken,
   type OpenedRun,
+  resolveNamed,
   startWorkspace,
   undoOpened,
 } from './open-run';
-import { modelProblems } from './roster';
+import { harnessesReached, modelProblems } from './roster';
 import { copyStageFolders, runsDir, type Source, writeStatus } from './run-dir';
 import {
   assertRunHeader,
@@ -188,6 +189,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if ('refused' in loaded) return loaded;
   const models = modelProblems(loaded, config);
   if (models.length > 0) return { refused: models.join('\n') };
+  const harnesses = await resolveNamed(options.adapters, found.dir, harnessesReached(loaded, config));
+  if ('refused' in harnesses) return harnesses;
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
   const stages = loaded.stages.map((each) => each.definition.name);
@@ -229,6 +232,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     loaded,
     config,
     adapters: options.adapters.entries,
+    harnesses: harnesses.entries,
     now,
   });
   assertRunHeader(unopened);
@@ -284,6 +288,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    harnesses: harnesses.ports,
     relay,
     config,
     loaded,
