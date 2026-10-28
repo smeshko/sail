@@ -416,6 +416,18 @@ test('a POST to a queue move route with the client header, a JSON body and no fo
   });
 });
 
+test('a POST of a move after its target drops a move command naming after, not before (review R6)', async () => {
+  const queue = betaQueue(true);
+  const server = start();
+  const body = { dedupKey: 'ticket:FAKE-5', after: 'ticket:FAKE-7' };
+  const response = await post(server, MOVE, { headers: JSON_HEADERS, body: JSON.stringify(body) });
+  const files = queue.inbox();
+  expect({
+    status: response.status,
+    command: JSON.parse(readFileSync(join(queue.inboxDir, files[0] ?? ''), 'utf8')),
+  }).toEqual({ status: 202, command: { op: 'move', workflow: 'ticket-to-pr', ...body } });
+});
+
 test.each([
   ['no client header', MOVE, { headers: { 'Content-Type': 'application/json' } }, 403],
   ['a text/plain body', MOVE, { headers: { ...HEADER, 'Content-Type': 'text/plain' } }, 415],

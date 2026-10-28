@@ -461,6 +461,23 @@ test('sail queue move a FAKE-3 --before FAKE-2, with the watcher live, puts the 
   });
 }, 30_000);
 
+test('sail queue move a FAKE-2 --after FAKE-3 puts the item directly after its target in the queue file (review R6)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
+    await w.timers.advance(1000);
+    const moved = await w.applied(['move', 'a', 'FAKE-2', '--after', 'FAKE-3']);
+    const items = JSON.parse(readFileSync(join(queueDir(w.runs, 'a'), 'queue.json'), 'utf8')).items;
+    expect({
+      code: moved.code,
+      items: items.map((item: Record<string, unknown>) => `${item.dedupKey} ${item.state}`),
+    }).toEqual({
+      code: EXIT_OK,
+      items: ['ticket:FAKE-1 dispatched', 'ticket:FAKE-3 queued', 'ticket:FAKE-2 queued'],
+    });
+    await w.stop();
+  });
+}, 30_000);
+
 test('sail queue move is refused with exit 3 before any command is dropped: neither or both of --before and --after, either on another operation, an item or target not queued or unknown, or the item itself as target', async () => {
   await withTempRepo(async (repo) => {
     const w = await running(repo, designated('FAKE-1', 'FAKE-2', 'FAKE-3'));
