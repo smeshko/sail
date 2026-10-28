@@ -154,6 +154,20 @@ function runStage(repo: TempRepo, plan: string): { code: number; stderr: string;
   };
 }
 
+test.each(['#### TASK-002: Second', '### TASK-002 Second', ''])(
+  'an incomplete detail set (%s) cannot skip the agent',
+  async (heading) => {
+    await withTempRepo(async (repo) => {
+      writeOwnSail(repo, { jev: seed() });
+      const { code, output } = runStage(repo, PLAN.replace('### TASK-002: Second', heading));
+      expect(code).toBe(0);
+      expect(output.checked).toBeNull();
+      expect(output.asked).toBe(false);
+    });
+  },
+  60_000,
+);
+
 const ALL = ['TASK-001', 'TASK-002', 'TASK-003'];
 const seed = (overrides: Record<string, number> = {}) =>
   nouls(Object.fromEntries(ALL.map((id) => [id, overrides[id] ?? 0.99])));

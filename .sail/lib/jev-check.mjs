@@ -109,6 +109,15 @@ export function parseTasks(planText) {
     if (heading === null) continue;
     tasks.push({ id: heading[1], text: part.trim(), paths: pathsOf(filesBlock(part.split('\n'))) });
   }
+  const list = planText.match(/^## Tasks\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1] ?? '';
+  const ids = [...list.matchAll(/^- \[[ xX]\] (TASK-\d{3})\b/gm)].map((match) => match[1]);
+  if (
+    ids.length !== tasks.length ||
+    new Set(ids).size !== ids.length ||
+    tasks.some((task) => !ids.includes(task.id)) ||
+    new Set(tasks.map((task) => task.id)).size !== tasks.length
+  )
+    return [];
   return tasks;
 }
 

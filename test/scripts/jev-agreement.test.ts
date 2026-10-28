@@ -11,6 +11,11 @@ const ROOT = join(import.meta.dir, '..', '..');
 const PLAN = [
   '# Plan',
   '',
+  '## Tasks',
+  '',
+  '- [ ] TASK-001: One',
+  '- [ ] TASK-002: Two',
+  '',
   '## Task details',
   '',
   '### TASK-001: One',
