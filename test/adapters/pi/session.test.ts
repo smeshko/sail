@@ -1,10 +1,12 @@
-// The real pi SDK session, built offline: nothing here calls a model. It checks the model and key refusals, that a
+// The real pi SDK session, built offline: nothing here calls a model, and the one prompt is answered by pi's faux
+// stream. It checks the model and key refusals, that a
 // session is made with an id of its own, that it carries sail's gate and bash and none of the workspace's own pi, and
 // that disposing it removes the temp directory it made.
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider, resetApiProviders } from '@mariozechner/pi-ai';
 import type { ExtensionHost } from '../../../src/adapters/pi/gate';
 import { createBashRunner } from '../../../src/adapters/pi/process';
 import { createPiSession, type PiSessionParams } from '../../../src/adapters/pi/session';
@@ -92,6 +94,54 @@ test("the workspace's own pi extensions and context files are not loaded", async
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("the workspace's own pi skills are not loaded", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'sail-test-pi-cwd-'));
+  try {
+    mkdirSync(join(cwd, '.pi', 'skills', 'planted'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.pi', 'skills', 'planted', 'SKILL.md'),
+      '---\nname: planted\ndescription: PLANTED skill.\n---\nPLANTED instructions.\n',
+    );
+    const session = await createPiSession(params({ cwd }));
+    const prompt = session.systemPrompt;
+    await session.dispose();
+    expect(prompt.includes('PLANTED')).toBe(false);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a bash call of the session runs on sail's operations, not pi's own", async () => {
+  // A faux stream in place of groq's API: one bash call, then an answer. No model is reached.
+  const faux = registerFauxProvider({ api: 'openai-completions' });
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall('bash', { command: 'echo sail' }), { stopReason: 'toolUse' }),
+    fauxAssistantMessage('done'),
+  ]);
+  const ran: string[] = [];
+  try {
+    const session = await createPiSession(
+      params({
+        bash: {
+          exec: async (command) => {
+            ran.push(command);
+            return { exitCode: 0 };
+          },
+        },
+      }),
+    );
+    try {
+      await session.prompt('run it');
+    } finally {
+      await session.dispose();
+    }
+  } finally {
+    faux.unregister();
+    resetApiProviders();
+  }
+  expect(ran).toEqual(['echo sail']);
 });
 
 test('a session puts pi offline, so its grep and find never download a binary', async () => {
