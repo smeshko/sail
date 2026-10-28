@@ -1,7 +1,8 @@
 // runDirDiff(): the readable difference between a run directory a test generated and the one committed (11.3 D9).
 // `''` means they are the same run. Otherwise it names each file one has and the other lacks, and for each file whose
 // bytes differ, its first three changed hunks: the line numbers, two lines of context, and the lines of the committed
-// file (`-`) and of the generated one (`+`). The run header's `sail.runtime`, the Bun that generated, is compared apart, in `run.json` alone.
+// file (`-`) and of the generated one (`+`). The run header's `sail.runtime`, the Bun that generated, is compared
+// apart, in `run.json` alone.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
