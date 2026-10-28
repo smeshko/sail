@@ -5,7 +5,7 @@
 // 2. Only GET: anything else is 405, OPTIONS included, so a cross-origin preflight fails. The one exception is a POST to
 //    `/api/repos/<repo>/queues/<workflow>/move`, which needs the client header (403), `Content-Type: application/json`
 //    (415) and an `Origin` that is absent or this server's own (403). It never writes a queue: it drops a move command
-//    in the watcher's inbox, as `sail queue move` does, and answers 409 when no watcher is live.
+//    in the watcher's inbox, as `sail queue move` does, and answers 409 when no watcher of that clone watches it.
 // 3. A WebSocket upgrade needs a same-origin `Origin`, or no `Origin` and the client header: browsers can't set headers
 //    on an upgrade, but always send `Origin`.
 // 4. A GET of exactly `/` is the page, which a navigation fetches with no header of its own. It holds no data: all it
@@ -19,7 +19,7 @@ import type { Server, ServerWebSocket } from 'bun';
 import { z } from 'zod';
 import { runsDir } from '../engine/run-dir';
 import { dropCommand } from '../watch/inbox';
-import { liveWatcher } from '../watch/registry';
+import { liveSet, liveWatcher } from '../watch/registry';
 import { callFile, containedFile, findRepo, findRunDir, repos, runItems } from './files';
 import { renderMarkdown } from './markdown';
 import { createPage } from './page';
@@ -67,7 +67,8 @@ const MoveBody = z
 
 /**
  * Asks the repository's live watcher to move a queued item, by dropping a move command in its inbox: the watcher alone
- * writes the queue. Refused unless the item and its target are both queued, and a watcher is running.
+ * writes the queue. Refused unless the item and its target are both queued, and the repository's live watcher runs in
+ * its `.sail/` and watches the workflow, as `sail queue move` checks.
  */
 async function moveRoute(registryDir: string, segments: string[], request: Request): Promise<Response> {
   const [, , name = '', , workflow = ''] = segments;
@@ -97,8 +98,14 @@ async function moveRoute(registryDir: string, segments: string[], request: Reque
     if (item === undefined) return error(409, `${workflow}'s queue has no item ${key}`);
     if (item.state !== 'queued') return error(409, `${key} is ${item.state}: only a queued item is moved`);
   }
-  if (liveWatcher(entry) === undefined) {
+  const watcher = liveWatcher(entry);
+  if (watcher === undefined) {
     return error(409, `no watcher is running for '${entry.name}': sail watch ${workflow} first`);
+  }
+  const named = `the watcher of '${entry.name}' (pid ${watcher.pid})`;
+  if (watcher.sailDir !== entry.sailDir) return error(409, `${named} runs in another clone: ${watcher.sailDir}`);
+  if (!liveSet(entry.sailDir, watcher.pid).some((each) => each.workflow === workflow)) {
+    return error(409, `${named} does not watch '${workflow}': sail watch ${workflow} first`);
   }
   const file = dropCommand(runsDir(entry.sailDir), {
     op: 'move',

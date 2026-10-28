@@ -13,7 +13,9 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../adapters/leases';
+import { runsDir } from '../engine/run-dir';
 import { formatIssue, validateDocument } from '../engine/schemas';
+import { QUEUE_DIR } from './queue-store';
 
 /** A repository's live watcher, as its registry entry records it. */
 export interface WatcherFields {
@@ -124,6 +126,40 @@ export type IsAlive = (pid: number) => boolean;
 export function liveWatcher(entry: RegistryEntry, isAlive: IsAlive = processIsAlive): WatcherFields | undefined {
   const { watcher } = entry;
   return watcher !== undefined && isAlive(watcher.pid) ? watcher : undefined;
+}
+
+/** A workflow in the live watcher's set: its name, its label and when it was added. */
+export interface Watched {
+  workflow: string;
+  label: string;
+  seq: number;
+  ts: string;
+}
+
+/** The live watcher's set, read from the queue event streams beside `sailDir`, in the order it was formed. */
+export function liveSet(sailDir: string, pid: number): Watched[] {
+  const dir = join(runsDir(sailDir), QUEUE_DIR);
+  if (!existsSync(dir)) return [];
+  const set: Watched[] = [];
+  for (const workflow of readdirSync(dir)) {
+    const file = join(dir, workflow, 'events.ndjson');
+    if (!existsSync(file)) continue;
+    let last: Record<string, unknown> | undefined;
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      // The live watcher's own events: one that lost the registry to it may have written after them (keepWatcher).
+      if ((event.type === 'watch:added' || event.type === 'watch:removed') && event.pid === pid) last = event;
+    }
+    if (last?.type === 'watch:added') {
+      set.push({ workflow, label: String(last.label), seq: Number(last.seq), ts: String(last.ts) });
+    }
+  }
+  return set.sort((a, b) => a.ts.localeCompare(b.ts) || a.workflow.localeCompare(b.workflow));
 }
 
 /** A watcher looking for what holds its name or its labels: its repository's `name`, and its own fields. */

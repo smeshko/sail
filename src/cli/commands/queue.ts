@@ -28,11 +28,12 @@ import { clean } from '../../events/consumers/screen';
 import { dropCommand, type Command as QueueCommand } from '../../watch/inbox';
 import { readWatch } from '../../watch/poll';
 import { dedupKey, type QueueFile, type QueueItem, queueDir, readQueue } from '../../watch/queue-store';
+import { liveSet } from '../../watch/registry';
 import { addsNoTicket, holderRefusal } from '../../watch/watcher';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Command, Io } from '../index';
 import { at, findProject, refuseAs } from './run-workflow';
-import { findWatcher, liveSet, taken, type WatchDeps } from './watch';
+import { findWatcher, taken, type WatchDeps } from './watch';
 
 const COMMAND = 'sail queue';
 const OPS = ['ls', 'add', 'requeue', 'drop', 'poll', 'move'] as const;

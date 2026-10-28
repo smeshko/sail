@@ -331,8 +331,11 @@ test('GET / answers the page with no client header, a foreign Host gets 403 and 
 const MOVE = '/api/repos/beta/queues/ticket-to-pr/move';
 const JSON_HEADERS = { ...HEADER, 'Content-Type': 'application/json' };
 
-/** beta's queue: FAKE-5, FAKE-7 and FAKE-8 queued, FAKE-3 dispatched. Gives the queue file, and the inbox's files. */
-function betaQueue(watcher: boolean) {
+/**
+ * beta's queue: FAKE-5, FAKE-7 and FAKE-8 queued, FAKE-3 dispatched. With `watcher`, a live watcher in beta's `.sail/`
+ * (or `sailDir`) that watches the workflow unless `watched` is false. Gives the queue file, and the inbox's files.
+ */
+function betaQueue(watcher: boolean, { watched = true, sailDir = m.beta.sailDir } = {}) {
   const runs = join(m.beta.clone, '.sail-runs');
   const dir = join(runs, 'queue', 'ticket-to-pr');
   mkdirSync(dir, { recursive: true });
@@ -364,10 +367,16 @@ function betaQueue(watcher: boolean) {
   const live = {
     pid: process.pid,
     startedAt: '2026-10-14T09:00:00.000Z',
-    sailDir: m.beta.sailDir,
+    sailDir,
     ticketSource: 'fake',
     labels: ['sail'],
   };
+  const event = (seq: number, type: string) =>
+    `${JSON.stringify({ seq, ts: '2026-10-14T09:00:00.000Z', type, workflow: 'ticket-to-pr', pid: process.pid, label: 'sail', everyMs: 300000, maxConcurrentRuns: 2 })}\n`;
+  writeFileSync(
+    join(dir, 'events.ndjson'),
+    watcher ? `${event(1, 'watch:added')}${watched ? '' : event(2, 'watch:removed')}` : '',
+  );
   writeFileSync(
     join(m.registryDir, 'beta.json'),
     `${JSON.stringify({ ...entryOf(m.beta), ...(watcher ? { watcher: live } : {}) })}\n`,
@@ -464,6 +473,36 @@ test('a move for a repository with no live watcher is 409 naming sail watch, and
   expect([response.status, await response.json(), queue.inbox()]).toEqual([
     409,
     { error: "no watcher is running for 'beta': sail watch ticket-to-pr first" },
+    [],
+  ]);
+});
+
+test('a move for a workflow the live watcher no longer watches is 409 naming sail watch, and drops no command (review R1)', async () => {
+  const queue = betaQueue(true, { watched: false });
+  const server = start();
+  const response = await post(server, MOVE, {
+    headers: JSON_HEADERS,
+    body: moveBody({ before: 'ticket:FAKE-5' }),
+  });
+  expect([response.status, await response.json(), queue.inbox()]).toEqual([
+    409,
+    {
+      error: `the watcher of 'beta' (pid ${process.pid}) does not watch 'ticket-to-pr': sail watch ticket-to-pr first`,
+    },
+    [],
+  ]);
+});
+
+test('a move for a repository whose live watcher runs in another clone is 409 naming it, and drops no command (review R1)', async () => {
+  const queue = betaQueue(true, { sailDir: m.alpha.sailDir });
+  const server = start();
+  const response = await post(server, MOVE, {
+    headers: JSON_HEADERS,
+    body: moveBody({ before: 'ticket:FAKE-5' }),
+  });
+  expect([response.status, await response.json(), queue.inbox()]).toEqual([
+    409,
+    { error: `the watcher of 'beta' (pid ${process.pid}) runs in another clone: ${m.alpha.sailDir}` },
     [],
   ]);
 });
