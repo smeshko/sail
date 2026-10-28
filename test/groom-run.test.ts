@@ -10,6 +10,7 @@ import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
 import { openWatchTarget, pollOnce } from '../src/watch/poll';
+import { seedHarness } from './helpers/fixture';
 import { fakeTicket, onlyRun, writeGroomRepo } from './helpers/groom-fixture';
 import { runCaptured } from './helpers/run-captured';
 import { sail } from './helpers/sail-process';
@@ -96,5 +97,71 @@ test('after a groom run, a rerun is refused and a poll queues nothing', async ()
     expect(target.label).toBe('groom');
     expect(await pollOnce(target, now)).toBe('polled');
     expect(target.store.snapshot().items).toEqual([]);
+  });
+}, 120_000);
+
+const NEW_TITLE = "Show the run's total cost in sail show's footer";
+
+/** The comment groom left on FAKE-2: its last. */
+const lastComment = (repoDir: string) => fakeTicket(repoDir, 'FAKE-2').comments.at(-1)?.body ?? '';
+
+/** Reseeds the `duplicates` check's one candidate with `confidence`. */
+function seedDuplicate(sailDir: string, confidence: number): void {
+  const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).duplicates;
+  answer.output.candidates[0].confidence = confidence;
+  seedHarness(sailDir, 'duplicates', [answer]);
+}
+
+test("groom applies the judge's edit and reports a duplicate under the threshold without marking it", async () => {
+  await withTempRepo(async (repo) => {
+    writeGroomRepo(repo);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.description).toBe(
+      "`sail show` should say what a run spent. Add the total of every call's cost at the end of its output.",
+    );
+    expect(ticket.title).toBe(NEW_TITLE);
+    expect(ticket.state).toEqual({ type: 'unstarted', name: 'Backlog' });
+    expect(ticket.links).toEqual([]);
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- applied: edit title');
+    expect(comment).toContain('- reported, not marked: duplicate of FAKE-1 (confidence 0.60, under 0.80)');
+    const types = readEvents(onlyRun(repo.dir)).map((event) => event.type);
+    expect(types).toContain('ticket:edited');
+    expect(types).not.toContain('ticket:related');
+  });
+}, 120_000);
+
+test('groom marks a duplicate the check named at or above the threshold', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    seedDuplicate(sailDir, 0.95);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.links.map((link) => link.title?.split(':')[0])).toEqual(['duplicate FAKE-1']);
+    expect(ticket.state.type).toBe('canceled');
+    expect(lastComment(repo.dir)).toContain('- applied: duplicate FAKE-1');
+    const related = readEvents(onlyRun(repo.dir)).filter((event) => event.type === 'ticket:related');
+    expect(related.map((event) => (event as { kind?: string }).kind)).toEqual(['duplicate']);
+  });
+}, 120_000);
+
+test('an action the port refuses is reported as failed, and the ticket is still commented and unlabelled', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).decide;
+    answer.output.actions = [{ kind: 'related', to: 'FAKE-2' }];
+    seedHarness(sailDir, 'decide', [answer]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.labels).not.toContain('groom');
+    expect(ticket.links).toEqual([]);
+    expect(lastComment(repo.dir)).toContain('- failed: related FAKE-2 (');
   });
 }, 120_000);
