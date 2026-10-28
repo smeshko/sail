@@ -25,6 +25,18 @@ test('read, write and edit map to a call on their path', () => {
   });
 });
 
+test('a path with a leading @ is checked as pi reaches it, without the @', () => {
+  expect({
+    read: toToolCall('read', { path: '@/etc/passwd' }, CWD),
+    write: toToolCall('write', { path: '@/etc/passwd', content: 'x' }, CWD),
+    home: toToolCall('read', { path: '@~/.ssh/id_rsa' }, CWD),
+  }).toEqual({
+    read: { call: { tool: 'read', kind: 'read', paths: ['/etc/passwd'], cwd: CWD } },
+    write: { call: { tool: 'write', kind: 'write', paths: ['/etc/passwd'], cwd: CWD } },
+    home: { unchecked: 'read of @~/.ssh/id_rsa: a path through ~ is not allowed, name it in full', kind: 'read' },
+  });
+});
+
 test('bash maps to an execute call carrying its command', () => {
   expect(toToolCall('bash', { command: 'git status' }, CWD)).toEqual({
     call: { tool: 'bash', kind: 'execute', paths: [], command: 'git status', cwd: CWD },

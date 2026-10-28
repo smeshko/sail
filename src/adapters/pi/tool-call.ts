@@ -1,5 +1,6 @@
 // pi's tool calls in sail's own terms: each call the session asks about becomes the permission engine's ToolCall, or the
-// reason it can't be checked, and a step's permissions give the session its built-in tools. pi expands a leading `~` in
+// reason it can't be checked, and a step's permissions give the session its built-in tools. pi drops a leading `@` from
+// a path, so the path is checked without it. pi expands a leading `~` in
 // a path but no `$VAR`, so a `~` or `$` path is refused rather than guessed at, and a padded path is checked both as
 // given and trimmed. A path with `..` is checked as the kernel reaches it, which decide() does, and as pi may
 // normalise it first. A `find` pattern that is absolute or climbs searches beyond its path, which nothing bounds.
@@ -22,13 +23,17 @@ class Unchecked {
 
 const climbs = (path: string): boolean => path.split('/').some((segment) => segment.trim() === '..');
 
-/** Every form of `path` pi may reach: as given, trimmed, and each normalised when it climbs. */
-function forms(tool: string, path: string, cwd: string): string[] {
-  const trimmed = path.trim();
+/** `path` as pi reaches it, without the leading `@` pi drops. */
+const unprefixed = (path: string): string => (path.startsWith('@') ? path.slice(1) : path);
+
+/** Every form of `path` pi may reach: as given, trimmed, each without a leading `@`, and normalised when it climbs. */
+function forms(tool: string, written: string, cwd: string): string[] {
+  const path = unprefixed(written);
+  const trimmed = unprefixed(path.trim());
   if (trimmed.startsWith('~'))
-    throw new Unchecked(`${tool} of ${path}: a path through ~ is not allowed, name it in full`);
+    throw new Unchecked(`${tool} of ${written}: a path through ~ is not allowed, name it in full`);
   if (trimmed.includes('$')) {
-    throw new Unchecked(`${tool} of ${path}: pi doesn't expand variables, name the path in full`);
+    throw new Unchecked(`${tool} of ${written}: pi doesn't expand variables, name the path in full`);
   }
   const given = trimmed === path ? [path] : [path, trimmed];
   return [...new Set([...given, ...given.filter(climbs).map((form) => resolve(cwd, form))])];
