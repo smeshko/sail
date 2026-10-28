@@ -121,6 +121,25 @@ test("sail '#1' --workflow review-pr runs to completion in a workspace at the he
   });
 });
 
+test("sail '#1' --workflow review-pr runs a pull request labelled in another case to completion, with no designation forced", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writePrWorkflow(sail, 'review-pr', {});
+    commitBranch(repo, BRANCH, 'greet.txt');
+    seedPullRequests(sail, repo, [{ number: 1, head: BRANCH, ticketKey: 'FAKE-1', labels: ['Sail'] }]);
+    const { code, stderr } = await runCaptured(['#1', '--workflow', 'review-pr'], repo.dir);
+    const [runId = ''] = runIds(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const header = existsSync(join(dir, 'run.json')) ? JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) : {};
+    expect({ code, stderr, forced: header.source?.forced, status: readStatus(dir).status }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      forced: [],
+      status: 'completed',
+    });
+  });
+});
+
 /** Writes a CodeHost of the repository's own into the stub that reads every ref as pull request 12. */
 function greedyHost(repo: TempRepo): void {
   const sail = join(repo.dir, '.sail');

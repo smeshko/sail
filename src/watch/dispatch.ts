@@ -42,6 +42,7 @@ import { claimedBy } from '../engine/source';
 import type { ResumedFrom } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
+import { holdsLabel } from '../ports/labels';
 import { getTicket, type TicketSource } from '../ports/ticket-source';
 import type { Ticket } from '../ports/types';
 import type { WorkspacePort } from '../ports/workspace';
@@ -281,7 +282,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         ? `it is ${pr.state}`
         : pr.draft
           ? 'it is a draft'
-          : !pr.labels.includes(label)
+          : !holdsLabel(pr.labels, label)
             ? `it is not designated: it carries no '${label}' label`
             : pr.fork
               ? 'it comes from a fork'

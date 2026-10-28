@@ -9,6 +9,7 @@
 // push access, so the key is tied to push access, and a mismatch has no `--force`.
 import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
+import { holdsLabel } from '../ports/labels';
 import type { TicketSource } from '../ports/ticket-source';
 import { PullRequestDetails } from '../ports/types';
 import type { Forced } from './run-dir';
@@ -131,7 +132,7 @@ export async function resolvePullRequest(
     return { refused: `pull request #${number}'s head is now ${pr.headSha.slice(0, 7)}, not ${headSha.slice(0, 7)}` };
   }
   const unready = pr.state !== 'open' ? `is ${pr.state}` : pr.draft ? 'is a draft' : undefined;
-  const designated = pr.labels.includes(label);
+  const designated = holdsLabel(pr.labels, label);
   if (!force) {
     if (unready !== undefined) return { refused: `pull request #${number} ${unready}. ${FORCE}` };
     if (!designated) {

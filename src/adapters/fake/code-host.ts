@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import type { CodeHost } from '../../ports/code-host';
 import { PortError } from '../../ports/errors';
+import { holdsLabel, sameLabel } from '../../ports/labels';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import {
   CheckStatus,
@@ -122,8 +123,8 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
   };
   /** Changes `name` on `pr` when it isn't so already, and says whether it changed. */
   const relabel = (pr: StoredPullRequest, change: 'added' | 'removed', name: string): boolean => {
-    if (pr.labels.includes(name) === (change === 'added')) return false;
-    pr.labels = change === 'added' ? [...pr.labels, name] : pr.labels.filter((each) => each !== name);
+    if (holdsLabel(pr.labels, name) === (change === 'added')) return false;
+    pr.labels = change === 'added' ? [...pr.labels, name] : pr.labels.filter((each) => !sameLabel(each, name));
     return true;
   };
   const label = (op: 'addLabel' | 'removeLabel', number: number, name: string): Labelled => {
@@ -232,7 +233,7 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
     async listDesignated(name) {
       const world = store.read();
       return world.pullRequests
-        .filter((pr) => pr.state === 'open' && !pr.draft && pr.labels.includes(name) && pr.fork !== true)
+        .filter((pr) => pr.state === 'open' && !pr.draft && holdsLabel(pr.labels, name) && pr.fork !== true)
         .sort((a, b) => a.number - b.number)
         .map((pr) => toPullRequest(world, pr));
     },

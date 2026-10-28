@@ -946,6 +946,19 @@ test.each<[string, Partial<PullRequestDetails>, (sha7: string) => string]>([
   });
 });
 
+test('a pull request labelled in another case by its dispatch is dispatched, not dropped', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await prWorld(repo);
+    w.reads.change = { labels: ['SAIL'] };
+    await w.dispatcher.tick();
+    expect({ dropped: w.typed('queue:dropped'), items: w.items(), spawned: w.spawner.runs.length }).toEqual({
+      dropped: [],
+      items: [`#1@${w.sha7} dispatched 1`],
+      spawned: 1,
+    });
+  });
+});
+
 test('a re-check of a pull request that fails unavailable fails its item with no attempt counted, and starts nothing', async () => {
   await withTempRepo(async (repo) => {
     const w = await prWorld(repo);
