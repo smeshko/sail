@@ -11,8 +11,9 @@
 // sandbox's CI behaves. A pull request listed in `silent` never registers `test`, so its checks read as an empty list.
 //
 // The levers a test pulls are options, not edits to the fixture: a pull request's labels, `conflict`, `testsFail`, a
-// `silent` check, an edit of the copied `harness.json`, a `github` hook that injects answers into the world, and `removeLabelAtAllStart()`. Every `sail` is a process of its own,
-// spawned with the clone's env: its script steps' `sail port` reach the worlds over HTTP. Both keys are markers.
+// `silent` check, an edit of the copied `harness.json`, a `github` hook that injects answers into the world, and
+// `removeLabelAtAllStart()`. Every `sail` is a process of its own, spawned with the clone's env: its script steps'
+// `sail port` reach the worlds over HTTP. Both keys are markers.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
