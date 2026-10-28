@@ -126,7 +126,7 @@
           "key": "publish#1/describe",
           "kind": "agent",
           "outcome": "done",
-          "durationMs": 1500,
+          "durationMs": 1100,
           "turns": 4,
           "toolCalls": 0,
           "costUsd": 0.101,
@@ -138,7 +138,7 @@
           "key": "publish#1/open",
           "kind": "script",
           "outcome": "passed",
-          "durationMs": 1500
+          "durationMs": 1000
         }
       ]
     }
