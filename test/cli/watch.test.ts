@@ -251,6 +251,21 @@ test("with a watcher running, sail watch of a pull-request workflow on another's
   });
 }, 30_000);
 
+test("with a watcher running, sail watch of a ticket workflow on another's label in another case exits 0: a ticket's label matches exactly (review R2)", async () => {
+  await withTempRepo(async (repo) => {
+    const w = await running(repo, ['a'], (sail) => writeWatched(sail, 'd', { label: 'Sail-A', cap: 1 }));
+    expect(w.recorded).toBe(true);
+    const added = await w.second(watchCommand, ['d']);
+    expect(added).toEqual({
+      code: EXIT_OK,
+      stdout: `sail watch: the watcher of 'stub' (pid ${WATCHER_PID}) watches a, d\n`,
+      stderr: '',
+    });
+    w.interrupts.interrupt();
+    expect(await w.exited).toBe(EXIT_OK);
+  });
+}, 30_000);
+
 test('sail unwatch with no watcher exits 3, and sail unwatch a b with one makes it exit 0 and prints that it stops', async () => {
   await withTempRepo(async (repo) => {
     const { env } = repository(repo);

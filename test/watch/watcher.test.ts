@@ -903,6 +903,22 @@ test('two pull-request workflows polling sail and Sail are refused, as one label
   });
 });
 
+test('two ticket workflows polling sail and Sail open under one watcher: a ticket label matches exactly (review R2)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(
+      repo,
+      [
+        { name: 'a', label: 'sail', cap: 1 },
+        { name: 'b', label: 'Sail', cap: 1 },
+      ],
+      [],
+    );
+    const started = await w.start(['a', 'b']).catch((error: unknown) => String(error));
+    expect(typeof started === 'string' ? started : started.watching()).toEqual(['a', 'b']);
+    if (typeof started !== 'string') await started.stop();
+  });
+});
+
 test('an add command for a pull-request workflow is rejected, naming what it polls, and queues nothing (review R1-5)', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-r' }));
