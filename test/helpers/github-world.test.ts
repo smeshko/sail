@@ -5,7 +5,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createGitHubWorld, type GitHubWorld, type GitHubWorldSeed, WORLD_API } from './github-world';
+import { createGitHubWorld, type GitHubWorld, type GitHubWorldSeed, WORLD_API, worldMergeSha } from './github-world';
 import { withOrigin } from './origin';
 import { type TempRepo, withTempRepo } from './temp-repo';
 
@@ -20,6 +20,8 @@ interface Reply {
   check_runs: { name: string; [field: string]: unknown }[];
   state: string;
   statuses: { context: string }[];
+  merged_at: string | null;
+  merge_commit_sha: string | null;
 }
 
 /** A request to the world, as the adapter makes it: the JSON it answers, parsed. */
@@ -205,5 +207,27 @@ test('without checksFor the check-runs of an unlisted sha are empty, as they wer
   await withWorld({}, async (world, _push, first) => {
     const none = (await ask(world, 'GET', `/commits/${first}/check-runs`)).json;
     expect({ total: none.total_count, runs: none.check_runs }).toEqual({ total: 0, runs: [] });
+  });
+});
+
+test('an injected answer with applied lets the world handle the request first, and still answers the canned response', async () => {
+  await withWorld({}, async (world, _push, first) => {
+    world.inject('PUT /pulls/1/merge', { status: 502, body: { message: 'Bad Gateway' }, applied: true });
+    const lost = await ask(world, 'PUT', '/pulls/1/merge', { merge_method: 'squash', sha: first });
+    expect(lost.status).toBe(502);
+    const read = (await ask(world, 'GET', '/pulls/1')).json;
+    expect({ mergedAt: read.merged_at !== null, sha: read.merge_commit_sha }).toEqual({
+      mergedAt: true,
+      sha: worldMergeSha(1, first),
+    });
+  });
+});
+
+test('an injected answer without applied leaves the pull request unmerged', async () => {
+  await withWorld({}, async (world, _push, first) => {
+    world.inject('PUT /pulls/1/merge', { status: 502, body: { message: 'Bad Gateway' } });
+    expect((await ask(world, 'PUT', '/pulls/1/merge', { merge_method: 'squash', sha: first })).status).toBe(502);
+    const read = (await ask(world, 'GET', '/pulls/1')).json;
+    expect({ mergedAt: read.merged_at, sha: read.merge_commit_sha }).toEqual({ mergedAt: null, sha: null });
   });
 });

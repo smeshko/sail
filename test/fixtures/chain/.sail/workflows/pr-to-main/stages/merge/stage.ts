@@ -1,4 +1,5 @@
-// merge: reads the pull request once more, then merges it by squash at the head the gate read, or refuses.
+// merge: reads the pull request once more, then merges it by squash at the head the gate read, or refuses. A merge
+// answered pending, or lost, is re-read, and reported merged when the pull request merged.
 import { script, value, z } from 'sail';
 
 export const Merged = z.object({

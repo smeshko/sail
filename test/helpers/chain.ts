@@ -11,8 +11,9 @@
 // sandbox's CI behaves. A pull request listed in `silent` never registers `test`, so its checks read as an empty list.
 //
 // The levers a test pulls are options, not edits to the fixture: a pull request's labels, `conflict`, `testsFail`, a
-// `silent` check, an edit of the copied `harness.json`, and `removeLabelAtAllStart()`. Every `sail` is a process of its own,
-// spawned with the clone's env: its script steps' `sail port` reach the worlds over HTTP. Both keys are markers.
+// `silent` check, an edit of the copied `harness.json`, a `github` hook that injects answers into the world, and
+// `removeLabelAtAllStart()`. Every `sail` is a process of its own, spawned with the clone's env: its script steps'
+// `sail port` reach the worlds over HTTP. Both keys are markers.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
@@ -72,6 +73,8 @@ export interface ChainOptions {
   readonly harness?: (answers: Record<string, Record<string, unknown>[]>) => void;
   /** The copy of the fixture's `.sail/`, after `harness` has changed it. */
   readonly prepare?: (sail: string) => void;
+  /** Called with the GitHub world once it is made and before it is served: a test `inject()`s here, without racing the run. */
+  readonly github?: (world: GitHubWorld) => void;
   /** Names of files a call leaves in its directory that `observe()` reads, by `<call key>/<name>`. */
   readonly capture?: readonly string[];
   /** Extra environment for every `sail` process: what the watcher's runs and their script steps inherit. */
@@ -194,6 +197,7 @@ export async function withChain<T>(options: ChainOptions, fn: (chain: Chain) => 
         { number: 1, title: 'Add a chain', description: 'Open a pull request.', state: 'Todo', labels: ['sail'] },
       ],
     });
+    options.github?.(github);
     const servedGitHub = github.serve();
     const servedLinear = linear.serve();
     try {
