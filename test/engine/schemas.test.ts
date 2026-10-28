@@ -1181,6 +1181,25 @@ test.each<[string, Record<string, unknown>, string]>([
   expect(paths('sail.result.v1', { ...builtinResult, ...fields })).toEqual([path]);
 });
 
+test("result: a built-in intake's claim holds whether the claim took and the state the provider reported, and nothing else", () => {
+  const claimed = (claim: unknown) => validateDocument('sail.result.v1', { ...builtinResult, claim });
+  const issue = (path: string, message: string) => [{ schema: 'sail.result.v1' as const, path, message }];
+  const state = { type: 'started', name: 'In Progress' };
+  expect(claimed({ claimed: true, state })).toEqual([]);
+  expect(claimed({ claimed: true })).toEqual(issue('/claim/state', 'is required'));
+  expect(claimed({ state })).toEqual(issue('/claim/claimed', 'is required'));
+  expect(claimed({ claimed: true, state, runId: RUN_ID })).toEqual(issue('/claim/runId', 'is not allowed'));
+  expect(
+    paths('sail.result.v1', { ...builtinResult, claim: { claimed: true, state: { type: 1, name: 'Doing' } } }),
+  ).toEqual(['/claim/state/type']);
+  expect(
+    paths('sail.result.v1', {
+      ...builtinResult,
+      claim: { claimed: true, state: { type: 'in-progress', name: 'Doing' } },
+    }),
+  ).toEqual(['/claim/state/type']);
+});
+
 test.each([
   ['built-in intake', builtinResult],
   ['script', scriptResult],
