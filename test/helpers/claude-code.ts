@@ -162,6 +162,15 @@ export function streamEvent(): SDKPartialAssistantMessage {
   };
 }
 
+export function rateLimitEvent(status: 'allowed' | 'allowed_warning' | 'rejected', resetsAt?: number): SDKMessage {
+  return {
+    type: 'rate_limit_event',
+    rate_limit_info: { status, ...(resetsAt === undefined ? {} : { resetsAt }) },
+    uuid: UUID,
+    session_id: SESSION_ID,
+  };
+}
+
 export function authStatus(error?: string): SDKAuthStatusMessage {
   return {
     type: 'auth_status',

@@ -273,6 +273,7 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       budget: request.budget,
       aborted: stopped(),
       overMinutes,
+      ...(options.now === undefined ? {} : { now: new Date(options.now()) }),
       ...(thrown === undefined ? {} : { thrown }),
     });
     const { outcome } = ended.result;
