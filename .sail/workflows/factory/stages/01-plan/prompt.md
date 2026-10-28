@@ -50,6 +50,8 @@ Break the work into tasks, numbered `TASK-001`, `TASK-002`, … in order:
 - Implement may write only `src/`, `test/`, `types/`, `schemas/`, `bin/`, `scripts/`, `.sail/`, `.githooks/`, the root
   configs (`package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `biome.json`), `AGENTS.md` and `CONTEXT.md`.
   If the change needs any other path, end the step **blocked**, naming the path: implement would block on it.
+- Implement may add an npm dependency with `bun add --exact <package>`, and the task that first imports it adds it.
+  A program installed on the machine is not one: CI has only what `package.json` and `bun.lock` name.
 
 ## 4. Plan the demonstration
 
