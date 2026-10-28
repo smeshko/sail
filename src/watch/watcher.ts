@@ -358,8 +358,11 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       }
       clearWatcher(options.registryDir, options.entry.name, pid);
     } finally {
-      release?.();
-      resolveDone();
+      try {
+        release?.();
+      } finally {
+        resolveDone();
+      }
     }
   };
 

@@ -4,6 +4,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { leaseFile } from '../../src/adapters/leases';
 import { branchFor } from '../../src/engine/branch';
 import { readConfig } from '../../src/engine/config';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
@@ -11,7 +12,7 @@ import { PortError } from '../../src/ports/errors';
 import { commandsDir, dropCommand } from '../../src/watch/inbox';
 import { queueDir } from '../../src/watch/queue-store';
 import { type RegistryEntry, readEntry, recordEntry } from '../../src/watch/registry';
-import { startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
+import { QUEUE_LEASE_DIR, startWatcher, type Watcher, type WatcherOptions } from '../../src/watch/watcher';
 import { fakeAdapters } from '../helpers/adapters';
 import { fakeTimers } from '../helpers/fake-timers';
 import { seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
@@ -135,6 +136,22 @@ test("a watcher whose workflow can't record watch:removed still stops, giving ba
     const next = await w.start(['a']);
     expect(next.watching()).toEqual(['a']);
     await next.stop();
+  });
+});
+
+test('a watcher resolves done even when releasing its queue lease throws (ADW-212)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+    const watcher = await w.start(['a']);
+    const lease = leaseFile(join(w.runs, QUEUE_LEASE_DIR), 'watcher', 'queue');
+    chmodSync(lease, 0o000);
+    try {
+      expect(await watcher.stop().catch(String)).toContain('EACCES');
+      expect(await stopped(watcher)).toBe(true);
+      expect(w.timers.pending()).toEqual([]);
+    } finally {
+      chmodSync(lease, 0o600);
+    }
   });
 });
 
