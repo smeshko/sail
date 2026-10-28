@@ -49,6 +49,9 @@ steps below say, in a commit of its own.
 Read files with the Read tool, or `sed -n` for a range. Change them only with Edit and Write: `sed -i`, `python3` and
 a heredoc into a file are denied, and each denial costs a turn.
 
+Write a scratch file, if you need one, under `$STAGE_OUT`, never in the repository: `rm` and `git clean` are
+denied, so a file left there can't be removed, and validation fails while any path is uncommitted.
+
 ## When something is wrong
 
 - A test that won't pass, or acceptance you can't meet: end the step **blocked**, saying what you tried and what
