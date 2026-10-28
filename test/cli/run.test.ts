@@ -138,6 +138,11 @@ test('the usage lists sail port codehost, by its operation', async () => {
   expect(stdout).toContain('\n  sail port codehost <operation> [arguments]  ');
 });
 
+test('the usage lists sail port jev ask', async () => {
+  const { stdout } = await runCaptured(['--help']);
+  expect(stdout).toContain('\n  sail port jev ask [--model <id>] [--body-file <path>]  ');
+});
+
 test('the usage lists sail port render', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toContain('\n  sail port render --untrusted --source <text> [--inline]  ');

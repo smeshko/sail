@@ -2,7 +2,7 @@
 // leaves the provider events its adapter emitted, and an `error:port` for a call that failed. `SAIL_EVENTS` names it. The child appends one line per event, with no
 // envelope, and the script kind reads the file once the script has ended and emits each event under the step's key.
 //
-// What a line must be is decided here alone: a JSON object whose type is a `ticket:*` or `codehost:*` event, or exactly
+// What a line must be is decided here alone: a JSON object whose type is a `ticket:*`, `codehost:*` or `jev:*` event, or exactly
 // `error:port`, with none of the fields the run stamps, that validates against `sail.event.v1` once enveloped. Any other
 // `error:*` is refused: only the port command reports one. A script can write the file
 // itself, so nothing else is taken from it. A `workspace:*` event carries no key, and no port command emits one.
@@ -37,9 +37,9 @@ function parseLine(line: string, envelope: { runId: string; key: string }): Port
   const { type } = data as { type?: unknown };
   if (
     typeof type !== 'string' ||
-    !(type.startsWith('ticket:') || type.startsWith('codehost:') || type === 'error:port')
+    !(type.startsWith('ticket:') || type.startsWith('codehost:') || type.startsWith('jev:') || type === 'error:port')
   ) {
-    return `its type ${JSON.stringify(type) ?? 'is missing: it'} is no ticket:*, codehost:* or error:port event`;
+    return `its type ${JSON.stringify(type) ?? 'is missing: it'} is no ticket:*, codehost:*, jev:* or error:port event`;
   }
   const enveloped = { seq: 1, ts: new Date(0).toISOString(), ...envelope, ...data };
   const issues = validateDocument('sail.event.v1', enveloped);

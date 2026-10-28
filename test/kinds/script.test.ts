@@ -745,6 +745,82 @@ test("a script whose sail port call fails, and which carries on to exit 0, has t
   });
 });
 
+const JEV_BODY = JSON.stringify({
+  state: 'A ticket asks to add dark mode.',
+  questions: {
+    area: { type: 'choice', instructions: 'Which area?', criteria: { ui: 'the interface', backend: 'the server' } },
+    size: { type: 'score', instructions: 'How large?', criteria: ['small', 'large'] },
+    clear: { type: 'noul', instructions: 'Is it clear?', criteria: { true: 'clear', false: 'unclear' } },
+  },
+});
+
+/** Gives the setup's `.sail/` a config whose jev port is the fake, seeded with `seed` when it is given. */
+function withJev(s: Setup, seed?: object): void {
+  const sail = join(s.workspace, '.sail');
+  writeFileSync(join(sail, 'project.yaml'), `${PROJECT}  jev: { use: fake }\n`);
+  if (seed === undefined) return;
+  mkdirSync(join(sail, 'fake'), { recursive: true });
+  writeFileSync(join(sail, 'fake', 'jev.json'), JSON.stringify(seed));
+}
+
+test("a script that runs sail port jev ask has jev:asked emitted before script:exit, valid under the step's key, and ends passed with the answers it printed", async () => {
+  const s = setup();
+  withJev(s, { usage: { inputTokens: 12, outputTokens: 3 } });
+  s.run(`echo '${JEV_BODY}' | sail port jev ask > "$STAGE_OUT/answers.json"\n${JUNIT}\necho '${PASSING}'`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  const asked = events.filter((event) => event.type === 'jev:asked');
+  expect({
+    order: typesOf(events).slice(0, 3),
+    asked,
+    issues: asked.flatMap((event) =>
+      validateDocument('sail.event.v1', {
+        seq: 1,
+        ts: '2026-10-22T09:00:00.000Z',
+        runId: RUN_ID,
+        key: 'tests#1',
+        ...event,
+      }),
+    ),
+    answers: Object.keys(JSON.parse(readFileSync(join(s.context.paths.dir, 'answers.json'), 'utf8')).answers),
+    outcome: [run.outcome, run.errors],
+  }).toEqual({
+    order: ['script:exec', 'jev:asked', 'script:exit'],
+    asked: [
+      {
+        type: 'jev:asked',
+        model: 'jev-latest',
+        questions: 3,
+        latencyMs: expect.any(Number),
+        usage: { inputTokens: 12, outputTokens: 3 },
+      },
+    ],
+    issues: [],
+    answers: ['area', 'size', 'clear'],
+    outcome: ['passed', []],
+  });
+});
+
+test('a script whose sail port jev ask is answered 429 and which exits with its status ends failed, with an error:port of the jev port', async () => {
+  const s = setup();
+  withJev(s, { error: { status: 429, detail: 'slow down' } });
+  s.run(
+    `echo '${JEV_BODY}' | sail port jev ask >/dev/null || { ${JUNIT}; echo '${FAILING}'; exit 1; }\necho '${PASSING}'`,
+  );
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  expect(events.filter((event) => event.type === 'error:port')).toEqual([
+    {
+      type: 'error:port',
+      port: 'jev',
+      op: 'ask',
+      code: 'unavailable',
+      message: 'jev.ask: TypeSafe answered 429 Too Many Requests: slow down',
+    },
+  ]);
+  expect(run.outcome).toBe('failed');
+});
+
 test.each<[string, string, number | undefined, string, string[]]>([
   ['times out', 'sleep 5', 1, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
   [
