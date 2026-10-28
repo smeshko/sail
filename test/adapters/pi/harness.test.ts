@@ -362,6 +362,43 @@ test('an abort during a bash command resolves error, ends with session_end, and 
   });
 });
 
+test('a session whose abort and dispose reject is still aborted, ends with session_end, and never rejects', async () => {
+  const controller = new AbortController();
+  const scripted = sessions({ stuck: [start, say('one'), { act: 'waitForAbort' }] });
+  const harness = createPiHarness({
+    env: {},
+    createSession: async (params) => {
+      const session = await scripted.createSession(params);
+      return {
+        ...session,
+        subscribe: (listener) => session.subscribe(listener),
+        prompt: (text) => session.prompt(text),
+        abort: async () => {
+          await session.abort();
+          throw new Error('abort broke');
+        },
+        dispose: async () => {
+          throw new Error('dispose broke');
+        },
+      };
+    },
+  });
+  const types: string[] = [];
+  const result = await harness.run({
+    ...request('stuck'),
+    signal: controller.signal,
+    onEvent: (event) => {
+      types.push(event.type);
+      if (event.type === 'agent:message') controller.abort();
+    },
+  });
+  expect({ result: summary(result), aborted: scripted.calls[0]?.aborted, last: types.at(-1) }).toEqual({
+    result: 'error: aborted',
+    aborted: true,
+    last: 'harness:session_end',
+  });
+});
+
 test('a command gets the preamble and the environment without the provider credential', async () => {
   const { scripted } = await play(
     'env',

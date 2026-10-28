@@ -115,6 +115,23 @@ test('a listener that throws does not turn a block into an allow', () => {
   expect(g.toolCall(call('bash', { command: 'rm file' }))?.block).toBe(true);
 });
 
+test('a call whose input throws when read is blocked under tools, naming why', () => {
+  const g = gate();
+  const input = new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error('unreadable');
+      },
+    },
+  );
+  const verdict = g.toolCall(call('bash', input, 'c9'));
+  expect({ verdict, rule: g.denials[0]?.[1].rule }).toEqual({
+    verdict: { block: true, reason: "bash: can't be decided: unreadable" },
+    rule: 'tools',
+  });
+});
+
 test('the extension registers the tool_call hook, which answers with the gate’s verdict', () => {
   const g = gate();
   const hooks: [string, (event: PiToolCall) => unknown][] = [];

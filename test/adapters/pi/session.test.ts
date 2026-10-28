@@ -144,6 +144,32 @@ test("a bash call of the session runs on sail's operations, not pi's own", async
   expect(ran).toEqual(['echo sail']);
 });
 
+test("a session's events reach its listener, and an abort after its prompt resolves", async () => {
+  // A faux stream in place of groq's API: one answer. No model is reached.
+  const faux = registerFauxProvider({ api: 'openai-completions' });
+  faux.setResponses([fauxAssistantMessage('done')]);
+  const types: string[] = [];
+  try {
+    const session = await createPiSession(params());
+    try {
+      const stop = session.subscribe((event) => types.push(event.type));
+      await session.prompt('answer');
+      stop();
+      await session.abort();
+    } finally {
+      await session.dispose();
+    }
+  } finally {
+    faux.unregister();
+    resetApiProviders();
+  }
+  expect({ start: types[0], end: types.at(-1), message: types.includes('message_end') }).toEqual({
+    start: 'agent_start',
+    end: 'agent_end',
+    message: true,
+  });
+});
+
 test('a session puts pi offline, so its grep and find never download a binary', async () => {
   const env: Record<string, string | undefined> = process.env;
   delete process.env.PI_OFFLINE;
