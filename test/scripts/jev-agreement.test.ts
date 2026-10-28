@@ -2,7 +2,7 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { collect } from '../../scripts/jev-agreement';
+import { collect, table } from '../../scripts/jev-agreement';
 import { validateDocument } from '../../src/engine/schemas';
 import { nouls, OWN_SAIL, writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -122,6 +122,97 @@ test('collect rebuilds tasks against the recorded base and call head, not live r
       ['log', `${baseSha}..${head}`, '--format=%h %s'],
       ['diff', `${baseSha}...${head}`],
     ]);
+  });
+});
+
+test('check-fix rebuilds recorded findings, fix notes and diff, maps resolved, and reports skipped calls', async () => {
+  await withTempRepo(async (repo) => {
+    const runDir = writeRun(repo);
+    const call = join(runDir, '13-check-fix/call-1');
+    mkdirSync(join(call, 'in'), { recursive: true });
+    const findings = [
+      { id: 'R1', title: 'broken' },
+      { id: 'R2', title: 'also broken' },
+    ];
+    const fixed = { fixes: [{ finding: 'R1', commit: 'fix-sha', note: 'fixed it' }] };
+    writeFileSync(join(call, 'in/findings.json'), JSON.stringify({ findings }));
+    writeFileSync(join(call, 'in/fixed.json'), JSON.stringify(fixed));
+    writeFileSync(join(call, 'in/since'), 'review-sha\n');
+    writeFileSync(
+      join(call, 'result.json'),
+      JSON.stringify({ workspace: { headSha: 'call-sha' }, usage: { costUsd: 2 }, durationMs: 120_000 }),
+    );
+    const entry = {
+      seq: 1,
+      key: 'check-fix#1',
+      stage: 'check-fix',
+      call: 1,
+      outcome: 'done',
+      output: {
+        items: [
+          { finding: 'R1', resolved: true },
+          { finding: 'R2', resolved: false },
+        ],
+      },
+      reason: null,
+      files: {},
+      resultPath: '13-check-fix/call-1/result.json',
+      recordedAt: '2026-01-01T00:00:00.000Z',
+    };
+    writeFileSync(join(runDir, 'journal.ndjson'), `${JSON.stringify(entry)}\n`);
+    const lib = (await import(join(ROOT, '.sail/lib/jev-check.mjs'))) as Parameters<typeof collect>[1];
+    const notes: string[] = [];
+    const calls = collect(
+      runDir,
+      {
+        ...lib,
+        git: (args) => {
+          expect(args).toEqual(['diff', 'review-sha..call-sha']);
+          return 'recorded fix diff';
+        },
+        askNouls: (questions, state) => {
+          expect(Object.keys(questions)).toEqual(['R1', 'R2']);
+          expect(state).toEqual({
+            diff: 'recorded fix diff',
+            findings: {
+              R1: { finding: findings[0], fix: fixed.fixes[0] },
+              R2: { finding: findings[1], fix: null },
+            },
+          });
+          return { asked: true, answers: { R1: { type: 'noul', noul: 0.92 }, R2: { type: 'noul', noul: 0.82 } } };
+        },
+      },
+      repo.home,
+      notes,
+    );
+    expect(calls).toEqual([
+      {
+        stage: 'check-fix',
+        items: [
+          { id: 'R1', agent: true, yes: 0.92 },
+          { id: 'R2', agent: false, yes: 0.82 },
+        ],
+        costUsd: 2,
+        minutes: 2,
+      },
+    ]);
+    expect(table('check-fix', calls)).toEqual([
+      'check-fix: 1 calls, 2 items',
+      '  0.80  agreement 1/2  false yeses 1  false noes 0  skippable 1/1  saves $2.00 and 2.0 min',
+      '  0.85  agreement 2/2  false yeses 0  false noes 0  skippable 0/1  saves $0.00 and 0.0 min',
+      '  0.90  agreement 2/2  false yeses 0  false noes 0  skippable 0/1  saves $0.00 and 0.0 min',
+      '  0.95  agreement 1/2  false yeses 0  false noes 1  skippable 0/1  saves $0.00 and 0.0 min',
+      '  0.99  agreement 1/2  false yeses 0  false noes 1  skippable 0/1  saves $0.00 and 0.0 min',
+    ]);
+    expect(notes).toEqual([]);
+    expect(
+      collect(runDir, { ...lib, git: () => '', askNouls: () => ({ asked: false, note: 'offline' }) }, repo.home, notes),
+    ).toEqual([]);
+    expect(notes).toEqual([`check-fix#1 in ${runDir}: offline`]);
+    writeFileSync(join(call, 'in/findings.json'), 'not JSON');
+    expect(collect(runDir, lib, repo.home, notes)).toEqual([]);
+    expect(notes).toHaveLength(2);
+    expect(notes[1]).toContain(`check-fix#1 in ${runDir}:`);
   });
 });
 
