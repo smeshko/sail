@@ -762,7 +762,7 @@ test.each<[string, string, number | undefined, string, string[]]>([
     ['script:exec', 'codehost:pushed', 'script:exit'],
   ],
 ])(
-  'a script that reports a provider event and then %s has it emitted before script:exit',
+  'a provider event in the port events file of a script that %s is emitted before script:exit',
   async (how, body, timeoutSeconds, outcome, types) => {
     const s = setup();
     if (how === 'times out') {
