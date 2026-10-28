@@ -10,7 +10,7 @@ import { readJournal } from '../src/engine/journal';
 import { readStatus } from '../src/engine/run-dir';
 import { readEvents } from '../src/events/consumers/ndjson';
 import { openWatchTarget, pollOnce } from '../src/watch/poll';
-import { seedHarness } from './helpers/fixture';
+import { edit, seedHarness } from './helpers/fixture';
 import { fakeTicket, onlyRun, writeGroomRepo } from './helpers/groom-fixture';
 import { runCaptured } from './helpers/run-captured';
 import { sail } from './helpers/sail-process';
@@ -131,6 +131,25 @@ test("groom applies the judge's edit and reports a duplicate under the threshold
     const types = readEvents(onlyRun(repo.dir)).map((event) => event.type);
     expect(types).toContain('ticket:edited');
     expect(types).not.toContain('ticket:related');
+  });
+}, 120_000);
+
+test('groom applies a title-only edit to a ticket with no description, and leaves the description empty', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(
+      sailDir,
+      'fake/tickets.json',
+      `"description": "\`sail show\` should say what a run spent. Add the total of every call's cost at the end of its output."`,
+      '"description": ""',
+    );
+    repo.git('commit', '-am', 'FAKE-2 has no description');
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect([ticket.title, ticket.description]).toEqual([NEW_TITLE, '']);
+    expect(lastComment(repo.dir)).toContain('- applied: edit title');
   });
 }, 120_000);
 

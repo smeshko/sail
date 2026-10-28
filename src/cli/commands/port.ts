@@ -281,7 +281,8 @@ const relateOperation: PortOperation<TicketSource> = {
 
 /**
  * The description of the ticket `<ticket>` names set to the body, and its title too with `--title`: the port's
- * `Edited`, parsed before it is printed. A body that is empty is refused, so a description is never cleared.
+ * `Edited`, parsed before it is printed. A description is never cleared: an empty body with `--title` edits the title
+ * alone, and without it is refused.
  */
 const editOperation: PortOperation<TicketSource> = {
   positionals: ['ticket'],
@@ -290,10 +291,15 @@ const editOperation: PortOperation<TicketSource> = {
   async run(source, { positionals: [ref = ''], values, body }) {
     const ticketKey = source.parseKey(ref);
     if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const title = typeof values.title === 'string' ? values.title : undefined;
+    const description = await body().catch((error: unknown) => {
+      if (title !== undefined && error instanceof EmptyBody) return undefined;
+      throw error;
+    });
     const edited = Edited.safeParse(
       await source.edit(ticketKey, {
-        ...(typeof values.title === 'string' ? { title: values.title } : {}),
-        description: await body(),
+        ...(title === undefined ? {} : { title }),
+        ...(description === undefined ? {} : { description }),
       }),
     );
     if (edited.success) return { value: edited.data };

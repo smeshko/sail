@@ -29,11 +29,13 @@ const scratch = mkdtempSync(join(tmpdir(), 'groom-'));
 /** Applies one action through the port: what it did, as the Actions section words it. */
 function apply(action) {
   if (action.kind === 'edit') {
-    // `edit` always sets the description, so a title-only edit sends the one the ticket has now.
-    const description = action.description ?? port(['ticket-source', 'get', ticketKey]).description;
-    const bodyFile = join(scratch, 'description.md');
-    writeFileSync(bodyFile, description);
-    const args = ['ticket-source', 'edit', ticketKey, '--body-file', bodyFile];
+    // A title-only edit sends no body, so the description stays as it is.
+    const args = ['ticket-source', 'edit', ticketKey];
+    if (action.description !== undefined) {
+      const bodyFile = join(scratch, 'description.md');
+      writeFileSync(bodyFile, action.description);
+      args.push('--body-file', bodyFile);
+    }
     if (action.title !== undefined) args.push('--title', action.title);
     port(args);
     const fields = [action.title !== undefined && 'title', action.description !== undefined && 'description'];
