@@ -1176,6 +1176,21 @@ test('event: intake:start takes the kind builtin, and neither a stage nor a step
   expect(paths('sail.event.v1', { ...stepStart, kind: 'builtin' })).toEqual(['/kind']);
 });
 
+test("event: an intake:start of a repository's intake takes the kind stage with its steps, and no other kind", () => {
+  const intakeStart = {
+    ...envelope,
+    type: 'intake:start',
+    key: 'intake#1',
+    intake: 'groom',
+    origin: 'repo:.sail/workflows/groom',
+    consumed: { source: 'run.json#/source' },
+  };
+  expect(paths('sail.event.v1', { ...intakeStart, kind: 'stage', steps: ['fetch', 'shape'] })).toEqual([]);
+  expect(paths('sail.event.v1', { ...intakeStart, kind: 'script' })).toEqual([]);
+  expect(paths('sail.event.v1', { ...intakeStart, kind: 'pipeline', steps: ['fetch', 'shape'] })).toEqual(['/kind']);
+  expect(paths('sail.event.v1', { ...intakeStart, kind: 'stage', steps: [1, 2] })).not.toEqual([]);
+});
+
 test("event: a step's start and end carry its try, as a call's do", () => {
   const start = stamped(stepStartEvent(OPEN, 2, 2, 'script', 2));
   const end = stamped(stepEndEvent(OPEN, 2, 'passed', 2));

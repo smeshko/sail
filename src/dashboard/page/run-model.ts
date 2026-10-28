@@ -238,7 +238,7 @@ const PASSED_OVER = new Set([
 ]);
 
 const STAGE_KINDS = new Set(['agent', 'script', 'stage']);
-const INTAKE_KINDS = new Set(['agent', 'script', 'builtin']);
+const INTAKE_KINDS = new Set(['agent', 'script', 'stage', 'builtin']);
 
 /** The command a tool call asked for: `input.command` when it is text, else the input as JSON, cut to 200 characters. */
 function commandOf(input: unknown): string | undefined {

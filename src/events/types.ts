@@ -143,7 +143,8 @@ interface Payloads {
   'intake:start': {
     key: string;
     intake: string;
-    kind: 'agent' | 'script' | 'builtin';
+    kind: 'agent' | 'script' | 'stage' | 'builtin';
+    steps?: string[];
     origin: string;
     consumed: Consumed;
   };

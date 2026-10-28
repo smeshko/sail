@@ -366,6 +366,32 @@ test("a group's all:start lists it once, though a resume reports it again, its a
   ).toEqual([]);
 });
 
+test("an intake:start of kind stage is the run's intake card, with the steps that start under its key", () => {
+  const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x' };
+  const model = emptyRun();
+  const events = [
+    { ...at, seq: 1, type: 'intake:start', key: 'intake#1', intake: 'groom', kind: 'stage', steps: ['fetch', 'shape'] },
+    {
+      ...at,
+      seq: 2,
+      type: 'step:start',
+      key: 'intake#1/fetch',
+      stage: 'intake',
+      step: 'fetch',
+      index: 1,
+      of: 2,
+      kind: 'script',
+    },
+    { ...at, seq: 3, type: 'step:end', key: 'intake#1/fetch', stage: 'intake', step: 'fetch', outcome: 'passed' },
+    { ...at, seq: 4, type: 'intake:end', key: 'intake#1', outcome: 'done' },
+  ];
+  for (const event of events) applyEvent(model, event);
+  const [card] = model.cards;
+  expect([model.intakeKey, model.cards.length, model.unreadable]).toEqual(['intake#1', 1, 0]);
+  expect([card?.key, card?.stage, card?.kind, card?.outcome]).toEqual(['intake#1', 'groom', 'stage', 'done']);
+  expect(card?.steps).toEqual([{ step: 'fetch', index: 1, of: 2, kind: 'script', outcome: 'passed' }]);
+});
+
 test("a card's timeline holds its messages, steps and script commands with their exits, in order: the golden run's", () => {
   const model = foldRun(golden());
   const timeline = (key: string) => model.cards.find((card) => card.key === key)?.timeline;
