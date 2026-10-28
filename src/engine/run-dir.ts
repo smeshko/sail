@@ -121,6 +121,7 @@ export const STOP_REASONS = [
   'unwatched',
   'stopped',
   'interrupted',
+  'usage_limit',
 ] as const;
 export type StopReason = (typeof STOP_REASONS)[number];
 

@@ -112,8 +112,13 @@ interface Payloads {
     /** The replays this process ran. */
     replays: number;
   };
-  /** A run suspended on its budget, right before its `run:end`: which budget, its limit and what was used. */
-  'run:suspended': { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number };
+  /**
+   * A run suspended right before its `run:end`: on its budget (which budget, its limit and what was used), or on the
+   * provider's usage limit (the call that hit it, and when it resets if the provider said).
+   */
+  'run:suspended':
+    | { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number }
+    | { stopReason: 'usage_limit'; key: string; resetsAt?: string };
   /** Whether the process driving the run holds a keep-awake: once per process, with no key. */
   'run:keep_awake': { held: true; by: string } | { held: false; reason: string };
   'stage:start': {
@@ -441,7 +446,9 @@ export interface QueuePayloads {
 }
 
 /** Where a resumed run was: running with its process gone, or suspended, with why. */
-export type ResumedFrom = { status: 'running' } | { status: 'suspended'; stopReason: 'interrupted' | 'unwatched' };
+export type ResumedFrom =
+  | { status: 'running' }
+  | { status: 'suspended'; stopReason: 'interrupted' | 'unwatched' | 'usage_limit' };
 
 type QueuePayloadOf<T extends QueueEventType> = QueuePayloads[T];
 

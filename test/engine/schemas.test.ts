@@ -624,6 +624,33 @@ test('provider events: a key where D10 allows one, and the rules each payload ad
   expect(check({ type: 'codehost:merged', key: OPEN, number: 1, method: 'squash', sha: SHA })).toEqual([]);
 });
 
+test('event: a run:suspended on the usage limit names its call and may carry the reset time, and takes no budget field', () => {
+  const check = (sample: Record<string, unknown>) =>
+    paths('sail.event.v1', { ...envelope, type: 'run:suspended', ...sample }).sort();
+  const limited = { stopReason: 'usage_limit', key: 'spec#1', resetsAt: '2026-10-28T14:20:00.000Z' };
+  expect({
+    limited: check(limited),
+    noReset: check({ stopReason: 'usage_limit', key: 'spec#1' }),
+    noKey: check({ stopReason: 'usage_limit' }),
+    badReset: check({ ...limited, resetsAt: 'tomorrow' }),
+    withBudget: check({ ...limited, budget: 'usd' }),
+    runEnd: paths('sail.event.v1', {
+      ...envelope,
+      type: 'run:end',
+      status: 'suspended',
+      stopReason: 'usage_limit',
+      replays: 1,
+    }),
+  }).toEqual({
+    limited: [],
+    noReset: [],
+    noKey: ['/key'],
+    badReset: ['/resetsAt'],
+    withBudget: ['/budget'],
+    runEnd: [],
+  });
+});
+
 test('event: a stop reason, errors and a signal each appear exactly when D5 says', () => {
   const issue = (path: string, message: string) => [{ schema: 'sail.event.v1' as const, path, message }];
   const check = (sample: NewEvent) => validateDocument('sail.event.v1', stamped(sample));
@@ -659,6 +686,7 @@ test('summary: a stop reason is required when failed or suspended, and forbidden
     { schema: 'sail.summary.v1', path: '/stopReason', message: 'is required' },
   ]);
   expect(paths('sail.summary.v1', { ...summary, status: 'suspended', stopReason: 'budget_exceeded' })).toEqual([]);
+  expect(paths('sail.summary.v1', { ...summary, status: 'suspended', stopReason: 'usage_limit' })).toEqual([]);
   expect(validateDocument('sail.summary.v1', { ...summary, status: 'completed', stopReason: 'stopped' })).toEqual([
     { schema: 'sail.summary.v1', path: '/stopReason', message: 'is not allowed' },
   ]);
@@ -759,6 +787,7 @@ test('result: errors is non-empty, and each error has a known reason and a messa
     'exit_code',
     'not_started',
     'budget_exceeded',
+    'usage_limit',
     'harness',
   ];
   const every = reasons.map((reason) => ({ reason, message: reason }));

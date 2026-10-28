@@ -971,6 +971,23 @@ test('sail FAKE-1 stops an agent stage at its maxTurns: budget_exceeded, the usa
   });
 }, 30_000);
 
+test('sail FAKE-1 on an agent stage that hits the usage limit exits 2: the view names usage_limit and when it resets, STATUS reads suspended usage_limit, and the run directory validates', async () => {
+  await withTempRepo(async (repo) => {
+    const resetsAt = '2026-10-28T14:20:00.000Z';
+    writeAgentFixture(repo.dir, [
+      { outcome: 'error', reason: 'usage_limit', message: "You've hit your limit", resetsAt },
+      submits(SPEC, 0.25),
+    ]);
+    const { code, view, dir } = await agentRun(repo.dir);
+
+    expect(code).toBe(EXIT_SUSPENDED);
+    expect(view).toContain(`  stop     usage_limit: spec#1 hit the usage limit: it resets at ${resetsAt}`);
+    expect(readStatus(dir)).toEqual({ status: 'suspended', stopReason: 'usage_limit' });
+    expect(journaled(dir)).not.toContain('spec#1');
+    expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
+  });
+}, 30_000);
+
 test('sail FAKE-1 --force on a branch a suspended run leases exits 3 naming that run, with no second run directory and the ticket as that run left it', async () => {
   await withTempRepo(async (repo) => {
     await withTempRepo(async (from) => {

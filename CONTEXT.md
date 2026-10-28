@@ -255,7 +255,7 @@ Where a run is in its life: `running`, `suspended`, `completed` or `failed`. It 
 _Avoid_: outcome, state, phase
 
 **Stop reason**:
-The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped` or `interrupted`. Every failed or suspended run carries exactly one.
+The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted` or `usage_limit`. Every failed or suspended run carries exactly one.
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
@@ -271,7 +271,7 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:

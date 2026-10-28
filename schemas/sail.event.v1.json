@@ -621,7 +621,8 @@
             "until",
             "unwatched",
             "stopped",
-            "interrupted"
+            "interrupted",
+            "usage_limit"
           ]
         },
         "message": { "type": "string" },
@@ -639,16 +640,34 @@
       "unevaluatedProperties": false
     },
     "runSuspended": {
-      "description": "a run suspended on its budget, right before its run:end: which budget it used up, its limit and what was used; the run's, so no key",
+      "description": "a run suspended right before its run:end: on its budget (which budget it used up, its limit and what was used), or on the provider's usage limit (the call that hit it, and when it resets if the provider said)",
       "type": "object",
       "$ref": "#/$defs/envelope",
       "properties": {
-        "stopReason": { "enum": ["budget_exceeded"] },
+        "stopReason": { "enum": ["budget_exceeded", "usage_limit"] },
         "budget": { "enum": ["usd", "minutes"] },
         "limit": { "type": "number", "minimum": 0 },
-        "used": { "type": "number", "minimum": 0 }
+        "used": { "type": "number", "minimum": 0 },
+        "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+(/[a-z0-9-]+)?$" },
+        "resetsAt": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+        }
       },
-      "required": ["stopReason", "budget", "limit", "used"],
+      "required": ["stopReason"],
+      "allOf": [
+        {
+          "if": { "properties": { "stopReason": { "const": "usage_limit" } }, "required": ["stopReason"] },
+          "then": {
+            "required": ["key"],
+            "properties": { "key": true, "resetsAt": true, "budget": false, "limit": false, "used": false }
+          },
+          "else": {
+            "required": ["budget", "limit", "used"],
+            "properties": { "budget": true, "limit": true, "used": true, "key": false, "resetsAt": false }
+          }
+        }
+      ],
       "unevaluatedProperties": false
     },
     "runKeepAwake": {
@@ -1604,7 +1623,7 @@
           "type": "object",
           "properties": {
             "status": { "enum": ["running", "suspended"] },
-            "stopReason": { "enum": ["interrupted", "unwatched"] }
+            "stopReason": { "enum": ["interrupted", "unwatched", "usage_limit"] }
           },
           "required": ["status"],
           "allOf": [
