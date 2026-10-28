@@ -303,10 +303,14 @@ test("a run seeded for the stage after a two-step call reuses the call's step li
     const reused = readEvents(dir).flatMap((event) =>
       event.type === 'journal:append' && event.fromRun !== undefined ? [event.key] : [],
     );
+    const ticketed = readEvents(dir).flatMap((event) =>
+      event.type === 'journal:append' && event.ticket !== undefined ? [event.key] : [],
+    );
     const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
     expect({
       journal: journaled(dir),
       reused,
+      ticketed,
       calls: summary.calls.map(({ key, fromRun }) => (fromRun === undefined ? key : `${key} reused`)),
       issues: issuesOf(dir),
     }).toEqual({
@@ -320,6 +324,7 @@ test("a run seeded for the stage after a two-step call reuses the call's step li
         'notify#1 passed',
       ],
       reused: ['intake#1', 'brief#1', 'spec#1', 'publish#1/describe', 'publish#1/open', 'publish#1'],
+      ticketed: ['intake#1'],
       calls: ['intake#1 reused', 'brief#1 reused', 'spec#1 reused', 'publish#1 reused', 'notify#1'],
       issues: [],
     });
