@@ -2,6 +2,7 @@ import type { Builtins } from '../ports/adapter';
 import { claudeCodeAdapters } from './claude-code/index';
 import { githubCodeHost } from './code-host/github';
 import { fakeAdapters } from './fake/index';
+import { typesafeJev } from './jev/typesafe';
 import { linearTicketSource } from './ticket-source/linear';
 import { gitWorktreeDefinition } from './workspace/git-worktree';
 
@@ -14,6 +15,7 @@ export {
   createFakeTicketSource,
   createFakeWorkspace,
 } from './fake/index';
+export { createTypesafeJev } from './jev/typesafe';
 export { createLinearTicketSource } from './ticket-source/linear';
 export { createGitWorktreeWorkspace } from './workspace/git-worktree';
 
@@ -24,4 +26,5 @@ export const BUILTINS: Builtins = {
   'claude-code': claudeCodeAdapters,
   'git-worktree': { workspace: gitWorktreeDefinition },
   github: { codeHost: githubCodeHost },
+  typesafe: { jev: typesafeJev },
 };
