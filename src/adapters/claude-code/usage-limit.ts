@@ -34,8 +34,15 @@ function instantAt(year: number, month: number, day: number, hour: number, minut
 }
 
 /**
- * The first instant after `now` at which the zone in `text` shows the time it names, as ISO 8601: `resets 4:20pm
- * (Europe/Sofia)` is today's or tomorrow's, `resets Oct 30, 4pm (Europe/Sofia)` that day's, or next year's.
+ * How long past a reset time it still names that reset rather than the next: the text gives it to the minute, and a
+ * limit read in that minute, or on a clock a little ahead, has not moved to the next day or year.
+ */
+const GRACE_MS = 5 * 60_000;
+
+/**
+ * The first instant after `now`, less the grace, at which the zone in `text` shows the time it names, as ISO 8601:
+ * `resets 4:20pm (Europe/Sofia)` is today's or tomorrow's, `resets Oct 30, 4pm (Europe/Sofia)` that day's, or next
+ * year's.
  */
 export function resetsFromText(text: string, now: Date): string | undefined {
   const found = RESETS.exec(text);
@@ -67,7 +74,7 @@ export function resetsFromText(text: string, now: Date): string | undefined {
       if (check.getUTCMonth() !== month || check.getUTCDate() !== day) return undefined;
     }
     let at = instantAt(year, month, day, hour, minute, zone.trim());
-    if (at <= now.getTime()) {
+    if (at <= now.getTime() - GRACE_MS) {
       at = dated
         ? instantAt(year + 1, month, day, hour, minute, zone.trim())
         : instantAt(year, month, day + 1, hour, minute, zone.trim());

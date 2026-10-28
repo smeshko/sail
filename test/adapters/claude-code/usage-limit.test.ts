@@ -20,6 +20,20 @@ test('the reset time of the ticket text is the next 4:20pm in Sofia after now, t
   ]).toEqual(['2026-10-28T14:20:00.000Z', '2026-10-29T14:20:00.000Z']);
 });
 
+test('a reset time read within a few minutes after it, as in its own minute or on a skewed clock, is that time, not the next day or year', () => {
+  expect([
+    resetsFromText('resets 4pm (Europe/Sofia)', new Date('2026-10-28T14:00:20Z')),
+    resetsFromText('resets Oct 28, 4pm (Europe/Sofia)', new Date('2026-10-28T14:00:20Z')),
+    resetsFromText('resets 4pm (Europe/Sofia)', new Date('2026-10-28T14:04:00Z')),
+    resetsFromText('resets 4pm (Europe/Sofia)', new Date('2026-10-28T14:06:00Z')),
+  ]).toEqual([
+    '2026-10-28T14:00:00.000Z',
+    '2026-10-28T14:00:00.000Z',
+    '2026-10-28T14:00:00.000Z',
+    '2026-10-29T14:00:00.000Z',
+  ]);
+});
+
 test('a reset time without minutes, with a month and day, is that day at that hour in the zone', () => {
   const now = new Date('2026-10-28T10:00:00Z');
   expect([
