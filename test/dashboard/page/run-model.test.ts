@@ -384,6 +384,16 @@ test("a group's all:start lists it once, though a resume reports it again, its a
   ).toEqual([]);
 });
 
+test('an intake:start naming a harness gives the intake card that harness, and one naming none gives it none', () => {
+  const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', seq: 1 };
+  const intake = { ...at, type: 'intake:start', key: 'intake#1', intake: 'groom', kind: 'agent' };
+  const named = emptyRun();
+  applyEvent(named, { ...intake, harness: 'second' });
+  const plain = emptyRun();
+  applyEvent(plain, intake);
+  expect([named.cards[0]?.harness, plain.cards[0]?.harness]).toEqual(['second', undefined]);
+});
+
 test("an intake:start of kind stage is the run's intake card, with the steps that start under its key", () => {
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x' };
   const model = emptyRun();

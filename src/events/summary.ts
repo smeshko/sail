@@ -332,7 +332,7 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
   state.calls.set(event.key, {
     key: event.key,
     kind: event.kind,
-    ...(event.type === 'stage:start' && event.harness !== undefined ? { harness: event.harness } : {}),
+    ...(event.harness === undefined ? {} : { harness: event.harness }),
     startedAt: event.ts,
     facts: {},
     ...(feedback === undefined ? {} : { feedback }),

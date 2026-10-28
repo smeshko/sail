@@ -158,6 +158,8 @@ interface Payloads {
     steps?: string[];
     origin: string;
     consumed: Consumed;
+    /** The named harness an agent intake ran on. Left out for the default harness. */
+    harness?: string;
   };
   'intake:end': { key: string; outcome: Outcome; resultPath: string };
   'step:start': {

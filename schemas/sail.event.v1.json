@@ -736,6 +736,7 @@
         "kind": { "enum": ["agent", "script", "stage", "builtin"] },
         "origin": { "$ref": "#/$defs/origin" },
         "consumed": { "$ref": "#/$defs/consumed" },
+        "harness": { "type": "string", "description": "the named harness the call ran on, left out for the default" },
         "steps": { "type": "array", "minItems": 2, "items": { "type": "string" } }
       },
       "required": ["intake", "kind", "origin", "consumed"],

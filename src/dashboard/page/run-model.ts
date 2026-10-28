@@ -426,7 +426,9 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       const intake = str(e.intake);
       if (key === undefined || intake === undefined || kind === undefined || !INTAKE_KINDS.has(kind)) return false;
       if (card !== undefined) return false;
-      newCard(model, { key, stage: intake, call: 1, kind: kind as CardKind, startedAt: ts });
+      const intakeCard = newCard(model, { key, stage: intake, call: 1, kind: kind as CardKind, startedAt: ts });
+      const intakeHarness = str(e.harness);
+      if (intakeHarness !== undefined) intakeCard.harness = intakeHarness;
       model.intakeKey = key;
       return true;
     }

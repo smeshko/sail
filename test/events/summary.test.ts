@@ -73,6 +73,26 @@ test('a call and a step carry the named harness their start events name, and one
   ]);
 });
 
+test('an intake call carries the named harness its intake:start names', () => {
+  const intakeStart: NewEvent = {
+    type: 'intake:start',
+    key: 'intake#1',
+    intake: 'groom',
+    kind: 'agent',
+    origin: 'repo:.sail/workflows/groom',
+    consumed: { source: 'run.json#/source' },
+    harness: 'second',
+  };
+  const summary = folded(
+    stamp(
+      [0, runStart({ maxMinutes: 90 })],
+      [100, intakeStart],
+      [200, { type: 'intake:end', key: 'intake#1', outcome: 'done', resultPath: '00-intake/call-1/result.json' }],
+    ),
+  );
+  expect(summary?.calls.map((call) => [call.key, call.harness])).toEqual([['intake#1', 'second']]);
+});
+
 test('a run with no run:end is running, and lasts until its latest event', () => {
   const summary = folded(
     stamp(
