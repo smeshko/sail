@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
-import { readConfig } from '../../src/engine/config';
+import { aliasOf, readConfig } from '../../src/engine/config';
 
 const FIXTURE_SAIL = join(import.meta.dir, '..', 'fixtures', 'repo', '.sail');
 
@@ -176,4 +176,40 @@ test("branchPrefix reads as given, and one git can't start a branch with is an i
     read: ['feature/sail-', 'a.b/x.locked/'],
     paths: Array.from({ length: 7 }, () => ['/branchPrefix']),
   });
+});
+
+const HARNESSES = `adapters:
+  ticketSource: { use: linear, team: ADW }
+  codeHost: { use: github }
+  harness: { use: fake }
+  workspace: { use: git-worktree }
+  harnesses:
+    second: { use: fake }
+`;
+
+test('a config with adapters.harnesses and an object alias reads, and aliasOf gives its model and harness', () => {
+  const models = 'models:\n  default: claude-sonnet-5\n  deep: { harness: second, model: claude-opus-5-5 }\n';
+  const config = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${HARNESSES}${models}`));
+  if ('issues' in config) throw new Error(`unexpected issues: ${JSON.stringify(config.issues)}`);
+  expect(config.adapters.harnesses).toEqual({ second: { use: 'fake' } });
+  expect(aliasOf(config, 'deep')).toEqual({ model: 'claude-opus-5-5', harness: 'second' });
+  expect(aliasOf(config, 'default')).toEqual({ model: 'claude-sonnet-5' });
+  expect(aliasOf(config, 'missing')).toBeUndefined();
+});
+
+test('an alias naming a harness adapters.harnesses does not define is one issue at /models/<alias>/harness naming it', () => {
+  const models = 'models:\n  default: claude-sonnet-5\n  deep: { harness: codex, model: gpt-5.5 }\n';
+  const config = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}${models}`));
+  expect(config).toEqual({
+    issues: [
+      { path: '/models/deep/harness', message: "names the harness 'codex', which adapters.harnesses doesn't define" },
+    ],
+  });
+});
+
+test('a config with only string models reads with no harnesses', () => {
+  const config = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}models: { default: claude-sonnet-5 }\n`));
+  if ('issues' in config) throw new Error(`unexpected issues: ${JSON.stringify(config.issues)}`);
+  expect(config.adapters.harnesses).toBeUndefined();
+  expect(aliasOf(config, 'default')).toEqual({ model: 'claude-sonnet-5' });
 });

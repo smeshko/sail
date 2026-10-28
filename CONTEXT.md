@@ -241,8 +241,16 @@ The intake and stages a run resolved at start: the intake its workflow names and
 _Avoid_: stage list, manifest, plan, registry
 
 **Config**:
-The repository's `.sail/project.yaml`: its `name`, which adapter fills each port, model aliases, budgets, the conventions, the designation label and the default workflow. It is validated against a JSON Schema before anything runs, and every sail command but `sail init` runs only in a clone that has it (ADR-0020).
+The repository's `.sail/project.yaml`: its `name`, which adapter fills each port, its named harnesses, model aliases, budgets, the conventions, the designation label and the default workflow. It is validated against a JSON Schema before anything runs, and every sail command but `sail init` runs only in a clone that has it (ADR-0020).
 _Avoid_: settings, project file, manifest, config.ts
+
+**Model alias**:
+A name in the config's `models` that an agent step picks with its `model` (`default` when it names none). It is a model id on the default harness, or `{ harness, model }`: a model id on the named harness it names. A `models` entry that names a harness `adapters.harnesses` doesn't define is refused wherever the config is read.
+_Avoid_: model name, model preset, model profile
+
+**Named harness**:
+A harness the config declares under `adapters.harnesses`, beside the default `adapters.harness`, for a model alias to name. It is resolved and preflighted only when a run reaches an alias that names it, and the run header records the ones it reached. A call on one records its name; a call on the default harness records none.
+_Avoid_: extra harness, secondary harness, provider (the external system behind an adapter)
 
 **Editor declarations**:
 The two generated files in `.sail/`, `sail.d.ts` and `sail-intakes.d.ts`, through which an editor resolves `sail` and `sail/intakes` to this machine's sail. `sail init` writes them, `sail check` rewrites them when they are missing or stale, and git ignores them. `sail check` itself type-checks against sail's own declarations and never reads a repository's `tsconfig.json`.
@@ -454,7 +462,7 @@ The head sha a merge names: the one the workflow checked. The host merges the pu
 _Avoid_: base sha, review sha
 
 **Harness**:
-The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. v1 adapter: Claude Code.
+The port that runs an agent step: a session with tools, permissions enforced on every tool call, a way to submit output, and mandatory usage reporting. A step runs on the config's default harness, or on the named harness its model alias names. v1 adapter: Claude Code.
 _Avoid_: agent provider, runner, executor, model
 
 **Workspace port**:

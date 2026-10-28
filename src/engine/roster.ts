@@ -6,7 +6,7 @@ import { relative, sep } from 'node:path';
 import { exitCodeMap } from '../kinds/script';
 import type { Intake } from '../sdk/intake';
 import type { Budget, Permissions, ScriptStep, StageDefinition, Step } from '../sdk/steps';
-import type { ProjectConfig } from './config';
+import { aliasOf, type ProjectConfig } from './config';
 import type { LoadedWorkflow } from './load-workflow';
 
 /** One step of a multi-step stage or intake. */
@@ -112,7 +112,7 @@ function stepFields(
 ): Omit<StepRosterEntry, 'step'> {
   const own = { ...field('output', name(step.output)), ...field('produces', produces) };
   if (step.kind === 'agent') {
-    const model = config.models[step.model ?? 'default'];
+    const model = aliasOf(config, step.model ?? 'default')?.model;
     // An empty list is recorded: it appends none, where a step that names none gets the project's.
     const conventions = step.conventions === undefined ? {} : { conventions: [...step.conventions] };
     return {

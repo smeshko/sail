@@ -30,16 +30,35 @@
         "ticketSource": { "$ref": "#/$defs/adapterEntry" },
         "codeHost": { "$ref": "#/$defs/adapterEntry" },
         "harness": { "$ref": "#/$defs/adapterEntry" },
-        "workspace": { "$ref": "#/$defs/adapterEntry" }
+        "workspace": { "$ref": "#/$defs/adapterEntry" },
+        "harnesses": {
+          "description": "extra harnesses by name, which a model alias may name; each is resolved only when a run reaches an alias that names it",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/slug" },
+          "additionalProperties": { "$ref": "#/$defs/adapterEntry" }
+        }
       },
       "required": ["ticketSource", "codeHost", "harness", "workspace"],
       "additionalProperties": false
     },
     "models": {
-      "description": "model aliases: alias → model id",
+      "description": "model aliases: alias → a model id on the default harness, or { harness, model }: a model id on the harness adapters.harnesses names",
       "type": "object",
       "propertyNames": { "$ref": "#/$defs/slug" },
-      "additionalProperties": { "type": "string", "minLength": 1 }
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          {
+            "type": "object",
+            "properties": {
+              "harness": { "$ref": "#/$defs/slug" },
+              "model": { "type": "string", "minLength": 1 }
+            },
+            "required": ["harness", "model"],
+            "additionalProperties": false
+          }
+        ]
+      }
     },
     "conventions": {
       "description": "the convention files appended to every agent prompt, each a path inside the repository; AGENTS.md and CLAUDE.md when absent, none when empty",

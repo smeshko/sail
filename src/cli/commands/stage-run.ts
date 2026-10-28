@@ -16,7 +16,7 @@ import { BUILTINS } from '../../adapters/index';
 import { resolveAdapters } from '../../engine/adapters';
 import type { Supplied } from '../../engine/bindings';
 import { type AgentExecution, callProblems, runCall } from '../../engine/call';
-import { type ProjectConfig, readConfig } from '../../engine/config';
+import { aliasOf, type ProjectConfig, readConfig } from '../../engine/config';
 import { loadStageFile, stageFileProblem, stageFolder } from '../../engine/definitions';
 import { systemKeepAwake } from '../../engine/keep-awake';
 import { modelProblemsOf } from '../../engine/roster';
@@ -88,7 +88,7 @@ async function executionOf(
   const steps: readonly Step[] = definition.kind === 'stage' ? definition.steps : [definition];
   const agents = steps.filter((step): step is AgentStep => step.kind === 'agent');
   const models = Object.fromEntries(
-    agents.map((step) => [step.name, config.models[step.model ?? 'default'] as string]),
+    agents.map((step) => [step.name, aliasOf(config, step.model ?? 'default')?.model as string]),
   );
   const adapters = await resolveAdapters({
     sailDir,

@@ -303,6 +303,22 @@ test('a sail range the running version does not satisfy is refused, naming the f
   });
 });
 
+test('a model alias naming a harness adapters.harnesses does not define is refused, naming /models/<alias>/harness and the harness', async () => {
+  await withTempRepo(async (repo) => {
+    const project = join(copyFixture(repo.dir), 'project.yaml');
+    writeFileSync(
+      project,
+      readFileSync(project, 'utf8').replace('deep: claude-opus-5-5', 'deep: { harness: codex, model: gpt-5.5 }'),
+    );
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr:
+        ".sail/project.yaml  /models/deep/harness names the harness 'codex', which adapters.harnesses doesn't define\n",
+    });
+  });
+});
+
 // The editor declarations (D15): `sail check` rewrites the ones that are missing or stale, where a `tsconfig.json` shows
 // the repository uses them.
 
