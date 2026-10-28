@@ -39,11 +39,12 @@ test('a roster stage that is null is unreadable and leaves no roster, and one wh
   expect(renderRun(odd, undefined, initialUi(0), 0).value).toContain('<span class="c-name">build</span>');
 });
 
-test("a route's value that is an object is kept as its JSON, and an interpolated object renders as escaped JSON", () => {
+test('a route event with an unprintable value is passed over, and an interpolated object renders as escaped JSON', () => {
   const model = emptyRun();
   const route = { ...at, seq: 2, type: 'workflow:route', at: 'review', took: 'fix', value: unprintable() };
   expect(() => applyEvent(model, route)).not.toThrow();
-  expect(model.routes).toEqual([{ at: 'review', value: '{"toString":0,"valueOf":0}', took: 'fix' }]);
+  expect([model.unreadable, model.other]).toEqual([0, {}]);
+  expect('routes' in model).toBe(false);
   expect(html`<b>${unprintable() as never}</b>`.value).toBe('<b>{&quot;toString&quot;:0,&quot;valueOf&quot;:0}</b>');
   expect(html`<b>${{ a: '<i>' } as never}</b>`.value).toBe('<b>{&quot;a&quot;:&quot;&lt;i&gt;&quot;}</b>');
 });

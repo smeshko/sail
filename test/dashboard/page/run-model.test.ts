@@ -25,7 +25,7 @@ const GOLDEN_KEYS = [
 ];
 const STAGE_NAMES = ['spec', 'implement', 'tests', 'self-review', 'describe', 'open', 'lint', 'intake', 'ticket'];
 
-test("the golden run folds into eight settled cards with its summary's outcomes, durations and costs, its routes, its PR and no pending card", () => {
+test("the golden run folds into eight settled cards with its summary's outcomes, durations and costs, its PR and no pending card", () => {
   const model = foldRun(golden());
   const summary = JSON.parse(readFileSync(join(GOLDEN_RUN, 'summary.json'), 'utf8')) as Summary;
   expect(model.cards.map((card) => card.key)).toEqual(GOLDEN_KEYS);
@@ -47,7 +47,6 @@ test("the golden run folds into eight settled cards with its summary's outcomes,
     'claude-opus-5-5',
     undefined,
   ]);
-  expect(model.routes).toEqual(summary.routes as never);
   expect(model.pending).toEqual([]);
   expect([model.runId, model.workflow, model.end, model.pr]).toEqual([
     'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
@@ -66,6 +65,7 @@ test("the golden run folds into eight settled cards with its summary's outcomes,
 test("the golden run's run-level events, run:keep_awake among them, count no type the fold doesn't handle (review R4)", () => {
   const events = golden();
   expect(events.some((event) => event.type === 'run:keep_awake')).toBe(true);
+  expect(events.some((event) => event.type === 'workflow:route')).toBe(true);
   expect(foldRun(events).other).toEqual({});
 });
 
