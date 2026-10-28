@@ -497,6 +497,10 @@ test("a step's gitDiff is taken just before it starts, after the step before it 
         ],
       });
       expect(existsSync(join(t.runDir, '05-reviewed', 'call-1', 'steps', '2-review', 'in', 'diff.patch'))).toBe(false);
+      expect(t.events.find((event) => event.type === 'step:end' && event.key === 'reviewed#1/review')).toMatchObject({
+        outcome: 'error',
+        durationMs: 0,
+      });
     });
   });
 });

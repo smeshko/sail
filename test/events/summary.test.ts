@@ -335,6 +335,22 @@ test('a step:end without durationMs, from before it carried one, is timed from s
   expect(summary?.calls[0]?.steps?.map((step) => step.durationMs)).toEqual([1000, 500]);
 });
 
+test("a step:end's durationMs of 0, from a step that never started, is its duration, not its step:start to step:end", () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [200, stepStart('publish#1/describe', 1, 2, 'agent')],
+      [1200, stepEnd('publish#1/describe', 1, 'done', 1, 900)],
+      [1210, journal('publish#1/describe', 1, 'done')],
+      [1600, stepStart('publish#1/open', 2, 2, 'script')],
+      [2100, stepEnd('publish#1/open', 2, 'error', 1, 0)],
+      [2200, end('publish#1', 'error', 900)],
+    ),
+  );
+  expect(summary?.calls[0]?.steps?.map((step) => step.durationMs)).toEqual([900, 0]);
+});
+
 test("a multi-step call has no kind, costs what its steps cost, and lists each step, its duration from each step:end, summing to the call's", () => {
   const summary = folded(
     stamp(
