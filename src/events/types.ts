@@ -388,7 +388,8 @@ export interface Consumer {
 /**
  * Every type a watched workflow's queue event stream carries, after `EVENT_TYPES` in `sail.event.v1`'s enum. Each has
  * a closed payload: the watch set's changes, the polls, queued items, dispatches, lease skips, drops, parking, errors,
- * and what the watcher did with a dispatched run it found: adopted it, or resumed it. Then a requeue by hand.
+ * and what the watcher did with a dispatched run it found: adopted it, or resumed it. Then a requeue by hand, the
+ * dispatch's hold and release, and a move by hand.
  */
 export const QUEUE_EVENT_TYPES = [
   'watch:added',
@@ -405,6 +406,7 @@ export const QUEUE_EVENT_TYPES = [
   'queue:requeued',
   'queue:held',
   'queue:released',
+  'queue:moved',
 ] as const;
 export type QueueEventType = (typeof QUEUE_EVENT_TYPES)[number];
 
@@ -470,6 +472,8 @@ export interface QueuePayloads {
   'queue:held': { workflow: string; until: string; run: string; reason: string };
   /** A workflow's held dispatch released, its hold passed. */
   'queue:released': { workflow: string };
+  /** A queued item put directly `before` or `after` another queued item by hand: exactly one of the two is given. */
+  'queue:moved': { workflow: string; dedupKey: string; before?: string; after?: string; reason: string };
 }
 
 /** Where a resumed run was: running with its process gone, or suspended, with why. */

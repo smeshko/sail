@@ -1782,3 +1782,36 @@ test('queue events: queue:polled takes the kind pr, queue:item_added a pull requ
     noBranch: ['/source/branch'],
   });
 });
+
+test('queue:moved validates closed in a queue stream with exactly one of before and after, each a dedup key, and a reason', () => {
+  const moved: NewQueueEvent = {
+    type: 'queue:moved',
+    workflow: 'ticket-to-pr',
+    dedupKey: 'ticket:FAKE-7',
+    before: 'ticket:FAKE-5',
+    reason: 'moved by hand',
+  };
+  expect({
+    before: paths('sail.event.v1', { ...queueEnvelope, ...moved }),
+    after: paths('sail.event.v1', {
+      ...queueEnvelope,
+      ...omit(moved as Record<string, unknown>, 'before'),
+      after: 'pr:12@ccccccc',
+    }),
+    neither: broken(moved, {}, 'before'),
+    both: broken(moved, { after: 'ticket:FAKE-6' }),
+    badKey: broken(moved, { before: 'FAKE-5' }),
+    reason: broken(moved, { reason: '' }),
+    surprise: broken(moved, { surprise: 1 }),
+    runId: broken(moved, { runId: RUN_ID }),
+  }).toEqual({
+    before: [],
+    after: [],
+    neither: ['/after'],
+    both: ['/after'],
+    badKey: ['/before'],
+    reason: ['/reason'],
+    surprise: ['/surprise'],
+    runId: ['/runId'],
+  });
+});

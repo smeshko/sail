@@ -83,6 +83,7 @@ test('a full Linear ticket is a Ticket with every field: comments in order with 
     url: 'https://linear.app/sail-test/issue/ADW-7/add-a-greeting',
     description: NODE.description,
     state: { type: 'unstarted', name: 'Ready' },
+    priority: 'high',
     labels: ['sail', 'cli'],
     comments: [
       { author: 'GitHub', body: 'Linked a pull request.', createdAt: '2026-10-01T09:00:00.000Z' },
@@ -146,5 +147,21 @@ test('a node without a state, or with a null list, is invalid, naming the field:
     ['invalid', 'ticketSource.get: Linear sent a ticket whose state is missing or malformed'],
     ['invalid', 'ticketSource.get: Linear sent a ticket whose labels is missing or malformed'],
     ['invalid', 'ticketSource.get: Linear sent a ticket whose attachments is missing or malformed'],
+  ]);
+});
+
+test('Linear’s priority numbers 0 to 4 read as none, urgent, high, medium and low, and a missing or null one as none', () => {
+  const priorities = [0, 1, 2, 3, 4].map((priority) => ticketOf(nodeWith({ priority })).priority);
+  expect(priorities).toEqual(['none', 'urgent', 'high', 'medium', 'low']);
+  expect(ticketOf(nodeWith({ priority: null })).priority).toBe('none');
+  expect(ticketOf(nodeWith({ priority: undefined })).priority).toBe('none');
+});
+
+test('a priority number outside 0 to 4 is invalid for the operation, naming the number', () => {
+  const error = caught(() => toTicket(nodeWith({ priority: 7 }), [], 'listDesignated'));
+  expect(error instanceof PortError ? [error.op, error.code, error.message] : error).toEqual([
+    'listDesignated',
+    'invalid',
+    "ticketSource.listDesignated: Linear's priority 7 is not one sail knows",
   ]);
 });

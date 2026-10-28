@@ -365,7 +365,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   };
 
   /** Applies a queue command to the watched workflow `target`'s queue, or throws why it can't. */
-  const edit = async (target: WatchTarget, command: Extract<Command, { op: 'add' | 'requeue' | 'drop' }>) => {
+  const edit = async (target: WatchTarget, command: Extract<Command, { op: 'add' | 'requeue' | 'drop' | 'move' }>) => {
     const { store } = target;
     const itemOf = (key: string): QueueItem | undefined => store.snapshot().items.find((item) => item.dedupKey === key);
     if (command.op === 'add') {
@@ -376,6 +376,11 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       const taken = itemOf(dedupKey({ kind: 'ticket', ticketKey: resolved.ticketKey }));
       if (taken !== undefined && taken.state !== 'done') return;
       store.add([resolved.ticket], { forced: force });
+      return;
+    }
+    if (command.op === 'move') {
+      const to = command.before !== undefined ? { before: command.before } : { after: command.after ?? '' };
+      store.move(command.dedupKey, to, 'moved by hand');
       return;
     }
     const item = itemOf(command.dedupKey);
@@ -421,7 +426,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       print(setLine(watching(), now()));
       return;
     }
-    if (command.op === 'add' || command.op === 'requeue' || command.op === 'drop') {
+    if (command.op === 'add' || command.op === 'requeue' || command.op === 'drop' || command.op === 'move') {
       const watched = set.get(command.workflow);
       if (watched === undefined) throw new Error(`not watching workflow '${command.workflow}'`);
       await edit(watched.target, command);

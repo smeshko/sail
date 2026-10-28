@@ -238,3 +238,28 @@ test('add, requeue and drop commands drain and apply as written, and one missing
   });
   expect(readdirSync(dir)).toEqual([]);
 });
+
+test('a move command drains with exactly one of before and after, and one with both or neither is rejected', async () => {
+  const runs = runsDir();
+  const commands: Command[] = [
+    { op: 'move', workflow: 'a', dedupKey: 'ticket:FAKE-3', before: 'ticket:FAKE-1' },
+    { op: 'move', workflow: 'a', dedupKey: 'ticket:FAKE-3', after: 'ticket:FAKE-2' },
+  ];
+  for (const command of commands) dropCommand(runs, command);
+  const dir = commandsDir(runs);
+  const base = { op: 'move', workflow: 'a', dedupKey: 'ticket:FAKE-3' };
+  writeFileSync(join(dir, 'x1-neither.json'), JSON.stringify(base));
+  writeFileSync(
+    join(dir, 'x2-both.json'),
+    JSON.stringify({ ...base, before: 'ticket:FAKE-1', after: 'ticket:FAKE-2' }),
+  );
+  const { applied, drained } = await drain(runs);
+  expect({ applied, rejected: drained.rejected.map((rejected) => rejected.reason) }).toEqual({
+    applied: commands,
+    rejected: [
+      expect.stringMatching(/^x1-neither\.json is not a command: after needs exactly one of before and after/),
+      expect.stringMatching(/^x2-both\.json is not a command: after needs exactly one of before and after/),
+    ],
+  });
+  expect(readdirSync(dir)).toEqual([]);
+});

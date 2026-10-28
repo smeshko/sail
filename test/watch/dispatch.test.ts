@@ -19,7 +19,7 @@ import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-stor
 import { dispatchLog } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
 import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
-import { manualClock, queueEventIssues, queueEvents, sourceKey } from '../helpers/queue';
+import { manualClock, queueEventIssues, queueEvents, sourceKey, ticket } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helpers/watched';
@@ -1144,5 +1144,16 @@ test('under pickUp [Todo], a queued ticket now in Backlog is dropped as Backlog 
     await w.dispatcher().tick();
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-2']);
     expect(eventsOf(w.runs, 'queue:dropped')).toEqual([{ dedupKey: 'ticket:FAKE-1', reason: 'it is Backlog' }]);
+  });
+});
+
+test('with one slot, a ticket whose priority was raised after it was queued is dispatched before the ones queued earlier', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 1);
+    w.store.add([ticket('FAKE-3', { priority: 'urgent' })]);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-3']);
+    expect(states(w.store)).toEqual(['FAKE-3 dispatched 1', 'FAKE-1 queued 0', 'FAKE-2 queued 0']);
   });
 });

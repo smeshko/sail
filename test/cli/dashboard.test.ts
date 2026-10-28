@@ -120,6 +120,6 @@ test('with nothing to stop it, sail dashboard refuses with exit 3 rather than se
 test('the usage lists sail dashboard', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(
-    /^ {2}sail dashboard \[--port <n>\] {2,}Serve every repository's runs read-only on localhost$/m,
+    /^ {2}sail dashboard \[--port <n>\] {2,}Serve every repository's runs and queues on localhost$/m,
   );
 }, 15_000);
