@@ -506,7 +506,7 @@ What an adapter declares it can do, such as the ticket moves it supports or the 
 _Avoid_: features, support flags
 
 **Provider**:
-The external system behind an adapter: Linear, GitHub, Anthropic, Jira.
+The external system behind an adapter: Linear, GitHub, Anthropic, TypeSafe, Jira.
 _Avoid_: vendor, platform, service
 
 ### Judgments
