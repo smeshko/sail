@@ -18,7 +18,7 @@ import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { wrapUntrusted } from '../../src/engine/render';
-import { Attached, Created, Posted, Ticket } from '../../src/ports/types';
+import { Attached, Created, ListedTicket, Posted, Ticket } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -864,6 +864,69 @@ test('attach without --file exits 3 with the usage, which lists attach', async (
     expect(refused.stderr).toStartWith(`sail port: ticket-source attach needs --file <path>\n${USAGE}\n`);
     expect(refused.stderr).toContain(
       '\n       sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]\n',
+    );
+  });
+});
+
+// `sail port ticket-source list`: the team's tickets by state and label, a JSON array of ListedTicket on one line.
+
+test('list --state unstarted prints one line of JSON: the unstarted tickets by number, each a ListedTicket, and none that is started', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const { code, stdout, stderr } = await runCaptured(
+      ['port', 'ticket-source', 'list', '--state', 'unstarted'],
+      repo.dir,
+    );
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const listed = ListedTicket.array().parse(oneLine(stdout));
+    expect(listed.map((ticket) => [ticket.ticketKey, ticket.state.type])).toEqual([
+      ['FAKE-1', 'unstarted'],
+      ['FAKE-3', 'unstarted'],
+      ['FAKE-5', 'unstarted'],
+    ]);
+    expect(listed[2]).toMatchObject({ title: LINKED.title, url: 'fake://tickets/FAKE-5', labels: ['sail', 'docs'] });
+  });
+});
+
+test('list --label narrows the list to the tickets carrying it', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const { code, stdout } = await runCaptured(['port', 'ticket-source', 'list', '--label', 'docs'], repo.dir);
+    expect(code).toBe(EXIT_OK);
+    expect(
+      ListedTicket.array()
+        .parse(oneLine(stdout))
+        .map((ticket) => ticket.ticketKey),
+    ).toEqual(['FAKE-5']);
+  });
+});
+
+test('list with --label given twice exits 3 before any port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const refused = await runCaptured(['port', 'ticket-source', 'list', '--label', 'a', '--label', 'b'], repo.dir);
+    expect({ code: refused.code, stdout: refused.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(refused.stderr).toStartWith('sail port: ticket-source list takes --label once, and it was given 2\n');
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test("list with a state that isn't one exits 1 with the adapter's invalid message", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    expect(await runCaptured(['port', 'ticket-source', 'list', '--state', 'open'], repo.dir)).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.list: open is not a ticket state (invalid)\n',
+    });
+  });
+});
+
+test('the usage lists ticket-source list with its options', async () => {
+  await withTempRepo(async (repo) => {
+    const refused = await runCaptured(['port', 'ticket-source'], repo.dir);
+    expect(refused.stderr).toContain(
+      '\n       sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]\n',
     );
   });
 });

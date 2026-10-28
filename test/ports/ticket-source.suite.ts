@@ -8,6 +8,7 @@ import { MAX_ATTACHMENT_BYTES, type TicketSource } from '../../src/ports/ticket-
 import {
   Attached,
   ClaimResult,
+  ListedTicket,
   Moved,
   Posted,
   Ticket,
@@ -130,6 +131,42 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     expect(listed.flatMap((ticket) => parseIssues(Ticket, ticket))).toEqual([]);
     expect(keys(listed)).toContain(world.designated);
     expect(keys(listed).filter((key) => key === world.started || key === world.undesignated)).toEqual([]);
+  });
+
+  test(`${label}: list by state holds the unstarted tickets, but not a started one, each a ListedTicket, and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const listed = await adapter.list({ state: 'unstarted' });
+    expect(listed.flatMap((ticket) => parseIssues(ListedTicket, ticket))).toEqual([]);
+    const found = listed.map((ticket) => ticket.ticketKey);
+    expect(found).toContain(world.designated);
+    expect(found).toContain(world.undesignated);
+    expect(found).not.toContain(world.started);
+    expect(listed.map((ticket) => ticket.state.type)).toEqual(listed.map(() => 'unstarted'));
+    const read = await adapter.get(world.designated);
+    const entry = listed.find((ticket) => ticket.ticketKey === world.designated);
+    expect(entry).toMatchObject({
+      title: read.title,
+      url: read.url,
+      description: read.description,
+      labels: read.labels,
+    });
+    expect(capture.events.map((event) => event.type)).toEqual(['ticket:fetched']);
+  });
+
+  test(`${label}: list by state and label holds the designated ticket, but not the undesignated one`, async () => {
+    const { adapter, world } = await start();
+    const listed = await adapter.list({ state: 'unstarted', label: world.label });
+    const found = listed.map((ticket) => ticket.ticketKey);
+    expect(found).toContain(world.designated);
+    expect(found).not.toContain(world.undesignated);
+    expect(listed.every((ticket) => ticket.labels.includes(world.label))).toBe(true);
+  });
+
+  test(`${label}: list with a state that isn't one rejects as invalid, naming list, and emits nothing`, async () => {
+    const { adapter, capture } = await start();
+    const error = await rejection(adapter.list({ state: 'open' as never }));
+    expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'list', code: 'invalid' });
+    expect(capture.events).toEqual([]);
   });
 
   test(`${label}: a claim starts the ticket and takes it off listDesignated, and a second claim is not taken`, async () => {

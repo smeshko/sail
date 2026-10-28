@@ -57,6 +57,8 @@ Usage:
   sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
   sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
+  sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]
+                                                             List the team's tickets by state and label, as JSON
   sail port ticket-source comment <ticket> [--body-file <path>]
                                                              Comment on a ticket, the body from the file or stdin
   sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>

@@ -64,6 +64,7 @@ export const PORT_OPERATIONS = {
     'get',
     'isDesignated',
     'listDesignated',
+    'list',
     'claim',
     'update',
     'comment',

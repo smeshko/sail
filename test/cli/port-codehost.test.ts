@@ -14,7 +14,7 @@ import { type CaptureOptions, runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const TICKET_USAGE =
-  'usage: sail port ticket-source get|links|attachments <ticket>\n       sail port ticket-source comment <ticket> [--body-file <path>]\n';
+  'usage: sail port ticket-source get|links|attachments <ticket>\n       sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]\n       sail port ticket-source comment <ticket> [--body-file <path>]\n';
 const UPDATE_USAGE = '       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>\n';
 const CREATE_USAGE = '       sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]\n';
 const ATTACH_USAGE =
@@ -271,7 +271,7 @@ test.each<[string, string[], string]>([
   [
     '--label given to ticket-source get',
     ['ticket-source', 'get', 'FAKE-1', '--label', 'sail'],
-    "option '--label' belongs to sail port ticket-source create or sail port codehost open-pull-request",
+    "option '--label' belongs to sail port ticket-source list or sail port ticket-source create or sail port codehost open-pull-request",
   ],
 ])('%s exits 3, naming the operation the option belongs to, and calls no port', async (_, argv, problem) => {
   await withTempRepo(async (repo) => {

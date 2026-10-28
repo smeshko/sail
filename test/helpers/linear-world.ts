@@ -337,6 +337,18 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
           : [];
       return ok({ issues: page(found.map(node), 50, after) });
     },
+    SailList: ({ team: key, label, types, after }) => {
+      const wanted = Array.isArray(types) ? types : [];
+      const found =
+        key === team.key
+          ? tickets.filter(
+              (ticket) =>
+                (label === undefined || (ticket.labels ?? []).includes(String(label))) &&
+                wanted.includes(stateOf(ticket).type),
+            )
+          : [];
+      return ok({ issues: page(found.map(node), 50, after) });
+    },
     SailTeam: ({ team: key }) =>
       ok({
         teams: {

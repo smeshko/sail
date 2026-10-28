@@ -12,7 +12,7 @@ import { type Fetch, LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source
 import type { ProviderEmit, ProviderEvent } from '../../../src/events/types';
 import type { AdapterContext, Env } from '../../../src/ports/adapter';
 import type { TicketSource } from '../../../src/ports/ticket-source';
-import { Created, Ticket, type TicketMove } from '../../../src/ports/types';
+import { Created, ListedTicket, Ticket, type TicketMove } from '../../../src/ports/types';
 import {
   createLinearWorld,
   type LinearWorld,
@@ -292,6 +292,48 @@ test('listDesignated answers exactly the designated tickets in triage, backlog a
     ['ADW-5', { type: 'unstarted', name: 'Inbox' }],
   ]);
   expect(world.operations()).toEqual(['SailDesignated', 'SailDesignated', 'SailTicket', 'SailTicket', 'SailTicket']);
+});
+
+test('list pages through the team, filters by state type and label, and answers each ticket by number from its list alone, whatever its state is called', async () => {
+  const { world, adapter } = linear(
+    seedOf(
+      RENAMED_STATES,
+      [
+        { number: 5, title: 'Five', description: 'Fifth.', state: 'Inbox', labels: ['sail', 'cli'] },
+        { number: 2, title: 'Two', description: null, state: 'Icebox', labels: ['sail'] },
+        { number: 4, title: 'Four', state: 'Ready', labels: ['cli'] },
+        { number: 1, title: 'One', state: 'Building', labels: ['sail'] },
+        { number: 6, title: 'Six', state: 'Shipped', labels: ['sail'] },
+        { number: 7, title: 'Seven', state: 'Dropped', labels: ['sail'] },
+      ],
+      1,
+    ),
+  );
+  const unstarted = await adapter.list({ state: 'unstarted' });
+  expect(unstarted.flatMap((ticket) => parseIssues(ListedTicket, ticket))).toEqual([]);
+  expect(unstarted.map((ticket) => [ticket.ticketKey, ticket.state, ticket.labels, ticket.description])).toEqual([
+    ['ADW-2', { type: 'unstarted', name: 'Icebox' }, ['sail'], ''],
+    ['ADW-4', { type: 'unstarted', name: 'Ready' }, ['cli'], ''],
+    ['ADW-5', { type: 'unstarted', name: 'Inbox' }, ['sail', 'cli'], 'Fifth.'],
+  ]);
+  expect(unstarted[0]?.url).toBe(URL_OF('ADW-2'));
+  expect(world.operations()).toEqual(['SailList', 'SailList', 'SailList']);
+
+  const sail = await adapter.list({ label: 'sail' });
+  expect(sail.map((ticket) => ticket.ticketKey)).toEqual(['ADW-1', 'ADW-2', 'ADW-5', 'ADW-6', 'ADW-7']);
+  const canceled = await adapter.list({ state: 'canceled' });
+  expect(canceled.map((ticket) => [ticket.ticketKey, ticket.state.type])).toEqual([['ADW-7', 'canceled']]);
+  const all = await adapter.list({});
+  expect(all.map((ticket) => ticket.ticketKey)).toEqual(['ADW-1', 'ADW-2', 'ADW-4', 'ADW-5', 'ADW-6', 'ADW-7']);
+});
+
+test('list for a team Linear does not have rejects not_found, naming it', async () => {
+  const world = createLinearWorld(SEED);
+  const typo = createLinearTicketSource({ team: 'ADX', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch: world.fetch });
+  expect(failure(await rejection(typo.list({ state: 'unstarted' })))).toEqual([
+    { port: 'ticketSource', op: 'list', code: 'not_found' },
+    'ticketSource.list: Linear has no team ADX',
+  ]);
 });
 
 test('listDesignated reads each listed ticket whole, every comment page included, and leaves out one claimed between the list and its read (review R1-1, R1-8)', async () => {

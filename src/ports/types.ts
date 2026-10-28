@@ -45,6 +45,17 @@ export const Ticket = z.object({
 });
 export type Ticket = z.infer<typeof Ticket>;
 
+/** A ticket as `list` reads it: what grooming surveys, without its comments, links and attachments. */
+export const ListedTicket = Ticket.pick({
+  ticketKey: true,
+  title: true,
+  url: true,
+  description: true,
+  state: true,
+  labels: true,
+}).extend({ raw: Raw });
+export type ListedTicket = z.infer<typeof ListedTicket>;
+
 // Ticket results
 
 export const ClaimResult = z.object({ claimed: z.boolean(), state: TicketState, raw: Raw });

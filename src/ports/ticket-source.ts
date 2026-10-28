@@ -6,11 +6,13 @@ import {
   type Attached,
   type ClaimResult,
   type Created,
+  type ListedTicket,
   type Moved,
   type Posted,
   Ticket,
   type TicketMove,
   type TicketSourceCapabilities,
+  type TicketStateType,
 } from './types';
 
 /** What every adapter factory takes beside its own options. */
@@ -35,6 +37,12 @@ export interface NewAttachment {
   readonly bytes: Uint8Array;
   /** What the ticket shows the attachment as. Its name unless given. */
   readonly title?: string;
+}
+
+/** What `list` keeps: tickets in a state of this type, and carrying this label. Each is left out to match any. */
+export interface TicketFilter {
+  readonly state?: TicketStateType;
+  readonly label?: string;
 }
 
 /** The largest file `attach` takes: 20 MiB. */
@@ -67,6 +75,11 @@ export interface TicketSource {
   isDesignated(ticket: Ticket, label: string): boolean;
   /** The designated tickets that are still unstarted. */
   listDesignated(label: string): Promise<Ticket[]>;
+  /**
+   * The team's tickets in a state of the filter's type and carrying its label, sorted by ticket number. A state that
+   * isn't a `TicketStateType` rejects as `invalid`. Emits nothing.
+   */
+  list(filter: TicketFilter): Promise<ListedTicket[]>;
   /** Moves an unstarted ticket to in progress. Emits `ticket:claimed` only when the claim took (D4). */
   claim(ticketKey: string): Promise<ClaimResult>;
   /** Moves the ticket, and returns the state the provider reports. Emits `ticket:updated`. */

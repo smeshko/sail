@@ -4,7 +4,16 @@ import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
-import { Attachment, Comment, Link, type Ticket, TicketMove, TicketState } from '../../ports/types';
+import {
+  Attachment,
+  Comment,
+  Link,
+  type ListedTicket,
+  type Ticket,
+  TicketMove,
+  TicketState,
+  TicketStateType,
+} from '../../ports/types';
 import { createStore } from './store';
 
 export interface FakeTicketSourceOptions extends ProviderOptions {
@@ -50,6 +59,19 @@ const toTicket = (stored: StoredTicket): Ticket => ({
   raw: structuredClone(stored),
 });
 
+const toListed = (stored: StoredTicket): ListedTicket => {
+  const { ticketKey, title, description, state, labels } = structuredClone(stored);
+  return {
+    ticketKey,
+    title,
+    description,
+    state,
+    labels,
+    url: `fake://tickets/${ticketKey}`,
+    raw: structuredClone(stored),
+  };
+};
+
 export function createFakeTicketSource(options: FakeTicketSourceOptions): TicketSource {
   const store = createStore({ seed: options.seed, state: options.state, schema: World, port: 'ticketSource' });
   const now = () => options.now?.() ?? new Date();
@@ -85,6 +107,20 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
         .tickets.filter((ticket) => ticket.labels.includes(label) && ticket.state.type === 'unstarted')
         .sort((a, b) => ticketNumber(a.ticketKey) - ticketNumber(b.ticketKey))
         .map(toTicket);
+    },
+    async list(filter) {
+      if (filter.state !== undefined && !TicketStateType.safeParse(filter.state).success) {
+        throw new PortError('ticketSource', 'list', 'invalid', `${String(filter.state)} is not a ticket state`);
+      }
+      return store
+        .read()
+        .tickets.filter(
+          (ticket) =>
+            (filter.state === undefined || ticket.state.type === filter.state) &&
+            (filter.label === undefined || ticket.labels.includes(filter.label)),
+        )
+        .sort((a, b) => ticketNumber(a.ticketKey) - ticketNumber(b.ticketKey))
+        .map(toListed);
     },
     async claim(ticketKey) {
       const result = store.change((world) => {

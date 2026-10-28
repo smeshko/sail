@@ -3,6 +3,7 @@
 //   sail port ticket-source get <ticket>            the ticket, as the port's Ticket
 //   sail port ticket-source links <ticket>          its links
 //   sail port ticket-source attachments <ticket>    its attachments
+//   sail port ticket-source list [--state <type>] [--label <name>]    the team's tickets, as an array of ListedTicket
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
@@ -31,6 +32,7 @@
 // loaded or asked for its credentials. `render` is a helper beside the ports: it needs no `.sail/`.
 import { readFileSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
+import { z } from 'zod';
 import type { Port } from '../../engine/config';
 import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
@@ -40,7 +42,16 @@ import type { PortErrorEvent, ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
-import { Attached, Created, Moved, Posted, type Ticket, type TicketMove } from '../../ports/types';
+import {
+  Attached,
+  Created,
+  ListedTicket,
+  Moved,
+  Posted,
+  type Ticket,
+  type TicketMove,
+  type TicketStateType,
+} from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { CODEHOST } from './port-codehost';
@@ -124,6 +135,32 @@ const ticketOperation = (read: (ticket: Ticket) => unknown): PortOperation<Ticke
     return { value: read(await getTicket(source, ticketKey)) };
   },
 });
+
+/**
+ * The team's tickets, filtered by `--state` and `--label`: the port's `ListedTicket`s, parsed before they are printed.
+ * The state is passed on as given, and the adapter refuses one it doesn't know. `--label` is repeatable for the other
+ * operations that share the parser, so a second one is refused here.
+ */
+const listOperation: PortOperation<TicketSource> = {
+  positionals: [],
+  options: { state: { value: 'unstarted|started|completed|canceled' }, label: { value: 'name' } },
+  async run(source, { values }) {
+    const labels = Array.isArray(values.label) ? values.label : [];
+    if (labels.length > 1)
+      return { refused: `ticket-source list takes --label once, and it was given ${labels.length}` };
+    const [label] = labels;
+    const listed = z.array(ListedTicket).safeParse(
+      await source.list({
+        ...(typeof values.state === 'string' ? { state: values.state as TicketStateType } : {}),
+        ...(typeof label === 'string' ? { label } : {}),
+      }),
+    );
+    if (listed.success) return { value: listed.data };
+    const [issue] = listed.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'list', 'invalid', `its answer is not a list of ListedTickets: ${where}`);
+  },
+};
 
 /** A comment on the ticket `<ticket>` names: the port's `Posted`, parsed before it is printed. */
 const commentOperation: PortOperation<TicketSource> = {
@@ -232,6 +269,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     get: ticketOperation((ticket) => ticket),
     links: ticketOperation((ticket) => ticket.links),
     attachments: ticketOperation((ticket) => ticket.attachments),
+    list: listOperation,
     comment: commentOperation,
     update: updateOperation,
     create: createOperation,

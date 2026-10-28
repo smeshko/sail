@@ -8,7 +8,7 @@ import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
-import { type Ticket, TicketMove, type TicketState } from '../../ports/types';
+import { type ListedTicket, type Ticket, TicketMove, type TicketState, TicketStateType } from '../../ports/types';
 import { createLinearClient, type Fetch, LINEAR_ENDPOINT } from './linear-client';
 import { COMMENT_FIELDS, stateTypeOf, TICKET_FIELDS, toTicket } from './linear-ticket';
 
@@ -38,6 +38,21 @@ const DESIGNATED = `query SailDesignated($team: String!, $label: String!, $types
     first: 50
     after: $after
   ) { nodes { identifier } pageInfo { hasNextPage endCursor } }
+}`;
+
+// A list carries each ticket's own fields and its labels, not its comments, relations and attachments, which keeps a
+// page of fifty well inside the complexity cap. The label filter is in the document only when a label is asked for.
+const list = (
+  withLabel: boolean,
+) => `query SailList($team: String!, $types: [String!], ${withLabel ? '$label: String, ' : ''}$after: String) {
+  issues(
+    filter: { team: { key: { eq: $team } }, ${withLabel ? 'labels: { some: { name: { eq: $label } } }, ' : ''}state: { type: { in: $types } } }
+    first: 50
+    after: $after
+  ) {
+    nodes { identifier title description url state { name type } labels(first: 50) { nodes { name } } }
+    pageInfo { hasNextPage endCursor }
+  }
 }`;
 
 const TEAM = `query SailTeam($team: String!) {
@@ -87,6 +102,14 @@ const UPLOAD_TIMEOUT_MS = 120_000;
 /** The Linear state types a designated ticket may be in to be listed: those sail reads as unstarted. */
 const UNSTARTED_TYPES = ['triage', 'backlog', 'unstarted'];
 
+/** The Linear state types each port state type covers: `canceled` takes Linear's duplicate type with its own. */
+const LINEAR_TYPES: Record<TicketStateType, string[]> = {
+  unstarted: UNSTARTED_TYPES,
+  started: ['started'],
+  completed: ['completed'],
+  canceled: ['canceled', 'duplicate'],
+};
+
 const KEY = /^([A-Z][A-Z0-9]*)-([1-9]\d*)$/;
 const URL_KEY = /^https:\/\/linear\.app\/[^/?#]+\/issue\/([A-Z][A-Z0-9]*-[1-9]\d*)(?:\/[^/?#]*)?\/?(?:[?#].*)?$/;
 
@@ -98,6 +121,14 @@ interface Node {
   id: string;
   number: number;
   comments: Page<unknown>;
+}
+interface ListedNode {
+  identifier: string;
+  title: string;
+  description: string | null;
+  url: string;
+  state: { name: string; type: string };
+  labels: { nodes: { name: string }[] };
 }
 interface LinearState {
   id: string;
@@ -340,6 +371,40 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       }
       const number = (ticket: Ticket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
       return tickets.sort((a, b) => number(a) - number(b));
+    },
+    async list(filter) {
+      if (filter.state !== undefined && !TicketStateType.safeParse(filter.state).success) {
+        throw new PortError('ticketSource', 'list', 'invalid', `${String(filter.state)} is not a ticket state`);
+      }
+      const types = filter.state === undefined ? Object.values(LINEAR_TYPES).flat() : LINEAR_TYPES[filter.state];
+      const document = list(filter.label !== undefined);
+      const listed: ListedTicket[] = [];
+      const seen = new Set<string>();
+      let after: string | null = null;
+      do {
+        const data: { issues: Page<ListedNode> } = await client.request('list', 'SailList', document, {
+          team,
+          types,
+          ...(filter.label === undefined ? {} : { label: filter.label }),
+          after,
+        });
+        for (const node of data.issues.nodes) {
+          listed.push({
+            ticketKey: node.identifier,
+            title: node.title,
+            url: node.url,
+            description: node.description ?? '',
+            state: portState(node.state, 'list'),
+            labels: node.labels.nodes.map((label) => label.name),
+            raw: node,
+          });
+        }
+        after = nextCursor('list', 'the team’s tickets', data.issues, seen);
+      } while (after !== null);
+      // A team Linear doesn't have lists nothing too: an empty list is checked against the team's existence.
+      if (listed.length === 0) await states('list');
+      const number = (ticket: ListedTicket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
+      return listed.sort((a, b) => number(a) - number(b));
     },
     async claim(ticketKey) {
       const { node } = await lookup('claim', ticketKey);
