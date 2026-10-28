@@ -107,7 +107,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
       now,
       emit: quietly,
       onOverMinutes: () => {
-        over ??= 'minutes';
+        if (submitted() === undefined) over ??= 'minutes';
         stop();
       },
     });
@@ -123,7 +123,9 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
           over = 'turns';
         }
       }
-      if (over !== undefined || stopped()) stop();
+      // A kept submission ends the session with its turn: pi goes on while another call in its batch didn't end it.
+      const kept = event.type === 'turn_end' && submitted() !== undefined;
+      if (over !== undefined || stopped() || kept) stop();
     });
     try {
       watch.start();

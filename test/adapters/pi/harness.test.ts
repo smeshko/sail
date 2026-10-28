@@ -261,6 +261,26 @@ test('a turn that submits on the last turn is done, not over', async () => {
   expect(summary(result)).toEqual(SPEC);
 });
 
+test('a session that goes on after its submission is stopped, and is done with what it submitted', async () => {
+  const { result, scripted } = await play(
+    'onward',
+    { budget: { maxTurns: 2, maxUsd: 2, maxMinutes: 10 } },
+    {
+      onward: [
+        start,
+        say('Reading and submitting.'),
+        { act: 'emit', event: toolStart('r1', 'read', { path: 'a.ts' }) },
+        ...submitted({ outcome: 'done', output: SPEC }),
+        say('more', 5),
+        turn,
+        say('and more', 5),
+        turn,
+      ],
+    },
+  );
+  expect({ result: summary(result), aborted: scripted.calls[0]?.aborted }).toEqual({ result: SPEC, aborted: true });
+});
+
 test('over maxUsd the session is aborted, and ends budget_exceeded naming maxUsd', async () => {
   const { result, capture, scripted } = await play(
     'usd',
