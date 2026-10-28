@@ -8,7 +8,8 @@
 //   5. `tests`, then `checks`, which waits for the required check on the pushed head; a failure is feedback;
 //   6. `gate` reads the pull request again: the label gone stops the run, anything else wrong hands it back;
 //   7. `merge` reads the pull request and main once more, and squashes at the head the gate read, then the ticket
-//      moves to done; a refusal hands back, or stops when the label is gone.
+//      moves to done; a refusal hands back, or stops when the label is gone. A merge answered pending, or whose answer
+//      was lost, is re-read, and goes on to done when the pull request merged.
 // A loop asked for a fourth pass halts the run, so a failure on the third pass hands back instead of failing the pass.
 // A hand-back comments, swaps `sail` for `sail-blocked`, comments on the ticket and fails the run. A stop, because the
 // label was removed, comments and fails the run, and adds no `sail-blocked`. Composition only: every contract lives on
