@@ -534,7 +534,11 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     }
     schedule(tickMs);
   } catch (error) {
-    finish();
+    try {
+      finish();
+    } catch {
+      // Cleanup must not replace the error that prevented startup.
+    }
     throw error;
   }
 

@@ -155,6 +155,32 @@ test('a watcher resolves done even when releasing its queue lease throws (ADW-21
   });
 });
 
+for (const failure of ['registry', 'lease'] as const) {
+  test(`a startup error is preserved when ${failure} cleanup also throws (ADW-212)`, async () => {
+    await withTempRepo(async (repo) => {
+      const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], []);
+      const path =
+        failure === 'registry' ? w.registryDir : leaseFile(join(w.runs, QUEUE_LEASE_DIR), 'watcher', 'queue');
+      const startupError = new Error('startup output failed');
+      try {
+        const result = await w
+          .start(['a'], {
+            write: () => {
+              chmodSync(path, failure === 'registry' ? 0o555 : 0o000);
+              throw startupError;
+            },
+          })
+          .catch((error: unknown) => error);
+        expect(result).toBe(startupError);
+        expect(w.timers.pending()).toEqual([]);
+        expect(w.events('a').at(-1)?.type).toBe('watch:removed');
+      } finally {
+        chmodSync(path, failure === 'registry' ? 0o755 : 0o600);
+      }
+    });
+  });
+}
+
 test('two workflows at caps 2 and 1 dispatch six tickets once each, in queue order, never over their caps, a leased ticket last and only after its lease is released', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
