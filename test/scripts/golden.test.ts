@@ -83,6 +83,13 @@ test("run.json's sail.runtime is the one field compared apart: a fresh run names
     writeFileSync(join(dir, 'run.json'), header.replace('"version": "0.0.0"', '"version": "0.0.1"'));
   });
   expect(stale(fresh, bumped)).toEqual([`run.json is stale: ${REGENERATE}`]);
+  // Two runs whose run.json differs only in the Bun that generated them are the same run, whatever Bun runs this.
+  const otherBun = changedCopy('other-bun', (dir) => {
+    const header = readFileSync(join(dir, 'run.json'), 'utf8');
+    writeFileSync(join(dir, 'run.json'), header.replace(RUNTIME, '"runtime": "bun 0.0.1-other"'));
+  });
+  expect(readFileSync(join(otherBun, 'run.json'), 'utf8')).toContain('"runtime": "bun 0.0.1-other"');
+  expect(stale(committed, otherBun)).toEqual([]);
   // And only in run.json: the same text in another file of the run is a difference.
   const stray = (name: string, runtime: string) =>
     changedCopy(name, (dir) => {
