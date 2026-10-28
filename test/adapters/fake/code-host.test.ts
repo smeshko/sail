@@ -99,6 +99,12 @@ test('listDesignated lists a pull request seeded with the label in upper case', 
   expect((await host.listDesignated('sail')).map((pr) => pr.number)).toContain(7);
 });
 
+test('addLabel and removeLabel match a label held in another case as the same label (review R1)', async () => {
+  const host = createFakeCodeHost(files());
+  expect((await host.addLabel(1, 'Sail')).labels).toEqual(['sail']);
+  expect((await host.removeLabel(1, 'SAIL')).labels).toEqual([]);
+});
+
 test('checks scripted pending then failed read pending, then failed from then on', async () => {
   const host = createFakeCodeHost(files());
   const reads: unknown[] = [];
