@@ -32,7 +32,7 @@
         "harness": { "$ref": "#/$defs/adapterEntry" },
         "workspace": { "$ref": "#/$defs/adapterEntry" },
         "harnesses": {
-          "description": "extra harnesses by name, which a model alias may name; each is resolved only when a run reaches an alias that names it",
+          "description": "named harnesses, by name, which a model alias may name; each is resolved only when a run reaches an alias that names it",
           "type": "object",
           "propertyNames": { "$ref": "#/$defs/slug" },
           "additionalProperties": { "$ref": "#/$defs/adapterEntry" }

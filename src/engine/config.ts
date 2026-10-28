@@ -39,7 +39,7 @@ export interface ProjectConfig {
   /** What a run's branch starts with. `DEFAULT_BRANCH_PREFIX` applies when it is left out. */
   branchPrefix?: string;
   adapters: Record<Port, AdapterConfig> & {
-    /** Extra named harnesses, which a model alias may name. Each is preflighted only when a run reaches it. */
+    /** The named harnesses, which a model alias may name. Each is preflighted only when a run reaches it. */
     harnesses?: Record<string, AdapterConfig>;
   };
   /** Model aliases: alias → model id, or the model id on a named harness. Empty when `project.yaml` has none. */
