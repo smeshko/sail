@@ -12,7 +12,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_FAILED, EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { type Io, run } from '../../src/cli/index';
@@ -748,6 +748,31 @@ test("a multi-step stage whose describe is blocked prints the call's line and de
       true,
       false,
     ]);
+  });
+}, 60_000);
+
+test("an isolated multi-step stage runs its agent step on the harness the step's alias names", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = fixtureCopy(repo);
+    edit(
+      sail,
+      'project.yaml',
+      'harness: { use: fake }',
+      'harness: { use: fake }\n  harnesses: { echo: { use: ./adapters/echo-harness.ts } }',
+    );
+    edit(sail, 'project.yaml', 'default: claude-sonnet-5', 'default: { harness: echo, model: claude-sonnet-5 }');
+    const { code, stdout } = await runCaptured(['stage', 'run', PUBLISH_DIR, ...PUBLISH_BINDS], repo.dir, {
+      env: { ...repo.env, ECHO_HARNESS_TOKEN: 'set' },
+    });
+    expect(code).toBe(EXIT_FAILED);
+    const steps = join(callDirOf(stdout, repo.dir), 'steps');
+    const results = [...new Bun.Glob('1-describe/**/result.json').scanSync({ cwd: steps })];
+    expect(results.length).toBeGreaterThan(0);
+    for (const path of results) {
+      expect(readResult(dirname(join(steps, path)))).toMatchObject({
+        harness: { adapter: 'echo', model: 'claude-sonnet-5' },
+      });
+    }
   });
 }, 60_000);
 
