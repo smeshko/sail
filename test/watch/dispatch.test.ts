@@ -25,6 +25,7 @@ import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helper
 
 const START = '2026-10-15T09:00:00.000Z';
 const FIVE_MINUTES = 5 * 60_000;
+const BACKOFF = 15 * 60_000;
 
 /** FAKE-1 to FAKE-n, designated and Todo. */
 const designated = (count: number) =>
@@ -87,6 +88,7 @@ async function world(
       workspace,
       env: repo.env,
       now: clock,
+      usageLimitBackoffMs: BACKOFF,
       spawn: spawner.spawn,
       resume: spawner.resume,
       isAlive: spawner.isAlive,
@@ -320,6 +322,73 @@ test('a run whose process is gone while it reads suspended interrupted or runnin
         { dedupKey: 'ticket:FAKE-2', run: run2, pid: FAKE_PID + 3, from: { status: 'running' } },
       ],
       settled: [],
+      issues: [],
+    });
+  });
+});
+
+test('a run suspended on the usage limit holds the workflow: nothing starts and an interrupted run is not resumed, no attempt is counted and nothing is parked; past the hold, queue:released, the runs are resumed and the queued item starts', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 4, 3);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'usage_limit' });
+    await w.spawner.end('FAKE-2', { status: 'suspended', stopReason: 'interrupted' });
+    await w.spawner.end('FAKE-3');
+    await dispatcher.tick();
+    await dispatcher.tick();
+    const held = {
+      spawned: spawnedKeys(w.spawner),
+      resumes: w.spawner.resumes.length,
+      items: w.store.snapshot().items.map((item) => [sourceKey(item), item.state, item.attempts]),
+      held: eventsOf(w.runs, 'queue:held').map(({ until, run, reason }) => ({ until, run, reason })),
+      settled: w.settled,
+    };
+    w.clock.advance(16 * 60_000);
+    await dispatcher.tick();
+    const run1 = w.spawner.run('FAKE-1').runId;
+    expect({
+      held,
+      after: {
+        spawned: spawnedKeys(w.spawner),
+        resumes: w.spawner.resumes.map(({ runId }) => runId),
+        released: eventsOf(w.runs, 'queue:released').length,
+        resumed: eventsOf(w.runs, 'run:resumed').map(({ dedupKey, from }) => [dedupKey, from]),
+        stillHeld: w.store.snapshot().held,
+        items: w.store.snapshot().items.map((item) => [sourceKey(item), item.state, item.attempts]),
+      },
+      issues: queueEventIssues(queueDir(w.runs, 'a')),
+    }).toEqual({
+      held: {
+        spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
+        resumes: 0,
+        items: [
+          ['FAKE-1', 'dispatched', 1],
+          ['FAKE-2', 'dispatched', 1],
+          ['FAKE-3', 'done', 1],
+          ['FAKE-4', 'queued', 0],
+        ],
+        held: [{ until: '2026-10-15T09:15:00.000Z', run: run1, reason: 'a run hit the usage limit' }],
+        settled: [
+          { dedupKey: 'ticket:FAKE-3', ticketKey: 'FAKE-3', runId: w.spawner.run('FAKE-3').runId, outcome: 'done' },
+        ],
+      },
+      after: {
+        spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3', 'FAKE-4'],
+        resumes: [run1, w.spawner.run('FAKE-2').runId],
+        released: 1,
+        resumed: [
+          ['ticket:FAKE-1', { status: 'suspended', stopReason: 'usage_limit' }],
+          ['ticket:FAKE-2', { status: 'suspended', stopReason: 'interrupted' }],
+        ],
+        stillHeld: undefined,
+        items: [
+          ['FAKE-1', 'dispatched', 1],
+          ['FAKE-2', 'dispatched', 1],
+          ['FAKE-3', 'done', 1],
+          ['FAKE-4', 'dispatched', 1],
+        ],
+      },
       issues: [],
     });
   });
@@ -674,6 +743,7 @@ test('a dispatcher whose cap was lowered resumes dead runs within it: one at a t
       workspace: w.adapters.ports.workspace,
       env: repo.env,
       now: w.clock,
+      usageLimitBackoffMs: BACKOFF,
       spawn: w.spawner.spawn,
       resume: w.spawner.resume,
       isAlive: w.spawner.isAlive,
@@ -866,6 +936,7 @@ async function prWorld(repo: TempRepo) {
     workspace: adapters.ports.workspace,
     env: repo.env,
     now: clock,
+    usageLimitBackoffMs: BACKOFF,
     spawn: spawner.spawn,
     resume: spawner.resume,
     isAlive: spawner.isAlive,

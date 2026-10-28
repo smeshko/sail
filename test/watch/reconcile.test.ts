@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { heldLease, takeLease } from '../../src/adapters/leases';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import type { QueueItem } from '../../src/watch/queue-store';
-import { type ReconcileContext, reconcileItem } from '../../src/watch/reconcile';
+import { type ReconcileContext, type Reconciled, reconcileItem } from '../../src/watch/reconcile';
 import { dispatchLog } from '../../src/watch/spawn';
 
 const dirs: string[] = [];
@@ -16,6 +16,8 @@ afterEach(() => {
 });
 
 const REMOTE = 'fake://origin';
+const NOW = '2026-10-28T10:00:00.000Z';
+const BACKOFF = 15 * 60_000;
 /** The pid of the run's process when it is alive: no real process has it. */
 const LIVE = 900_100;
 const DEAD = 900_101;
@@ -32,6 +34,8 @@ function world() {
     workflow: 'a',
     isAlive: (pid) => pid === LIVE || pid === process.pid,
     workspace: { holder: async (remote, branch) => heldLease(leases, remote, branch) },
+    now: new Date(NOW),
+    backoffMs: BACKOFF,
     first: false,
     resumed: false,
     ...fields,
@@ -172,4 +176,58 @@ test("a dead pid whose run's lease a live process holds is adopted under that pr
     { kind: 'adopt', pid: process.pid },
     { kind: 'resume', from: { status: 'suspended', stopReason: 'interrupted' } },
   ]);
+});
+
+/** Writes run `n`'s events.ndjson with one `run:suspended` on the usage limit, at `ts`, with the reset time if any. */
+function limitedAt(runsDir: string, n: number, ts: string, resetsAt?: string): void {
+  const event = {
+    seq: 1,
+    ts,
+    runId: runIdOf(n),
+    type: 'run:suspended',
+    stopReason: 'usage_limit',
+    key: 'spec#1',
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+  };
+  writeFileSync(join(runsDir, runIdOf(n), 'events.ndjson'), `${JSON.stringify(event)}\n`);
+}
+
+test('a suspended usage_limit run is held until its reset time, or the back-off after it hit the limit, and is resumed once that has passed, even by a dispatcher that resumed it before', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'usage_limit');
+  limitedAt(w.runsDir, 1, '2026-10-28T09:50:00.000Z', '2026-10-28T14:20:00.000Z');
+  runDir(w.runsDir, 2, 'suspended', 'usage_limit');
+  limitedAt(w.runsDir, 2, '2026-10-28T09:50:00.000Z');
+  runDir(w.runsDir, 3, 'suspended', 'usage_limit');
+  const later = (minutes: number) => w.context({ now: new Date(Date.parse(NOW) + minutes * 60_000) });
+  const resume: Reconciled = { kind: 'resume', from: { status: 'suspended', stopReason: 'usage_limit' } };
+  expect([
+    await reconcileItem(item(1, DEAD), w.context()),
+    await reconcileItem(item(2, DEAD), w.context()),
+    await reconcileItem(item(3, DEAD), w.context()),
+    await reconcileItem(item(2, DEAD), later(5)),
+    await reconcileItem(item(2, DEAD), { ...later(6), resumed: true }),
+    await reconcileItem(item(1, DEAD), later(260)),
+    await reconcileItem(item(1, DEAD), { ...later(260), resumed: true }),
+  ]).toEqual([
+    { kind: 'held', until: '2026-10-28T14:20:00.000Z', reason: 'spec#1 hit the usage limit' },
+    { kind: 'held', until: '2026-10-28T10:05:00.000Z', reason: 'spec#1 hit the usage limit' },
+    { kind: 'held', until: '2026-10-28T10:15:00.000Z', reason: 'a run hit the usage limit' },
+    resume,
+    resume,
+    resume,
+    resume,
+  ]);
+});
+
+test('a suspended usage_limit run whose lease a live process holds is adopted, not held or resumed', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'usage_limit');
+  limitedAt(w.runsDir, 1, '2026-10-28T09:50:00.000Z', '2026-10-28T14:20:00.000Z');
+  takeLease(w.leases, REMOTE, branchOf(1), {
+    runId: runIdOf(1),
+    runDir: join(w.runsDir, runIdOf(1)),
+    pid: process.pid,
+  });
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({ kind: 'adopt', pid: process.pid });
 });

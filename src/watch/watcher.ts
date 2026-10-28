@@ -53,7 +53,7 @@ import {
   type WatchLine,
 } from './lines';
 import { createPoller, openWatchTarget, type Poller, type Timers, type WatchTarget } from './poll';
-import { dedupKey, type QueueItem, type QueuePolicy } from './queue-store';
+import { DEFAULT_QUEUE_POLICY, dedupKey, type QueueItem, type QueuePolicy } from './queue-store';
 import { liveHolder } from './reconcile';
 import {
   claimWatcher,
@@ -276,6 +276,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     });
     const dispatcher = createDispatcher({
       workflow,
+      usageLimitBackoffMs: (policy ?? DEFAULT_QUEUE_POLICY).usageLimitBackoffMs,
       label: target.label,
       maxConcurrentRuns: target.maxConcurrentRuns,
       branchPrefix: config.branchPrefix ?? DEFAULT_BRANCH_PREFIX,

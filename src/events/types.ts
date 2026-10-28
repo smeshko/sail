@@ -382,6 +382,8 @@ export const QUEUE_EVENT_TYPES = [
   'run:adopted',
   'run:resumed',
   'queue:requeued',
+  'queue:held',
+  'queue:released',
 ] as const;
 export type QueueEventType = (typeof QUEUE_EVENT_TYPES)[number];
 
@@ -443,6 +445,10 @@ export interface QueuePayloads {
   'run:resumed': { workflow: string; dedupKey: string; run: string; pid: number; from: ResumedFrom };
   /** A parked or failed item put back in the queue by hand, with no attempts. */
   'queue:requeued': { workflow: string; dedupKey: string; reason: string };
+  /** A workflow's dispatch held until a time because run `run` hit the usage limit: the queue is unchanged. */
+  'queue:held': { workflow: string; until: string; run: string; reason: string };
+  /** A workflow's held dispatch released, its hold passed. */
+  'queue:released': { workflow: string };
 }
 
 /** Where a resumed run was: running with its process gone, or suspended, with why. */

@@ -11,6 +11,10 @@
 //   a resume that leaves the run unended parks the item with why; no `run.json` is a start that was refused, whose
 //   reason is the last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding
 //   no slot.
+// - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
+//   or the back-off after it hit the limit. While held, nothing starts and no run is resumed, and no item's attempt is
+//   counted, failed or parked. A tick past the hold releases it (`queue:released`), and the run is resumed with the
+//   rest of the dispatch; a run that hits the limit again is held again.
 // - **A due pull request**, in queue order: the lease on its queued branch first, then the re-check of the pull request
 //   through the CodeHost. One that is closed, merged, a draft, unlabelled, a fork or moved to another sha is dropped
 //   with why, and its run starts as `sail '#<n>' --head-sha <sha>`, pinned to the queued sha. It claims nothing.
@@ -81,6 +85,8 @@ export interface DispatcherOptions {
   /** The environment a run starts in. */
   env: Readonly<Record<string, string>>;
   now: () => Date;
+  /** How long a usage limit holds the dispatch when the run names no reset time. */
+  usageLimitBackoffMs: number;
   spawn: (options: SpawnRunOptions) => SpawnedRun;
   /** Starts `sail resume <run>` for a run whose process is gone. */
   resume: (options: SpawnResumeOptions) => SpawnedRun;
@@ -120,8 +126,16 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const logFroms = new Map<string, number>();
   /** The runs this dispatcher has resumed: each is resumed once. */
   const resumed = new Set<string>();
+  /** When this dispatcher first saw each run on its usage limit, until it resumes the run. */
+  const limitedAt = new Map<string, Date>();
   /** Until the first settle is over: a live run found then is adopted. */
   let first = true;
+
+  /** Whether a usage limit holds the dispatch now. */
+  const holding = (): boolean => {
+    const { held } = store.snapshot();
+    return held !== undefined && now().getTime() < Date.parse(held.until);
+  };
 
   const alive = (item: QueueItem) => item.pid !== undefined && isAlive(item.pid);
   const dispatchedItems = () => store.snapshot().items.filter((item) => item.state === 'dispatched');
@@ -187,6 +201,9 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         workflow,
         isAlive,
         workspace,
+        now: now(),
+        backoffMs: options.usageLimitBackoffMs,
+        ...(limitedAt.has(runId) ? { limitedAt: limitedAt.get(runId) as Date } : {}),
         first,
         resumed: resumed.has(runId),
         ...(exits.has(item.dedupKey) ? { exited: exited ?? null } : {}),
@@ -227,12 +244,20 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       case 'park':
         park(item, runId, answer.reason);
         break;
+      case 'held':
+        // The run will be resumed once, and again if it hits the limit again, so it is not one this dispatcher resumed.
+        resumed.delete(runId);
+        limitedAt.set(runId, limitedAt.get(runId) ?? now());
+        store.hold(answer.until, runId, answer.reason);
+        break;
       case 'resume':
+        if (holding()) break;
         // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
         if (inFlight() >= options.maxConcurrentRuns) break;
         // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
         // to a dead run's control file: `sail stop` ends a run it finds dead itself.
         cancelUnwatch(runDir);
+        limitedAt.delete(runId);
         resume(item, runId, answer.from);
         break;
       case 'wait':
@@ -364,6 +389,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   };
 
   const dispatch = async () => {
+    if (holding()) return;
     let remote: string | undefined;
     for (const item of store.due()) {
       if (inFlight() >= options.maxConcurrentRuns) return;
@@ -382,6 +408,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
 
   return {
     async tick() {
+      if (store.snapshot().held !== undefined && !holding()) store.release();
       await settle();
       await dispatch();
     },

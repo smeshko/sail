@@ -117,6 +117,29 @@ test('run:adopted, run:resumed from running and from suspended, and queue:requeu
   ]);
 });
 
+test('queue:held prints when the dispatch resumes and why, and queue:released prints that it is released', () => {
+  const events: QueueEvent[] = [
+    {
+      ...envelope,
+      type: 'queue:held',
+      until: '2026-10-28T14:20:00.000Z',
+      run: RUN,
+      reason: 'spec#1 hit the usage limit',
+    },
+    { ...envelope, type: 'queue:released' },
+  ];
+  expect(
+    events.map((event) => {
+      const line = queueLine(event);
+      return line === undefined ? undefined : utc(line);
+    }),
+  ).toEqual([
+    '08:09:10 a  dispatch held until 2026-10-28T14:20:00.000Z: spec#1 hit the usage limit\n',
+    '08:09:10 a  dispatch released\n',
+  ]);
+  for (const event of events) expect(validateDocument('sail.event.v1', event)).toEqual([]);
+});
+
 test('a poll that found nothing prints no line, unless it follows a failed poll', () => {
   const nothing: QueueEvent = {
     ...envelope,

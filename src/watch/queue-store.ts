@@ -21,6 +21,9 @@
 //   (a ticket its own failed run claimed is not) is dropped: it leaves `items`, and a later poll may queue it again.
 // - A dispatched item whose run the watcher found alive is `adopted()`, and one whose run it resumed is `resumed()`: each
 //   records the pid the run is alive as now, and emits `run:adopted` or `run:resumed`.
+// - A run that hit the usage limit holds the workflow's dispatch: `hold()` keeps the later `until` in `held` and emits
+//   `queue:held` when it set or extended it, and `release()` clears it and emits `queue:released`. The items are not
+//   changed: no attempt is counted, and nothing is failed or parked.
 // - `skippedLeased()`, `watched()` and `unwatched()` only emit their events: none of them changes `queue.json`.
 // - Every event the store emits is handed to `onEvent` once it is appended, in order: the watcher's terminal lines. A
 //   hook that throws is ignored, so the terminal never breaks the queue.
@@ -101,6 +104,15 @@ export const QueueFile = z.strictObject({
       })
       .optional(),
   }),
+  /** Set while a usage limit holds the workflow's dispatch: nothing starts or resumes until `until`. */
+  held: z
+    .strictObject({
+      until: z.string(),
+      runId: z.string(),
+      reason: z.string(),
+      at: z.string(),
+    })
+    .optional(),
   items: z.array(QueueItem),
 });
 export type QueueFile = z.infer<typeof QueueFile>;
@@ -114,6 +126,8 @@ export interface QueuePolicy {
   pollBackoffMs: readonly number[];
   /** How many done items are kept. */
   doneKept: number;
+  /** How long a usage limit holds the dispatch when the provider gave no reset time. */
+  usageLimitBackoffMs: number;
 }
 
 /** The prototype's numbers (DECISIONS D6). */
@@ -122,6 +136,7 @@ export const DEFAULT_QUEUE_POLICY: QueuePolicy = {
   retryDelaysMs: [5 * 60_000, 20 * 60_000],
   pollBackoffMs: [60_000, 2 * 60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000],
   doneKept: 100,
+  usageLimitBackoffMs: 15 * 60_000,
 };
 
 /** The key a queue item is known by: `ticket:<ticket key>`, or `pr:<number>@<the head sha's first 7>`. */
@@ -170,6 +185,13 @@ export interface QueueStore {
   requeue(key: string, reason: string): void;
   /** Takes the item out of the queue, and emits `queue:dropped` with the reason. An unknown key throws. */
   drop(key: string, reason: string): void;
+  /**
+   * Holds the workflow's dispatch until `until` because run `runId` hit the usage limit, and emits `queue:held`. A hold
+   * already set to a later time stays as it is, and emits nothing.
+   */
+  hold(until: string, runId: string, reason: string): void;
+  /** Clears the hold and emits `queue:released`. A queue not held changes nothing. */
+  release(): void;
   /** Emits `queue:skipped_leased`: the due item waits, since run `heldBy` holds `branch`. The queue is unchanged. */
   skippedLeased(key: string, branch: string, heldBy: string): void;
   /** Emits `watch:added`: watcher `pid` watches the workflow now. The queue is unchanged. */
@@ -432,6 +454,21 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
         next.items.splice(next.items.indexOf(find(next, key)), 1);
       });
       stream.emit({ type: 'queue:dropped', workflow, dedupKey: key, reason });
+    },
+    hold(until, runId, reason) {
+      const current = queue.held;
+      if (current !== undefined && Date.parse(current.until) >= Date.parse(until)) return;
+      change((next) => {
+        next.held = { until, runId, reason, at: now().toISOString() };
+      });
+      stream.emit({ type: 'queue:held', workflow, until, run: runId, reason });
+    },
+    release() {
+      if (queue.held === undefined) return;
+      change((next) => {
+        delete next.held;
+      });
+      stream.emit({ type: 'queue:released', workflow });
     },
     skippedLeased(key, branch, heldBy) {
       stream.emit({ type: 'queue:skipped_leased', workflow, dedupKey: key, branch, heldBy });

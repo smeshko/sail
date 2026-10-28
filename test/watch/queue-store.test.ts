@@ -27,7 +27,13 @@ function runsDir(): string {
 }
 
 const START = '2026-10-14T09:00:00.000Z';
-const POLICY: QueuePolicy = { maxAttempts: 2, retryDelaysMs: [60_000], pollBackoffMs: [60_000], doneKept: 2 };
+const POLICY: QueuePolicy = {
+  maxAttempts: 2,
+  retryDelaysMs: [60_000],
+  pollBackoffMs: [60_000],
+  doneKept: 2,
+  usageLimitBackoffMs: 15 * 60_000,
+};
 
 function open(runs: string, now = manualClock(START), workflow = 'ticket-to-pr'): QueueStore {
   const store = openQueue({ runsDir: runs, workflow, label: 'sail', now, policy: POLICY });
@@ -635,6 +641,41 @@ test('parked parks an item on its first attempt, with queue:parked and the reaso
     due: [],
     issues: [],
   });
+});
+
+test('hold() persists held and emits queue:held once, extends only to a later time, release() clears it and emits queue:released, a reopened store keeps held, and no item changes', () => {
+  const runs = runsDir();
+  const clock = manualClock(START);
+  const store = open(runs, clock);
+  store.add([ticket('FAKE-1')]);
+  const items = store.snapshot().items;
+  const until = '2026-10-14T13:20:00.000Z';
+  store.hold(until, 'run-1', 'spec#1 hit the usage limit');
+  store.hold('2026-10-14T10:00:00.000Z', 'run-2', 'earlier');
+  store.hold(until, 'run-3', 'same time');
+  const held = store.snapshot().held;
+  const reopened = open(runs, clock);
+  store.hold('2026-10-14T14:00:00.000Z', 'run-4', 'later');
+  expect({
+    held,
+    reopened: reopened.snapshot().held,
+    extended: store.snapshot().held,
+    items: store.snapshot().items,
+    types: typesIn(runs).filter((type) => String(type).startsWith('queue:h')),
+  }).toEqual({
+    held: { until, runId: 'run-1', reason: 'spec#1 hit the usage limit', at: START },
+    reopened: { until, runId: 'run-1', reason: 'spec#1 hit the usage limit', at: START },
+    extended: { until: '2026-10-14T14:00:00.000Z', runId: 'run-4', reason: 'later', at: START },
+    items,
+    types: ['queue:held', 'queue:held'],
+  });
+  store.release();
+  store.release();
+  expect({ held: store.snapshot().held, types: typesIn(runs).filter((type) => type === 'queue:released') }).toEqual({
+    held: undefined,
+    types: ['queue:released'],
+  });
+  expect(queueEventIssues(queueDir(runs, 'ticket-to-pr'))).toEqual([]);
 });
 
 test('requeue puts a parked or a failed item back queued with no attempts and nothing of its last run, with queue:requeued, and a queued, dispatched or done item throws naming its state and changes nothing', () => {

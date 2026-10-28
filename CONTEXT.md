@@ -531,6 +531,10 @@ _Avoid_: queue log, daemon log
 The key a queue item is known by, minted from its source: `ticket:<ticket key>`, and `pr:<number>@<sha7>` so a new push is a new item. A key already queued, dispatched, waiting to retry or parked is not queued again.
 _Avoid_: item id, queue key
 
+**Held dispatch**:
+A watched workflow's dispatch stopped until a time, because one of its runs hit the usage limit. It is kept in `queue.json`, and the queue is not changed: nothing starts or resumes until the reset, or a back-off when the provider gave none, and no item's attempt is counted.
+_Avoid_: paused (the poll's word), throttled, frozen
+
 **Parked**:
 A queue item's state once it has failed its last attempt: kept with the reason, never retried, until a person requeues or drops it.
 _Avoid_: dead-lettered, stuck, quarantined
