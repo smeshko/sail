@@ -8,7 +8,7 @@ export const Duplicates = z.object({
   candidates: z.array(z.object({ ticketKey: z.string(), confidence: z.number().min(0).max(1), why: z.string() })),
 });
 
-/** The ticket to check: its key, which is left out of the others, and what people wrote about it. */
+/** The ticket to check: its ticket key, which is left out of the others, and what people wrote about it. */
 export const DuplicateTicket = z.object({
   ticketKey: z.string(),
   title: untrusted(),
