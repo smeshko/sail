@@ -22,6 +22,32 @@ export interface FakeTicketSourceOptions extends ProviderOptions {
   readonly seed: string;
   /** Where the world's changes are kept. Read instead of `seed` once it exists. */
   readonly state: string;
+  /** The state names a designated ticket is picked up from. Every unstarted state when left out. */
+  readonly pickUp?: readonly string[];
+}
+
+/** Every state the fake knows, with the type it reports it as. A `pickUp` entry is checked against it. */
+export const FAKE_STATES: readonly TicketState[] = [
+  { type: 'unstarted', name: 'Triage' },
+  { type: 'unstarted', name: 'Backlog' },
+  { type: 'unstarted', name: 'Todo' },
+  { type: 'started', name: 'In Progress' },
+  { type: 'started', name: 'In Review' },
+  { type: 'completed', name: 'Done' },
+  { type: 'canceled', name: 'Canceled' },
+];
+
+/** Throws naming the first `pickUp` entry that is no unstarted state of the fake. */
+export function checkFakePickUp(pickUp: readonly string[]): void {
+  for (const name of pickUp) {
+    const known = FAKE_STATES.find((state) => state.name === name);
+    if (known === undefined) {
+      throw new Error(`option pickUp: '${name}' is no state of the fake ticket source`);
+    }
+    if (known.type !== 'unstarted') {
+      throw new Error(`option pickUp: '${name}' is a ${known.type} state; pickUp takes unstarted states`);
+    }
+  }
 }
 
 /** A ticket as the seed holds it: its URL and `raw` are derived. */
@@ -96,6 +122,9 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
   const store = createStore({ seed: options.seed, state: options.state, schema: World, port: 'ticketSource' });
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
+  const { pickUp } = options;
+  const canPickUp = (ticket: Pick<Ticket, 'state'>) =>
+    ticket.state.type === 'unstarted' && (pickUp === undefined || pickUp.includes(ticket.state.name));
   const find = (world: World, op: string, ticketKey: string): StoredTicket => {
     const found = world.tickets.find((ticket) => ticket.ticketKey === ticketKey);
     if (found === undefined) throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey}`);
@@ -143,11 +172,11 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       return ticket;
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
-    canPickUp: (ticket) => ticket.state.type === 'unstarted',
+    canPickUp,
     async listDesignated(label) {
       return store
         .read()
-        .tickets.filter((ticket) => ticket.labels.includes(label) && ticket.state.type === 'unstarted')
+        .tickets.filter((ticket) => ticket.labels.includes(label) && canPickUp(ticket))
         .sort((a, b) => ticketNumber(a.ticketKey) - ticketNumber(b.ticketKey))
         .map(toTicket);
     },
@@ -168,7 +197,7 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     async claim(ticketKey) {
       const result = store.change((world) => {
         const ticket = find(world, 'claim', ticketKey);
-        const claimed = ticket.state.type === 'unstarted';
+        const claimed = canPickUp(ticket);
         if (claimed) ticket.state = { ...STATES['in-progress'] };
         return { claimed, state: { ...ticket.state }, raw: structuredClone(ticket) };
       });
@@ -182,7 +211,10 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       }
       const moved = store.change((world) => {
         const ticket = find(world, 'update', ticketKey);
-        ticket.state = { ...STATES[change.state] };
+        ticket.state =
+          change.state === 'unstarted' && pickUp?.[0] !== undefined
+            ? { type: 'unstarted', name: pickUp[0] }
+            : { ...STATES[change.state] };
         return { state: { ...ticket.state }, raw: structuredClone(ticket) };
       });
       emit({ type: 'ticket:updated', ticketKey, change: { state: change.state }, state: moved.state });

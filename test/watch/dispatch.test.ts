@@ -4,6 +4,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { branchFor } from '../../src/engine/branch';
 import { requestStop, requestUnwatch } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
@@ -1126,5 +1127,22 @@ test('a re-check of a pull request that fails unavailable fails its item with no
       spawned: 0,
       settled: [{ number: 1, headSha: w.headSha }],
     });
+  });
+});
+
+test('under pickUp [Todo], a queued ticket now in Backlog is dropped as Backlog and never spawned', async () => {
+  await withTempRepo(async (repo) => {
+    const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+    const seedPath = join(repo.dir, '.sail', 'fake', 'tickets.json');
+    const w = await world(repo, 2, 2, {
+      source: () => createFakeTicketSource({ seed: seedPath, state, pickUp: ['Todo'], now: () => new Date(START) }),
+    });
+    const seed = JSON.parse(readFileSync(seedPath, 'utf8'));
+    seed.tickets[0].state = { type: 'unstarted', name: 'Backlog' };
+    mkdirSync(join(repo.dir, '.sail-runs', 'fake'), { recursive: true });
+    writeFileSync(state, JSON.stringify(seed));
+    await w.dispatcher().tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-2']);
+    expect(eventsOf(w.runs, 'queue:dropped')).toEqual([{ dedupKey: 'ticket:FAKE-1', reason: 'it is Backlog' }]);
   });
 });

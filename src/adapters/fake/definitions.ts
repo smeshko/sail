@@ -7,7 +7,7 @@ import type { AdapterContext, AdapterDefinition, AdapterOptions, Env, PortAdapte
 import { createFakeCodeHost } from './code-host';
 import { createFakeHarness } from './harness';
 import { createPlaybackHarness } from './playback';
-import { createFakeTicketSource } from './ticket-source';
+import { checkFakePickUp, createFakeTicketSource } from './ticket-source';
 import { createFakeWorkspace } from './workspace';
 
 /** Parses `options` with a strict object, or throws naming the offending option. */
@@ -32,9 +32,25 @@ const provider = (context: AdapterContext) => ({
 export const fakeAdapters: { [P in Port]: AdapterDefinition<PortAdapters[P]> } = {
   ticketSource: {
     create(options, context) {
-      const { seed } = parse('ticketSource', { seed: z.string().optional() }, options);
+      const shape = {
+        seed: z.string().optional(),
+        pickUp: z
+          .array(z.string().min(1))
+          .min(1)
+          .refine((names) => new Set(names).size === names.length, 'names a state twice')
+          .optional(),
+      };
+      const { seed, pickUp } = parse('ticketSource', shape, options);
+      if (pickUp !== undefined) {
+        try {
+          checkFakePickUp(pickUp);
+        } catch (error) {
+          throw new Error(`fake ticketSource: ${(error as Error).message}`);
+        }
+      }
       return createFakeTicketSource({
         ...provider(context),
+        ...(pickUp === undefined ? {} : { pickUp }),
         seed: resolve(context.sailDir, seed ?? 'fake/tickets.json'),
         state: resolve(context.runsDir, 'fake/tickets.json'),
       });

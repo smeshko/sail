@@ -748,3 +748,27 @@ test("an answer that is no list of pull requests fails a pr workflow's poll as t
     },
   });
 });
+
+test('with pickUp [Todo], a poll queues the labelled Todo ticket and skips the labelled Backlog one', async () => {
+  const dir = tempDir();
+  const seed = join(dir, 'tickets.json');
+  const world = [ticket('FAKE-1'), ticket('FAKE-2', { state: { type: 'unstarted', name: 'Backlog' } })];
+  writeFileSync(seed, JSON.stringify({ tickets: world.map(({ url, raw, ...stored }) => stored) }));
+  const source = createFakeTicketSource({ seed, state: join(dir, 'state.json'), pickUp: ['Todo'] });
+  const clock = manualClock(START);
+  const a = target(dir, 'a', 'sail', source, clock);
+  expect(await pollOnce(a, clock)).toBe('polled');
+  expect(itemKeys(dir, 'a')).toEqual(['ticket:FAKE-1']);
+});
+
+test('an adapter that over-answers a Backlog ticket under pickUp [Todo] has it filtered by canPickUp', async () => {
+  const dir = tempDir();
+  const seed = join(dir, 'tickets.json');
+  const world = [ticket('FAKE-1'), ticket('FAKE-2', { state: { type: 'unstarted', name: 'Backlog' } })];
+  writeFileSync(seed, JSON.stringify({ tickets: world.map(({ url, raw, ...stored }) => stored) }));
+  const fake = createFakeTicketSource({ seed, state: join(dir, 'state.json'), pickUp: ['Todo'] });
+  const clock = manualClock(START);
+  const a = target(dir, 'a', 'sail', { ...fake, listDesignated: async () => world }, clock);
+  await pollOnce(a, clock);
+  expect(itemKeys(dir, 'a')).toEqual(['ticket:FAKE-1']);
+});
