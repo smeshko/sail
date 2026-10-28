@@ -74,6 +74,8 @@ export const implement = agent('implement', {
       'git rev-parse *',
       'git restore *',
     ],
+    // An adapter is written against its API's docs: the wire format, auth and errors.
+    tools: ['WebFetch'],
   },
   budget: { maxTurns: 250, maxUsd: 10, maxMinutes: 60 },
 });

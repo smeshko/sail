@@ -34,6 +34,8 @@ export const plan = agent('plan', {
       'git grep *',
       'ls *',
     ],
+    // A ticket can name an outside API's docs, and the plan is only as right as its reading of them.
+    tools: ['WebFetch'],
   },
   budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 15 },
 });
