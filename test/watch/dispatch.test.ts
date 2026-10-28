@@ -187,6 +187,32 @@ test('a ticket that became In Progress, or lost its label, since it was queued i
   });
 });
 
+test('a ticket the re-check no longer finds is dropped as no longer existing, never spawned or retried, and the next due item starts in the same tick', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2, {
+      source: (own) => ({
+        ...own,
+        get: (ticketKey: string) => {
+          if (ticketKey === 'FAKE-1') throw new PortError('ticketSource', 'get', 'not_found', 'no ticket FAKE-1');
+          return own.get(ticketKey);
+        },
+      }),
+    });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-2']);
+    expect(states(w.store)).toEqual(['FAKE-2 dispatched 1']);
+    expect(eventsOf(w.runs, 'queue:dropped')).toEqual([
+      { dedupKey: 'ticket:FAKE-1', reason: 'it no longer exists: ticketSource.get: no ticket FAKE-1' },
+    ]);
+    expect(w.settled).toEqual([]);
+    w.clock.advance(FIVE_MINUTES);
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-2']);
+    expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
+  });
+});
+
 test('a re-check the ticket source fails leaves the item failed with no attempt, due again after the first retry delay, and the rest for the next tick', async () => {
   await withTempRepo(async (repo) => {
     let down = true;
