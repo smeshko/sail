@@ -232,6 +232,18 @@ test('a suspended usage_limit run whose lease a live process holds is adopted, n
   expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({ kind: 'adopt', pid: process.pid });
 });
 
+test('a suspended usage_limit run whose reset time is not after the limit was hit is held for the back-off after it', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'usage_limit');
+  limitedAt(w.runsDir, 1, '2026-10-28T09:50:00.000Z', '2026-10-28T09:45:00.000Z');
+  runDir(w.runsDir, 2, 'suspended', 'usage_limit');
+  limitedAt(w.runsDir, 2, '2026-10-28T09:50:00.000Z', '2026-10-28T09:50:00.000Z');
+  expect([await reconcileItem(item(1, DEAD), w.context()), await reconcileItem(item(2, DEAD), w.context())]).toEqual([
+    { kind: 'held', until: '2026-10-28T10:05:00.000Z', reason: 'spec#1 hit the usage limit' },
+    { kind: 'held', until: '2026-10-28T10:05:00.000Z', reason: 'spec#1 hit the usage limit' },
+  ]);
+});
+
 test('a suspended usage_limit run this dispatcher resumed, and which hit no limit since, is parked with why its resume failed; one that hit the limit again after the resume is held again', async () => {
   const w = world();
   runDir(w.runsDir, 1, 'suspended', 'usage_limit');

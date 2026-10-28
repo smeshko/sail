@@ -75,7 +75,7 @@ function statusOf(runDir: string): RunStatus | undefined {
 
 /**
  * When the usage limit the run suspended on lets it go on, and why it waits: the reset time its last `run:suspended`
- * names, else that event's time plus the back-off, else now plus the back-off.
+ * names when that is after the event, else that event's time plus the back-off, else now plus the back-off.
  */
 function usageLimitOf(
   runDir: string,
@@ -87,7 +87,9 @@ function usageLimitOf(
   const key = last?.type === 'run:suspended' && last.stopReason === 'usage_limit' ? last.key : undefined;
   const resetsAt = last?.type === 'run:suspended' && last.stopReason === 'usage_limit' ? last.resetsAt : undefined;
   const base = last === undefined ? (context.limitedAt ?? context.now).getTime() : Date.parse(last.ts);
-  const until = resetsAt ?? new Date(base + context.backoffMs).toISOString();
+  // A reset time not after the limit was hit, as from a skewed clock, would resume the run into the limit again at once.
+  const until =
+    resetsAt !== undefined && Date.parse(resetsAt) > base ? resetsAt : new Date(base + context.backoffMs).toISOString();
   const call = key === undefined ? 'a run' : key;
   return { until, reason: `${call} hit the usage limit`, ...(last === undefined ? {} : { at: Date.parse(last.ts) }) };
 }
