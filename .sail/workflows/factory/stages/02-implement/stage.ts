@@ -56,6 +56,8 @@ export const implement = agent('implement', {
       'echo *',
       'bun --version',
       'bun scripts/affected-tests.ts --list',
+      // A new dependency, pinned: the package an adapter imports, such as pi's or Codex's SDK.
+      'bun add --exact *',
       'bun run test *',
       'bun run typecheck',
       'bun run lint',
