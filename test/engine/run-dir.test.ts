@@ -12,6 +12,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  copiedIntakeFile,
+  copyStageFolders,
   createRunDir,
   RUNS_DIR,
   type RunStatus,
@@ -132,4 +134,61 @@ test('interrupted is the last stop reason, so STATUS can say a suspended run was
 test("the stop reasons are sail.summary.v1's, in its order", () => {
   const schema = JSON.parse(readFileSync(join(import.meta.dir, '..', '..', 'schemas', 'sail.summary.v1.json'), 'utf8'));
   expect([...STOP_REASONS]).toEqual(schema.properties.stopReason.enum);
+});
+
+function repoWith(files: string[]): string {
+  const root = tempDir();
+  for (const file of files) {
+    mkdirSync(join(root, file, '..'), { recursive: true });
+    writeFileSync(join(root, file), file);
+  }
+  return root;
+}
+
+const stageEntry = { origin: 'repo:.sail/stages/echo' };
+
+test("copyStageFolders copies a private intake's workflow folder and a shared intake's folder into the definition", () => {
+  const root = repoWith([
+    '.sail/workflows/groom/intake.ts',
+    '.sail/workflows/groom/fetch.sh',
+    '.sail/intakes/shared/intake.ts',
+    '.sail/intakes/shared/fetch.sh',
+    '.sail/stages/echo/stage.ts',
+  ]);
+  for (const origin of ['repo:.sail/workflows/groom/intake.ts', 'repo:.sail/intakes/shared']) {
+    const runDir = tempDir();
+    copyStageFolders(runDir, root, { intake: { name: 'groom', origin }, stages: { echo: stageEntry } });
+    const copied = (path: string) => existsSync(join(runDir, 'definition', path));
+    expect(copied('.sail/stages/echo/stage.ts')).toBe(true);
+    const folder = origin.endsWith('.ts') ? '.sail/workflows/groom' : '.sail/intakes/shared';
+    expect(copied(`${folder}/fetch.sh`)).toBe(true);
+  }
+});
+
+test('copyStageFolders copies no folder for a built-in intake', () => {
+  const root = repoWith(['.sail/stages/echo/stage.ts']);
+  const runDir = tempDir();
+  copyStageFolders(runDir, root, { intake: { name: 'ticket', origin: 'builtin' }, stages: { echo: stageEntry } });
+  expect(readdirSync(join(runDir, 'definition', '.sail'))).toEqual(['stages']);
+});
+
+test("copiedIntakeFile is a file beside the run's copy of the intake's folder, or the live file when the run has no copy", () => {
+  const root = repoWith(['.sail/workflows/groom/intake.ts', '.sail/intakes/shared/intake.ts']);
+  const runDir = tempDir();
+  const live = join(root, '.sail/workflows/groom/intake.ts');
+  expect(copiedIntakeFile(runDir, 'repo:.sail/workflows/groom/intake.ts', live)).toBe(live);
+  copyStageFolders(runDir, root, {
+    intake: { name: 'groom', origin: 'repo:.sail/workflows/groom/intake.ts' },
+    stages: {},
+  });
+  expect(copiedIntakeFile(runDir, 'repo:.sail/workflows/groom/intake.ts', live)).toBe(
+    join(runDir, 'definition', '.sail/workflows/groom/intake.ts'),
+  );
+  const shared = join(root, '.sail/intakes/shared/intake.ts');
+  expect(copiedIntakeFile(runDir, 'repo:.sail/intakes/shared', shared)).toBe(shared);
+  copyStageFolders(runDir, root, { intake: { name: 'shared', origin: 'repo:.sail/intakes/shared' }, stages: {} });
+  expect(copiedIntakeFile(runDir, 'repo:.sail/intakes/shared', shared)).toBe(
+    join(runDir, 'definition', '.sail/intakes/shared/intake.ts'),
+  );
+  expect(copiedIntakeFile(runDir, 'builtin', live)).toBe(live);
 });

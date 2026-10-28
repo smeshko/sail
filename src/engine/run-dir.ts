@@ -8,7 +8,7 @@
 // the header vouches for. `.sail/lib/` and the shared prompt fragments are left where they are: a script finds the one
 // beside `$SAIL_CONFIG`, which `sail port` also reads its adapters from, and neither belongs to one stage.
 import { cpSync, existsSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, join, relative, sep } from 'node:path';
 import { createDir, replaceFile } from './durable';
 import type { Roster } from './roster';
 
@@ -73,8 +73,19 @@ export const DEFINITION_DIR = 'definition';
 const repoPath = (origin: string | undefined) =>
   origin?.startsWith('repo:') ? origin.slice('repo:'.length) : undefined;
 
-/** Copies each stage folder `roster` reaches, from `root`, the directory holding `.sail/`, into `runDir`'s definition. */
-export function copyStageFolders(runDir: string, root: string, roster: Pick<Roster, 'stages'>): void {
+/** The intake's `intake.ts` as a roster origin says: a private intake's origin is the file, a shared one's its folder. */
+const intakeFolder = (path: string): string => (path.endsWith('.ts') ? dirname(path) : path);
+
+/**
+ * Copies each stage folder `roster` reaches, from `root`, the directory holding `.sail/`, into `runDir`'s definition,
+ * and the folder of the intake when it is the repository's own: a private intake's workflow folder, or a shared one's.
+ */
+export function copyStageFolders(runDir: string, root: string, roster: Pick<Roster, 'intake' | 'stages'>): void {
+  const intake = repoPath(roster.intake.origin);
+  if (intake !== undefined) {
+    const folder = intakeFolder(intake);
+    cpSync(join(root, folder), join(runDir, DEFINITION_DIR, folder), { recursive: true });
+  }
   for (const { origin } of Object.values(roster.stages)) {
     const path = repoPath(origin);
     if (path !== undefined) cpSync(join(root, path), join(runDir, DEFINITION_DIR, path), { recursive: true });
@@ -89,6 +100,17 @@ export function copiedStageFile(runDir: string, origin: string | undefined, live
   const path = repoPath(origin);
   const copy = path === undefined ? undefined : join(runDir, DEFINITION_DIR, path);
   return copy !== undefined && existsSync(copy) ? join(copy, 'stage.ts') : live;
+}
+
+/**
+ * The file an intake's steps read their folder beside: the run's copy of the intake's folder, or `live`, the
+ * checkout's, for an intake of no copy: a run that started before runs copied an intake's folder, or a built-in.
+ */
+export function copiedIntakeFile(runDir: string, origin: string | undefined, live: string): string {
+  const path = repoPath(origin);
+  if (path === undefined) return live;
+  const folder = join(runDir, DEFINITION_DIR, intakeFolder(path));
+  return existsSync(folder) ? join(folder, basename(live)) : live;
 }
 
 /**

@@ -58,7 +58,7 @@ import { type Raise, raiseProblem } from './budget';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { PORTS, type Port, type ProjectConfig, readConfig } from './config';
-import { INTAKE_KEY, INTAKE_STAGE, intakeBody } from './intake';
+import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
@@ -213,19 +213,13 @@ export function intakeNameTaken(loaded: LoadedWorkflow, sailDir: string): string
   return `${file}: a stage can't be named '${INTAKE_STAGE}': its first call's key would be the intake's, ${INTAKE_KEY}`;
 }
 
-/**
- * Why the workflow's intake can't take `ref`, a source of `kind`, as a refusal: it accepts no source of that kind, or
- * isn't a built-in.
- */
+/** Why the workflow's intake can't take `ref`, a source of `kind`, as a refusal: it accepts no source of that kind. */
 function intakeProblem(loaded: LoadedWorkflow, sailDir: string, ref: string, kind: SourceKind): string | undefined {
   const { name, accepts } = loaded.intake.definition;
   const file = relative(dirname(sailDir), join(loaded.dir, 'workflow.ts'));
   if (!accepts.includes(kind)) {
     const is = kind === 'ticket' ? 'a ticket' : 'a pull request';
     return `${file}: its intake '${name}' accepts ${accepts.join(', ') || 'nothing'}, and ${ref} is ${is}`;
-  }
-  if (intakeBody(loaded.intake) === undefined) {
-    return `${file}: its intake '${name}' is the repository's own, and only a built-in intake runs`;
   }
   return undefined;
 }

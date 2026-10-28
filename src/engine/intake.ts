@@ -5,6 +5,9 @@
 //
 // The call records the kind `builtin`: no step ran, so it has no exit, command or logs, and no `in/`, since the body
 // reads the source from the run header.
+//
+// An intake of the repository's own runs no body: its steps are the stage `intake`, so they run as any stage's do, as
+// the call `intake#1`, and intakeEmit() reports that call as the intake's events.
 import { BUILTIN_INTAKES, type IntakeBody } from '../builtins/intakes/index';
 import type { Emit } from '../events/types';
 import type { StepRun } from '../kinds/index';
@@ -101,6 +104,36 @@ export function intakeProblems(own: Intake): string[] {
     }
   }
   return found;
+}
+
+/**
+ * `emit` for the call of a repository intake's steps, which runs as the stage `intake`: its `stage:start` and
+ * `stage:end` become the `intake:start` and `intake:end` a built-in intake emits, and everything else is passed on. A
+ * one-step intake has the kind of its step, and several steps are a `stage` that names them.
+ */
+export function intakeEmit(emit: Emit, own: Intake, origin: string): Emit {
+  return (event) => {
+    if (event.type === 'stage:start' && event.key === INTAKE_KEY) {
+      return emit({
+        type: 'intake:start',
+        key: event.key,
+        intake: own.name,
+        kind: event.kind,
+        ...(event.steps === undefined ? {} : { steps: event.steps }),
+        origin,
+        consumed: event.consumed,
+      });
+    }
+    if (event.type === 'stage:end' && event.key === INTAKE_KEY) {
+      return emit({ type: 'intake:end', key: event.key, outcome: event.outcome, resultPath: event.resultPath });
+    }
+    return emit(event);
+  };
+}
+
+/** Why a run ends because its intake's one call didn't pass, as `outcome` and `reason` its journal line holds it. */
+export function intakeFailure(name: string, outcome: string, reason: string): string {
+  return `the intake '${name}' (${INTAKE_KEY}) ended in ${outcome}: ${reason}`;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));

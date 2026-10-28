@@ -24,6 +24,8 @@ import {
   INTAKE_KEY,
   INTAKE_STAGE,
   intakeBody,
+  intakeEmit,
+  intakeFailure,
   intakeProblems,
   ownIntakeStage,
   runIntake,
@@ -401,6 +403,65 @@ const groom = intake('groom', {
   steps: [fetchStep, shapeStep],
 });
 
+test("intakeEmit reports the call intake#1 as the intake's events, and passes every other event on", () => {
+  const seen: NewEvent[] = [];
+  const emit = intakeEmit((event) => seen.push(event), groom, 'repo:.sail/workflows/groom/intake.ts');
+  const consumed = { source: 'run.json#/source' };
+  emit({
+    type: 'stage:start',
+    key: 'intake#1',
+    stage: 'intake',
+    call: 1,
+    try: 1,
+    kind: 'stage',
+    consumed,
+    steps: ['fetch', 'shape'],
+  });
+  emit({
+    type: 'step:start',
+    key: 'intake#1/fetch',
+    stage: 'intake',
+    step: 'fetch',
+    index: 1,
+    of: 2,
+    kind: 'script',
+    try: 1,
+  });
+  emit({
+    type: 'stage:end',
+    key: 'intake#1',
+    stage: 'intake',
+    call: 1,
+    try: 1,
+    outcome: 'done',
+    durationMs: 5,
+    resultPath: '00-intake/call-1/result.json',
+  });
+  emit({ type: 'stage:start', key: 'echo#1', stage: 'echo', call: 1, try: 1, kind: 'script', consumed: {} });
+  expect(seen.map((event) => event.type)).toEqual(['intake:start', 'step:start', 'intake:end', 'stage:start']);
+  expect(seen[0]).toEqual({
+    type: 'intake:start',
+    key: 'intake#1',
+    intake: 'groom',
+    kind: 'stage',
+    steps: ['fetch', 'shape'],
+    origin: 'repo:.sail/workflows/groom/intake.ts',
+    consumed,
+  });
+  expect(seen[2]).toEqual({
+    type: 'intake:end',
+    key: 'intake#1',
+    outcome: 'done',
+    resultPath: '00-intake/call-1/result.json',
+  });
+});
+
+test('intakeFailure names the intake, its call, the outcome and the reason', () => {
+  expect(intakeFailure('groom', 'blocked', 'the ticket says nothing')).toBe(
+    "the intake 'groom' (intake#1) ended in blocked: the ticket says nothing",
+  );
+});
+
 test("ownIntakeStage is a stage named intake with the intake's steps, files and output, and its steps' source binding", () => {
   expect(ownIntakeStage(groom)).toEqual({
     kind: 'stage',
@@ -470,7 +531,8 @@ test("a fromStep naming a step that runs later is a problem naming the intake an
 // A run and its intake, on the stub.
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
-const PORT_FAILED = 'intake#1 ended in error: port: ticketSource.get: no ticket FAKE-1 (not_found)';
+const PORT_FAILED =
+  "the intake 'ticket' (intake#1) ended in error: port: ticketSource.get: no ticket FAKE-1 (not_found)";
 
 /** Runs the stub's ticket-to-pr from `cwd` on `FAKE-1`, or as `options` say. It must not be refused. */
 async function ticketRun(cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> {
@@ -638,11 +700,13 @@ test('an intake output that breaks TicketInput fails the run with stage_error, n
     writeOddStub(repo.dir, "async (key) => ({ ...(await fake.get(key)), url: 'not a url' })");
     const end = await ticketRun(repo.dir);
     expect(end).toMatchObject({ status: 'failed', stopReason: 'stage_error' });
-    expect(end.message).toStartWith("intake#1 ended in error: invalid_output: the output doesn't match its schema:\n");
+    expect(end.message).toStartWith(
+      "the intake 'ticket' (intake#1) ended in error: invalid_output: the output doesn't match its schema:\n",
+    );
     expect(end.message).toContain('→ at url');
     const { entries } = readJournal(end.dir);
     expect(entries.map((entry) => [entry.key, entry.outcome, entry.output])).toEqual([['intake#1', 'error', null]]);
-    expect(`intake#1 ended in error: ${entries[0]?.reason}`).toBe(end.message ?? '');
+    expect(`the intake 'ticket' (intake#1) ended in error: ${entries[0]?.reason}`).toBe(end.message ?? '');
     expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('failed stage_error\n');
     expect(workflowEntries(repo.dir)).toBe(0);
     expect(stubExecutions(repo.dir)).toEqual([]);
