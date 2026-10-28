@@ -103,6 +103,21 @@ test("run.json's sail.runtime alone differing is no difference, and any other fi
   );
 });
 
+test('the runtime text in a file other than the run header is a difference', () => {
+  const text = (runtime: string) => `{\n  "runtime": "${runtime}"\n}\n`;
+  const files = (runtime: string) => ({
+    'run.json': text(runtime),
+    '01-spec/call-1/result.json': text(runtime),
+    'x/run.json': text(runtime),
+  });
+  const diff = runDirDiff(runDir(files('bun 1.4.2')), runDir(files('bun 1.3.14')));
+  expect(diff).toContain('01-spec/call-1/result.json differs from the stored run');
+  expect(diff).toContain('x/run.json differs from the stored run');
+  expect(diff).toContain('  +   "runtime": "bun 1.4.2"');
+  expect(diff).toContain('  -   "runtime": "bun 1.3.14"');
+  expect(diff.split('\n').filter((line) => line.startsWith('run.json differs'))).toEqual([]);
+});
+
 test('files too long to compare line by line differ as a whole, and stay readable', () => {
   const [a, b] = [numbered(2100), Array.from({ length: 2100 }, (_, index) => `other ${index}`).join('\n')];
   const diff = runDirDiff(runDir({ 'big.txt': b }), runDir({ 'big.txt': a }));

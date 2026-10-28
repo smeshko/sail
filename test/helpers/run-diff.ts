@@ -1,7 +1,7 @@
 // runDirDiff(): the readable difference between a run directory a test generated and the one committed (11.3 D9).
 // `''` means they are the same run. Otherwise it names each file one has and the other lacks, and for each file whose
 // bytes differ, its first three changed hunks: the line numbers, two lines of context, and the lines of the committed
-// file (`-`) and of the generated one (`+`). `run.json`'s `sail.runtime`, the Bun that generated, is compared apart.
+// file (`-`) and of the generated one (`+`). The run header's `sail.runtime`, the Bun that generated, is compared apart, in `run.json` alone.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
@@ -23,11 +23,14 @@ function filesIn(dir: string): string[] {
 }
 
 /**
- * A file's text, with the one field that names the machine's Bun put aside. `latin1` reads one character per byte, so
+ * A file's text, with the run header's field that names the machine's Bun put aside: only the `run.json` at the run
+ * directory's root, so the same text in any other file stays a difference. `latin1` reads one character per byte, so
  * two files compare equal only when their bytes are; `utf8` is the text a diff shows.
  */
-const comparable = (dir: string, file: string, encoding: 'utf8' | 'latin1' = 'utf8'): string =>
-  readFileSync(join(dir, file), encoding).replace(RUNTIME, '"runtime": "bun <version>"');
+function comparable(dir: string, file: string, encoding: 'utf8' | 'latin1' = 'utf8'): string {
+  const text = readFileSync(join(dir, file), encoding);
+  return file === 'run.json' ? text.replace(RUNTIME, '"runtime": "bun <version>"') : text;
+}
 
 type Op = { kind: ' ' | '-' | '+'; line: string; stored: number; generated: number };
 
