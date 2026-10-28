@@ -1,6 +1,6 @@
 // Reads the ticket in $INPUT_SOURCE through `sail port ticket-source get`, and the team's unstarted and started tickets
 // through `list`. Writes ticket.json, brief.md (the ticket, with every passage a person wrote wrapped as untrusted
-// input) and others.md (the other open tickets, their titles wrapped the same way). Makes no claim. Prints the GroomInput,
+// input) and others.md (the other open tickets, their states and titles wrapped the same way). Makes no claim. Prints the GroomInput,
 // with the other open tickets' keys.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -28,8 +28,15 @@ writeFileSync(join(out, 'ticket.json'), `${JSON.stringify(ticket, null, 2)}\n`);
 const brief = [
   `# ${ticket.ticketKey}`,
   '',
-  `State: ${ticket.state.name} (${ticket.state.type})`,
-  `Labels: ${ticket.labels.join(', ') || 'none'}`,
+  `State (${ticket.state.type}):`,
+  '',
+  wrap(ticket.state.name, `ticket ${ticketKey}, state`),
+  '',
+  'Labels:',
+  '',
+  ...(ticket.labels.length === 0
+    ? ['None.']
+    : ticket.labels.flatMap((label, index) => [wrap(label, `ticket ${ticketKey}, label ${index + 1}`), ''])),
   '',
   '## Title',
   '',
@@ -56,7 +63,8 @@ const open = [
   ...json(['ticket-source', 'list', '--state', 'started']),
 ].filter((other) => other.ticketKey !== ticketKey);
 const others = open.map(
-  (other) => `- ${other.ticketKey} (${other.state.name}): ${wrap(other.title, `ticket ${other.ticketKey}, title`)}`,
+  (other) =>
+    `- ${other.ticketKey}: ${wrap(other.state.name, `ticket ${other.ticketKey}, state`)} ${wrap(other.title, `ticket ${other.ticketKey}, title`)}`,
 );
 writeFileSync(
   join(out, 'others.md'),

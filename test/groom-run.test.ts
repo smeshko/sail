@@ -61,6 +61,10 @@ test("groom's intake wraps the ticket and the other tickets as untrusted input",
     expect(brief).toContain('<untrusted-input source="ticket FAKE-2, description">');
     expect(others).toContain('<untrusted-input source="ticket FAKE-1, title">');
     expect(others).not.toContain('FAKE-2');
+    expect(brief).toContain('<untrusted-input source="ticket FAKE-2, state">');
+    expect(brief).toContain('<untrusted-input source="ticket FAKE-2, label 1">');
+    expect(brief).not.toContain('State: Backlog');
+    expect(others).toContain('<untrusted-input source="ticket FAKE-1, state">');
   });
 }, 120_000);
 
