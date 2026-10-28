@@ -12,6 +12,9 @@
 // A multi-step call a resume starts again keeps the steps it ended before: they are journaled and don't run again, so
 // their facts would otherwise be lost with the earlier process's `stage:start`.
 //
+// A step's duration is its `step:end`'s, the base its call's sums; one written before `step:end` carried it is timed
+// from its `step:start` to its `step:end`.
+//
 // A group's calls are listed among the calls like any other, in `stage:start` order, and the group itself in `groups`:
 // its keys in declaration order from its `all:start`, and its duration once its `all:end` came. A resume that runs the
 // rest of a group reports its `all:start` again, and the group is listed once.
@@ -375,7 +378,7 @@ function startStep(state: SummaryState, event: EventOf<'step:start'>): void {
 function endStep(state: SummaryState, event: EventOf<'step:end'>): void {
   const step = state.calls.get(callKeyOf(event.key))?.steps.get(event.key);
   if (step === undefined) return;
-  step.end = { outcome: event.outcome, durationMs: elapsed(step.startedAt, event.ts) };
+  step.end = { outcome: event.outcome, durationMs: event.durationMs ?? elapsed(step.startedAt, event.ts) };
   state.results.set(event.resultPath, event.key);
 }
 

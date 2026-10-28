@@ -317,7 +317,25 @@ test("a call's agent facts are its latest try's last session's, and totals sum e
   });
 });
 
-test("a multi-step call has no kind, costs what its steps cost, and lists each step, its duration from the step's own events", () => {
+test('a step:end without durationMs, from before it carried one, is timed from step:start to step:end', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [200, stepStart('publish#1/describe', 1, 2, 'agent')],
+      [1200, stepEnd('publish#1/describe', 1, 'done')],
+      [1210, journal('publish#1/describe', 1, 'done')],
+      [1600, stepStart('publish#1/open', 2, 2, 'script')],
+      [2100, stepEnd('publish#1/open', 2, 'passed')],
+      [2110, journal('publish#1/open', 2, 'passed')],
+      [2200, end('publish#1', 'passed', 1500)],
+      [2210, journal('publish#1', 3, 'passed')],
+    ),
+  );
+  expect(summary?.calls[0]?.steps?.map((step) => step.durationMs)).toEqual([1000, 500]);
+});
+
+test("a multi-step call has no kind, costs what its steps cost, and lists each step, its duration from each step:end, summing to the call's", () => {
   const summary = folded(
     stamp(
       [0, runStart()],
@@ -325,17 +343,17 @@ test("a multi-step call has no kind, costs what its steps cost, and lists each s
       [200, stepStart('publish#1/describe', 1, 3, 'agent')],
       [300, session('publish#1/describe', { turns: 4, toolCalls: 2, denials: 1, usage: { costUsd: 0.1 } })],
       [310, produced('publish#1/describe', 'pr-body.md')],
-      [1200, stepEnd('publish#1/describe', 1, 'done')],
+      [1200, stepEnd('publish#1/describe', 1, 'done', 1, 900)],
       [1210, journal('publish#1/describe', 1, 'done')],
       [1300, stepStart('publish#1/review', 2, 3, 'agent')],
       [1400, session('publish#1/review', { turns: 1, toolCalls: 0, denials: 0, usage: { costUsd: 0.2 } })],
-      [1500, stepEnd('publish#1/review', 2, 'done')],
+      [1500, stepEnd('publish#1/review', 2, 'done', 1, 150)],
       [1510, journal('publish#1/review', 2, 'done')],
       [1600, stepStart('publish#1/open', 3, 3, 'script')],
       [1700, produced('publish#1', 'pr-body.md')],
-      [2100, stepEnd('publish#1/open', 3, 'passed')],
+      [2100, stepEnd('publish#1/open', 3, 'passed', 1, 400)],
       [2110, journal('publish#1/open', 3, 'passed')],
-      [2200, end('publish#1', 'passed', 2150)],
+      [2200, end('publish#1', 'passed', 1450)],
       [2210, journal('publish#1', 4, 'passed')],
     ),
   );
@@ -343,7 +361,7 @@ test("a multi-step call has no kind, costs what its steps cost, and lists each s
     {
       key: 'publish#1',
       outcome: 'passed',
-      durationMs: 2150,
+      durationMs: 1450,
       costUsd: 0.3,
       files: ['pr-body.md'],
       resultPath: 'publish/call-1/result.json',
@@ -352,7 +370,7 @@ test("a multi-step call has no kind, costs what its steps cost, and lists each s
           key: 'publish#1/describe',
           kind: 'agent',
           outcome: 'done',
-          durationMs: 1000,
+          durationMs: 900,
           turns: 4,
           toolCalls: 2,
           costUsd: 0.1,
@@ -362,12 +380,12 @@ test("a multi-step call has no kind, costs what its steps cost, and lists each s
           key: 'publish#1/review',
           kind: 'agent',
           outcome: 'done',
-          durationMs: 200,
+          durationMs: 150,
           turns: 1,
           toolCalls: 0,
           costUsd: 0.2,
         },
-        { key: 'publish#1/open', kind: 'script', outcome: 'passed', durationMs: 500 },
+        { key: 'publish#1/open', kind: 'script', outcome: 'passed', durationMs: 400 },
       ],
     },
   ]);
@@ -713,14 +731,14 @@ test("a multi-step call a resume started again between its steps keeps the steps
       [200, stepStart('publish#1/describe', 1, 2, 'agent')],
       [300, session('publish#1/describe', { turns: 2, toolCalls: 1, denials: 0, usage: { costUsd: 0.25 } })],
       [310, produced('publish#1/describe', 'pr-body.md')],
-      [1200, stepEnd('publish#1/describe', 1, 'done')],
+      [1200, stepEnd('publish#1/describe', 1, 'done', 1, 800)],
       [1210, journal('publish#1/describe', 3, 'done')],
       [1300, runEnd('suspended', 1, { stopReason: 'interrupted' })],
       [5000, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
       [5100, stepStart('publish#1/open', 2, 2, 'script')],
-      [5600, stepEnd('publish#1/open', 2, 'passed')],
+      [5600, stepEnd('publish#1/open', 2, 'passed', 1, 300)],
       [5610, journal('publish#1/open', 4, 'passed')],
-      [5700, end('publish#1', 'passed', 1500)],
+      [5700, end('publish#1', 'passed', 1100)],
       [5710, journal('publish#1', 5, 'passed')],
       [5800, runEnd('completed', 1)],
     ),
@@ -730,7 +748,7 @@ test("a multi-step call a resume started again between its steps keeps the steps
       {
         key: 'publish#1',
         outcome: 'passed',
-        durationMs: 1500,
+        durationMs: 1100,
         costUsd: 0.25,
         files: ['pr-body.md'],
         resultPath: 'publish/call-1/result.json',
@@ -739,13 +757,13 @@ test("a multi-step call a resume started again between its steps keeps the steps
             key: 'publish#1/describe',
             kind: 'agent',
             outcome: 'done',
-            durationMs: 1000,
+            durationMs: 800,
             turns: 2,
             toolCalls: 1,
             costUsd: 0.25,
             files: ['pr-body.md'],
           },
-          { key: 'publish#1/open', kind: 'script', outcome: 'passed', durationMs: 500 },
+          { key: 'publish#1/open', kind: 'script', outcome: 'passed', durationMs: 300 },
         ],
       },
     ],
