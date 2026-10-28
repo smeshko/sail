@@ -145,6 +145,15 @@ test('the session is given pi’s model, the workspace, the tools its step can u
   });
 });
 
+test('the session is told to submit through the submit tool, not through structured output', async () => {
+  const { scripted } = await play('done');
+  const prompt = scripted.calls[0]?.params.systemPrompt ?? '';
+  expect({
+    tool: prompt.includes('by calling the `submit` tool'),
+    structured: prompt.includes('structured output'),
+  }).toEqual({ tool: true, structured: false });
+});
+
 test('a step with no shell is told it has none', async () => {
   const { scripted } = await play('done');
   expect(scripted.calls[0]?.params.systemPrompt).toContain("You have no shell, so you can't read environment");

@@ -6,6 +6,16 @@ import Ajv2020, { type ErrorObject } from 'ajv/dist/2020';
 import { submissionEnvelope } from '../claude-code/submission';
 import { SUBMIT_TOOL } from './tool-call';
 
+/** The last section appended to pi's system prompt: how this harness takes a submission. */
+export const SUBMIT_CONTRACT = `## Submitting
+
+You submit by calling the \`${SUBMIT_TOOL}\` tool, exactly once, when the work is over. Its argument is an envelope:
+
+- When the work is complete: {"outcome": "done", "output": <the output its schema describes>}
+- When you cannot complete it: {"outcome": "blocked", "reason": "<one paragraph saying why>"}
+
+Submit nothing else, and do not submit before the work is done.`;
+
 export type Submitted =
   | { readonly outcome: 'done'; readonly output: unknown }
   | { readonly outcome: 'blocked'; readonly reason: string };

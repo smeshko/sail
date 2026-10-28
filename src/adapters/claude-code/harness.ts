@@ -109,10 +109,12 @@ export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env)
  * A session with one has them in its environment too (D16).
  */
 export function appendedSystemPrompt(request: HarnessRequest): string {
-  return whereYouWork(request, sessionTools(request.permissions).tools.includes('Bash'));
+  return [whereYouWork(request, sessionTools(request.permissions).tools.includes('Bash')), '', SUBMIT_CONTRACT].join(
+    '\n',
+  );
 }
 
-/** The same text for any harness: `hasShell` is whether the session is offered a shell. */
+/** Where the session works, the same text for any harness: `hasShell` is whether the session is offered a shell. */
 export function whereYouWork(request: HarnessRequest, hasShell: boolean): string {
   const variables = Object.entries(request.env).map(([name, value]) => `- \`$${name}\`: ${value}`);
   const shell = hasShell
@@ -133,8 +135,6 @@ export function whereYouWork(request: HarnessRequest, hasShell: boolean): string
     '',
     'A file the step produces goes straight into `$STAGE_OUT` under its own name, as `$STAGE_OUT/<name>`, not into a',
     'directory below it.',
-    '',
-    SUBMIT_CONTRACT,
   ].join('\n');
 }
 

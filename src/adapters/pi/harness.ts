@@ -15,7 +15,7 @@ import { createPiSessionReader, type PiEvent, type PiSessionReader } from './mes
 import { bashEnv, createBashRunner } from './process';
 import { toHarnessResult } from './result';
 import { createPiSession, type PiSession, type PiSessionFactory } from './session';
-import { type Submitted, submitTool } from './submission';
+import { SUBMIT_CONTRACT, type Submitted, submitTool } from './submission';
 import { sessionTools } from './tool-call';
 
 export interface PiHarnessOptions {
@@ -256,7 +256,7 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
         session = await createSession({
           cwd: request.cwd,
           model: request.model,
-          systemPrompt: whereYouWork(request, tools.includes('bash')),
+          systemPrompt: [whereYouWork(request, tools.includes('bash')), '', SUBMIT_CONTRACT].join('\n'),
           tools,
           gate: gateExtension(gate),
           submit: submitTool(request.outputSchema, (found) => {
