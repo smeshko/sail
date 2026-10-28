@@ -22,7 +22,7 @@ export default workflow(
     intake: ticket,
     version: 6,
     watch: { every: '5m' },
-    maxConcurrentRuns: 3,
+    maxConcurrentRuns: 2,
     description: 'plan, implement test first, validate, check the tasks, pull request, follow-ups',
   },
   async (run) => {

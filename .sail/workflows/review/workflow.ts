@@ -50,8 +50,8 @@ export default workflow(
     intake: pr,
     version: 2,
     watch: { every: '5m' },
-    // One pull request at a time: each merge moves the base the next one is reviewed against.
-    maxConcurrentRuns: 1,
+    // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
+    maxConcurrentRuns: 2,
     description: 'validate, leak-check, demonstrate and review six ways at once, judge, fix in rounds, merge',
   },
   async (run) => {
