@@ -126,6 +126,8 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const logFroms = new Map<string, number>();
   /** The runs this dispatcher has resumed: each is resumed once. */
   const resumed = new Set<string>();
+  /** When this dispatcher last resumed each run from its usage limit, until the run is held again. */
+  const resumedAt = new Map<string, Date>();
   /** When this dispatcher first saw each run on its usage limit, until it resumes the run. */
   const limitedAt = new Map<string, Date>();
   /** Until the first settle is over: a live run found then is adopted. */
@@ -166,6 +168,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   /** Resumes the item's run as a process of its own, once, which then counts as the item's. */
   const resume = (item: QueueItem, runId: string, from: ResumedFrom) => {
     resumed.add(runId);
+    if (from.status === 'suspended' && from.stopReason === 'usage_limit') resumedAt.set(runId, now());
     exits.delete(item.dedupKey);
     let spawned: SpawnedRun;
     try {
@@ -206,6 +209,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         ...(limitedAt.has(runId) ? { limitedAt: limitedAt.get(runId) as Date } : {}),
         first,
         resumed: resumed.has(runId),
+        ...(resumedAt.has(runId) ? { resumedAt: resumedAt.get(runId) as Date } : {}),
         ...(exits.has(item.dedupKey) ? { exited: exited ?? null } : {}),
         ...(logFrom === undefined ? {} : { logFrom }),
       });
@@ -247,6 +251,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       case 'held':
         // The run will be resumed once, and again if it hits the limit again, so it is not one this dispatcher resumed.
         resumed.delete(runId);
+        resumedAt.delete(runId);
         limitedAt.set(runId, limitedAt.get(runId) ?? now());
         store.hold(answer.until, runId, answer.reason);
         break;

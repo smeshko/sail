@@ -9,7 +9,7 @@
 // | `failed stopped` | parked at once: a person stopped it, and a stopped run is never retried |
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended unwatched` | adopted under its lease's pid when a live process holds its lease, else resumed, once |
-// | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before |
+// | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
 // | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
 //
 // A limit with no event to date it by is dated by when the dispatcher first saw it (`limitedAt`).
@@ -46,6 +46,8 @@ export interface ReconcileContext {
   first: boolean;
   /** Whether this dispatcher has already resumed the item's run. */
   resumed: boolean;
+  /** When this dispatcher last resumed the item's run from its usage limit: a limit not hit since means it failed. */
+  resumedAt?: Date;
   /** How the process this dispatcher last started for the item exited, once it has. */
   exited?: number | null;
   /** Where the output of the process this dispatcher last started for the item begins in its dispatch log. */
@@ -78,7 +80,7 @@ function statusOf(runDir: string): RunStatus | undefined {
 function usageLimitOf(
   runDir: string,
   context: Pick<ReconcileContext, 'now' | 'backoffMs' | 'limitedAt'>,
-): { until: string; reason: string } {
+): { until: string; reason: string; at?: number } {
   const last = readEvents(runDir)
     .filter((event) => event.type === 'run:suspended' && event.stopReason === 'usage_limit')
     .at(-1);
@@ -87,7 +89,7 @@ function usageLimitOf(
   const base = last === undefined ? (context.limitedAt ?? context.now).getTime() : Date.parse(last.ts);
   const until = resetsAt ?? new Date(base + context.backoffMs).toISOString();
   const call = key === undefined ? 'a run' : key;
-  return { until, reason: `${call} hit the usage limit` };
+  return { until, reason: `${call} hit the usage limit`, ...(last === undefined ? {} : { at: Date.parse(last.ts) }) };
 }
 
 /** Where a run stands that a resume takes on, or undefined for any other. */
@@ -158,7 +160,10 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
   if (status.status === 'suspended' && status.stopReason === 'usage_limit') {
     const holder = await liveHolder(runDir, runId, context);
     if (holder !== undefined) return { kind: 'adopt', pid: holder };
-    const { until, reason } = usageLimitOf(runDir, context);
+    const { until, reason, at } = usageLimitOf(runDir, context);
+    if (context.resumedAt !== undefined && (at === undefined || at <= context.resumedAt.getTime())) {
+      return { kind: 'park', reason: why(context, runId, 'its resume failed') ?? 'its resume failed' };
+    }
     if (context.now.getTime() < Date.parse(until)) return { kind: 'held', until, reason };
     return { kind: 'resume', from: { status: 'suspended', stopReason: 'usage_limit' } };
   }
