@@ -164,7 +164,8 @@ export function renderTimeline(card: StageCard, ui: UiState, now: number, output
   const running = card.state === 'running';
   const state = running ? 'running' : (card.outcome ?? 'settled');
   const denials = card.denials.length;
-  const facts = `${duration(elapsedMs(card, now))} · ${cost(card.costUsd)} · ${card.toolCalls} tool call${
+  // A running call's cost is known only once its session ends.
+  const facts = `${duration(elapsedMs(card, now))}${running ? '' : ` · ${cost(card.costUsd)}`} · ${card.toolCalls} tool call${
     card.toolCalls === 1 ? '' : 's'
   }${denials === 0 ? '' : ` · ${denials} denied`}`;
   const entries = card.timeline;
@@ -177,12 +178,12 @@ export function renderTimeline(card: StageCard, ui: UiState, now: number, output
   });
   const hidesAll =
     entries.some((entry) => filterOf(entry) !== undefined) && shown.every((entry) => filterOf(entry) === undefined);
-  return html`<div class="d-h tl-h"><button class="btn" data-action="close-timeline" title="back to the cards (Esc)">‹ cards</button><span class="d-title">${card.key}</span><span class="pill ${pillOf(state)}">${state}</span><span class="c-agent">${card.kind}${
+  return html`<div class="tl-top"><div class="d-h tl-h"><button class="btn" data-action="close-timeline" title="back to the cards (Esc)">‹ cards</button><span class="d-title">${card.key}</span><span class="pill ${pillOf(state)}">${state}</span><span class="c-agent">${card.kind}${
     card.model === undefined ? '' : html` <span class="c-model">${card.model}</span>`
   }</span><span class="d-agent">${facts}</span><button class="btn" data-action="step-card" data-by="-1" title="previous call ([)">‹</button><button class="btn" data-action="step-card" data-by="1" title="next call (])">›</button>${
     running ? html`<button class="tog${ui.follow ? ' on' : ''}" data-action="toggle-follow">follow</button>` : ''
   }</div>
-${filters(entries, ui)}<div class="tl">${
+${filters(entries, ui)}</div><div class="tl">${
     entries.length === 0
       ? html`<div class="qempty">${running ? 'nothing yet: the timeline fills as the call works' : 'this call recorded no timeline'}</div>`
       : hidesAll

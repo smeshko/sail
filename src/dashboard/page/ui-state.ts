@@ -67,7 +67,7 @@ export function initialUi(tz: number): UiState {
     theme: 'dark',
     inspector: true,
     cursor: 0,
-    follow: true,
+    follow: false,
     tz,
   };
 }

@@ -958,10 +958,13 @@
       .tl-h .btn {
         flex: none;
       }
-      .tl-f {
+      /* the header and the chips stay pinned while the timeline scrolls under them */
+      .tl-top {
         position: sticky;
         top: 0;
         z-index: 1;
+      }
+      .tl-f {
         display: flex;
         flex-wrap: wrap;
         gap: 4px;

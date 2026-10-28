@@ -38,7 +38,9 @@ function card(entry: StageCard, place: number, ui: UiState, now: number): SafeHt
     entry.tries > 1 ? html`<span class="retry">↻${entry.tries}</span>` : ''
   }${entry.denials.length > 0 ? html`<span class="warnchip">⊘ ${entry.denials.length}</span>` : ''}<span class="pill ${pillOf(state)}">${state}</span></div>
 <div class="c-agent">${entry.kind}${entry.model === undefined ? '' : html` <span class="c-model">${entry.model}</span>`}</div>
-<div class="facts"><div><b>${duration(elapsedMs(entry, now))}</b><span class="lbl">duration</span></div><div><b>${cost(entry.costUsd)}</b><span class="lbl">cost</span></div><div><b>${entry.toolCalls}</b><span class="lbl">tool calls</span></div></div>
+<div class="facts"><div><b>${duration(elapsedMs(entry, now))}</b><span class="lbl">duration</span></div>${
+    entry.state === 'running' ? '' : html`<div><b>${cost(entry.costUsd)}</b><span class="lbl">cost</span></div>`
+  }<div><b>${entry.toolCalls}</b><span class="lbl">tool calls</span></div></div>
 ${entry.message === undefined ? '' : html`<div class="c-msg">${entry.message}</div>`}
 ${
   entry.steps.length === 0
@@ -91,14 +93,19 @@ function groups(model: RunModel, ui: UiState, now: number): SafeHtml[] {
   return out;
 }
 
-/** Duration, cost and calls of the run: from the summary when there is one, else from the cards. */
+/** The summary once the run has ended: until then it is the one written after the last call, behind the cards. */
+const finalOf = (model: RunModel, summary: Summary | null | undefined) =>
+  model.end === undefined ? undefined : (summary ?? undefined);
+
+/** Duration, cost and calls of the run: from the summary once it has ended, else from the cards. */
 function totals(model: RunModel, summary: Summary | null | undefined, now: number): SafeHtml {
+  const final = finalOf(model, summary);
   const started = model.startedAt === undefined ? Number.NaN : Date.parse(model.startedAt);
-  const ms = summary?.durationMs ?? (Number.isNaN(started) ? undefined : Math.max(0, now - started));
-  const spent = summary?.totals.usage.costUsd ?? model.cards.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0);
+  const ms = final?.durationMs ?? (Number.isNaN(started) ? undefined : Math.max(0, now - started));
+  const spent = final?.totals.usage.costUsd ?? model.cards.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0);
   const maxUsd = summary?.totals.budget?.maxUsd ?? model.budget?.maxUsd;
   const maxMinutes = model.budget?.maxMinutes;
-  const used = summary?.totals.budget?.usedPct;
+  const used = final?.totals.budget?.usedPct;
   const settled = model.cards.filter((entry) => entry.state === 'settled').length;
   return html`<div class="stats totals">
 <div class="stat"><b>${duration(ms)}</b><span>${maxMinutes === undefined ? 'duration' : `of ${maxMinutes}m`}</span></div>
@@ -148,7 +155,7 @@ function tokensOf(
   model: RunModel,
   summary: Summary | null | undefined,
 ): { input: number; output: number; cached: number } {
-  const usage = model.end === undefined ? undefined : summary?.totals.usage;
+  const usage = finalOf(model, summary)?.totals.usage;
   if (usage !== undefined) {
     return { input: usage.inputTokens ?? 0, output: usage.outputTokens ?? 0, cached: usage.cacheReadTokens ?? 0 };
   }
@@ -166,7 +173,8 @@ export function renderStatus(model: RunModel, summary: Summary | null | undefine
   const settled = model.cards.filter((entry) => entry.state === 'settled').length;
   const tools = model.cards.reduce((sum, entry) => sum + entry.toolCalls, 0);
   const denials = model.cards.reduce((sum, entry) => sum + entry.denials.length, 0);
-  const spent = summary?.totals.usage.costUsd ?? model.cards.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0);
+  const spent =
+    finalOf(model, summary)?.totals.usage.costUsd ?? model.cards.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0);
   const used = tokensOf(model, summary);
   return html`<span>calls <b>${settled}/${model.cards.length}</b></span><span>tools <b>${tools}</b></span><span class="${
     denials > 0 ? 'w' : ''

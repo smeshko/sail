@@ -53,14 +53,16 @@ test("a tool call's input is shown by its most telling field's first line, else 
   ]);
 });
 
-test('a running call with no events yet says the timeline fills as it works, with follow on, and a settled one with none says so', () => {
+test('a running call with no events yet says the timeline fills as it works, with follow off by default, and a settled one with none says so', () => {
   const running = renderTimeline(spec([]), ui(), NOW).value;
   expect(running).toContain('<span class="d-title">spec#1</span><span class="pill p-run">running</span>');
+  expect(running).toStartWith('<div class="tl-top"><div class="d-h tl-h">');
+  expect(running).toContain('follow</button></div>\n</div><div class="tl">');
   expect(running).toContain('<div class="qempty">nothing yet: the timeline fills as the call works</div>');
-  expect(running).toContain('<button class="tog on" data-action="toggle-follow">follow</button>');
+  expect(running).toContain('<button class="tog" data-action="toggle-follow">follow</button>');
   expect(running).toContain('<div class="streaming"><i></i>spec#1 is working…</div>');
-  expect(renderTimeline(spec([]), ui({ follow: false }), NOW).value).toContain(
-    '<button class="tog" data-action="toggle-follow">follow</button>',
+  expect(renderTimeline(spec([]), ui({ follow: true }), NOW).value).toContain(
+    '<button class="tog on" data-action="toggle-follow">follow</button>',
   );
   const settled = renderTimeline(
     spec([{ ...at, seq: 901, type: 'stage:end', stage: 'spec', call: 1, try: 1, outcome: 'done', durationMs: 1200 }]),
@@ -109,7 +111,7 @@ test('thinking and messages are escaped text; a tool row shows its input, durati
     '<div class="tcall t-running"><button class="trow" data-action="toggle-tool" data-call="c3">',
   );
   expect(closed).toContain('<span class="tmeta"><span class="mark">…</span>');
-  expect(closed).toContain('<span class="d-agent">28.5s · — · 3 tool calls · 1 denied</span>');
+  expect(closed).toContain('<span class="d-agent">28.5s · 3 tool calls · 1 denied</span>');
   expect(closed).not.toContain('class="tout"');
 
   const opened = renderTimeline(card, ui({ opened: ['c1', 'c2'] }), NOW).value;
