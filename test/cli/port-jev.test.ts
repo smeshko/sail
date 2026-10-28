@@ -62,6 +62,16 @@ test('ask reads its body from --body-file, and --model is the model asked', asyn
   });
 });
 
+test("--model overrides the body's model, and without it the body's model is the model asked", async () => {
+  await withTempRepo(async (repo) => {
+    withJev(repo);
+    const stdin = JSON.stringify({ ...THREE_QUESTIONS, model: 'jev-body' });
+    const overridden = await jev(repo, ['ask', '--model', 'jev-x'], { stdin });
+    const own = await jev(repo, ['ask'], { stdin });
+    expect([JSON.parse(overridden.stdout).model, JSON.parse(own.stdout).model]).toEqual(['jev-x', 'jev-body']);
+  });
+});
+
 test('with SAIL_EVENTS set, ask appends a jev:asked line', async () => {
   await withTempRepo(async (repo) => {
     withJev(repo, { usage: { inputTokens: 5, outputTokens: 1 } });
