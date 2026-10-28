@@ -1,7 +1,7 @@
-// groom: a groom-labelled ticket in, one comment out. The ticket is read without a claim, so it stays where it is. Three
-// checks look at it at once (duplicates, staleness, open questions); a judge writes the report and chooses actions from
-// a fixed set; the act step applies them, comments the report and takes the label off, so the watcher grooms each ticket
-// once. Composition only: every contract lives on its stage.
+// groom: a groom-labelled ticket in, one comment out. The ticket is read without a claim, so it stays where it is unless
+// a marked duplicate cancels it. Three checks look at it at once (duplicates, staleness, open questions); a judge writes
+// the report and chooses actions from a fixed set; the act step applies them, comments the report and takes the label
+// off, so the watcher grooms each ticket once. Composition only: every contract lives on its stage.
 import { workflow, type z } from 'sail';
 import { readTicket } from './intake';
 import type { Decision, Duplicates, Plan } from './schemas';

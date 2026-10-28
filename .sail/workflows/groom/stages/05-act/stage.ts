@@ -1,5 +1,6 @@
 // act: comments the judge's report on the ticket with what was done to it, and takes the designation label off last, so
-// the watcher grooms a ticket once. It moves nothing: no state update and no claim, only the actions it is given.
+// the watcher grooms a ticket once. It makes no state update and no claim, only the actions it is given; a `duplicate`
+// among them relates the ticket as one, which cancels it.
 import { file, script, value, z } from 'sail';
 import { Acted, Plan } from '../../schemas';
 
