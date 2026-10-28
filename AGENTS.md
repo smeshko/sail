@@ -12,13 +12,15 @@ Bun `>=1.4.2` is the only runtime. No command needs Node.
 - `bun install`: installs dependencies and points `core.hooksPath` at `.githooks`, so the pre-push hook runs `gate`.
 - `bun run verify`: typecheck, lint, then every test with the coverage gate. A change is green when this passes. It is
   CI's check, and locally it stops before the tests: the whole suite runs only where `CI` is set, or with
-  `SAIL_FULL_SUITE=1`.
+  `SAIL_FULL_SUITE=1`. It first warns, without refusing, when the running Bun is not the one
+  `.github/workflows/verify.yml` pins, printing the command that runs it on that Bun.
 - `bun run test <path>`: tests without the coverage gate. A path filters the run; with none, or `./test`, it is the whole
   suite, refused locally as above. Each test gets 60 s unless you pass `--timeout`. The files run in parallel, a worker
   per core, slowest first by the timings the last runs recorded; `--parallel=1` runs them one at a time.
 - `bun run typecheck`, `bun run lint`, `bun run fix`: `tsc --noEmit`, `biome check`, and `biome check --write`.
-- `bun run gate`: typecheck, lint, then only the tests the branch affects, with no coverage gate. It's what the pre-push
-  hook runs. `bun scripts/affected-tests.ts --list` prints the selection: each change since the merge-base with
+- `bun run gate`: like `verify`, it first warns when the running Bun is not CI's pin; then typecheck, lint, then only
+  the tests the branch affects, with no coverage gate. It's what the pre-push hook runs.
+  `bun scripts/affected-tests.ts --list` prints the selection: each change since the merge-base with
   `origin/staging` selects its nearest tests. A changed test file selects itself; any other file selects the test files
   that reach it through imports or a path they name, such as a helper or a fixture, at the fewest steps that reach any.
   The tests further out are CI's. A change to `package.json`, `bun.lock`, `bunfig.toml`, `tsconfig.json`, `scripts/test.ts`, `test/setup.ts`
