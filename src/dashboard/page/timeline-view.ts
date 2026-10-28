@@ -2,7 +2,8 @@
 // are blocks of text. A tool call is one row with its input and, once it ends, its duration and how it ended; opened, it
 // shows its whole input, the start of its result and any denial. Steps and tries are separators, and a script's
 // command is a row with its exit; opened, it shows the end of the call's stdout and stderr, which the shell reads. Everything
-// else comes from the card, so a running call's timeline grows with its events.
+// else comes from the card, so a running call's timeline grows with its events. An opened box carries a data-scroll key,
+// by which the host keeps its scroll across a redraw.
 // Above the entries, a chip for each kind the call has, with its count, shows or hides that kind; separators always stay.
 import { clock, cost, duration } from './format';
 import { html, type SafeHtml, text } from './html';
@@ -47,14 +48,14 @@ const MARKS: Record<TimelineTool['status'], string> = { running: '…', complete
 function tool(entry: TimelineTool, ui: UiState): SafeHtml {
   const open = ui.opened.includes(entry.callId);
   const body = open
-    ? html`<div class="tout"><div class="grp-t">input</div><pre class="code">${JSON.stringify(entry.input, null, 2) ?? ''}</pre>${
+    ? html`<div class="tout"><div class="grp-t">input</div><pre class="code" data-scroll="input:${entry.callId}">${JSON.stringify(entry.input, null, 2) ?? ''}</pre>${
         entry.denial === undefined
           ? ''
           : html`<div class="mini deny"><div class="mini-h">denied · ${entry.denial.rule}</div><div class="mini-b">${entry.denial.reason}</div></div>`
       }${
         entry.result === undefined
           ? ''
-          : html`<div class="grp-t">result</div><pre class="code${entry.status === 'failed' ? ' bad' : ''}">${entry.result}</pre>`
+          : html`<div class="grp-t">result</div><pre class="code${entry.status === 'failed' ? ' bad' : ''}" data-scroll="result:${entry.callId}">${entry.result}</pre>`
       }</div>`
     : '';
   return html`<div class="tcall t-${entry.status}${open ? ' open' : ''}"><button class="trow" data-action="toggle-tool" data-call="${entry.callId}"><span class="tname">${entry.tool}</span><span class="tdet">${inputSummary(entry.input)}</span><span class="tmeta">${
@@ -104,16 +105,16 @@ function tail(log: string): { shown: string; cut: number } {
   return { shown: lines.slice(cut).join('\n'), cut };
 }
 
-function stream(name: string, loaded: Loaded<string> | undefined): SafeHtml {
+function stream(name: string, id: string, loaded: Loaded<string> | undefined): SafeHtml {
   if (loaded === undefined || loaded.state === 'loading')
     return html`<div class="grp-t">${name}</div><div class="code">loading…</div>`;
   if (loaded.state === 'missing' || loaded.value === '') return html``;
   const { shown, cut } = tail(loaded.value);
-  return html`<div class="grp-t">${name}${cut === 0 ? '' : ` · last ${OUTPUT_LINES} lines`}</div><pre class="code">${shown}</pre>`;
+  return html`<div class="grp-t">${name}${cut === 0 ? '' : ` · last ${OUTPUT_LINES} lines`}</div><pre class="code" data-scroll="${name}:${id}">${shown}</pre>`;
 }
 
-function outputOf(output: CallOutput | undefined): SafeHtml {
-  const streams = html`${stream('stdout', output?.stdout)}${stream('stderr', output?.stderr)}`;
+function outputOf(id: string, output: CallOutput | undefined): SafeHtml {
+  const streams = html`${stream('stdout', id, output?.stdout)}${stream('stderr', id, output?.stderr)}`;
   return html`<div class="tout">${streams.value === '' ? html`<div class="code">the call printed nothing</div>` : streams}</div>`;
 }
 
@@ -126,7 +127,7 @@ function script(entry: TimelineScript, id: string, ui: UiState, output: CallOutp
           entry.signal ?? (entry.code === undefined ? '' : `exit ${entry.code}`)
         }</span>`;
   return html`<div class="tcall t-${scriptStatus(entry)}${open ? ' open' : ''}"><button class="trow" data-action="toggle-tool" data-call="${id}"><span class="tname">$</span><span class="tdet">${entry.command}</span><span class="tmeta">${ended}</span></button>${
-    open ? outputOf(output) : ''
+    open ? outputOf(id, output) : ''
   }</div>`;
 }
 

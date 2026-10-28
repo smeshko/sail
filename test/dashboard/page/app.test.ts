@@ -351,7 +351,9 @@ test('live: opening a running card shows its timeline in the centre, which grows
   host.advance(100);
   expect(host.regions.main).toContain('<div class="tcall t-failed open">');
   expect(host.regions.main).toContain('<span class="tmeta">1.5s<span class="mark">✗</span>');
-  expect(host.regions.main).toContain('<div class="grp-t">result</div><pre class="code bad">1 fail</pre>');
+  expect(host.regions.main).toContain(
+    '<div class="grp-t">result</div><pre class="code bad" data-scroll="result:c1">1 fail</pre>',
+  );
   expect(host.regions.main).toContain(
     '<div class="ev msg"><span class="ts">09:00:04</span><div class="col"><p>Fixing the test.</p>',
   );
@@ -733,7 +735,9 @@ test("opening a script command reads the call's stdout and stderr once, shows th
   expect(outputReads()).toEqual([`${tests}?stream=stdout`, `${tests}?stream=stderr`]);
   await settle();
   host.advance(100);
-  expect(host.regions.main).toContain('<div class="grp-t">stdout</div><pre class="code">bun test v1.3.14');
+  expect(host.regions.main).toContain(
+    '<div class="grp-t">stdout</div><pre class="code" data-scroll="stdout:script:0">bun test v1.3.14',
+  );
   // Another call starts over; while it runs, its events read its output again, a second apart at most.
   host.click({ action: 'select-card', key: 'publish#1' });
   host.click({ action: 'toggle-tool', call: 'script:0' });

@@ -18,6 +18,7 @@ export interface ConnectHandlers {
 }
 
 export interface PageHost {
+  /** Draws `html` into `region`, keeping the scroll of each `data-scroll` box that is still there. */
   render(region: Region, html: string): void;
   /** Scrolls what holds `region` to its end. */
   scrollToEnd(region: Region): void;
@@ -52,6 +53,7 @@ export interface ElementLike {
   dataset: Record<string, string | undefined>;
   parentElement: ElementLike | null;
   tagName?: string;
+  querySelectorAll?(selectors: string): ArrayLike<ElementLike>;
   style?: { setProperty(name: string, value: string): void };
 }
 
@@ -137,7 +139,18 @@ export function browserHost(win: BrowserWindow): PageHost {
   return {
     render(region, markup) {
       const element = doc.getElementById(region);
-      if (element !== null) element.innerHTML = markup;
+      if (element === null) return;
+      const scrolled = new Map<string, number>();
+      for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
+        const key = box.dataset.scroll;
+        if (key !== undefined && (box.scrollTop ?? 0) > 0) scrolled.set(key, box.scrollTop ?? 0);
+      }
+      element.innerHTML = markup;
+      if (scrolled.size === 0) return;
+      for (const box of Array.from(element.querySelectorAll?.('[data-scroll]') ?? [])) {
+        const offset = scrolled.get(box.dataset.scroll ?? '');
+        if (offset !== undefined) box.scrollTop = offset;
+      }
     },
     scrollToEnd(region) {
       const box = doc.getElementById(region)?.parentElement;
