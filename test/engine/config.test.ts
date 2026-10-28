@@ -47,6 +47,24 @@ test("the fixture's project.yaml reads into a typed config", () => {
   });
 });
 
+test('adapters.jev may be left out, and when given keeps its options', () => {
+  const without = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}`));
+  if ('issues' in without) throw new Error(`unexpected issues: ${JSON.stringify(without.issues)}`);
+  expect(without.adapters.jev).toBeUndefined();
+  const withJev = readConfig(
+    sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}  jev: { use: typesafe, model: jev-x }\n`),
+  );
+  if ('issues' in withJev) throw new Error(`unexpected issues: ${JSON.stringify(withJev.issues)}`);
+  expect(withJev.adapters.jev).toEqual({ use: 'typesafe', model: 'jev-x' });
+});
+
+test('adapters.jev without use is an issue at /adapters/jev/use', () => {
+  const config = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}  jev: { model: jev-x }\n`));
+  expect(config).toEqual({
+    issues: [expect.objectContaining({ path: '/adapters/jev/use', message: 'is required' })],
+  });
+});
+
 test('models and budgets default to empty, and an adapter keeps its own options', () => {
   const config = readConfig(sailDir(`name: bare\nsail: ">=0.0.0"\n${ADAPTERS}`));
   if ('issues' in config) throw new Error(`unexpected issues: ${JSON.stringify(config.issues)}`);

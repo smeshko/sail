@@ -100,6 +100,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'repository',
     'sweep',
   ],
+  jev: ['ask', 'capabilities'],
 };
 
 /** Capabilities each port's schema accepts. */
@@ -108,6 +109,7 @@ export const CAPABILITIES: Record<Port, unknown> = {
   codeHost: { checks: true, labels: true, drafts: true, mergeMethods: ['merge'] },
   harness: { structuredOutput: true, permissions: true, usage: true, abort: true, budgets: [] },
   workspace: { keep: true, sweep: true },
+  jev: { questionTypes: ['choice', 'score', 'noul'] },
 };
 
 /** An adapter for `port` with every operation a function that does nothing, `change`d by the test. */

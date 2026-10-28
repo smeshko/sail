@@ -167,6 +167,7 @@ test('BUILTINS holds the fake for every port, each a definition with create alon
     codeHost: ['create'],
     harness: ['create'],
     workspace: ['create'],
+    jev: ['create'],
   });
   const linear = Object.entries(BUILTINS.linear ?? {}).map(([port, definition]) => [port, Object.keys(definition)]);
   expect(Object.fromEntries(linear)).toEqual({ ticketSource: ['requires', 'create'] });
@@ -243,5 +244,19 @@ test('the ticket source fake created with pickUp [Backlog, Todo] picks up from b
       ['FAKE-1', 'FAKE-2'],
       [false, true, true],
     ]);
+  });
+});
+
+test('the jev fake reads its seed from sailDir/<seed>, and refuses an option it does not know', async () => {
+  await withTempRepo(async (repo) => {
+    const ctx = context(repo);
+    writeFileSync(join(ctx.sailDir, 'fake', 'jev.json'), JSON.stringify({ model: 'jev-seeded' }));
+    const jev = await fakeAdapters.jev.create({}, ctx);
+    const request = {
+      state: 'x',
+      questions: { q: { type: 'noul' as const, instructions: 'ok?', criteria: { true: 'yes', false: 'no' } } },
+    };
+    expect((await jev.ask(request)).model).toBe('jev-seeded');
+    expect(await thrown(() => fakeAdapters.jev.create({ sead: 'x' }, ctx))).toMatch(/^fake jev: option sead:/);
   });
 });

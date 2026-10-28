@@ -62,6 +62,7 @@
         "codehost:labelled",
         "codehost:commented",
         "codehost:merged",
+        "jev:asked",
         "workspace:leased",
         "workspace:lease_released",
         "workspace:created",
@@ -269,6 +270,10 @@
     {
       "if": { "properties": { "type": { "const": "codehost:merged" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/codehostMerged" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "jev:asked" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/jevAsked" }
     },
     {
       "if": { "properties": { "type": { "const": "workspace:leased" } }, "required": ["type"] },
@@ -1093,7 +1098,7 @@
       "$ref": "#/$defs/envelope",
       "properties": {
         "key": true,
-        "port": { "enum": ["ticketSource", "codeHost"] },
+        "port": { "enum": ["ticketSource", "codeHost", "jev"] },
         "op": { "type": "string", "minLength": 1 },
         "code": { "enum": ["not_found", "unauthorized", "forbidden", "conflict", "invalid", "unavailable"] },
         "message": { "type": "string", "minLength": 1 }
@@ -1319,6 +1324,28 @@
         "sha": { "$ref": "#/$defs/sha" }
       },
       "required": ["number", "method", "sha"],
+      "unevaluatedProperties": false
+    },
+    "jevAsked": {
+      "description": "a Jev call that was answered: the model, the number of questions, the latency and the usage",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "model": { "type": "string", "minLength": 1 },
+        "questions": { "type": "integer", "minimum": 1 },
+        "latencyMs": { "type": "number", "minimum": 0 },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "inputTokens": { "type": "integer", "minimum": 0 },
+            "outputTokens": { "type": "integer", "minimum": 0 }
+          },
+          "required": ["inputTokens", "outputTokens"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["model", "questions", "latencyMs"],
       "unevaluatedProperties": false
     },
     "workspaceLeased": {

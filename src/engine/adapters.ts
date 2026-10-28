@@ -14,14 +14,14 @@ import {
   type PortAdapters,
 } from '../ports/adapter';
 import type { Harness } from '../ports/harness';
-import { type AdapterConfig, PORTS, type Port, type ProjectConfig } from './config';
+import { type AdapterConfig, PORTS, type Port, type ProjectConfig, type RunPort } from './config';
 import { registerSail } from './definitions';
 import { origin } from './roster';
 import { runsDir } from './run-dir';
 import type { AdapterEntry } from './run-header';
 import type { SchemaIssue } from './schemas';
 
-export interface ResolveOptions<P extends Port = Port> {
+export interface ResolveOptions<P extends Port = RunPort> {
   sailDir: string;
   config: ProjectConfig;
   builtins: Builtins;
@@ -42,7 +42,7 @@ export interface ProviderRelay {
   attach(sink: (event: ProviderEvent) => void): () => void;
 }
 
-export interface ResolvedAdapters<P extends Port = Port> {
+export interface ResolvedAdapters<P extends Port = RunPort> {
   ports: Pick<PortAdapters, P>;
   entries: Record<P, AdapterEntry>;
   /** What every adapter created here emits into. */
@@ -108,7 +108,7 @@ function asDefinition(value: unknown): AdapterDefinition<unknown> | undefined {
 }
 
 /** Pass 1: the definition `use` names for `port`, or an issue. */
-async function find(port: Port, use: string, options: ResolveOptions): Promise<Found | string> {
+async function find(port: Port, use: string, options: ResolveOptions<Port>): Promise<Found | string> {
   if (!isModulePath(use)) {
     const definition = options.builtins[use]?.[port];
     if (definition) return { definition: definition as AdapterDefinition<unknown>, origin: 'builtin' };
@@ -186,7 +186,7 @@ async function build(
   use: string,
   found: Found,
   options: AdapterOptions,
-  resolved: ResolveOptions,
+  resolved: ResolveOptions<Port>,
   emit: ProviderEmit,
 ): Promise<{ adapter: unknown } | { issue: string }> {
   const fail = (text: string) => ({ issue: text });
@@ -229,12 +229,12 @@ async function build(
  * it does so for those alone: no other port's adapter is loaded, asked for its credentials or created. Every adapter
  * emits into one relay, and into `options.emit` when one is given.
  */
-export async function resolveAdapters<P extends Port = Port>(
+export async function resolveAdapters<P extends Port = RunPort>(
   options: ResolveOptions<P>,
 ): Promise<ResolvedAdapters<P> | { issues: SchemaIssue[] }> {
   const issues: SchemaIssue[] = [];
   const issue = (port: Port, text: string) => issues.push({ path: `/adapters/${port}`, message: text });
-  const optionsOf = ({ use: _use, ...rest }: ProjectConfig['adapters'][Port]): AdapterOptions => rest;
+  const optionsOf = ({ use: _use, ...rest }: AdapterConfig): AdapterOptions => rest;
   const wanted: readonly Port[] = options.ports ?? PORTS;
   const relay = providerRelay();
   const emit: ProviderEmit = (event) => {
@@ -242,32 +242,42 @@ export async function resolveAdapters<P extends Port = Port>(
     relay.emit(event);
   };
 
+  const configs = {} as Record<Port, AdapterConfig>;
+  for (const port of wanted) {
+    const config = options.config.adapters[port];
+    if (config === undefined) {
+      issue(port, `is not set: name the adapter that fills ${port}, such as { use: typesafe }`);
+    } else {
+      configs[port] = config;
+    }
+  }
+  if (issues.length > 0) return { issues };
+
   const found = {} as Record<Port, Found>;
   for (const port of wanted) {
-    const result = await find(port, options.config.adapters[port].use, options);
+    const result = await find(port, configs[port].use, options);
     if (typeof result === 'string') issue(port, result);
     else found[port] = result;
   }
   if (issues.length > 0) return { issues };
 
   for (const port of wanted) {
-    const { use } = options.config.adapters[port];
-    for (const text of preflight(use, found[port], optionsOf(options.config.adapters[port]), options.env))
-      issue(port, text);
+    const { use } = configs[port];
+    for (const text of preflight(use, found[port], optionsOf(configs[port]), options.env)) issue(port, text);
   }
   if (issues.length > 0) return { issues };
 
   const ports = {} as Record<Port, unknown>;
   const entries = {} as Record<Port, AdapterEntry>;
   for (const port of wanted) {
-    const { use } = options.config.adapters[port];
+    const { use } = configs[port];
     const read = declared(use, found[port]);
     if ('issue' in read) {
       issue(port, read.issue);
       continue;
     }
     const { versions } = read;
-    const built = await build(port, use, found[port], optionsOf(options.config.adapters[port]), options, emit);
+    const built = await build(port, use, found[port], optionsOf(configs[port]), options, emit);
     if ('issue' in built) {
       issue(port, built.issue);
       continue;
@@ -290,7 +300,7 @@ export async function resolveAdapters<P extends Port = Port>(
  * credentials or created.
  */
 async function resolveHarnesses(
-  options: ResolveOptions,
+  options: ResolveOptions<Port>,
   names: readonly string[],
   emit: ProviderEmit,
 ): Promise<NamedHarnesses | { issues: SchemaIssue[] }> {

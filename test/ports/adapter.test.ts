@@ -6,10 +6,11 @@ import { join } from 'node:path';
 import {
   createFakeCodeHost,
   createFakeHarness,
+  createFakeJev,
   createFakeTicketSource,
   createFakeWorkspace,
 } from '../../src/adapters/index';
-import { PORTS, type Port } from '../../src/engine/config';
+import { OPTIONAL_PORTS, PORTS, type Port } from '../../src/engine/config';
 import { PORT_CAPABILITIES, PORT_OPERATIONS } from '../../src/ports/adapter';
 import { OPERATIONS } from '../helpers/adapters';
 
@@ -22,9 +23,12 @@ const FAKES: Record<Port, object> = {
   codeHost: createFakeCodeHost({ seed: join(SEED, 'prs.json'), state: join(SEED, 'state-prs.json') }),
   harness: createFakeHarness({ script: join(SEED, 'harness.json') }),
   workspace: createFakeWorkspace({ repo: FIXTURE }),
+  jev: createFakeJev({ seed: join(SEED, 'jev.json') }),
 };
 
-test.each([...PORTS])(
+const ALL_PORTS = [...PORTS, ...OPTIONAL_PORTS];
+
+test.each(ALL_PORTS)(
   "%s: the operations table is the fake adapter's methods, with capabilities in and name out",
   (port) => {
     const table: string[] = [...PORT_OPERATIONS[port]].sort();
@@ -36,7 +40,7 @@ test.each([...PORTS])(
   },
 );
 
-test.each([...PORTS])("%s: the capabilities schema parses the fake's capabilities()", (port) => {
+test.each(ALL_PORTS)("%s: the capabilities schema parses the fake's capabilities()", (port) => {
   const fake = FAKES[port] as { capabilities(): unknown };
   const parsed = PORT_CAPABILITIES[port].safeParse(fake.capabilities());
   expect(parsed.success).toBe(true);

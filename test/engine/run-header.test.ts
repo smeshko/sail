@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeF
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
-import { type Port, type ProjectConfig, readConfig } from '../../src/engine/config';
+import { type ProjectConfig, type RunPort, readConfig } from '../../src/engine/config';
 import { type LoadedWorkflow, loadWorkflow } from '../../src/engine/load-workflow';
 import type { Source } from '../../src/engine/run-dir';
 import {
@@ -55,11 +55,16 @@ async function hashAfter(change: (sail: string) => void = () => {}): Promise<str
 const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 const FAKE_1: Source = { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] };
 const FAKE: AdapterEntry = { use: 'fake', origin: 'builtin' };
-const FAKE_ENTRIES: Record<Port, AdapterEntry> = { ticketSource: FAKE, codeHost: FAKE, harness: FAKE, workspace: FAKE };
+const FAKE_ENTRIES: Record<RunPort, AdapterEntry> = {
+  ticketSource: FAKE,
+  codeHost: FAKE,
+  harness: FAKE,
+  workspace: FAKE,
+};
 
 /** The fixture's header, built on a fresh copy, recording `adapters`, and the run's workspace when one is given. */
 async function fixtureHeader(
-  adapters: Record<Port, AdapterEntry> = FAKE_ENTRIES,
+  adapters: Record<RunPort, AdapterEntry> = FAKE_ENTRIES,
   workspace?: HeaderWorkspace,
 ): Promise<RunHeader> {
   return withTempRepo(async (repo) => {
@@ -225,7 +230,7 @@ test('a header records the adapters it is handed, with the versions a repository
     origin: 'repo:.sail/adapters/echo-harness.ts',
     versions: { echo: '1.0.0' },
   };
-  const entries: Record<Port, AdapterEntry> = { ...FAKE_ENTRIES, harness: echo };
+  const entries: Record<RunPort, AdapterEntry> = { ...FAKE_ENTRIES, harness: echo };
   const header = await fixtureHeader(entries);
   expect(header.adapters).toEqual(entries);
   expect(validateRunHeader(header)).toEqual([]);

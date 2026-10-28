@@ -6,6 +6,7 @@ import type { Port } from '../../engine/config';
 import type { AdapterContext, AdapterDefinition, AdapterOptions, Env, PortAdapters } from '../../ports/adapter';
 import { createFakeCodeHost } from './code-host';
 import { createFakeHarness } from './harness';
+import { createFakeJev } from './jev';
 import { createPlaybackHarness } from './playback';
 import { checkFakePickUp, createFakeTicketSource } from './ticket-source';
 import { createFakeWorkspace } from './workspace';
@@ -88,6 +89,20 @@ export const fakeAdapters: { [P in Port]: AdapterDefinition<PortAdapters[P]> } =
         });
       }
       return createFakeHarness({ script: resolve(context.sailDir, script ?? 'fake/harness.json') });
+    },
+  },
+  jev: {
+    create(options, context) {
+      const { seed, model } = parse(
+        'jev',
+        { seed: z.string().optional(), model: z.string().min(1).optional() },
+        options,
+      );
+      return createFakeJev({
+        ...provider(context),
+        ...(model === undefined ? {} : { model }),
+        seed: resolve(context.sailDir, seed ?? 'fake/jev.json'),
+      });
     },
   },
   workspace: {

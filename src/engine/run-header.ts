@@ -6,7 +6,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import type { TicketState } from '../ports/types';
 import { runBudgetOf } from './budget';
-import type { Port, ProjectConfig } from './config';
+import type { ProjectConfig, RunPort } from './config';
 import { createFileOnce } from './durable';
 import type { LoadedWorkflow } from './load-workflow';
 import { buildRoster, type IntakeEntry, origin, type RosterEntry } from './roster';
@@ -39,7 +39,7 @@ export interface RunHeader {
   claim?: ClaimRecord;
   workflow: { name: string; version: number; origin: string; sha256: string };
   sail: { version: string; runtime: string };
-  adapters: Record<Port, AdapterEntry> & {
+  adapters: Record<RunPort, AdapterEntry> & {
     /** The named harnesses the run reached. Absent when it reached none. */
     harnesses?: Record<string, AdapterEntry>;
   };
@@ -99,7 +99,7 @@ export interface HeaderFields {
   sailDir: string;
   loaded: LoadedWorkflow;
   config: ProjectConfig;
-  adapters: Record<Port, AdapterEntry>;
+  adapters: Record<RunPort, AdapterEntry>;
   /** The named harnesses the run reached, which the header records beside the ports. Left out when empty. */
   harnesses?: Record<string, AdapterEntry>;
   now: Date;

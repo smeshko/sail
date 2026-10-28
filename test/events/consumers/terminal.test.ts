@@ -912,6 +912,10 @@ test('at trace, an event of every type prints a line of its own', () => {
       head('', '· codehost:merged {"number":1,"method":"squash","sha":"f569e7f"}', w),
     ],
     [
+      { type: 'jev:asked', model: 'jev-latest', questions: 3, latencyMs: 40 },
+      head('', '· jev:asked {"model":"jev-latest","questions":3,"latencyMs":40}', w),
+    ],
+    [
       { type: 'workspace:leased', remote: 'origin', branch: 'sail/FAKE-1' },
       head('', '· workspace:leased {"remote":"origin","branch":"sail/FAKE-1"}', w),
     ],

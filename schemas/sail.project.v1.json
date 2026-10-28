@@ -31,6 +31,10 @@
         "codeHost": { "$ref": "#/$defs/adapterEntry" },
         "harness": { "$ref": "#/$defs/adapterEntry" },
         "workspace": { "$ref": "#/$defs/adapterEntry" },
+        "jev": {
+          "description": "the adapter that fills the Jev port, which only sail port jev resolves; left out, a run never reaches it",
+          "$ref": "#/$defs/adapterEntry"
+        },
         "harnesses": {
           "description": "named harnesses, by name, which a model alias may name; each is resolved only when a run reaches an alias that names it",
           "type": "object",

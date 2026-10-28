@@ -8,7 +8,11 @@ import type { SchemaIssue } from './schemas';
 
 /** The outside systems a run talks to, one adapter each. */
 export const PORTS = ['ticketSource', 'codeHost', 'harness', 'workspace'] as const;
-export type Port = (typeof PORTS)[number];
+/** The ports every run resolves. */
+export type RunPort = (typeof PORTS)[number];
+/** The ports `project.yaml` may leave out, resolved only when something asks for them. */
+export const OPTIONAL_PORTS = ['jev'] as const;
+export type Port = RunPort | (typeof OPTIONAL_PORTS)[number];
 
 /** An adapter by name for a built-in, or by module path for the repository's own, with its options beside it. */
 export interface AdapterConfig {
@@ -38,7 +42,9 @@ export interface ProjectConfig {
   defaultWorkflow?: string;
   /** What a run's branch starts with. `DEFAULT_BRANCH_PREFIX` applies when it is left out. */
   branchPrefix?: string;
-  adapters: Record<Port, AdapterConfig> & {
+  adapters: Record<RunPort, AdapterConfig> & {
+    /** The Jev adapter, which only `sail port jev` resolves. */
+    jev?: AdapterConfig;
     /** The named harnesses, which a model alias may name. Each is preflighted only when a run reaches it. */
     harnesses?: Record<string, AdapterConfig>;
   };

@@ -7,7 +7,13 @@ import { gitWorktreeDefinition } from './workspace/git-worktree';
 
 export { createClaudeCodeHarness } from './claude-code/index';
 export { createGitHubCodeHost } from './code-host/github';
-export { createFakeCodeHost, createFakeHarness, createFakeTicketSource, createFakeWorkspace } from './fake/index';
+export {
+  createFakeCodeHost,
+  createFakeHarness,
+  createFakeJev,
+  createFakeTicketSource,
+  createFakeWorkspace,
+} from './fake/index';
 export { createLinearTicketSource } from './ticket-source/linear';
 export { createGitWorktreeWorkspace } from './workspace/git-worktree';
 
