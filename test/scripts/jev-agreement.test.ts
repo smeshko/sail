@@ -2,6 +2,7 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { collect } from '../../scripts/jev-agreement';
 import { validateDocument } from '../../src/engine/schemas';
 import { nouls, OWN_SAIL, writeOwnSail } from '../helpers/own-sail';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
@@ -34,6 +35,7 @@ function writeRun(repo: TempRepo): string {
   const call = join(runDir, '04-check-tasks', 'call-1');
   mkdirSync(join(call, 'in'), { recursive: true });
   writeFileSync(join(call, 'in', 'plan.md'), PLAN);
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify({ baseSha: repo.git('rev-parse', 'HEAD').trim() }));
   const output = {
     tasks: [
       { id: 'TASK-001', implemented: true, evidence: 'abc1234' },
@@ -92,6 +94,36 @@ test('jev-agreement prints agreement 1/2 and one false yes at 0.95 when Jev says
     expect(lines).toHaveLength(6);
   });
 }, 60_000);
+
+test('collect rebuilds tasks against the recorded base and call head, not live refs', async () => {
+  await withTempRepo(async (repo) => {
+    const runDir = writeRun(repo);
+    const baseSha = 'b'.repeat(40);
+    writeFileSync(join(runDir, 'run.json'), JSON.stringify({ baseSha }));
+    const lib = (await import(join(ROOT, '.sail/lib/jev-check.mjs'))) as Parameters<typeof collect>[1];
+    const args: string[][] = [];
+    const notes: string[] = [];
+    collect(
+      runDir,
+      {
+        ...lib,
+        git: (each) => {
+          args.push(each);
+          return 'evidence';
+        },
+        askNouls: () => ({ asked: true, answers: {} }),
+      },
+      repo.home,
+      notes,
+    );
+    expect(notes).toEqual([]);
+    const head = repo.git('rev-parse', 'HEAD').trim();
+    expect(args).toEqual([
+      ['log', `${baseSha}..${head}`, '--format=%h %s'],
+      ['diff', `${baseSha}...${head}`],
+    ]);
+  });
+});
 
 test("sail's own project.yaml, with adapters.jev, validates against sail.project.v1", () => {
   const config = Bun.YAML.parse(readFileSync(join(OWN_SAIL, 'project.yaml'), 'utf8')) as {

@@ -21,6 +21,7 @@ type Answered =
   | { asked: true; answers: Record<string, { type: string; noul?: number }> }
   | { asked: false; note: string };
 interface Lib {
+  BASE: string;
   git: Run;
   yesses(answers: Record<string, unknown>, ids: string[]): { id: string; yes: number }[];
   askNouls(questions: object, state: object, out: string): Answered;
@@ -64,7 +65,8 @@ function verdicts(stage: string, output: unknown): [string, boolean][] {
   return items.map((each) => [each.finding, each.resolved]);
 }
 
-function collect(runDir: string, lib: Lib, out: string, notes: string[]): Call[] {
+export function collect(runDir: string, lib: Lib, out: string, notes: string[]): Call[] {
+  const { baseSha } = JSON.parse(read(runDir, 'run.json')) as { baseSha: string };
   const calls: Call[] = [];
   for (const entry of readJournal(runDir).entries) {
     if (entry.outcome !== 'done' || (entry.stage !== 'check-tasks' && entry.stage !== 'check-fix')) continue;
@@ -74,7 +76,7 @@ function collect(runDir: string, lib: Lib, out: string, notes: string[]): Call[]
       durationMs?: number;
     };
     const sha = result.workspace?.headSha ?? 'HEAD';
-    const run: Run = (args) => lib.git(args.map((arg) => arg.replace(/HEAD$/, sha)));
+    const run: Run = (args) => lib.git(args.map((arg) => arg.replace(lib.BASE, baseSha).replace(/HEAD$/, sha)));
     let asked: Answered;
     try {
       const { questions, state } = questionsAndState(
