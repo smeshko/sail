@@ -5,7 +5,7 @@
 // request merged once its checks pass. A review that leaves findings open, or one too thin to trust, comments why,
 // takes the label off and fails, leaving the pull request to a human.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
-import { workflow, type z } from 'sail';
+import { type Result, workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
@@ -170,7 +170,7 @@ export default workflow(
         // validation runs alone, which also stands in for what the fixes broke.
         const asked = await run.stage(jevFix, { findings: { findings: targets }, fixed: fixed.output, since });
         let checked: z.infer<typeof FixChecked>;
-        let again: Awaited<ReturnType<typeof run.stage<typeof validate>>>;
+        let again: Result<typeof validate>;
         if (asked.output.checked !== null) {
           checked = asked.output.checked;
           again = await run.stage(validate);
