@@ -40,6 +40,15 @@ test('a provider whose key is not set is refused naming the variable', async () 
   expect(String(error)).toBe('Error: needs GROQ_API_KEY, which is not set');
 });
 
+test('a key sail fetched itself is used in place of the variable, so a Codex model needs none set', async () => {
+  const codex = await createPiSession(params({ model: 'openai-codex/gpt-5.5', env: {}, apiKey: 'codex-access' }));
+  const groq = await createPiSession(params({ env: {}, apiKey: 'gsk_fetched' }));
+  const ids = [codex.sessionId !== '', groq.sessionId !== ''];
+  await codex.dispose();
+  await groq.dispose();
+  expect(ids).toEqual([true, true]);
+});
+
 test("the workspace's .pi/SYSTEM.md never becomes the session's system prompt", async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sail-test-pi-cwd-'));
   try {

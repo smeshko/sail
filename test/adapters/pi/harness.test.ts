@@ -12,6 +12,8 @@ import { fakeTimers } from '../../helpers/fake-timers';
 import {
   agentStart,
   assistantEnd,
+  codexJwt,
+  fakeKeychain,
   PI_MODEL,
   PI_SESSION_ID,
   type Step,
@@ -503,5 +505,50 @@ test('an onEvent that throws on the end fails a session that was done, keeping w
   expect({ text: summary(result), cost: result.usage.costUsd }).toEqual({
     text: 'error: pi: listener broke',
     cost: 0.01,
+  });
+});
+
+test("an openai-codex model's session is given the Codex login's access token; another model's never asks for it", async () => {
+  const scripted = sessions();
+  let asked = 0;
+  const harness = createPiHarness({
+    env: { GROQ_API_KEY: 'gsk_x' },
+    ...scripted,
+    codexToken: async () => {
+      asked++;
+      return 'codex-access';
+    },
+  });
+  const codex = await harness.run(request('done', { model: 'openai-codex/gpt-5.5' }));
+  const groq = await harness.run(request('done'));
+  expect({
+    results: [summary(codex), summary(groq)],
+    keys: scripted.calls.map((call) => call.params.apiKey),
+    asked,
+  }).toEqual({ results: [SPEC, SPEC], keys: ['codex-access', undefined], asked: 1 });
+});
+
+test('with no Codex login in the keychain an openai-codex session is the error naming sail login codex, never started', async () => {
+  const scripted = sessions();
+  const keychain = fakeKeychain(join(base, `keychain-${++made}`));
+  const harness = createPiHarness({ env: keychain.env, ...scripted });
+  const result = await harness.run(request('done', { model: 'openai-codex/gpt-5.5' }));
+  expect({ text: summary(result), started: scripted.calls.length, asked: keychain.calls() }).toEqual({
+    text: 'error: pi: no Codex login in the keychain: run sail login codex',
+    started: 0,
+    asked: ['find-generic-password -a ivo -s sail-openai-codex -w'],
+  });
+});
+
+test("the keychain's Codex login reaches the session when it has time left", async () => {
+  const scripted = sessions();
+  const keychain = fakeKeychain(join(base, `keychain-${++made}`));
+  const access = codexJwt('acct');
+  keychain.hold({ access, refresh: 'refresh-1', expires: Date.now() + 3_600_000, accountId: 'acct' });
+  const harness = createPiHarness({ env: keychain.env, ...scripted });
+  const result = await harness.run(request('done', { model: 'openai-codex/gpt-5.5' }));
+  expect({ result: summary(result), key: scripted.calls[0]?.params.apiKey === access }).toEqual({
+    result: SPEC,
+    key: true,
   });
 });

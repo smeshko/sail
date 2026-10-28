@@ -1,7 +1,8 @@
 // The one file that touches pi's SDK: an isolated in-process coding-agent session. Nothing of the user's own pi is read
 // (settings, auth, sessions, extensions, skills, prompt templates, context files), nor a SYSTEM.md; the only extension
-// is sail's gate, the bash tool runs on sail's operations, and the credential is the provider's variable from the
-// environment sail was given. The SDK is imported by the first session, not with the CLI.
+// is sail's gate, the bash tool runs on sail's operations, and the credential is the one sail fetched (the Codex login's
+// access token) or else the provider's variable from the environment sail was given. The SDK is imported by the first
+// session, not with the CLI.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,6 +27,8 @@ export interface PiSessionParams {
   readonly bash: BashRunner['operations'];
   /** Where the provider's credential is read from. */
   readonly env: Env;
+  /** The provider's credential when sail fetched it itself, which `env` then isn't read for. */
+  readonly apiKey?: string;
 }
 
 /** The part of pi's `AgentSession` the harness uses. */
@@ -55,7 +58,9 @@ export const createPiSession: PiSessionFactory = async (params) => {
   const model = provider === '' || modelId === '' ? undefined : registry.find(provider, modelId);
   if (model === undefined) throw new Error(`no model ${params.model}`);
   const names = keyNames(provider);
-  if (names.length > 0) {
+  if (params.apiKey !== undefined) {
+    authStorage.setRuntimeApiKey(provider, params.apiKey);
+  } else if (names.length > 0) {
     const key = names.map((name) => params.env[name]).find((value) => value !== undefined && value !== '');
     if (key === undefined) throw new Error(`needs ${names.join(' or ')}, which is not set`);
     authStorage.setRuntimeApiKey(provider, key);
