@@ -528,8 +528,12 @@ One timed sweep for eligible designated tickets and designated pull requests, ap
 _Avoid_: sweep, scan, sync
 
 **Queue**:
-The sources waiting for a run, kept per workflow and deduplicated. A queued item is always a source, never a resolved input.
+The sources waiting for a run, kept per workflow and deduplicated. A queued item is always a source, never a resolved input. Its order is the queue order.
 _Avoid_: backlog, inbox, buffer
+
+**Queue order**:
+The order a queue dispatches its items in, and the order `queue.json` keeps them: by priority (urgent, high, medium, low, none), oldest first within one. A pull request ranks as none. A poll that finds a queued ticket at another priority moves it to its new place.
+_Avoid_: ranking, sort, schedule
 
 **Queue event stream**:
 A watched workflow's own event stream, `.sail-runs/queue/<workflow>/events.ndjson`: polls, queue items, dispatches, skips, parking and errors, in the run's envelope without `runId`, and append-only across restarts.

@@ -772,3 +772,25 @@ test('an adapter that over-answers a Backlog ticket under pickUp [Todo] has it f
   await pollOnce(a, clock);
   expect(itemKeys(dir, 'a')).toEqual(['ticket:FAKE-1']);
 });
+
+test('a second poll that finds a queued ticket at a higher priority updates its priority and moves it, counting it found and not added', async () => {
+  const dir = tempDir();
+  const clock = manualClock(START);
+  const seeded = fakeSource(dir);
+  let answer: Ticket[] = [ticket('FAKE-1'), ticket('FAKE-5')];
+  const source = { ...seeded, listDesignated: async () => answer } as TicketSource;
+  const a = target(dir, 'a', 'sail', source, clock);
+  await pollOnce(a, clock);
+  answer = [ticket('FAKE-1'), ticket('FAKE-5', { priority: 'urgent' })];
+  await pollOnce(a, clock);
+  expect(itemKeys(dir, 'a')).toEqual(['ticket:FAKE-5', 'ticket:FAKE-1']);
+  expect(queueFile(dir, 'a').items.map((item) => item.priority)).toEqual(['urgent', undefined]);
+  expect(
+    events(dir, 'a')
+      .filter((event) => event.type === 'queue:polled')
+      .map((event) => [event.found, event.added]),
+  ).toEqual([
+    [2, 2],
+    [2, 0],
+  ]);
+});

@@ -829,3 +829,108 @@ test('a new head sha that shares its first 7 with a done item is queued in its p
     after: [['queued', { kind: 'pr', number: 12, headSha: collides, branch: 'sail/FAKE-12-x' }]],
   });
 });
+
+/** The dedup keys `due()` gives, and the order `queue.json` holds them in. */
+const dueOrder = (store: QueueStore) => store.due().map((item) => item.dedupKey.replace('ticket:', ''));
+const fileOrder = (store: QueueStore) => store.snapshot().items.map((item) => item.dedupKey.replace('ticket:', ''));
+
+test('tickets added together and across polls come out urgent, high, medium, low, then none, oldest first within a priority', () => {
+  const clock = manualClock(START);
+  const store = open(runsDir(), clock);
+  store.add([
+    ticket('FAKE-1'),
+    ticket('FAKE-2', { priority: 'low' }),
+    ticket('FAKE-3', { priority: 'medium' }),
+    ticket('FAKE-4', { priority: 'none' }),
+  ]);
+  clock.advance(1_000);
+  store.add([ticket('FAKE-5', { priority: 'urgent' }), ticket('FAKE-6', { priority: 'low' }), ticket('FAKE-7')]);
+  clock.advance(1_000);
+  store.add([ticket('FAKE-8', { priority: 'high' }), ticket('FAKE-9', { priority: 'urgent' })]);
+  const expected = ['FAKE-5', 'FAKE-9', 'FAKE-8', 'FAKE-3', 'FAKE-2', 'FAKE-6', 'FAKE-1', 'FAKE-4', 'FAKE-7'];
+  expect({ due: dueOrder(store), file: fileOrder(store) }).toEqual({ due: expected, file: expected });
+  expect(store.snapshot().items.map((item) => item.priority)).toEqual([
+    'urgent',
+    'urgent',
+    'high',
+    'medium',
+    'low',
+    'low',
+    undefined,
+    'none',
+    undefined,
+  ]);
+});
+
+test('a re-add that finds a queued ticket at another priority updates the item and moves it, and is not counted as added', () => {
+  const clock = manualClock(START);
+  const runs = runsDir();
+  const store = open(runs, clock);
+  store.add([ticket('FAKE-1'), ticket('FAKE-2'), ticket('FAKE-3', { priority: 'low' })]);
+  clock.advance(1_000);
+  const added = store.add([
+    ticket('FAKE-1'),
+    ticket('FAKE-2', { priority: 'urgent' }),
+    ticket('FAKE-3', { priority: 'low' }),
+  ]);
+  expect({ added, due: dueOrder(store), events: typesIn(runs) }).toEqual({
+    added: 0,
+    due: ['FAKE-2', 'FAKE-3', 'FAKE-1'],
+    events: ['queue:item_added', 'queue:item_added', 'queue:item_added'],
+  });
+  expect(store.snapshot().items[0]?.priority).toBe('urgent');
+  store.add([ticket('FAKE-2')]);
+  expect({
+    due: dueOrder(store),
+    priority: store.snapshot().items.find((item) => item.dedupKey === 'ticket:FAKE-2')?.priority,
+  }).toEqual({
+    due: ['FAKE-3', 'FAKE-1', 'FAKE-2'],
+    priority: undefined,
+  });
+});
+
+test('pull requests rank like unprioritised tickets and stay oldest first, behind prioritised tickets', () => {
+  const clock = manualClock(START);
+  const store = open(runsDir(), clock);
+  store.addPullRequests([pullRequest(12, 'c'.repeat(40))]);
+  clock.advance(1_000);
+  store.addPullRequests([pullRequest(13, 'd'.repeat(40))]);
+  clock.advance(1_000);
+  store.add([ticket('FAKE-1', { priority: 'low' })]);
+  expect(store.due().map((item) => item.dedupKey)).toEqual(['ticket:FAKE-1', 'pr:12@ccccccc', 'pr:13@ddddddd']);
+});
+
+test('a failed item that retries and a requeued item are placed by their priority again', () => {
+  const retried = open(runsDir(), manualClock(START));
+  retried.add([ticket('FAKE-1', { priority: 'low' })]);
+  retried.dispatched('ticket:FAKE-1', 'run');
+  retried.add([ticket('FAKE-2', { priority: 'urgent' })]);
+  expect(fileOrder(retried)).toEqual(['FAKE-1', 'FAKE-2']);
+  retried.failed('ticket:FAKE-1', 'tests failed');
+  expect(fileOrder(retried)).toEqual(['FAKE-2', 'FAKE-1']);
+
+  const requeued = open(runsDir(), manualClock(START));
+  requeued.add([ticket('FAKE-3', { priority: 'low' })]);
+  requeued.dispatched('ticket:FAKE-3', 'run');
+  requeued.parked('ticket:FAKE-3', 'by hand');
+  requeued.add([ticket('FAKE-4', { priority: 'medium' })]);
+  expect(fileOrder(requeued)).toEqual(['FAKE-3', 'FAKE-4']);
+  requeued.requeue('ticket:FAKE-3', 'requeued by hand');
+  expect(fileOrder(requeued)).toEqual(['FAKE-4', 'FAKE-3']);
+});
+
+test('a queue.json written before priorities existed reads and dispatches in the order it holds', () => {
+  const runs = runsDir();
+  open(runs).add([ticket('FAKE-2'), ticket('FAKE-1')]);
+  const reopened = open(runs);
+  expect({
+    items: reopened.snapshot().items.map((item) => [item.dedupKey, item.priority, item.moved]),
+    due: dueOrder(reopened),
+  }).toEqual({
+    items: [
+      ['ticket:FAKE-2', undefined, undefined],
+      ['ticket:FAKE-1', undefined, undefined],
+    ],
+    due: ['FAKE-2', 'FAKE-1'],
+  });
+});
