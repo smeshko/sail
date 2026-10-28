@@ -1,7 +1,8 @@
 // Applies the actions in $INPUT_ACTIONS to the ticket in $INPUT_TICKETKEY, comments report.md and an `## Actions`
-// section on it, then removes the label in $INPUT_LABEL. An action the port refuses is listed as failed and stops
-// nothing. The comment goes before the label, so a run that fails before the end leaves the ticket designated.
-// Prints the Acted.
+// section on it, then swaps the label in $INPUT_LABEL for the plan's outcome, `groomed` or `open-questions`. An action
+// the port refuses is listed as failed and stops nothing. The comment goes before the labels, so a run that fails before
+// the end leaves the ticket designated. Every action sets a whole value (a description, a state, a relation, a label), so
+// a retry that applies it again changes nothing. Prints the Acted.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,13 @@ const ticketKey = read('INPUT_TICKETKEY').trim();
 const label = read('INPUT_LABEL').trim();
 const plan = JSON.parse(read('INPUT_ACTIONS'));
 const report = read('INPUT_REPORT').trimEnd();
+
+/** Each label group AGENTS.md names: a `labels` action takes off the group's other labels before it adds its own. */
+const GROUPS = {
+  type: ['feature', 'bug', 'refactoring'],
+  platform: ['core', 'cli', 'dashboard'],
+  source: ['dogfooding', 'code-review', 'field-report'],
+};
 
 /** Runs `sail port …`, failing the step when it fails: its one line of JSON. */
 function port(args) {
@@ -26,35 +34,64 @@ function port(args) {
 
 const scratch = mkdtempSync(join(tmpdir(), 'groom-'));
 
+/** Sets `key`'s description from a file, so a description of any size and character reaches the port intact. */
+function describe(key, description, title) {
+  const args = ['ticket-source', 'edit', key];
+  if (description !== undefined) {
+    const bodyFile = join(scratch, 'description.md');
+    writeFileSync(bodyFile, description);
+    args.push('--body-file', bodyFile);
+  }
+  if (title !== undefined) args.push('--title', title);
+  port(args);
+}
+
 /** Applies one action through the port: what it did, as the Actions section words it. */
 function apply(action) {
   if (action.kind === 'edit') {
     // A title-only edit sends no body, so the description stays as it is.
-    const args = ['ticket-source', 'edit', ticketKey];
-    if (action.description !== undefined) {
-      const bodyFile = join(scratch, 'description.md');
-      writeFileSync(bodyFile, action.description);
-      args.push('--body-file', bodyFile);
-    }
-    if (action.title !== undefined) args.push('--title', action.title);
-    port(args);
+    describe(ticketKey, action.description, action.title);
     const fields = [action.title !== undefined && 'title', action.description !== undefined && 'description'];
     return `edit ${fields.filter(Boolean).join(' and ')}`;
+  }
+  if (action.kind === 'cancel') {
+    port(['ticket-source', 'update', ticketKey, '--state', 'canceled']);
+    return `cancel (${action.reason})`;
+  }
+  if (action.kind === 'merge') {
+    // The survivor takes in every ask before any ticket is canceled, so a failure midway loses none of them.
+    describe(action.into, action.description);
+    for (const key of action.absorb) port(['ticket-source', 'relate', key, '--kind', 'duplicate', '--to', action.into]);
+    return `merge ${action.absorb.join(', ')} into ${action.into}`;
+  }
+  if (action.kind === 'labels') {
+    const chosen = [action.set.type, action.set.platform, action.set.source].filter((name) => name !== undefined);
+    // Linear lets a ticket carry one label of each group, so the group's others come off first.
+    for (const name of Object.values(GROUPS).flat()) {
+      if (!chosen.includes(name)) port(['ticket-source', 'remove-label', ticketKey, name]);
+    }
+    for (const name of chosen) port(['ticket-source', 'add-label', ticketKey, name]);
+    return `labels ${chosen.join(', ')}`;
   }
   const other = action.kind === 'duplicate' ? action.of : action.to;
   port(['ticket-source', 'relate', ticketKey, '--kind', action.kind, '--to', other]);
   return `${action.kind} ${other}`;
 }
 
+/** The action as the Actions section names it before it is applied. */
+function named(action) {
+  if (action.kind === 'edit' || action.kind === 'cancel' || action.kind === 'labels') return action.kind;
+  if (action.kind === 'merge') return `merge ${action.absorb.join(', ')} into ${action.into}`;
+  return `${action.kind} ${action.kind === 'duplicate' ? action.of : action.to}`;
+}
+
 const applied = [];
 const failed = [];
 for (const action of plan.apply) {
-  const what =
-    action.kind === 'edit' ? 'edit' : `${action.kind} ${action.kind === 'duplicate' ? action.of : action.to}`;
   try {
     applied.push(apply(action));
   } catch (error) {
-    failed.push(`${what} (${(error.reason ?? error.message).split('\n')[0]})`);
+    failed.push(`${named(action)} (${(error.reason ?? error.message).split('\n')[0]})`);
   }
 }
 
@@ -66,10 +103,12 @@ const section = [
   ...failed.map((line) => `- failed: ${line}`),
 ];
 if (section.length === 2) section.push('- none');
+section.push('', `Labelled \`${plan.outcome}\`.`);
 
 const body = join(process.env.STAGE_OUT, 'comment.md');
 writeFileSync(body, `${report}\n\n${section.join('\n')}\n`);
 const comment = port(['ticket-source', 'comment', ticketKey, '--body-file', body]);
+port(['ticket-source', 'add-label', ticketKey, plan.outcome]);
 const relabelled = port(['ticket-source', 'remove-label', ticketKey, label]);
 console.log(
   JSON.stringify({
@@ -78,5 +117,6 @@ console.log(
     failed,
     comment: comment.url,
     unlabelled: !relabelled.labels.includes(label),
+    labelled: plan.outcome,
   }),
 );

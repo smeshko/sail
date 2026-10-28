@@ -1,5 +1,6 @@
 // Files each follow-up in $INPUT_FOLLOWUPS as a ticket: its type as a label, `code-review` too for a deferred review
-// finding, and never the designation label, which would hand it to the next run. Each description ends with where it
+// finding, and `groom`, so the groom workflow judges whether it earns its place; never the factory's designation label,
+// which would hand it to the next run. Each description ends with where it
 // came from. A pull request comment then lists the tickets, and the failures. Prints the Filed.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -24,7 +25,7 @@ function port(args, body) {
 const filed = [];
 const failed = [];
 for (const { title, description, type, fromReview } of followUps) {
-  const labels = [type, ...(fromReview ? ['code-review'] : [])].flatMap((label) => ['--label', label]);
+  const labels = [type, ...(fromReview ? ['code-review'] : []), 'groom'].flatMap((label) => ['--label', label]);
   const body = `${description}\n\nFrom ${origin}: ${pr.url}`;
   const { answer, error } = port(['ticket-source', 'create', '--title', title, ...labels], body);
   if (answer) filed.push({ title, ticketKey: answer.ticketKey, url: answer.url });

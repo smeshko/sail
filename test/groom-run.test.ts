@@ -18,7 +18,7 @@ import { withTempRepo } from './helpers/temp-repo';
 
 const RUN = ['FAKE-2', '--workflow', 'groom'];
 
-test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and takes the label off, leaving it in Backlog', async () => {
+test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps groom for open-questions, leaving it in Backlog', async () => {
   await withTempRepo(async (repo) => {
     writeGroomRepo(repo);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
@@ -28,17 +28,26 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and takes
     expect(readStatus(dir)).toEqual({ status: 'completed' });
     const keys = readJournal(dir).entries.map((entry) => entry.key);
     expect(keys[0]).toBe('intake#1');
-    expect(keys.slice(1, 4).sort()).toEqual(['duplicates#1', 'questions#1', 'staleness#1']);
-    expect(keys.slice(4)).toEqual(['decide#1', 'act#1']);
+    expect(keys.slice(1, 5).sort()).toEqual(['duplicates#1', 'questions#1', 'staleness#1', 'worth#1']);
+    expect(keys.slice(5)).toEqual(['decide#1', 'act#1']);
 
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.state).toEqual({ type: 'unstarted', name: 'Backlog' });
-    expect(ticket.labels).not.toContain('groom');
+    expect(ticket.labels).toEqual(['open-questions']);
     const seeded = ticket.comments.length;
     const comment = ticket.comments.at(-1)?.body ?? '';
-    for (const heading of ['## Duplicates', '## Staleness', '## Open questions', '## Actions']) {
+    for (const heading of [
+      '## Worth',
+      '## Merges',
+      '## Duplicates',
+      '## Staleness',
+      '## Labels',
+      '## Open questions',
+    ]) {
       expect(comment).toContain(heading);
     }
+    expect(comment).toContain('## Actions');
+    expect(comment).toContain('Labelled `open-questions`.');
     expect(seeded).toBe(2);
 
     const types = readEvents(dir).map((event) => event.type);
@@ -46,6 +55,8 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and takes
     expect(types).not.toContain('ticket:updated');
     const unlabelled = readEvents(dir).filter((event) => event.type === 'ticket:unlabelled');
     expect(unlabelled.map((event) => (event as { label?: string }).label)).toEqual(['groom']);
+    const labelled = readEvents(dir).filter((event) => event.type === 'ticket:labelled');
+    expect(labelled.map((event) => (event as { label?: string }).label)).toEqual(['open-questions']);
   });
 }, 120_000);
 
@@ -65,6 +76,9 @@ test("groom's intake wraps the ticket and the other tickets as untrusted input",
     expect(brief).toContain('<untrusted-input source="ticket FAKE-2, label 1">');
     expect(brief).not.toContain('State: Backlog');
     expect(others).toContain('<untrusted-input source="ticket FAKE-1, state">');
+    expect(others).toContain('<untrusted-input source="ticket FAKE-1, labels">');
+    expect(others).toContain('<untrusted-input source="ticket FAKE-1, description">');
+    expect(others).toContain('A run with no agent calls prints `total $0.00`');
   });
 }, 120_000);
 
@@ -293,6 +307,181 @@ test('groom reports, never applies, a relation to its own ticket or to one the i
     }
     expect(comment).not.toContain('- applied:');
     expect(comment).not.toContain('- failed:');
+  });
+}, 120_000);
+
+/** Reseeds one check's or the judge's only answer, changed by `change`. */
+function reseed(sailDir: string, stage: string, change: (output: Record<string, unknown>) => void): void {
+  const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8'))[stage];
+  change(answer.output);
+  seedHarness(sailDir, stage, [answer]);
+}
+
+/** The ticket keys of the ticket:labelled or ticket:unlabelled events of the run, with the label. */
+const labelEvents = (repoDir: string, type: 'ticket:labelled' | 'ticket:unlabelled') =>
+  readEvents(onlyRun(repoDir))
+    .filter((event) => event.type === type)
+    .map((event) => (event as { label?: string }).label);
+
+test('groom labels a ticket with no open question groomed', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.questions = [];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').labels).toEqual(['groomed']);
+    expect(lastComment(repo.dir)).toContain('Labelled `groomed`.');
+  });
+}, 120_000);
+
+test('groom cancels a ticket the worth check gave cancel at the threshold, and labels it groomed despite its questions', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'worth', (output) => {
+      Object.assign(output, { verdict: 'cancel', confidence: 0.8 });
+    });
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'cancel', reason: 'a tidy-up nobody would notice' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.state).toEqual({ type: 'canceled', name: 'Canceled' });
+    expect(ticket.labels).toEqual(['groomed']);
+    expect(lastComment(repo.dir)).toContain('- applied: cancel (a tidy-up nobody would notice)');
+  });
+}, 120_000);
+
+test('groom cancels a stale ticket whatever the worth check gave', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'staleness', (output) => {
+      output.stale = true;
+    });
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'cancel', reason: 'stale' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe('canceled');
+  });
+}, 120_000);
+
+test('groom reports, never applies, a cancel the checks do not back', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'cancel', reason: 'too small' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe('unstarted');
+    expect(lastComment(repo.dir)).toContain(
+      '- reported, not marked: cancel (the worth check gave keep at 0.70, and the ticket is not stale)',
+    );
+    expect(readEvents(onlyRun(repo.dir)).map((event) => event.type)).not.toContain('ticket:updated');
+  });
+}, 120_000);
+
+const MERGED = 'Print the total.\n\n## Merged from FAKE-2\n\nShow the cost total.';
+
+test('groom merges the ticket into another the worth check named: the survivor takes the description, the ticket is canceled as its duplicate', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    reseed(sailDir, 'worth', (output) => {
+      output.merges = [{ ticketKey: 'FAKE-1', confidence: 0.9, why: 'one footer line' }];
+    });
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'merge', into: 'FAKE-1', absorb: ['FAKE-2'], description: MERGED }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-1').description).toBe(MERGED);
+    const ticket = fakeTicket(repo.dir, 'FAKE-2');
+    expect(ticket.state.type).toBe('canceled');
+    expect(ticket.links.map((link) => link.title?.split(':')[0])).toEqual(['duplicate FAKE-1']);
+    expect(ticket.labels).toEqual(['groomed']);
+    expect(lastComment(repo.dir)).toContain('- applied: merge FAKE-2 into FAKE-1');
+  });
+}, 120_000);
+
+test('groom reports a merge under the threshold, and one that would absorb a started ticket, and changes no ticket', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(sailDir, 'fake/tickets.json', '"name": "Todo"', '"name": "In Progress"');
+    edit(
+      sailDir,
+      'fake/tickets.json',
+      '"type": "unstarted",\n        "name": "In Progress"',
+      '"type": "started",\n        "name": "In Progress"',
+    );
+    repo.git('commit', '-am', 'FAKE-1 is started');
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [
+        { kind: 'merge', into: 'FAKE-1', absorb: ['FAKE-2'], description: MERGED },
+        { kind: 'merge', into: 'FAKE-2', absorb: ['FAKE-1'], description: MERGED },
+      ];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe('unstarted');
+    expect(fakeTicket(repo.dir, 'FAKE-1').description).not.toBe(MERGED);
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain(
+      '- reported, not marked: merge of FAKE-2 into FAKE-1 (FAKE-1 at confidence 0.60, under 0.80)',
+    );
+    expect(comment).toContain('- reported, not marked: merge of FAKE-1 into FAKE-2 (FAKE-1 started or an epic)');
+  });
+}, 120_000);
+
+test("groom sets the ticket's labels: one of each group, taking off the group's others and keeping the rest", async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(sailDir, 'fake/tickets.json', '"labels": ["groom"]', '"labels": ["groom", "bug", "core", "epic"]');
+    repo.git('commit', '-am', 'FAKE-2 carries labels');
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [
+        { kind: 'labels', set: { type: 'feature', platform: 'cli', source: 'dogfooding' } },
+        { kind: 'labels', set: { type: 'bug', platform: 'core' } },
+      ];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').labels.sort()).toEqual(
+      ['cli', 'dogfooding', 'epic', 'feature', 'open-questions'].sort(),
+    );
+    expect(labelEvents(repo.dir, 'ticket:unlabelled').sort()).toEqual(['bug', 'core', 'groom']);
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- applied: labels feature, cli, dogfooding');
+    expect(comment).toContain('- reported, not marked: labels (the labels are already set)');
+  });
+}, 120_000);
+
+test('groom never cancels an epic', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(sailDir, 'fake/tickets.json', '"labels": ["groom"]', '"labels": ["groom", "epic"]');
+    repo.git('commit', '-am', 'FAKE-2 is an epic');
+    reseed(sailDir, 'staleness', (output) => {
+      output.stale = true;
+    });
+    reseed(sailDir, 'decide', (output) => {
+      output.actions = [{ kind: 'cancel', reason: 'stale' }];
+    });
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    expect(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe('unstarted');
+    expect(lastComment(repo.dir)).toContain('- reported, not marked: cancel (started or an epic)');
   });
 }, 120_000);
 

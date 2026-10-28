@@ -529,6 +529,31 @@
       }
     }
   ],
+  "worth": [
+    {
+      "outcome": "done",
+      "output": {
+        "verdict": "keep",
+        "confidence": 0.7,
+        "why": "A run's total cost is something a person reading sail show asks for; nothing prints it today.",
+        "merges": [
+          {
+            "ticketKey": "FAKE-1",
+            "confidence": 0.6,
+            "why": "FAKE-1 asks for the same footer line, with acceptance criteria."
+          }
+        ]
+      },
+      "turns": 5,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.1
+      }
+    }
+  ],
   "staleness": [
     {
       "outcome": "done",
@@ -568,12 +593,19 @@
       "output": {
         "summary": "FAKE-2 asks for the footer FAKE-1 asks for, less precisely; it is probably a duplicate, but the check is not sure enough to cancel it.",
         "actions": [
-          { "kind": "duplicate", "of": "FAKE-1" },
-          { "kind": "edit", "title": "Show the run's total cost in sail show's footer" }
-        ]
+          {
+            "kind": "duplicate",
+            "of": "FAKE-1"
+          },
+          {
+            "kind": "edit",
+            "title": "Show the run's total cost in sail show's footer"
+          }
+        ],
+        "questions": ["Should the total include the calls a seeded run reused from the run it came from?"]
       },
       "files": {
-        "report.md": "## Grooming report\n\nFAKE-2 reads as a vaguer FAKE-1: both want a total cost line in `sail show`.\n\n## Duplicates\n\n- FAKE-1 at confidence 0.60: the same footer line, but FAKE-2 does not say where the total goes.\n\n## Staleness\n\nNot stale: `show.ts` lists each call's cost and prints no total.\n\n## Open questions\n\n- Should the total include the calls a seeded run reused from the run it came from?\n"
+        "report.md": "## Grooming report\n\nFAKE-2 reads as a vaguer FAKE-1: both want a total cost line in `sail show`.\n\n## Worth\n\nKept at 0.70: nothing prints a run's total today, and a reader of `sail show` asks for it.\n\n## Merges\n\n- FAKE-1 at confidence 0.60: the same footer line; likely one ticket, but the check is not sure enough to merge.\n\n## Duplicates\n\n- FAKE-1 at confidence 0.60: the same footer line, but FAKE-2 does not say where the total goes.\n\n## Staleness\n\nNot stale: `show.ts` lists each call's cost and prints no total.\n\n## Labels\n\nFAKE-2 carries no type or platform: it is a `feature` of the `cli`.\n\n## Open questions\n\n- Should the total include the calls a seeded run reused from the run it came from?\n"
       },
       "messages": ["Report written: FAKE-2 is probably a duplicate of FAKE-1."],
       "turns": 10,
