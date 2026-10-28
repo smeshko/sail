@@ -1,20 +1,17 @@
 // groom's contracts, shared by its intake, stages and workflow: the ticket it reads, what each check finds, what the
 // judge decides, and what the act step did.
 import { untrusted, z } from 'sail';
+import { Duplicates } from '../../stages/duplicates/stage';
 
 export const GroomInput = z.object({
   ticketKey: z.string(),
   title: untrusted(),
+  description: untrusted(),
   state: z.object({ type: z.string(), name: z.string() }),
   /** The ticket keys of the team's other open tickets, the only ones an action may relate the ticket to. */
   others: z.array(z.string()),
   /** The ticket keys, this one's among them, that groom never cancels or merges away: started tickets and epics. */
   kept: z.array(z.string()),
-});
-
-/** Other tickets the groomed one may duplicate, each with how sure the check is. */
-export const Duplicates = z.object({
-  candidates: z.array(z.object({ ticketKey: z.string(), confidence: z.number().min(0).max(1), why: z.string() })),
 });
 
 /** Whether the repository already does what the ticket asks. */
