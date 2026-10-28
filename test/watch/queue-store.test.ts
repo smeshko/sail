@@ -889,7 +889,7 @@ test('a re-add that finds a queued ticket at another priority updates the item a
   });
 });
 
-test('pull requests rank like unprioritised tickets and stay oldest first, behind prioritised tickets', () => {
+test('pull requests take the queue order of unprioritised tickets and stay oldest first, behind prioritised tickets', () => {
   const clock = manualClock(START);
   const store = open(runsDir(), clock);
   store.addPullRequests([pullRequest(12, 'c'.repeat(40))]);

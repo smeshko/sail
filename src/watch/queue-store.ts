@@ -10,9 +10,9 @@
 //   memory of what was started (ADR-0015), and a ticket moved back to unstarted is a deliberate re-run. A pull request's
 //   key carries its head sha, so a done one stays taken while the item is kept: the same sha is never reviewed twice.
 //   Only the same full sha keeps it: a done item at another sha that shares its first 7 is replaced.
-// - Pending items (queued, and failed awaiting a retry) are kept in dispatch order in `items`, and `due()` reads them in
+// - Pending items (queued, and failed awaiting a retry) are kept in queue order in `items`, and `due()` reads them in
 //   that order: by the ticket's priority (urgent, high, medium, low, none), oldest first within one. A pull request
-//   ranks as none. An unmoved pending item goes before the first unmoved pending item that sorts after it, on add, on
+//   counts as none. An unmoved pending item goes before the first unmoved pending item dispatched after it, on add, on
 //   a priority change a re-add finds, on a retry and on a requeue. A queue.json without priorities keeps the order it
 //   has, which is the order of `addedAt`.
 // - A parked item stays in `items` with its reason, so a person can see it, and its key stays taken until a person
@@ -155,14 +155,16 @@ export function dedupKey(source: QueueSource): string {
   return source.kind === 'ticket' ? `ticket:${source.ticketKey}` : `pr:${source.number}@${source.headSha.slice(0, 7)}`;
 }
 
-const PRIORITY_RANK: Record<TicketPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
+const PRIORITY_ORDER: Record<TicketPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
 
-/** Where an item ranks: its ticket's priority, and `none` for a pull request or a ticket without one. */
-const rankOf = (item: QueueItem): number => PRIORITY_RANK[item.priority ?? 'none'];
+/** Where an item's priority puts it in the queue order: `none` for a pull request or a ticket without one. */
+const priorityOrder = (item: QueueItem): number => PRIORITY_ORDER[item.priority ?? 'none'];
 
 /** Whether `a` is dispatched after `b` by (priority, addedAt). Equal keys keep the order they are in. */
-const sortsAfter = (a: QueueItem, b: QueueItem): boolean =>
-  rankOf(a) !== rankOf(b) ? rankOf(a) > rankOf(b) : Date.parse(a.addedAt) > Date.parse(b.addedAt);
+const dispatchedAfter = (a: QueueItem, b: QueueItem): boolean =>
+  priorityOrder(a) !== priorityOrder(b)
+    ? priorityOrder(a) > priorityOrder(b)
+    : Date.parse(a.addedAt) > Date.parse(b.addedAt);
 
 /** A poll that failed, as `pollFailed()` records it. */
 export interface PollFailure {
@@ -356,17 +358,20 @@ export function openQueue(options: OpenQueueOptions): QueueStore | { refused: st
    * none is. Moved items are never compared with, so they keep their places.
    */
   const place = (next: QueueFile, item: QueueItem): void => {
-    const ranked = (each: QueueItem) => (each.state === 'queued' || each.state === 'failed') && each.moved !== true;
+    const unmoved = (each: QueueItem) => (each.state === 'queued' || each.state === 'failed') && each.moved !== true;
     const at = next.items.indexOf(item);
     if (at >= 0) {
-      // An item whose neighbours among the ranked ones already bracket it stays, so equal keys keep their order.
-      const after = next.items.slice(at + 1).find(ranked);
-      const behind = next.items.slice(0, at).findLast(ranked);
-      if ((behind === undefined || !sortsAfter(behind, item)) && (after === undefined || !sortsAfter(item, after)))
+      // An item whose neighbours among the unmoved ones already bracket it stays, so equal keys keep their order.
+      const after = next.items.slice(at + 1).find(unmoved);
+      const behind = next.items.slice(0, at).findLast(unmoved);
+      if (
+        (behind === undefined || !dispatchedAfter(behind, item)) &&
+        (after === undefined || !dispatchedAfter(item, after))
+      )
         return;
       next.items.splice(at, 1);
     }
-    const before = next.items.findIndex((each) => ranked(each) && sortsAfter(each, item));
+    const before = next.items.findIndex((each) => unmoved(each) && dispatchedAfter(each, item));
     if (before < 0) next.items.push(item);
     else next.items.splice(before, 0, item);
   };
