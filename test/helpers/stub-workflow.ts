@@ -331,9 +331,15 @@ export function writeStub(repoDir: string, options: StubOptions = {}): string {
 
 const PR_ONLY: Record<string, string> = {
   'workflows/pr-only/intake.ts': `// pull-request: an intake of the repository's own that builds its input from a pull request, never from a ticket.
-import { intake, z } from 'sail';
+import { intake, script, z } from 'sail';
 
-export const pullRequest = intake('pull-request', { accepts: ['pr'], output: z.object({ number: z.number().int() }) });
+const PullRequest = z.object({ number: z.number().int() });
+const fetch = script('fetch', { run: './fetch.sh', output: PullRequest });
+
+export const pullRequest = intake('pull-request', { accepts: ['pr'], output: PullRequest, steps: [fetch] });
+`,
+  'workflows/pr-only/fetch.sh': `#!/bin/sh
+echo '{"number": 1}'
 `,
   'workflows/pr-only/workflow.ts': `// pr-only: a workflow a ticket can't start, since its intake accepts only pull requests.
 import { workflow } from 'sail';
@@ -346,7 +352,10 @@ export default workflow('pr-only', { intake: pullRequest, version: 1 }, async (r
 
 /** Adds `pr-only` to the stub `.sail/`: a workflow whose intake, the repository's own, accepts only pull requests. */
 export function writePrOnly(sail: string): void {
-  for (const [path, text] of Object.entries(PR_ONLY)) write(sail, path, text);
+  for (const [path, text] of Object.entries(PR_ONLY)) {
+    const file = write(sail, path, text);
+    if (path.endsWith('.sh')) chmodSync(file, 0o755);
+  }
 }
 
 /** Makes the call `key` sleep the next time it runs, and clears the `.stub/sleeping` an earlier sleep left. */

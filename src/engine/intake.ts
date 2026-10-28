@@ -12,12 +12,14 @@ import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
+import type { Intake, Stage } from '../sdk/index';
 import { type CallPaths, callPaths, createCallDir, runRelative, stageOut } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { type ContractError, recordFiles, validateOutput } from './contract';
 import type { LoadedIntake } from './load-workflow';
 import { buildResult, writeResult } from './result';
 import type { Source } from './run-dir';
+import { stepProblems } from './stage-call';
 
 /** The intake's stage name: its call directory is `00-intake/`, and no stage may take the name. */
 export const INTAKE_STAGE = 'intake';
@@ -60,6 +62,45 @@ export interface RanIntake {
 /** The body of a built-in intake, or undefined for an intake the repository exports: only a built-in runs. */
 export function intakeBody(loaded: LoadedIntake): IntakeBody | undefined {
   return BUILTIN_INTAKES.get(loaded.definition);
+}
+
+/**
+ * A repository intake's steps as the stage named `intake`, so they run as the call `intake#1`. Its `consumes` is the
+ * `source` binding of the first step that declares one.
+ */
+export function ownIntakeStage(own: Intake): Stage {
+  const steps = own.steps ?? [];
+  const source = steps.flatMap((step) => {
+    const binding = step.consumes.source;
+    return binding === undefined ? [] : [binding];
+  })[0];
+  return {
+    kind: 'stage',
+    name: INTAKE_STAGE,
+    consumes: source === undefined ? {} : { source },
+    produces: own.produces,
+    output: own.output,
+    steps: steps as Stage['steps'],
+  };
+}
+
+/** Why a repository's intake can't run, one message each, or none when it can. */
+export function intakeProblems(own: Intake): string[] {
+  const at = `intake '${own.name}'`;
+  if (own.steps === undefined) {
+    return BUILTIN_INTAKES.has(own) ? [] : [`${at} has no steps: only a built-in intake runs without them`];
+  }
+  const found = stepProblems(ownIntakeStage(own)).map((message) => message.replace(`stage '${INTAKE_STAGE}'`, at));
+  for (const step of own.steps) {
+    for (const [name, binding] of Object.entries(step.consumes)) {
+      if ((binding.kind === 'file' || binding.kind === 'value') && name !== 'source') {
+        found.push(
+          `${at} step '${step.name}' consumes '${name}', and an intake's steps take only 'source' from the run`,
+        );
+      }
+    }
+  }
+  return found;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));

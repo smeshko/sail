@@ -104,8 +104,10 @@ test('check --list orders private stages by folder, intake first, lists a multi-
     write('stages/format/stage.ts', scriptStage('format'));
     write(
       'workflows/other/intake.ts',
-      "import { intake, z } from 'sail';\n" +
-        "export const ticketed = intake('ticketed', { accepts: ['ticket'], output: z.object({ key: z.string() }) });\n",
+      "import { intake, script, z } from 'sail';\n" +
+        'const Key = z.object({ key: z.string() });\n' +
+        "const fetch = script('fetch', { run: './fetch.sh', output: Key });\n" +
+        "export const ticketed = intake('ticketed', { accepts: ['ticket'], output: Key, steps: [fetch] });\n",
     );
     write(
       'workflows/other/workflow.ts',
@@ -254,6 +256,22 @@ test('a stage named unlike its folder is refused, naming the file', async () => 
       stdout: '',
       stderr:
         "../../.sail/workflows/ticket-to-pr/stages/spec/stage.ts  declares stage 'specs', but its folder spec/ says 'spec'\n",
+    });
+  });
+});
+
+test('a repository intake with no steps is refused, naming its intake.ts and that only a built-in intake runs without them', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    mkdirSync(join(sail, 'intakes', 'bare'), { recursive: true });
+    writeFileSync(
+      join(sail, 'intakes', 'bare', 'intake.ts'),
+      "import { intake, z } from 'sail';\nexport const bare = intake('bare', { accepts: ['ticket'], output: z.object({}) });\n",
+    );
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: ".sail/intakes/bare/intake.ts  intake 'bare' has no steps: only a built-in intake runs without them\n",
     });
   });
 });

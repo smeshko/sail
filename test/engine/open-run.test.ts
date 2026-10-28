@@ -531,7 +531,7 @@ function useOwnIntake(sail: string): void {
   edit(sail, WORKFLOW, "import { ticket } from 'sail/intakes';", "import { own as ticket } from './intake';");
 }
 
-test('openRun refuses a workflow that names an intake of its own, which accepts tickets: only a built-in intake runs', async () => {
+test('openRun refuses a workflow that names an intake of its own with no steps, naming the intake.ts', async () => {
   await withTempRepo(async (repo) => {
     useOwnIntake(copyFixture(repo.dir));
     const run = await openRun({
@@ -542,7 +542,7 @@ test('openRun refuses a workflow that names an intake of its own, which accepts 
     });
     expect(run).toEqual({
       refused:
-        ".sail/workflows/ticket-to-pr/workflow.ts: its intake 'own' is the repository's own, and only a built-in intake runs",
+        ".sail/workflows/ticket-to-pr/intake.ts: intake 'own' has no steps: only a built-in intake runs without them",
     });
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
   });
