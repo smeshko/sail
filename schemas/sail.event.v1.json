@@ -1625,7 +1625,7 @@
       "unevaluatedProperties": false
     },
     "queueDropped": {
-      "description": "an item taken out of the queue, such as one its re-check found no longer designated or unstarted; a later poll may queue it again",
+      "description": "an item taken out of the queue, such as one its re-check found no longer designated or in a pick-up state; a later poll may queue it again",
       "type": "object",
       "$ref": "#/$defs/queueEnvelope",
       "properties": {
