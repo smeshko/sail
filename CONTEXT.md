@@ -36,6 +36,10 @@ _Avoid_: issue, work item, task, story (each is one provider's word)
 The ticket's human-readable identifier, such as `ADW-23`. Always say "ticket key" in full; a bare "key" names a call or step.
 _Avoid_: ticket id (the provider's internal id), ref
 
+**Priority**:
+A ticket's urgency as its ticket system ranks it: urgent, high, medium, low or none. TicketSource reports it, and a ticket without one has none.
+_Avoid_: importance, severity
+
 **Designated ticket**:
 A ticket its team has marked for sail with a label (`sail` by default, configurable). It is the only kind an intake accepts unless forced. A poll collects it only while it is also in a pick-up state, because a claim moves it to In Progress (ADR-0015).
 _Avoid_: tagged ticket, eligible ticket, allowlisted ticket

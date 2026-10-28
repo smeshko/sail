@@ -3,7 +3,7 @@
 // links in the text, so they are found there and listed beside Linear's own attachments.
 import { z } from 'zod';
 import { PortError } from '../../ports/errors';
-import type { Attachment, Comment, Link, Ticket, TicketStateType } from '../../ports/types';
+import type { Attachment, Comment, Link, Ticket, TicketPriority, TicketStateType } from '../../ports/types';
 
 /** The fields of a comment, for the ticket query and the comment pages. */
 export const COMMENT_FIELDS = 'id body createdAt user { name } botActor { name }';
@@ -38,6 +38,17 @@ export function stateTypeOf(linearType: string, op: string): TicketStateType {
   return type;
 }
 
+const PRIORITIES: readonly TicketPriority[] = ['none', 'urgent', 'high', 'medium', 'low'];
+
+/** Linear's priority number as sail's, or a PortError of `op` naming a number sail doesn't know. */
+function priorityOf(number: number, op: string): TicketPriority {
+  const priority = PRIORITIES[number];
+  if (priority === undefined) {
+    throw new PortError('ticketSource', op, 'invalid', `Linear's priority ${number} is not one sail knows`);
+  }
+  return priority;
+}
+
 const Related = z.object({ identifier: z.string(), title: z.string(), url: z.string() });
 
 export const LinearComment = z.object({
@@ -53,6 +64,7 @@ const LinearTicketNode = z.object({
   title: z.string(),
   description: z.string().nullable(),
   url: z.string(),
+  priority: z.number().int().nullish(),
   state: z.object({ name: z.string(), type: z.string() }),
   labels: z.object({ nodes: z.array(z.object({ name: z.string() })) }),
   relations: z.object({ nodes: z.array(z.object({ type: z.string(), relatedIssue: Related })) }),
@@ -113,6 +125,7 @@ export function toTicket(node: unknown, comments: readonly unknown[], op: string
     url: ticket.url,
     description,
     state: { type: stateTypeOf(ticket.state.type, op), name: ticket.state.name },
+    priority: priorityOf(ticket.priority ?? 0, op),
     labels: ticket.labels.nodes.map((label) => label.name),
     comments: sorted.map(
       (comment): Comment => ({ author: authorOf(comment), body: comment.body, createdAt: comment.createdAt }),

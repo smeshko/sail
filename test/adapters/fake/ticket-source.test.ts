@@ -288,3 +288,26 @@ test('with pickUp [Backlog, Todo], the unstarted move lands on Backlog, and with
   const open = createFakeTicketSource(files());
   expect((await open.update('FAKE-1', { state: 'unstarted' })).state).toEqual(TODO_STATE);
 });
+
+test('a seeded priority comes back from get and listDesignated, and a seed without one returns no priority', async () => {
+  const seed = join(tempDir(), 'tickets.json');
+  const ticket = (ticketKey: string, extra: object) => ({
+    ticketKey,
+    title: ticketKey,
+    description: '',
+    state: { type: 'unstarted', name: 'Todo' },
+    labels: ['sail'],
+    comments: [],
+    links: [],
+    attachments: [],
+    ...extra,
+  });
+  writeFileSync(seed, JSON.stringify({ tickets: [ticket('FAKE-1', { priority: 'high' }), ticket('FAKE-2', {})] }));
+  const source = createFakeTicketSource({ seed, state: join(tempDir(), 'state.json') });
+  expect((await source.get('FAKE-1')).priority).toBe('high');
+  expect('priority' in (await source.get('FAKE-2'))).toBe(false);
+  expect((await source.listDesignated('sail')).map((each) => [each.ticketKey, each.priority])).toEqual([
+    ['FAKE-1', 'high'],
+    ['FAKE-2', undefined],
+  ]);
+});
