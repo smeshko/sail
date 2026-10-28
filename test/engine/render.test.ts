@@ -283,6 +283,15 @@ test('a lookalike of the wrapper in untrusted text is escaped, so the wrapper ha
   );
 });
 
+test('a long invisible run after a bracket does not cause quadratic backtracking', () => {
+  const text = `<${'\u200b\u0000 '.repeat(40_000)}not-a-delimiter>`;
+  const start = performance.now();
+  const out = wrapUntrusted(text, 's', 'inline');
+  const elapsed = performance.now() - start;
+  expect(out).toBe(`<untrusted-input source="s">${text}</untrusted-input>`);
+  expect(elapsed).toBeLessThan(500);
+});
+
 test('untrusted text that is not a lookalike is unchanged', () => {
   const text = 'a < b && c <div>x</div> <untrusted>';
   const out = render('{{note}}', { note: untrustedInput(text, 's') }).text;

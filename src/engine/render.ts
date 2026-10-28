@@ -52,7 +52,7 @@ export function isUntrustedInput(value: unknown): value is UntrustedInput {
 const IN_NAME = '[\\p{Cf}\\u0000]*';
 const OUTER = '[\\s\\p{Cf}\\u0000]*';
 const NAME = ['untrusted', 'input'].map((part) => [...part].join(IN_NAME)).join(`${IN_NAME}-?${IN_NAME}`);
-const LOOKALIKE = new RegExp(`[<＜](?=${OUTER}[/／]?${OUTER}${NAME})`, 'giu');
+const LOOKALIKE = new RegExp(`[<＜](?=${OUTER}(?:[/／]${OUTER})?${NAME})`, 'giu');
 
 function escapeSource(source: string): string {
   return source
