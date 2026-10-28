@@ -9,6 +9,10 @@ moved them to, with the tests an `impl` task calls for. A task is not implemente
 describes, or a commit covers only part of it. Don't judge how well it is done: correctness, style and design are the
 review's.
 
+`$STAGE_IN/jev.json` holds what Jev answered about each task before you were called: its probability of yes per task,
+or why it could not be asked. Read it as a hint where to look first, a low answer being a task to examine closely. It is
+never a verdict: judge every task yourself from the commits.
+
 You only read. Don't change any file.
 
 ## Submit
