@@ -112,3 +112,13 @@ export async function runProcess(options: ProcessOptions): Promise<ProcessEnd> {
   await stopGroup(pgid, graceMs); // whatever the leader left running
   return { started: true, code: child.exitCode, signal: child.signalCode ?? null, timedOut, aborted };
 }
+
+/** Whether `pid` names a live process: one this process may not signal is alive all the same. */
+export function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}

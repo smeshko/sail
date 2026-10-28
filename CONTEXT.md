@@ -411,6 +411,10 @@ _Avoid_: tool use, action, request, invocation
 A tool call refused for falling outside the step's permissions, recorded with the permissions that refused it. The agent carries on.
 _Avoid_: block, violation, rejection
 
+**Exclusive slot**:
+A script step's machine-wide hold on a named slot, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/`. One step on the machine holds a name at a time; a step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
+_Avoid_: lock, mutex, semaphore
+
 **Budget**:
 The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
 _Avoid_: limit, quota, cap, allowance
@@ -540,7 +544,7 @@ One call's card in the dashboard's run view, with its outcome, tries, duration, 
 _Avoid_: tile, step card, job
 
 **Timeline**:
-One call's events in order, drawn where the run view's cards were when a stage card is opened, and followed live while the call runs. It shows thinking, messages, steps, tries, script commands, and each tool call: its input, and once it ends, its status, duration, the start of its result and any denial. It comes from the run's events alone, so a running call shows one before its transcript is written.
+One call's events in order, drawn where the run view's cards were when a stage card is opened, and followed live while the call runs. It shows thinking, messages, steps, tries, script commands, a step queued for its exclusive slot with the run holding it, and each tool call: its input, and once it ends, its status, duration, the start of its result and any denial. It comes from the run's events alone, so a running call shows one before its transcript is written.
 _Avoid_: feed, activity, live log, stream (the event stream's word)
 
 **Inspector**:

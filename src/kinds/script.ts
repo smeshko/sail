@@ -10,6 +10,10 @@
 // script runs leaves its provider events. Once the process has ended, however it ended, the file is read and each event
 // emitted, after `script:exec` and before `script:exit`. A line that is no provider event ends the step in `error`,
 // with the reason `port`. The variable is this kind's, not the preamble's: an agent step gets none.
+//
+// A step that declares `exclusive` takes that machine-wide slot before `script:exec` and gives it back once the script
+// has ended and been read. While another holder has it the step waits, emitting `step:queued` for each holder it finds,
+// and the wait doesn't count toward `timeoutSeconds`. An abort while it waits ends the step in `error`, `not_started`.
 import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { delimiter, join, relative, resolve } from 'node:path';
 import { stageOut } from '../engine/call-dir';
@@ -20,6 +24,16 @@ import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
 import { checkoutPath } from '../engine/run-dir';
+import {
+  defaultSlotsDir,
+  releaseSlot,
+  type Slot,
+  SlotContended,
+  SlotError,
+  type SlotHolder,
+  type SlotResult,
+  takeSlot,
+} from '../engine/slots';
 import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
 
@@ -33,6 +47,11 @@ const SYSTEM_PATH = '/usr/bin:/bin';
 export const DEFAULT_TIMEOUT_SECONDS = 600;
 
 const LISTS = ['passed', 'failed', 'error'] as const;
+
+const SLOT_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/** How often a step queued for its slot looks again, unless the context says otherwise. */
+const SLOT_POLL_MS = 1000;
 
 /** The step's `exitCodes`, with `passed` defaulting to `[0]` and `failed` to `[1]` when left out. */
 export function exitCodeMap(step: ScriptStep): Record<(typeof LISTS)[number], readonly number[]> {
@@ -61,6 +80,11 @@ function problems(step: ScriptStep): string[] {
   const timeout = step.timeoutSeconds;
   if (timeout !== undefined && !(Number.isFinite(timeout) && timeout > 0)) {
     found.push(`timeoutSeconds must be a positive number: ${timeout}`);
+  }
+  if (step.exclusive !== undefined && !SLOT_NAME.test(step.exclusive)) {
+    found.push(
+      `exclusive must be a slot name of lowercase letters, digits and hyphens, up to 64, starting with a letter or digit: '${step.exclusive}'`,
+    );
   }
   return found;
 }
@@ -148,7 +172,77 @@ function printedBytes(stdout: string): number {
   }
 }
 
-async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
+/** Sleeps `ms`, or until `signal` aborts. */
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((done) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', finish);
+      done();
+    };
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener('abort', finish, { once: true });
+  });
+}
+
+/**
+ * Takes the exclusive slot `name`, waiting while another holder has it. Each new holder it finds is reported once, as
+ * `step:queued`. A slot that kept changing hands is tried again at the next poll. Undefined once the slot is held;
+ * otherwise the error that ended the wait: an interruption, or a slot file that isn't one.
+ */
+async function acquire(
+  name: string,
+  holder: SlotHolder,
+  context: StepContext,
+  emit: NonNullable<StepContext['emit']>,
+): Promise<ContractError | undefined> {
+  const dir = context.slots?.dir ?? defaultSlotsDir();
+  const pollMs = context.slots?.pollMs ?? SLOT_POLL_MS;
+  const interrupted = (): ContractError => ({
+    reason: 'not_started',
+    message: `interrupted while queued for exclusive slot '${name}'`,
+  });
+  let reported: Slot | undefined;
+  for (;;) {
+    if (context.signal?.aborted) return interrupted();
+    let result: SlotResult;
+    try {
+      result = takeSlot(dir, name, holder, (context.clock ?? systemClock)());
+    } catch (error) {
+      if (error instanceof SlotContended) {
+        await pause(pollMs, context.signal);
+        continue;
+      }
+      if (error instanceof SlotError) return { reason: 'not_started', message: error.message };
+      throw error;
+    }
+    if (result.taken) return undefined;
+    const held = result.holder;
+    if (reported === undefined || reported.runId !== held.runId || reported.key !== held.key) {
+      emit({
+        type: 'step:queued',
+        exclusive: name,
+        holder: { runId: held.runId, key: held.key, pid: held.pid, takenAt: held.takenAt },
+      });
+      reported = held;
+    }
+    await pause(pollMs, context.signal);
+  }
+}
+
+/**
+ * Gives slot `name` back. A slot file that can't be released doesn't replace the script's result: the next taker
+ * reports it, naming the file.
+ */
+function release(dir: string, name: string, holder: SlotHolder): void {
+  try {
+    releaseSlot(dir, name, holder);
+  } catch (error) {
+    if (!(error instanceof SlotError)) throw error;
+  }
+}
+
+async function runScript(step: ScriptStep, context: StepContext): Promise<StepRun> {
   const emit = context.emit ?? (() => {});
   const command = resolve(context.stageDir, step.run);
   const timeoutSeconds = step.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
@@ -266,6 +360,24 @@ async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
     errors: all,
     record,
   };
+}
+
+async function run(step: ScriptStep, context: StepContext): Promise<StepRun> {
+  if (step.exclusive === undefined) return runScript(step, context);
+  const holder: SlotHolder = {
+    runId: context.runId,
+    key: context.key ?? `${context.stage}#${context.call}`,
+    runDir: context.runDir,
+    pid: process.pid,
+  };
+  const emit = context.emit ?? (() => {});
+  const refused = await acquire(step.exclusive, holder, context, emit);
+  if (refused !== undefined) return { outcome: 'error', output: null, files: {}, errors: [refused], record: {} };
+  try {
+    return await runScript(step, context);
+  } finally {
+    release(context.slots?.dir ?? defaultSlotsDir(), step.exclusive, holder);
+  }
 }
 
 export const scriptKind: StepKind<ScriptStep> = { kind: 'script', problems, run };

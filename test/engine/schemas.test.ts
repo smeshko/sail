@@ -304,6 +304,12 @@ const CLOSED: NewEvent[] = [
     outcome: 'passed',
     resultPath: '05-publish/call-1/steps/2-open/result.json',
   },
+  {
+    type: 'step:queued',
+    key: KEY,
+    exclusive: 'verify',
+    holder: { runId: 'HOLDER-1', key: 'verify#1', pid: 4242, takenAt: '2026-10-27T09:00:00.000Z' },
+  },
   { type: 'input:materialised', key: KEY, binding: 'exit', from: '--bind' },
   {
     type: 'script:exec',
@@ -352,6 +358,7 @@ const CALL_LEVEL = new Set([
   'intake:end',
   'step:start',
   'step:end',
+  'step:queued',
   'input:materialised',
   'script:exec',
   'script:exit',
@@ -390,7 +397,7 @@ test.each(closed((type) => type === 'run:start'))(
 test.each(CLOSED.filter((sample) => CALL_LEVEL.has(sample.type)).map((sample) => [sample.type, sample] as const))(
   '%s requires the key of its call',
   (_, sample) => {
-    expect(CALL_LEVEL.size).toBe(15);
+    expect(CALL_LEVEL.size).toBe(16);
     expect(validateDocument('sail.event.v1', omit(stamped(sample), 'key'))).toEqual([
       { schema: 'sail.event.v1', path: '/key', message: 'is required' },
     ]);

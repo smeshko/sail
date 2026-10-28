@@ -78,6 +78,7 @@ export type TimelineEntry =
   | { kind: 'thinking' | 'message'; ts: string; text: string }
   | { kind: 'try'; ts: string; try: number }
   | { kind: 'step'; ts: string; step: string; index: number; of: number }
+  | { kind: 'queued'; ts: string; exclusive: string; holder: string }
   | TimelineTool
   | TimelineScript;
 
@@ -566,6 +567,13 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       if (card === undefined || text === undefined) return false;
       // A model whose thinking is not summarized sends blocks with no text: there is nothing of them to show.
       if (text !== '') card.timeline.push({ kind: 'thinking', ts, text });
+      return true;
+    }
+    case 'step:queued': {
+      const exclusive = str(e.exclusive);
+      const holder = str(obj(e.holder)?.runId);
+      if (card === undefined || exclusive === undefined || holder === undefined) return false;
+      card.timeline.push({ kind: 'queued', ts, exclusive, holder });
       return true;
     }
     case 'script:exec': {

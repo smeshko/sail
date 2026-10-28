@@ -26,6 +26,7 @@ export const EVENT_TYPES = [
   'stage:end',
   'step:start',
   'step:end',
+  'step:queued',
   'loop:iteration',
   'loop:exit',
   'all:start',
@@ -165,6 +166,13 @@ interface Payloads {
     resultPath: string;
     /** Exactly when the outcome is `error`. */
     errors?: ContractError[];
+  };
+  'step:queued': {
+    key: string;
+    /** The exclusive slot the step waits for. */
+    exclusive: string;
+    /** The run and call that hold the slot now. */
+    holder: { runId: string; key: string; pid: number; takenAt: string };
   };
   'input:materialised': { key: string; binding: string; from: string };
   'prompt:rendered': {

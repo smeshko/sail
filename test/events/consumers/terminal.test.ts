@@ -735,6 +735,15 @@ test('at trace, an event of every type prints a line of its own', () => {
       ),
     ],
     [
+      {
+        type: 'step:queued',
+        key: 'tests#1',
+        exclusive: 'verify',
+        holder: { runId: 'HOLDER-1', key: 'verify#1', pid: 4242, takenAt: '2026-10-27T09:00:00.000Z' },
+      },
+      detail('tests#1', 'queued for exclusive verify · held by HOLDER-1 verify#1', w),
+    ],
+    [
       { type: 'script:exec', key: 'tests#1', command: 'run.sh', cwd: '.', envKeys: [] },
       detail('tests#1', '$ run.sh', w),
     ],
@@ -959,6 +968,21 @@ test.each<[Verbosity, string]>([
     expect(render(events, verbosity)).toBe(expected);
   },
 );
+
+test.each([
+  ['quiet', ''],
+  ['normal', view(detail('verify#1', 'queued for exclusive verify · held by HOLDER-1 verify#1'))],
+] as const)('prints a queued step from normal, naming the holder (%s)', (verbosity, expected) => {
+  const events = stream([
+    {
+      type: 'step:queued',
+      key: 'verify#1',
+      exclusive: 'verify',
+      holder: { runId: 'HOLDER-1', key: 'verify#1', pid: 4242, takenAt: '2026-10-27T09:00:00.000Z' },
+    },
+  ]);
+  expect(render(events, verbosity)).toBe(expected);
+});
 
 test('verbose leaves the cwd off a command run in the workspace, and routes to the end or a fail', () => {
   const events = stream([
