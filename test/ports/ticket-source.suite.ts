@@ -11,6 +11,7 @@ import {
   ListedTicket,
   Moved,
   Posted,
+  Relabelled,
   Ticket,
   type TicketMove,
   TicketSourceCapabilities,
@@ -38,6 +39,10 @@ export interface TicketWorld {
   readonly undesignated: string;
   /** No such ticket. */
   readonly missing: string;
+  /** A label the team has and `designated` lacks. */
+  readonly spareLabel: string;
+  /** A label the team lacks. */
+  readonly unknownLabel: string;
   /** Refs the adapter accepts, each with the ticket key it names. */
   readonly refs: readonly (readonly [string, string])[];
 }
@@ -107,9 +112,15 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       portFailure(await rejection(adapter.update(world.missing, { state: 'done' }))),
       portFailure(await rejection(adapter.comment(world.missing, 'hello'))),
       portFailure(await rejection(adapter.attach(world.missing, TRANSCRIPT))),
+      portFailure(await rejection(adapter.addLabel(world.missing, world.spareLabel))),
+      portFailure(await rejection(adapter.removeLabel(world.missing, world.label))),
     ];
     expect(failures).toEqual(
-      ['get', 'claim', 'update', 'comment', 'attach'].map((op) => ({ port: 'ticketSource', op, code: 'not_found' })),
+      ['get', 'claim', 'update', 'comment', 'attach', 'addLabel', 'removeLabel'].map((op) => ({
+        port: 'ticketSource',
+        op,
+        code: 'not_found',
+      })),
     );
     expect(capture.events).toEqual([]);
   });
@@ -167,6 +178,52 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     const error = await rejection(adapter.list({ state: 'open' as never }));
     expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'list', code: 'invalid' });
     expect(capture.events).toEqual([]);
+  });
+
+  test(`${label}: addLabel then removeLabel leaves the ticket's labels as they were, each returning the labels after it and emitting ticket:labelled then ticket:unlabelled`, async () => {
+    const { adapter, world, capture } = await start();
+    const before = (await adapter.get(world.designated)).labels;
+    const added = await adapter.addLabel(world.designated, world.spareLabel);
+    expect(parseIssues(Relabelled, added)).toEqual([]);
+    expect(added.ticketKey).toBe(world.designated);
+    expect([...added.labels].sort()).toEqual([...before, world.spareLabel].sort());
+    expect([...(await adapter.get(world.designated)).labels].sort()).toEqual([...added.labels].sort());
+
+    const removed = await adapter.removeLabel(world.designated, world.spareLabel);
+    expect(parseIssues(Relabelled, removed)).toEqual([]);
+    expect([...removed.labels].sort()).toEqual([...before].sort());
+    expect([...(await adapter.get(world.designated)).labels].sort()).toEqual([...before].sort());
+
+    const changes = capture.events.filter((event) => event.type !== 'ticket:fetched');
+    expect(changes).toEqual([
+      { type: 'ticket:labelled', ticketKey: world.designated, label: world.spareLabel, labels: added.labels },
+      { type: 'ticket:unlabelled', ticketKey: world.designated, label: world.spareLabel, labels: removed.labels },
+    ]);
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: addLabel of a label the ticket carries and removeLabel of one it lacks return its labels as they are, and emit nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const before = (await adapter.get(world.designated)).labels;
+    const added = await adapter.addLabel(world.designated, world.label);
+    const removed = await adapter.removeLabel(world.designated, world.spareLabel);
+    expect([[...added.labels].sort(), [...removed.labels].sort()]).toEqual([[...before].sort(), [...before].sort()]);
+    expect(capture.events.map((event) => event.type)).toEqual(['ticket:fetched']);
+  });
+
+  test(`${label}: addLabel and removeLabel of a label the team lacks reject as invalid, naming the operation, and change and emit nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const before = (await adapter.get(world.designated)).labels;
+    const failures = [
+      portFailure(await rejection(adapter.addLabel(world.designated, world.unknownLabel))),
+      portFailure(await rejection(adapter.removeLabel(world.designated, world.unknownLabel))),
+    ];
+    expect(failures).toEqual([
+      { port: 'ticketSource', op: 'addLabel', code: 'invalid' },
+      { port: 'ticketSource', op: 'removeLabel', code: 'invalid' },
+    ]);
+    expect((await adapter.get(world.designated)).labels).toEqual(before);
+    expect(capture.events.map((event) => event.type)).toEqual(['ticket:fetched', 'ticket:fetched']);
   });
 
   test(`${label}: a claim starts the ticket and takes it off listDesignated, and a second claim is not taken`, async () => {

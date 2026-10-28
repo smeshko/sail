@@ -9,6 +9,7 @@ import {
   type ListedTicket,
   type Moved,
   type Posted,
+  type Relabelled,
   Ticket,
   type TicketMove,
   type TicketSourceCapabilities,
@@ -88,6 +89,16 @@ export interface TicketSource {
   comment(ticketKey: string, body: string): Promise<Posted>;
   /** Files a new ticket with these labels, in whatever state the provider starts one in. Emits `ticket:created`. */
   create(ticket: NewTicket): Promise<Created>;
+  /**
+   * Adds the label to the ticket and returns the labels it carries then. Idempotent: a label it already carries sends
+   * nothing and emits nothing. A label the team lacks rejects as `invalid` before any change. Emits `ticket:labelled`.
+   */
+  addLabel(ticketKey: string, label: string): Promise<Relabelled>;
+  /**
+   * Removes the label from the ticket and returns the labels it carries then. Idempotent: a label it lacks sends
+   * nothing and emits nothing. A label the team lacks rejects as `invalid` before any change. Emits `ticket:unlabelled`.
+   */
+  removeLabel(ticketKey: string, label: string): Promise<Relabelled>;
   /**
    * Uploads the file and attaches it to the ticket, after `checkAttachment()` passes it. Emits `ticket:attached`.
    */

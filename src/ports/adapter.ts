@@ -69,6 +69,8 @@ export const PORT_OPERATIONS = {
     'update',
     'comment',
     'create',
+    'addLabel',
+    'removeLabel',
     'attach',
     'capabilities',
   ]),

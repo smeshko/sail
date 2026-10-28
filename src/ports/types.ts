@@ -71,6 +71,10 @@ export type Posted = z.infer<typeof Posted>;
 export const Created = z.object({ ticketKey: z.string(), url: z.string(), raw: Raw });
 export type Created = z.infer<typeof Created>;
 
+/** What `addLabel` and `removeLabel` leave: the labels the ticket carries afterwards. */
+export const Relabelled = z.object({ ticketKey: z.string(), labels: z.array(z.string()), raw: Raw });
+export type Relabelled = z.infer<typeof Relabelled>;
+
 /** A file `attach` attached to a ticket: the attachment's URL. */
 export const Attached = z.object({ url: z.string(), raw: Raw });
 export type Attached = z.infer<typeof Attached>;

@@ -65,6 +65,8 @@ Usage:
                                                              Move a ticket to that state
   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
                                                              File a new ticket, the description from the file or stdin
+  sail port ticket-source add-label|remove-label <ticket> <label>
+                                                             Add the team's label to a ticket, or remove it
   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
                                                              Upload a file and attach it to a ticket
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them

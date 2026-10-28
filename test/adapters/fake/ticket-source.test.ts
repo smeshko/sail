@@ -23,11 +23,12 @@ function tempDir(): string {
   return dir;
 }
 
-/** A copy of the fixture seed, and a state file in a folder that doesn't exist yet. */
-function files(): { seed: string; state: string } {
+/** A copy of the fixture seed, naming the labels its team has when `labels` is given, and a state file in a folder that doesn't exist yet. */
+function files(labels?: string[]): { seed: string; state: string } {
   const dir = tempDir();
   const seed = join(dir, 'tickets.json');
-  copyFileSync(SEED, seed);
+  if (labels === undefined) copyFileSync(SEED, seed);
+  else writeFileSync(seed, JSON.stringify({ labels, ...JSON.parse(readFileSync(SEED, 'utf8')) }));
   return { seed, state: join(dir, 'state', 'tickets.json') };
 }
 
@@ -49,19 +50,44 @@ function seedOf(tickets: { ticketKey: string; state: TicketState; labels: string
 const keys = (tickets: readonly Ticket[]): string[] => tickets.map((ticket) => ticket.ticketKey);
 
 ticketSourceSuite('fake', async (emit) => ({
-  adapter: createFakeTicketSource({ ...files(), emit }),
+  adapter: createFakeTicketSource({ ...files(['sail', 'cli', 'Bug']), emit }),
   world: {
     label: 'sail',
     designated: 'FAKE-1',
     started: 'FAKE-2',
     undesignated: 'FAKE-3',
     missing: 'FAKE-99',
+    spareLabel: 'Bug',
+    unknownLabel: 'no-such-label',
     refs: [
       ['FAKE-1', 'FAKE-1'],
       ['fake://tickets/FAKE-12', 'FAKE-12'],
     ],
   },
 }));
+
+test("addLabel gives the label in the team's own spelling, however it is written, and adds nothing the ticket carries under another case", async () => {
+  const source = createFakeTicketSource(files(['sail', 'cli', 'Bug']));
+  expect((await source.addLabel('FAKE-1', 'bug')).labels).toEqual(['sail', 'Bug']);
+  expect((await source.addLabel('FAKE-1', 'BUG')).labels).toEqual(['sail', 'Bug']);
+  expect((await source.removeLabel('FAKE-1', 'SAIL')).labels).toEqual(['Bug']);
+});
+
+test('a seed without labels knows every label: addLabel adds any name, and a change made through one instance is read by the next', async () => {
+  const world = files();
+  const source = createFakeTicketSource(world);
+  expect((await source.addLabel('FAKE-3', 'anything-at-all')).labels).toEqual(['anything-at-all']);
+  expect((await createFakeTicketSource(world).get('FAKE-3')).labels).toEqual(['anything-at-all']);
+});
+
+test("an unknown label's refusal says which label it is: no label <name>", async () => {
+  const source = createFakeTicketSource(files(['sail']));
+  const error = await rejection(source.addLabel('FAKE-1', 'no-such-label'));
+  expect([portFailure(error), messageOf(error)]).toEqual([
+    { port: 'ticketSource', op: 'addLabel', code: 'invalid' },
+    'ticketSource.addLabel: no label no-such-label',
+  ]);
+});
 
 test('a claim made through one instance is read by a new one on the same state file, and the seed is unchanged', async () => {
   const world = files();

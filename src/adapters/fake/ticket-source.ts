@@ -36,8 +36,17 @@ const StoredTicket = z.object({
 });
 type StoredTicket = z.infer<typeof StoredTicket>;
 
-const World = z.object({ tickets: z.array(StoredTicket) });
+/** `labels` names the team's labels; a seed without it knows every label. */
+const World = z.object({ labels: z.array(z.string()).optional(), tickets: z.array(StoredTicket) });
 type World = z.infer<typeof World>;
+
+/** The team's spelling of `name`, matched without regard to case. An unknown label is `invalid`. */
+function knownLabel(world: World, op: string, name: string): string {
+  if (world.labels === undefined) return name;
+  const found = world.labels.find((each) => each.toLowerCase() === name.toLowerCase());
+  if (found === undefined) throw new PortError('ticketSource', op, 'invalid', `no label ${name}`);
+  return found;
+}
 
 /** The fake's state for each move, named as a Linear-like provider names them. */
 const STATES: Record<TicketMove, TicketState> = {
@@ -80,6 +89,28 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     const found = world.tickets.find((ticket) => ticket.ticketKey === ticketKey);
     if (found === undefined) throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey}`);
     return found;
+  };
+
+  const relabel = async (op: 'addLabel' | 'removeLabel', ticketKey: string, label: string) => {
+    const adding = op === 'addLabel';
+    const changed = store.change((world) => {
+      const ticket = find(world, op, ticketKey);
+      const name = knownLabel(world, op, label);
+      const carried = ticket.labels.includes(name);
+      if (carried === adding)
+        return { name, changed: false, ticketKey, labels: [...ticket.labels], raw: structuredClone(ticket) };
+      ticket.labels = adding ? [...ticket.labels, name] : ticket.labels.filter((each) => each !== name);
+      return { name, changed: true, ticketKey, labels: [...ticket.labels], raw: structuredClone(ticket) };
+    });
+    const { name, changed: did, ...relabelled } = changed;
+    if (did)
+      emit({
+        type: adding ? 'ticket:labelled' : 'ticket:unlabelled',
+        ticketKey,
+        label: name,
+        labels: relabelled.labels,
+      });
+    return relabelled;
   };
 
   return {
@@ -174,6 +205,8 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       emit({ type: 'ticket:created', ticketKey: created.ticketKey, title, url: created.url });
       return created;
     },
+    addLabel: (ticketKey, label) => relabel('addLabel', ticketKey, label),
+    removeLabel: (ticketKey, label) => relabel('removeLabel', ticketKey, label),
     async attach(ticketKey, file) {
       checkAttachment(file);
       const name = file.title ?? file.name;

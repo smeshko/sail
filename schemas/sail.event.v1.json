@@ -52,6 +52,8 @@
         "ticket:commented",
         "ticket:created",
         "ticket:attached",
+        "ticket:labelled",
+        "ticket:unlabelled",
         "codehost:pushed",
         "codehost:pr_opened",
         "codehost:checks",
@@ -222,6 +224,14 @@
     {
       "if": { "properties": { "type": { "const": "ticket:attached" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/ticketAttached" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:labelled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketLabelled" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:unlabelled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketLabelled" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:pushed" } }, "required": ["type"] },
@@ -1121,6 +1131,18 @@
         "url": { "type": "string" }
       },
       "required": ["ticketKey", "name", "contentType", "size", "url"],
+      "unevaluatedProperties": false
+    },
+    "ticketLabelled": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "label": { "type": "string" },
+        "labels": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["ticketKey", "label", "labels"],
       "unevaluatedProperties": false
     },
     "codehostPushed": {

@@ -566,6 +566,8 @@ const PROVIDER: NewEvent[] = [
     size: 42,
     url: 'fake://tickets/FAKE-1/attachments/1',
   },
+  { type: 'ticket:labelled', key: OPEN, ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail', 'Bug'] },
+  { type: 'ticket:unlabelled', key: OPEN, ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail'] },
   { type: 'codehost:pushed', key: OPEN, branch: 'sail/FAKE-1', headSha: SHA },
   {
     type: 'codehost:pr_opened',

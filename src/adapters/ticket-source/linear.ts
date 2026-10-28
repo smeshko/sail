@@ -8,7 +8,14 @@ import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
-import { type ListedTicket, type Ticket, TicketMove, type TicketState, TicketStateType } from '../../ports/types';
+import {
+  type ListedTicket,
+  type Relabelled,
+  type Ticket,
+  TicketMove,
+  type TicketState,
+  TicketStateType,
+} from '../../ports/types';
 import { createLinearClient, type Fetch, LINEAR_ENDPOINT } from './linear-client';
 import { COMMENT_FIELDS, stateTypeOf, TICKET_FIELDS, toTicket } from './linear-ticket';
 
@@ -82,6 +89,14 @@ const CREATE = `mutation SailCreate($teamId: String!, $title: String!, $descript
     success
     issue { id identifier url }
   }
+}`;
+
+const ADD_LABEL = `mutation SailAddLabel($id: String!, $labelId: String!) {
+  issueAddLabel(id: $id, labelId: $labelId) { success issue { labels(first: 250) { nodes { name } } } }
+}`;
+
+const REMOVE_LABEL = `mutation SailRemoveLabel($id: String!, $labelId: String!) {
+  issueRemoveLabel(id: $id, labelId: $labelId) { success issue { labels(first: 250) { nodes { name } } } }
 }`;
 
 // A signed URL to PUT the file's bytes to, with the headers the PUT must carry, and the URL the file is served at.
@@ -235,6 +250,63 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       if (!(error instanceof PortError) || !['invalid', 'not_found'].includes(error.code)) throw error;
       return read('listDesignated', ticketKey);
     }
+  }
+
+  /** The team's id and every label its tickets can carry, read page by page. */
+  async function teamLabels(op: string): Promise<{ teamId: string; known: { id: string; name: string }[] }> {
+    const known: { id: string; name: string }[] = [];
+    const seen = new Set<string>();
+    let teamId = '';
+    let after: string | null = null;
+    do {
+      const read: { teams: { nodes: { id: string }[] }; issueLabels: Page<{ id: string; name: string }> } =
+        await client.request(op, 'SailTeamLabels', TEAM_LABELS, { team, after });
+      const [found] = read.teams.nodes;
+      if (found === undefined) throw new PortError('ticketSource', op, 'not_found', `Linear has no team ${team}`);
+      teamId = found.id;
+      known.push(...read.issueLabels.nodes);
+      after = nextCursor(op, `the labels of team ${team}`, read.issueLabels, seen);
+    } while (after !== null);
+    return { teamId, known };
+  }
+
+  /** The team's label named `name`, whatever its case, or an `invalid` PortError of `op`. */
+  function labelOf(op: string, known: { id: string; name: string }[], name: string): { id: string; name: string } {
+    const label = known.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+    if (label === undefined) throw new PortError('ticketSource', op, 'invalid', `team ${team} has no label ${name}`);
+    return label;
+  }
+
+  /** Adds or removes the label, after the ticket is found and the label resolved. A change that is already so sends nothing. */
+  async function relabel(op: 'addLabel' | 'removeLabel', ticketKey: string, name: string): Promise<Relabelled> {
+    const adding = op === 'addLabel';
+    const { node } = await lookup(op, ticketKey);
+    const { known } = await teamLabels(op);
+    const label = labelOf(op, known, name);
+    const carried = (node as unknown as { labels: { nodes: { name: string }[] } }).labels.nodes.map(
+      (each) => each.name,
+    );
+    if (carried.includes(label.name) === adding) return { ticketKey, labels: carried, raw: node };
+    const field = adding ? 'issueAddLabel' : 'issueRemoveLabel';
+    const data = await client.request<
+      Record<string, { success: boolean; issue: { labels: { nodes: { name: string }[] } } | null }>
+    >(op, adding ? 'SailAddLabel' : 'SailRemoveLabel', adding ? ADD_LABEL : REMOVE_LABEL, {
+      id: node.id,
+      labelId: label.id,
+    });
+    const answered = data[field];
+    if (answered === undefined || !answered.success || answered.issue === null) {
+      throw new PortError(
+        'ticketSource',
+        op,
+        'conflict',
+        `Linear did not ${adding ? 'add' : 'remove'} the label ${label.name} on ${ticketKey}`,
+        data,
+      );
+    }
+    const labels = answered.issue.labels.nodes.map((each) => each.name);
+    emit({ type: adding ? 'ticket:labelled' : 'ticket:unlabelled', ticketKey, label: label.name, labels });
+    return { ticketKey, labels, raw: data };
   }
 
   async function states(op: string): Promise<LinearState[]> {
@@ -443,28 +515,8 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     },
     async create({ title, description, labels }) {
       // Every label is resolved before anything is filed: a name the team lacks files no ticket.
-      const known: { id: string; name: string }[] = [];
-      const seen = new Set<string>();
-      let teamId: string | undefined;
-      let after: string | null = null;
-      do {
-        const read: { teams: { nodes: { id: string }[] }; issueLabels: Page<{ id: string; name: string }> } =
-          await client.request('create', 'SailTeamLabels', TEAM_LABELS, { team, after });
-        const [found] = read.teams.nodes;
-        if (found === undefined) {
-          throw new PortError('ticketSource', 'create', 'not_found', `Linear has no team ${team}`);
-        }
-        teamId = found.id;
-        known.push(...read.issueLabels.nodes);
-        after = nextCursor('create', `the labels of team ${team}`, read.issueLabels, seen);
-      } while (after !== null);
-      const labelIds = labels.map((name) => {
-        const label = known.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
-        if (label === undefined) {
-          throw new PortError('ticketSource', 'create', 'invalid', `team ${team} has no label ${name}`);
-        }
-        return label.id;
-      });
+      const { teamId, known } = await teamLabels('create');
+      const labelIds = labels.map((name) => labelOf('create', known, name).id);
       const data = await client.request<{
         issueCreate: { success: boolean; issue: { id: string; identifier: string; url: string } | null };
       }>('create', 'SailCreate', CREATE, { teamId, title, description, labelIds });
@@ -481,6 +533,8 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       emit({ type: 'ticket:created', ticketKey, title, url });
       return { ticketKey, url, raw: data };
     },
+    addLabel: (ticketKey, label) => relabel('addLabel', ticketKey, label),
+    removeLabel: (ticketKey, label) => relabel('removeLabel', ticketKey, label),
     async attach(ticketKey, file) {
       checkAttachment(file);
       const { node } = await lookup('attach', ticketKey);

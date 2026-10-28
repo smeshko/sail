@@ -18,7 +18,7 @@ import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { wrapUntrusted } from '../../src/engine/render';
-import { Attached, Created, ListedTicket, Posted, Ticket } from '../../src/ports/types';
+import { Attached, Created, ListedTicket, Posted, Relabelled, Ticket } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -928,6 +928,84 @@ test('the usage lists ticket-source list with its options', async () => {
     expect(refused.stderr).toContain(
       '\n       sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]\n',
     );
+  });
+});
+
+// `sail port ticket-source add-label` and `remove-label`: the port's Relabelled as one line of JSON, against a seed that
+// names the labels its team has.
+
+/** The fixture's `.sail/`, its seed naming the team's labels. */
+function fixtureWithTeamLabels(repoDir: string): void {
+  const sail = copyFixture(repoDir);
+  const seed = join(sail, 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(seed, 'utf8'));
+  writeFileSync(seed, `${JSON.stringify({ labels: ['sail', 'docs', 'Bug'], tickets: world.tickets }, null, 2)}\n`);
+}
+
+test('add-label then remove-label print the port’s Relabelled with the labels after each, and with SAIL_EVENTS set append ticket:labelled then ticket:unlabelled', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const env = { SAIL_EVENTS: file };
+    const added = await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-1', 'bug'], repo.dir, { env });
+    const removed = await runCaptured(['port', 'ticket-source', 'remove-label', 'FAKE-1', 'Bug'], repo.dir, { env });
+    expect([added.code, added.stderr, removed.code, removed.stderr]).toEqual([EXIT_OK, '', EXIT_OK, '']);
+    expect(Relabelled.parse(oneLine(added.stdout)).labels).toEqual(['sail', 'Bug']);
+    expect(Relabelled.parse(oneLine(removed.stdout)).labels).toEqual(['sail']);
+    const events = readFileSync(file, 'utf8')
+      .split('\n')
+      .slice(0, -1)
+      .map((line) => JSON.parse(line));
+    expect(events).toEqual([
+      { type: 'ticket:labelled', ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail', 'Bug'] },
+      { type: 'ticket:unlabelled', ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail'] },
+    ]);
+  });
+});
+
+test('add-label of a label the team lacks exits 1 with the adapter’s message, changes nothing, and with SAIL_EVENTS set appends an error:port', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const failed = await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-1', 'no-such-label'], repo.dir, {
+      env: { SAIL_EVENTS: file },
+    });
+    expect(failed).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.addLabel: no label no-such-label (invalid)\n',
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+    expect(readFileSync(file, 'utf8')).toContain('"type":"error:port"');
+  });
+});
+
+test('add-label to a ticket the seed lacks exits 1 as not_found', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    expect(await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-99', 'Bug'], repo.dir)).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.addLabel: no ticket FAKE-99 (not_found)\n',
+    });
+  });
+});
+
+test('add-label without its label, or for a ticket that is none, exits 3 before any port is called', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    const bare = await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-1'], repo.dir);
+    const none = await runCaptured(['port', 'ticket-source', 'remove-label', 'nonsense', 'Bug'], repo.dir);
+    expect([bare.code, bare.stderr]).toEqual([EXIT_REFUSED, expect.stringContaining('add-label needs a label')]);
+    expect(none.code).toBe(EXIT_REFUSED);
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('the usage lists add-label and remove-label with their ticket and label', async () => {
+  await withTempRepo(async (repo) => {
+    const refused = await runCaptured(['port', 'ticket-source'], repo.dir);
+    expect(refused.stderr).toContain('\n       sail port ticket-source add-label|remove-label <ticket> <label>\n');
   });
 });
 

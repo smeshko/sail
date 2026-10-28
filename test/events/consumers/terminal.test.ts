@@ -862,6 +862,14 @@ test('at trace, an event of every type prints a line of its own', () => {
       ),
     ],
     [
+      { type: 'ticket:labelled', ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail', 'Bug'] },
+      head('', '· ticket:labelled {"ticketKey":"FAKE-1","label":"Bug","labels":["sail","Bug"]}', w),
+    ],
+    [
+      { type: 'ticket:unlabelled', ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail'] },
+      head('', '· ticket:unlabelled {"ticketKey":"FAKE-1","label":"Bug","labels":["sail"]}', w),
+    ],
+    [
       { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'b4efb0c' },
       head('', '· codehost:pushed {"branch":"sail/FAKE-1","headSha":"b4efb0c"}', w),
     ],

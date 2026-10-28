@@ -8,6 +8,8 @@
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
 //                                                   files a new ticket: its description from the file or stdin
+//   sail port ticket-source add-label <ticket> <label>       adds the team's label to it
+//   sail port ticket-source remove-label <ticket> <label>    removes the label from it
 //   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
 //                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
@@ -48,6 +50,7 @@ import {
   ListedTicket,
   Moved,
   Posted,
+  Relabelled,
   type Ticket,
   type TicketMove,
   type TicketStateType,
@@ -197,6 +200,23 @@ const updateOperation: PortOperation<TicketSource> = {
   },
 };
 
+/**
+ * The label `<label>` named added to or removed from the ticket `<ticket>` names: the port's `Relabelled`, parsed
+ * before it is printed. The label is passed on as given, and the adapter refuses one the team lacks.
+ */
+const relabelOperation = (op: 'addLabel' | 'removeLabel'): PortOperation<TicketSource> => ({
+  positionals: ['ticket', 'label'],
+  async run(source, { positionals: [ref = '', label = ''] }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const relabelled = Relabelled.safeParse(await source[op](ticketKey, label));
+    if (relabelled.success) return { value: relabelled.data };
+    const [issue] = relabelled.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', op, 'invalid', `its answer is not a Relabelled: ${where}`);
+  },
+});
+
 /** A new ticket, its description the body: the port's `Created`, parsed before it is printed. */
 const createOperation: PortOperation<TicketSource> = {
   positionals: [],
@@ -273,6 +293,8 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     comment: commentOperation,
     update: updateOperation,
     create: createOperation,
+    'add-label': relabelOperation('addLabel'),
+    'remove-label': relabelOperation('removeLabel'),
     attach: attachOperation,
   },
 };
