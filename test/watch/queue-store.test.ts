@@ -921,7 +921,28 @@ test('a failed item that retries and a requeued item are placed by their priorit
 
 test('a queue.json written before priorities existed reads and dispatches in the order it holds', () => {
   const runs = runsDir();
-  open(runs).add([ticket('FAKE-2'), ticket('FAKE-1')]);
+  const dir = queueDir(runs, 'ticket-to-pr');
+  mkdirSync(dir, { recursive: true });
+  // No priority on any item, and the file's order is not the order of addedAt: FAKE-2 was added after FAKE-1.
+  const item = (key: string, addedAt: string) => ({
+    dedupKey: `ticket:${key}`,
+    source: { kind: 'ticket', ticketKey: key },
+    title: `Ticket ${key}`,
+    url: `fake://tickets/${key}`,
+    state: 'queued',
+    attempts: 0,
+    addedAt,
+  });
+  writeFileSync(
+    join(dir, 'queue.json'),
+    `${JSON.stringify({
+      version: 1,
+      workflow: 'ticket-to-pr',
+      updatedAt: START,
+      polling: { label: 'sail', failures: 0 },
+      items: [item('FAKE-2', '2026-09-24T10:56:00.000Z'), item('FAKE-1', '2026-09-24T10:55:00.000Z')],
+    })}\n`,
+  );
   const reopened = open(runs);
   expect({
     items: reopened.snapshot().items.map((item) => [item.dedupKey, item.priority, item.moved]),
