@@ -1,7 +1,7 @@
 // reconcileItem() (DECISIONS D5, D6): what one dispatched item's run needs, case by case, on run directories, dispatch
 // logs and branch leases the test writes by hand. The leases are read through the real lease files.
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { heldLease, takeLease } from '../../src/adapters/leases';
@@ -131,6 +131,25 @@ test('suspended until and budget_exceeded wait; a dead running, a suspended inte
       reason: `its resume failed: sail resume: run ${runIdOf(4)}'s workspace can't be reopened: the workspace is gone (invalid)`,
     },
     { kind: 'park', reason: 'its resume failed: it exited 1' },
+  ]);
+});
+
+test("a failed resume is parked with only what it logged after logFrom: its exit, a signal, or its own line, never the run's last line", async () => {
+  const w = world();
+  runDir(w.runsDir, 4, 'suspended', 'interrupted');
+  logLine(w.runsDir, 4, "the original run's last line");
+  const log = dispatchLog(w.runsDir, 'a', runIdOf(4));
+  const logFrom = Buffer.byteLength(readFileSync(log, 'utf8'));
+  const silent = [
+    await reconcileItem(item(4, DEAD), w.context({ resumed: true, exited: 1, logFrom })),
+    await reconcileItem(item(4, DEAD), w.context({ resumed: true, exited: null, logFrom })),
+  ];
+  appendFileSync(log, 'sail resume: it fell over\n');
+  const loud = await reconcileItem(item(4, DEAD), w.context({ resumed: true, exited: 1, logFrom }));
+  expect([...silent, loud]).toEqual([
+    { kind: 'park', reason: 'its resume failed: it exited 1' },
+    { kind: 'park', reason: 'its resume failed: it was ended by a signal' },
+    { kind: 'park', reason: 'its resume failed: sail resume: it fell over' },
   ]);
 });
 

@@ -6,9 +6,10 @@
 //   its watcher (ADR-0018), and neither a Ctrl-C at the watcher's terminal nor the watcher's exit reaches it.
 // - Its stdout and stderr go to `.sail-runs/queue/<workflow>/dispatch/<run id>.log`, not to the run directory: the
 //   child makes that itself, and a start refuses one that exists. A start refused before its run directory exists
-//   leaves only this log, whose last line says why. A resume appends to its run's log, so the log's last line is why
-//   the resume failed when it did.
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+//   leaves only this log, whose last line says why. A resume appends to its run's log from the offset it reports as
+//   `logFrom`, so only what follows that offset is the resume's, and the log's last line after it is why the resume
+//   failed when it did.
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { queueDir } from './queue-store';
 
@@ -54,6 +55,8 @@ export interface SpawnedRun {
   pid: number;
   /** The child's exit code, or null when a signal ended it. */
   exited: Promise<number | null>;
+  /** The byte length of the dispatch log when the child started: its own output begins there. */
+  logFrom: number;
 }
 
 /** Starts `sail <args>` in `root`, detached, its output appended to `log`. */
@@ -67,6 +70,7 @@ function spawnSail(
   mkdirSync(dirname(log), { recursive: true });
   const fd = openSync(log, 'a');
   try {
+    const logFrom = fstatSync(fd).size;
     const child = Bun.spawn([...(cli ?? SAIL_CLI), ...args], {
       cwd: root,
       env: { ...env },
@@ -76,7 +80,7 @@ function spawnSail(
       stderr: fd,
     });
     child.unref();
-    return { pid: child.pid, exited: child.exited.then(() => child.exitCode) };
+    return { pid: child.pid, exited: child.exited.then(() => child.exitCode), logFrom };
   } finally {
     // The child holds its own copy of the descriptor.
     closeSync(fd);
@@ -109,10 +113,12 @@ export function spawnResume(options: SpawnResumeOptions): SpawnedRun {
 /** The longest reason a log's last line gives. */
 const LINE_MAX = 500;
 
-/** The last line of the log at `path` that isn't blank, cut to 500 characters, or undefined when there is none. */
-export function lastLine(path: string): string | undefined {
+/** The last line of the log at `path`, after byte `from`, that isn't blank, cut to 500 characters, or undefined when there is none. */
+export function lastLine(path: string, from = 0): string | undefined {
   if (!existsSync(path)) return undefined;
-  const line = readFileSync(path, 'utf8')
+  const line = readFileSync(path)
+    .subarray(from)
+    .toString('utf8')
     .split('\n')
     .map((each) => each.trim())
     .findLast((each) => each !== '');
