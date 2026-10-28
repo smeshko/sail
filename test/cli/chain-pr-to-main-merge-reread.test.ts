@@ -68,6 +68,39 @@ test('a merge answered pending that did not happen still hands back with merge p
   });
 });
 
+test('a merge answered pending that GitHub reports merged without its merge commit hands back with merge pending', async () => {
+  const run = await observe(
+    {
+      pulls: [{ number: 7, branch: 'sail/ADW-1-chain', ticket: 'ADW-1' }],
+      github: (world) =>
+        world.inject('PUT /pulls/7/merge', {
+          status: 200,
+          applied: true,
+          // Read once the world has merged it: GitHub reports it merged, with no merge commit.
+          get body() {
+            const pull = world.pullRequests.find((each) => each.number === 7);
+            if (pull !== undefined) pull.mergeCommitSha = null;
+            return PENDING.body;
+          },
+        }),
+    },
+    ['#7', '--workflow', 'pr-to-main'],
+  );
+  expect({
+    code: run.code,
+    message: run.end.message,
+    done: ended(run).includes('done#1'),
+    merge: outputOf(run, 'merge#1'),
+    merges: merges(run, 7).length,
+  }).toEqual({
+    code: EXIT_FAILED,
+    message: 'handed back: merge pending',
+    done: false,
+    merge: { state: 'pending', reason: 'Merge pending' },
+    merges: 1,
+  });
+});
+
 test('a failed merge call that did not happen still ends merge#1 in error and hands back with merge failed', async () => {
   const run = await answered(LOST);
   expect({

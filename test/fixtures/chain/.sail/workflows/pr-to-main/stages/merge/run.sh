@@ -44,9 +44,11 @@ if [ "$sent" = yes ] && [ "$(printf '%s' "$answer" | "${SAIL_BUN:-bun}" -e 'cons
 fi
 # The merge answered pending, or its call failed: the host may have merged all the same. Re-read the pull request, and
 # when it merged, ask the port once more, which reports a merged pull request with its sha and sends no second request.
+# Only a `merged` answer counts: one merged without its merge commit is answered pending, and falls through.
 if reread=$(sail port codehost get-pull-request "$pr" 9>&-) \
   && [ "$(printf '%s' "$reread" | "${SAIL_BUN:-bun}" -e 'console.log(JSON.parse(await Bun.stdin.text()).state)' 9>&-)" = merged ] \
-  && recovered=$(sail port codehost merge "$pr" --method squash --expected-head-sha "$sha" 9>&-); then
+  && recovered=$(sail port codehost merge "$pr" --method squash --expected-head-sha "$sha" 9>&-) \
+  && [ "$(printf '%s' "$recovered" | "${SAIL_BUN:-bun}" -e 'console.log(JSON.parse(await Bun.stdin.text()).state)' 9>&-)" = merged ]; then
   if [ "$sent" = yes ]; then how="the merge answered pending"; else how="the merge's answer was lost"; fi
   printf '%s' "$recovered" | HOW="$how" "${SAIL_BUN:-bun}" -e '
     const merged = JSON.parse(await Bun.stdin.text());
