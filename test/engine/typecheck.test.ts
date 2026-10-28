@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseDiagnostics, typecheck } from '../../src/engine/typecheck';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -96,12 +95,29 @@ test('a .sail/ with no TypeScript checks ok without running tsc', async () => {
 test('a tsc that cannot run is internal, and leaves no config behind', async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
-    const configs = () => readdirSync(tmpdir()).filter((name) => name.startsWith('sail-check-'));
-    const before = configs();
-    const result = await typecheck(sail, { tsc: join(repo.dir, 'missing', 'tsc') });
+    const tmp = join(repo.dir, 'tmp');
+    mkdirSync(tmp);
+    const result = await typecheck(sail, { tsc: join(repo.dir, 'missing', 'tsc'), tmp });
     expect(result).toHaveProperty('internal');
     if ('internal' in result) expect(result.internal).toContain('missing');
-    expect(configs()).toEqual(before);
+    expect(readdirSync(tmp)).toEqual([]);
+  });
+});
+
+test('typecheck writes its tsc config under the temp directory it is given, and removes it', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const tmp = join(repo.dir, 'tmp');
+    mkdirSync(tmp);
+    const tsc = join(repo.dir, 'stub-tsc.js');
+    writeFileSync(
+      tsc,
+      "const args = process.argv; console.log('config=' + args[args.indexOf('-p') + 1]); process.exit(2);\n",
+    );
+    const result = await typecheck(sail, { tsc, tmp });
+    expect(result).toHaveProperty('internal');
+    if ('internal' in result) expect(result.internal).toContain(`config=${join(tmp, 'sail-check-')}`);
+    expect(readdirSync(tmp)).toEqual([]);
   });
 });
 
