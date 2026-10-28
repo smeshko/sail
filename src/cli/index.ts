@@ -57,12 +57,20 @@ Usage:
   sail queue add <workflow> <ticket> [--force]               Queue a ticket through the watcher: --force skips its checks
   sail queue requeue|drop <workflow> <item>                  Queue a parked item again, or drop it, through the watcher
   sail port ticket-source get|links|attachments <ticket>     Print a ticket, its links or its attachments as JSON
+  sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]
+                                                             List the team's tickets by state and label, as JSON
   sail port ticket-source comment <ticket> [--body-file <path>]
                                                              Comment on a ticket, the body from the file or stdin
   sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>
                                                              Move a ticket to that state
   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
                                                              File a new ticket, the description from the file or stdin
+  sail port ticket-source add-label|remove-label <ticket> <label>
+                                                             Add the team's label to a ticket, or remove it
+  sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>
+                                                             Relate a ticket to another; a duplicate is closed
+  sail port ticket-source edit <ticket> [--title <text>] [--body-file <path>]
+                                                             Set a ticket's description from the file or stdin, and its title
   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
                                                              Upload a file and attach it to a ticket
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
@@ -237,6 +245,8 @@ const commands = new Map<string, CommandSpec>([
         state: { type: 'string' },
         file: { type: 'string' },
         'content-type': { type: 'string' },
+        kind: { type: 'string' },
+        to: { type: 'string' },
       },
       positionals: 4,
       command: port,

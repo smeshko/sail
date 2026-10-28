@@ -18,7 +18,8 @@ import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { wrapUntrusted } from '../../src/engine/render';
-import { Attached, Created, Posted, Ticket } from '../../src/ports/types';
+import { notATicket } from '../../src/engine/source';
+import { Attached, Created, Edited, ListedTicket, Posted, Relabelled, Related, Ticket } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -865,6 +866,256 @@ test('attach without --file exits 3 with the usage, which lists attach', async (
     expect(refused.stderr).toContain(
       '\n       sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]\n',
     );
+  });
+});
+
+// `sail port ticket-source list`: the team's tickets by state and label, a JSON array of ListedTicket on one line.
+
+test('list --state unstarted prints one line of JSON: the unstarted tickets by number, each a ListedTicket, and none that is started', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const { code, stdout, stderr } = await runCaptured(
+      ['port', 'ticket-source', 'list', '--state', 'unstarted'],
+      repo.dir,
+    );
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const listed = ListedTicket.array().parse(oneLine(stdout));
+    expect(listed.map((ticket) => [ticket.ticketKey, ticket.state.type])).toEqual([
+      ['FAKE-1', 'unstarted'],
+      ['FAKE-3', 'unstarted'],
+      ['FAKE-5', 'unstarted'],
+    ]);
+    expect(listed[2]).toMatchObject({ title: LINKED.title, url: 'fake://tickets/FAKE-5', labels: ['sail', 'docs'] });
+  });
+});
+
+test('list --label narrows the list to the tickets carrying it', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const { code, stdout } = await runCaptured(['port', 'ticket-source', 'list', '--label', 'docs'], repo.dir);
+    expect(code).toBe(EXIT_OK);
+    expect(
+      ListedTicket.array()
+        .parse(oneLine(stdout))
+        .map((ticket) => ticket.ticketKey),
+    ).toEqual(['FAKE-5']);
+  });
+});
+
+test('list with --label given twice exits 3 before any port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const refused = await runCaptured(['port', 'ticket-source', 'list', '--label', 'a', '--label', 'b'], repo.dir);
+    expect({ code: refused.code, stdout: refused.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(refused.stderr).toStartWith('sail port: ticket-source list takes --label once, and it was given 2\n');
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test("list with a state that isn't one exits 1 with the adapter's invalid message", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    expect(await runCaptured(['port', 'ticket-source', 'list', '--state', 'open'], repo.dir)).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.list: open is not a ticket state (invalid)\n',
+    });
+  });
+});
+
+test('the usage lists ticket-source list with its options', async () => {
+  await withTempRepo(async (repo) => {
+    const refused = await runCaptured(['port', 'ticket-source'], repo.dir);
+    expect(refused.stderr).toContain(
+      '\n       sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]\n',
+    );
+  });
+});
+
+// `sail port ticket-source add-label` and `remove-label`: the port's Relabelled as one line of JSON, against a seed that
+// names the labels its team has.
+
+/** The fixture's `.sail/`, its seed naming the team's labels. */
+function fixtureWithTeamLabels(repoDir: string): void {
+  const sail = copyFixture(repoDir);
+  const seed = join(sail, 'fake', 'tickets.json');
+  const world = JSON.parse(readFileSync(seed, 'utf8'));
+  writeFileSync(seed, `${JSON.stringify({ labels: ['sail', 'docs', 'Bug'], tickets: world.tickets }, null, 2)}\n`);
+}
+
+test('add-label then remove-label print the port’s Relabelled with the labels after each, and with SAIL_EVENTS set append ticket:labelled then ticket:unlabelled', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const env = { SAIL_EVENTS: file };
+    const added = await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-1', 'bug'], repo.dir, { env });
+    const removed = await runCaptured(['port', 'ticket-source', 'remove-label', 'FAKE-1', 'Bug'], repo.dir, { env });
+    expect([added.code, added.stderr, removed.code, removed.stderr]).toEqual([EXIT_OK, '', EXIT_OK, '']);
+    expect(Relabelled.parse(oneLine(added.stdout)).labels).toEqual(['sail', 'Bug']);
+    expect(Relabelled.parse(oneLine(removed.stdout)).labels).toEqual(['sail']);
+    const events = readFileSync(file, 'utf8')
+      .split('\n')
+      .slice(0, -1)
+      .map((line) => JSON.parse(line));
+    expect(events).toEqual([
+      { type: 'ticket:labelled', ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail', 'Bug'] },
+      { type: 'ticket:unlabelled', ticketKey: 'FAKE-1', label: 'Bug', labels: ['sail'] },
+    ]);
+  });
+});
+
+test('add-label of a label the team lacks exits 1 with the adapter’s message, changes nothing, and with SAIL_EVENTS set appends an error:port', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    const file = join(repo.dir, 'port-events.ndjson');
+    const failed = await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-1', 'no-such-label'], repo.dir, {
+      env: { SAIL_EVENTS: file },
+    });
+    expect(failed).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.addLabel: no label no-such-label (invalid)\n',
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+    expect(readFileSync(file, 'utf8')).toContain('"type":"error:port"');
+  });
+});
+
+test('add-label to a ticket the seed lacks exits 1 as not_found', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    expect(await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-99', 'Bug'], repo.dir)).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.addLabel: no ticket FAKE-99 (not_found)\n',
+    });
+  });
+});
+
+test('add-label without its label, or for a ticket that is none, exits 3 before any port is called', async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithTeamLabels(repo.dir);
+    const bare = await runCaptured(['port', 'ticket-source', 'add-label', 'FAKE-1'], repo.dir);
+    const none = await runCaptured(['port', 'ticket-source', 'remove-label', 'nonsense', 'Bug'], repo.dir);
+    expect([bare.code, bare.stderr]).toEqual([EXIT_REFUSED, expect.stringContaining('add-label needs a label')]);
+    expect(none.code).toBe(EXIT_REFUSED);
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+// `sail port ticket-source relate`: the port's Related as one line of JSON.
+
+test('relate --kind duplicate prints the port’s Related with the ticket canceled, and get then shows a link to the other ticket', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const related = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-3', '--kind', 'duplicate', '--to', 'FAKE-1'],
+      repo.dir,
+    );
+    expect({ code: related.code, stderr: related.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(Related.parse(oneLine(related.stdout))).toMatchObject({
+      ticketKey: 'FAKE-3',
+      kind: 'duplicate',
+      to: 'FAKE-1',
+      state: { type: 'canceled', name: 'Duplicate' },
+    });
+    const got = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-3'], repo.dir);
+    const ticket = Ticket.parse(oneLine(got.stdout));
+    expect(ticket.state.type).toBe('canceled');
+    expect(ticket.links.map((link) => [link.url, link.title?.startsWith('duplicate FAKE-1')])).toEqual([
+      ['fake://tickets/FAKE-1', true],
+    ]);
+  });
+});
+
+test('relate without --to, or with a --to that is no ticket, or with no --kind, exits 3 before any port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const noTo = await runCaptured(['port', 'ticket-source', 'relate', 'FAKE-1', '--kind', 'related'], repo.dir);
+    const badTo = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-1', '--kind', 'related', '--to', 'nope'],
+      repo.dir,
+    );
+    const noKind = await runCaptured(['port', 'ticket-source', 'relate', 'FAKE-1', '--to', 'FAKE-3'], repo.dir);
+    expect([noTo.code, badTo.code, noKind.code]).toEqual([EXIT_REFUSED, EXIT_REFUSED, EXIT_REFUSED]);
+    expect(noTo.stderr).toStartWith('sail port: ticket-source relate needs --to <ticket>\n');
+    expect(badTo.stderr).toStartWith(`sail port: ${notATicket('nope', 'fake')}\n`);
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
+test('relate of a ticket the seed lacks, on either side, exits 1 as not_found and changes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const first = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-99', '--kind', 'related', '--to', 'FAKE-1'],
+      repo.dir,
+    );
+    const second = await runCaptured(
+      ['port', 'ticket-source', 'relate', 'FAKE-1', '--kind', 'related', '--to', 'FAKE-99'],
+      repo.dir,
+    );
+    expect([first, second]).toEqual([
+      { code: EXIT_FAILED, stdout: '', stderr: 'sail port: ticketSource.relate: no ticket FAKE-99 (not_found)\n' },
+      { code: EXIT_FAILED, stdout: '', stderr: 'sail port: ticketSource.relate: no ticket FAKE-99 (not_found)\n' },
+    ]);
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+  });
+});
+
+// `sail port ticket-source edit`: the description from --body-file or stdin, the port's Edited as one line.
+
+test('edit sets the description from --body-file, and the title with --title, and get then shows both', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeFileSync(join(repo.dir, 'groomed.md'), 'Groomed.\n');
+    const edited = await runCaptured(
+      ['port', 'ticket-source', 'edit', 'FAKE-1', '--title', 'New', '--body-file', 'groomed.md'],
+      repo.dir,
+    );
+    expect({ code: edited.code, stderr: edited.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(Edited.parse(oneLine(edited.stdout))).toMatchObject({ ticketKey: 'FAKE-1', url: 'fake://tickets/FAKE-1' });
+    const got = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-1'], repo.dir);
+    const ticket = Ticket.parse(oneLine(got.stdout));
+    expect([ticket.title, ticket.description]).toEqual(['New', 'Groomed.\n']);
+  });
+});
+
+test('edit with --title and an empty stdin exits 3 before the port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const refused = await runCaptured(['port', 'ticket-source', 'edit', 'FAKE-1', '--title', 'New'], repo.dir, {
+      stdin: '',
+    });
+    expect(refused).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: 'sail port: ticket-source edit needs a body, and stdin is empty\n',
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+  });
+});
+
+test('edit of a ticket the seed lacks exits 1 as not_found', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeFileSync(join(repo.dir, 'groomed.md'), 'Groomed.\n');
+    const missing = await runCaptured(
+      ['port', 'ticket-source', 'edit', 'FAKE-99', '--body-file', 'groomed.md'],
+      repo.dir,
+    );
+    expect(missing).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.edit: no ticket FAKE-99 (not_found)\n',
+    });
+  });
+});
+
+test('the usage lists add-label and remove-label with their ticket and label', async () => {
+  await withTempRepo(async (repo) => {
+    const refused = await runCaptured(['port', 'ticket-source'], repo.dir);
+    expect(refused.stderr).toContain('\n       sail port ticket-source add-label|remove-label <ticket> <label>\n');
   });
 });
 

@@ -30,15 +30,20 @@ export async function fakeAdapters(
 /** Each port's operations as the design names them: its methods, `capabilities` included, `name` left out. */
 export const OPERATIONS: Record<Port, string[]> = {
   ticketSource: [
+    'addLabel',
     'attach',
     'capabilities',
     'claim',
     'comment',
     'create',
+    'edit',
     'get',
     'isDesignated',
+    'list',
     'listDesignated',
     'parseKey',
+    'relate',
+    'removeLabel',
     'update',
   ],
   codeHost: [

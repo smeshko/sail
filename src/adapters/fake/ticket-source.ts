@@ -4,7 +4,17 @@ import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import { PortError } from '../../ports/errors';
 import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
-import { Attachment, Comment, Link, type Ticket, TicketMove, TicketState } from '../../ports/types';
+import {
+  Attachment,
+  Comment,
+  Link,
+  type ListedTicket,
+  type Ticket,
+  TicketMove,
+  TicketRelation,
+  TicketState,
+  TicketStateType,
+} from '../../ports/types';
 import { createStore } from './store';
 
 export interface FakeTicketSourceOptions extends ProviderOptions {
@@ -27,8 +37,17 @@ const StoredTicket = z.object({
 });
 type StoredTicket = z.infer<typeof StoredTicket>;
 
-const World = z.object({ tickets: z.array(StoredTicket) });
+/** `labels` names the team's labels; a seed without it knows every label. */
+const World = z.object({ labels: z.array(z.string()).optional(), tickets: z.array(StoredTicket) });
 type World = z.infer<typeof World>;
+
+/** The team's spelling of `name`, matched without regard to case. An unknown label is `invalid`. */
+function knownLabel(world: World, op: string, name: string): string {
+  if (world.labels === undefined) return name;
+  const found = world.labels.find((each) => each.toLowerCase() === name.toLowerCase());
+  if (found === undefined) throw new PortError('ticketSource', op, 'invalid', `no label ${name}`);
+  return found;
+}
 
 /** The fake's state for each move, named as a Linear-like provider names them. */
 const STATES: Record<TicketMove, TicketState> = {
@@ -36,6 +55,16 @@ const STATES: Record<TicketMove, TicketState> = {
   'in-progress': { type: 'started', name: 'In Progress' },
   'in-review': { type: 'started', name: 'In Review' },
   done: { type: 'completed', name: 'Done' },
+};
+
+/** The state `relate` leaves a duplicate in. */
+const DUPLICATE: TicketState = { type: 'canceled', name: 'Duplicate' };
+
+/** What the other ticket's link calls a relation, read from its side. */
+const INVERSE: Record<TicketRelation, string> = {
+  related: 'related',
+  blocks: 'blocked by',
+  duplicate: 'duplicated by',
 };
 
 const KEY = /^FAKE-\d+$/;
@@ -50,6 +79,19 @@ const toTicket = (stored: StoredTicket): Ticket => ({
   raw: structuredClone(stored),
 });
 
+const toListed = (stored: StoredTicket): ListedTicket => {
+  const { ticketKey, title, description, state, labels } = structuredClone(stored);
+  return {
+    ticketKey,
+    title,
+    description,
+    state,
+    labels,
+    url: `fake://tickets/${ticketKey}`,
+    raw: structuredClone(stored),
+  };
+};
+
 export function createFakeTicketSource(options: FakeTicketSourceOptions): TicketSource {
   const store = createStore({ seed: options.seed, state: options.state, schema: World, port: 'ticketSource' });
   const now = () => options.now?.() ?? new Date();
@@ -58,6 +100,28 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
     const found = world.tickets.find((ticket) => ticket.ticketKey === ticketKey);
     if (found === undefined) throw new PortError('ticketSource', op, 'not_found', `no ticket ${ticketKey}`);
     return found;
+  };
+
+  const relabel = async (op: 'addLabel' | 'removeLabel', ticketKey: string, label: string) => {
+    const adding = op === 'addLabel';
+    const changed = store.change((world) => {
+      const ticket = find(world, op, ticketKey);
+      const name = knownLabel(world, op, label);
+      const carried = ticket.labels.includes(name);
+      if (carried === adding)
+        return { name, changed: false, ticketKey, labels: [...ticket.labels], raw: structuredClone(ticket) };
+      ticket.labels = adding ? [...ticket.labels, name] : ticket.labels.filter((each) => each !== name);
+      return { name, changed: true, ticketKey, labels: [...ticket.labels], raw: structuredClone(ticket) };
+    });
+    const { name, changed: did, ...relabelled } = changed;
+    if (did)
+      emit({
+        type: adding ? 'ticket:labelled' : 'ticket:unlabelled',
+        ticketKey,
+        label: name,
+        labels: relabelled.labels,
+      });
+    return relabelled;
   };
 
   return {
@@ -85,6 +149,20 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
         .tickets.filter((ticket) => ticket.labels.includes(label) && ticket.state.type === 'unstarted')
         .sort((a, b) => ticketNumber(a.ticketKey) - ticketNumber(b.ticketKey))
         .map(toTicket);
+    },
+    async list(filter) {
+      if (filter.state !== undefined && !TicketStateType.safeParse(filter.state).success) {
+        throw new PortError('ticketSource', 'list', 'invalid', `${String(filter.state)} is not a ticket state`);
+      }
+      return store
+        .read()
+        .tickets.filter(
+          (ticket) =>
+            (filter.state === undefined || ticket.state.type === filter.state) &&
+            (filter.label === undefined || ticket.labels.includes(filter.label)),
+        )
+        .sort((a, b) => ticketNumber(a.ticketKey) - ticketNumber(b.ticketKey))
+        .map(toListed);
     },
     async claim(ticketKey) {
       const result = store.change((world) => {
@@ -137,6 +215,45 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       });
       emit({ type: 'ticket:created', ticketKey: created.ticketKey, title, url: created.url });
       return created;
+    },
+    addLabel: (ticketKey, label) => relabel('addLabel', ticketKey, label),
+    removeLabel: (ticketKey, label) => relabel('removeLabel', ticketKey, label),
+    async relate(ticketKey, { kind, to }) {
+      if (!TicketRelation.safeParse(kind).success) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${String(kind)} is not a relation`);
+      }
+      if (to === ticketKey) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${ticketKey} can't be related to itself`);
+      }
+      const related = store.change((world) => {
+        const ticket = find(world, 'relate', ticketKey);
+        const other = find(world, 'relate', to);
+        ticket.links.push({ url: `fake://tickets/${to}`, title: `${kind} ${to}: ${other.title}` });
+        other.links.push({
+          url: `fake://tickets/${ticketKey}`,
+          title: `${INVERSE[kind]} ${ticketKey}: ${ticket.title}`,
+        });
+        if (kind === 'duplicate') ticket.state = { ...DUPLICATE };
+        return { state: { ...ticket.state }, raw: structuredClone(ticket) };
+      });
+      emit({ type: 'ticket:related', ticketKey, kind, to, state: related.state });
+      return { ticketKey, kind, to, ...related };
+    },
+    async edit(ticketKey, { title, description }) {
+      if (title === undefined && description === undefined) {
+        throw new PortError('ticketSource', 'edit', 'invalid', 'an edit names a title, a description, or both');
+      }
+      const edited = store.change((world) => {
+        const ticket = find(world, 'edit', ticketKey);
+        if (title !== undefined) ticket.title = title;
+        if (description !== undefined) ticket.description = description;
+        return { ticketKey, url: `fake://tickets/${ticketKey}`, raw: structuredClone(ticket) };
+      });
+      const fields: ('title' | 'description')[] = [];
+      if (title !== undefined) fields.push('title');
+      if (description !== undefined) fields.push('description');
+      emit({ type: 'ticket:edited', ticketKey, fields });
+      return edited;
     },
     async attach(ticketKey, file) {
       checkAttachment(file);

@@ -3,10 +3,17 @@
 //   sail port ticket-source get <ticket>            the ticket, as the port's Ticket
 //   sail port ticket-source links <ticket>          its links
 //   sail port ticket-source attachments <ticket>    its attachments
+//   sail port ticket-source list [--state <type>] [--label <name>]    the team's tickets, as an array of ListedTicket
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
 //                                                   files a new ticket: its description from the file or stdin
+//   sail port ticket-source add-label <ticket> <label>       adds the team's label to it
+//   sail port ticket-source remove-label <ticket> <label>    removes the label from it
+//   sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>
+//                                                   relates it to another: a duplicate is closed
+//   sail port ticket-source edit <ticket> [--title <text>] [--body-file <path>]
+//                                                   sets its description from the file or stdin, and its title
 //   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
 //                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
@@ -31,6 +38,7 @@
 // loaded or asked for its credentials. `render` is a helper beside the ports: it needs no `.sail/`.
 import { readFileSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
+import { z } from 'zod';
 import type { Port } from '../../engine/config';
 import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
@@ -40,7 +48,20 @@ import type { PortErrorEvent, ProviderEmit } from '../../events/types';
 import type { PortAdapters } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
-import { Attached, Created, Moved, Posted, type Ticket, type TicketMove } from '../../ports/types';
+import {
+  Attached,
+  Created,
+  Edited,
+  ListedTicket,
+  Moved,
+  Posted,
+  Relabelled,
+  Related,
+  type Ticket,
+  type TicketMove,
+  type TicketRelation,
+  type TicketStateType,
+} from '../../ports/types';
 import { EXIT_FAILED, EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { CODEHOST } from './port-codehost';
@@ -125,6 +146,32 @@ const ticketOperation = (read: (ticket: Ticket) => unknown): PortOperation<Ticke
   },
 });
 
+/**
+ * The team's tickets, filtered by `--state` and `--label`: the port's `ListedTicket`s, parsed before they are printed.
+ * The state is passed on as given, and the adapter refuses one it doesn't know. `--label` is repeatable for the other
+ * operations that share the parser, so a second one is refused here.
+ */
+const listOperation: PortOperation<TicketSource> = {
+  positionals: [],
+  options: { state: { value: 'unstarted|started|completed|canceled' }, label: { value: 'name' } },
+  async run(source, { values }) {
+    const labels = Array.isArray(values.label) ? values.label : [];
+    if (labels.length > 1)
+      return { refused: `ticket-source list takes --label once, and it was given ${labels.length}` };
+    const [label] = labels;
+    const listed = z.array(ListedTicket).safeParse(
+      await source.list({
+        ...(typeof values.state === 'string' ? { state: values.state as TicketStateType } : {}),
+        ...(typeof label === 'string' ? { label } : {}),
+      }),
+    );
+    if (listed.success) return { value: listed.data };
+    const [issue] = listed.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'list', 'invalid', `its answer is not a list of ListedTickets: ${where}`);
+  },
+};
+
 /** A comment on the ticket `<ticket>` names: the port's `Posted`, parsed before it is printed. */
 const commentOperation: PortOperation<TicketSource> = {
   positionals: ['ticket'],
@@ -157,6 +204,72 @@ const updateOperation: PortOperation<TicketSource> = {
     const [issue] = moved.error.issues;
     const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
     throw new PortError('ticketSource', 'update', 'invalid', `its answer is not a Moved: ${where}`);
+  },
+};
+
+/**
+ * The label `<label>` named added to or removed from the ticket `<ticket>` names: the port's `Relabelled`, parsed
+ * before it is printed. The label is passed on as given, and the adapter refuses one the team lacks.
+ */
+const relabelOperation = (op: 'addLabel' | 'removeLabel'): PortOperation<TicketSource> => ({
+  positionals: ['ticket', 'label'],
+  async run(source, { positionals: [ref = '', label = ''] }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const relabelled = Relabelled.safeParse(await source[op](ticketKey, label));
+    if (relabelled.success) return { value: relabelled.data };
+    const [issue] = relabelled.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', op, 'invalid', `its answer is not a Relabelled: ${where}`);
+  },
+});
+
+/**
+ * A relation of the ticket `<ticket>` names to the one `--to` names: the port's `Related`, parsed before it is printed.
+ * The kind is passed on as given, and the adapter refuses one it doesn't know.
+ */
+const relateOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: {
+    kind: { value: 'related|blocks|duplicate', required: true, filled: true },
+    to: { value: 'ticket', required: true, filled: true },
+  },
+  async run(source, { positionals: [ref = ''], values }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const target = typeof values.to === 'string' ? values.to : '';
+    const to = source.parseKey(target);
+    if (to === undefined) return { refused: notATicket(target, source.name) };
+    const kind = (typeof values.kind === 'string' ? values.kind : '') as TicketRelation;
+    const related = Related.safeParse(await source.relate(ticketKey, { kind, to }));
+    if (related.success) return { value: related.data };
+    const [issue] = related.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'relate', 'invalid', `its answer is not a Related: ${where}`);
+  },
+};
+
+/**
+ * The description of the ticket `<ticket>` names set to the body, and its title too with `--title`: the port's
+ * `Edited`, parsed before it is printed. A body that is empty is refused, so a description is never cleared.
+ */
+const editOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: { title: { value: 'text', filled: true }, 'body-file': { value: 'path' } },
+  body: true,
+  async run(source, { positionals: [ref = ''], values, body }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const edited = Edited.safeParse(
+      await source.edit(ticketKey, {
+        ...(typeof values.title === 'string' ? { title: values.title } : {}),
+        description: await body(),
+      }),
+    );
+    if (edited.success) return { value: edited.data };
+    const [issue] = edited.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'edit', 'invalid', `its answer is not an Edited: ${where}`);
   },
 };
 
@@ -232,9 +345,14 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     get: ticketOperation((ticket) => ticket),
     links: ticketOperation((ticket) => ticket.links),
     attachments: ticketOperation((ticket) => ticket.attachments),
+    list: listOperation,
     comment: commentOperation,
     update: updateOperation,
     create: createOperation,
+    'add-label': relabelOperation('addLabel'),
+    'remove-label': relabelOperation('removeLabel'),
+    relate: relateOperation,
+    edit: editOperation,
     attach: attachOperation,
   },
 };

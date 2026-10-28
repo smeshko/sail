@@ -45,6 +45,17 @@ export const Ticket = z.object({
 });
 export type Ticket = z.infer<typeof Ticket>;
 
+/** A ticket as `list` reads it: what grooming surveys, without its comments, links and attachments. */
+export const ListedTicket = Ticket.pick({
+  ticketKey: true,
+  title: true,
+  url: true,
+  description: true,
+  state: true,
+  labels: true,
+}).extend({ raw: Raw });
+export type ListedTicket = z.infer<typeof ListedTicket>;
+
 // Ticket results
 
 export const ClaimResult = z.object({ claimed: z.boolean(), state: TicketState, raw: Raw });
@@ -59,6 +70,28 @@ export type Posted = z.infer<typeof Posted>;
 /** A ticket `create` filed: its ticket key and URL. */
 export const Created = z.object({ ticketKey: z.string(), url: z.string(), raw: Raw });
 export type Created = z.infer<typeof Created>;
+
+/** What `addLabel` and `removeLabel` leave: the labels the ticket carries afterwards. */
+export const Relabelled = z.object({ ticketKey: z.string(), labels: z.array(z.string()), raw: Raw });
+export type Relabelled = z.infer<typeof Relabelled>;
+
+/** How `relate` ties a ticket to another: `blocks` and `duplicate` read from the ticket the call names. */
+export const TicketRelation = z.enum(['related', 'blocks', 'duplicate']);
+export type TicketRelation = z.infer<typeof TicketRelation>;
+
+/** What `relate` leaves: the relation made, and the state the ticket is in then. */
+export const Related = z.object({
+  ticketKey: z.string(),
+  kind: TicketRelation,
+  to: z.string(),
+  state: TicketState,
+  raw: Raw,
+});
+export type Related = z.infer<typeof Related>;
+
+/** What `edit` leaves: the ticket's key and URL. */
+export const Edited = z.object({ ticketKey: z.string(), url: z.string(), raw: Raw });
+export type Edited = z.infer<typeof Edited>;
 
 /** A file `attach` attached to a ticket: the attachment's URL. */
 export const Attached = z.object({ url: z.string(), raw: Raw });

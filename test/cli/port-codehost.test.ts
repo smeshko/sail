@@ -14,9 +14,11 @@ import { type CaptureOptions, runCaptured } from '../helpers/run-captured';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const TICKET_USAGE =
-  'usage: sail port ticket-source get|links|attachments <ticket>\n       sail port ticket-source comment <ticket> [--body-file <path>]\n';
+  'usage: sail port ticket-source get|links|attachments <ticket>\n       sail port ticket-source list [--state <unstarted|started|completed|canceled>] [--label <name>]\n       sail port ticket-source comment <ticket> [--body-file <path>]\n';
 const UPDATE_USAGE = '       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>\n';
 const CREATE_USAGE = '       sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]\n';
+const RELABEL_USAGE =
+  '       sail port ticket-source add-label|remove-label <ticket> <label>\n       sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>\n       sail port ticket-source edit <ticket> [--title <text>] [--body-file <path>]\n';
 const ATTACH_USAGE =
   '       sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]\n';
 const PUSH_USAGE = '       sail port codehost push <branch>\n';
@@ -266,12 +268,12 @@ test.each<[string, string[], string]>([
   [
     '--title given to push',
     ['codehost', 'push', 'sail/x', '--title', 'T'],
-    "option '--title' belongs to sail port ticket-source create or sail port ticket-source attach or sail port codehost open-pull-request",
+    "option '--title' belongs to sail port ticket-source create or sail port ticket-source edit or sail port ticket-source attach or sail port codehost open-pull-request",
   ],
   [
     '--label given to ticket-source get',
     ['ticket-source', 'get', 'FAKE-1', '--label', 'sail'],
-    "option '--label' belongs to sail port ticket-source create or sail port codehost open-pull-request",
+    "option '--label' belongs to sail port ticket-source list or sail port ticket-source create or sail port codehost open-pull-request",
   ],
 ])('%s exits 3, naming the operation the option belongs to, and calls no port', async (_, argv, problem) => {
   await withTempRepo(async (repo) => {
@@ -292,7 +294,7 @@ test("an operation the code host does not have exits 3, naming it, and so do cod
     const none = await codehost(repo, []);
     expect(none.code).toBe(EXIT_REFUSED);
     expect(none.stderr).toStartWith(
-      `sail port: no operation given for codehost\n${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${ATTACH_USAGE}${PUSH_USAGE}`,
+      `sail port: no operation given for codehost\n${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${RELABEL_USAGE}${ATTACH_USAGE}${PUSH_USAGE}`,
     );
     // An option of render's is refused for the code host as it is for the ticket source.
     const untrusted = await codehost(repo, ['push', 'sail/x', '--untrusted']);
@@ -393,7 +395,7 @@ const HEAD = {
   4: '7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a50',
 } as const;
 
-const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${ATTACH_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehost get-pull-request|checks <pr>
+const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${RELABEL_USAGE}${ATTACH_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehost get-pull-request|checks <pr>
        sail port codehost list-designated <label>
        sail port codehost merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
        sail port codehost add-label|remove-label <pr> <label>
@@ -730,7 +732,7 @@ test.each<[string, string[], string]>([
   [
     '--body-file given to add-label',
     ['add-label', '1', 'x', '--body-file', 'note.md'],
-    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port codehost open-pull-request or sail port codehost comment",
+    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port ticket-source edit or sail port codehost open-pull-request or sail port codehost comment",
   ],
 ])('%s exits 3, naming where the option belongs', async (_, args, problem) => {
   await withTempRepo(async (repo) => {

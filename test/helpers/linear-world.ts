@@ -30,15 +30,15 @@ export interface WorldComment {
 
 export interface WorldTicket {
   readonly number: number;
-  readonly title: string;
+  title: string;
   /** Linear sends `null` for a ticket without one. */
-  readonly description?: string | null;
+  description?: string | null;
   /** The state's name. */
   state: string;
-  readonly labels?: readonly string[];
+  labels?: readonly string[];
   comments?: WorldComment[];
   /** This ticket's relations to other tickets of the world, by number. Their inverse is derived. */
-  readonly relations?: readonly { readonly type: string; readonly number: number }[];
+  relations?: readonly { readonly type: string; readonly number: number }[];
   attachments?: readonly { readonly title: string; readonly url: string }[];
   readonly priority?: number;
   readonly assignee?: { readonly name: string; readonly email: string } | null;
@@ -121,6 +121,8 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'Int',
   'Boolean',
   'ID',
+  'IssueRelationType',
+  'IssueUpdateInput',
   // Query and mutation roots.
   'issues',
   'issue',
@@ -128,6 +130,9 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'issueUpdate',
   'commentCreate',
   'issueCreate',
+  'issueAddLabel',
+  'issueRemoveLabel',
+  'issueRelationCreate',
   'issueLabels',
   'fileUpload',
   'attachmentCreate',
@@ -146,6 +151,8 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'issueId',
   'teamId',
   'labelIds',
+  'labelId',
+  'relatedIssueId',
   'contentType',
   'filename',
   'size',
@@ -186,6 +193,7 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'success',
   'comment',
   'attachment',
+  'issueRelation',
   'uploadFile',
   'uploadUrl',
   'assetUrl',
@@ -193,7 +201,17 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'value',
 ]);
 
-const MUTATIONS = new Set(['SailMove', 'SailComment', 'SailCreate', 'SailUpload', 'SailAttach']);
+const MUTATIONS = new Set([
+  'SailMove',
+  'SailComment',
+  'SailCreate',
+  'SailUpload',
+  'SailAttach',
+  'SailAddLabel',
+  'SailRemoveLabel',
+  'SailRelate',
+  'SailEdit',
+]);
 
 /** The header `fileUpload` signs an upload with, which the PUT must carry back. */
 export const UPLOAD_SIGNATURE = 'x-sail-signature';
@@ -317,6 +335,20 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
 
   const ok = (data: unknown): WorldResponse => ({ status: 200, body: { data } });
 
+  /** Adds or removes a label of the team, as Linear's issueAddLabel and issueRemoveLabel do. */
+  function relabel(field: string, id: unknown, labelId: unknown, adding: boolean): WorldResponse {
+    const ticket = byId(id);
+    const label = team.labels.find((candidate) => candidate.id === labelId);
+    if (ticket === undefined || label === undefined) {
+      return graphqlError(400, 'INPUT_ERROR', `Entity not found: ${ticket === undefined ? 'Issue' : 'IssueLabel'}`);
+    }
+    const others = (ticket.labels ?? []).filter((name) => name !== label.name);
+    ticket.labels = adding ? [...others, label.name] : others;
+    return ok({
+      [field]: { success: true, issue: { labels: { nodes: ticket.labels.map((name) => ({ name })) } } },
+    });
+  }
+
   const OPERATIONS: Record<string, (variables: Record<string, unknown>) => WorldResponse> = {
     SailTicket: ({ team: key, number }) => {
       const found = key === team.key ? tickets.filter((ticket) => ticket.number === number) : [];
@@ -333,6 +365,18 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
         key === team.key
           ? tickets.filter(
               (ticket) => (ticket.labels ?? []).includes(String(label)) && wanted.includes(stateOf(ticket).type),
+            )
+          : [];
+      return ok({ issues: page(found.map(node), 50, after) });
+    },
+    SailList: ({ team: key, label, types, after }) => {
+      const wanted = Array.isArray(types) ? types : [];
+      const found =
+        key === team.key
+          ? tickets.filter(
+              (ticket) =>
+                (label === undefined || (ticket.labels ?? []).includes(String(label))) &&
+                wanted.includes(stateOf(ticket).type),
             )
           : [];
       return ok({ issues: page(found.map(node), 50, after) });
@@ -381,6 +425,32 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
         issueCreate: {
           success: true,
           issue: { id: `issue-${number}`, identifier: identifier(number), url: urlOf(number) },
+        },
+      });
+    },
+    SailAddLabel: ({ id, labelId }) => relabel('issueAddLabel', id, labelId, true),
+    SailRemoveLabel: ({ id, labelId }) => relabel('issueRemoveLabel', id, labelId, false),
+    SailRelate: ({ id, relatedId, type }) => {
+      const ticket = byId(id);
+      const other = byId(relatedId);
+      if (ticket === undefined || other === undefined) {
+        return graphqlError(400, 'INPUT_ERROR', `Entity not found: ${ticket === undefined ? 'Issue' : 'RelatedIssue'}`);
+      }
+      ticket.relations = [...(ticket.relations ?? []), { type: String(type), number: other.number }];
+      return ok({
+        issueRelationCreate: { success: true, issueRelation: { id: `relation-${ticket.relations.length}` } },
+      });
+    },
+    SailEdit: ({ id, input }) => {
+      const ticket = byId(id);
+      if (ticket === undefined) return graphqlError(400, 'INPUT_ERROR', 'Entity not found: Issue');
+      const change = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+      if (typeof change.title === 'string') ticket.title = change.title;
+      if (typeof change.description === 'string') ticket.description = change.description;
+      return ok({
+        issueUpdate: {
+          success: true,
+          issue: { id: `issue-${ticket.number}`, identifier: identifier(ticket.number), url: urlOf(ticket.number) },
         },
       });
     },

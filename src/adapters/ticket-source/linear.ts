@@ -8,7 +8,15 @@ import type { ProviderEvent } from '../../events/types';
 import type { AdapterDefinition } from '../../ports/adapter';
 import { PortError } from '../../ports/errors';
 import { checkAttachment, type ProviderOptions, type TicketSource } from '../../ports/ticket-source';
-import { type Ticket, TicketMove, type TicketState } from '../../ports/types';
+import {
+  type ListedTicket,
+  type Relabelled,
+  type Ticket,
+  TicketMove,
+  TicketRelation,
+  type TicketState,
+  TicketStateType,
+} from '../../ports/types';
 import { createLinearClient, type Fetch, LINEAR_ENDPOINT } from './linear-client';
 import { COMMENT_FIELDS, stateTypeOf, TICKET_FIELDS, toTicket } from './linear-ticket';
 
@@ -40,6 +48,21 @@ const DESIGNATED = `query SailDesignated($team: String!, $label: String!, $types
   ) { nodes { identifier } pageInfo { hasNextPage endCursor } }
 }`;
 
+// A list carries each ticket's own fields and its labels, not its comments, relations and attachments, which keeps a
+// page of fifty well inside the complexity cap. The label filter is in the document only when a label is asked for.
+const list = (
+  withLabel: boolean,
+) => `query SailList($team: String!, $types: [String!], ${withLabel ? '$label: String, ' : ''}$after: String) {
+  issues(
+    filter: { team: { key: { eq: $team } }, ${withLabel ? 'labels: { some: { name: { eq: $label } } }, ' : ''}state: { type: { in: $types } } }
+    first: 50
+    after: $after
+  ) {
+    nodes { identifier title description url state { name type } labels(first: 50) { nodes { name } } }
+    pageInfo { hasNextPage endCursor }
+  }
+}`;
+
 const TEAM = `query SailTeam($team: String!) {
   teams(filter: { key: { eq: $team } }) { nodes { id key states { nodes { id name type position } } } }
 }`;
@@ -69,6 +92,22 @@ const CREATE = `mutation SailCreate($teamId: String!, $title: String!, $descript
   }
 }`;
 
+const ADD_LABEL = `mutation SailAddLabel($id: String!, $labelId: String!) {
+  issueAddLabel(id: $id, labelId: $labelId) { success issue { labels(first: 250) { nodes { name } } } }
+}`;
+
+const REMOVE_LABEL = `mutation SailRemoveLabel($id: String!, $labelId: String!) {
+  issueRemoveLabel(id: $id, labelId: $labelId) { success issue { labels(first: 250) { nodes { name } } } }
+}`;
+
+const RELATE = `mutation SailRelate($id: String!, $relatedId: String!, $type: IssueRelationType!) {
+  issueRelationCreate(input: { issueId: $id, relatedIssueId: $relatedId, type: $type }) { success issueRelation { id } }
+}`;
+
+const EDIT = `mutation SailEdit($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) { success issue { id identifier url } }
+}`;
+
 // A signed URL to PUT the file's bytes to, with the headers the PUT must carry, and the URL the file is served at.
 const UPLOAD = `mutation SailUpload($contentType: String!, $filename: String!, $size: Int!) {
   fileUpload(contentType: $contentType, filename: $filename, size: $size) {
@@ -87,6 +126,14 @@ const UPLOAD_TIMEOUT_MS = 120_000;
 /** The Linear state types a designated ticket may be in to be listed: those sail reads as unstarted. */
 const UNSTARTED_TYPES = ['triage', 'backlog', 'unstarted'];
 
+/** The Linear state types each port state type covers: `canceled` takes Linear's duplicate type with its own. */
+const LINEAR_TYPES: Record<TicketStateType, string[]> = {
+  unstarted: UNSTARTED_TYPES,
+  started: ['started'],
+  completed: ['completed'],
+  canceled: ['canceled', 'duplicate'],
+};
+
 const KEY = /^([A-Z][A-Z0-9]*)-([1-9]\d*)$/;
 const URL_KEY = /^https:\/\/linear\.app\/[^/?#]+\/issue\/([A-Z][A-Z0-9]*-[1-9]\d*)(?:\/[^/?#]*)?\/?(?:[?#].*)?$/;
 
@@ -98,6 +145,14 @@ interface Node {
   id: string;
   number: number;
   comments: Page<unknown>;
+}
+interface ListedNode {
+  identifier: string;
+  title: string;
+  description: string | null;
+  url: string;
+  state: { name: string; type: string };
+  labels: { nodes: { name: string }[] };
 }
 interface LinearState {
   id: string;
@@ -206,6 +261,63 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     }
   }
 
+  /** The team's id and every label its tickets can carry, read page by page. */
+  async function teamLabels(op: string): Promise<{ teamId: string; known: { id: string; name: string }[] }> {
+    const known: { id: string; name: string }[] = [];
+    const seen = new Set<string>();
+    let teamId = '';
+    let after: string | null = null;
+    do {
+      const read: { teams: { nodes: { id: string }[] }; issueLabels: Page<{ id: string; name: string }> } =
+        await client.request(op, 'SailTeamLabels', TEAM_LABELS, { team, after });
+      const [found] = read.teams.nodes;
+      if (found === undefined) throw new PortError('ticketSource', op, 'not_found', `Linear has no team ${team}`);
+      teamId = found.id;
+      known.push(...read.issueLabels.nodes);
+      after = nextCursor(op, `the labels of team ${team}`, read.issueLabels, seen);
+    } while (after !== null);
+    return { teamId, known };
+  }
+
+  /** The team's label named `name`, whatever its case, or an `invalid` PortError of `op`. */
+  function labelOf(op: string, known: { id: string; name: string }[], name: string): { id: string; name: string } {
+    const label = known.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+    if (label === undefined) throw new PortError('ticketSource', op, 'invalid', `team ${team} has no label ${name}`);
+    return label;
+  }
+
+  /** Adds or removes the label, after the ticket is found and the label resolved. A change that is already so sends nothing. */
+  async function relabel(op: 'addLabel' | 'removeLabel', ticketKey: string, name: string): Promise<Relabelled> {
+    const adding = op === 'addLabel';
+    const { node } = await lookup(op, ticketKey);
+    const { known } = await teamLabels(op);
+    const label = labelOf(op, known, name);
+    const carried = (node as unknown as { labels: { nodes: { name: string }[] } }).labels.nodes.map(
+      (each) => each.name,
+    );
+    if (carried.includes(label.name) === adding) return { ticketKey, labels: carried, raw: node };
+    const field = adding ? 'issueAddLabel' : 'issueRemoveLabel';
+    const data = await client.request<
+      Record<string, { success: boolean; issue: { labels: { nodes: { name: string }[] } } | null }>
+    >(op, adding ? 'SailAddLabel' : 'SailRemoveLabel', adding ? ADD_LABEL : REMOVE_LABEL, {
+      id: node.id,
+      labelId: label.id,
+    });
+    const answered = data[field];
+    if (answered === undefined || !answered.success || answered.issue === null) {
+      throw new PortError(
+        'ticketSource',
+        op,
+        'conflict',
+        `Linear did not ${adding ? 'add' : 'remove'} the label ${label.name} on ${ticketKey}`,
+        data,
+      );
+    }
+    const labels = answered.issue.labels.nodes.map((each) => each.name);
+    emit({ type: adding ? 'ticket:labelled' : 'ticket:unlabelled', ticketKey, label: label.name, labels });
+    return { ticketKey, labels, raw: data };
+  }
+
   async function states(op: string): Promise<LinearState[]> {
     if (teamStates !== undefined) return teamStates;
     const data = await client.request<{ teams: { nodes: { states: { nodes: LinearState[] } }[] } }>(
@@ -284,7 +396,10 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
   }
 
   async function move(op: string, id: string, to: TicketMove): Promise<{ state: TicketState; raw: object }> {
-    const stateId = await target(op, to);
+    return moveTo(op, id, await target(op, to));
+  }
+
+  async function moveTo(op: string, id: string, stateId: string): Promise<{ state: TicketState; raw: object }> {
     const data = await client.request<{
       issueUpdate: { success: boolean; issue: { state: { name: string; type: string } } | null };
     }>(op, 'SailMove', MOVE, { id, stateId });
@@ -341,6 +456,40 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const number = (ticket: Ticket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
       return tickets.sort((a, b) => number(a) - number(b));
     },
+    async list(filter) {
+      if (filter.state !== undefined && !TicketStateType.safeParse(filter.state).success) {
+        throw new PortError('ticketSource', 'list', 'invalid', `${String(filter.state)} is not a ticket state`);
+      }
+      const types = filter.state === undefined ? Object.values(LINEAR_TYPES).flat() : LINEAR_TYPES[filter.state];
+      const document = list(filter.label !== undefined);
+      const listed: ListedTicket[] = [];
+      const seen = new Set<string>();
+      let after: string | null = null;
+      do {
+        const data: { issues: Page<ListedNode> } = await client.request('list', 'SailList', document, {
+          team,
+          types,
+          ...(filter.label === undefined ? {} : { label: filter.label }),
+          after,
+        });
+        for (const node of data.issues.nodes) {
+          listed.push({
+            ticketKey: node.identifier,
+            title: node.title,
+            url: node.url,
+            description: node.description ?? '',
+            state: portState(node.state, 'list'),
+            labels: node.labels.nodes.map((label) => label.name),
+            raw: node,
+          });
+        }
+        after = nextCursor('list', 'the team’s tickets', data.issues, seen);
+      } while (after !== null);
+      // A team Linear doesn't have lists nothing too: an empty list is checked against the team's existence.
+      if (listed.length === 0) await states('list');
+      const number = (ticket: ListedTicket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
+      return listed.sort((a, b) => number(a) - number(b));
+    },
     async claim(ticketKey) {
       const { node } = await lookup('claim', ticketKey);
       const read = (node as unknown as { state: { name: string; type: string } }).state;
@@ -378,28 +527,8 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     },
     async create({ title, description, labels }) {
       // Every label is resolved before anything is filed: a name the team lacks files no ticket.
-      const known: { id: string; name: string }[] = [];
-      const seen = new Set<string>();
-      let teamId: string | undefined;
-      let after: string | null = null;
-      do {
-        const read: { teams: { nodes: { id: string }[] }; issueLabels: Page<{ id: string; name: string }> } =
-          await client.request('create', 'SailTeamLabels', TEAM_LABELS, { team, after });
-        const [found] = read.teams.nodes;
-        if (found === undefined) {
-          throw new PortError('ticketSource', 'create', 'not_found', `Linear has no team ${team}`);
-        }
-        teamId = found.id;
-        known.push(...read.issueLabels.nodes);
-        after = nextCursor('create', `the labels of team ${team}`, read.issueLabels, seen);
-      } while (after !== null);
-      const labelIds = labels.map((name) => {
-        const label = known.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
-        if (label === undefined) {
-          throw new PortError('ticketSource', 'create', 'invalid', `team ${team} has no label ${name}`);
-        }
-        return label.id;
-      });
+      const { teamId, known } = await teamLabels('create');
+      const labelIds = labels.map((name) => labelOf('create', known, name).id);
       const data = await client.request<{
         issueCreate: { success: boolean; issue: { id: string; identifier: string; url: string } | null };
       }>('create', 'SailCreate', CREATE, { teamId, title, description, labelIds });
@@ -415,6 +544,62 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const { identifier: ticketKey, url } = data.issueCreate.issue;
       emit({ type: 'ticket:created', ticketKey, title, url });
       return { ticketKey, url, raw: data };
+    },
+    addLabel: (ticketKey, label) => relabel('addLabel', ticketKey, label),
+    removeLabel: (ticketKey, label) => relabel('removeLabel', ticketKey, label),
+    async relate(ticketKey, { kind, to }) {
+      if (!TicketRelation.safeParse(kind).success) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${String(kind)} is not a relation`);
+      }
+      if (to === ticketKey) {
+        throw new PortError('ticketSource', 'relate', 'invalid', `${ticketKey} can't be related to itself`);
+      }
+      const { node } = await lookup('relate', ticketKey);
+      const { node: other } = await lookup('relate', to);
+      const current = (node as unknown as { state: { name: string; type: string } }).state;
+      // The state a duplicate closes in is chosen before the relation is made, so a team without one changes nothing.
+      let closing: LinearState | undefined;
+      if (kind === 'duplicate' && !['canceled', 'duplicate'].includes(current.type)) {
+        const all = await states('relate');
+        closing = all.find((state) => state.type === 'duplicate') ?? all.find((state) => state.type === 'canceled');
+        if (closing === undefined) {
+          throw new PortError('ticketSource', 'relate', 'invalid', `team ${team} has no state for duplicate`);
+        }
+      }
+      const data = await client.request<{
+        issueRelationCreate: { success: boolean; issueRelation: { id: string } | null };
+      }>('relate', 'SailRelate', RELATE, { id: node.id, relatedId: other.id, type: kind });
+      if (!data.issueRelationCreate.success || data.issueRelationCreate.issueRelation === null) {
+        throw new PortError(
+          'ticketSource',
+          'relate',
+          'conflict',
+          `Linear did not relate ${ticketKey} to ${to} as ${kind}`,
+          data,
+        );
+      }
+      const moved = closing === undefined ? undefined : await moveTo('relate', node.id, closing.id);
+      const state = moved?.state ?? portState(current, 'relate');
+      emit({ type: 'ticket:related', ticketKey, kind, to, state });
+      return { ticketKey, kind, to, state, raw: moved === undefined ? data : { relation: data, move: moved.raw } };
+    },
+    async edit(ticketKey, { title, description }) {
+      if (title === undefined && description === undefined) {
+        throw new PortError('ticketSource', 'edit', 'invalid', 'an edit names a title, a description, or both');
+      }
+      const { node } = await lookup('edit', ticketKey);
+      const input = {
+        ...(title === undefined ? {} : { title }),
+        ...(description === undefined ? {} : { description }),
+      };
+      const data = await client.request<{
+        issueUpdate: { success: boolean; issue: { id: string; identifier: string; url: string } | null };
+      }>('edit', 'SailEdit', EDIT, { id: node.id, input });
+      if (!data.issueUpdate.success || data.issueUpdate.issue === null) {
+        throw new PortError('ticketSource', 'edit', 'conflict', `Linear did not edit ${ticketKey}`, data);
+      }
+      emit({ type: 'ticket:edited', ticketKey, fields: Object.keys(input) as ('title' | 'description')[] });
+      return { ticketKey, url: data.issueUpdate.issue.url, raw: data };
     },
     async attach(ticketKey, file) {
       checkAttachment(file);

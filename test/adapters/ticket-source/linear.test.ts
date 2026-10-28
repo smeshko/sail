@@ -5,16 +5,17 @@
 //
 // Against the sandbox team, the suite runs only when SAIL_LIVE_TICKET_SOURCE=1 (DECISIONS D9). Without it the live suite
 // is not registered at all. Its world is named by SAIL_LIVE_LINEAR_TEAM, _LABEL, _DESIGNATED, _STARTED, _UNDESIGNATED and
-// _IN_REVIEW, and LINEAR_API_KEY.
+// _IN_REVIEW, _SPARE_LABEL (a label of the team that _DESIGNATED and _UNDESIGNATED don't carry), and LINEAR_API_KEY.
 import { describe, expect, test } from 'bun:test';
 import { createLinearTicketSource, linearTicketSource } from '../../../src/adapters/ticket-source/linear';
 import { type Fetch, LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source/linear-client';
 import type { ProviderEmit, ProviderEvent } from '../../../src/events/types';
 import type { AdapterContext, Env } from '../../../src/ports/adapter';
 import type { TicketSource } from '../../../src/ports/ticket-source';
-import { Created, Ticket, type TicketMove } from '../../../src/ports/types';
+import { Created, Edited, ListedTicket, Relabelled, Related, Ticket, type TicketMove } from '../../../src/ports/types';
 import {
   createLinearWorld,
+  DEFAULT_STATES,
   type LinearWorld,
   type LinearWorldSeed,
   RENAMED_STATES,
@@ -133,6 +134,8 @@ describe('the port suite', () => {
       started: 'ADW-2',
       undesignated: 'ADW-3',
       missing: 'ADW-999',
+      spareLabel: 'Bug',
+      unknownLabel: 'no-such-label',
       refs: [
         ['ADW-1', 'ADW-1'],
         [`${URL_OF('ADW-12')}/add-a-greeting`, 'ADW-12'],
@@ -162,6 +165,8 @@ const live: MakeTicketSource = async (emit) => {
     started: need('SAIL_LIVE_LINEAR_STARTED'),
     undesignated: need('SAIL_LIVE_LINEAR_UNDESIGNATED'),
     missing: `${options.team}-999999`,
+    spareLabel: need('SAIL_LIVE_LINEAR_SPARE_LABEL'),
+    unknownLabel: `sail-no-such-label-${Math.random().toString(36).slice(2, 10)}`,
     refs: [[need('SAIL_LIVE_LINEAR_DESIGNATED'), need('SAIL_LIVE_LINEAR_DESIGNATED')]] as const,
   };
   const reset = createLinearTicketSource(options);
@@ -292,6 +297,48 @@ test('listDesignated answers exactly the designated tickets in triage, backlog a
     ['ADW-5', { type: 'unstarted', name: 'Inbox' }],
   ]);
   expect(world.operations()).toEqual(['SailDesignated', 'SailDesignated', 'SailTicket', 'SailTicket', 'SailTicket']);
+});
+
+test('list pages through the team, filters by state type and label, and answers each ticket by number from its list alone, whatever its state is called', async () => {
+  const { world, adapter } = linear(
+    seedOf(
+      RENAMED_STATES,
+      [
+        { number: 5, title: 'Five', description: 'Fifth.', state: 'Inbox', labels: ['sail', 'cli'] },
+        { number: 2, title: 'Two', description: null, state: 'Icebox', labels: ['sail'] },
+        { number: 4, title: 'Four', state: 'Ready', labels: ['cli'] },
+        { number: 1, title: 'One', state: 'Building', labels: ['sail'] },
+        { number: 6, title: 'Six', state: 'Shipped', labels: ['sail'] },
+        { number: 7, title: 'Seven', state: 'Dropped', labels: ['sail'] },
+      ],
+      1,
+    ),
+  );
+  const unstarted = await adapter.list({ state: 'unstarted' });
+  expect(unstarted.flatMap((ticket) => parseIssues(ListedTicket, ticket))).toEqual([]);
+  expect(unstarted.map((ticket) => [ticket.ticketKey, ticket.state, ticket.labels, ticket.description])).toEqual([
+    ['ADW-2', { type: 'unstarted', name: 'Icebox' }, ['sail'], ''],
+    ['ADW-4', { type: 'unstarted', name: 'Ready' }, ['cli'], ''],
+    ['ADW-5', { type: 'unstarted', name: 'Inbox' }, ['sail', 'cli'], 'Fifth.'],
+  ]);
+  expect(unstarted[0]?.url).toBe(URL_OF('ADW-2'));
+  expect(world.operations()).toEqual(['SailList', 'SailList', 'SailList']);
+
+  const sail = await adapter.list({ label: 'sail' });
+  expect(sail.map((ticket) => ticket.ticketKey)).toEqual(['ADW-1', 'ADW-2', 'ADW-5', 'ADW-6', 'ADW-7']);
+  const canceled = await adapter.list({ state: 'canceled' });
+  expect(canceled.map((ticket) => [ticket.ticketKey, ticket.state.type])).toEqual([['ADW-7', 'canceled']]);
+  const all = await adapter.list({});
+  expect(all.map((ticket) => ticket.ticketKey)).toEqual(['ADW-1', 'ADW-2', 'ADW-4', 'ADW-5', 'ADW-6', 'ADW-7']);
+});
+
+test('list for a team Linear does not have rejects not_found, naming it', async () => {
+  const world = createLinearWorld(SEED);
+  const typo = createLinearTicketSource({ team: 'ADX', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch: world.fetch });
+  expect(failure(await rejection(typo.list({ state: 'unstarted' })))).toEqual([
+    { port: 'ticketSource', op: 'list', code: 'not_found' },
+    'ticketSource.list: Linear has no team ADX',
+  ]);
 });
 
 test('listDesignated reads each listed ticket whole, every comment page included, and leaves out one claimed between the list and its read (review R1-1, R1-8)', async () => {
@@ -683,6 +730,194 @@ test('create with a label the team lacks is invalid, naming it and the team, and
     'ticketSource.create: team ADW has no label urgent',
   ]);
   expect([world.operations(), capture.events]).toEqual([['SailTeamLabels'], []]);
+});
+
+test('addLabel resolves the label by name whatever its case, sends one SailAddLabel with the ticket and label ids, and answers the labels the ticket carries then', async () => {
+  const { world, adapter, capture } = linear();
+  const added = await adapter.addLabel('ADW-1', 'bug');
+  expect(parseIssues(Relabelled, added)).toEqual([]);
+  expect([added.ticketKey, added.labels]).toEqual(['ADW-1', ['sail', 'cli', 'Bug']]);
+  expect(world.operations()).toEqual(['SailTicket', 'SailTeamLabels', 'SailAddLabel']);
+  expect(world.requests[2]?.variables).toEqual({ id: 'issue-1', labelId: 'label-bug' });
+  expect(capture.events).toEqual([
+    { type: 'ticket:labelled', ticketKey: 'ADW-1', label: 'Bug', labels: ['sail', 'cli', 'Bug'] },
+  ]);
+  const removed = await adapter.removeLabel('ADW-1', 'BUG');
+  expect(removed.labels).toEqual(['sail', 'cli']);
+  expect(world.operations().slice(3)).toEqual(['SailTicket', 'SailTeamLabels', 'SailRemoveLabel']);
+  expect(world.requests.at(-1)?.variables).toEqual({ id: 'issue-1', labelId: 'label-bug' });
+  expect(capture.events.at(-1)).toEqual({
+    type: 'ticket:unlabelled',
+    ticketKey: 'ADW-1',
+    label: 'Bug',
+    labels: ['sail', 'cli'],
+  });
+});
+
+test('addLabel and removeLabel of a label the team lacks are invalid, naming it and the team, after the ticket is found and before any mutation; of a missing ticket, not_found before any label is read', async () => {
+  const { world, adapter, capture } = linear();
+  const errors = [
+    await rejection(adapter.addLabel('ADW-1', 'urgent')),
+    await rejection(adapter.removeLabel('ADW-1', 'urgent')),
+    await rejection(adapter.addLabel('ADW-999', 'urgent')),
+  ];
+  expect(errors.map(failure)).toEqual([
+    [{ port: 'ticketSource', op: 'addLabel', code: 'invalid' }, 'ticketSource.addLabel: team ADW has no label urgent'],
+    [
+      { port: 'ticketSource', op: 'removeLabel', code: 'invalid' },
+      'ticketSource.removeLabel: team ADW has no label urgent',
+    ],
+    [
+      { port: 'ticketSource', op: 'addLabel', code: 'not_found' },
+      'ticketSource.addLabel: no ticket ADW-999 in team ADW',
+    ],
+  ]);
+  expect(world.operations()).toEqual([
+    'SailTicket',
+    'SailTeamLabels',
+    'SailTicket',
+    'SailTeamLabels',
+    'SailTicket',
+    'SailTeam',
+  ]);
+  expect(capture.events).toEqual([]);
+});
+
+test('addLabel of a label the ticket carries and removeLabel of one it lacks send no mutation and emit nothing', async () => {
+  const { world, adapter, capture } = linear();
+  const same = await adapter.addLabel('ADW-1', 'SAIL');
+  const none = await adapter.removeLabel('ADW-1', 'bug');
+  expect([same.labels, none.labels]).toEqual([
+    ['sail', 'cli'],
+    ['sail', 'cli'],
+  ]);
+  expect(world.operations().filter((name) => name === 'SailAddLabel' || name === 'SailRemoveLabel')).toEqual([]);
+  expect(capture.events).toEqual([]);
+});
+
+test('addLabel answering success: false is a conflict, and emits nothing', async () => {
+  const { world, adapter, capture } = linear();
+  world.failNext('SailAddLabel', {
+    status: 200,
+    body: { data: { issueAddLabel: { success: false, issue: null } } },
+  });
+  const error = await rejection(adapter.addLabel('ADW-1', 'Bug'));
+  expect([portFailure(error), capture.events]).toEqual([
+    { port: 'ticketSource', op: 'addLabel', code: 'conflict' },
+    [],
+  ]);
+});
+
+const TWO_TICKETS = [
+  { number: 1, title: 'One', state: 'Todo', labels: [] },
+  { number: 2, title: 'Two', state: 'Todo', labels: [] },
+];
+
+test('relate sends both lookups, then one SailRelate of the ticket to the other by id and kind, and a related or blocks relation moves nothing', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const related = await adapter.relate('ADW-1', { kind: 'blocks', to: 'ADW-2' });
+  expect(parseIssues(Related, related)).toEqual([]);
+  expect([related.kind, related.to, related.state]).toEqual(['blocks', 'ADW-2', { type: 'unstarted', name: 'Todo' }]);
+  expect(world.operations()).toEqual(['SailTicket', 'SailTicket', 'SailRelate']);
+  expect(world.requests[2]?.variables).toEqual({ id: 'issue-1', relatedId: 'issue-2', type: 'blocks' });
+  expect(capture.events).toEqual([
+    { type: 'ticket:related', ticketKey: 'ADW-1', kind: 'blocks', to: 'ADW-2', state: related.state },
+  ]);
+  const read = await adapter.get('ADW-2');
+  expect(read.links.map((link) => link.url)).toEqual([URL_OF('ADW-1')]);
+});
+
+test('relate with duplicate moves the ticket to the first duplicate-type state, or else the first canceled-type one, whatever they are called', async () => {
+  const defaults = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const renamed = linear(
+    seedOf(RENAMED_STATES, [
+      { number: 1, title: 'One', state: 'Ready', labels: [] },
+      { number: 2, title: 'Two', state: 'Ready', labels: [] },
+    ]),
+  );
+  const first = await defaults.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' });
+  const second = await renamed.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' });
+  expect([first.state, second.state]).toEqual([
+    { type: 'canceled', name: 'Duplicate' },
+    { type: 'canceled', name: 'Dropped' },
+  ]);
+  expect(defaults.world.operations()).toEqual(['SailTicket', 'SailTicket', 'SailTeam', 'SailRelate', 'SailMove']);
+  expect(defaults.world.requests[4]?.variables).toEqual({ id: 'issue-1', stateId: 'state-duplicate' });
+  expect(defaults.world.ticket(1).state).toBe('Duplicate');
+  expect(renamed.world.ticket(1).state).toBe('Dropped');
+});
+
+test('relate with duplicate on a team with neither state is invalid, naming the team, and sends no SailRelate; a ticket already canceled is not moved again', async () => {
+  const none = linear(
+    seedOf(
+      [
+        { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 0 },
+        { id: 'state-done', name: 'Done', type: 'completed', position: 1 },
+      ],
+      TWO_TICKETS,
+    ),
+  );
+  const error = await rejection(none.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' }));
+  expect(failure(error)).toEqual([
+    { port: 'ticketSource', op: 'relate', code: 'invalid' },
+    'ticketSource.relate: team ADW has no state for duplicate',
+  ]);
+  expect(none.world.operations()).not.toContain('SailRelate');
+  expect(none.capture.events).toEqual([]);
+
+  const closed = linear(
+    seedOf(DEFAULT_STATES, [
+      { number: 1, title: 'One', state: 'Canceled', labels: [] },
+      { number: 2, title: 'Two', state: 'Todo', labels: [] },
+    ]),
+  );
+  const done = await closed.adapter.relate('ADW-1', { kind: 'duplicate', to: 'ADW-2' });
+  expect(done.state).toEqual({ type: 'canceled', name: 'Canceled' });
+  expect(closed.world.operations()).not.toContain('SailMove');
+});
+
+test('relate of a ticket to itself, or with a kind that isn’t one, is invalid before any request', async () => {
+  const { world, adapter } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const errors = [
+    await rejection(adapter.relate('ADW-1', { kind: 'related', to: 'ADW-1' })),
+    await rejection(adapter.relate('ADW-1', { kind: 'twin' as never, to: 'ADW-2' })),
+  ];
+  expect(errors.map(portFailure)).toEqual([
+    { port: 'ticketSource', op: 'relate', code: 'invalid' },
+    { port: 'ticketSource', op: 'relate', code: 'invalid' },
+  ]);
+  expect(world.operations()).toEqual([]);
+});
+
+test('relate answering success: false is a conflict, and emits nothing', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  world.failNext('SailRelate', {
+    status: 200,
+    body: { data: { issueRelationCreate: { success: false, issueRelation: null } } },
+  });
+  const error = await rejection(adapter.relate('ADW-1', { kind: 'related', to: 'ADW-2' }));
+  expect([portFailure(error), capture.events]).toEqual([{ port: 'ticketSource', op: 'relate', code: 'conflict' }, []]);
+});
+
+test('edit with a title alone looks the ticket up, then sends one SailEdit whose input holds the title and nothing else', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const edited = await adapter.edit('ADW-1', { title: 'Uno' });
+  expect(parseIssues(Edited, edited)).toEqual([]);
+  expect([edited.ticketKey, edited.url]).toEqual(['ADW-1', URL_OF('ADW-1')]);
+  expect(world.operations()).toEqual(['SailTicket', 'SailEdit']);
+  expect(world.requests[1]?.variables).toEqual({ id: 'issue-1', input: { title: 'Uno' } });
+  expect(world.ticket(1).title).toBe('Uno');
+  expect(capture.events).toEqual([{ type: 'ticket:edited', ticketKey: 'ADW-1', fields: ['title'] }]);
+});
+
+test('edit naming neither field is invalid before any request, and edit answering success: false is a conflict that emits nothing', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const empty = await rejection(adapter.edit('ADW-1', {}));
+  expect(portFailure(empty)).toEqual({ port: 'ticketSource', op: 'edit', code: 'invalid' });
+  expect(world.operations()).toEqual([]);
+  world.failNext('SailEdit', { status: 200, body: { data: { issueUpdate: { success: false, issue: null } } } });
+  const refused = await rejection(adapter.edit('ADW-1', { description: 'Groomed.' }));
+  expect([portFailure(refused), capture.events]).toEqual([{ port: 'ticketSource', op: 'edit', code: 'conflict' }, []]);
 });
 
 test('create in a team Linear doesn’t have is not_found, and Linear answering success: false to it is a conflict; neither emits', async () => {

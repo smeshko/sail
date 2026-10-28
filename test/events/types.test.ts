@@ -23,14 +23,18 @@ function typeEnum(schema: unknown): unknown {
   return undefined;
 }
 
-test("EVENT_TYPES holds a run's 57 types, error:consumer, error:port, prompt:rendered, run:suspended, run:keep_awake, budget:raised, step:queued, ticket:created and ticket:attached included", () => {
-  expect(EVENT_TYPES).toHaveLength(57);
+test("EVENT_TYPES holds a run's 61 types, error:consumer, error:port, prompt:rendered, run:suspended, run:keep_awake, budget:raised, step:queued, ticket:created, ticket:attached, ticket:labelled, ticket:unlabelled, ticket:related and ticket:edited included", () => {
+  expect(EVENT_TYPES).toHaveLength(61);
   const types: readonly string[] = EVENT_TYPES;
   expect(types.indexOf('run:suspended')).toBe(types.indexOf('run:end') + 1);
   expect(types.indexOf('run:keep_awake')).toBe(types.indexOf('run:suspended') + 1);
   expect(types.indexOf('budget:raised')).toBe(types.indexOf('budget:exceeded') + 1);
   expect(types.indexOf('ticket:created')).toBe(types.indexOf('ticket:commented') + 1);
   expect(types.indexOf('ticket:attached')).toBe(types.indexOf('ticket:created') + 1);
+  expect(types.indexOf('ticket:labelled')).toBe(types.indexOf('ticket:attached') + 1);
+  expect(types.indexOf('ticket:unlabelled')).toBe(types.indexOf('ticket:labelled') + 1);
+  expect(types.indexOf('ticket:related')).toBe(types.indexOf('ticket:unlabelled') + 1);
+  expect(types.indexOf('ticket:edited')).toBe(types.indexOf('ticket:related') + 1);
   expect(EVENT_TYPES.indexOf('error:consumer')).toBe(EVENT_TYPES.indexOf('error:crash') + 1);
   expect(EVENT_TYPES.indexOf('error:port')).toBe(EVENT_TYPES.indexOf('error:consumer') + 1);
   expect(EVENT_TYPES.indexOf('prompt:rendered')).toBe(EVENT_TYPES.indexOf('input:materialised') + 1);

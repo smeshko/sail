@@ -12,7 +12,7 @@ import type { IntakeEntry, RosterEntry } from '../engine/roster';
 import type { StopReason } from '../engine/run-dir';
 import type { RunHeader } from '../engine/run-header';
 import type { PortErrorCode } from '../ports/errors';
-import type { CheckStatus, MergeMethod, TicketMove, TicketState, Usage } from '../ports/types';
+import type { CheckStatus, MergeMethod, TicketMove, TicketRelation, TicketState, Usage } from '../ports/types';
 import type { Budget, Permissions } from '../sdk/steps';
 
 /** Every type a run's event stream carries, in `sail.event.v1`'s order. A queue's follow in the schema's enum. */
@@ -59,6 +59,10 @@ export const EVENT_TYPES = [
   'ticket:commented',
   'ticket:created',
   'ticket:attached',
+  'ticket:labelled',
+  'ticket:unlabelled',
+  'ticket:related',
+  'ticket:edited',
   'codehost:pushed',
   'codehost:pr_opened',
   'codehost:checks',
@@ -307,6 +311,20 @@ interface Payloads {
   'ticket:created': { key?: string; ticketKey: string; title: string; url: string };
   /** A file `attach` attached: its name, content type and size in bytes, and the attachment's URL. */
   'ticket:attached': { key?: string; ticketKey: string; name: string; contentType: string; size: number; url: string };
+  /** A label `addLabel` added: the label and the ticket's labels afterwards. */
+  'ticket:labelled': { key?: string; ticketKey: string; label: string; labels: string[] };
+  /** A label `removeLabel` removed: the label and the ticket's labels afterwards. */
+  'ticket:unlabelled': { key?: string; ticketKey: string; label: string; labels: string[] };
+  /** A relation `relate` made: the ticket's kind of relation to another, and the ticket's state afterwards. */
+  'ticket:related': {
+    key?: string;
+    ticketKey: string;
+    kind: TicketRelation;
+    to: string;
+    state: TicketState;
+  };
+  /** A change `edit` made: the fields it set, `title` and `description`, at least one. */
+  'ticket:edited': { key?: string; ticketKey: string; fields: ('title' | 'description')[] };
   'codehost:pushed': { key?: string; branch: string; headSha: string };
   'codehost:pr_opened': {
     key?: string;

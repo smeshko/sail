@@ -52,6 +52,10 @@
         "ticket:commented",
         "ticket:created",
         "ticket:attached",
+        "ticket:labelled",
+        "ticket:unlabelled",
+        "ticket:related",
+        "ticket:edited",
         "codehost:pushed",
         "codehost:pr_opened",
         "codehost:checks",
@@ -222,6 +226,22 @@
     {
       "if": { "properties": { "type": { "const": "ticket:attached" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/ticketAttached" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:labelled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketLabelled" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:unlabelled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketLabelled" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:related" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketRelated" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:edited" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketEdited" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:pushed" } }, "required": ["type"] },
@@ -1122,6 +1142,44 @@
         "url": { "type": "string" }
       },
       "required": ["ticketKey", "name", "contentType", "size", "url"],
+      "unevaluatedProperties": false
+    },
+    "ticketLabelled": {
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "label": { "type": "string" },
+        "labels": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["ticketKey", "label", "labels"],
+      "unevaluatedProperties": false
+    },
+    "ticketRelated": {
+      "description": "a relation of the ticket to another, and the ticket's state afterwards",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "kind": { "enum": ["related", "blocks", "duplicate"] },
+        "to": { "type": "string" },
+        "state": { "$ref": "#/$defs/ticketState" }
+      },
+      "required": ["ticketKey", "kind", "to", "state"],
+      "unevaluatedProperties": false
+    },
+    "ticketEdited": {
+      "description": "the fields an edit set on the ticket",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "fields": { "type": "array", "items": { "enum": ["title", "description"] }, "minItems": 1 }
+      },
+      "required": ["ticketKey", "fields"],
       "unevaluatedProperties": false
     },
     "codehostPushed": {
