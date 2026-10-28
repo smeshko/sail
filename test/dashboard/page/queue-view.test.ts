@@ -147,8 +147,10 @@ test('a held queue shows a held until chip with its reason, and queue:held and q
   const queue = { ...(panel.queue as NonNullable<typeof panel.queue>), held };
   const ui = initialUi(0);
   const markup = renderQueue({ ...panel, queue }, undefined, ui, NOW).value;
-  expect(markup).toContain('<span class="warnchip">held until ');
-  expect(markup).toContain(': spec#1 hit the usage limit</span>');
+  expect(markup).toContain('<span class="warnchip">held until 14:20:00: spec#1 hit the usage limit</span>');
+  expect(renderQueue({ ...panel, queue }, undefined, initialUi(120), NOW).value).toContain(
+    '<span class="warnchip">held until 16:20:00: spec#1 hit the usage limit</span>',
+  );
   expect(renderQueue(panel, undefined, ui, NOW).value).not.toContain('held until');
   const at = { seq: 20, ts: '2026-09-24T12:00:00.000Z', workflow: QUEUE_WORKFLOW };
   expect(
