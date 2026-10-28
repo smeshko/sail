@@ -234,5 +234,14 @@ test('the ticket source fake created with pickUp [Backlog, Todo] picks up from b
       type: 'unstarted',
       name: 'Backlog',
     });
+    const listed = (await source.listDesignated('sail')).map((ticket) => ticket.ticketKey);
+    const ticket = await source.get('FAKE-1');
+    const pickable = ['Triage', 'Backlog', 'Todo'].map((name) =>
+      source.canPickUp({ ...ticket, state: { type: 'unstarted', name } }),
+    );
+    expect([listed, pickable]).toEqual([
+      ['FAKE-1', 'FAKE-2'],
+      [false, true, true],
+    ]);
   });
 });
