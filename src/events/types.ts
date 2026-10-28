@@ -442,7 +442,7 @@ export interface QueuePayloads {
   'queue:dispatched': { workflow: string; dedupKey: string; run: string; attempt: number; pid: number };
   /** A due item left queued because run `heldBy` holds its branch's lease: it used no slot and counted no attempt. */
   'queue:skipped_leased': { workflow: string; dedupKey: string; branch: string; heldBy: string };
-  /** An item taken out of the queue: its re-check found it no longer designated or unstarted. */
+  /** An item taken out of the queue: its re-check found it no longer designated or in a pick-up state. */
   'queue:dropped': { workflow: string; dedupKey: string; reason: string };
   'queue:parked': { workflow: string; dedupKey: string; attempts: number; reason: string };
   /** `retryInMs` is given exactly when the workflow isn't paused. */

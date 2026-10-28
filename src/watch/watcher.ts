@@ -16,7 +16,7 @@
 //   resumes those runs, then dispatches from the queue. An empty set stops the watcher.
 // - `poll`: polls a watched workflow now. One outside the set is rejected.
 // - `add`, `requeue` and `drop`: a change to a watched workflow's queue by hand, each safe to apply twice. `add` checks
-//   the ticket as a start does, designated and unstarted unless forced, and queues it, forced when it was. `requeue`
+//   the ticket as a start does, designated and in a pick-up state unless forced, and queues it, forced when it was. `requeue`
 //   puts a parked or failed item back as queued, unless its last run has not ended: that run still holds the branch.
 //   `drop` takes out any item but a dispatched one, whose run has not been settled. One outside the set is rejected.
 // A rejected command prints its reason, and the set stays as it was.

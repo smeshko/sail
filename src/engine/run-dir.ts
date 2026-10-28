@@ -30,7 +30,7 @@ export interface TicketRunSource {
   via: 'cli' | 'watch';
   /**
    * The checks `--force` overrode, each at most once: `designation` when the ticket didn't carry the repository's
-   * label, `state` when the claim didn't take because the ticket was not unstarted. Empty for a run nobody forced, and
+   * label, `state` when the claim didn't take because the ticket was not in a pick-up state. Empty for a run nobody forced, and
    * for one `--force` had nothing to override.
    */
   forced: Forced[];

@@ -212,3 +212,36 @@ test.each<[Record<string, unknown>, string]>([
     expect(message).not.toBe('created');
   });
 });
+
+test.each<[unknown, string]>([
+  [['Nope'], "option pickUp: 'Nope' is no state of the fake ticket source"],
+  [['Todo', 'In Progress'], "option pickUp: 'In Progress' is a started state; pickUp takes unstarted states"],
+  [['Done'], "option pickUp: 'Done' is a completed state; pickUp takes unstarted states"],
+  [[], 'option pickUp:'],
+  [[''], 'option pickUp.0:'],
+  [['Todo', 'Todo'], 'option pickUp:'],
+])('the ticket source fake created with pickUp %j throws %s', async (pickUp, message) => {
+  await withTempRepo(async (repo) => {
+    const thrownMessage = await thrown(() => fakeAdapters.ticketSource.create({ pickUp }, context(repo)));
+    expect(thrownMessage).toContain(`fake ticketSource: ${message}`);
+  });
+});
+
+test('the ticket source fake created with pickUp [Backlog, Todo] picks up from both and moves unstarted to Backlog', async () => {
+  await withTempRepo(async (repo) => {
+    const source = await fakeAdapters.ticketSource.create({ pickUp: ['Backlog', 'Todo'] }, context(repo));
+    expect((await source.update('FAKE-2', { state: 'unstarted' })).state).toEqual({
+      type: 'unstarted',
+      name: 'Backlog',
+    });
+    const listed = (await source.listDesignated('sail')).map((ticket) => ticket.ticketKey);
+    const ticket = await source.get('FAKE-1');
+    const pickable = ['Triage', 'Backlog', 'Todo'].map((name) =>
+      source.canPickUp({ ...ticket, state: { type: 'unstarted', name } }),
+    );
+    expect([listed, pickable]).toEqual([
+      ['FAKE-1', 'FAKE-2'],
+      [false, true, true],
+    ]);
+  });
+});

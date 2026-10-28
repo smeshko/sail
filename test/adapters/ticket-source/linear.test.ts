@@ -1099,3 +1099,138 @@ test('Linear answering success: false to fileUpload or to attachmentCreate is a 
     ],
   ]);
 });
+
+// pickUp: the states a designated ticket is picked up from, checked against the team's when the adapter is created.
+
+const PICK_UP_SEED = seedOf(
+  [
+    { id: 'state-backlog', name: 'Backlog', type: 'backlog', position: 0 },
+    { id: 'state-todo', name: 'Todo', type: 'unstarted', position: 1 },
+    { id: 'state-ready', name: 'Ready', type: 'unstarted', position: 2 },
+    { id: 'state-progress', name: 'In Progress', type: 'started', position: 3 },
+    { id: 'state-done', name: 'Done', type: 'completed', position: 4 },
+  ],
+  [
+    { number: 1, title: 'One', state: 'Todo', labels: ['sail'] },
+    { number: 2, title: 'Two', state: 'Backlog', labels: ['sail'] },
+    { number: 3, title: 'Three', state: 'Ready', labels: ['sail'] },
+  ],
+);
+
+/** A linear adapter on `PICK_UP_SEED` with `pickUp`, whose requests for the designated tickets name more states than asked. */
+function pickingUp(pickUp: string[], overAnswer = false) {
+  const world = createLinearWorld(PICK_UP_SEED);
+  const fetch: Fetch = (input, init) => {
+    if (!overAnswer || typeof init.body !== 'string') return world.fetch(input, init);
+    const body = JSON.parse(init.body);
+    if (body.operationName === 'SailDesignated') body.variables.names = ['Todo', 'Backlog', 'Ready'];
+    return world.fetch(input, { ...init, body: JSON.stringify(body) });
+  };
+  const adapter = createLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    fetch,
+    pickUp,
+  });
+  return { world, adapter };
+}
+
+test('with pickUp [Todo], listDesignated asks Linear for the Todo state by name and lists only Todo tickets', async () => {
+  const { world, adapter } = pickingUp(['Todo']);
+  const listed = await adapter.listDesignated('sail');
+  const asked = world.requests.find((request) => request.operationName === 'SailDesignated');
+  expect([listed.map((ticket) => ticket.ticketKey), asked?.variables.names]).toEqual([['ADW-1'], ['Todo']]);
+});
+
+test('with pickUp [Todo], a Backlog ticket Linear lists anyway is filtered out of listDesignated', async () => {
+  const { adapter } = pickingUp(['Todo'], true);
+  expect((await adapter.listDesignated('sail')).map((ticket) => ticket.ticketKey)).toEqual(['ADW-1']);
+});
+
+test('with pickUp [Todo], claiming a Backlog ticket takes nothing and sends no move, and claiming a Todo ticket moves it', async () => {
+  const { world, adapter } = pickingUp(['Todo']);
+  const refused = await adapter.claim('ADW-2');
+  expect([refused.claimed, refused.state, world.operations().includes('SailMove')]).toEqual([
+    false,
+    { type: 'unstarted', name: 'Backlog' },
+    false,
+  ]);
+  const taken = await adapter.claim('ADW-1');
+  expect([taken.claimed, world.ticket(1).state]).toEqual([true, 'In Progress']);
+});
+
+test('canPickUp holds for a ticket in a pick-up state by name, and for any unstarted one without pickUp', async () => {
+  const picky = pickingUp(['Ready']).adapter;
+  const open = createLinearTicketSource({ team: 'ADW', endpoint: LINEAR_ENDPOINT, apiKey: KEY });
+  const [todo, ready] = await Promise.all([picky.get('ADW-1'), picky.get('ADW-3')]);
+  expect([picky.canPickUp(todo), picky.canPickUp(ready), open.canPickUp(todo)]).toEqual([false, true, true]);
+});
+
+test('with pickUp [Ready], the unstarted move lands on Ready, though Todo comes first by position', async () => {
+  const { world, adapter } = pickingUp(['Ready']);
+  const moved = await adapter.update('ADW-2', { state: 'unstarted' });
+  expect([moved.state, world.ticket(2).state]).toEqual([{ type: 'unstarted', name: 'Ready' }, 'Ready']);
+});
+
+test('with pickUp [Ready, Todo], the unstarted move lands on Todo, the first of them by position', async () => {
+  const { world, adapter } = pickingUp(['Ready', 'Todo']);
+  const moved = await adapter.update('ADW-2', { state: 'unstarted' });
+  expect([moved.state, world.ticket(2).state]).toEqual([{ type: 'unstarted', name: 'Todo' }, 'Todo']);
+});
+
+test('without pickUp, the unstarted move still lands on the first unstarted state by position', async () => {
+  const world = createLinearWorld(PICK_UP_SEED);
+  const adapter = createLinearTicketSource({ team: 'ADW', endpoint: LINEAR_ENDPOINT, apiKey: KEY, fetch: world.fetch });
+  expect((await adapter.update('ADW-2', { state: 'unstarted' })).state).toEqual({ type: 'unstarted', name: 'Todo' });
+});
+
+test.each<[string[], string]>([
+  [['Nope'], "linear ticketSource: option pickUp: 'Nope' is no state of team ADW"],
+  [
+    ['Todo', 'In Progress'],
+    "linear ticketSource: option pickUp: 'In Progress' is a started state of team ADW; pickUp takes triage, backlog and unstarted states",
+  ],
+  [
+    ['Done'],
+    "linear ticketSource: option pickUp: 'Done' is a completed state of team ADW; pickUp takes triage, backlog and unstarted states",
+  ],
+])(
+  'the definition with pickUp %j rejects naming the entry, after exactly one team request',
+  async (pickUp, message) => {
+    const world = createLinearWorld(PICK_UP_SEED);
+    const served = world.serve();
+    try {
+      const env = { LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url };
+      const error = await rejection(Promise.resolve(linearTicketSource.create({ team: 'ADW', pickUp }, context(env))));
+      expect([messageOf(error), world.operations()]).toEqual([message, ['SailTeam']]);
+    } finally {
+      served.stop();
+    }
+  },
+);
+
+test('the definition with a valid pickUp reads the team’s states once, and a later claim reads them no more', async () => {
+  const world = createLinearWorld(PICK_UP_SEED);
+  const served = world.serve();
+  try {
+    const env = { LINEAR_API_KEY: KEY, SAIL_LINEAR_API_URL: served.url };
+    const adapter = await linearTicketSource.create({ team: 'ADW', pickUp: ['Todo', 'Ready'] }, context(env));
+    expect(world.operations()).toEqual(['SailTeam']);
+    expect((await adapter.claim('ADW-1')).claimed).toBe(true);
+    expect(world.operations().filter((operation) => operation === 'SailTeam')).toEqual(['SailTeam']);
+  } finally {
+    served.stop();
+  }
+});
+
+test.each<[unknown, string]>([
+  [[], 'linear ticketSource: option pickUp: Too small: expected array to have >=1 items'],
+  [[''], 'linear ticketSource: option pickUp.0: Too small: expected string to have >=1 characters'],
+  [['Todo', 'Todo'], 'linear ticketSource: option pickUp: names a state twice'],
+])('the definition refuses pickUp %j before any request', async (pickUp, message) => {
+  const error = await rejection(
+    Promise.resolve().then(() => linearTicketSource.create({ team: 'ADW', pickUp }, context({}))),
+  );
+  expect(messageOf(error)).toBe(message);
+});

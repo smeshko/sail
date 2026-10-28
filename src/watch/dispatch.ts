@@ -23,7 +23,7 @@
 //   lease comes first because a leased item is skipped on every tick for as long as the lease lasts, and checking it
 //   costs no provider call (D6). A leased item stays queued, uses no slot and counts no attempt, and says so with one
 //   `queue:skipped_leased` per holder. An item whose ticket the re-check doesn't find (`not_found`: deleted, or moved
-//   out of the team) is dropped. So is an item no longer designated or unstarted, unless its ticket is started by the
+//   out of the team) is dropped. So is an item no longer designated or in a pick-up state, unless its ticket is started by the
 //   claim of this clone's own run that failed (the latest `sail run <id> started` comment): a retry or a requeue must
 //   be able to run it again, and that run starts with `--force`. A forced item, added with `--force`, skips the
 //   re-check on its first dispatch: only the lease holds it back, and its run starts with `--force`. What `--force`
@@ -338,7 +338,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
 
   /**
    * Whether the item may start now, and whether its run must be forced: its branches are free, and its ticket is still
-   * designated and unstarted, or started by this clone's own failed run, which a forced start takes over. A forced
+   * designated and in a pick-up state, or started by this clone's own failed run, which a forced start takes over. A forced
    * item skips the re-check until its first dispatch.
    */
   const eligible = async (item: QueueItem, remote: string): Promise<false | { force: boolean }> => {
@@ -360,7 +360,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       return false;
     }
     const own = ownClaim(ticket);
-    if (ticket.state.type !== 'unstarted' && !own) {
+    if (!ticketSource.canPickUp(ticket) && !own) {
       store.drop(item.dedupKey, `it is ${ticket.state.name}`);
       return false;
     }

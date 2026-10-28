@@ -63,6 +63,7 @@ export const PORT_OPERATIONS = {
     'parseKey',
     'get',
     'isDesignated',
+    'canPickUp',
     'listDesignated',
     'list',
     'claim',

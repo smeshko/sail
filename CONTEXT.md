@@ -37,8 +37,12 @@ The ticket's human-readable identifier, such as `ADW-23`. Always say "ticket key
 _Avoid_: ticket id (the provider's internal id), ref
 
 **Designated ticket**:
-A ticket its team has marked for sail with a label (`sail` by default, configurable). It is the only kind an intake accepts unless forced. A poll collects it only while it is also unstarted (Backlog or Todo), because a claim moves it to In Progress (ADR-0015).
+A ticket its team has marked for sail with a label (`sail` by default, configurable). It is the only kind an intake accepts unless forced. A poll collects it only while it is also in a pick-up state, because a claim moves it to In Progress (ADR-0015).
 _Avoid_: tagged ticket, eligible ticket, allowlisted ticket
+
+**Pick-up state**:
+A state a designated ticket is picked up from: by default every state the ticket source reads as unstarted (Triage, Backlog or Todo), or the ones its `pickUp` option names. The ticket source decides it with `canPickUp`; a poll, a dispatch, a claim and a start all apply that one rule, and `--force` overrides it.
+_Avoid_: ready state, eligible state
 
 **Designated pull request**:
 An open, non-draft pull request carrying the designation label, in any case, whose head branch is in the repository. A workflow that opens a pull request adds the label to hand it to a workflow that watches pull requests, and a human adds it to consent to the same. The watcher polls these, and the built-in `pr` intake accepts them.
@@ -49,11 +53,11 @@ The hidden `<!-- sail:ticket KEY -->` line in a pull request's body. It names th
 _Avoid_: ticket tag, PR link
 
 **Claim**:
-Moving a designated ticket to In Progress through TicketSource before its run starts: at dispatch for a run the watcher starts, and at its start for a run started by hand. sail then comments on the ticket with the run id. After a claim the ticket is no longer unstarted, so a restart cannot pick it up twice. A forced run of a ticket that is not unstarted makes no claim: it moves the ticket to In Progress through `update`.
+Moving a designated ticket to In Progress through TicketSource before its run starts: at dispatch for a run the watcher starts, and at its start for a run started by hand. sail then comments on the ticket with the run id. After a claim the ticket is no longer in a pick-up state, so a restart cannot pick it up twice. A forced run of a ticket that is not in a pick-up state makes no claim: it moves the ticket to In Progress through `update`.
 _Avoid_: lock, reserve, take
 
 **Forced run**:
-A run started with `--force` on a ticket that is not designated, not unstarted, or both. Its run header lists the checks `--force` overrode, `designation` and `state`.
+A run started with `--force` on a ticket that is not designated, not in a pick-up state, or both. Its run header lists the checks `--force` overrode, `designation` and `state`.
 _Avoid_: bypass, skip, unsafe run
 
 **Brief**:

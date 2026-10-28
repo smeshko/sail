@@ -25,6 +25,11 @@ export interface LinearTicketSourceOptions extends ProviderOptions {
   readonly team: string;
   /** The name of the team's `started` state that `in-review` moves to. Without it, `in-review` isn't a move. */
   readonly inReview?: string;
+  /**
+   * The names of the states a designated ticket is picked up from, such as `Todo`. Every triage, backlog and unstarted
+   * state when left out. `openLinearTicketSource` checks them against the team's states.
+   */
+  readonly pickUp?: readonly string[];
   readonly endpoint: string;
   readonly apiKey: string;
   readonly fetch?: Fetch;
@@ -61,6 +66,19 @@ const list = (
     nodes { identifier title description url state { name type } labels(first: 50) { nodes { name } } }
     pageInfo { hasNextPage endCursor }
   }
+}`;
+
+// As DESIGNATED, with the states named too: the tickets in a backlog the source doesn't pick up are not listed to be read.
+const DESIGNATED_IN = `query SailDesignated($team: String!, $label: String!, $types: [String!], $names: [String!], $after: String) {
+  issues(
+    filter: {
+      team: { key: { eq: $team } }
+      labels: { some: { name: { eq: $label } } }
+      state: { type: { in: $types }, name: { in: $names } }
+    }
+    first: 50
+    after: $after
+  ) { nodes { identifier } pageInfo { hasNextPage endCursor } }
 }`;
 
 const TEAM = `query SailTeam($team: String!) {
@@ -123,7 +141,7 @@ const ATTACH = `mutation SailAttach($issueId: String!, $url: String!, $title: St
 /** How long the PUT of a file's bytes may take. */
 const UPLOAD_TIMEOUT_MS = 120_000;
 
-/** The Linear state types a designated ticket may be in to be listed: those sail reads as unstarted. */
+/** The Linear state types sail reads as unstarted: the ones a designated ticket is picked up from, and a `pickUp` entry may be. */
 const UNSTARTED_TYPES = ['triage', 'backlog', 'unstarted'];
 
 /** The Linear state types each port state type covers: `canceled` takes Linear's duplicate type with its own. */
@@ -187,8 +205,11 @@ const portState = (state: { name: string; type: string }, op: string): TicketSta
   name: state.name,
 });
 
-export function createLinearTicketSource(options: LinearTicketSourceOptions): TicketSource {
-  const { team, inReview } = options;
+function buildLinearTicketSource(options: LinearTicketSourceOptions): {
+  source: TicketSource;
+  checkPickUp(): Promise<void>;
+} {
+  const { team, inReview, pickUp } = options;
   const client = createLinearClient({
     endpoint: options.endpoint,
     apiKey: options.apiKey,
@@ -356,7 +377,9 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
           ? ofType('started').find((state) => state.name !== inReview)
           : move === 'done'
             ? ofType('completed')[0]
-            : (ofType('unstarted')[0] ?? ofType('backlog')[0]);
+            : pickUp === undefined
+              ? (ofType('unstarted')[0] ?? ofType('backlog')[0])
+              : all.find((state) => pickUp.includes(state.name));
     if (chosen === undefined)
       throw new PortError('ticketSource', op, 'invalid', `team ${team} has no state for ${move}`);
     return chosen.id;
@@ -409,7 +432,10 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
     return { state: portState(data.issueUpdate.issue.state, op), raw: data };
   }
 
-  return {
+  const canPickUp = (ticket: Pick<Ticket, 'state'>) =>
+    ticket.state.type === 'unstarted' && (pickUp === undefined || pickUp.includes(ticket.state.name));
+
+  const source: TicketSource = {
     name: 'linear',
     parseKey: (ref) => (KEY.test(ref) ? ref : URL_KEY.exec(ref)?.[1]),
     async get(ticketKey) {
@@ -429,6 +455,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       return ticket;
     },
     isDesignated: (ticket, label) => ticket.labels.includes(label),
+    canPickUp,
     async listDesignated(label) {
       const keys: string[] = [];
       const seen = new Set<string>();
@@ -437,8 +464,8 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
         const data: { issues: Page<{ identifier: string }> } = await client.request(
           'listDesignated',
           'SailDesignated',
-          DESIGNATED,
-          { team, label, types: UNSTARTED_TYPES, after },
+          pickUp === undefined ? DESIGNATED : DESIGNATED_IN,
+          { team, label, types: UNSTARTED_TYPES, ...(pickUp === undefined ? {} : { names: pickUp }), after },
         );
         keys.push(...data.issues.nodes.map((node) => node.identifier));
         after = nextCursor('listDesignated', 'the designated tickets', data.issues, seen);
@@ -451,7 +478,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
         const found = await readListed(key);
         if (found === undefined) continue;
         const ticket = toTicket(found.node, found.comments, 'listDesignated');
-        if (ticket.state.type === 'unstarted' && ticket.labels.includes(label)) tickets.push(ticket);
+        if (canPickUp(ticket) && ticket.labels.includes(label)) tickets.push(ticket);
       }
       const number = (ticket: Ticket) => Number(ticket.ticketKey.slice(ticket.ticketKey.indexOf('-') + 1));
       return tickets.sort((a, b) => number(a) - number(b));
@@ -494,7 +521,7 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const { node } = await lookup('claim', ticketKey);
       const read = (node as unknown as { state: { name: string; type: string } }).state;
       const state = portState(read, 'claim');
-      if (state.type !== 'unstarted') return { claimed: false, state, raw: node };
+      if (!canPickUp({ state })) return { claimed: false, state, raw: node };
       const moved = await move('claim', node.id, 'in-progress');
       emit({ type: 'ticket:claimed', ticketKey, state: moved.state });
       return { claimed: true, ...moved };
@@ -648,14 +675,50 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       moves: ['unstarted', 'in-progress', ...(inReview === undefined ? [] : (['in-review'] as const)), 'done'],
     }),
   };
+
+  /** Throws naming the first `pickUp` entry that is no triage, backlog or unstarted state of the team. */
+  async function checkPickUp(): Promise<void> {
+    for (const name of pickUp ?? []) {
+      const found = (await states('configure')).find((state) => state.name === name);
+      if (found === undefined) {
+        throw new Error(`linear ticketSource: option pickUp: '${name}' is no state of team ${team}`);
+      }
+      if (!UNSTARTED_TYPES.includes(found.type)) {
+        throw new Error(
+          `linear ticketSource: option pickUp: '${name}' is a ${found.type} state of team ${team}; pickUp takes triage, backlog and unstarted states`,
+        );
+      }
+    }
+  }
+
+  return { source, checkPickUp };
+}
+
+export function createLinearTicketSource(options: LinearTicketSourceOptions): TicketSource {
+  return buildLinearTicketSource(options).source;
+}
+
+/** The adapter, after its `pickUp` entries were checked against the team's states: one request, and none without `pickUp`. */
+export async function openLinearTicketSource(options: LinearTicketSourceOptions): Promise<TicketSource> {
+  const { source, checkPickUp } = buildLinearTicketSource(options);
+  if (options.pickUp !== undefined) await checkPickUp();
+  return source;
 }
 
 const LinearOptions = z.strictObject({
   team: z.string().regex(/^[A-Z][A-Z0-9]*$/, 'must be a Linear team key, such as ADW'),
   inReview: z.string().min(1).optional(),
+  pickUp: z
+    .array(z.string().min(1))
+    .min(1)
+    .refine((names) => new Set(names).size === names.length, 'names a state twice')
+    .optional(),
 });
 
-/** `linear` in `project.yaml`: `team` is required, `inReview` optional, and the key comes from `LINEAR_API_KEY`. */
+/**
+ * `linear` in `project.yaml`: `team` is required, `inReview` and `pickUp` optional, and the key comes from
+ * `LINEAR_API_KEY`. With `pickUp`, creating it reads the team's states once to check the names.
+ */
 export const linearTicketSource: AdapterDefinition<TicketSource> = {
   requires: () => ['LINEAR_API_KEY'],
   create(options, context) {
@@ -665,9 +728,10 @@ export const linearTicketSource: AdapterDefinition<TicketSource> = {
       const option = issue?.code === 'unrecognized_keys' ? issue.keys.join(', ') : issue?.path.join('.');
       throw new Error(`linear ticketSource: option ${option}: ${issue?.message}`);
     }
-    return createLinearTicketSource({
+    return openLinearTicketSource({
       team: parsed.data.team,
       ...(parsed.data.inReview === undefined ? {} : { inReview: parsed.data.inReview }),
+      ...(parsed.data.pickUp === undefined ? {} : { pickUp: parsed.data.pickUp }),
       apiKey: context.env.LINEAR_API_KEY ?? '',
       endpoint: context.env.SAIL_LINEAR_API_URL || LINEAR_ENDPOINT,
       ...(context.emit === undefined ? {} : { emit: context.emit }),

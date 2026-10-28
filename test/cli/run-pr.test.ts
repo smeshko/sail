@@ -339,8 +339,9 @@ test("the usage lists sail '#<pr>' after sail <ticket>, and says what --force ov
   const commands = stdout.split('\n').filter((line) => line.startsWith('  sail '));
   expect({
     second: commands[1]?.startsWith("  sail '#<pr>' [--workflow <name>] [--force] [-q|-v|-vv]  "),
-    force: /^ {2}--force {2,}\S.*designated.*unstarted.*; a pull request that is unlabelled, closed or a draft$/m.test(
-      stdout,
-    ),
+    force:
+      /^ {2}--force {2,}\S.*designated.*pick-up state.*; a pull request that is unlabelled, closed or a draft$/m.test(
+        stdout,
+      ),
   }).toEqual({ second: true, force: true });
 });

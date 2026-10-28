@@ -243,3 +243,48 @@ test('a second create on a new instance numbers after the first, and a create in
   const empty = createFakeTicketSource({ seed: seedOf([]), state: join(tempDir(), 'state.json') });
   expect((await empty.create({ title: 'First', description: 'c', labels: [] })).ticketKey).toBe('FAKE-1');
 });
+
+// pickUp: the states a designated ticket is picked up from.
+
+const TODO_STATE: TicketState = { type: 'unstarted', name: 'Todo' };
+const BACKLOG_STATE: TicketState = { type: 'unstarted', name: 'Backlog' };
+
+function pickingUp(pickUp: string[]) {
+  const seed = seedOf([
+    { ticketKey: 'FAKE-1', state: TODO_STATE, labels: ['sail'] },
+    { ticketKey: 'FAKE-2', state: BACKLOG_STATE, labels: ['sail'] },
+  ]);
+  return createFakeTicketSource({ seed, state: join(tempDir(), 'state.json'), pickUp });
+}
+
+test('with pickUp [Todo], listDesignated gives the Todo ticket and not the Backlog one', async () => {
+  expect(keys(await pickingUp(['Todo']).listDesignated('sail'))).toEqual(['FAKE-1']);
+});
+
+test('with pickUp [Todo], canPickUp holds for a Todo ticket and not for a Backlog one, and without pickUp for both', async () => {
+  const picky = pickingUp(['Todo']);
+  const [todo, backlog] = await Promise.all([picky.get('FAKE-1'), picky.get('FAKE-2')]);
+  const open = createFakeTicketSource({
+    seed: seedOf([]),
+    state: join(tempDir(), 'state.json'),
+  });
+  expect([picky.canPickUp(todo), picky.canPickUp(backlog), open.canPickUp(backlog)]).toEqual([true, false, true]);
+});
+
+test('with pickUp [Todo], claiming the Backlog ticket takes nothing and changes nothing, and claiming the Todo one takes', async () => {
+  const source = pickingUp(['Todo']);
+  const refused = await source.claim('FAKE-2');
+  expect([refused.claimed, refused.state, (await source.get('FAKE-2')).state]).toEqual([
+    false,
+    BACKLOG_STATE,
+    BACKLOG_STATE,
+  ]);
+  expect((await source.claim('FAKE-1')).claimed).toBe(true);
+});
+
+test('with pickUp [Backlog, Todo], the unstarted move lands on Backlog, and without pickUp on Todo', async () => {
+  const picky = pickingUp(['Backlog', 'Todo']);
+  expect((await picky.update('FAKE-1', { state: 'unstarted' })).state).toEqual(BACKLOG_STATE);
+  const open = createFakeTicketSource(files());
+  expect((await open.update('FAKE-1', { state: 'unstarted' })).state).toEqual(TODO_STATE);
+});

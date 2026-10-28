@@ -21,7 +21,9 @@ const notDesignated = (label: string) => `the ticket is not designated: it carri
 const notUnstarted = (state: TicketState) =>
   state.type === 'started'
     ? `the ticket is already claimed: it is ${state.name}. ${FORCE}`
-    : `the ticket is not unstarted: it is ${state.name}. ${FORCE}`;
+    : state.type === 'unstarted'
+      ? `the ticket is not in a pick-up state: it is ${state.name}. ${FORCE}`
+      : `the ticket is not unstarted: it is ${state.name}. ${FORCE}`;
 const lostClaim = (state: TicketState) =>
   `the ticket is already claimed: it became ${state.name} while sail was starting. ${FORCE}`;
 const commentFailed = (state: TicketState, runId: string, failure: string) =>
@@ -52,7 +54,7 @@ export interface ResolvedSource {
 }
 
 /**
- * The ticket `ref` names, fetched and checked: it carries `label`, and it is unstarted, each unless `force`. A ticket
+ * The ticket `ref` names, fetched and checked: it carries `label`, and it is in a pick-up state, each unless `force`. A ticket
  * that fails both checks is refused for the first. Nothing is written to the ticket.
  */
 export async function resolveSource(options: ResolveSourceOptions): Promise<ResolvedSource | { refused: string }> {
@@ -68,7 +70,7 @@ export async function resolveSource(options: ResolveSourceOptions): Promise<Reso
   const designated = ticketSource.isDesignated(ticket, label);
   if (!force) {
     if (!designated) return { refused: notDesignated(label) };
-    if (ticket.state.type !== 'unstarted') return { refused: notUnstarted(ticket.state) };
+    if (!ticketSource.canPickUp(ticket)) return { refused: notUnstarted(ticket.state) };
   }
   return { ticketKey, ticket, forced: designated ? [] : ['designation'] };
 }
@@ -116,7 +118,7 @@ export interface ClaimedSource {
 /**
  * Claims the ticket, moves it to In Progress through `update` when the claim didn't take and `force` is set, then
  * comments with the run id. The claim's own answer decides, not an earlier fetch: two starts can both read a ticket as
- * unstarted, and one claim takes. Each port call that fails refuses, and nothing is moved back.
+ * in a pick-up state, and one claim takes. Each port call that fails refuses, and nothing is moved back.
  */
 export async function claimSource(options: ClaimSourceOptions): Promise<ClaimedSource | { refused: string }> {
   const { ticketKey, runId, ticketSource, force = false } = options;

@@ -147,6 +147,17 @@ test('an answer of get that is no Ticket is refused as invalid, saying where it 
   });
 });
 
+test('an unstarted ticket outside the pick-up states is refused with its own text unless forced', async () => {
+  const { source } = world();
+  const picky: TicketSource = { ...source, canPickUp: () => false };
+  const refused = await resolveSource({ ref: 'FAKE-1', ticketSource: picky, label: 'sail' });
+  const forced = await resolveSource({ ref: 'FAKE-1', ticketSource: picky, label: 'sail', force: true });
+  expect([refused, 'refused' in forced]).toEqual([
+    { refused: 'the ticket is not in a pick-up state: it is Todo. --force runs it anyway' },
+    false,
+  ]);
+});
+
 test.each<[string, string, string, string]>([
   ['an undesignated ticket', 'FAKE-3', 'sail', "the ticket is not designated: it carries no 'sail' label"],
   [
@@ -333,4 +344,48 @@ test('claimedBy gives the latest claim, past a later comment that is no claim', 
 
 test('claimedBy reads back the run id claimComment wrote', () => {
   expect(claimedBy(said(`  ${claimComment('FAKE-9-xyz')}\n`))).toBe('FAKE-9-xyz');
+});
+
+// A fake that picks up from Todo alone, over a Todo and a Backlog ticket, both labelled.
+
+function pickUpWorld() {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-source-'));
+  dirs.push(dir);
+  const seed = join(dir, 'tickets.json');
+  const backlog: TicketState = { type: 'unstarted', name: 'Backlog' };
+  const tickets = [
+    { ticketKey: 'FAKE-1', labels: ['sail'], state: TODO },
+    { ticketKey: 'FAKE-2', labels: ['sail'], state: backlog },
+  ].map((ticket) => ({
+    ...ticket,
+    title: `Ticket ${ticket.ticketKey}`,
+    description: '',
+    comments: [],
+    links: [],
+    attachments: [],
+  }));
+  writeFileSync(seed, JSON.stringify({ tickets }));
+  return createFakeTicketSource({ seed, state: join(dir, 'state.json'), now: () => NOW, pickUp: ['Todo'] });
+}
+
+test('with pickUp [Todo], a start refuses the Backlog ticket, accepts the Todo one, and force accepts the Backlog one', async () => {
+  const source = pickUpWorld();
+  const start = (ref: string, force?: boolean) =>
+    resolveSource({ ref, ticketSource: source, label: 'sail', ...(force === undefined ? {} : { force }) });
+  expect(await start('FAKE-2')).toEqual({
+    refused: 'the ticket is not in a pick-up state: it is Backlog. --force runs it anyway',
+  });
+  expect('refused' in (await start('FAKE-1'))).toBe(false);
+  expect(await start('FAKE-2', true)).toMatchObject({ ticketKey: 'FAKE-2', forced: [] });
+});
+
+test('with pickUp [Todo], a forced claim of the Backlog ticket moves it to In Progress and records the state as forced', async () => {
+  const source = pickUpWorld();
+  const claimed = await claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source, force: true });
+  if ('refused' in claimed) throw new Error(claimed.refused);
+  expect([claimed.claim, claimed.forced, (await source.get('FAKE-2')).state]).toEqual([
+    { claimed: false, state: IN_PROGRESS },
+    ['state'],
+    IN_PROGRESS,
+  ]);
 });
