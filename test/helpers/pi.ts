@@ -102,6 +102,7 @@ export function scriptedSessions(scripts: (prompt: string) => readonly Step[]) {
     const idle = () => new Promise<void>((done) => controller.signal.addEventListener('abort', () => done()));
     const session: PiSession = {
       sessionId: PI_SESSION_ID,
+      systemPrompt: params.systemPrompt,
       subscribe(listener) {
         listeners.push(listener);
         return () => {

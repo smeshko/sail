@@ -1,7 +1,7 @@
 // The one file that touches pi's SDK: an isolated in-process coding-agent session. Nothing of the user's own pi is read
-// (settings, auth, sessions, extensions, skills, prompt templates, context files); the only extension is sail's gate,
-// the bash tool runs on sail's operations, and the credential is the provider's variable from the environment sail was
-// given. The SDK is imported by the first session, not with the CLI.
+// (settings, auth, sessions, extensions, skills, prompt templates, context files), nor a SYSTEM.md; the only extension
+// is sail's gate, the bash tool runs on sail's operations, and the credential is the provider's variable from the
+// environment sail was given. The SDK is imported by the first session, not with the CLI.
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +31,8 @@ export interface PiSessionParams {
 /** The part of pi's `AgentSession` the harness uses. */
 export interface PiSession {
   readonly sessionId: string;
+  /** What the model is told before the prompt. */
+  readonly systemPrompt: string;
   subscribe(listener: (event: PiEvent) => void): () => void;
   prompt(text: string): Promise<void>;
   abort(): Promise<void>;
@@ -73,6 +75,8 @@ export const createPiSession: PiSessionFactory = async (params) => {
       noThemes: true,
       noContextFiles: true,
       extensionFactories: [(pi) => params.gate(pi as unknown as ExtensionHost)],
+      // pi's own prompt, never a SYSTEM.md the workspace or an agent dir holds.
+      systemPromptOverride: () => undefined,
       appendSystemPrompt: [params.systemPrompt],
     });
     await resourceLoader.reload();
@@ -94,6 +98,7 @@ export const createPiSession: PiSessionFactory = async (params) => {
     });
     return {
       sessionId: session.sessionId,
+      systemPrompt: session.systemPrompt,
       subscribe: (listener) => session.subscribe((event) => listener(event as unknown as PiEvent)),
       prompt: (text) => session.prompt(text),
       abort: () => session.abort(),
