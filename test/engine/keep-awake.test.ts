@@ -82,6 +82,22 @@ describe('systemKeepAwake', () => {
     expect(hold).toMatchObject({ held: false, reason: 'caffeinate could not start: EPERM' });
     hold.release();
   });
+
+  // The defaults reach the real machine: caffeinate is on macOS's PATH and on no other platform's.
+  test('the default which looks caffeinate up on the PATH', () => {
+    const hold = systemKeepAwake({}, { platform: 'darwin', spawn: () => ({ kill() {}, unref() {} }) }).acquire();
+    expect(hold.held).toBe(Bun.which('caffeinate') !== null);
+    hold.release();
+  });
+
+  test('the default spawn starts caffeinate, or reports that it could not start', () => {
+    // A pid that has already exited: caffeinate -w on it ends at once.
+    const exited = Bun.spawnSync(['true']).pid;
+    const hold = systemKeepAwake({}, { platform: 'darwin', which: () => 'caffeinate', pid: exited }).acquire();
+    if (hold.held) expect(hold.by).toBe('caffeinate');
+    else expect(hold.reason).toStartWith('caffeinate could not start: ');
+    hold.release();
+  });
 });
 
 describe('recordingKeepAwake', () => {
