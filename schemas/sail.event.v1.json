@@ -55,6 +55,7 @@
         "ticket:labelled",
         "ticket:unlabelled",
         "ticket:related",
+        "ticket:edited",
         "codehost:pushed",
         "codehost:pr_opened",
         "codehost:checks",
@@ -237,6 +238,10 @@
     {
       "if": { "properties": { "type": { "const": "ticket:related" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/ticketRelated" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ticket:edited" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/ticketEdited" }
     },
     {
       "if": { "properties": { "type": { "const": "codehost:pushed" } }, "required": ["type"] },
@@ -1162,6 +1167,18 @@
         "state": { "$ref": "#/$defs/ticketState" }
       },
       "required": ["ticketKey", "kind", "to", "state"],
+      "unevaluatedProperties": false
+    },
+    "ticketEdited": {
+      "description": "the fields an edit set on the ticket",
+      "type": "object",
+      "$ref": "#/$defs/envelope",
+      "properties": {
+        "key": true,
+        "ticketKey": { "type": "string" },
+        "fields": { "type": "array", "items": { "enum": ["title", "description"] }, "minItems": 1 }
+      },
+      "required": ["ticketKey", "fields"],
       "unevaluatedProperties": false
     },
     "codehostPushed": {

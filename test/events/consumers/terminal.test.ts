@@ -884,6 +884,10 @@ test('at trace, an event of every type prints a line of its own', () => {
       ),
     ],
     [
+      { type: 'ticket:edited', ticketKey: 'FAKE-1', fields: ['title', 'description'] },
+      head('', '· ticket:edited {"ticketKey":"FAKE-1","fields":["title","description"]}', w),
+    ],
+    [
       { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'b4efb0c' },
       head('', '· codehost:pushed {"branch":"sail/FAKE-1","headSha":"b4efb0c"}', w),
     ],

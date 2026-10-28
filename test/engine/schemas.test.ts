@@ -576,6 +576,7 @@ const PROVIDER: NewEvent[] = [
     to: 'FAKE-1',
     state: { type: 'canceled', name: 'Duplicate' },
   },
+  { type: 'ticket:edited', key: OPEN, ticketKey: 'FAKE-1', fields: ['title', 'description'] },
   { type: 'codehost:pushed', key: OPEN, branch: 'sail/FAKE-1', headSha: SHA },
   {
     type: 'codehost:pr_opened',

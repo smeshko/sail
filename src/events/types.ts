@@ -62,6 +62,7 @@ export const EVENT_TYPES = [
   'ticket:labelled',
   'ticket:unlabelled',
   'ticket:related',
+  'ticket:edited',
   'codehost:pushed',
   'codehost:pr_opened',
   'codehost:checks',
@@ -321,6 +322,8 @@ interface Payloads {
     to: string;
     state: TicketState;
   };
+  /** A change `edit` made: the fields it set, `title` and `description`, at least one. */
+  'ticket:edited': { key?: string; ticketKey: string; fields: ('title' | 'description')[] };
   'codehost:pushed': { key?: string; branch: string; headSha: string };
   'codehost:pr_opened': {
     key?: string;

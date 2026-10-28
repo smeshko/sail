@@ -104,6 +104,10 @@ const RELATE = `mutation SailRelate($id: String!, $relatedId: String!, $type: Is
   issueRelationCreate(input: { issueId: $id, relatedIssueId: $relatedId, type: $type }) { success issueRelation { id } }
 }`;
 
+const EDIT = `mutation SailEdit($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) { success issue { id identifier url } }
+}`;
+
 // A signed URL to PUT the file's bytes to, with the headers the PUT must carry, and the URL the file is served at.
 const UPLOAD = `mutation SailUpload($contentType: String!, $filename: String!, $size: Int!) {
   fileUpload(contentType: $contentType, filename: $filename, size: $size) {
@@ -578,6 +582,24 @@ export function createLinearTicketSource(options: LinearTicketSourceOptions): Ti
       const state = moved?.state ?? portState(current, 'relate');
       emit({ type: 'ticket:related', ticketKey, kind, to, state });
       return { ticketKey, kind, to, state, raw: moved === undefined ? data : { relation: data, move: moved.raw } };
+    },
+    async edit(ticketKey, { title, description }) {
+      if (title === undefined && description === undefined) {
+        throw new PortError('ticketSource', 'edit', 'invalid', 'an edit names a title, a description, or both');
+      }
+      const { node } = await lookup('edit', ticketKey);
+      const input = {
+        ...(title === undefined ? {} : { title }),
+        ...(description === undefined ? {} : { description }),
+      };
+      const data = await client.request<{
+        issueUpdate: { success: boolean; issue: { id: string; identifier: string; url: string } | null };
+      }>('edit', 'SailEdit', EDIT, { id: node.id, input });
+      if (!data.issueUpdate.success || data.issueUpdate.issue === null) {
+        throw new PortError('ticketSource', 'edit', 'conflict', `Linear did not edit ${ticketKey}`, data);
+      }
+      emit({ type: 'ticket:edited', ticketKey, fields: Object.keys(input) as ('title' | 'description')[] });
+      return { ticketKey, url: data.issueUpdate.issue.url, raw: data };
     },
     async attach(ticketKey, file) {
       checkAttachment(file);

@@ -72,6 +72,7 @@ export const PORT_OPERATIONS = {
     'addLabel',
     'removeLabel',
     'relate',
+    'edit',
     'attach',
     'capabilities',
   ]),

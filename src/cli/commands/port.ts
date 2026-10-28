@@ -12,6 +12,8 @@
 //   sail port ticket-source remove-label <ticket> <label>    removes the label from it
 //   sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>
 //                                                   relates it to another: a duplicate is closed
+//   sail port ticket-source edit <ticket> [--title <text>] [--body-file <path>]
+//                                                   sets its description from the file or stdin, and its title
 //   sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]
 //                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
@@ -49,6 +51,7 @@ import { getTicket, type TicketSource } from '../../ports/ticket-source';
 import {
   Attached,
   Created,
+  Edited,
   ListedTicket,
   Moved,
   Posted,
@@ -246,6 +249,30 @@ const relateOperation: PortOperation<TicketSource> = {
   },
 };
 
+/**
+ * The description of the ticket `<ticket>` names set to the body, and its title too with `--title`: the port's
+ * `Edited`, parsed before it is printed. A body that is empty is refused, so a description is never cleared.
+ */
+const editOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  options: { title: { value: 'text', filled: true }, 'body-file': { value: 'path' } },
+  body: true,
+  async run(source, { positionals: [ref = ''], values, body }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const edited = Edited.safeParse(
+      await source.edit(ticketKey, {
+        ...(typeof values.title === 'string' ? { title: values.title } : {}),
+        description: await body(),
+      }),
+    );
+    if (edited.success) return { value: edited.data };
+    const [issue] = edited.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'edit', 'invalid', `its answer is not an Edited: ${where}`);
+  },
+};
+
 /** A new ticket, its description the body: the port's `Created`, parsed before it is printed. */
 const createOperation: PortOperation<TicketSource> = {
   positionals: [],
@@ -325,6 +352,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     'add-label': relabelOperation('addLabel'),
     'remove-label': relabelOperation('removeLabel'),
     relate: relateOperation,
+    edit: editOperation,
     attach: attachOperation,
   },
 };

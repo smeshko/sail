@@ -30,9 +30,9 @@ export interface WorldComment {
 
 export interface WorldTicket {
   readonly number: number;
-  readonly title: string;
+  title: string;
   /** Linear sends `null` for a ticket without one. */
-  readonly description?: string | null;
+  description?: string | null;
   /** The state's name. */
   state: string;
   labels?: readonly string[];
@@ -122,6 +122,7 @@ export const LINEAR_NAMES: ReadonlySet<string> = new Set([
   'Boolean',
   'ID',
   'IssueRelationType',
+  'IssueUpdateInput',
   // Query and mutation roots.
   'issues',
   'issue',
@@ -209,6 +210,7 @@ const MUTATIONS = new Set([
   'SailAddLabel',
   'SailRemoveLabel',
   'SailRelate',
+  'SailEdit',
 ]);
 
 /** The header `fileUpload` signs an upload with, which the PUT must carry back. */
@@ -437,6 +439,19 @@ export function createLinearWorld(seed: LinearWorldSeed): LinearWorld {
       ticket.relations = [...(ticket.relations ?? []), { type: String(type), number: other.number }];
       return ok({
         issueRelationCreate: { success: true, issueRelation: { id: `relation-${ticket.relations.length}` } },
+      });
+    },
+    SailEdit: ({ id, input }) => {
+      const ticket = byId(id);
+      if (ticket === undefined) return graphqlError(400, 'INPUT_ERROR', 'Entity not found: Issue');
+      const change = (typeof input === 'object' && input !== null ? input : {}) as Record<string, unknown>;
+      if (typeof change.title === 'string') ticket.title = change.title;
+      if (typeof change.description === 'string') ticket.description = change.description;
+      return ok({
+        issueUpdate: {
+          success: true,
+          issue: { id: `issue-${ticket.number}`, identifier: identifier(ticket.number), url: urlOf(ticket.number) },
+        },
       });
     },
     SailUpload: ({ contentType, filename, size }) => {

@@ -8,6 +8,7 @@ import { MAX_ATTACHMENT_BYTES, type TicketSource } from '../../src/ports/ticket-
 import {
   Attached,
   ClaimResult,
+  Edited,
   ListedTicket,
   Moved,
   Posted,
@@ -119,13 +120,16 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       portFailure(await rejection(adapter.removeLabel(world.missing, world.label))),
       portFailure(await rejection(adapter.relate(world.missing, { kind: 'related', to: world.designated }))),
       portFailure(await rejection(adapter.relate(world.designated, { kind: 'related', to: world.missing }))),
+      portFailure(await rejection(adapter.edit(world.missing, { description: 'Groomed.' }))),
     ];
     expect(failures).toEqual(
-      ['get', 'claim', 'update', 'comment', 'attach', 'addLabel', 'removeLabel', 'relate', 'relate'].map((op) => ({
-        port: 'ticketSource',
-        op,
-        code: 'not_found',
-      })),
+      ['get', 'claim', 'update', 'comment', 'attach', 'addLabel', 'removeLabel', 'relate', 'relate', 'edit'].map(
+        (op) => ({
+          port: 'ticketSource',
+          op,
+          code: 'not_found',
+        }),
+      ),
     );
     expect(capture.events).toEqual([]);
     expect((await adapter.get(world.designated)).links).toEqual(links);
@@ -280,6 +284,25 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
       { port: 'ticketSource', op: 'relate', code: 'invalid' },
       { port: 'ticketSource', op: 'relate', code: 'invalid' },
     ]);
+    expect(capture.events).toEqual([]);
+  });
+
+  test(`${label}: edit sets the description, which get then shows, and emits one ticket:edited naming the field`, async () => {
+    const { adapter, world, capture } = await start();
+    const edited = await adapter.edit(world.designated, { description: 'Groomed.' });
+    expect(parseIssues(Edited, edited)).toEqual([]);
+    expect(edited.ticketKey).toBe(world.designated);
+    expect((await adapter.get(world.designated)).description).toBe('Groomed.');
+    expect(capture.events.filter((event) => event.type !== 'ticket:fetched')).toEqual([
+      { type: 'ticket:edited', ticketKey: world.designated, fields: ['description'] },
+    ]);
+    expectValidEvents(capture);
+  });
+
+  test(`${label}: edit naming neither title nor description rejects as invalid, naming edit, and changes and emits nothing`, async () => {
+    const { adapter, world, capture } = await start();
+    const failure = portFailure(await rejection(adapter.edit(world.designated, {})));
+    expect(failure).toEqual({ port: 'ticketSource', op: 'edit', code: 'invalid' });
     expect(capture.events).toEqual([]);
   });
 

@@ -19,7 +19,7 @@ import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { wrapUntrusted } from '../../src/engine/render';
 import { notATicket } from '../../src/engine/source';
-import { Attached, Created, ListedTicket, Posted, Relabelled, Related, Ticket } from '../../src/ports/types';
+import { Attached, Created, Edited, ListedTicket, Posted, Relabelled, Related, Ticket } from '../../src/ports/types';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { withTempRepo } from '../helpers/temp-repo';
@@ -1060,6 +1060,55 @@ test('relate of a ticket the seed lacks, on either side, exits 1 as not_found an
       { code: EXIT_FAILED, stdout: '', stderr: 'sail port: ticketSource.relate: no ticket FAKE-99 (not_found)\n' },
     ]);
     expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+  });
+});
+
+// `sail port ticket-source edit`: the description from --body-file or stdin, the port's Edited as one line.
+
+test('edit sets the description from --body-file, and the title with --title, and get then shows both', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeFileSync(join(repo.dir, 'groomed.md'), 'Groomed.\n');
+    const edited = await runCaptured(
+      ['port', 'ticket-source', 'edit', 'FAKE-1', '--title', 'New', '--body-file', 'groomed.md'],
+      repo.dir,
+    );
+    expect({ code: edited.code, stderr: edited.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(Edited.parse(oneLine(edited.stdout))).toMatchObject({ ticketKey: 'FAKE-1', url: 'fake://tickets/FAKE-1' });
+    const got = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-1'], repo.dir);
+    const ticket = Ticket.parse(oneLine(got.stdout));
+    expect([ticket.title, ticket.description]).toEqual(['New', 'Groomed.\n']);
+  });
+});
+
+test('edit with --title and an empty stdin exits 3 before the port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const refused = await runCaptured(['port', 'ticket-source', 'edit', 'FAKE-1', '--title', 'New'], repo.dir, {
+      stdin: '',
+    });
+    expect(refused).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: 'sail port: ticket-source edit needs a body, and stdin is empty\n',
+    });
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'tickets.json'))).toBe(false);
+  });
+});
+
+test('edit of a ticket the seed lacks exits 1 as not_found', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    writeFileSync(join(repo.dir, 'groomed.md'), 'Groomed.\n');
+    const missing = await runCaptured(
+      ['port', 'ticket-source', 'edit', 'FAKE-99', '--body-file', 'groomed.md'],
+      repo.dir,
+    );
+    expect(missing).toEqual({
+      code: EXIT_FAILED,
+      stdout: '',
+      stderr: 'sail port: ticketSource.edit: no ticket FAKE-99 (not_found)\n',
+    });
   });
 });
 

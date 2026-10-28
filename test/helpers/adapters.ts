@@ -36,6 +36,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'claim',
     'comment',
     'create',
+    'edit',
     'get',
     'isDesignated',
     'list',

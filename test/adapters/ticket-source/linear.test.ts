@@ -12,7 +12,7 @@ import { type Fetch, LINEAR_ENDPOINT } from '../../../src/adapters/ticket-source
 import type { ProviderEmit, ProviderEvent } from '../../../src/events/types';
 import type { AdapterContext, Env } from '../../../src/ports/adapter';
 import type { TicketSource } from '../../../src/ports/ticket-source';
-import { Created, ListedTicket, Relabelled, Related, Ticket, type TicketMove } from '../../../src/ports/types';
+import { Created, Edited, ListedTicket, Relabelled, Related, Ticket, type TicketMove } from '../../../src/ports/types';
 import {
   createLinearWorld,
   DEFAULT_STATES,
@@ -897,6 +897,27 @@ test('relate answering success: false is a conflict, and emits nothing', async (
   });
   const error = await rejection(adapter.relate('ADW-1', { kind: 'related', to: 'ADW-2' }));
   expect([portFailure(error), capture.events]).toEqual([{ port: 'ticketSource', op: 'relate', code: 'conflict' }, []]);
+});
+
+test('edit with a title alone looks the ticket up, then sends one SailEdit whose input holds the title and nothing else', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const edited = await adapter.edit('ADW-1', { title: 'Uno' });
+  expect(parseIssues(Edited, edited)).toEqual([]);
+  expect([edited.ticketKey, edited.url]).toEqual(['ADW-1', URL_OF('ADW-1')]);
+  expect(world.operations()).toEqual(['SailTicket', 'SailEdit']);
+  expect(world.requests[1]?.variables).toEqual({ id: 'issue-1', input: { title: 'Uno' } });
+  expect(world.ticket(1).title).toBe('Uno');
+  expect(capture.events).toEqual([{ type: 'ticket:edited', ticketKey: 'ADW-1', fields: ['title'] }]);
+});
+
+test('edit naming neither field is invalid before any request, and edit answering success: false is a conflict that emits nothing', async () => {
+  const { world, adapter, capture } = linear(seedOf(DEFAULT_STATES, TWO_TICKETS));
+  const empty = await rejection(adapter.edit('ADW-1', {}));
+  expect(portFailure(empty)).toEqual({ port: 'ticketSource', op: 'edit', code: 'invalid' });
+  expect(world.operations()).toEqual([]);
+  world.failNext('SailEdit', { status: 200, body: { data: { issueUpdate: { success: false, issue: null } } } });
+  const refused = await rejection(adapter.edit('ADW-1', { description: 'Groomed.' }));
+  expect([portFailure(refused), capture.events]).toEqual([{ port: 'ticketSource', op: 'edit', code: 'conflict' }, []]);
 });
 
 test('create in a team Linear doesn’t have is not_found, and Linear answering success: false to it is a conflict; neither emits', async () => {

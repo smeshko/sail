@@ -239,6 +239,22 @@ export function createFakeTicketSource(options: FakeTicketSourceOptions): Ticket
       emit({ type: 'ticket:related', ticketKey, kind, to, state: related.state });
       return { ticketKey, kind, to, ...related };
     },
+    async edit(ticketKey, { title, description }) {
+      if (title === undefined && description === undefined) {
+        throw new PortError('ticketSource', 'edit', 'invalid', 'an edit names a title, a description, or both');
+      }
+      const edited = store.change((world) => {
+        const ticket = find(world, 'edit', ticketKey);
+        if (title !== undefined) ticket.title = title;
+        if (description !== undefined) ticket.description = description;
+        return { ticketKey, url: `fake://tickets/${ticketKey}`, raw: structuredClone(ticket) };
+      });
+      const fields: ('title' | 'description')[] = [];
+      if (title !== undefined) fields.push('title');
+      if (description !== undefined) fields.push('description');
+      emit({ type: 'ticket:edited', ticketKey, fields });
+      return edited;
+    },
     async attach(ticketKey, file) {
       checkAttachment(file);
       const name = file.title ?? file.name;

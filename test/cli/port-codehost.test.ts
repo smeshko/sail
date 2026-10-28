@@ -18,7 +18,7 @@ const TICKET_USAGE =
 const UPDATE_USAGE = '       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>\n';
 const CREATE_USAGE = '       sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]\n';
 const RELABEL_USAGE =
-  '       sail port ticket-source add-label|remove-label <ticket> <label>\n       sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>\n';
+  '       sail port ticket-source add-label|remove-label <ticket> <label>\n       sail port ticket-source relate <ticket> --kind <related|blocks|duplicate> --to <ticket>\n       sail port ticket-source edit <ticket> [--title <text>] [--body-file <path>]\n';
 const ATTACH_USAGE =
   '       sail port ticket-source attach <ticket> --file <path> [--title <text>] [--content-type <type>]\n';
 const PUSH_USAGE = '       sail port codehost push <branch>\n';
@@ -268,7 +268,7 @@ test.each<[string, string[], string]>([
   [
     '--title given to push',
     ['codehost', 'push', 'sail/x', '--title', 'T'],
-    "option '--title' belongs to sail port ticket-source create or sail port ticket-source attach or sail port codehost open-pull-request",
+    "option '--title' belongs to sail port ticket-source create or sail port ticket-source edit or sail port ticket-source attach or sail port codehost open-pull-request",
   ],
   [
     '--label given to ticket-source get',
@@ -732,7 +732,7 @@ test.each<[string, string[], string]>([
   [
     '--body-file given to add-label',
     ['add-label', '1', 'x', '--body-file', 'note.md'],
-    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port codehost open-pull-request or sail port codehost comment",
+    "option '--body-file' belongs to sail port ticket-source comment or sail port ticket-source create or sail port ticket-source edit or sail port codehost open-pull-request or sail port codehost comment",
   ],
 ])('%s exits 3, naming where the option belongs', async (_, args, problem) => {
   await withTempRepo(async (repo) => {

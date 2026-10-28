@@ -89,6 +89,10 @@ export const Related = z.object({
 });
 export type Related = z.infer<typeof Related>;
 
+/** What `edit` leaves: the ticket's key and URL. */
+export const Edited = z.object({ ticketKey: z.string(), url: z.string(), raw: Raw });
+export type Edited = z.infer<typeof Edited>;
+
 /** A file `attach` attached to a ticket: the attachment's URL. */
 export const Attached = z.object({ url: z.string(), raw: Raw });
 export type Attached = z.infer<typeof Attached>;

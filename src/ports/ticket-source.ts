@@ -6,6 +6,7 @@ import {
   type Attached,
   type ClaimResult,
   type Created,
+  type Edited,
   type ListedTicket,
   type Moved,
   type Posted,
@@ -52,6 +53,12 @@ export interface TicketFilter {
 export interface TicketRelationChange {
   readonly kind: TicketRelation;
   readonly to: string;
+}
+
+/** What `edit` sets: a new title, a new description, or both. */
+export interface TicketEdit {
+  readonly title?: string;
+  readonly description?: string;
 }
 
 /** The largest file `attach` takes: 20 MiB. */
@@ -113,6 +120,11 @@ export interface TicketSource {
    * that isn't a `TicketRelation`, rejects as `invalid`, and nothing changes. Emits `ticket:related`.
    */
   relate(ticketKey: string, change: TicketRelationChange): Promise<Related>;
+  /**
+   * Sets the ticket's title, description, or both. A change naming neither rejects as `invalid` before any request.
+   * Emits `ticket:edited`, with the fields it set.
+   */
+  edit(ticketKey: string, change: TicketEdit): Promise<Edited>;
   /**
    * Uploads the file and attaches it to the ticket, after `checkAttachment()` passes it. Emits `ticket:attached`.
    */
