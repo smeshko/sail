@@ -22,7 +22,8 @@ const DUPLICATE_CONFIDENCE = 0.8;
 
 /**
  * Splits the judge's actions into those to apply and those to report. A `duplicate` is applied when the check named its
- * ticket at `DUPLICATE_CONFIDENCE` or more, and only the first such; any other is reported with the reason.
+ * ticket at `DUPLICATE_CONFIDENCE` or more, and only the first such; any other is reported with the reason, as is an
+ * `edit` that names nothing to change.
  */
 function limit(
   actions: z.infer<typeof Decision>['actions'],
@@ -31,6 +32,10 @@ function limit(
   const apply: z.infer<typeof Plan>['apply'] = [];
   const reported: string[] = [];
   for (const action of actions) {
+    if (action.kind === 'edit' && action.title === undefined && action.description === undefined) {
+      reported.push('edit (names neither a title nor a description)');
+      continue;
+    }
     if (action.kind !== 'duplicate') {
       apply.push(action);
       continue;

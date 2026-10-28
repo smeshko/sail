@@ -12,7 +12,9 @@ const out = process.env.STAGE_OUT;
 function port(args, input) {
   const result = spawnSync('sail', ['port', ...args], { encoding: 'utf8', input: input ?? '' });
   if (result.status !== 0)
-    throw new Error(`sail port ${args.join(' ')}: ${(result.stderr || result.status).toString().trim()}`);
+    throw new Error(
+      `sail port ${args.join(' ')}: ${(result.stderr || result.error?.message || `exit ${result.status ?? result.signal}`).trim()}`,
+    );
   return result.stdout;
 }
 

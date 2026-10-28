@@ -153,6 +153,22 @@ test('groom applies a title-only edit to a ticket with no description, and leave
   });
 }, 120_000);
 
+test('groom reports an edit that names neither a title nor a description, and edits nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).decide;
+    answer.output.actions = [{ kind: 'edit' }];
+    seedHarness(sailDir, 'decide', [answer]);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const comment = lastComment(repo.dir);
+    expect(comment).toContain('- reported, not marked: edit (names neither a title nor a description)');
+    expect(comment).not.toContain('- applied:');
+    expect(readEvents(onlyRun(repo.dir)).map((event) => event.type)).not.toContain('ticket:edited');
+  });
+}, 120_000);
+
 test('groom marks a duplicate the check named at or above the threshold', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
