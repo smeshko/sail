@@ -542,6 +542,29 @@ test("groom's duplicates stage leaves the ticket itself out of what it asks Jev"
   });
 }, 120_000);
 
+test("groom's duplicates stage asks about and returns a started ticket", async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    edit(
+      sailDir,
+      'fake/tickets.json',
+      '"type": "unstarted",\n        "name": "Todo"',
+      '"type": "started",\n        "name": "In Progress"',
+    );
+    repo.git('commit', '-am', 'FAKE-1 is started');
+    seedDuplicate(sailDir, 0.95);
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+
+    const dir = onlyRun(repo.dir);
+    expect(Object.keys(duplicatesRequest(dir).questions)).toEqual(['FAKE-1']);
+    expect(duplicatesCall(dir).entry.output).toEqual({
+      candidates: [{ ticketKey: 'FAKE-1', confidence: 0.95, why: expect.any(String) }],
+    });
+    expect(duplicatesCall(dir).asked).toHaveLength(1);
+  });
+}, 120_000);
+
 test("groom's duplicates stage asks Jev nothing when no other ticket is open", async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
