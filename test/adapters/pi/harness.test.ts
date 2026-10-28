@@ -362,6 +362,30 @@ test('an abort during a bash command resolves error, ends with session_end, and 
   });
 });
 
+test('a command gets the preamble and the environment without the provider credential', async () => {
+  const { scripted } = await play(
+    'env',
+    {},
+    {
+      env: [
+        start,
+        { act: 'bash', command: 'env > env.txt' },
+        say('Listed.'),
+        ...submitted({ outcome: 'done', output: SPEC }),
+      ],
+    },
+  );
+  const cwd = scripted.calls[0]?.params.cwd ?? '';
+  const names = readFileSync(join(cwd, 'env.txt'), 'utf8')
+    .split('\n')
+    .map((line) => line.slice(0, line.indexOf('=')));
+  expect({
+    key: names.includes('GROQ_API_KEY'),
+    path: names.includes('PATH'),
+    stageOut: names.includes('STAGE_OUT'),
+  }).toEqual({ key: false, path: true, stageOut: true });
+});
+
 test('every pi event goes to onRaw, and a recorder that throws changes nothing', async () => {
   const { raw, result } = await play('done');
   expect({ types: (raw as { type: string }[]).map((event) => event.type), done: summary(result) }).toEqual({
