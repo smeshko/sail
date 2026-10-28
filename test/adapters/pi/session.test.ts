@@ -53,6 +53,14 @@ test("the workspace's .pi/SYSTEM.md never becomes the session's system prompt", 
   }
 });
 
+test('a session puts pi offline, so its grep and find never download a binary', async () => {
+  const env: Record<string, string | undefined> = process.env;
+  delete process.env.PI_OFFLINE;
+  const session = await createPiSession(params());
+  await session.dispose();
+  expect(env.PI_OFFLINE).toBe('1');
+});
+
 test('a session is made without a model call, has an id, and its dispose removes its directory', async () => {
   const before = leftovers();
   const session = await createPiSession(params());

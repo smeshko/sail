@@ -47,6 +47,8 @@ export const createPiSession: PiSessionFactory = async (params) => {
   const provider = slash < 0 ? '' : params.model.slice(0, slash);
   const modelId = slash < 0 ? '' : params.model.slice(slash + 1);
 
+  // pi's grep and find fetch an unpinned rg or fd from GitHub and run it when none is found; offline, they never do.
+  process.env.PI_OFFLINE = '1';
   const sdk = await import('@mariozechner/pi-coding-agent');
   const authStorage = sdk.AuthStorage.inMemory();
   const registry = sdk.ModelRegistry.inMemory(authStorage);
