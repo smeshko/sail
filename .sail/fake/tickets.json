@@ -12,6 +12,25 @@
       "comments": [],
       "links": [],
       "attachments": []
+    },
+    {
+      "ticketKey": "FAKE-2",
+      "title": "Show the cost total",
+      "description": "`sail show` should say what a run spent. Add the total of every call's cost at the end of its output.",
+      "state": {
+        "type": "unstarted",
+        "name": "Backlog"
+      },
+      "labels": ["groom"],
+      "comments": [
+        {
+          "author": "fixture-user",
+          "body": "Probably the same footer line FAKE-1 asks for.",
+          "createdAt": "2026-10-01T09:00:00.000Z"
+        }
+      ],
+      "links": [],
+      "attachments": []
     }
   ]
 }

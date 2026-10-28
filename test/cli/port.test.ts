@@ -1087,12 +1087,26 @@ test('edit sets the description from --body-file, and the title with --title, an
   });
 });
 
-test('edit with --title and an empty stdin exits 3 before the port is called', async () => {
+test('edit with --title and an empty stdin sets the title alone, keeping the description', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
-    const refused = await runCaptured(['port', 'ticket-source', 'edit', 'FAKE-1', '--title', 'New'], repo.dir, {
+    const before = Ticket.parse(
+      oneLine((await runCaptured(['port', 'ticket-source', 'get', 'FAKE-1'], repo.dir)).stdout),
+    );
+    const edited = await runCaptured(['port', 'ticket-source', 'edit', 'FAKE-1', '--title', 'New'], repo.dir, {
       stdin: '',
     });
+    expect({ code: edited.code, stderr: edited.stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    const got = await runCaptured(['port', 'ticket-source', 'get', 'FAKE-1'], repo.dir);
+    const ticket = Ticket.parse(oneLine(got.stdout));
+    expect([ticket.title, ticket.description]).toEqual(['New', before.description]);
+  });
+});
+
+test('edit with an empty stdin and no --title exits 3 before the port is called', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const refused = await runCaptured(['port', 'ticket-source', 'edit', 'FAKE-1'], repo.dir, { stdin: '' });
     expect(refused).toEqual({
       code: EXIT_REFUSED,
       stdout: '',

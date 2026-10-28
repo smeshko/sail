@@ -506,5 +506,84 @@
         "costUsd": 0.8
       }
     }
+  ],
+  "duplicates": [
+    {
+      "outcome": "done",
+      "output": {
+        "candidates": [
+          {
+            "ticketKey": "FAKE-1",
+            "confidence": 0.6,
+            "why": "Both add a total cost line to sail show, but FAKE-2 does not say where the total goes."
+          }
+        ]
+      },
+      "turns": 6,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.1
+      }
+    }
+  ],
+  "staleness": [
+    {
+      "outcome": "done",
+      "output": {
+        "stale": false,
+        "evidence": "git grep 'total' src/cli/commands/show.ts finds no total: show.ts lists each call's cost and stops."
+      },
+      "turns": 5,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.1
+      }
+    }
+  ],
+  "questions": [
+    {
+      "outcome": "done",
+      "output": {
+        "questions": ["Should the total include the calls a seeded run reused from the run it came from?"]
+      },
+      "turns": 4,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.1
+      }
+    }
+  ],
+  "decide": [
+    {
+      "outcome": "done",
+      "output": {
+        "summary": "FAKE-2 asks for the footer FAKE-1 asks for, less precisely; it is probably a duplicate, but the check is not sure enough to cancel it.",
+        "actions": [
+          { "kind": "duplicate", "of": "FAKE-1" },
+          { "kind": "edit", "title": "Show the run's total cost in sail show's footer" }
+        ]
+      },
+      "files": {
+        "report.md": "## Grooming report\n\nFAKE-2 reads as a vaguer FAKE-1: both want a total cost line in `sail show`.\n\n## Duplicates\n\n- FAKE-1 at confidence 0.60: the same footer line, but FAKE-2 does not say where the total goes.\n\n## Staleness\n\nNot stale: `show.ts` lists each call's cost and prints no total.\n\n## Open questions\n\n- Should the total include the calls a seeded run reused from the run it came from?\n"
+      },
+      "messages": ["Report written: FAKE-2 is probably a duplicate of FAKE-1."],
+      "turns": 10,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.4
+      }
+    }
   ]
 }
