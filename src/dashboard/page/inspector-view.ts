@@ -45,6 +45,7 @@ function overview(card: StageCard, result: Fields | undefined): SafeHtml {
     ['stage', card.stage],
     ['kind', card.kind],
     ['model', card.model ?? '—'],
+    ...(card.harness === undefined ? [] : [['harness', card.harness] as [string, unknown]]),
     // A running call's cost is known only once its session ends.
     ...(card.state === 'running' ? [] : [['cost', cost(card.costUsd)] as [string, unknown]]),
     ['turns', card.turns ?? '—'],

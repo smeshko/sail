@@ -46,6 +46,7 @@ export interface CardStep {
   index: number;
   of: number;
   kind: string;
+  harness?: string;
   outcome?: string;
 }
 
@@ -115,6 +116,8 @@ export interface StageCard {
   outcome?: string;
   tries: number;
   model?: string;
+  /** The named harness it ran on; absent for the default. */
+  harness?: string;
   startedAt: string;
   durationMs?: number;
   costUsd?: number;
@@ -147,6 +150,7 @@ export interface PendingCard {
   stage: string;
   kind: 'agent' | 'script' | 'stage';
   model?: string;
+  harness?: string;
 }
 
 export interface Roster {
@@ -331,7 +335,13 @@ function pendingOf(model: RunModel): PendingCard[] {
       const given = str(entry.kind);
       const kind = given !== undefined && STAGE_KINDS.has(given) ? (given as PendingCard['kind']) : 'stage';
       const stageModel = str(entry.model);
-      return stageModel === undefined ? { stage, kind } : { stage, kind, model: stageModel };
+      const stageHarness = str(entry.harness);
+      return {
+        stage,
+        kind,
+        ...(stageModel === undefined ? {} : { model: stageModel }),
+        ...(stageHarness === undefined ? {} : { harness: stageHarness }),
+      };
     });
 }
 
@@ -435,6 +445,8 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       started.tries = Math.max(started.tries, tryNumber);
       const stageModel = str(e.model) ?? model.roster?.stages[stage]?.model;
       if (stageModel !== undefined) started.model = stageModel;
+      const stageHarness = str(e.harness) ?? str(model.roster?.stages[stage]?.harness);
+      if (stageHarness !== undefined) started.harness = stageHarness;
       return true;
     }
     case 'intake:end':
@@ -459,7 +471,14 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       const of = num(e.of);
       if (card === undefined || step === undefined || index === undefined || of === undefined) return false;
       const existing = card.steps.find((entry) => entry.step === step);
-      const fields = { step, index, of, kind: str(e.kind) ?? '' };
+      const stepHarness = str(e.harness);
+      const fields = {
+        step,
+        index,
+        of,
+        kind: str(e.kind) ?? '',
+        ...(stepHarness === undefined ? {} : { harness: stepHarness }),
+      };
       if (existing === undefined) card.steps.push(fields);
       else Object.assign(existing, fields);
       card.timeline.push({ kind: 'step', ts, step, index, of });

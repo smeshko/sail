@@ -193,6 +193,24 @@ test("a corrective try reuses its call's card, whose tries is the highest try, a
   expect(model.cards[1]?.steps).toEqual([{ step: 'lint', index: 1, of: 2, kind: 'script', outcome: 'passed' }]);
 });
 
+test('a card and a pending card carry the named harness from the stage:start or the roster, and a call on the default carries none', () => {
+  const events = golden();
+  const start = events.find((event) => event.type === 'stage:start' && event.key === 'spec#1');
+  const named = foldRun([events[0], { ...start, harness: 'second' }]);
+  expect(named.cards.map((card) => [card.key, card.harness])).toEqual([['spec#1', 'second']]);
+  const plain = foldRun([events[0], start]);
+  expect(plain.cards.map((card) => card.harness)).toEqual([undefined]);
+
+  const roster = events[0] as { roster: { stages: Record<string, { harness?: string }> } };
+  const stages = {
+    ...roster.roster.stages,
+    'self-review': { ...roster.roster.stages['self-review'], harness: 'second' },
+  };
+  const pending = foldRun([{ ...events[0], roster: { ...roster.roster, stages } }, start]).pending;
+  expect(pending.find((card) => card.stage === 'self-review')?.harness).toBe('second');
+  expect(pending.find((card) => card.stage === 'implement')?.harness).toBeUndefined();
+});
+
 test("live cost: a session's usage updates, then a second session's, sum to what each last said before any session end", () => {
   const events = golden();
   const at = { ts: '2026-09-25T09:00:30.000Z', runId: 'x', key: 'spec#1' };
