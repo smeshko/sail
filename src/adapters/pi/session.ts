@@ -32,7 +32,12 @@ export interface PiSessionParams {
   readonly env: Env;
   /** Providers the session's models are found in beside pi's own, such as a test's faux provider. */
   readonly providers?: readonly Provider[];
+  /** Where a provider's catalog is fetched from when its built-in one lacks the model: pi.dev unless a test says. */
+  readonly catalogBaseUrl?: string;
 }
+
+/** How long a provider's catalog may take to fetch before its model is refused. */
+const CATALOG_TIMEOUT_MS = 15_000;
 
 /** The part of pi's `AgentSession` the harness uses. */
 export interface PiSession {
@@ -59,10 +64,14 @@ export const createPiSession: PiSessionFactory = async (params) => {
   const codex = provider === CODEX_PROVIDER;
   const credentials = codex ? keychainCodexStore(params.env) : new ai.InMemoryCredentialStore();
   // No models.json and no auth.json: the catalog is pi's own, and the one credential is the one given here.
-  const runtime = await sdk.ModelRuntime.create({ credentials, modelsPath: null });
+  const runtime = await sdk.ModelRuntime.create({
+    credentials,
+    modelsPath: null,
+    ...(params.catalogBaseUrl === undefined ? {} : { catalogBaseUrl: params.catalogBaseUrl }),
+  });
   for (const extra of params.providers ?? []) runtime.registerNativeProvider(extra);
-  const model = provider === '' || modelId === '' ? undefined : runtime.getModel(provider, modelId);
-  if (model === undefined) throw new Error(`no model ${params.model}`);
+  if (provider === '' || modelId === '') throw new Error(`no model ${params.model}`);
+  // The credential comes before the model: pi refreshes the catalog of a provider only once it has one.
   if (codex) {
     if ((await credentials.read(CODEX_PROVIDER)) === undefined) throw new Error(NO_LOGIN);
   } else {
@@ -73,6 +82,13 @@ export const createPiSession: PiSessionFactory = async (params) => {
       await runtime.setRuntimeApiKey(provider, key);
     }
   }
+  // PI_OFFLINE keeps pi's catalogs to the ones it ships: a model newer than those is in the provider's pi.dev catalog.
+  if (runtime.getModel(provider, modelId) === undefined) {
+    const signal = AbortSignal.timeout(CATALOG_TIMEOUT_MS);
+    await runtime.refresh({ providers: [provider], allowNetwork: true, force: true, signal }).catch(() => undefined);
+  }
+  const model = runtime.getModel(provider, modelId);
+  if (model === undefined) throw new Error(`no model ${params.model}`);
 
   const agentDir = await mkdtemp(join(tmpdir(), 'sail-pi-'));
   try {
