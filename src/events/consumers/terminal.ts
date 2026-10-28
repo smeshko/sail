@@ -106,13 +106,13 @@ export function formatSize(bytes: number): string {
   return `${(Math.round((bytes / 1048576) * 10) / 10).toFixed(1)} MB`;
 }
 
-/** `text`'s lines, cleaned and without trailing whitespace, the blank ones after the first left out. */
 /** A start line's model, then the named harness it ran on: ` · <model> on <harness>`. */
 function modelOn(event: { model?: string; harness?: string }): string {
   if (event.model === undefined) return '';
   return ` · ${event.model}${event.harness === undefined ? '' : ` on ${event.harness}`}`;
 }
 
+/** `text`'s lines, cleaned and without trailing whitespace, the blank ones after the first left out. */
 function textLines(text: string): string[] {
   const [first = '', ...more] = text.split('\n').map((line) => clean(line).trimEnd());
   return [first, ...more.filter((line) => line !== '')];
