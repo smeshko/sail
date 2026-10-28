@@ -225,6 +225,7 @@ test("the call's events: its stage:start with its steps, each step's start and e
         step: 'describe',
         try: 1,
         outcome: 'done',
+        durationMs: expect.any(Number),
         resultPath: `${CALL}/steps/1-describe/result.json`,
       },
       {
@@ -244,6 +245,7 @@ test("the call's events: its stage:start with its steps, each step's start and e
         step: 'open',
         try: 1,
         outcome: 'passed',
+        durationMs: expect.any(Number),
         resultPath: `${CALL}/steps/2-open/result.json`,
       },
       expect.objectContaining({
@@ -266,6 +268,20 @@ test("the call's events: its stage:start with its steps, each step's start and e
     expect(s.harness.requests.map((request) => request.key)).toEqual(['publish#1/describe']);
     const stamped = s.events.map((event, i) => ({ seq: i + 1, ts: TS, runId: RUN_ID, ...event }));
     expect(stamped.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue)).toEqual([]);
+  });
+});
+
+test("each step:end carries its step result's durationMs, and stage:end's is their sum", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    await runStageCall(s.request(), publish);
+    const ends = s.events.filter((event) => event.type === 'step:end');
+    expect(ends).toHaveLength(2);
+    const fromResults = ends.map((event) => json(s, (event as { resultPath: string }).resultPath).durationMs as number);
+    expect(fromResults.every((ms) => typeof ms === 'number')).toBe(true);
+    expect(ends.map((event) => (event as { durationMs?: number }).durationMs)).toEqual(fromResults);
+    const stageEnd = s.events.find((event) => event.type === 'stage:end') as { durationMs: number };
+    expect(stageEnd.durationMs).toBe((fromResults[0] as number) + (fromResults[1] as number));
   });
 });
 
@@ -481,6 +497,10 @@ test("a step's gitDiff is taken just before it starts, after the step before it 
         ],
       });
       expect(existsSync(join(t.runDir, '05-reviewed', 'call-1', 'steps', '2-review', 'in', 'diff.patch'))).toBe(false);
+      expect(t.events.find((event) => event.type === 'step:end' && event.key === 'reviewed#1/review')).toMatchObject({
+        outcome: 'error',
+        durationMs: 0,
+      });
     });
   });
 });

@@ -810,6 +810,7 @@
         "step": { "type": "string" },
         "try": { "type": "integer", "minimum": 1 },
         "outcome": { "$ref": "#/$defs/outcome" },
+        "durationMs": { "type": "number", "minimum": 0 },
         "resultPath": { "$ref": "#/$defs/resultPath" },
         "errors": { "$ref": "#/$defs/errors" }
       },
