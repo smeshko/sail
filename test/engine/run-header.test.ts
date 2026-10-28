@@ -133,7 +133,10 @@ test.each<[string, (sail: string) => void]>([
 
 test("a repository's intake is hashed: a private one as its file, a shared one as its folder", async () => {
   const intake =
-    "import { intake, z } from 'sail';\nexport const own = intake('own', { accepts: ['ticket'], output: z.object({}) });\n";
+    "import { intake, script, z } from 'sail';\n" +
+    'const Empty = z.object({});\n' +
+    "const fetch = script('fetch', { run: './fetch.sh', output: Empty });\n" +
+    "export const own = intake('own', { accepts: ['ticket'], output: Empty, steps: [fetch] });\n";
   const shared = (extra: string) => (sail: string) => {
     write(sail, 'intakes/own/intake.ts', intake);
     write(sail, 'intakes/own/brief.md', extra);

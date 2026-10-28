@@ -670,9 +670,10 @@
       "$ref": "#/$defs/callEnvelope",
       "properties": {
         "intake": { "type": "string" },
-        "kind": { "enum": ["agent", "script", "builtin"] },
+        "kind": { "enum": ["agent", "script", "stage", "builtin"] },
         "origin": { "$ref": "#/$defs/origin" },
-        "consumed": { "$ref": "#/$defs/consumed" }
+        "consumed": { "$ref": "#/$defs/consumed" },
+        "steps": { "type": "array", "minItems": 2, "items": { "type": "string" } }
       },
       "required": ["intake", "kind", "origin", "consumed"],
       "unevaluatedProperties": false

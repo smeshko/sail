@@ -1220,6 +1220,26 @@ test('at normal, a multi-step call prints its start with its step count, each st
   expect(twoStep('quiet')).toEqual([TITLE]);
 });
 
+test('at normal, a repository intake of several steps prints its start as intake <name> · stage', () => {
+  const lines = render(
+    stream([
+      rosterStart(),
+      {
+        type: 'intake:start',
+        key: 'intake#1',
+        intake: 'groom',
+        kind: 'stage',
+        steps: ['fetch', 'shape'],
+        origin: 'repo:.sail/workflows/groom',
+        consumed: {},
+      },
+    ]),
+    'normal',
+    { runsDir: runsWith({}) },
+  ).split('\n');
+  expect(lines).toContain(head('intake#1', '▶ intake groom · stage', w18));
+});
+
 test("at verbose, a validated file's verdict is followed by its checks, and a session's thinking, tool calls and denials still print nothing: they are trace's", () => {
   const verbose = twoStep('verbose');
   expect(verbose).toContain(

@@ -318,7 +318,7 @@ function foldRunEnd(state: SummaryState, event: EventOf<'run:end'>): void {
 function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf<'stage:start'>): void {
   const held = new Set(state.feedback.values());
   const feedback = Object.values(event.consumed).find((from): from is string => from !== null && held.has(from));
-  const earlier = event.type === 'stage:start' && event.kind === 'stage' ? state.calls.get(event.key) : undefined;
+  const earlier = event.kind === 'stage' ? state.calls.get(event.key) : undefined;
   const kept = earlier === undefined ? [] : [...earlier.steps].filter(([, step]) => step.end !== undefined);
   state.calls.set(event.key, {
     key: event.key,

@@ -20,7 +20,16 @@ import type { IntakeBody, IntakeContext } from '../../src/builtins/intakes/index
 import { ticketIntake } from '../../src/builtins/intakes/ticket/index';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import { runRelative } from '../../src/engine/call-dir';
-import { INTAKE_KEY, INTAKE_STAGE, intakeBody, runIntake } from '../../src/engine/intake';
+import {
+  INTAKE_KEY,
+  INTAKE_STAGE,
+  intakeBody,
+  intakeEmit,
+  intakeFailure,
+  intakeProblems,
+  ownIntakeStage,
+  runIntake,
+} from '../../src/engine/intake';
 import { appendJournal, readJournal } from '../../src/engine/journal';
 import type { LoadedIntake } from '../../src/engine/load-workflow';
 import { openRun } from '../../src/engine/open-run';
@@ -30,7 +39,7 @@ import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } fro
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
 import type { Consumer, Emit, NewEvent, SailEvent } from '../../src/events/types';
 import type { TicketSource } from '../../src/ports/ticket-source';
-import { intake, z } from '../../src/sdk';
+import { agent, file, fromStep, intake, script, value, z } from '../../src/sdk';
 import * as intakes from '../../src/sdk/intakes';
 import { TicketInput } from '../../src/sdk/intakes';
 import { fakeAdapters } from '../helpers/adapters';
@@ -374,10 +383,156 @@ test('intakeBody gives the body of the built-in a workflow names, and none for a
   expect(intakeBody({ definition: own, path: '/repo/.sail/intakes/own', module: { own } })).toBeUndefined();
 });
 
+// What a repository's own intake is turned into, and what refuses it.
+
+const Fetched = z.object({ ticketKey: z.string() });
+const SourceValue = value(z.object({ kind: z.string() }).passthrough());
+const fetchStep = script('fetch', { run: './fetch.sh', consumes: { source: SourceValue }, output: Fetched });
+const shapeStep = agent('shape', {
+  prompt: './shape.md',
+  consumes: { fetched: fromStep('fetch').output() },
+  output: Fetched,
+  model: 'default',
+  permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] },
+  budget: { maxTurns: 5, maxUsd: 1, maxMinutes: 5 },
+});
+const groom = intake('groom', {
+  accepts: ['ticket'],
+  output: Fetched,
+  produces: { 'brief.md': 'file' },
+  steps: [fetchStep, shapeStep],
+});
+
+test("intakeEmit reports the call intake#1 as the intake's events, and passes every other event on", () => {
+  const seen: NewEvent[] = [];
+  const emit = intakeEmit((event) => seen.push(event), groom, 'repo:.sail/workflows/groom/intake.ts');
+  const consumed = { source: 'run.json#/source' };
+  emit({
+    type: 'stage:start',
+    key: 'intake#1',
+    stage: 'intake',
+    call: 1,
+    try: 1,
+    kind: 'stage',
+    consumed,
+    steps: ['fetch', 'shape'],
+  });
+  emit({
+    type: 'step:start',
+    key: 'intake#1/fetch',
+    stage: 'intake',
+    step: 'fetch',
+    index: 1,
+    of: 2,
+    kind: 'script',
+    try: 1,
+  });
+  emit({
+    type: 'stage:end',
+    key: 'intake#1',
+    stage: 'intake',
+    call: 1,
+    try: 1,
+    outcome: 'done',
+    durationMs: 5,
+    resultPath: '00-intake/call-1/result.json',
+  });
+  emit({ type: 'stage:start', key: 'echo#1', stage: 'echo', call: 1, try: 1, kind: 'script', consumed: {} });
+  expect(seen.map((event) => event.type)).toEqual(['intake:start', 'step:start', 'intake:end', 'stage:start']);
+  expect(seen[0]).toEqual({
+    type: 'intake:start',
+    key: 'intake#1',
+    intake: 'groom',
+    kind: 'stage',
+    steps: ['fetch', 'shape'],
+    origin: 'repo:.sail/workflows/groom/intake.ts',
+    consumed,
+  });
+  expect(seen[2]).toEqual({
+    type: 'intake:end',
+    key: 'intake#1',
+    outcome: 'done',
+    resultPath: '00-intake/call-1/result.json',
+  });
+});
+
+test('intakeFailure names the intake, its call, the outcome and the reason', () => {
+  expect(intakeFailure('groom', 'blocked', 'the ticket says nothing')).toBe(
+    "the intake 'groom' (intake#1) ended in blocked: the ticket says nothing",
+  );
+});
+
+test("ownIntakeStage is a stage named intake with the intake's steps, files and output, and its steps' source binding", () => {
+  expect(ownIntakeStage(groom)).toEqual({
+    kind: 'stage',
+    name: 'intake',
+    consumes: { source: SourceValue },
+    produces: { 'brief.md': 'file' },
+    output: Fetched,
+    steps: [fetchStep, shapeStep],
+  });
+});
+
+test('ownIntakeStage consumes nothing when no step declares a source binding', () => {
+  const bare = intake('bare', {
+    accepts: ['ticket'],
+    output: Fetched,
+    steps: [script('only', { run: './only.sh', output: Fetched })],
+  });
+  expect(ownIntakeStage(bare).consumes).toEqual({});
+});
+
+test('intakeProblems finds none in the built-in intakes or in a well-wired intake of two steps', () => {
+  expect([intakes.ticket, intakes.pr, groom].map(intakeProblems)).toEqual([[], [], []]);
+});
+
+test('an intake with no steps is a problem unless it is a built-in', () => {
+  const bare = intake('bare', { accepts: ['ticket'], output: z.object({}) });
+  expect(intakeProblems(bare)).toEqual(["intake 'bare' has no steps: only a built-in intake runs without them"]);
+});
+
+test('a step binding other than source is a problem naming the intake, the step and the binding', () => {
+  const wrong = intake('wrong', {
+    accepts: ['ticket'],
+    output: Fetched,
+    steps: [
+      script('fetch', {
+        run: './fetch.sh',
+        consumes: { brief: file('brief.md'), ticket: value(z.string()) },
+        output: Fetched,
+      }),
+    ],
+  });
+  expect(intakeProblems(wrong)).toEqual([
+    "intake 'wrong' step 'fetch' consumes 'brief', and an intake's steps take only 'source' from the run",
+    "intake 'wrong' step 'fetch' consumes 'ticket', and an intake's steps take only 'source' from the run",
+  ]);
+});
+
+test("a fromStep naming a step that runs later is a problem naming the intake and the step, not the stage 'intake'", () => {
+  const late = intake('late', {
+    accepts: ['ticket'],
+    output: Fetched,
+    steps: [
+      script('first', {
+        run: './first.sh',
+        consumes: { later: fromStep('second' as never).output() },
+        output: Fetched,
+      }),
+      script('second', { run: './second.sh', output: Fetched }),
+    ],
+  });
+  const problems = intakeProblems(late);
+  expect(problems).toHaveLength(1);
+  expect(problems[0]).toStartWith("intake 'late': step 'first' ");
+  expect(problems[0]).toContain('a step that runs after it');
+});
+
 // A run and its intake, on the stub.
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
-const PORT_FAILED = 'intake#1 ended in error: port: ticketSource.get: no ticket FAKE-1 (not_found)';
+const PORT_FAILED =
+  "the intake 'ticket' (intake#1) ended in error: port: ticketSource.get: no ticket FAKE-1 (not_found)";
 
 /** Runs the stub's ticket-to-pr from `cwd` on `FAKE-1`, or as `options` say. It must not be refused. */
 async function ticketRun(cwd: string, options: Partial<RunWorkflowOptions> = {}): Promise<RunEnd> {
@@ -545,11 +700,13 @@ test('an intake output that breaks TicketInput fails the run with stage_error, n
     writeOddStub(repo.dir, "async (key) => ({ ...(await fake.get(key)), url: 'not a url' })");
     const end = await ticketRun(repo.dir);
     expect(end).toMatchObject({ status: 'failed', stopReason: 'stage_error' });
-    expect(end.message).toStartWith("intake#1 ended in error: invalid_output: the output doesn't match its schema:\n");
+    expect(end.message).toStartWith(
+      "the intake 'ticket' (intake#1) ended in error: invalid_output: the output doesn't match its schema:\n",
+    );
     expect(end.message).toContain('→ at url');
     const { entries } = readJournal(end.dir);
     expect(entries.map((entry) => [entry.key, entry.outcome, entry.output])).toEqual([['intake#1', 'error', null]]);
-    expect(`intake#1 ended in error: ${entries[0]?.reason}`).toBe(end.message ?? '');
+    expect(`the intake 'ticket' (intake#1) ended in error: ${entries[0]?.reason}`).toBe(end.message ?? '');
     expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('failed stage_error\n');
     expect(workflowEntries(repo.dir)).toBe(0);
     expect(stubExecutions(repo.dir)).toEqual([]);

@@ -119,8 +119,8 @@ test("the walk stops at an intake.ts: a stage only the workflow's intake imports
       sail,
       'workflows/ticket-to-pr/intake.ts',
       "import { intake } from 'sail';\n" +
-        "import { LintReport } from '../../stages/lint/stage';\n" +
-        "export const linted = intake('linted', { accepts: ['ticket'], output: LintReport });\n",
+        "import { LintReport, lint } from '../../stages/lint/stage';\n" +
+        "export const linted = intake('linted', { accepts: ['ticket'], output: LintReport, steps: [lint] });\n",
     );
     edit(
       sail,

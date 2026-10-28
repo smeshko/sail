@@ -96,8 +96,10 @@ test('a private and a shared intake are found with their owners, and an intake.t
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
     const declare = (name: string) =>
-      "import { intake, z } from 'sail';\n" +
-      `export const ${name.replace('-', '')} = intake('${name}', { accepts: ['ticket'], output: z.object({}) });\n`;
+      "import { intake, script, z } from 'sail';\n" +
+      'const Empty = z.object({});\n' +
+      `const step = script('fetch', { run: './fetch.sh', output: Empty });\n` +
+      `export const ${name.replace('-', '')} = intake('${name}', { accepts: ['ticket'], output: Empty, steps: [step] });\n`;
     const owned = ticketToPr(sail, 'intake.ts');
     writeFileSync(owned, declare('ticket-plus'));
     mkdirSync(join(sail, 'intakes', 'jira'), { recursive: true });
@@ -113,6 +115,26 @@ test('a private and a shared intake are found with their owners, and an intake.t
       { name: 'ticket-plus', workflow: 'ticket-to-pr', file: owned },
     ]);
     expect(problems).toEqual([{ file: none, message: 'exports no intake' }]);
+  });
+});
+
+test('a shared and a private intake with no steps are problems against their intake.ts files, and add no entry', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const bare = (name: string) =>
+      `import { intake, z } from 'sail';\nexport const ${name} = intake('${name}', { accepts: ['ticket'], output: z.object({}) });\n`;
+    const owned = ticketToPr(sail, 'intake.ts');
+    writeFileSync(owned, bare('mine'));
+    mkdirSync(join(sail, 'intakes', 'shared'), { recursive: true });
+    const shared = join(sail, 'intakes', 'shared', 'intake.ts');
+    writeFileSync(shared, bare('shared'));
+
+    const { intakes, problems } = await loadDefinitions(sail);
+    expect(intakes).toEqual([]);
+    expect(problems).toEqual([
+      { file: shared, message: "intake 'shared' has no steps: only a built-in intake runs without them" },
+      { file: owned, message: "intake 'mine' has no steps: only a built-in intake runs without them" },
+    ]);
   });
 });
 

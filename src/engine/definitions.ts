@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, sep } from 'node:path';
 import type { Intake, StageDefinition, Workflow } from '../sdk/index';
 import * as sdk from '../sdk/index';
 import * as intakes from '../sdk/intakes';
+import { intakeProblems } from './intake';
 import { stepProblems } from './stage-call';
 import { watchProblem } from './watchable';
 
@@ -189,7 +190,9 @@ export async function loadDefinitions(dir: string): Promise<Definitions> {
       const message = `exports ${more.length + 1} intakes (${names}), and an intake.ts exports exactly one`;
       found.problems.push({ file, message });
     } else {
-      found.intakes.push({ name: intake.name, workflow, file });
+      const unrunnable = intakeProblems(intake);
+      for (const message of unrunnable) found.problems.push({ file, message });
+      if (unrunnable.length === 0) found.intakes.push({ name: intake.name, workflow, file });
     }
   };
   await load('workflows/*/intake.ts', readIntakes);

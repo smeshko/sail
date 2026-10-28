@@ -519,6 +519,66 @@ test("a built-in intake's call is an entry of kind builtin, which no step of a c
   ]);
 });
 
+const OWN_INTAKE_START: NewEvent = {
+  type: 'intake:start',
+  key: 'intake#1',
+  intake: 'groom',
+  kind: 'stage',
+  steps: ['fetch', 'shape'],
+  origin: 'repo:.sail/workflows/groom',
+  consumed: { source: 'run.json#/source' },
+};
+const intakeEnd = (outcome: 'done' | 'failed'): NewEvent => ({
+  type: 'intake:end',
+  key: 'intake#1',
+  outcome,
+  resultPath: '00-intake/call-1/result.json',
+});
+
+test('a repository intake of two steps is a call with both steps and no kind of its own, as a multi-step stage is', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, OWN_INTAKE_START],
+      [200, stepStart('intake#1/fetch', 1, 2, 'script')],
+      [300, stepEnd('intake#1/fetch', 1, 'passed')],
+      [400, stepStart('intake#1/shape', 2, 2, 'agent')],
+      [900, stepEnd('intake#1/shape', 2, 'done')],
+      [1000, intakeEnd('done')],
+      [1010, journal('intake#1', 1, 'done')],
+    ),
+  );
+  expect(summary?.calls).toEqual([
+    {
+      key: 'intake#1',
+      outcome: 'done',
+      durationMs: 900,
+      resultPath: '00-intake/call-1/result.json',
+      steps: [
+        { key: 'intake#1/fetch', kind: 'script', outcome: 'passed', durationMs: 100 },
+        { key: 'intake#1/shape', kind: 'agent', outcome: 'done', durationMs: 500 },
+      ],
+    },
+  ]);
+});
+
+test('a repository intake started again after its first step ended keeps that step, as a resumed multi-step stage does', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, OWN_INTAKE_START],
+      [200, stepStart('intake#1/fetch', 1, 2, 'script')],
+      [300, stepEnd('intake#1/fetch', 1, 'passed')],
+      [400, runEnd('suspended', 1, { stopReason: 'interrupted' })],
+      [5000, OWN_INTAKE_START],
+      [5100, stepStart('intake#1/shape', 2, 2, 'agent')],
+      [5600, stepEnd('intake#1/shape', 2, 'done')],
+      [5700, intakeEnd('done')],
+    ),
+  );
+  expect(summary?.calls[0]?.steps?.map((step) => step.key)).toEqual(['intake#1/fetch', 'intake#1/shape']);
+});
+
 // The run's ticket (D16): the one the intake fetched.
 
 const INTAKE_START: NewEvent = {

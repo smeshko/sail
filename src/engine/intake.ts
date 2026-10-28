@@ -5,6 +5,9 @@
 //
 // The call records the kind `builtin`: no step ran, so it has no exit, command or logs, and no `in/`, since the body
 // reads the source from the run header.
+//
+// An intake of the repository's own runs no body: its steps are the stage `intake`, so they run as any stage's do, as
+// the call `intake#1`, and intakeEmit() reports that call as the intake's events.
 import { BUILTIN_INTAKES, type IntakeBody } from '../builtins/intakes/index';
 import type { Emit } from '../events/types';
 import type { StepRun } from '../kinds/index';
@@ -12,12 +15,14 @@ import type { CodeHost } from '../ports/code-host';
 import { PortError } from '../ports/errors';
 import type { TicketSource } from '../ports/ticket-source';
 import type { WorkspacePort } from '../ports/workspace';
+import type { Intake, Stage } from '../sdk/index';
 import { type CallPaths, callPaths, createCallDir, runRelative, stageOut } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { type ContractError, recordFiles, validateOutput } from './contract';
 import type { LoadedIntake } from './load-workflow';
 import { buildResult, writeResult } from './result';
 import type { Source } from './run-dir';
+import { stepProblems } from './stage-call';
 
 /** The intake's stage name: its call directory is `00-intake/`, and no stage may take the name. */
 export const INTAKE_STAGE = 'intake';
@@ -60,6 +65,75 @@ export interface RanIntake {
 /** The body of a built-in intake, or undefined for an intake the repository exports: only a built-in runs. */
 export function intakeBody(loaded: LoadedIntake): IntakeBody | undefined {
   return BUILTIN_INTAKES.get(loaded.definition);
+}
+
+/**
+ * A repository intake's steps as the stage named `intake`, so they run as the call `intake#1`. Its `consumes` is the
+ * `source` binding of the first step that declares one.
+ */
+export function ownIntakeStage(own: Intake): Stage {
+  const steps = own.steps ?? [];
+  const source = steps.flatMap((step) => {
+    const binding = step.consumes.source;
+    return binding === undefined ? [] : [binding];
+  })[0];
+  return {
+    kind: 'stage',
+    name: INTAKE_STAGE,
+    consumes: source === undefined ? {} : { source },
+    produces: own.produces,
+    output: own.output,
+    steps: steps as Stage['steps'],
+  };
+}
+
+/** Why a repository's intake can't run, one message each, or none when it can. */
+export function intakeProblems(own: Intake): string[] {
+  const at = `intake '${own.name}'`;
+  if (own.steps === undefined) {
+    return BUILTIN_INTAKES.has(own) ? [] : [`${at} has no steps: only a built-in intake runs without them`];
+  }
+  const found = stepProblems(ownIntakeStage(own)).map((message) => message.replace(`stage '${INTAKE_STAGE}'`, at));
+  for (const step of own.steps) {
+    for (const [name, binding] of Object.entries(step.consumes)) {
+      if ((binding.kind === 'file' || binding.kind === 'value') && name !== 'source') {
+        found.push(
+          `${at} step '${step.name}' consumes '${name}', and an intake's steps take only 'source' from the run`,
+        );
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * `emit` for the call of a repository intake's steps, which runs as the stage `intake`: its `stage:start` and
+ * `stage:end` become the `intake:start` and `intake:end` a built-in intake emits, and everything else is passed on. A
+ * one-step intake has the kind of its step, and several steps are a `stage` that names them.
+ */
+export function intakeEmit(emit: Emit, own: Intake, origin: string): Emit {
+  return (event) => {
+    if (event.type === 'stage:start' && event.key === INTAKE_KEY) {
+      return emit({
+        type: 'intake:start',
+        key: event.key,
+        intake: own.name,
+        kind: event.kind,
+        ...(event.steps === undefined ? {} : { steps: event.steps }),
+        origin,
+        consumed: event.consumed,
+      });
+    }
+    if (event.type === 'stage:end' && event.key === INTAKE_KEY) {
+      return emit({ type: 'intake:end', key: event.key, outcome: event.outcome, resultPath: event.resultPath });
+    }
+    return emit(event);
+  };
+}
+
+/** Why a run ends because its intake's one call didn't pass, as `outcome` and `reason` its journal line holds it. */
+export function intakeFailure(name: string, outcome: string, reason: string): string {
+  return `the intake '${name}' (${INTAKE_KEY}) ended in ${outcome}: ${reason}`;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));

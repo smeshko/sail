@@ -24,8 +24,10 @@ async function refused(sail: string, name = 'ticket-to-pr'): Promise<string> {
 
 /** An intake declared in a file of its own. */
 const intakeFile = (name: string) =>
-  "import { intake, z } from 'sail';\n" +
-  `export const own = intake('${name}', { accepts: ['ticket'], output: z.object({ key: z.string() }) });\n`;
+  "import { intake, script, z } from 'sail';\n" +
+  'const Key = z.object({ key: z.string() });\n' +
+  "const fetch = script('fetch', { run: './fetch.sh', output: Key });\n" +
+  `export const own = intake('${name}', { accepts: ['ticket'], output: Key, steps: [fetch] });\n`;
 
 test('ticket-to-pr loads with its private and shared stages, the built-in intake and every file it imports', async () => {
   await withTempRepo(async (repo) => {

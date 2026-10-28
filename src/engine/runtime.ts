@@ -7,7 +7,9 @@
 // A run runs its intake before the first replay and journals it as `intake#1`, the journal's first line.
 // Every replay is handed that entry beside the stage entries, so a resume reads the input from the journal and never
 // fetches the ticket again. An intake that didn't pass fails the run with `stage_error`: no workflow code has run, and
-// nothing can route on it.
+// nothing can route on it. An intake of the repository's own runs its steps as that one call, from the run's source,
+// and only the call's line is journaled: its steps' results are in the call directory, and a call interrupted before
+// it ended runs again from its first step.
 //
 // A group, `run.all()`, ends the replay with its unjournaled calls, which run at once, each in its own call directory.
 // Each is journaled as it completes, carrying the group's keys, so the journal holds them in completion order, and
@@ -93,11 +95,20 @@ import type { StageDefinition } from '../sdk/steps';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
 import { type BudgetTracker, recordIn, suspension, trackBudget } from './budget';
-import { type AgentExecution, asStep, callProblems, runCall } from './call';
+import { type AgentExecution, asStep, callProblems, type Ran, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { takeControl } from './control';
-import { INTAKE_INDEX, INTAKE_KEY, INTAKE_STAGE, intakeBody, runIntake } from './intake';
+import {
+  INTAKE_INDEX,
+  INTAKE_KEY,
+  INTAKE_STAGE,
+  intakeBody,
+  intakeEmit,
+  intakeFailure,
+  ownIntakeStage,
+  runIntake,
+} from './intake';
 import {
   appendJournal,
   JOURNAL_FILE,
@@ -107,6 +118,7 @@ import {
   readJournal,
 } from './journal';
 import { type KeepAwake, type KeepAwakeHold, systemKeepAwake } from './keep-awake';
+import type { LoadedIntake } from './load-workflow';
 import {
   type OpenedRun,
   type OpenRunOptions,
@@ -116,7 +128,8 @@ import {
   rootRelative,
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
-import { copiedStageFile, type StopReason, writeStatus } from './run-dir';
+import type { RosterEntry } from './roster';
+import { copiedIntakeFile, copiedStageFile, type StopReason, writeStatus } from './run-dir';
 import { openSeededRun, type SeededRunOptions } from './seed-run';
 
 /** Who else receives a run's events, beside `events.ndjson`. */
@@ -216,8 +229,12 @@ function entryFrom(
  * What an agent call runs on: the run's harness, the conventions `project.yaml` lists now, and the model the run's
  * roster froze at its start, which a resume keeps whatever the alias names by then.
  */
-function executionOf(opened: OpenedRun, stage: string, tracker: BudgetTracker | undefined): AgentExecution {
-  const entry = opened.header.stages[stage];
+function executionOf(
+  opened: OpenedRun,
+  stage: string,
+  entry: RosterEntry | undefined,
+  tracker: BudgetTracker | undefined,
+): AgentExecution {
   const { conventions } = opened.config;
   // A multi-step stage's agent steps run on this harness too, so each of their requests is narrowed as a call's is.
   const harness = tracker === undefined ? opened.adapters.harness : tracker.harness(opened.adapters.harness);
@@ -496,7 +513,9 @@ async function drive(
   }
   /** The call's agent execution, its gitDiff patches and its contract's check, or why it can't run. */
   const prepare = async (call: PendingCall, finished: JournalEntry[]): Promise<Ready | { failed: string }> => {
-    const agent = runsAgent(call.definition) ? executionOf(opened, call.stage, tracker) : undefined;
+    const agent = runsAgent(call.definition)
+      ? executionOf(opened, call.stage, header.stages[call.stage], tracker)
+      : undefined;
     const diffs = await gitDiffs(opened, call);
     if ('failed' in diffs) return diffs;
     const supplied = { ...call.supplied, ...diffs.supplied };
@@ -551,6 +570,43 @@ async function drive(
     reached ||= journaled.key === last;
     return journaled;
   };
+  /**
+   * Runs a repository intake's steps as the call `intake#1`, from the run's source, or says why they can't. Only the
+   * call's line is journaled, not each step's, so the journal's head stays `intake#1`: a call stopped part way runs
+   * again from its first step, at the next try.
+   */
+  const runOwnIntake = async (own: LoadedIntake): Promise<Ran | { failed: string }> => {
+    const { definition, path } = own;
+    const stage = ownIntakeStage(definition);
+    const agent = runsAgent(stage) ? executionOf(opened, INTAKE_STAGE, header.intake, tracker) : undefined;
+    const supplied: Record<string, Supplied> = Object.hasOwn(stage.consumes, 'source')
+      ? { source: { kind: 'value', value: header.source, from: 'run.json#/source' } }
+      : {};
+    const problems = callProblems(stage, supplied, agent);
+    if (problems.length > 0) return { failed: `the intake '${definition.name}' can't run: ${problems.join('; ')}` };
+    const live = path === undefined || path.endsWith('.ts') ? (path ?? '') : join(path, 'intake.ts');
+    return await runCall(
+      {
+        runDir: dir,
+        runId,
+        stageIndex: INTAKE_INDEX,
+        call: 1,
+        try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
+        definition: stage,
+        stageFile: copiedIntakeFile(dir, header.intake.origin, live),
+        workspace: opened.workspace.path,
+        root,
+        branch: opened.workspace.branch,
+        config: join(sailDir, 'project.yaml'),
+        supplied,
+        ...(signal === undefined ? {} : { signal }),
+        ...(agent === undefined ? {} : { agent }),
+        emit: intakeEmit(tapped, definition, header.intake.origin),
+        clock,
+      },
+      { diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch },
+    );
+  };
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
   let reached = false;
@@ -594,32 +650,32 @@ async function drive(
     let [intake] = readJournal(dir).entries;
     if (intake === undefined) {
       const body = intakeBody(loaded.intake);
-      if (body === undefined) {
-        const name = loaded.intake.definition.name;
-        return await failed('stage_error', `${INTAKE_KEY} can't run: the intake '${name}' is the repository's own`);
-      }
       if (signal?.aborted) return await interrupted(`stopped before ${INTAKE_KEY}`);
       const beforeIntake = controlled(INTAKE_KEY) ?? overBudget(INTAKE_KEY);
       if (beforeIntake !== undefined) return await beforeIntake;
       running = INTAKE_KEY;
-      const { result, paths } = await runIntake({
-        runDir: dir,
-        runId,
-        intake: loaded.intake,
-        body,
-        source: header.source,
-        ticketSource: opened.adapters.ticketSource,
-        codeHost: opened.adapters.codeHost,
-        workspace: { port: opened.adapters.workspace, path: opened.workspace.path },
-        branchPrefix: opened.config.branchPrefix ?? DEFAULT_BRANCH_PREFIX,
-        try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
-        ...(signal === undefined ? {} : { signal }),
-        emit: bus.emit,
-        clock,
-      });
-      if (signal?.aborted) return await interrupted(`stopped during ${INTAKE_KEY}`);
-      intake = appendJournal(dir, entryFrom(dir, result, paths), clock());
-      bus.emit({ type: 'journal:append', key: intake.key, line: intake.seq, outcome: intake.outcome });
+      const ran =
+        body === undefined
+          ? await runOwnIntake(loaded.intake)
+          : await runIntake({
+              runDir: dir,
+              runId,
+              intake: loaded.intake,
+              body,
+              source: header.source,
+              ticketSource: opened.adapters.ticketSource,
+              codeHost: opened.adapters.codeHost,
+              workspace: { port: opened.adapters.workspace, path: opened.workspace.path },
+              branchPrefix: opened.config.branchPrefix ?? DEFAULT_BRANCH_PREFIX,
+              try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
+              ...(signal === undefined ? {} : { signal }),
+              emit: bus.emit,
+              clock,
+            });
+      if ('failed' in ran) return await failed('stage_error', ran.failed);
+      if (signal?.aborted || ('stopped' in ran && ran.stopped))
+        return await interrupted(`stopped during ${INTAKE_KEY}`);
+      intake = journal(ran.result, ran.paths);
       running = undefined;
       options.onCall?.(intake);
     } else if (intake.key !== INTAKE_KEY) {
@@ -630,8 +686,9 @@ async function drive(
     }
     // Checked on every start, not only when the intake just ran: a crash between the journal line and STATUS must
     // not replay a workflow that has no input.
-    if (intake.outcome !== 'passed') {
-      return await failed('stage_error', `${INTAKE_KEY} ended in ${intake.outcome}: ${intake.reason ?? ''}`);
+    if (!PASSED.has(intake.outcome)) {
+      const why = intakeFailure(loaded.intake.definition.name, intake.outcome, intake.reason ?? '');
+      return await failed('stage_error', why);
     }
     while (true) {
       replays++;
