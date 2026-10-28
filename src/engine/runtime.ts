@@ -239,7 +239,7 @@ function entryFrom(
 }
 
 /**
- * What an agent call runs on: the run's harness, the conventions `project.yaml` lists now, and the model the run's
+ * What an agent call runs on: the run's harness, or the named harness its roster entry names, the conventions `project.yaml` lists now, and the model the run's
  * roster froze at its start, which a resume keeps whatever the alias names by then.
  */
 function executionOf(
@@ -249,7 +249,7 @@ function executionOf(
   tracker: BudgetTracker | undefined,
 ): AgentExecution {
   const { conventions } = opened.config;
-  // A multi-step stage's agent steps run on this harness too, so each of their requests is narrowed as a call's is.
+  // A multi-step stage's agent steps run on these harnesses too, so each of their requests is narrowed as a call's is.
   const tracked = (harness: Harness) => (tracker === undefined ? harness : tracker.harness(harness));
   const named = (name: string): Harness => {
     const harness = opened.harnesses[name];

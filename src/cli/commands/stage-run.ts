@@ -2,9 +2,10 @@
 // into `.sail-runs/<stage>-<ulid>/00-<stage>/call-1/` beside its `.sail/`. Every refusal comes before anything is
 // written. This module parses, prints and maps the outcome to an exit code; the work is the engine's.
 //
-// An agent stage runs on the harness `project.yaml` names, with the model its alias names there, and each agent step of
-// a multi-step stage on its own. Only the harness is resolved: a stage in isolation reaches no ticket source, code host
-// or workspace, so it needs none of their credentials. A script stage resolves no adapter at all. A multi-step stage
+// An agent stage runs on the harness `project.yaml` names, or on the named harness its alias names, with the model its
+// alias names there, and each agent step of a multi-step stage on its own. Only the harness and the named harnesses the
+// stage's aliases name are resolved: a stage in isolation reaches no ticket source, code host or workspace, so it needs
+// none of their credentials. A script stage resolves no adapter at all. A multi-step stage
 // runs its steps in order, with no journal and no resume, and a step that declares a `gitDiff()` can't start: a stage
 // in isolation has no workspace to take one from.
 //
