@@ -2,7 +2,7 @@
 // `sail FAKE-1` run to its end once in a repository of its own, and each case seeds from a copy of it: a process opens
 // one run per `.sail/`, so a resume runs in a copy of the seeded run's repository.
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../../src/engine/journal';
 import { type RunEnd, resumeWorkflow, runSeededWorkflow, runWorkflow } from '../../src/engine/runtime';
@@ -116,6 +116,23 @@ test('a run seeded from a seeded run names the same ticket in its summary, thoug
     });
   });
 }, 90_000);
+
+test('a run seeded from a source whose events are gone names no ticket in its summary, and validates', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    rmSync(join(from.dir, 'events.ndjson'));
+    const end = await seeded(repo, from.runId, 'spec');
+    expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const dir = dirOf(end);
+    const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+    const reusedIntake = readEvents(dir).find((event) => event.type === 'journal:append' && event.key === 'intake#1');
+    expect([summary.ticket, reusedIntake !== undefined && 'ticket' in reusedIntake, issuesOf(dir)]).toEqual([
+      undefined,
+      false,
+      [],
+    ]);
+  });
+}, 60_000);
 
 test('with continue, a run seeded for spec runs to its end with the calls of the source, and opens its pull request from its own branch', async () => {
   await withTempRepo(async (repo) => {
