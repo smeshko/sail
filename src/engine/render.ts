@@ -48,8 +48,11 @@ export function isUntrustedInput(value: unknown): value is UntrustedInput {
   return value instanceof Marked;
 }
 
-/** `<` becomes `&lt;` wherever `untrusted-input` follows it, so the text can't close the wrapper or open another. */
-const LOOKALIKE = /<(?=\s*\/?\s*untrusted-input)/gi;
+/** Escape the bracket of a delimiter lookalike, including invisible characters splitting its name. */
+const IN_NAME = '[\\p{Cf}\\u0000]*';
+const OUTER = '[\\s\\p{Cf}\\u0000]*';
+const NAME = ['untrusted', 'input'].map((part) => [...part].join(IN_NAME)).join(`${IN_NAME}-?${IN_NAME}`);
+const LOOKALIKE = new RegExp(`[<＜](?=${OUTER}(?:[/／]${OUTER})?${NAME})`, 'giu');
 
 function escapeSource(source: string): string {
   return source
@@ -57,7 +60,8 @@ function escapeSource(source: string): string {
     .replaceAll('"', '&quot;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
-    .replace(/\r?\n|\r/g, '&#10;');
+    .replace(/\r?\n|\r/g, '&#10;')
+    .replace(LOOKALIKE, '&lt;');
 }
 
 /** `text` inside `<untrusted-input source="…">`: three lines as a block, one line inline. */
