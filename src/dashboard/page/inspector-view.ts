@@ -46,6 +46,10 @@ function overview(card: StageCard, result: Fields | undefined): SafeHtml {
     ['kind', card.kind],
     ['model', card.model ?? '—'],
     ...(card.harness === undefined ? [] : [['harness', card.harness] as [string, unknown]]),
+    // A multi-step call's steps each name the harness they ran on.
+    ...card.steps.flatMap((entry) =>
+      entry.harness === undefined ? [] : [[`harness · ${entry.step}`, entry.harness] as [string, unknown]],
+    ),
     // A running call's cost is known only once its session ends.
     ...(card.state === 'running' ? [] : [['cost', cost(card.costUsd)] as [string, unknown]]),
     ['turns', card.turns ?? '—'],
