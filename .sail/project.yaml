@@ -18,6 +18,9 @@ adapters:
   harness: { use: claude-code }
   # Each run's workspace is a fresh worktree: its setup installs the dependencies before any stage runs.
   workspace: { use: git-worktree, setup: bun install --frozen-lockfile }
+  # Jev answers check-tasks and check-fix before their agents run. Without TYPESAFE_API_KEY it cannot be asked, and the
+  # check agents run as before.
+  jev: { use: typesafe }
 
 models: { default: claude-sonnet-5-5, deep: claude-opus-5-5 }
 # No dollar cap on the run: each agent stage carries its own.
