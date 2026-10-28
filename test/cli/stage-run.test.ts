@@ -304,7 +304,7 @@ test('a script that clears $STAGE_OUT first still gets a result.json, naming the
 test('Ctrl+C stops the script, and the command ends with the signal recorded', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);
-    writeScript(join(sail, 'stages', 'tests', 'run.sh'), 'sleep 30');
+    writeScript(join(sail, 'stages', 'tests', 'run.sh'), 'exec sleep 30');
     let stdout = '';
     let unregistered = false;
     let interruptedAt = 0;
