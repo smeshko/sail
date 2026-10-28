@@ -6,6 +6,7 @@
 //   sail port ticket-source list [--state <type>] [--label <name>]    the team's tickets, as an array of ListedTicket
 //   sail port ticket-source comment <ticket> [--body-file <path>]    comments on it: the body from the file or stdin
 //   sail port ticket-source update <ticket> --state <move>    moves it: unstarted, in-progress, in-review or done
+//   sail port ticket-source claim <ticket>    moves it to in progress if unstarted, and says whether that took
 //   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
 //                                                   files a new ticket: its description from the file or stdin
 //   sail port ticket-source add-label <ticket> <label>       adds the team's label to it
@@ -50,6 +51,7 @@ import { PortError } from '../../ports/errors';
 import { getTicket, type TicketSource } from '../../ports/ticket-source';
 import {
   Attached,
+  ClaimResult,
   Created,
   Edited,
   ListedTicket,
@@ -208,6 +210,23 @@ const updateOperation: PortOperation<TicketSource> = {
 };
 
 /**
+ * A claim of the ticket `<ticket>` names: the port's `ClaimResult`, parsed before it is printed. A claim that didn't
+ * take, because the ticket was already claimed, is an answer, not a failure.
+ */
+const claimOperation: PortOperation<TicketSource> = {
+  positionals: ['ticket'],
+  async run(source, { positionals: [ref = ''] }) {
+    const ticketKey = source.parseKey(ref);
+    if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };
+    const claimed = ClaimResult.safeParse(await source.claim(ticketKey));
+    if (claimed.success) return { value: claimed.data };
+    const [issue] = claimed.error.issues;
+    const where = [issue?.path.join('.'), issue?.message].filter(Boolean).join(' ');
+    throw new PortError('ticketSource', 'claim', 'invalid', `its answer is not a ClaimResult: ${where}`);
+  },
+};
+
+/**
  * The label `<label>` named added to or removed from the ticket `<ticket>` names: the port's `Relabelled`, parsed
  * before it is printed. The label is passed on as given, and the adapter refuses one the team lacks.
  */
@@ -348,6 +367,7 @@ const TICKET_SOURCE: PortTable<'ticketSource'> = {
     list: listOperation,
     comment: commentOperation,
     update: updateOperation,
+    claim: claimOperation,
     create: createOperation,
     'add-label': relabelOperation('addLabel'),
     'remove-label': relabelOperation('removeLabel'),
