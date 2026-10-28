@@ -66,6 +66,7 @@ const MOVE_TYPES: Record<TicketMove, TicketStateType> = {
   'in-progress': 'started',
   'in-review': 'started',
   done: 'completed',
+  canceled: 'canceled',
 };
 
 /** Every captured event validates against sail.event.v1, stamped with a call's key and without one. */

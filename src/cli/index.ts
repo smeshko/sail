@@ -62,7 +62,7 @@ Usage:
                                                              List the team's tickets by state and label, as JSON
   sail port ticket-source comment <ticket> [--body-file <path>]
                                                              Comment on a ticket, the body from the file or stdin
-  sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>
+  sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done|canceled>
                                                              Move a ticket to that state
   sail port ticket-source create --title <text> [--label <name>]... [--body-file <path>]
                                                              File a new ticket, the description from the file or stdin

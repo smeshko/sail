@@ -155,9 +155,9 @@ test("a seed that isn't JSON, or holds a ticket without a title, is invalid, nam
   expect(messageOf(errors[1])).toContain('title');
 });
 
-test("the fake supports all four moves, and each lands on the fake's state of that name", async () => {
+test("the fake supports all five moves, and each lands on the fake's state of that name", async () => {
   const source = createFakeTicketSource(files());
-  const moves: TicketMove[] = ['unstarted', 'in-progress', 'in-review', 'done'];
+  const moves: TicketMove[] = ['unstarted', 'in-progress', 'in-review', 'done', 'canceled'];
   expect(source.capabilities()).toEqual({ comments: true, links: true, attachments: true, moves });
   const states: TicketState[] = [];
   for (const move of moves) states.push((await source.update('FAKE-1', { state: move })).state);
@@ -166,6 +166,7 @@ test("the fake supports all four moves, and each lands on the fake's state of th
     { type: 'started', name: 'In Progress' },
     { type: 'started', name: 'In Review' },
     { type: 'completed', name: 'Done' },
+    { type: 'canceled', name: 'Canceled' },
   ]);
 });
 

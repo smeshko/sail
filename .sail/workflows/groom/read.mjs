@@ -1,7 +1,7 @@
 // Reads the ticket in $INPUT_SOURCE through `sail port ticket-source get`, and the team's unstarted and started tickets
 // through `list`. Writes ticket.json, brief.md (the ticket, with every passage a person wrote wrapped as untrusted
-// input) and others.md (the other open tickets, their states and titles wrapped the same way). Makes no claim. Prints the GroomInput,
-// with the other open tickets' keys.
+// input) and others.md (the other open tickets, their states, labels, titles and the start of their descriptions wrapped
+// the same way). Makes no claim. Prints the GroomInput, with the other open tickets' keys and the keys groom keeps.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -62,10 +62,24 @@ const open = [
   ...json(['ticket-source', 'list', '--state', 'unstarted']),
   ...json(['ticket-source', 'list', '--state', 'started']),
 ].filter((other) => other.ticketKey !== ticketKey);
-const others = open.map(
-  (other) =>
-    `- ${other.ticketKey}: ${wrap(other.state.name, `ticket ${other.ticketKey}, state`)} ${wrap(other.title, `ticket ${other.ticketKey}, title`)}`,
+/** The most of each other ticket's description others.md carries: enough to judge a merge, not the whole backlog. */
+const DESCRIPTION_CHARS = 600;
+const excerpt = (text) => (text.length > DESCRIPTION_CHARS ? `${text.slice(0, DESCRIPTION_CHARS)}…` : text);
+const others = open.map((other) =>
+  [
+    `## ${other.ticketKey}`,
+    '',
+    wrap(other.state.name, `ticket ${other.ticketKey}, state`),
+    wrap(other.labels.join(', ') || '(no labels)', `ticket ${other.ticketKey}, labels`),
+    wrap(other.title, `ticket ${other.ticketKey}, title`),
+    wrap(excerpt(other.description || '(none)'), `ticket ${other.ticketKey}, description`),
+    '',
+  ].join('\n'),
 );
+/** A started ticket or an epic is someone's work in hand: groom never cancels it or merges it away. */
+const kept = [ticket, ...open]
+  .filter((each) => each.state.type === 'started' || each.labels.includes('epic'))
+  .map((each) => each.ticketKey);
 writeFileSync(
   join(out, 'others.md'),
   ['# Other open tickets', '', ...(others.length === 0 ? ['None.'] : others), ''].join('\n'),
@@ -77,5 +91,6 @@ console.log(
     title: ticket.title,
     state: ticket.state,
     others: open.map((other) => other.ticketKey),
+    kept,
   }),
 );

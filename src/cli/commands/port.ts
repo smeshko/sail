@@ -199,7 +199,7 @@ const commentOperation: PortOperation<TicketSource> = {
  */
 const updateOperation: PortOperation<TicketSource> = {
   positionals: ['ticket'],
-  options: { state: { value: 'unstarted|in-progress|in-review|done', required: true } },
+  options: { state: { value: 'unstarted|in-progress|in-review|done|canceled', required: true } },
   async run(source, { positionals: [ref = ''], values }) {
     const ticketKey = source.parseKey(ref);
     if (ticketKey === undefined) return { refused: notATicket(ref, source.name) };

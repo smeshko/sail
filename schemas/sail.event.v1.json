@@ -1112,7 +1112,7 @@
       "required": ["type", "name"],
       "additionalProperties": false
     },
-    "ticketMove": { "enum": ["unstarted", "in-progress", "in-review", "done"] },
+    "ticketMove": { "enum": ["unstarted", "in-progress", "in-review", "done", "canceled"] },
     "ticketFetched": {
       "description": "the ticket that was fetched, by its title and URL, and how many comments, links and attachments it came with",
       "type": "object",

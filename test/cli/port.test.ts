@@ -512,10 +512,10 @@ test('update without --state exits 3 with the usage, which lists update, and upd
     const stateless = await runCaptured(['port', 'ticket-source', 'update', 'FAKE-1'], repo.dir);
     expect({ code: stateless.code, stdout: stateless.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
     expect(stateless.stderr).toStartWith(
-      `sail port: ticket-source update needs --state <unstarted|in-progress|in-review|done>\n${USAGE}\n`,
+      `sail port: ticket-source update needs --state <unstarted|in-progress|in-review|done|canceled>\n${USAGE}\n`,
     );
     expect(stateless.stderr).toContain(
-      '\n       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done>\n',
+      '\n       sail port ticket-source update <ticket> --state <unstarted|in-progress|in-review|done|canceled>\n',
     );
     const notATicket = await runCaptured(['port', 'ticket-source', 'update', 'ADW-7', '--state', 'done'], repo.dir);
     expect({ code: notATicket.code, stdout: notATicket.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
