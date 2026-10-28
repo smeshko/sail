@@ -169,6 +169,11 @@ test.each<[string, (sail: string) => void, string]>([
     },
     "reaches two stages named 'tests'",
   ],
+  [
+    'a model alias naming a harness adapters.harnesses does not define',
+    (sail) => nameHarness(sail, 'codex', 'gpt-5.5'),
+    ".sail/project.yaml  /models/deep/harness names the harness 'codex', which adapters.harnesses doesn't define",
+  ],
 ])('%s is refused, and no run directory is created', async (_, breakIt, reason) => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
