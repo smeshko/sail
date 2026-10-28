@@ -38,6 +38,7 @@ import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
 import type { Consumer, Emit, NewEvent, SailEvent } from '../../src/events/types';
+import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
 import { agent, file, fromStep, intake, script, value, z } from '../../src/sdk';
 import * as intakes from '../../src/sdk/intakes';
@@ -248,6 +249,29 @@ test("a body that throws a PortError ends the try in error with one error: the r
     resultPath: '00-intake/call-1/result.json',
   });
   expect(eventIssues(events)).toEqual([]);
+});
+
+test('what a body recorded before it threw a PortError is kept in its result: a claim that took, then a failed get, leaves the claim in result.json', async () => {
+  const { runDir, ticketSource } = world();
+  const claim = { claimed: true, state: { type: 'started', name: 'In Progress' } };
+  const { result, paths } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: async ({ record }) => {
+      record({ claim });
+      throw new PortError('ticketSource', 'get', 'unavailable', 'the provider is down');
+    },
+    source: SOURCE,
+    ticketSource,
+  });
+  expect(result).toMatchObject({
+    outcome: 'error',
+    errors: [{ reason: 'port', message: 'ticketSource.get: the provider is down (unavailable)' }],
+    claim,
+  });
+  expect(validateDocument('sail.result.v1', result).map(formatIssue)).toEqual([]);
+  expect(JSON.parse(readFileSync(paths.result, 'utf8'))).toEqual(result);
 });
 
 test("an output the intake's schema refuses is invalid_output with Zod's message, reported as output:invalid, and the files the body left are still recorded", async () => {
