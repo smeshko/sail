@@ -1,12 +1,15 @@
 // The one file that touches pi's SDK: an isolated in-process coding-agent session. Nothing of the user's own pi is read
 // (settings, auth, sessions, extensions, skills, prompt templates, context files), nor a SYSTEM.md; the only extension
-// is sail's gate, the bash tool runs on sail's operations, and the credential is the one sail fetched (the Codex login's
-// access token) or else the provider's variable from the environment sail was given. The SDK is imported by the first
-// session, not with the CLI.
+// is sail's gate, the bash tool runs on sail's operations, and the credential is the provider's variable from the
+// environment sail was given, or for `openai-codex` the Codex login in the keychain, which pi refreshes there. The SDK is
+// imported by the first session, not with the CLI.
+
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Provider } from '@earendil-works/pi-ai';
 import type { Env } from '../../ports/adapter';
+import { CODEX_PROVIDER, keychainCodexStore, NO_LOGIN } from './codex-login';
 import type { ExtensionHost } from './gate';
 import type { PiEvent } from './messages';
 import type { BashRunner } from './process';
@@ -25,10 +28,10 @@ export interface PiSessionParams {
   readonly gate: (host: ExtensionHost) => void;
   readonly submit: SubmitTool;
   readonly bash: BashRunner['operations'];
-  /** Where the provider's credential is read from. */
+  /** Where the provider's credential is read from, and the PATH the keychain's `security` is found on. */
   readonly env: Env;
-  /** The provider's credential when sail fetched it itself, which `env` then isn't read for. */
-  readonly apiKey?: string;
+  /** Providers the session's models are found in beside pi's own, such as a test's faux provider. */
+  readonly providers?: readonly Provider[];
 }
 
 /** The part of pi's `AgentSession` the harness uses. */
@@ -52,18 +55,23 @@ export const createPiSession: PiSessionFactory = async (params) => {
 
   // pi's grep and find fetch an unpinned rg or fd from GitHub and run it when none is found; offline, they never do.
   process.env.PI_OFFLINE = '1';
-  const sdk = await import('@mariozechner/pi-coding-agent');
-  const authStorage = sdk.AuthStorage.inMemory();
-  const registry = sdk.ModelRegistry.inMemory(authStorage);
-  const model = provider === '' || modelId === '' ? undefined : registry.find(provider, modelId);
+  const [sdk, ai] = await Promise.all([import('@earendil-works/pi-coding-agent'), import('@earendil-works/pi-ai')]);
+  const codex = provider === CODEX_PROVIDER;
+  const credentials = codex ? keychainCodexStore(params.env) : new ai.InMemoryCredentialStore();
+  // No models.json and no auth.json: the catalog is pi's own, and the one credential is the one given here.
+  const runtime = await sdk.ModelRuntime.create({ credentials, modelsPath: null });
+  for (const extra of params.providers ?? []) runtime.registerNativeProvider(extra);
+  const model = provider === '' || modelId === '' ? undefined : runtime.getModel(provider, modelId);
   if (model === undefined) throw new Error(`no model ${params.model}`);
-  const names = keyNames(provider);
-  if (params.apiKey !== undefined) {
-    authStorage.setRuntimeApiKey(provider, params.apiKey);
-  } else if (names.length > 0) {
-    const key = names.map((name) => params.env[name]).find((value) => value !== undefined && value !== '');
-    if (key === undefined) throw new Error(`needs ${names.join(' or ')}, which is not set`);
-    authStorage.setRuntimeApiKey(provider, key);
+  if (codex) {
+    if ((await credentials.read(CODEX_PROVIDER)) === undefined) throw new Error(NO_LOGIN);
+  } else {
+    const names = keyNames(provider);
+    if (names.length > 0) {
+      const key = names.map((name) => params.env[name]).find((value) => value !== undefined && value !== '');
+      if (key === undefined) throw new Error(`needs ${names.join(' or ')}, which is not set`);
+      await runtime.setRuntimeApiKey(provider, key);
+    }
   }
 
   const agentDir = await mkdtemp(join(tmpdir(), 'sail-pi-'));
@@ -93,8 +101,7 @@ export const createPiSession: PiSessionFactory = async (params) => {
     const { session } = await sdk.createAgentSession({
       cwd: params.cwd,
       agentDir,
-      authStorage,
-      modelRegistry: registry,
+      modelRuntime: runtime,
       model,
       thinkingLevel: 'medium',
       tools: [...params.tools, params.submit.name],

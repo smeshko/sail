@@ -6,11 +6,12 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fauxAssistantMessage, fauxToolCall, registerFauxProvider, resetApiProviders } from '@mariozechner/pi-ai';
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from '@earendil-works/pi-ai';
 import type { ExtensionHost } from '../../../src/adapters/pi/gate';
 import { createBashRunner } from '../../../src/adapters/pi/process';
 import { createPiSession, type PiSessionParams } from '../../../src/adapters/pi/session';
 import { submitTool } from '../../../src/adapters/pi/submission';
+import { codexJwt, fakeKeychain } from '../../helpers/pi';
 import { rejection } from '../../helpers/ports';
 
 const runner = createBashRunner({ env: { PATH: process.env.PATH ?? '' } });
@@ -27,6 +28,9 @@ const params = (extra: Partial<PiSessionParams> = {}): PiSessionParams => ({
   ...extra,
 });
 
+/** The faux provider's one model, which needs no key. */
+const FAUX = { model: 'faux/scripted', env: {} } as const;
+
 const leftovers = () => readdirSync(tmpdir()).filter((name) => name.startsWith('sail-pi-'));
 
 test('a model without a provider, or one pi does not know, is refused by name', async () => {
@@ -40,13 +44,23 @@ test('a provider whose key is not set is refused naming the variable', async () 
   expect(String(error)).toBe('Error: needs GROQ_API_KEY, which is not set');
 });
 
-test('a key sail fetched itself is used in place of the variable, so a Codex model needs none set', async () => {
-  const codex = await createPiSession(params({ model: 'openai-codex/gpt-5.5', env: {}, apiKey: 'codex-access' }));
-  const groq = await createPiSession(params({ env: {}, apiKey: 'gsk_fetched' }));
-  const ids = [codex.sessionId !== '', groq.sessionId !== ''];
-  await codex.dispose();
-  await groq.dispose();
-  expect(ids).toEqual([true, true]);
+test('an openai-codex model needs no variable but a Codex login in the keychain, and is refused without one', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sail-test-pi-keychain-'));
+  try {
+    const keychain = fakeKeychain(dir);
+    const codex = params({ model: 'openai-codex/gpt-6.1-sol', env: keychain.env });
+    const none = await rejection(createPiSession(codex));
+    keychain.hold({ type: 'oauth', access: codexJwt('acct'), refresh: 'r', expires: Date.now() + 3_600_000 });
+    const session = await createPiSession(codex);
+    const made = session.sessionId !== '';
+    await session.dispose();
+    expect({ none: String(none), made }).toEqual({
+      none: 'Error: no Codex login in the keychain: run sail login codex',
+      made: true,
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the workspace's .pi/SYSTEM.md never becomes the session's system prompt", async () => {
@@ -123,8 +137,8 @@ test("the workspace's own pi skills are not loaded", async () => {
 });
 
 test("a bash call of the session runs on sail's operations, not pi's own", async () => {
-  // A faux stream in place of groq's API: one bash call, then an answer. No model is reached.
-  const faux = registerFauxProvider({ api: 'openai-completions' });
+  // A faux provider in place of a real one: one bash call, then an answer. No model is reached.
+  const faux = fauxProvider({ provider: 'faux', models: [{ id: 'scripted' }] });
   faux.setResponses([
     fauxAssistantMessage(fauxToolCall('bash', { command: 'echo sail' }), { stopReason: 'toolUse' }),
     fauxAssistantMessage('done'),
@@ -133,6 +147,8 @@ test("a bash call of the session runs on sail's operations, not pi's own", async
   try {
     const session = await createPiSession(
       params({
+        ...FAUX,
+        providers: [faux.provider],
         bash: {
           exec: async (command) => {
             ran.push(command);
@@ -147,19 +163,18 @@ test("a bash call of the session runs on sail's operations, not pi's own", async
       await session.dispose();
     }
   } finally {
-    faux.unregister();
-    resetApiProviders();
+    faux.setResponses([]);
   }
   expect(ran).toEqual(['echo sail']);
 });
 
 test("a session's events reach its listener, and an abort after its prompt resolves", async () => {
-  // A faux stream in place of groq's API: one answer. No model is reached.
-  const faux = registerFauxProvider({ api: 'openai-completions' });
+  // A faux provider in place of a real one: one answer. No model is reached.
+  const faux = fauxProvider({ provider: 'faux', models: [{ id: 'scripted' }] });
   faux.setResponses([fauxAssistantMessage('done')]);
   const types: string[] = [];
   try {
-    const session = await createPiSession(params());
+    const session = await createPiSession(params({ ...FAUX, providers: [faux.provider] }));
     try {
       const stop = session.subscribe((event) => types.push(event.type));
       await session.prompt('answer');
@@ -169,12 +184,11 @@ test("a session's events reach its listener, and an abort after its prompt resol
       await session.dispose();
     }
   } finally {
-    faux.unregister();
-    resetApiProviders();
+    faux.setResponses([]);
   }
   expect({ start: types[0], end: types.at(-1), message: types.includes('message_end') }).toEqual({
     start: 'agent_start',
-    end: 'agent_end',
+    end: 'agent_settled',
     message: true,
   });
 });

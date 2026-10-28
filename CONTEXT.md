@@ -470,7 +470,7 @@ The port that runs an agent step: a session with tools, permissions enforced on 
 _Avoid_: agent provider, runner, executor, model
 
 **Codex login**:
-The ChatGPT subscription the pi harness runs `openai-codex` models on. `sail login codex` keeps its OAuth tokens in sail's own macOS keychain item, and sail refreshes the access token before a session when it has under five minutes left, saving the new single-use refresh token.
+The ChatGPT subscription the pi harness runs `openai-codex` models on. `sail login codex` keeps its OAuth tokens in sail's own macOS keychain item, and pi refreshes the access token there when it has under five minutes left, under a lock every sail process shares, as each refresh token is good for one refresh.
 _Avoid_: Codex key, Codex API key
 
 **Workspace port**:

@@ -10,7 +10,6 @@ import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
 import { type BudgetTimers, createBudgetWatch } from '../claude-code/budget';
 import { whereYouWork } from '../claude-code/harness';
 import { renderTranscript } from '../claude-code/transcript';
-import { CODEX_PROVIDER, codexAccessToken, keychainCodexLogin } from './codex-login';
 import { createGate, gateExtension } from './gate';
 import { createPiSessionReader, type PiEvent, type PiSessionReader } from './messages';
 import { bashEnv, createBashRunner } from './process';
@@ -27,8 +26,6 @@ export interface PiHarnessOptions {
   readonly now?: () => number;
   /** The timers the minute budget runs on: the system's when left out. */
   readonly timers?: BudgetTimers;
-  /** The Codex login's access token, for an `openai-codex` model: the keychain's login when left out. */
-  readonly codexToken?: () => Promise<string>;
 }
 
 const SYSTEM_TIMERS: BudgetTimers = {
@@ -66,7 +63,6 @@ function tap(request: HarnessRequest, event: PiEvent): void {
 
 export function createPiHarness(options: PiHarnessOptions): Harness {
   const createSession = options.createSession ?? createPiSession;
-  const codexToken = options.codexToken ?? (() => codexAccessToken(keychainCodexLogin(options.env)));
   const now = () => options.now?.() ?? Date.now();
 
   async function converse(
@@ -259,8 +255,6 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
           },
           onDenied: (toolCallId, denial) => reader?.markDenied(toolCallId, denial),
         });
-        const codex = request.model.startsWith(`${CODEX_PROVIDER}/`);
-        const apiKey = codex ? await codexToken() : undefined;
         session = await createSession({
           cwd: request.cwd,
           model: request.model,
@@ -272,7 +266,6 @@ export function createPiHarness(options: PiHarnessOptions): Harness {
           }),
           bash: runner.operations,
           env: options.env,
-          ...(apiKey === undefined ? {} : { apiKey }),
         });
         const live = session;
         reader = createPiSessionReader({

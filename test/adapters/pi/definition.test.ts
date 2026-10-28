@@ -44,10 +44,10 @@ test('a provider option makes a harness named pi', async () => {
 });
 
 test('versions() is the exact version package.json pins', async () => {
-  const pinned = (await Bun.file('package.json').json()).dependencies['@mariozechner/pi-coding-agent'];
+  const pinned = (await Bun.file('package.json').json()).dependencies['@earendil-works/pi-coding-agent'];
   expect({ pinned, versions: piAdapters.harness.versions?.() }).toEqual({
     pinned: PI_VERSION,
-    versions: { '@mariozechner/pi-coding-agent': PI_VERSION },
+    versions: { '@earendil-works/pi-coding-agent': PI_VERSION },
   });
 });
 

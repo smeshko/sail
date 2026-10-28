@@ -10,7 +10,7 @@ import { keyNames } from './providers';
 export { createPiHarness } from './harness';
 
 /** The SDK's version, which `package.json` pins exactly: the SDK exports no way to read it. */
-export const PI_VERSION = '0.73.1';
+export const PI_VERSION = '1.4.0';
 
 const Options = z.strictObject({ provider: z.string().min(1).optional() });
 
@@ -31,7 +31,7 @@ export function requires(options: AdapterOptions, _env: Env, models: readonly st
 export const piAdapters: { harness: AdapterDefinition<Harness> } = {
   harness: {
     requires,
-    versions: () => ({ '@mariozechner/pi-coding-agent': PI_VERSION }),
+    versions: () => ({ '@earendil-works/pi-coding-agent': PI_VERSION }),
     create(options, context) {
       const parsed = Options.safeParse(options);
       if (!parsed.success) {

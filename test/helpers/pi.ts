@@ -2,7 +2,7 @@
 // login's stand-ins: a `security` that keeps the keychain item in a file, and an access token naming its account.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CodexCredential } from '../../src/adapters/pi/codex-login';
+import type { Credential } from '@earendil-works/pi-ai';
 import type { PiEvent } from '../../src/adapters/pi/messages';
 import type { PiSession, PiSessionFactory, PiSessionParams } from '../../src/adapters/pi/session';
 
@@ -168,6 +168,9 @@ case "$1" in
       exit 44
     fi
     cat "$FAKE_KEYCHAIN" ;;
+  delete-generic-password)
+    if [ ! -f "$FAKE_KEYCHAIN" ]; then echo 'security: The specified item could not be found in the keychain.' >&2; exit 44; fi
+    rm "$FAKE_KEYCHAIN" ;;
   add-generic-password)
     if [ -n "$FAKE_KEYCHAIN_REFUSE" ]; then echo "$FAKE_KEYCHAIN_REFUSE" >&2; exit 45; fi
     while [ $# -gt 0 ]; do
@@ -186,7 +189,7 @@ export function fakeKeychain(dir: string, extra: Record<string, string> = {}) {
   const item = join(dir, 'keychain');
   return {
     env: { PATH: `${bin}:/usr/bin:/bin`, USER: 'ivo', FAKE_KEYCHAIN: item, ...extra },
-    hold: (credential: CodexCredential) => writeFileSync(item, `${JSON.stringify(credential)}\n`),
+    hold: (credential: Credential) => writeFileSync(item, `${JSON.stringify(credential)}\n`),
     held: (): unknown => (existsSync(item) ? JSON.parse(readFileSync(item, 'utf8')) : undefined),
     calls: (): string[] => (existsSync(`${item}.log`) ? readFileSync(`${item}.log`, 'utf8').trimEnd().split('\n') : []),
   };

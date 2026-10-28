@@ -1,21 +1,18 @@
-// The Codex login: the keychain item through a stand-in `security` on the PATH, the lock file, and when the access token
-// is refreshed. Nothing here reaches the real keychain or OpenAI: pi's refresh is answered by a stubbed fetch.
+// The Codex login: the keychain item as pi's credential store, through a stand-in `security`, the lock file its writes
+// hold, and pi's own refresh run through it. Nothing here reaches the real keychain or OpenAI: the token endpoint is a
+// stubbed fetch.
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir, userInfo } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
+import type { Credential } from '@earendil-works/pi-ai';
+import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import {
   accountOf,
-  type CodexCredential,
-  type CodexStore,
-  codexAccessToken,
   KEYCHAIN_SERVICE,
-  keychainCodexLogin,
   keychainStore,
-  NO_LOGIN,
-  REFRESH_MARGIN_MS,
-  refreshWithPi,
   type Security,
+  type SecurityEnd,
   systemSecurity,
   withLock,
 } from '../../../src/adapters/pi/codex-login';
@@ -32,56 +29,65 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-const LOGIN: CodexCredential = { access: 'access-1', refresh: 'refresh-1', expires: 1_000_000_000, accountId: 'acct' };
+const LOGIN: Credential = { type: 'oauth', access: 'access-1', refresh: 'refresh-1', expires: 1_000_000_000 };
+const ok = (stdout = ''): SecurityEnd => ({ exitCode: 0, stdout, stderr: '' });
 
-function memoryStore(initial?: CodexCredential): CodexStore & { writes: CodexCredential[] } {
-  let held = initial;
-  const writes: CodexCredential[] = [];
-  return {
-    writes,
-    read: async () => held,
-    async write(credential) {
-      writes.push(credential);
-      held = credential;
-    },
-  };
-}
+/** A keychain store over `security`, its lock `lockFile`: one in a fresh directory unless named. */
+const storeOver = (security: Security, lockFile = join(fresh(), 'codex.lock')) =>
+  keychainStore({ account: 'ivo', security, lockFile, lock: { pollMs: 5 } });
 
-test('the keychain store reads none, a login, and refuses what is not one or what security refuses', async () => {
-  const answers: Record<string, Awaited<ReturnType<Security>>> = {
+test("the store reads none, the login, nothing for another provider, and refuses what isn't a login or what security refuses", async () => {
+  const answers: Record<string, SecurityEnd> = {
     none: { exitCode: 44, stdout: '', stderr: 'could not be found' },
-    login: { exitCode: 0, stdout: `${JSON.stringify(LOGIN)}\n`, stderr: '' },
-    junk: { exitCode: 0, stdout: 'not json\n', stderr: '' },
-    partial: { exitCode: 0, stdout: '{"access":"a"}\n', stderr: '' },
+    login: ok(`${JSON.stringify({ ...LOGIN, accountId: 'acct' })}\n`),
+    junk: ok('not json\n'),
+    apiKey: ok('{"type":"api_key","key":"k"}\n'),
     locked: { exitCode: 51, stdout: '', stderr: 'User interaction is not allowed.\n' },
   };
-  const read = (name: string) =>
-    keychainStore('ivo', async () => answers[name] as Awaited<ReturnType<Security>>).read();
+  const read = (name: string, provider = 'openai-codex') =>
+    storeOver(async () => answers[name] as SecurityEnd).read(provider);
+  const notALogin = `Error: the keychain's ${KEYCHAIN_SERVICE} item is not a Codex login: run sail login codex`;
   expect({
     none: await read('none'),
     login: await read('login'),
+    other: await read('login', 'anthropic'),
     junk: String(await rejection(read('junk'))),
-    partial: String(await rejection(read('partial'))),
+    apiKey: String(await rejection(read('apiKey'))),
     locked: String(await rejection(read('locked'))),
   }).toEqual({
     none: undefined,
-    login: LOGIN,
-    junk: `Error: the keychain's ${KEYCHAIN_SERVICE} item is not a Codex login: run sail login codex`,
-    partial: `Error: the keychain's ${KEYCHAIN_SERVICE} item is not a Codex login: run sail login codex`,
+    login: { ...LOGIN, accountId: 'acct' },
+    other: undefined,
+    junk: notALogin,
+    apiKey: notALogin,
     locked: 'Error: the keychain refused the Codex login: User interaction is not allowed.',
   });
 });
 
-test("the keychain store writes the user's sail-openai-codex item, replacing it, and names a refusal", async () => {
+test("modify writes the user's sail-openai-codex item, replacing it; undefined leaves it; another provider is refused", async () => {
   const calls: (readonly string[])[] = [];
-  const ok = keychainStore('ivo', async (args) => {
+  let held: Credential | undefined;
+  const store = storeOver(async (args) => {
     calls.push(args);
-    return { exitCode: 0, stdout: '', stderr: '' };
+    if (args[0] === 'find-generic-password') {
+      return held === undefined ? { exitCode: 44, stdout: '', stderr: '' } : ok(JSON.stringify(held));
+    }
+    held = JSON.parse(args.at(-1) as string);
+    return ok();
   });
-  await ok.write(LOGIN);
-  const refusing = keychainStore('ivo', async () => ({ exitCode: 45, stdout: '', stderr: 'duplicate item\n' }));
-  expect({ calls, refused: String(await rejection(refusing.write(LOGIN))) }).toEqual({
-    calls: [
+  const written = await store.modify('openai-codex', async () => LOGIN);
+  const kept = await store.modify('openai-codex', async () => undefined);
+  const other = await rejection(store.modify('anthropic', async () => LOGIN));
+  expect({
+    written,
+    kept,
+    other: String(other),
+    writes: calls.filter((call) => call[0] === 'add-generic-password'),
+  }).toEqual({
+    written: LOGIN,
+    kept: LOGIN,
+    other: "Error: the keychain holds the Codex login, not anthropic's",
+    writes: [
       [
         'add-generic-password',
         '-U',
@@ -95,16 +101,44 @@ test("the keychain store writes the user's sail-openai-codex item, replacing it,
         JSON.stringify(LOGIN),
       ],
     ],
-    refused: 'Error: the keychain refused the Codex login: duplicate item',
   });
 });
 
-test("a login written through the PATH's security reads back the same", async () => {
+test("a write security refuses rejects modify, naming security's message", async () => {
+  const store = storeOver(async (args) =>
+    args[0] === 'find-generic-password'
+      ? { exitCode: 44, stdout: '', stderr: '' }
+      : { exitCode: 45, stdout: '', stderr: 'duplicate item\n' },
+  );
+  expect(String(await rejection(store.modify('openai-codex', async () => LOGIN)))).toBe(
+    'Error: the keychain refused the Codex login: duplicate item',
+  );
+});
+
+test('through the PATH security a login is listed, read back, deleted, and deleting none is no error', async () => {
   const keychain = fakeKeychain(fresh());
-  const store = keychainStore('ivo', systemSecurity(keychain.env));
-  const before = await store.read();
-  await store.write(LOGIN);
-  expect({ before, after: await store.read() }).toEqual({ before: undefined, after: LOGIN });
+  const store = storeOver(systemSecurity(keychain.env));
+  const before = await store.list();
+  await store.modify('openai-codex', async () => LOGIN);
+  const listed = await store.list();
+  const read = await store.read('openai-codex');
+  await store.delete('openai-codex');
+  await store.delete('openai-codex');
+  const refused = await rejection(store.delete('anthropic'));
+  expect({ before, listed, read, after: keychain.held(), refused: String(refused) }).toEqual({
+    before: [],
+    listed: [{ providerId: 'openai-codex', type: 'oauth' }],
+    read: LOGIN,
+    after: undefined,
+    refused: "Error: the keychain holds the Codex login, not anthropic's",
+  });
+});
+
+test('a delete security refuses rejects, naming its message', async () => {
+  const store = storeOver(async () => ({ exitCode: 51, stdout: '', stderr: 'User interaction is not allowed.\n' }));
+  expect(String(await rejection(store.delete('openai-codex')))).toBe(
+    'Error: the keychain refused the Codex login: User interaction is not allowed.',
+  );
 });
 
 test('the account is $USER, or the login name when it is unset', () => {
@@ -142,9 +176,9 @@ test('a lock is held by one at a time: the second waits for the first to let go'
 
 test("a lock whose holder is dead is taken; a live holder's is refused after the wait, naming it", async () => {
   const dir = fresh();
+  mkdirSync(dir, { recursive: true });
   const stale = join(dir, 'stale.lock');
   const dead = Bun.spawnSync(['/bin/sh', '-c', 'echo $$']).stdout.toString().trim();
-  mkdirSync(dir, { recursive: true });
   writeFileSync(stale, `${dead}\n`);
   const took = await withLock(stale, async () => 'took');
   const live = join(dir, 'live.lock');
@@ -157,111 +191,57 @@ test("a lock whose holder is dead is taken; a live holder's is refused after the
   });
 });
 
-test('an access token with more than five minutes left is used as it is', async () => {
-  const store = memoryStore(LOGIN);
-  let refreshed = 0;
-  const token = await codexAccessToken({
-    store,
-    lockFile: join(fresh(), 'codex.lock'),
-    now: () => LOGIN.expires - REFRESH_MARGIN_MS - 1,
-    refresh: async () => {
-      refreshed++;
-      return LOGIN;
-    },
-  });
-  expect({ token, refreshed, writes: store.writes }).toEqual({ token: 'access-1', refreshed: 0, writes: [] });
-});
-
-test('one with five minutes or less is refreshed once, and the new pair is kept, however many sessions ask', async () => {
-  const store = memoryStore(LOGIN);
-  const next: CodexCredential = {
-    access: 'access-2',
-    refresh: 'refresh-2',
-    expires: LOGIN.expires + 3_600_000,
-    accountId: 'acct',
-  };
+/** OpenAI's token endpoint, answering each refresh with a new pair: the refresh tokens it was sent are kept. */
+function tokenEndpoint(): string[] {
   const spent: string[] = [];
-  const login = {
-    store,
-    lockFile: join(fresh(), 'codex.lock'),
-    now: () => LOGIN.expires - REFRESH_MARGIN_MS,
-    lock: { pollMs: 5 },
-    refresh: async (token: string) => {
-      spent.push(token);
-      await Bun.sleep(20);
-      return next;
-    },
-  };
-  const tokens = await Promise.all([codexAccessToken(login), codexAccessToken(login), codexAccessToken(login)]);
-  expect({ tokens, spent, writes: store.writes }).toEqual({
-    tokens: ['access-2', 'access-2', 'access-2'],
-    spent: ['refresh-1'],
-    writes: [next],
-  });
-});
-
-test('no login, one gone while waiting on the lock, and a refresh that fails each tell to run sail login codex', async () => {
-  const lockFile = join(fresh(), 'codex.lock');
-  const stale = { now: () => LOGIN.expires, lockFile };
-  const none = await rejection(codexAccessToken({ ...stale, store: memoryStore(), refresh: async () => LOGIN }));
-  let reads = 0;
-  const vanishing: CodexStore = {
-    read: async () => (reads++ === 0 ? LOGIN : undefined),
-    write: async () => undefined,
-  };
-  const gone = await rejection(codexAccessToken({ ...stale, store: vanishing, refresh: async () => LOGIN }));
-  const failing = await rejection(
-    codexAccessToken({
-      ...stale,
-      store: memoryStore(LOGIN),
-      refresh: async () => {
-        throw new Error('invalid_grant');
-      },
-    }),
-  );
-  expect([String(none), String(gone), String(failing)]).toEqual([
-    `Error: ${NO_LOGIN}`,
-    `Error: ${NO_LOGIN}`,
-    'Error: the Codex login could not be refreshed (invalid_grant): run sail login codex',
-  ]);
-});
-
-test("pi's refresh trades the refresh token at OpenAI for a new login with the token's account", async () => {
-  const sent: string[] = [];
-  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-    sent.push(`${String(url)} ${String(init?.body)}`);
-    return Response.json({ access_token: codexJwt('acct-9'), refresh_token: 'refresh-9', expires_in: 3600 });
+  globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const token = new URLSearchParams(String(init?.body)).get('refresh_token') ?? '';
+    spent.push(token);
+    await Bun.sleep(20);
+    return Response.json({
+      access_token: codexJwt(`acct-${spent.length}`),
+      refresh_token: `refresh-${spent.length + 1}`,
+      expires_in: 3600,
+    });
   }) as typeof fetch;
-  const before = Date.now();
-  const login = await refreshWithPi('refresh-1');
-  expect({
-    access: login.access === codexJwt('acct-9'),
-    refresh: login.refresh,
-    accountId: login.accountId,
-    expiresInAnHour: login.expires >= before + 3_600_000,
-    grant: sent[0]?.startsWith('https://auth.openai.com/oauth/token '),
-    spent: sent[0]?.includes('refresh_token=refresh-1'),
-  }).toEqual({
-    access: true,
-    refresh: 'refresh-9',
-    accountId: 'acct-9',
-    expiresInAnHour: true,
-    grant: true,
-    spent: true,
+  return spent;
+}
+
+/** pi's model runtime over the keychain login in `keychain`, locked by `lockFile`. */
+const runtimeOver = (keychain: ReturnType<typeof fakeKeychain>, lockFile: string) =>
+  ModelRuntime.create({
+    credentials: storeOver(systemSecurity(keychain.env), lockFile),
+    modelsPath: null,
+    refreshOnCreate: false,
   });
+
+test('pi uses an access token with more than five minutes left as it is', async () => {
+  const keychain = fakeKeychain(fresh());
+  const access = codexJwt('acct');
+  keychain.hold({ type: 'oauth', access, refresh: 'refresh-1', expires: Date.now() + 10 * 60_000, accountId: 'acct' });
+  const spent = tokenEndpoint();
+  const auth = await (await runtimeOver(keychain, join(fresh(), 'codex.lock'))).getAuth('openai-codex');
+  expect({ key: auth?.auth.apiKey === access, spent }).toEqual({ key: true, spent: [] });
 });
 
-test("the keychain login reads the user's item through the PATH's security and locks under ~/.sail/locks", async () => {
+test('pi refreshes one with under five minutes left once, however many sessions ask, and the keychain keeps the new pair', async () => {
   const keychain = fakeKeychain(fresh());
-  keychain.hold({ ...LOGIN, expires: Date.now() + 3_600_000 });
-  const login = keychainCodexLogin(keychain.env);
-  expect({
-    token: await codexAccessToken(login),
-    lockFile: login.lockFile,
-    asked: keychain.calls()[0],
-  }).toEqual({
-    token: 'access-1',
-    lockFile: join(homedir(), '.sail', 'locks', 'openai-codex.lock'),
-    asked: `find-generic-password -a ivo -s ${KEYCHAIN_SERVICE} -w`,
+  keychain.hold({
+    type: 'oauth',
+    access: codexJwt('acct'),
+    refresh: 'refresh-1',
+    expires: Date.now() + 4 * 60_000,
+    accountId: 'acct',
   });
+  const spent = tokenEndpoint();
+  // Three runtimes, as three processes would have: each has its own view, and only the lock file is shared.
+  const lockFile = join(fresh(), 'codex.lock');
+  const runtimes = await Promise.all([1, 2, 3].map(() => runtimeOver(keychain, lockFile)));
+  const auths = await Promise.all(runtimes.map((runtime) => runtime.getAuth('openai-codex')));
+  const held = keychain.held() as { access: string; refresh: string };
+  expect({
+    spent,
+    keys: auths.map((auth) => auth?.auth.apiKey === codexJwt('acct-1')),
+    held: { access: held.access === codexJwt('acct-1'), refresh: held.refresh },
+  }).toEqual({ spent: ['refresh-1'], keys: [true, true, true], held: { access: true, refresh: 'refresh-2' } });
 });

@@ -45,7 +45,7 @@ Usage:
   sail '#<pr>' [--workflow <name>] [--force] [-q|-v|-vv]     Start a run from a pull request: #12, 12, or its URL
   sail init                                                  Write .sail/ here: a config and the editor's setup, no workflow
   sail check [--list]                                        Type-check .sail/ and list its workflows and stages
-  sail login codex                                           Log in to a ChatGPT subscription for pi's openai-codex models
+  sail login codex [--device]                                Log in to a ChatGPT subscription for pi's openai-codex models
   sail resume <run> [-q|-v|-vv]                              Resume a suspended or crashed run
   sail stop <run>                                            Stop a run: at its next call boundary while it runs, at once when it is suspended
   sail run --from-run <run> --stage <stage> [--continue]     Rerun one stage on another run's earlier calls: a seeded run
@@ -188,7 +188,7 @@ const commands = new Map<string, CommandSpec>([
   ['check', { options: { list: { type: 'boolean' } }, positionals: 0, command: check }],
   ['dashboard', { options: { port: { type: 'string' } }, positionals: 0, command: dashboard }],
   ['init', bare(init)],
-  ['login', { options: {}, positionals: 1, command: login }],
+  ['login', { options: { device: { type: 'boolean' } }, positionals: 1, command: login }],
   [
     'resume',
     {
