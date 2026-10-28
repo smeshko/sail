@@ -627,6 +627,9 @@ const PUSHED = { type: 'codehost:pushed', branch: 'sail/FAKE-1', headSha: 'a'.re
 const LABELLED = { type: 'codehost:labelled', number: 5, label: 'sail', change: 'added' } as const;
 /** A script line that appends `event` to the port events file, as a `sail port` would. */
 const reports = (event: object) => `echo '${JSON.stringify(event)}' >> "$SAIL_EVENTS"`;
+/** Puts `event` in the port events file before the script starts: the timeout starts at spawn, and a loaded machine can take longer than it to start bash. */
+const reportedBefore = (s: Setup, event: object) =>
+  writeFileSync(join(s.context.paths.dir, PORT_EVENTS), `${JSON.stringify(event)}\n`);
 const typesOf = (events: readonly CallEvent[]) => events.map((event) => event.type);
 
 const PROJECT = `name: script-kind
@@ -743,8 +746,7 @@ test("a script whose sail port call fails, and which carries on to exit 0, has t
 });
 
 test.each<[string, string, number | undefined, string, string[]]>([
-  // Five seconds, so a loaded machine still starts the script and reports the event before the timeout.
-  ['times out', 'sleep 30', 5, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
+  ['times out', 'sleep 5', 1, 'error', ['script:exec', 'codehost:pushed', 'script:exit', 'error:timeout']],
   [
     'exits with a failing code',
     `${JUNIT}\necho '${FAILING}'\nexit 1`,
@@ -763,7 +765,10 @@ test.each<[string, string, number | undefined, string, string[]]>([
   'a script that reports a provider event and then %s has it emitted before script:exit',
   async (how, body, timeoutSeconds, outcome, types) => {
     const s = setup();
-    s.run(`${reports(PUSHED)}\n${body}`);
+    if (how === 'times out') {
+      reportedBefore(s, PUSHED);
+      s.run(body);
+    } else s.run(`${reports(PUSHED)}\n${body}`);
     const { context, events } = collecting(s);
     const controller = new AbortController();
     const step = tests(timeoutSeconds === undefined ? {} : { timeoutSeconds });
@@ -808,9 +813,10 @@ test('a bad line joins the errors the step already has: a script that timed out,
     message: 'port-events.ndjson line 1 is not a provider event: it carries seq, which the run stamps',
   };
   const timedOut = setup();
-  timedOut.run(`${reports(forged)}\nsleep 30`);
-  expect((await scriptKind.run(tests({ timeoutSeconds: 5 }), timedOut.context)).errors).toEqual([
-    { reason: 'timeout', message: 'timed out after 5s' },
+  reportedBefore(timedOut, forged);
+  timedOut.run('sleep 5');
+  expect((await scriptKind.run(tests({ timeoutSeconds: 1 }), timedOut.context)).errors).toEqual([
+    { reason: 'timeout', message: 'timed out after 1s' },
     port,
   ]);
   const noFile = setup();
