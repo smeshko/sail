@@ -22,6 +22,8 @@ Run sail only through `.sail/lib/demo.sh`. It runs this branch's `sail` in a scr
 - `.sail/lib/demo.sh new $STAGE_OUT/demo` makes a demo repository at `$STAGE_OUT/demo/repo`, holding the fixture
   repository's `.sail/` (`test/fixtures/repo/.sail/`): the `ticket-to-pr` workflow on fake ports, with `FAKE-1` seeded.
   `--from <dir>` copies another `.sail/` instead, such as one you wrote under `$STAGE_OUT`. Every port must be `fake`.
+  `--own` copies this branch's own `.sail/` instead, with every adapter put on `fake` and its seeds the ones under
+  `.sail/fake/`: use it when the change is to sail's own workflows, such as `groom`, `factory` or `review`.
 - `.sail/lib/demo.sh run $STAGE_OUT/demo <command> [args…]` commits what changed in the demo repository, runs the
   command there, prints its output and its exit code, and appends both to `$STAGE_OUT/demo/transcript.txt`. It exits
   with the command's code. Run `sail` by name: `.sail/lib/demo.sh run $STAGE_OUT/demo sail FAKE-1`.

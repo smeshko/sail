@@ -3,6 +3,8 @@
 // Usage: bun .sail/lib/demo.mjs <command> …, or .sail/lib/demo.sh <command> …
 //   new <dir> [--from <sail-dir>]  a git repository at <dir>/repo holding a copy of <sail-dir>, the fixture
 //                                  repository's .sail/ when left out, and the HOME its commands get, at <dir>/home
+//   new <dir> --own                the same, holding this checkout's own .sail/ with every adapter put on fake, its
+//                                  seeds the ones under .sail/fake/
 //   run <dir> sail [args…]         commits what changed in <dir>/repo, runs this checkout's sail there, prints what
 //                                  it printed and appends it to <dir>/transcript.txt; exits with sail's code. Only
 //                                  sail runs, so a stage allowed this harness runs nothing else through it
@@ -75,14 +77,33 @@ function checkFake(sailDir, missing) {
   if (real.length > 0) refuse(`every port must be on fake, and ${real.join(', ')} isn't: a demo costs nothing`);
 }
 
-function create(dir, from) {
+/** Puts every adapter of the copy's project.yaml on fake: each port, Jev, and each named harness. */
+function fakeAll(sailDir) {
+  const config = join(sailDir, 'project.yaml');
+  const project = Bun.YAML.parse(readFileSync(config, 'utf8'));
+  const { harnesses, ...ports } = project.adapters ?? {};
+  project.adapters = Object.fromEntries(Object.keys(ports).map((port) => [port, { use: 'fake' }]));
+  if (harnesses !== undefined) {
+    project.adapters.harnesses = Object.fromEntries(Object.keys(harnesses).map((name) => [name, { use: 'fake' }]));
+  }
+  writeFileSync(config, Bun.YAML.stringify(project, null, 2));
+}
+
+function create(dir, from, own) {
   if (existsSync(join(dir, 'repo'))) refuse(`${join(dir, 'repo')} exists already`);
-  checkFake(from, `${from} holds no project.yaml`);
+  if (!own) checkFake(from, `${from} holds no project.yaml`);
   mkdirSync(join(dir, 'repo'), { recursive: true });
   mkdirSync(join(dir, 'home'), { recursive: true });
   git(dir, 'init', '--quiet', '-b', 'main');
   writeFileSync(join(dir, 'repo', 'README.md'), '# demo\n\nThe scratch repository a demonstration runs in.\n');
-  cpSync(from, join(dir, 'repo', '.sail'), { recursive: true });
+  // The SDK's declarations are generated where the repository is checked, not copied.
+  const generated = (source) => !source.endsWith('sail.d.ts') && !source.endsWith('sail-intakes.d.ts');
+  cpSync(from, join(dir, 'repo', '.sail'), { recursive: true, filter: own ? generated : undefined });
+  if (own) {
+    fakeAll(join(dir, 'repo', '.sail'));
+    // The conventions the config lists are appended to every agent prompt, so they must exist.
+    for (const name of ['AGENTS.md', 'CONTEXT.md']) cpSync(join(root, name), join(dir, 'repo', name));
+  }
   git(dir, 'add', '-A');
   git(dir, 'commit', '--quiet', '-m', 'demo repository');
   console.log(`demo: ${join(dir, 'repo')} holds ${from}, every port on fake; its HOME is ${join(dir, 'home')}`);
@@ -311,12 +332,15 @@ async function capture(dir, name, query) {
 
 const [command, target, ...rest] = process.argv.slice(2);
 if (target === undefined)
-  refuse('usage: demo.sh new <dir> [--from <sail-dir>] | run <dir> sail [args…] | dashboard <dir> <name> [<k>=<v>…]');
+  refuse(
+    'usage: demo.sh new <dir> [--from <sail-dir> | --own] | run <dir> sail [args…] | dashboard <dir> <name> [<k>=<v>…]',
+  );
 const dir = resolve(target);
 if (command === 'new') {
-  if (rest.length !== 0 && (rest.length !== 2 || rest[0] !== '--from'))
-    refuse('usage: demo.sh new <dir> [--from <sail-dir>]');
-  create(dir, resolve(rest[1] ?? FIXTURE_SAIL));
+  const own = rest.length === 1 && rest[0] === '--own';
+  if (rest.length !== 0 && !own && (rest.length !== 2 || rest[0] !== '--from'))
+    refuse('usage: demo.sh new <dir> [--from <sail-dir> | --own]');
+  create(dir, own ? join(root, '.sail') : resolve(rest[1] ?? FIXTURE_SAIL), own);
 } else if (command === 'run') {
   if (rest[0] !== 'sail') refuse('usage: demo.sh run <dir> sail [args…]: only sail runs here');
   await runIn(dir, rest);
