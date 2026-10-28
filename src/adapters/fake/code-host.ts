@@ -8,6 +8,7 @@ import { PortError } from '../../ports/errors';
 import { holdsLabel, sameLabel } from '../../ports/labels';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import {
+  CHECK_LOG_TAIL,
   CheckStatus,
   Comment,
   type Labelled,
@@ -28,7 +29,9 @@ export interface FakeCodeHostOptions extends ProviderOptions {
   readonly env?: Readonly<Record<string, string>>;
 }
 
-const CheckScripts = z.array(z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1) }));
+const CheckScripts = z.array(
+  z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1), log: z.string().optional() }),
+);
 const MergeScripts = z.array(z.enum(['merged', 'pending', 'refused', 'rejected'])).min(1);
 
 /** A pull request as the seed holds it, with its scripts and how far each has been read. */
@@ -272,6 +275,13 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
         emit({ type: 'codehost:checks_rerun', number, headSha: rerun.headSha, checks: rerun.rerun });
       }
       return rerun;
+    },
+    async checkLog(number, name) {
+      const pr = find(store.read(), 'checkLog', number);
+      const log = pr.checks.find((check) => check.name === name)?.log;
+      if (log === undefined)
+        throw new PortError('codeHost', 'checkLog', 'not_found', `no log of a check named ${name}`);
+      return { number, name, log: log.slice(-CHECK_LOG_TAIL), raw: structuredClone(pr) };
     },
     async merge(number, request) {
       // A request from outside TypeScript, such as `sail port`, is checked before anything is read.

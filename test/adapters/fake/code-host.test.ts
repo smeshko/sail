@@ -64,7 +64,9 @@ const suiteSeed = (seed: { pullRequests: Record<string, unknown>[] }) => {
   seed.pullRequests.push(
     seeded(5, { labels: [] }),
     seeded(6, { state: 'closed' }),
-    seeded(7, { checks: [{ name: 'verify', statuses: ['failed', 'passed'] }] }),
+    seeded(7, {
+      checks: [{ name: 'verify', statuses: ['failed', 'passed'], log: '(fail) sail show prints a zero total' }],
+    }),
   );
 };
 
@@ -80,7 +82,7 @@ codeHostSuite('fake', async (emit) => ({
     missing: 99,
     pendingMerge: 3,
     rejectedMerge: 4,
-    failedCheck: { number: 7, name: 'verify' },
+    failedCheck: { number: 7, name: 'verify', log: '(fail) sail show prints a zero total' },
     mergeable: async () => ({ number: 1, headSha: PR_1_HEAD }),
     refs: [
       ['12', 12],
@@ -135,6 +137,29 @@ test('checks scripted failed then passed read passed after the failed one is rer
     { before: undefined, rerun: ['verify'], after: 'passed' },
     { before: 'failed', rerun: ['verify'], after: 'passed' },
   ]);
+});
+
+test('checkLog cuts a log over 20 000 characters to its last 20 000, and a check seeded without a log is not_found', async () => {
+  const log = `${'a'.repeat(15_000)}${'b'.repeat(10_000)}`;
+  const host = createFakeCodeHost(
+    files((seed) =>
+      seed.pullRequests.push(
+        seeded(7, {
+          checks: [
+            { name: 'verify', statuses: ['failed'], log },
+            { name: 'lint', statuses: ['passed'] },
+          ],
+        }),
+      ),
+    ),
+  );
+  const cut = await host.checkLog(7, 'verify');
+  const failure = portFailure(await rejection(host.checkLog(7, 'lint')));
+  expect({ length: cut.log.length, tail: cut.log === log.slice(-20_000), failure }).toEqual({
+    length: 20_000,
+    tail: true,
+    failure: { port: 'codeHost', op: 'checkLog', code: 'not_found' },
+  });
 });
 
 test('rerunChecks names only the checks whose current status is failed, and a passed one is left alone and not announced', async () => {

@@ -1,6 +1,7 @@
 // The CodeHost port: the repository host in sail's words. State is honest: a merge counts once the host reports it,
 // never when it was only requested (D4).
 import type {
+  CheckLog,
   Checks,
   CodeHostCapabilities,
   Labelled,
@@ -50,6 +51,11 @@ export interface CodeHost {
    * a failed commit status is left out. Emits `codehost:checks_rerun` only when it reran a check.
    */
   rerunChecks(number: number): Promise<Rerun>;
+  /**
+   * The last 20 000 characters of the log of the check `name` on the pull request's head. Emits nothing. A check the head
+   * doesn't have, or one with no log to read, is `not_found`.
+   */
+  checkLog(number: number, name: string): Promise<CheckLog>;
   /**
    * Merges the pull request by `request.method`, only while its head is `request.expectedHeadSha`. It is `refused`, with
    * nothing sent, when the pull request is closed, a draft, or at another head. A rejection by the host is a PortError.

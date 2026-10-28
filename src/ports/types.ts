@@ -158,6 +158,19 @@ export const Rerun = z.object({
 });
 export type Rerun = z.infer<typeof Rerun>;
 
+/** How many characters of a check's log `checkLog` answers: the last of them. */
+export const CHECK_LOG_TAIL = 20_000;
+
+/** The tail of one check's log. */
+export const CheckLog = z.object({
+  number: z.number().int(),
+  name: z.string(),
+  log: z.string(),
+  url: z.string().optional(),
+  raw: Raw,
+});
+export type CheckLog = z.infer<typeof CheckLog>;
+
 // Merges
 
 export const MergeMethod = z.enum(['merge', 'squash', 'rebase']);

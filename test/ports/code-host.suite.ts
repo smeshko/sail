@@ -6,6 +6,7 @@ import { expect, test } from 'bun:test';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
 import type { CodeHost } from '../../src/ports/code-host';
 import {
+  CheckLog,
   Checks,
   CodeHostCapabilities,
   Labelled,
@@ -52,10 +53,10 @@ export interface CodeHostWorld {
   /** One whose merge the host rejects. Where that can't be arranged, it is left out and named unarranged. */
   readonly rejectedMerge?: number;
   /**
-   * An open pull request with a failed check the host can rerun, and that check's name. Where that can't be arranged,
-   * it is left out and named unarranged.
+   * An open pull request with a failed check the host can rerun and read the log of, that check's name and its log
+   * (short). Where that can't be arranged, it is left out and named unarranged.
    */
-  readonly failedCheck?: { readonly number: number; readonly name: string };
+  readonly failedCheck?: { readonly number: number; readonly name: string; readonly log: string };
   /** Refs the adapter accepts, each with the number it names. */
   readonly refs: readonly (readonly [string, number])[];
   /** A checkout holding a new commit, a branch no pull request uses, and that commit's sha. */
@@ -276,6 +277,7 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
       ['getPullRequest', () => adapter.getPullRequest(missing)],
       ['checks', () => adapter.checks(missing)],
       ['rerunChecks', () => adapter.rerunChecks(missing)],
+      ['checkLog', () => adapter.checkLog(missing, 'verify')],
       ['merge', () => adapter.merge(missing, { method: 'squash', expectedHeadSha: 'a'.repeat(40) })],
       ['addLabel', () => adapter.addLabel(missing, world.label)],
       ['removeLabel', () => adapter.removeLabel(missing, world.label)],
@@ -325,6 +327,37 @@ export function codeHostSuite(label: string, make: MakeCodeHost, unarranged: rea
         { type: 'codehost:checks_rerun', number: failed.number, headSha, checks: [failed.name] },
       ]);
       expectValidEvents(capture);
+    },
+  );
+
+  test.skipIf(unarranged.includes('failedCheck'))(
+    `${label}: checkLog answers the log of a check by its name, and emits nothing`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const failed = world.failedCheck;
+      if (failed === undefined) throw new Error('no failedCheck in the world, and none named unarranged');
+      const answer = await adapter.checkLog(failed.number, failed.name);
+      expect(parseIssues(CheckLog, answer)).toEqual([]);
+      expect({ number: answer.number, name: answer.name, log: answer.log, events: capture.events }).toEqual({
+        number: failed.number,
+        name: failed.name,
+        log: failed.log,
+        events: [],
+      });
+    },
+  );
+
+  test.skipIf(unarranged.includes('failedCheck'))(
+    `${label}: checkLog of a check the head does not have is not_found, and emits nothing`,
+    async () => {
+      const { adapter, world, capture } = await start();
+      const failed = world.failedCheck;
+      if (failed === undefined) throw new Error('no failedCheck in the world, and none named unarranged');
+      const error = await rejection(adapter.checkLog(failed.number, 'no-such-check'));
+      expect({ failure: portFailure(error), events: capture.events }).toEqual({
+        failure: { port: 'codeHost', op: 'checkLog', code: 'not_found' },
+        events: [],
+      });
     },
   );
 

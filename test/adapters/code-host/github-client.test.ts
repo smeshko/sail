@@ -67,6 +67,40 @@ test('a 201 answers the parsed body, and the request carries the method, the fou
   ]);
 });
 
+test('an empty 2xx answer, such as the 201 of a rerun, is undefined, not an error', async () => {
+  const { github } = client(() => new Response(null, { status: 201 }));
+  expect(await github.request('rerunChecks', 'POST', github.repoPath('actions', 'runs', 9, 'rerun-failed-jobs'))).toBe(
+    undefined,
+  );
+});
+
+test('requestText sends a GET with the four headers and reads the answer as text, however it looks', async () => {
+  const log = '2026-10-28T10:00:00Z ##[error]{"not":"json"}\n';
+  const { github, sent } = client(() => new Response(log, { status: 200, headers: { 'Content-Type': 'text/plain' } }));
+  const answer = await github.requestText('checkLog', github.repoPath('actions', 'jobs', 5, 'logs'));
+  expect({ answer, method: sent[0]?.method, url: sent[0]?.url, authorization: sent[0]?.headers.authorization }).toEqual(
+    {
+      answer: log,
+      method: 'GET',
+      url: `${API}/repos/o/r/actions/jobs/5/logs`,
+      authorization: `Bearer ${TOKEN}`,
+    },
+  );
+});
+
+test('requestText maps a 404 to not_found with GitHub’s message, and masks the token in a log', async () => {
+  const missing = client(() => json(404, { message: 'Not Found' }));
+  const error = await rejection(
+    missing.github.requestText('checkLog', missing.github.repoPath('actions', 'jobs', 5, 'logs')),
+  );
+  const echoing = client(() => new Response(`token ${TOKEN} leaked`, { status: 200 }));
+  const masked = await echoing.github.requestText('checkLog', echoing.github.repoPath('actions', 'jobs', 5, 'logs'));
+  expect<unknown>({ failure: failure(error), leaked: masked.includes(TOKEN) }).toEqual({
+    failure: { code: 'not_found', message: 'codeHost.checkLog: GitHub 404: Not Found' },
+    leaked: false,
+  });
+});
+
 const RESET = 1_790_000_000;
 
 test.each<[string, () => Response, string, string]>([

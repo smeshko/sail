@@ -3,7 +3,7 @@
 // Each is read in pages of 100 until GitHub's `total_count` is reached, and an answer GitHub doesn't document reads as
 // failed: a check sail can't read is never one that passed.
 import { PortError } from '../../ports/errors';
-import type { Check, CheckStatus } from '../../ports/types';
+import { CHECK_LOG_TAIL, type Check, type CheckStatus } from '../../ports/types';
 import type { GitHubClient } from './github-client';
 
 /** A check run as GitHub's `check-runs` endpoint lists it: the fields the adapter reads. */
@@ -269,4 +269,24 @@ export async function readChecks(
     })),
   ];
   return { checks, raw: { checkRuns, statuses } };
+}
+
+/**
+ * The log of `sha`'s latest check run named `name`, cut to its last `CHECK_LOG_TAIL` characters. A check run's id is the
+ * id of its Actions job; a commit status, an unknown name and a run with no job log (another app's) are `not_found`.
+ */
+export async function readCheckLog(
+  client: GitHubClient,
+  op: string,
+  sha: string,
+  name: string,
+): Promise<{ log: string; url?: string }> {
+  const { latest } = await readRuns(client, op, sha);
+  const run = latest.find((each) => each.name === name);
+  if (run === undefined || !Number.isInteger(run.id)) {
+    throw new PortError('codeHost', op, 'not_found', `no check run named ${name} on ${sha}`);
+  }
+  const text = await client.requestText(op, client.repoPath('actions', 'jobs', run.id as number, 'logs'));
+  const url = run.html_url ?? undefined;
+  return { log: text.slice(-CHECK_LOG_TAIL), ...(url === undefined ? {} : { url }) };
 }

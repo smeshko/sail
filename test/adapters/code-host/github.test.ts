@@ -142,6 +142,7 @@ function suiteWorld(): GitHubWorld {
         number: 13,
         head: 'sail/failing',
         checkRuns: [{ id: 1, name: 'verify', status: 'completed', conclusion: 'failure', check_suite: { id: 55 } }],
+        jobLogs: { 1: '(fail) sail show prints a zero total' },
         workflowRuns: [{ id: 900, workflow_id: 5, check_suite_id: 55 }],
       },
     ],
@@ -160,7 +161,7 @@ const offline = (on: GitHubWorld): CodeHostWorld => ({
   missing: 99,
   pendingMerge: 12,
   rejectedMerge: 11,
-  failedCheck: { number: 13, name: 'verify' },
+  failedCheck: { number: 13, name: 'verify', log: '(fail) sail show prints a zero total' },
   refs: [
     ['7', 7],
     ['#7', 7],
@@ -957,6 +958,30 @@ test('rerunChecks leaves out a check whose workflow run GitHub refuses to rerun,
   on.inject('POST /actions/runs/900/rerun-failed-jobs', { status: 403, body: { message: 'Forbidden' } });
   const result = await settle(host(on).rerunChecks(7));
   expect('rejected' in result ? result : result.rerun).toEqual(['unit']);
+});
+
+test('checkLog answers the last 20 000 characters of the job log, and a commit status or an unknown name is not_found', async () => {
+  const log = `${'a'.repeat(15_000)}${'b'.repeat(10_000)}`;
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [failedRun(1, 'verify', 55)],
+        statuses: [{ context: 'deploy', state: 'failure' }],
+        jobLogs: { 1: log },
+      },
+    ],
+  });
+  const read = await settle(host(on).checkLog(7, 'verify'));
+  const status = await settle(host(on).checkLog(7, 'deploy'));
+  const unknown = await settle(host(on).checkLog(7, 'nope'));
+  const code = (each: typeof status) => ('rejected' in each ? (each.rejected as { code?: string }).code : 'answered');
+  expect({
+    tail: 'rejected' in read ? read : read.log === log.slice(-20_000),
+    status: code(status),
+    unknown: code(unknown),
+  }).toEqual({ tail: true, status: 'not_found', unknown: 'not_found' });
 });
 
 test("runs of different names are each kept in GitHub's order, beside the latest of a repeated one", async () => {

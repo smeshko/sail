@@ -23,6 +23,8 @@ export interface GitHubClientOptions {
 export interface GitHubClient {
   /** The parsed JSON of the answer to `method path`, or a PortError of the CodeHost operation `op`. */
   request<T>(op: string, method: string, path: string, body?: unknown): Promise<T>;
+  /** The text of the answer to `GET path`, redirects followed, or a PortError of the CodeHost operation `op`. */
+  requestText(op: string, path: string): Promise<string>;
   /** `/repos/{owner}/{repo}/…`, each segment encoded on its own. */
   repoPath(...segments: readonly (string | number)[]): string;
 }
@@ -107,49 +109,65 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
     return new PortError('codeHost', op, 'unavailable', message);
   };
   const encode = (segment: string | number) => encodeURIComponent(String(segment));
+  const parse = (text: string): Body => {
+    try {
+      return { json: JSON.parse(text) };
+    } catch {
+      return { text };
+    }
+  };
+  const failure = (op: string, response: Response, parsed: Body): PortError => {
+    const code = response.ok ? 'unavailable' : codeFor(response, parsed);
+    const limited = response.status === 429 || isRateLimit(response, parsed);
+    const reset = code === 'unavailable' && limited ? resetOf(response) : '';
+    const raw = 'json' in parsed ? parsed.json : undefined;
+    return new PortError('codeHost', op, code, `${githubMessage(response.status, parsed)}${reset}`, raw);
+  };
+  const exchange = async (op: string, method: string, path: string, body?: unknown) => {
+    const send = options.fetch ?? fetch;
+    let response: Response;
+    try {
+      response = await send(`${apiUrl}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${options.token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'sail',
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      throw transport(op, error, `GitHub is unreachable at ${host}`);
+    }
+    try {
+      // Masked whole, before anything cuts it: a token across the cut would leave a fragment no redactor knows.
+      return { response, text: redact.text(await response.text()) };
+    } catch (error) {
+      throw transport(op, error, `the answer from GitHub at ${host} broke off`);
+    }
+  };
   return {
     repoPath: (...segments) => ['', 'repos', options.owner, options.repo, ...segments].map(encode).join('/'),
     async request<T>(op: string, method: string, path: string, body?: unknown) {
       try {
-        const send = options.fetch ?? fetch;
-        let response: Response;
-        let text: string;
-        try {
-          response = await send(`${apiUrl}${path}`, {
-            method,
-            headers: {
-              Authorization: `Bearer ${options.token}`,
-              Accept: 'application/vnd.github+json',
-              'X-GitHub-Api-Version': '2022-11-28',
-              'User-Agent': 'sail',
-              ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-            },
-            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-            signal: AbortSignal.timeout(timeoutMs),
-          });
-        } catch (error) {
-          throw transport(op, error, `GitHub is unreachable at ${host}`);
-        }
-        try {
-          // Masked whole, before anything cuts it: a token across the cut would leave a fragment no redactor knows.
-          text = redact.text(await response.text());
-        } catch (error) {
-          throw transport(op, error, `the answer from GitHub at ${host} broke off`);
-        }
-        let parsed: Body;
+        const { response, text } = await exchange(op, method, path, body);
         // An empty 2xx body, such as the 201 of a rerun, answers undefined.
         if (response.ok && text === '') return undefined as T;
-        try {
-          parsed = { json: JSON.parse(text) };
-        } catch {
-          parsed = { text };
-        }
+        const parsed = parse(text);
         if (response.ok && 'json' in parsed) return parsed.json as T;
-        const code = response.ok ? 'unavailable' : codeFor(response, parsed);
-        const limited = response.status === 429 || isRateLimit(response, parsed);
-        const reset = code === 'unavailable' && limited ? resetOf(response) : '';
-        const raw = 'json' in parsed ? parsed.json : undefined;
-        throw new PortError('codeHost', op, code, `${githubMessage(response.status, parsed)}${reset}`, raw);
+        throw failure(op, response, parsed);
+      } catch (error) {
+        throw redact.error(error);
+      }
+    },
+    async requestText(op: string, path: string) {
+      try {
+        const { response, text } = await exchange(op, 'GET', path);
+        if (response.ok) return text;
+        throw failure(op, response, parse(text));
       } catch (error) {
         throw redact.error(error);
       }

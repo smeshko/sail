@@ -77,6 +77,7 @@ export const OPERATIONS: Record<Port, string[]> = {
   codeHost: [
     'addLabel',
     'capabilities',
+    'checkLog',
     'checks',
     'comment',
     'getPullRequest',

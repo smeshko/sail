@@ -140,6 +140,7 @@ const POSITIONALS = {
   branch: 'a branch',
   pr: 'a pull request',
   label: 'a label',
+  name: 'a check name',
 } as const;
 export type Positional = keyof typeof POSITIONALS;
 

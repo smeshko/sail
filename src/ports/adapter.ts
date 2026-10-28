@@ -94,6 +94,7 @@ export const PORT_OPERATIONS = {
     'getPullRequest',
     'checks',
     'rerunChecks',
+    'checkLog',
     'merge',
     'addLabel',
     'removeLabel',

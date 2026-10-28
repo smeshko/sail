@@ -359,6 +359,7 @@ export default {
     getPullRequest: nothing,
     checks: nothing,
     rerunChecks: nothing,
+    checkLog: nothing,
     merge: nothing,
     addLabel: nothing,
     removeLabel: nothing,
@@ -399,6 +400,7 @@ const HEAD = {
 
 const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${RELABEL_USAGE}${ATTACH_USAGE}${PUSH_USAGE}${OPEN_USAGE}       sail port codehost get-pull-request|checks|rerun-checks <pr>
        sail port codehost list-designated <label>
+       sail port codehost check-log <pr> <name>
        sail port codehost merge <pr> --method <merge|squash|rebase> --expected-head-sha <sha>
        sail port codehost add-label|remove-label <pr> <label>
        sail port codehost comment <pr> [--body-file <path>]
@@ -496,6 +498,21 @@ test("rerun-checks prints the port's Rerun naming the failed check after the fak
       code: EXIT_OK,
       stderr: '',
       printed: { number: 4, headSha: world(repo.dir).pullRequests[3].headSha, rerun: ['ci'] },
+    });
+  });
+});
+
+test("check-log prints the port's CheckLog of the named check, and a name the pull request has no log for exits 1", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const found = await codehost(repo, ['check-log', '#4', 'ci']);
+    const { raw: _raw, ...printed } = oneLine(found.stdout);
+    const missing = await codehost(repo, ['check-log', '4', 'nope']);
+    expect({ code: found.code, stderr: found.stderr, printed, missing: missing.code }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      printed: { number: 4, name: 'ci', log: '(fail) sail whisper prints nothing' },
+      missing: 1,
     });
   });
 });
@@ -717,6 +734,8 @@ test.each<[string[], string]>([
   [['checks'], 'codehost checks needs a pull request'],
   [['checks', '4', 'extra'], "unknown argument 'extra'"],
   [['rerun-checks'], 'codehost rerun-checks needs a pull request'],
+  [['check-log'], 'codehost check-log needs a pull request'],
+  [['check-log', '4'], 'codehost check-log needs a check name'],
   [['merge', '--method', 'squash', '--expected-head-sha', HEAD[3]], 'codehost merge needs a pull request'],
   [['merge', '3', 'extra', '--method', 'squash', '--expected-head-sha', HEAD[3]], "unknown argument 'extra'"],
   [['add-label'], 'codehost add-label needs a pull request'],
