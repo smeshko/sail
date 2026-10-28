@@ -26,7 +26,8 @@
 //
 // A script step's `sail port jev ask` emits a `jev:asked` under its key. Each one is summed into its call, its step when
 // the key holds one, and the run's totals; one with no key counts in the totals alone. A call that starts again starts
-// its count over, as it does its other facts. A run that asked Jev nothing has no `jev` anywhere.
+// its count over, as it does its other facts, from the steps it keeps. A run that asked Jev nothing has no `jev`
+// anywhere.
 import { INTAKE_KEY } from '../engine/intake';
 import type { JournalEntry } from '../engine/journal';
 import type { StopReason } from '../engine/run-dir';
@@ -351,6 +352,10 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
   const feedback = Object.values(event.consumed).find((from): from is string => from !== null && held.has(from));
   const earlier = event.kind === 'stage' ? state.calls.get(event.key) : undefined;
   const kept = earlier === undefined ? [] : [...earlier.steps].filter(([, step]) => step.end !== undefined);
+  const jev = kept.reduce<JevTotals | undefined>(
+    (sum, [, step]) => (step.jev === undefined ? sum : sumJev(sum, step.jev)),
+    undefined,
+  );
   state.calls.set(event.key, {
     key: event.key,
     kind: event.kind,
@@ -360,6 +365,7 @@ function startCall(state: SummaryState, event: EventOf<'intake:start'> | EventOf
     ...(feedback === undefined ? {} : { feedback }),
     files: [...new Set(kept.flatMap(([, step]) => step.files))],
     steps: new Map(kept),
+    ...(jev === undefined ? {} : { jev }),
   });
 }
 
@@ -449,16 +455,20 @@ function foldSession(state: SummaryState, event: EventOf<'harness:session_end'>)
 
 /** `into` with one Jev call added: usage is summed only once a call has reported it. */
 function addJev(into: JevTotals | undefined, event: EventOf<'jev:asked'>): JevTotals {
+  const one: JevTotals = { calls: 1, questions: event.questions, latencyMs: event.latencyMs };
+  return sumJev(into, event.usage === undefined ? one : { ...one, ...event.usage });
+}
+
+/** `into`, which may be none, and `more` summed: usage is summed only once either has reported it. */
+function sumJev(into: JevTotals | undefined, more: JevTotals): JevTotals {
   const next: JevTotals = {
-    calls: (into?.calls ?? 0) + 1,
-    questions: (into?.questions ?? 0) + event.questions,
-    latencyMs: (into?.latencyMs ?? 0) + event.latencyMs,
+    calls: (into?.calls ?? 0) + more.calls,
+    questions: (into?.questions ?? 0) + more.questions,
+    latencyMs: (into?.latencyMs ?? 0) + more.latencyMs,
   };
-  const inputTokens = (into?.inputTokens ?? 0) + (event.usage?.inputTokens ?? 0);
-  const outputTokens = (into?.outputTokens ?? 0) + (event.usage?.outputTokens ?? 0);
-  if (into?.inputTokens !== undefined || event.usage !== undefined) {
-    next.inputTokens = inputTokens;
-    next.outputTokens = outputTokens;
+  if (into?.inputTokens !== undefined || more.inputTokens !== undefined) {
+    next.inputTokens = (into?.inputTokens ?? 0) + (more.inputTokens ?? 0);
+    next.outputTokens = (into?.outputTokens ?? 0) + (more.outputTokens ?? 0);
   }
   return next;
 }

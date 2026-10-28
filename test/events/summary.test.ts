@@ -905,6 +905,34 @@ test('jev:asked events sum per call, per step and in the totals, usage included,
   expect(summary?.totals.jev).toEqual({ calls: 3, questions: 6, latencyMs: 740, inputTokens: 160, outputTokens: 9 });
 });
 
+test('a multi-step call a resume started again between its steps keeps the Jev calls of the steps it ended, and a step it runs again starts its count over, though the totals count every try (review R3, R5)', () => {
+  const summary = folded(
+    stamp(
+      [0, runStart()],
+      [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [110, stepStart('publish#1/describe', 1, 2, 'script')],
+      [120, asked('publish#1/describe', 3, 400, { inputTokens: 100, outputTokens: 5 })],
+      [200, stepEnd('publish#1/describe', 1, 'passed')],
+      [210, stepStart('publish#1/open', 2, 2, 'script')],
+      [220, asked('publish#1/open', 4, 300)],
+      [300, runEnd('suspended', 1, { stopReason: 'interrupted' })],
+      [5000, start('publish#1', { kind: 'stage', steps: ['describe', 'open'] })],
+      [5100, stepStart('publish#1/open', 2, 2, 'script')],
+      [5110, asked('publish#1/open', 2, 250, { inputTokens: 60, outputTokens: 4 })],
+      [5600, stepEnd('publish#1/open', 2, 'passed')],
+      [5700, end('publish#1', 'passed', 600)],
+      [5800, runEnd('completed', 1)],
+    ),
+  );
+  const [publish] = summary?.calls ?? [];
+  expect(publish?.steps?.map((step) => [step.key, step.jev])).toEqual([
+    ['publish#1/describe', { calls: 1, questions: 3, latencyMs: 400, inputTokens: 100, outputTokens: 5 }],
+    ['publish#1/open', { calls: 1, questions: 2, latencyMs: 250, inputTokens: 60, outputTokens: 4 }],
+  ]);
+  expect(publish?.jev).toEqual({ calls: 2, questions: 5, latencyMs: 650, inputTokens: 160, outputTokens: 9 });
+  expect(summary?.totals.jev).toEqual({ calls: 3, questions: 9, latencyMs: 950, inputTokens: 160, outputTokens: 9 });
+});
+
 test('a jev:asked with no key counts in the totals alone', () => {
   const summary = folded(
     stamp([0, runStart()], [100, start('spec#1')], [110, asked(undefined, 2, 70)], [200, end('spec#1', 'passed', 100)]),
