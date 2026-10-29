@@ -57,7 +57,7 @@ The hidden `<!-- sail:ticket KEY -->` line in a pull request's body. It names th
 _Avoid_: ticket tag, PR link
 
 **Claim**:
-Moving a designated ticket to In Progress through TicketSource, and commenting on it with the run id. The intake makes it, not the start: the built-in `ticket` intake claims inside `intake#1` and records the claim in that call's `result.json`, and a repository intake claims only when a step runs `sail port ticket-source claim`. A later try of `intake#1` whose earlier try's claim took, as its `ticket:claimed` in the run's stream shows, completes that claim and posts the comment, rather than losing the ticket to itself. Opening a run moves nothing, so a workflow that only reads its ticket, such as a grooming one, leaves it where it is. After a claim the ticket is no longer in a pick-up state, so a restart cannot pick it up twice. A claim another start took first fails the run. A forced run of a ticket that is not in a pick-up state makes no claim: it moves the ticket to In Progress through `update`.
+Moving a designated ticket to In Progress through TicketSource, and commenting on it with the run id. The intake makes it, not the start: the built-in `ticket` intake claims inside `intake#1` and records the claim in that call's `result.json`, and a repository intake claims only when a step runs `sail port ticket-source claim`. A later try of the built-in `ticket` intake's `intake#1` whose earlier try's claim took, as its `ticket:claimed` in the run's stream shows, completes that claim and posts the comment, rather than losing the ticket to itself. Opening a run moves nothing, so a workflow that only reads its ticket, such as a grooming one, leaves it where it is. After a claim the ticket is no longer in a pick-up state, so a restart cannot pick it up twice. A claim another start took first fails the run. A forced run of a ticket that is not in a pick-up state makes no claim: it moves the ticket to In Progress through `update`.
 _Avoid_: lock, reserve, take
 
 **Forced run**:
@@ -339,7 +339,7 @@ What was asked, written once at start and never changed: the source, the workflo
 _Avoid_: manifest, metadata, config snapshot
 
 **Journal**:
-The append-only record of completed calls and steps (key, outcome, output, files). It is the only state a resume needs.
+The append-only record of completed calls and steps (key, outcome, output, files). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
 _Avoid_: log, history, state file, checkpoint
 
 **Replay**:
