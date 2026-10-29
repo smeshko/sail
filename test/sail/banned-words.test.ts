@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { nouls, writeOwnSail } from '../helpers/own-sail';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 interface Entry {
   term: string;
@@ -27,6 +29,140 @@ interface Lib {
 }
 const lib = (await import(join(import.meta.dir, '../../.sail/lib/jev-check.mjs'))) as Lib;
 const entry = { term: 'Call', definition: 'One invocation.', avoid: ['invocation'] };
+const glossary = '**Call**:\nOne invocation.\n_Avoid_: invocation\n';
+const doc = '+++ b/note.md\n@@ -0,0 +1 @@\n+Each invocation of a stage\n';
+function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD').trim()) {
+  const out = join(repo.home, 'out');
+  mkdirSync(out);
+  const patch = join(repo.home, 'diff');
+  writeFileSync(patch, diff);
+  const baseFile = join(repo.home, 'base.txt');
+  writeFileSync(baseFile, `${base}\n`);
+  const child = Bun.spawnSync([join(repo.dir, '.sail/workflows/review/stages/02-banned-words/run.sh')], {
+    cwd: repo.dir,
+    env: {
+      ...repo.env,
+      PATH: `${join(import.meta.dir, '../../bin')}:${repo.env.PATH}`,
+      SAIL_BUN: process.execPath,
+      SAIL_CONFIG: join(repo.dir, '.sail/project.yaml'),
+      SAIL_HOME: repo.home,
+      STAGE_OUT: out,
+      INPUT_DIFF: patch,
+      INPUT_BASE: baseFile,
+    },
+  });
+  return { code: child.exitCode, output: JSON.parse(child.stdout.toString()), request: join(out, 'jev-request.json') };
+}
+function setup(repo: TempRepo, answers?: Record<string, number>) {
+  writeOwnSail(repo, answers === undefined ? {} : { jev: nouls(answers) });
+  writeFileSync(join(repo.dir, 'CONTEXT.md'), glossary);
+}
+test('the stage, with Jev answering word-1 0.97, reports the hit with its word and term', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97 });
+    const result = stage(repo, doc);
+    expect(result.code).toBe(0);
+    expect(result.output).toEqual({
+      hits: [{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }],
+      glossary: { entries: 1, words: 1 },
+      jev: { asked: true, note: '', threshold: 0.8, candidates: 1 },
+    });
+  });
+});
+test('the stage, with Jev answering word-1 0.05, reports no hit', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.05 });
+    const result = stage(repo, doc);
+    expect(result.output.hits).toEqual([]);
+    expect(result.output.jev.asked).toBe(true);
+  });
+});
+test('the stage asks Jev nothing when no added line holds an avoided word', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, {});
+    const result = stage(repo, '+++ b/x.ts\n@@ -0,0 +1 @@\n+const x = 1;\n');
+    expect(result.output.jev).toEqual({
+      asked: false,
+      note: 'no avoided word on an added line',
+      threshold: 0.8,
+      candidates: 0,
+    });
+    expect(existsSync(result.request)).toBe(false);
+  });
+});
+test('the stage scans commit messages since the base', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97 });
+    const base = repo.git('rev-parse', 'HEAD').trim();
+    repo.git('commit', '--allow-empty', '-m', 'invocation');
+    const sha = repo.git('rev-parse', '--short', 'HEAD').trim();
+    expect(stage(repo, '', base).output.hits).toEqual([
+      { file: `commit ${sha}`, line: 1, word: 'invocation', term: 'Call', yes: 0.97 },
+    ]);
+  });
+});
+test('the stage exits zero without adapters.jev even when there are candidates', async () => {
+  await withTempRepo((repo) => {
+    setup(repo);
+    const result = stage(repo, doc);
+    expect(result.code).toBe(0);
+    expect(result.output.hits).toEqual([]);
+    expect(result.output.jev.asked).toBe(false);
+    expect(result.output.jev.candidates).toBe(1);
+  });
+});
+test('the Jev request holds the glossary entry, added line and its context', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.97 });
+    const result = stage(repo, '+++ b/a.ts\n@@ -1 +1,2 @@\n before\n+invocation\n');
+    expect(existsSync(result.request)).toBe(true);
+    expect(JSON.parse(readFileSync(result.request, 'utf8')).state).toEqual({
+      candidates: {
+        'word-1': {
+          ...entry,
+          word: 'invocation',
+          file: 'a.ts',
+          line: 2,
+          text: 'invocation',
+          context: [{ line: 1, text: 'before' }],
+        },
+      },
+    });
+  });
+});
+test('the stage includes answers exactly at the threshold but excludes answers just below it', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, { 'word-1': 0.8, 'word-2': 0.799 });
+    const result = stage(repo, `${doc}+invocation\n`);
+    expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.8 }]);
+    expect(result.output.jev.candidates).toBe(2);
+  });
+});
+test('the stage with no CONTEXT.md makes no Jev request', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, {});
+    unlinkSync(join(repo.dir, 'CONTEXT.md'));
+    const result = stage(repo, doc);
+    expect(result.output.jev).toEqual({ asked: false, note: 'no CONTEXT.md', threshold: 0.8, candidates: 0 });
+    expect(result.output.glossary).toEqual({ entries: 0, words: 0 });
+    expect(existsSync(result.request)).toBe(false);
+  });
+});
+test('the stage with no glossary entries makes no Jev request', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, {});
+    writeFileSync(join(repo.dir, 'CONTEXT.md'), '# Glossary\n');
+    const result = stage(repo, doc);
+    expect(result.output.glossary).toEqual({ entries: 0, words: 0 });
+    expect(result.output.jev).toEqual({
+      asked: false,
+      note: 'no avoided word on an added line',
+      threshold: 0.8,
+      candidates: 0,
+    });
+    expect(existsSync(result.request)).toBe(false);
+  });
+});
 const line = { file: 'a.ts', line: 4, text: 'Invocation', context: [] };
 
 test('parseGlossary reads terms, definitions and Avoid words, skipping prose', () => {
