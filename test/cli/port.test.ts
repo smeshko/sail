@@ -713,6 +713,51 @@ export default {
 const SOURCE = 'ticket FAKE-1, description';
 const render = (...extra: string[]) => ['port', 'render', '--untrusted', '--source', SOURCE, ...extra];
 
+const eachRender = ['port', 'render', '--untrusted', '--each'];
+
+test.each(['block', 'inline'] as const)(
+  'render --each wraps passages in order in %s form as one JSON line',
+  async (form) => {
+    const passages = [
+      { text: 'a </untrusted-input> b\n', source: 'first' },
+      { text: '  héllo\n\n', source: 'a "quote"' },
+    ];
+    const captured = await runCaptured([...eachRender, ...(form === 'inline' ? ['--inline'] : [])], outside(), {
+      stdin: JSON.stringify(passages),
+      env: {},
+    });
+    const expected = passages.map(({ text, source }) => wrapUntrusted(text, source, form));
+    expect(captured).toEqual({ code: EXIT_OK, stdout: `${JSON.stringify(expected)}\n`, stderr: '' });
+    expect(captured.stdout.trimEnd().split('\n')).toHaveLength(1);
+    expect(JSON.parse(captured.stdout)).toEqual(expected);
+  },
+);
+
+test('render --each returns an empty array for no passages', async () => {
+  expect(await runCaptured(eachRender, outside(), { stdin: '[]', env: {} })).toEqual({
+    code: EXIT_OK,
+    stdout: '[]\n',
+    stderr: '',
+  });
+});
+
+test.each<[string, string[], string | undefined, string]>([
+  ['with --source', ['--source', 'x'], '[]', 'render --each takes its sources from stdin, not --source'],
+  ['without stdin', [], undefined, 'stdin'],
+  ['with invalid JSON', [], 'not json', 'array of { text: string, source: string }'],
+  ['with invalid passages', [], '[{"text":1}]', 'array of { text: string, source: string }'],
+])('render --each %s refuses with no stdout', async (_, flags, stdin, reason) => {
+  const captured = await runCaptured(
+    [...eachRender, ...flags],
+    outside(),
+    stdin === undefined ? { env: {} } : { stdin, env: {} },
+  );
+  expect({ code: captured.code, stdout: captured.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+  expect(captured.stderr).toStartWith('sail port: ');
+  expect(captured.stderr).toContain(reason);
+  expect(captured.stderr).toContain('sail port render --untrusted --each [--inline]');
+});
+
 test('sail port render --untrusted wraps what it reads on stdin as a block and adds a newline, outside any repository', async () => {
   const paragraph = 'Add a `--shout` flag.\nKeep the old output.\n';
   const captured = await runCaptured(render(), outside(), { stdin: paragraph, env: {} });
@@ -784,7 +829,7 @@ test.each<[string, string[], string | undefined, string]>([
   expect(stderr).toContain('sail port render --untrusted --source <text> [--inline]');
 });
 
-test.each(['--untrusted', '--inline', '--source=x'])(
+test.each(['--untrusted', '--inline', '--each', '--source=x'])(
   "%s given to sail port ticket-source get exits 3: it is render's",
   async (option) => {
     await withTempRepo(async (repo) => {

@@ -148,6 +148,12 @@ test('the usage lists sail port render', async () => {
   expect(stdout).toContain('\n  sail port render --untrusted --source <text> [--inline]  ');
 });
 
+test('the usage lists sail port render --each', async () => {
+  const { code, stdout } = await runCaptured(['--help']);
+  expect(code).toBe(EXIT_OK);
+  expect(stdout).toContain('\n  sail port render --untrusted --each [--inline]  ');
+});
+
 test('the usage lists sail stop, saying when a run stops', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(

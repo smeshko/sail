@@ -79,6 +79,7 @@ Usage:
   sail port codehost <operation> [arguments]                 Run a code host operation: sail port codehost lists them
   sail port jev ask [--model <id>] [--body-file <path>]      Ask Jev the questions in a JSON body; typed answers on stdout
   sail port render --untrusted --source <text> [--inline]    Wrap stdin as untrusted input
+  sail port render --untrusted --each [--inline]             Wrap each passage of a JSON array on stdin; a JSON array out
   sail --version                                             Print the version
   sail --help                                                Print this help
 
@@ -238,6 +239,7 @@ const commands = new Map<string, CommandSpec>([
         untrusted: { type: 'boolean' },
         source: { type: 'string' },
         inline: { type: 'boolean' },
+        each: { type: 'boolean' },
         base: { type: 'string' },
         head: { type: 'string' },
         title: { type: 'string' },
