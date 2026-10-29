@@ -12,8 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const { wrapAll } = await import(pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'untrusted.mjs')).href);
-const { openTickets, excerpt, sameWork, SAME_WORK, MAX_QUESTIONS, MAX_REQUEST_BYTES } = await import(
+const { openTickets, wrapAll, excerpt, sameWork, SAME_WORK, MAX_QUESTIONS, MAX_REQUEST_BYTES } = await import(
   pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
 );
 

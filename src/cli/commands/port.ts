@@ -20,12 +20,13 @@
 //                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
 //   sail port jev ask [--model <id>] [--body-file <path>]    asks Jev the questions in the JSON body: port-jev.ts
-//   sail port render --untrusted (--source <text> [--inline] | --batch [--inline])    text or JSON passages, wrapped
+//   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
+//   sail port render --untrusted --each [--inline]    a JSON array of passages in, a JSON array of wrapped strings out
 //
 // Arguments go in as positionals and flags, and a result comes out as one line of JSON on stdout, so a bash script
 // builds no JSON. A failed port call exits 1 with the port's message, and anything refused before a call is made exits
-// 3: every refusal comes before the port is called, and before stdin is read, except an empty port body or an invalid
-// render batch body. Those are refused once read.
+// 3: every refusal comes before the port is called, and before stdin is read, with two exceptions. An empty body
+// (from a file or stdin), and malformed render --each stdin, are refused once read.
 //
 // Each port is a table of operations of one shape: an operation names its positionals and its options, and returns the
 // value to print. This module dispatches over the tables, checks a command line against the operation's row, reads a
@@ -75,8 +76,9 @@ import { findProject, refuseAs } from './run-workflow';
 const COMMAND = 'sail port';
 
 /** The options that are `render`'s alone. */
-const RENDER_OPTIONS = ['untrusted', 'source', 'inline', 'batch'] as const;
-const RENDER_USAGE = 'render --untrusted (--source <text> [--inline] | --batch [--inline])';
+const RENDER_OPTIONS = ['untrusted', 'source', 'inline', 'each'] as const;
+const RENDER_USAGE = ['render --untrusted --source <text> [--inline]', 'render --untrusted --each [--inline]'];
+const Passages = z.array(z.object({ text: z.string(), source: z.string() }));
 
 /** How an operation takes one of its options. */
 export interface OptionUse {
@@ -429,7 +431,7 @@ function usageLines(): string[] {
     }
     for (const [takes, names] of named) lines.push(`${port} ${names.join('|')} ${takes}`);
   }
-  return [...lines, RENDER_USAGE];
+  return [...lines, ...RENDER_USAGE];
 }
 
 const USAGE = `usage: ${usageLines()
@@ -493,7 +495,9 @@ function portErrorEvent(error: PortError): PortErrorEvent | undefined {
 }
 
 /**
- * Wrap stdin or a batch of JSON passages exactly as the engine does. An invalid batch is refused after reading.
+ * `sail port render --untrusted --source <text> [--inline]`: stdin, wrapped exactly as the engine wraps a passage. Every
+ * `--each` instead reads a JSON array of { text, source } and prints wrapped strings as a JSON array. Every refusal
+ * comes before stdin is read, except malformed batch stdin.
  */
 async function render(args: Parsed, io: Io, usage: (message: string) => ExitCode): Promise<ExitCode> {
   const [, extra] = args.positionals;
@@ -502,42 +506,27 @@ async function render(args: Parsed, io: Io, usage: (message: string) => ExitCode
     return usage('render needs --untrusted: it wraps untrusted input, and nothing else yet');
   }
   const { source } = args.values;
-  if (args.values.batch === true) {
-    if (source !== undefined) return usage('render cannot combine --source with --batch');
-    const bodyFile = args.values['body-file'];
-    let text: string;
-    if (typeof bodyFile === 'string') {
-      try {
-        text = readFileSync(resolve(io.cwd, bodyFile), 'utf8');
-      } catch (error) {
-        return usage(
-          `can't read --body-file ${bodyFile}: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`,
-        );
-      }
-    } else {
-      if (io.stdin === undefined) return usage('render batch reads --body-file or stdin, and there is neither');
-      text = await io.stdin();
-    }
-    let body: unknown;
+  const form = args.values.inline === true ? 'inline' : 'block';
+  if (args.values.each === true) {
+    if (source !== undefined) return usage('render --each takes its sources from stdin, not --source');
+    if (io.stdin === undefined) return usage('render reads passages on stdin, and there is no stdin');
+    const text = await io.stdin();
+    let parsed: unknown;
     try {
-      body = JSON.parse(text);
+      parsed = JSON.parse(text);
     } catch {
-      return usage('render batch needs valid JSON');
+      return usage('render --each expects a JSON array of { text: string, source: string } on stdin');
     }
-    const parsed = z.array(z.object({ text: z.string(), source: z.string() })).safeParse(body);
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      return usage(`invalid render batch at ${issue?.path.join('.') || 'body'}: ${issue?.message}`);
-    }
-    io.stdout(
-      `${JSON.stringify(parsed.data.map((p) => wrapUntrusted(p.text, p.source, args.values.inline === true ? 'inline' : 'block')))}\n`,
-    );
+    const passages = Passages.safeParse(parsed);
+    if (!passages.success)
+      return usage('render --each expects a JSON array of { text: string, source: string } on stdin');
+    io.stdout(`${JSON.stringify(passages.data.map(({ text, source }) => wrapUntrusted(text, source, form)))}\n`);
     return EXIT_OK;
   }
   if (typeof source !== 'string') return usage('render needs --source <text>, which says where the text came from');
   if (io.stdin === undefined) return usage('render reads the text on stdin, and there is no stdin');
   const text = await io.stdin();
-  io.stdout(`${wrapUntrusted(text, source, args.values.inline === true ? 'inline' : 'block')}\n`);
+  io.stdout(`${wrapUntrusted(text, source, form)}\n`);
   return EXIT_OK;
 }
 

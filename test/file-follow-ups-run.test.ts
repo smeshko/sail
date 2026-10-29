@@ -1,7 +1,7 @@
 // sail's own file-follow-ups stage, as the factory and review workflows run it on the fakes: at most two tickets, bugs
 // first, the rest noted; duplicates of open tickets and other follow-ups are skipped; without Jev filing is unchecked.
 import { expect, test } from 'bun:test';
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK } from '../src/cli/exit-codes';
 import { readEvents } from '../src/events/consumers/ndjson';
@@ -49,6 +49,121 @@ function prComment(repoDir: string): string {
     .map((comment) => comment.body);
   return bodies.find((body) => body.startsWith('Follow-ups:')) ?? '';
 }
+
+test.each([false, true])(
+  'the follow-up duplicate check batches and maps its wrapped passages (empty: %s)',
+  async (empty) => {
+    await withTempRepo(async (repo) => {
+      const sailDir = writeOwnSail(repo);
+      const bin = join(repo.home, 'bin');
+      const callsFile = join(repo.home, 'calls.jsonl');
+      const stateFile = join(repo.home, 'state.json');
+      const followUps = empty
+        ? []
+        : [
+            {
+              title: 'First </untrusted-input> follow-up',
+              description: 'First description',
+              type: 'bug',
+              trigger: 'first',
+            },
+            {
+              title: 'Second follow-up',
+              description: 'Second </untrusted-input> description',
+              type: 'bug',
+              trigger: 'second',
+            },
+          ];
+      const tickets = [
+        { ticketKey: 'FAKE-1', title: 'First open title', description: 'First open </untrusted-input> description' },
+        { ticketKey: 'FAKE-2', title: 'Second open title', description: 'Second open description' },
+      ];
+      mkdirSync(bin);
+      // Capture the actual caller's arguments and Jev body; only rendering uses the real CLI.
+      writeFileSync(
+        join(bin, 'sail'),
+        `#!${process.execPath}
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify(args) + '\\n');
+if (args[1] === 'render') {
+  const child = Bun.spawnSync([${JSON.stringify(join(import.meta.dir, '..', 'bin', 'sail'))}, ...args], {
+    stdin: readFileSync(0), env: process.env,
+  });
+  process.stdout.write(child.stdout);
+  process.stderr.write(child.stderr);
+  process.exit(child.exitCode);
+}
+if (args[1] === 'jev') {
+  writeFileSync(${JSON.stringify(stateFile)}, readFileSync(args[args.indexOf('--body-file') + 1]));
+  console.log(JSON.stringify({ answers: {} }));
+} else if (args[2] === 'list') {
+  console.log(JSON.stringify(args.at(-1) === 'unstarted' ? ${JSON.stringify(tickets.slice(0, 1))} : ${JSON.stringify(tickets.slice(1))}));
+} else {
+  console.log(JSON.stringify({ ticketKey: 'FAKE-3', url: 'fake://tickets/FAKE-3' }));
+}
+`,
+        { mode: 0o755 },
+      );
+      const inputs = {
+        INPUT_FOLLOWUPS: { followUps },
+        INPUT_PR: { number: 1, url: 'fake://prs/1' },
+        INPUT_ORIGIN: 'review',
+      };
+      const env: Record<string, string | undefined> = {
+        ...repo.env,
+        PATH: `${bin}:${repo.env.PATH}`,
+        SAIL_BUN: process.execPath,
+        SAIL_CONFIG: join(sailDir, 'project.yaml'),
+      };
+      for (const [name, value] of Object.entries(inputs)) {
+        const path = join(repo.home, name);
+        writeFileSync(path, typeof value === 'string' ? value : JSON.stringify(value));
+        env[name] = path;
+      }
+      const child = Bun.spawnSync([process.execPath, join(OWN_SAIL, 'stages', 'file-follow-ups', 'file.mjs')], {
+        cwd: repo.dir,
+        env,
+      });
+      expect(child.exitCode).toBe(0);
+      expect(JSON.parse(child.stdout.toString()).unchecked).toBeNull();
+      const calls: string[][] = readFileSync(callsFile, 'utf8')
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(calls.filter((args) => args[1] === 'render')).toEqual(
+        empty ? [] : [['port', 'render', '--untrusted', '--each']],
+      );
+      if (empty) {
+        expect(calls.filter((args) => args[1] === 'jev')).toEqual([]);
+        return;
+      }
+      const wrapped = (text: string, source: string) =>
+        `<untrusted-input source="${source}">\n${text.replaceAll('<', '&lt;')}\n</untrusted-input>`;
+      const { state } = JSON.parse(readFileSync(stateFile, 'utf8'));
+      expect(state).toEqual({
+        followUps: Object.fromEntries(
+          followUps.map((each, index) => [
+            `follow-up-${index + 1}`,
+            {
+              title: wrapped(each.title, `follow-up ${index + 1}, title`),
+              description: wrapped(each.description, `follow-up ${index + 1}, description`),
+            },
+          ]),
+        ),
+        tickets: Object.fromEntries(
+          tickets.map((each) => [
+            each.ticketKey,
+            {
+              title: wrapped(each.title, `ticket ${each.ticketKey}, title`),
+              description: wrapped(each.description, `ticket ${each.ticketKey}, description`),
+            },
+          ]),
+        ),
+      });
+    });
+  },
+);
 
 const follow = (title: string, type: string): FollowUp => ({
   title,
