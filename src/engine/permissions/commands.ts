@@ -45,6 +45,7 @@ interface Collected {
 /** What an argument the shell expands at run time could add: the flags the deny set looks for. */
 const WORST = ['-rf', '--force', '--hard', '-D', '-delete'];
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+const VALUE_LETTERS: Record<string, string> = { sh: 'o', dash: 'o', zsh: 'o', bash: 'oO', ksh: 'oR' };
 const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly']);
 const GIT_PATHS = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']);
 const OUTPUT = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
@@ -291,7 +292,7 @@ class Collector {
     return { logical: lexical ?? found, physical: found };
   }
 
-  /** A shell running `-c` text is recursed into; one reading its input is refused. Returns false for a script. */
+  /** Consume option values before finding `-c` text or a script; shells reading their input are refused. */
   private shell(name: string, args: readonly Word[], text: string, cwd: Cwd, depth: number): boolean {
     let command = false;
     let input = false;
@@ -302,7 +303,7 @@ class Collector {
         i++;
         break;
       }
-      if (/^[-+]o$/.test(arg)) i++;
+      if (arg === '--emulate' && name === 'zsh') i++;
       else if (arg === '--rcfile' || arg === '--init-file') {
         this.out.refusals.push(`${name} ${arg} runs a file of commands: ${quote(text)}`);
         return true;
@@ -310,6 +311,7 @@ class Collector {
       else if (/^[-+][A-Za-z]+$/.test(arg)) {
         if (arg.startsWith('-') && arg.includes('c')) command = true;
         if (arg.includes('s')) input = true;
+        i += [...arg.slice(1)].filter((letter) => VALUE_LETTERS[name]?.includes(letter)).length;
       } else break;
     }
     if (command) {

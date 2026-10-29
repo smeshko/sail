@@ -57,6 +57,15 @@ test.each([
 });
 
 test.each([
+  ['bash -O extglob -c "rm -rf ."', { commands: ['bash *'] }, DENY('rm -rf')],
+  ['bash +O extglob -c "sudo x"', { commands: ['bash *'] }, DENY('sudo')],
+  ['bash -eo pipefail -c "rm -rf ."', { commands: ['bash *'] }, DENY('rm -rf')],
+  ['bash -co pipefail "rm -rf ."', { commands: ['bash *'] }, DENY('rm -rf')],
+  ['bash -oO pipefail extglob -c "rm -rf ."', { commands: ['bash *'] }, DENY('rm -rf')],
+  ['zsh --emulate sh -c "rm -rf ."', { commands: ['zsh *'] }, DENY('rm -rf')],
+  ['ksh -R x.db -c "rm -rf ."', { commands: ['ksh *'] }, DENY('rm -rf')],
+  ['bash -O extglob scripts/a.sh', { commands: ['bash *'] }, 'allow'],
+  ['bash -O', { commands: ['bash *'] }, CANT],
   ['bash -c "rm -rf ."', { commands: ['bash *'] }, DENY('rm -rf')],
   ["sh -c 'git checkout main'", { commands: ['sh *', 'git *'] }, DENY('git checkout')],
   ['bash -lc "sudo x"', {}, DENY('sudo')],
