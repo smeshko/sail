@@ -13,7 +13,7 @@
 //   5. the source's journal, which must read: an `intake#1` that passed, and a call of the stage. The seed is every
 //      entry before the stage's first call, or before the first line of any of its group's calls, their steps' lines
 //      included: a seed never splits a group, so the seeded run runs the whole group again. A stage with only step lines
-//      and no recorded group is refused, since its group membership is unknown. Each entry must point inside its own
+//      and no recorded group is refused if another call is incomplete too: they may be grouped. Each entry must point inside its own
 //      call directory, at regular files, since that is what a run writes and all the copy takes.
 // Then the run id is minted and the header built and checked, with `fromRun` and no claim: a seeded run reads no
 // ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by
@@ -165,7 +165,8 @@ function callDirs(sourceDir: string, runId: string, entries: readonly JournalEnt
 /**
  * The seed's cut before stage's first call or any line of its group. Step lines carry no group, so read the group
  * from call lines, then include every member's step lines when finding its start. No line of stage means -1.
- * With only steps and no group-bearing call, membership is unknown: refuse rather than risk splitting a group.
+ * With only steps and no group-bearing call, refuse if another call is incomplete too: they may be grouped.
+ * A lone incomplete call is safe: the cut excludes all its steps, and no other incomplete call can be reused.
  */
 function seedEnd(entries: readonly JournalEntry[], stage: string): number | { incomplete: string } {
   const first = entries.findIndex((entry) => entry.stage === stage);
@@ -173,7 +174,16 @@ function seedEnd(entries: readonly JournalEntry[], stage: string): number | { in
   const own = `${stage}#${entries[first]?.call}`;
   const group = entries.find((entry) => entry.step === undefined && entry.group?.includes(own))?.group;
   if (group === undefined) {
-    if (!entries.some((entry) => entry.key === own && entry.step === undefined)) return { incomplete: own };
+    const completed = new Set(entries.filter((entry) => entry.step === undefined).map((entry) => entry.key));
+    if (
+      !completed.has(own) &&
+      entries.some((entry) => {
+        const call = `${entry.stage}#${entry.call}`;
+        return call !== own && !completed.has(call);
+      })
+    ) {
+      return { incomplete: own };
+    }
     return first;
   }
   const members = new Set(group);

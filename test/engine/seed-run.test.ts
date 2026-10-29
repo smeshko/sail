@@ -108,6 +108,36 @@ export const notify = stage('notify', {
   });
 }, 60_000);
 
+test('seeding an interrupted sequential multi-step call reuses only its preceding calls', async () => {
+  await withTempRepo(async (repo) => {
+    const fromRun = await withTempRepo(async (from) => {
+      writeTwoStep(from.dir);
+      const end = await runWorkflow({
+        cwd: from.dir,
+        adapters: await fakeAdapters(from.dir),
+        workflow: AGENT_WORKFLOW,
+        ticket: 'FAKE-1',
+      });
+      if ('refused' in end) throw new Error(end.refused);
+      expect(end.status).toBe('completed');
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+    const fromDir = join(repo.dir, '.sail-runs', fromRun);
+    cutJournal(fromDir, 4);
+    writeFileSync(join(fromDir, 'STATUS'), 'running\n');
+    expect(readJournal(fromDir).entries.map((entry) => entry.key)).toEqual([
+      'intake#1',
+      'brief#1',
+      'spec#1',
+      'publish#1/describe',
+    ]);
+    const opened = openedFrom(await seed(repo, { fromRun, stage: 'publish' }));
+    expect(readJournal(opened.dir).entries.map((entry) => entry.key)).toEqual(['intake#1', 'brief#1', 'spec#1']);
+    expect(existsSync(join(opened.dir, '03-publish/call-1'))).toBe(false);
+  });
+}, 60_000);
+
 const source = sharedSource();
 afterAll(() => source.release());
 
