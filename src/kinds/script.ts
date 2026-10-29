@@ -1,4 +1,5 @@
-// The script kind: any executable, run with the environment preamble in its own process group. Its exit code maps to
+// The script kind: any executable, run with the script environment in its own process group.
+// Credentials are never given unless declared. Its exit code maps to
 // `passed` or `failed` through `exitCodes`, its last stdout line is its JSON output, and it must leave every declared
 // file in `$STAGE_OUT`. Every broken promise is collected as an error. It reports the facts only it knows as events:
 // how the process ran and ended, whether the output was read and held its schema, and which files it recorded.
@@ -19,7 +20,8 @@ import { delimiter, join, relative, resolve } from 'node:path';
 import { stageOut } from '../engine/call-dir';
 import { systemClock } from '../engine/clock';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
-import { withoutRepositoryVariables } from '../engine/git-env';
+import { scriptEnv } from '../engine/env-allowlist';
+import { repositoryVariables } from '../engine/git-env';
 import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
@@ -64,6 +66,13 @@ export function exitCodeMap(step: ScriptStep): Record<(typeof LISTS)[number], re
 
 function problems(step: ScriptStep): string[] {
   const found: string[] = [];
+  const names = new Set<string>();
+  for (const name of step.env ?? []) {
+    if (typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+      found.push(`env names an invalid variable: '${name}'`);
+    if (names.has(name)) found.push(`env names '${name}' twice`);
+    names.add(name);
+  }
   const map = exitCodeMap(step);
   const listedUnder = new Map<number, string>();
   for (const list of LISTS) {
@@ -249,11 +258,9 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
   const portEvents = join(context.paths.dir, PORT_EVENTS_FILE);
   const variables = [...preamble(context), { name: 'SAIL_EVENTS', value: portEvents, path: true }];
   // A step in a run's workspace must not have its git point at the clone. A step in the clone keeps what a hook set.
-  const inherited = context.inClone
-    ? Object.fromEntries(
-        Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-      )
-    : withoutRepositoryVariables(process.env);
+  const source = context.env ?? process.env;
+  const picked = scriptEnv(source, step.env ?? []);
+  const inherited = { ...picked.env, ...(context.inClone ? repositoryVariables(source) : {}) };
 
   // Recorded relative to the root, and only these variables: the inherited environment may hold secrets. The script
   // runs in the workspace.
@@ -265,7 +272,7 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
     type: 'script:exec',
     command: recorded.command,
     cwd: at(context.workspace),
-    envKeys: variables.map(({ name }) => name),
+    envKeys: [...variables.map(({ name }) => name), ...picked.given],
   });
   const clock = context.clock ?? systemClock;
   const startedAt = clock().getTime();

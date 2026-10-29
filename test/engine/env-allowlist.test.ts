@@ -1,5 +1,28 @@
 import { expect, test } from 'bun:test';
-import { allowlisted, isCredential } from '../../src/engine/env-allowlist';
+import { allowlisted, isCredential, scriptEnv } from '../../src/engine/env-allowlist';
+
+test('script environment skips unset declarations and deduplicates set names in order', () => {
+  expect(scriptEnv({ A: 'a', B: 'b' }, ['B', 'ABSENT', 'A', 'B'])).toEqual({
+    env: { B: 'b', A: 'a' },
+    given: ['B', 'A'],
+  });
+});
+
+test('script environment excludes git config injection and toolchain variables by default', () => {
+  expect(
+    scriptEnv(
+      {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_PARAMETERS: 'secret',
+        JAVA_HOME: '/java',
+        CI: '1',
+        XDG_CONFIG_HOME: '/config',
+        GIT_COMMITTER_EMAIL: 'test@example.com',
+      },
+      [],
+    ),
+  ).toEqual({ env: { XDG_CONFIG_HOME: '/config', GIT_COMMITTER_EMAIL: 'test@example.com' }, given: [] });
+});
 
 for (const name of ['LC_ALL', 'AWS_REGION', 'PATH']) {
   test(`allowlists ${name}`, () => expect(allowlisted(name)).toBe(true));

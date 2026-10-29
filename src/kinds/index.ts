@@ -5,6 +5,7 @@ import type { CallPaths } from '../engine/call-dir';
 import type { Clock } from '../engine/clock';
 import type { ContractError, FileEntry } from '../engine/contract';
 import type { CallEmit } from '../events/types';
+import type { Env } from '../ports/adapter';
 import type { Harness } from '../ports/harness';
 import type { Step } from '../sdk/steps';
 import { agentKind } from './agent';
@@ -44,6 +45,8 @@ export interface StepContext {
   workspace: string;
   /** The step runs in the clone itself, not a run's workspace, so it keeps a git hook's repository variables. */
   inClone?: boolean;
+  /** The environment the step's own is picked from; process.env when left out. */
+  env?: Env;
   /** The directory that holds `.sail/`: every path a result or an event records is relative to it. */
   root: string;
   /** The run's branch, which the step pushes. Empty for a stage run in isolation, which no run owns. */

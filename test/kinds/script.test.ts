@@ -88,6 +88,95 @@ function setup(): Setup {
 const tests = (options: { exitCodes?: ExitCodes; timeoutSeconds?: number; run?: string } = {}): ScriptStep =>
   script('tests', { run: './run.sh', produces: { 'junit.xml': 'file' }, output: TestReport, ...options });
 
+const secrets = {
+  GITHUB_TOKEN: 'github-secret',
+  SAIL_GITHUB_TOKEN: 'sail-secret',
+  LINEAR_API_KEY: 'linear-secret',
+  TYPESAFE_API_KEY: 'typesafe-secret',
+  ANTHROPIC_API_KEY: 'anthropic-secret',
+  CLAUDE_CODE_OAUTH_TOKEN: 'claude-secret',
+};
+
+async function environmentRun(declared: readonly string[] = [], inClone = false) {
+  const s = setup();
+  const events: CallEvent[] = [];
+  s.context.env = {
+    ...secrets,
+    FOO: 'bar',
+    HOME: '/test/home',
+    PATH: '/usr/bin:/bin',
+    SSH_AUTH_SOCK: '/test/ssh',
+    SAIL_HOME: '/test/sail',
+    GIT_AUTHOR_NAME: 'Test Author',
+    GIT_INDEX_FILE: '/test/index',
+  };
+  s.context.inClone = inClone;
+  s.context.emit = (event) => events.push(event);
+  s.run('env > "$STAGE_OUT/environment"\necho "{}"');
+  const result = await scriptKind.run(
+    script('tests', { run: './run.sh', output: z.object({}), env: declared }),
+    s.context,
+  );
+  expect(result.outcome).toBe('passed');
+  const environment = Object.fromEntries(
+    readFileSync(join(s.context.paths.dir, 'environment'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const i = line.indexOf('=');
+        return [line.slice(0, i), line.slice(i + 1)];
+      }),
+  );
+  return { environment, result, events };
+}
+
+test('a script step that declares nothing gets none of the run credentials', async () => {
+  await withTempRepo(async () => {
+    const { environment } = await environmentRun();
+    for (const name of [...Object.keys(secrets), 'FOO', 'GIT_INDEX_FILE']) expect(environment[name]).toBeUndefined();
+    expect(environment.HOME).toBe('/test/home');
+    expect(environment.PATH).toBe(`${BIN_DIR}:/usr/bin:/bin`);
+    expect(environment.SSH_AUTH_SOCK).toBe('/test/ssh');
+    expect(environment.SAIL_HOME).toBe('/test/sail');
+    expect(environment.GIT_AUTHOR_NAME).toBe('Test Author');
+    expect(environment.SAIL_BUN).toBe(process.execPath);
+    expect(environment.RUN_ID).toBe(RUN_ID);
+  });
+});
+
+test('a step that declares GITHUB_TOKEN gets only that credential', async () => {
+  const { environment, events, result } = await environmentRun(['GITHUB_TOKEN']);
+  expect(environment.GITHUB_TOKEN).toBe('github-secret');
+  for (const name of Object.keys(secrets).filter((name) => name !== 'GITHUB_TOKEN'))
+    expect(environment[name]).toBeUndefined();
+  const exec = events.find((e) => e.type === 'script:exec');
+  expect(exec?.type === 'script:exec' ? exec.envKeys.slice(-1) : []).toEqual(['GITHUB_TOKEN']);
+  expect(JSON.stringify({ events, result })).not.toContain('github-secret');
+});
+
+test('a declared variable that is not set is not given or recorded', async () => {
+  const { environment, events } = await environmentRun(['UNSET_SCRIPT_VARIABLE']);
+  expect(environment.UNSET_SCRIPT_VARIABLE).toBeUndefined();
+  expect(JSON.stringify(events)).not.toContain('UNSET_SCRIPT_VARIABLE');
+});
+
+test('in the clone git repository variables are kept and credentials are not', async () => {
+  await withTempRepo(async () => {
+    const { environment } = await environmentRun([], true);
+    expect(environment.GIT_INDEX_FILE).toBe('/test/index');
+    expect(environment.GITHUB_TOKEN).toBeUndefined();
+  });
+});
+
+for (const [env, message] of [
+  [['bad-name'], "env names an invalid variable: 'bad-name'"],
+  [['HOME', 'HOME'], "env names 'HOME' twice"],
+] as const) {
+  test(message, () =>
+    expect(scriptKind.problems(script('x', { run: './x', output: z.object({}), env }))).toEqual([message]),
+  );
+}
+
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 
 /**
@@ -372,7 +461,7 @@ test("a script inherits none of the variables that tie git to a repository: a sa
       GIT_DIR: 'unset',
       GIT_WORK_TREE: 'unset',
       GIT_INDEX_FILE: 'unset',
-      GIT_CONFIG_COUNT: '0',
+      GIT_CONFIG_COUNT: 'unset',
     });
   } finally {
     for (const [name, value] of Object.entries(saved)) {
@@ -398,7 +487,7 @@ test('a script step that runs in the clone keeps the variables a git hook set: i
     Object.assign(process.env, hooked, { GIT_CONFIG_COUNT: '0' });
     try {
       const run = await scriptKind.run(step, { ...s.context, inClone: true });
-      expect(run.output).toEqual({ ...hooked, GIT_CONFIG_COUNT: '0' });
+      expect(run.output).toEqual({ ...hooked, GIT_CONFIG_COUNT: 'unset' });
     } finally {
       for (const [name, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[name];

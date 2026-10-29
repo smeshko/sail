@@ -88,6 +88,12 @@ export interface ScriptOptions<C extends Consumes, P extends Produces, O extends
   readonly output: O;
   readonly exitCodes?: ExitCodes;
   /**
+   * Extra environment names passed when set, credentials included; for example `env: ['JAVA_HOME']`.
+   * Defaults are non-credential allowlisted names, SSH_AUTH_SOCK, SAIL_* knobs, git identity and the preamble.
+   * script:exec records declared names, never their values.
+   */
+  readonly env?: readonly string[];
+  /**
    * How long the script may run. The engine defaults to 600, and on a timeout stops the script's whole process group:
    * SIGTERM, then SIGKILL after a grace period.
    */
