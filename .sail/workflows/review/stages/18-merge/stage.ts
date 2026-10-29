@@ -1,6 +1,8 @@
 // merge: waits for the pull request's checks on the head the review left, then merges it into its base, only while it
-// is still at that head. Failed checks are rerun once. Checks still red, or a merge the host rejects, go back to the
-// workflow as a retry, with the failed checks' logs, so a fix pass or a sync with the base can run before the next try.
+// is still at that head; a host still showing an older head of the branch is read again until it catches up. Failed
+// checks are rerun once. Checks still red, a head that conflicts with its base, or a merge the host rejects, go back
+// to the workflow as a retry, with the failed checks' logs, so a sync with the base and a fix pass can run before the
+// next try.
 // On the last try those, a head that moves or a merge the host refuses fail the step: it comments why and takes the
 // designation label off, so the watcher leaves the pull request to a human.
 import { script, value, z } from 'sail';

@@ -3,9 +3,9 @@
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
 // fresh validation. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
-// request merged once its checks pass. Landing it takes what fix passes are left: checks still red after a rerun go to
-// fix as findings, and a merge the host rejects merges the base in, an agent resolving any conflict; each is validated
-// and pushed before the next try. A review that leaves findings open, one too thin to trust, or a pull request that
+// request merged once its checks pass. Landing it takes what fix passes are left: each merges the base in, an agent
+// resolving any conflict, and sends checks still red after a rerun to fix as findings; each is validated and pushed
+// before the next try. A review that leaves findings open, one too thin to trust, or a pull request that
 // can't land in the passes left, comments why, takes the label off and fails, leaving the pull request to a human; so
 // does one a stage blocked, which also puts needs-human on, since no run of it would get further.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
@@ -263,9 +263,9 @@ export default workflow(
       return run.fail(`review: ${thin.map((each) => `review-${each.lens}`).join(', ')} too thin to trust`);
     }
 
-    // Merge once the checks on the pushed head pass. A retry takes one of the fix passes the review left: red checks
-    // go to fix as findings, a rejected merge merges the base in. Each is validated, a failed validation going to fix
-    // too, then pushed. Anything a pass can't fix blocks the next merge, which comments it and fails, as the last
+    // Merge once the checks on the pushed head pass. A retry takes one of the fix passes the review left: it merges the
+    // base in, then red checks go to fix as findings. Each is validated, a failed validation going to fix too, then
+    // pushed. Anything a pass can't fix blocks the next merge, which comments it and fails, as the last
     // pass's merge does instead of retrying.
     let passes = rounds.length;
     let headSha = pushed.output.headSha;
@@ -286,38 +286,38 @@ export default workflow(
       if (retry === null) return { merged: merged.output, pushed: pushed.output.pushed, tickets: tickets.length };
       passes++;
       blocked = undefined;
-      let targets: z.infer<typeof NumberedFinding>[] = [];
-      if (retry === 'checks') {
-        targets = failed.map((check, index) => ({
-          id: `C${passes}-${index + 1}`,
-          source: 'checks' as const,
-          severity: 'high' as const,
-          file: '',
-          title: `Check ${check.name} fails`,
-          detail: [check.url ?? '', check.log].filter(Boolean).join('\n\n'),
-        }));
-      } else {
-        const synced = await run.stage(syncBase, {
-          pr: pullRequest,
-          ...(ticketKey === undefined ? {} : { ticketKey }),
+      // Either retry merges the base in first, so a fix for red checks is made on the base it will land on.
+      const synced = await run.stage(syncBase, {
+        pr: pullRequest,
+        ...(ticketKey === undefined ? {} : { ticketKey }),
+      });
+      // Rejected with the base already in, the merge has nothing a pass can fix.
+      if (retry === 'base' && !synced.output.moved) {
+        blocked = merged.output.reason;
+        continue;
+      }
+      if (synced.output.conflicts.length > 0) {
+        const resolved = await run.stage(resolveConflicts, {
+          requirements: reading.requirements,
+          synced: synced.output,
         });
-        // Rejected with the base already in, the merge has nothing a pass can fix.
-        if (!synced.output.moved) {
-          blocked = merged.output.reason;
+        if (resolved.outcome === 'blocked' || resolved.output.commit === null) {
+          blocked = `the conflicts with the base in ${synced.output.conflicts.join(', ')} weren't resolved`;
           continue;
         }
-        if (synced.output.conflicts.length > 0) {
-          const resolved = await run.stage(resolveConflicts, {
-            requirements: reading.requirements,
-            synced: synced.output,
-          });
-          if (resolved.outcome === 'blocked' || resolved.output.commit === null) {
-            blocked = `the conflicts with the base in ${synced.output.conflicts.join(', ')} weren't resolved`;
-            continue;
-          }
-          landing.push(`merged the base in, resolving conflicts in ${synced.output.conflicts.join(', ')}`);
-        } else landing.push('merged the base in');
-      }
+        landing.push(`merged the base in, resolving conflicts in ${synced.output.conflicts.join(', ')}`);
+      } else if (synced.output.moved) landing.push('merged the base in');
+      const targets: z.infer<typeof NumberedFinding>[] =
+        retry === 'checks'
+          ? failed.map((check, index) => ({
+              id: `C${passes}-${index + 1}`,
+              source: 'checks' as const,
+              severity: 'high' as const,
+              file: '',
+              title: `Check ${check.name} fails`,
+              detail: [check.url ?? '', check.log].filter(Boolean).join('\n\n'),
+            }))
+          : [];
       // A failed validation, or the failed checks, go to fix in this pass.
       const validated = targets.length === 0 ? await run.stage(validate) : undefined;
       if (validated?.outcome === 'failed') {

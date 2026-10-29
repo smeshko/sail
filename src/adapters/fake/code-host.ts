@@ -48,6 +48,8 @@ const StoredPullRequest = z.object({
   ticketKey: z.string().optional(),
   /** Each check's status on every read, the last repeating. */
   checks: CheckScripts.default([]),
+  /** The head a host lagging behind a push reports on each checks read, the last repeating: `headSha` when left out. */
+  heads: z.array(z.string()).min(1).optional(),
   /** What each merge call is answered, the last repeating: `rejected` is the host refusing it, a PortError. */
   merges: MergeScripts.default(['merged']),
   reads: z
@@ -250,8 +252,9 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       const checks = store.change((world) => {
         const pr = find(world, 'checks', number);
         const read = pr.checks.map(({ name, statuses }) => ({ name, status: scripted(statuses, pr.reads.checks) }));
+        const headSha = pr.heads === undefined ? pr.headSha : scripted(pr.heads, pr.reads.checks);
         pr.reads.checks++;
-        return { number, headSha: pr.headSha, checks: read, raw: structuredClone(pr) };
+        return { number, headSha, checks: read, raw: structuredClone(pr) };
       });
       emit({ type: 'codehost:checks', number, headSha: checks.headSha, checks: checks.checks });
       return checks;
