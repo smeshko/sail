@@ -56,6 +56,8 @@ interface Grammar {
   readonly valued: readonly string[];
   /** Long options whose value attaches only with `=`. */
   readonly optional?: readonly string[];
+  /** Valued options that name a file the wrapper writes. */
+  readonly writes?: readonly string[];
   /** Options of the form `-<digits>`. */
   readonly numeric?: boolean;
   /** Words to skip after the options, such as `timeout`'s duration. */
@@ -69,7 +71,7 @@ const WRAPPERS: Readonly<Record<string, Grammar>> = {
   exec: { flags: ['-c', '-l'], valued: ['-a'] },
   nice: { flags: [], valued: ['-n', '--adjustment'], numeric: true },
   nohup: { flags: [], valued: [] },
-  time: { flags: ['-p', '-l', '-h'], valued: [] },
+  time: { flags: ['-p', '-l', '-h', '-a', '--append'], valued: ['-o', '--output'], writes: ['-o', '--output'] },
   timeout: {
     flags: ['--preserve-status', '--foreground', '-v', '--verbose'],
     valued: ['-s', '--signal', '-k', '--kill-after'],
@@ -87,13 +89,22 @@ function quote(text: string): string {
 }
 
 /** Where the options of `grammar` end in `args`, or the option it doesn't know. */
-function skipOptions(args: readonly Word[], grammar: Grammar): { at: number } | { unknown: string } {
+function skipOptions(args: readonly Word[], grammar: Grammar): { at: number; writes: Word[] } | { unknown: string } {
+  const writes: Word[] = [];
   let i = 0;
   while (i < args.length) {
     const arg = (args[i] as Word).text;
-    if (arg === '--') return { at: i + 1 };
+    if (arg === '--') return { at: i + 1, writes };
     if (!arg.startsWith('-') || (arg === '-' && !grammar.flags.includes('-'))) break;
     const name = arg.startsWith('--') ? (arg.split('=')[0] as string) : arg;
+    const writeOption = grammar.writes?.find((option) =>
+      option.startsWith('--') ? option === name : arg.startsWith(option),
+    );
+    if (writeOption !== undefined) {
+      const attached = arg.slice(writeOption.length).replace(/^=/, '');
+      const value = arg === writeOption ? args[i + 1] : { ...(args[i] as Word), text: attached };
+      if (value !== undefined) writes.push(value);
+    }
     if (grammar.optional?.includes(name)) i++;
     else if (grammar.flags.includes(arg)) i++;
     else if (grammar.valued.includes(name) && name !== arg) i++;
@@ -102,7 +113,7 @@ function skipOptions(args: readonly Word[], grammar: Grammar): { at: number } | 
     else if (grammar.numeric === true && /^-\d+$/.test(arg)) i++;
     else return { unknown: arg };
   }
-  return { at: Math.min(i + (grammar.positional ?? 0), args.length) };
+  return { at: Math.min(i + (grammar.positional ?? 0), args.length), writes };
 }
 
 class Collector {
@@ -206,6 +217,7 @@ class Collector {
         this.out.refusals.push(`${name}'s option ${skipped.unknown} isn't known: ${quote(text)}`);
         return undefined;
       }
+      for (const word of skipped.writes) this.out.writes.push({ word, text, cwd: cwd.physical });
       let at = skipped.at;
       if (name === 'env') {
         for (; at < args.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test((args[at] as Word).text); at++) {
