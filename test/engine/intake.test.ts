@@ -919,6 +919,101 @@ test("a resume replays intake#1 from the journal: it fetches nothing, the stream
   });
 }, 30_000);
 
+test('an interrupted pending intake fetch ends as port error, ignores late files and events, and resumes as try 2', async () => {
+  await withTempRepo(async (repo) => {
+    const stopped = await withTempRepo(async (from) => {
+      writeStub(from.dir, { testsPassAt: 1 });
+      const adapters = await fakeAdapters(from.dir);
+      const controller = new AbortController();
+      const port = adapters.ports.ticketSource;
+      const get = port.get.bind(port);
+      let calls = 0;
+      let release!: () => void;
+      port.get = async (key) => {
+        if (++calls === 1) return get(key);
+        queueMicrotask(() => controller.abort());
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return get(key);
+      };
+      const pending = ticketRun(from.dir, { adapters, signal: controller.signal });
+      const end = await Promise.race([pending, Bun.sleep(5000).then(() => undefined)]);
+      expect(end === undefined).toBe(false);
+      if (end === undefined) return undefined;
+      expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during intake#1' });
+      expect(readFileSync(join(end.dir, 'STATUS'), 'utf8')).toBe('suspended interrupted\n');
+      expect(resultOf(end.dir, '00-intake/call-1')).toMatchObject({
+        outcome: 'error',
+        errors: [{ reason: 'port', message: 'ticketSource.get: the fetch of FAKE-1 was interrupted (unavailable)' }],
+      });
+      expect(events(end.dir).filter((event) => event.type === 'intake:end')).toMatchObject([{ outcome: 'error' }]);
+      expect(journalText(end.dir)).toBe('');
+      const before = readFileSync(join(end.dir, 'events.ndjson'), 'utf8');
+      expect(events(end.dir).at(-1)?.type).toBe('run:end');
+      expect(events(end.dir).filter((event) => event.type === 'ticket:fetched')).toEqual([]);
+      expect(readdirSync(join(end.dir, '00-intake/call-1'))).toEqual(['result.json']);
+      release();
+      await Bun.sleep(10);
+      expect(readFileSync(join(end.dir, 'events.ndjson'), 'utf8')).toBe(before);
+      expect(readdirSync(join(end.dir, '00-intake/call-1'))).toEqual(['result.json']);
+      copyRun(from.dir, repo.dir);
+      return end;
+    });
+    if (stopped === undefined) return;
+    const resumed = await resumeWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      runId: stopped.runId,
+    });
+    expect(resumed).toMatchObject({ status: 'completed' });
+    expect(readJournal(join(repo.dir, '.sail-runs', stopped.runId)).entries[0]).toMatchObject({
+      key: 'intake#1',
+      outcome: 'passed',
+      resultPath: '00-intake/call-1/try-2/result.json',
+    });
+  });
+}, 30_000);
+
+test('an abort on ticket:claimed completes the claim but cuts the following fetch', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const controller = new AbortController();
+    const stop: Consumer = {
+      name: 'stop',
+      onEvent: (event) => {
+        if (event.type === 'ticket:claimed') controller.abort();
+      },
+    };
+    const end = await ticketRun(repo.dir, { signal: controller.signal, consumers: [stop] });
+    expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during intake#1' });
+    expect(resultOf(end.dir, '00-intake/call-1')).toMatchObject({
+      outcome: 'error',
+      errors: [{ reason: 'port', message: 'ticketSource.get: the fetch of FAKE-1 was interrupted (unavailable)' }],
+    });
+    expect(readdirSync(join(end.dir, '00-intake/call-1'))).toEqual(['result.json']);
+    expect(journalText(end.dir)).toBe('');
+  });
+});
+
+test('aborting a pending preflight fetch refuses the start without a run directory', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const controller = new AbortController();
+    const adapters = await fakeAdapters(repo.dir);
+    adapters.ports.ticketSource.get = () => {
+      queueMicrotask(() => controller.abort());
+      return new Promise(() => {});
+    };
+    const end = await Promise.race([
+      runWorkflow({ cwd: repo.dir, workflow: 'ticket-to-pr', ticket: 'FAKE-1', adapters, signal: controller.signal }),
+      Bun.sleep(5000).then(() => 'still pending'),
+    ]);
+    expect(end).toEqual({ refused: 'stopped before the run was opened' });
+    expect(existsSync(join(repo.dir, '.sail-runs')) ? readdirSync(join(repo.dir, '.sail-runs')) : []).toEqual([]);
+  });
+});
+
 test('an abort seen once the workspace is made, before the intake starts, suspends the run with an empty journal, no intake directory and no claim or fetch in its stream', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);

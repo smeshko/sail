@@ -46,6 +46,7 @@ export interface ResolveSourceOptions {
   label: string;
   /** Skips the label and state checks. */
   force?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface ResolvedSource {
@@ -58,7 +59,7 @@ export interface ResolvedSource {
 
 /**
  * The ticket `ref` names, fetched and checked: it carries `label`, and it is in a pick-up state, each unless `force`. A ticket
- * that fails both checks is refused for the first. Nothing is written to the ticket.
+ * that fails both checks is refused for the first. The signal cuts the fetch; nothing is written to the ticket.
  */
 export async function resolveSource(options: ResolveSourceOptions): Promise<ResolvedSource | { refused: string }> {
   const { ref, ticketSource, label, force = false } = options;
@@ -66,7 +67,7 @@ export async function resolveSource(options: ResolveSourceOptions): Promise<Reso
   if (ticketKey === undefined) return { refused: notATicket(ref, ticketSource.name) };
   let ticket: Ticket;
   try {
-    ticket = await getTicket(ticketSource, ticketKey);
+    ticket = await getTicket(ticketSource, ticketKey, options.signal);
   } catch (error) {
     return { refused: refusalOf(error) };
   }
@@ -110,6 +111,7 @@ export interface ClaimSourceOptions {
   forced: readonly Forced[];
   /** An earlier try of this call claimed the ticket, as the run's stream records. */
   claimedEarlier?: boolean;
+  signal?: AbortSignal;
 }
 
 /**
@@ -118,7 +120,8 @@ export interface ClaimSourceOptions {
  * didn't take is this run's own earlier claim when the ticket's latest claim comment names the run, or when
  * `claimedEarlier` records it and no claim comment names a newer run (or an unrecognised run id). A missing comment is
  * posted. Otherwise it moves the ticket to In Progress through `update` when `forced` has `state`, and is lost when it
- * doesn't. A port call that fails throws its PortError, a lost claim a `conflict`, and nothing is moved back.
+ * doesn't. The signal cuts only the re-read: claim, update and comment take no signal. A port call that fails throws
+ * its PortError, a lost claim a `conflict`, and nothing is moved back.
  */
 export async function claimSource(options: ClaimSourceOptions): Promise<ClaimRecord> {
   const { ticketKey, runId, ticketSource, forced, claimedEarlier = false } = options;
@@ -126,7 +129,7 @@ export async function claimSource(options: ClaimSourceOptions): Promise<ClaimRec
   let claimed = answer.claimed;
   let state = stateOf(answer.state);
   if (!claimed) {
-    const ticket = await getTicket(ticketSource, ticketKey);
+    const ticket = await getTicket(ticketSource, ticketKey, options.signal);
     const owner = claimedBy(ticket);
     if (owner === runId) return { claimed: true, state: stateOf(ticket.state) };
     // Run ids end in time-ordered ULIDs. A previous run's comment survives a return to a pick-up state;
