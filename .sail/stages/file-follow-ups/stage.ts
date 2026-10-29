@@ -1,5 +1,5 @@
 // file-follow-ups: files at most two follow-ups as tickets of their own through `sail port ticket-source create`, bugs
-// first, and notes the rest; one Jev finds is the same work as an open ticket is commented there instead. Then it lists
+// first, and notes the rest; duplicates of open tickets or earlier follow-ups are skipped. Then it lists
 // what it did on the pull request. It runs once the pull request is open, so a ticket that can't be filed is reported,
 // not fatal. Shared: the factory files what its run found, and review what its judge set aside for a ticket.
 import { script, value, z } from 'sail';
@@ -22,8 +22,8 @@ export const PullRequestRef = z.object({ number: z.number().int(), url: z.string
 
 export const Filed = z.object({
   filed: z.array(z.object({ title: z.string(), ticketKey: z.string(), url: z.string() })),
-  /** The follow-ups Jev found already open as a ticket, which got a comment instead. */
-  existing: z.array(z.object({ title: z.string(), ticketKey: z.string(), confidence: z.number() })),
+  /** Follow-ups duplicating an open ticket or another follow-up in the batch. */
+  skipped: z.array(z.object({ title: z.string(), duplicateOf: z.string(), confidence: z.number() })),
   /** The follow-ups past the cap: listed on the pull request, not filed. */
   noted: z.array(z.object({ title: z.string() })),
   failed: z.array(z.object({ title: z.string(), error: z.string() })),
