@@ -1,16 +1,17 @@
 // review: a factory-labelled pull request in, merged out. Validation, the leak check, the demonstration and six
 // reviewers look at it at once; a judge decides what each finding becomes (fixed here, filed as a ticket, or dropped)
-// and which reviews are too thin to trust. Up to three fix passes follow, each reviewed beside a fresh validation. Then
+// and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
+// fresh validation. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
 // request merged once its checks pass. A review that leaves findings open, or one too thin to trust, comments why,
 // takes the label off and fails, leaving the pull request to a human.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
-import { workflow, type z } from 'sail';
+import { type Result, workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
 import { validate } from '../../stages/validate/stage';
-import type { Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord } from './schemas';
+import type { FixChecked, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
 import { leakCheck } from './stages/03-leak-check/stage';
@@ -23,6 +24,7 @@ import { reviewSecurity } from './stages/09-review-security/stage';
 import { reviewConventions } from './stages/10-review-conventions/stage';
 import { judge } from './stages/11-judge/stage';
 import { fix } from './stages/12-fix/stage';
+import { jevFix } from './stages/12-jev-fix/stage';
 import { checkFix } from './stages/13-check-fix/stage';
 import { push } from './stages/14-push/stage';
 import { attachDemonstration } from './stages/16-attach-demonstration/stage';
@@ -48,7 +50,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 2,
+    version: 3,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -149,8 +151,8 @@ export default workflow(
     }
     const { thin } = judgement;
 
-    // Fix, then review the fixes beside a fresh validation, up to FIX_PASSES passes. What is still open, what the fixes
-    // broke at medium or above, and a failed validation go to the next pass.
+    // Fix, then ask Jev about the targets, falling back to the agent unless all are clear yeses, up to FIX_PASSES passes.
+    // Always validate afresh. Open targets, new agent findings at medium or above, and failed validation go to the next pass.
     const rounds: z.infer<typeof ReviewRecord>['rounds'] = [];
     let open: z.infer<typeof ReviewRecord>['open'] = [];
     let resolved = targets.length === 0;
@@ -165,21 +167,33 @@ export default workflow(
           base,
         });
         if (fixed.outcome === 'blocked') return run.fail(`fix blocked: ${fixed.reason}`);
-        const [checked, again] = await run.all([
-          [checkFix, { findings: { findings: targets }, fixed: fixed.output, since }],
-          [validate],
-        ]);
-        if (checked.outcome === 'blocked') return run.fail(`check-fix blocked: ${checked.reason}`);
-        rounds.push({ round, fixed: fixed.output, checked: checked.output, validated: again.outcome === 'passed' });
+        // Jev first: when it finds every target resolved with a clear yes, the agent's session is not paid for and
+        // validation runs alone, which also stands in for what the fixes broke.
+        const asked = await run.stage(jevFix, { findings: { findings: targets }, fixed: fixed.output, since });
+        let checked: z.infer<typeof FixChecked>;
+        let again: Result<typeof validate>;
+        if (asked.output.checked !== null) {
+          checked = asked.output.checked;
+          again = await run.stage(validate);
+        } else {
+          const [agent, validated] = await run.all([
+            [checkFix, { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output }],
+            [validate],
+          ]);
+          if (agent.outcome === 'blocked') return run.fail(`check-fix blocked: ${agent.reason}`);
+          checked = agent.output;
+          again = validated;
+        }
+        rounds.push({ round, fixed: fixed.output, checked, validated: again.outcome === 'passed' });
 
-        const items = new Map(checked.output.items.map((each) => [each.finding, each]));
+        const items = new Map(checked.items.map((each) => [each.finding, each]));
         const unresolved = targets
           .filter((target) => items.get(target.id)?.resolved !== true)
           .map((target) => ({
             finding: target.id,
             detail: items.get(target.id)?.detail ?? 'check-fix did not report it',
           }));
-        const fresh = checked.output.findings
+        const fresh = checked.findings
           .filter((finding) => finding.severity !== 'low')
           .map((finding, index) => ({ ...finding, id: `F${round}-${index + 1}`, source: 'check-fix' as const }));
         open = [

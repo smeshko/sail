@@ -10,6 +10,7 @@ import { validate } from '../../stages/validate/stage';
 import { PassFeedback } from './schemas';
 import { plan } from './stages/01-plan/stage';
 import { implement } from './stages/02-implement/stage';
+import { jevTasks } from './stages/03-jev-tasks/stage';
 import { checkTasks } from './stages/04-check-tasks/stage';
 import { describe } from './stages/05-describe/stage';
 import { open } from './stages/06-open/stage';
@@ -20,7 +21,7 @@ export default workflow(
   'factory',
   {
     intake: ticket,
-    version: 6,
+    version: 7,
     watch: { every: '5m' },
     maxConcurrentRuns: 2,
     description: 'plan, implement test first, validate, check the tasks, pull request, follow-ups',
@@ -47,11 +48,17 @@ export default workflow(
         iteration.fail({ validation: v.output, tasks: null });
         continue;
       }
-      const checked = await run.stage(checkTasks, { plan: planFile });
-      if (checked.outcome === 'blocked') return run.fail(`check-tasks blocked: ${checked.reason}`);
-      if (checked.output.tasks.some((task) => !task.implemented)) {
+      // Jev first: when it answers every task with a clear yes the agent's session is not paid for.
+      const asked = await run.stage(jevTasks, { plan: planFile });
+      let tasks = asked.output.checked;
+      if (tasks === null) {
+        const checked = await run.stage(checkTasks, { plan: planFile, jev: asked.output });
+        if (checked.outcome === 'blocked') return run.fail(`check-tasks blocked: ${checked.reason}`);
+        tasks = checked.output;
+      }
+      if (tasks.tasks.some((task) => !task.implemented)) {
         if (passes === IMPLEMENT_PASSES) break;
-        iteration.fail({ validation: null, tasks: checked.output });
+        iteration.fail({ validation: null, tasks });
         continue;
       }
       implemented = true;

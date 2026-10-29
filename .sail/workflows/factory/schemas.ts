@@ -39,6 +39,18 @@ export const TasksChecked = z.object({
     .min(1),
 });
 
+/**
+ * What jev-tasks asked Jev: whether it could, why not when it couldn't, the clear-yes threshold, each task's
+ * probability of yes, and the TasksChecked it stands in for when every task is a clear yes (null otherwise).
+ */
+export const TasksAsked = z.object({
+  asked: z.boolean(),
+  note: z.string(),
+  threshold: z.number(),
+  answers: z.array(z.object({ id: z.string(), yes: z.number() })),
+  checked: TasksChecked.nullable(),
+});
+
 /** Why the last implement pass didn't stand: its validation failed, or a task isn't implemented. */
 export const PassFeedback = z.object({
   validation: Validation.nullable(),

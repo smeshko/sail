@@ -20,7 +20,8 @@ adapters:
   harnesses: { codex: { use: pi } }
   # Each run's workspace is a fresh worktree: its setup installs the dependencies before any stage runs.
   workspace: { use: git-worktree, setup: bun install --frozen-lockfile }
-  # Groom's duplicates stage asks Jev, so a run that reaches it needs TYPESAFE_API_KEY.
+  # Jev answers check-tasks and check-fix before their agents run, and groom's duplicates stage asks it. Without
+  # TYPESAFE_API_KEY the check agents run as before, and a groom run fails at its duplicates stage.
   jev: { use: typesafe }
 
 models:

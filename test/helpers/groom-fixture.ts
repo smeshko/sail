@@ -1,40 +1,14 @@
 // sail's own `.sail/` in a temporary repository, every port on its fake, so `sail FAKE-2 --workflow groom` runs the
 // committed groom workflow end to end.
-import { cpSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Ticket } from '../../src/ports/types';
+import { OWN_SAIL, writeOwnSail } from './own-sail';
 import type { TempRepo } from './temp-repo';
 
-const OWN_SAIL = join(import.meta.dir, '..', '..', '.sail');
-
-const FAKE_ADAPTERS = [
-  'adapters:',
-  '  ticketSource: { use: fake, seed: ./fake/tickets.json }',
-  '  codeHost: { use: fake, seed: ./fake/prs.json }',
-  '  harness: { use: fake }',
-  '  workspace: { use: fake }',
-  '  jev: { use: fake, seed: ./fake/jev.json }',
-  '  harnesses: { codex: { use: fake } }',
-  '',
-].join('\n');
-
-/** Copies the repository's own `.sail/` into `repo`, points its ports at the fakes, commits, and returns the copy. */
+/** sail's own `.sail/` in `repo` on the fakes, its Jev answering from the committed seed the duplicates stage asks. */
 export function writeGroomRepo(repo: TempRepo): string {
-  const sail = join(repo.dir, '.sail');
-  cpSync(OWN_SAIL, sail, {
-    recursive: true,
-    filter: (source) => !source.endsWith('sail.d.ts') && !source.endsWith('sail-intakes.d.ts'),
-  });
-  const config = join(sail, 'project.yaml');
-  const text = readFileSync(config, 'utf8');
-  const start = text.indexOf('adapters:\n');
-  const end = text.indexOf('\nmodels:');
-  writeFileSync(config, `${text.slice(0, start)}${FAKE_ADAPTERS}${text.slice(end)}`);
-  // The conventions the config lists are appended to every agent prompt, so they must exist.
-  for (const name of ['AGENTS.md', 'CONTEXT.md']) writeFileSync(join(repo.dir, name), `# ${name}\n`);
-  repo.git('add', '.sail', 'AGENTS.md', 'CONTEXT.md');
-  repo.git('commit', '-m', 'add sail');
-  return sail;
+  return writeOwnSail(repo, { jev: JSON.parse(readFileSync(join(OWN_SAIL, 'fake', 'jev.json'), 'utf8')) });
 }
 
 /** The ticket as the fake holds it after a run: its state file, or the seed while nothing has changed it. */
