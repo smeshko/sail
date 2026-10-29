@@ -37,6 +37,17 @@ test('git programs: a grant cannot allow a program option', () => {
   const want = DENY('git program option');
   expect(verdict(run('git push --exec=x origin', { commands: ['git *'] }), want)).toEqual(want);
 });
+test.each([
+  ['git clone -o -- --upload-pack=/tmp/x file:///r d', 'git program option'],
+  ['git push --repo -- --receive-pack=/tmp/x origin', 'git program option'],
+  ['git clone -o -- -c core.sshCommand=x r d', 'git -c'],
+  ["git rebase -X -- -x 'sudo x' main", 'sudo'],
+  ["git rebase -s -- -x 'sudo x' main", 'sudo'],
+])('git option value --: %s', (command, entry) => {
+  const want = DENY(entry);
+  expect(verdict(run(command, { commands: ['git *'] }), want)).toEqual(want);
+});
+
 const CANT: Want = ['commands', "can't be checked:"];
 const UNLISTED = (text: string): Want => ['commands', `\`${text}\` matches none of the step's commands`];
 

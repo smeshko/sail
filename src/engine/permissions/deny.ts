@@ -126,6 +126,9 @@ export function optionValues(
         break;
       }
     }
+    // An unlisted option may take `--` as its value. Git then keeps parsing options;
+    // without that option's grammar we must conservatively keep scanning too.
+    if (args[i + 1] === '--' && arg.startsWith('-') && !arg.includes('=')) i++;
   }
   return found;
 }
