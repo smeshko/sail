@@ -178,6 +178,24 @@ test("a dead pid whose run's lease a live process holds is adopted under that pr
   ]);
 });
 
+test("a suspended run whose marked lease's pid is alive is resumed, not adopted", async () => {
+  const w = world();
+  const dir = runDir(w.runsDir, 1, 'suspended', 'interrupted');
+  const child = Bun.spawn(['sleep', '30']);
+  try {
+    const holder = { runId: runIdOf(1), runDir: dir, pid: child.pid };
+    takeLease(w.leases, REMOTE, branchOf(1), holder);
+    takeLease(w.leases, REMOTE, branchOf(1), { ...holder, suspended: true });
+    expect(await reconcileItem(item(1, DEAD), w.context({ isAlive: (pid) => pid === child.pid }))).toEqual({
+      kind: 'resume',
+      from: { status: 'suspended', stopReason: 'interrupted' },
+    });
+  } finally {
+    child.kill();
+    await child.exited;
+  }
+});
+
 /** Writes run `n`'s events.ndjson with one `run:suspended` on the usage limit, at `ts`, with the reset time if any. */
 function limitedAt(runsDir: string, n: number, ts: string, resetsAt?: string): void {
   const event = {

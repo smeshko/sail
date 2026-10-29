@@ -15,6 +15,7 @@ import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } fro
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import type { Consumer, SailEvent } from '../../src/events/types';
+import { PortError } from '../../src/ports/errors';
 import type { HarnessRequest } from '../../src/ports/harness';
 import { fakeAdapters } from '../helpers/adapters';
 import { AGENT_WORKFLOW, SPEC, submits, writeAgentFixture } from '../helpers/agent-fixture';
@@ -247,10 +248,28 @@ test('a run.json that cannot be written once the workspace is made throws, and l
   });
 });
 
-test('a suspended run keeps its worktree and its lease, and a failed run releases both', async () => {
+test('a suspended run marks its lease as held by no process after run:end', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
-    const suspended = await ran(repo.dir, { until: 'spec' });
+    let markAtEnd: boolean | undefined;
+    const suspended = await ran(repo.dir, {
+      until: 'spec',
+      consumers: [
+        {
+          name: 'ordering',
+          onEvent: (event) => {
+            if (event.type === 'run:end') markAtEnd = readLease(leasesOf(repo.dir), REMOTE, BRANCH)?.suspended ?? false;
+          },
+        },
+      ],
+    });
+    expect(markAtEnd).toBe(false);
+    expect(readLease(leasesOf(repo.dir), REMOTE, BRANCH)).toMatchObject({
+      runId: suspended.runId,
+      pid: process.pid,
+      suspended: true,
+    });
+    expect(readEvents(suspended.dir).at(-1)?.type).toBe('run:end');
     const kept = {
       status: suspended.status,
       worktree: existsSync(join(suspended.dir, 'workspace', '.git')),
@@ -272,6 +291,61 @@ test('a suspended run keeps its worktree and its lease, and a failed run release
         failed: { status: 'failed', worktree: false, worktrees: [], lease: null },
       });
     });
+  });
+});
+
+test('a failed lease mark leaves the suspended end and its last event intact', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const lease = adapters.ports.workspace.lease.bind(adapters.ports.workspace);
+    adapters.ports.workspace.lease = async (remote, branch, holder) => {
+      if (holder.suspended) throw new PortError('workspace', 'lease', 'unavailable', 'cannot mark');
+      return lease(remote, branch, holder);
+    };
+    const end = await ran(repo.dir, { adapters, until: 'spec' });
+    expect(end.status).toBe('suspended');
+    expect(readEvents(end.dir).at(-1)?.type).toBe('run:end');
+    expect(readLease(leasesOf(repo.dir), REMOTE, BRANCH)?.suspended).toBeUndefined();
+  });
+});
+
+test('a suspended run whose marked lease names a live, unrelated pid resumes to completion', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const runId = await withTempRepo(async (from) => {
+      writeStub(from.dir);
+      const end = await ran(from.dir, { until: 'spec' });
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+    const child = Bun.spawn(['sleep', '30'], { env: repo.env });
+    try {
+      const file = leaseFile(leasesOf(repo.dir), REMOTE, BRANCH);
+      mkdirSync(leasesOf(repo.dir), { recursive: true });
+      writeFileSync(
+        file,
+        JSON.stringify({
+          remote: REMOTE,
+          branch: BRANCH,
+          runId,
+          runDir: join(repo.dir, '.sail-runs', runId),
+          takenAt: new Date().toISOString(),
+          pid: child.pid,
+          suspended: true,
+        }),
+      );
+      const end = await resumeWorkflow({
+        cwd: repo.dir,
+        adapters: await fakeAdapters(repo.dir),
+        runId,
+      });
+      expect('refused' in end ? end : end.status).toBe('completed');
+      expect(readLease(leasesOf(repo.dir), REMOTE, BRANCH)).toBeUndefined();
+    } finally {
+      child.kill();
+      await child.exited;
+    }
   });
 });
 
