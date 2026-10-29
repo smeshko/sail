@@ -322,6 +322,21 @@ test('reopenRun reopens a suspended run with the header on disk and STATUS runni
   });
 });
 
+test('a still-running refusal from an adapter that names no lease file says to remove its lease', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const pid = process.ppid;
+    const adapters = await workspaceWith(repo.dir, 'lease', () => async (remote, branch, holder) => ({
+      leased: false,
+      holder: { ...holder, remote, branch, pid, takenAt: NOW.toISOString() },
+      raw: null,
+    }));
+    expect(await reopenRun({ cwd: repo.dir, runId: run.runId, adapters })).toEqual({
+      refused: `run ${run.runId} is still running, in process ${pid}: stop it before resuming it. If process ${pid} is not sail, it took the pid of the run's ended process: remove its lease, then resume it`,
+    });
+  });
+});
+
 test('reopenRun whose lease throws is refused, and leaves STATUS, the events and the leases as they were', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);

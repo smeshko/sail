@@ -663,7 +663,10 @@ async function resumeWorkspace(
   if (!leased.leased) {
     const { holder } = leased;
     if (holder.runId === run.runId) {
-      return { refused: `run ${run.runId} is still running, in process ${holder.pid}: stop it before resuming it` };
+      const lease = leased.file === undefined ? 'its lease' : `the lease file ${leased.file}`;
+      return {
+        refused: `run ${run.runId} is still running, in process ${holder.pid}: stop it before resuming it. If process ${holder.pid} is not sail, it took the pid of the run's ended process: remove ${lease}, then resume it`,
+      };
     }
     return { refused: leasedBy(branch, holder) };
   }
