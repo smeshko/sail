@@ -14,7 +14,8 @@
 // - The tracker never aborts a call. Each agent request is handed its share of what the run has left, through a
 //   Harness wrapper, and the harness ends a session that reaches it, as it ends one at its step's own budget. A share is
 //   what is left less what the other open requests hold of theirs, so sessions that run at once can't each use the
-//   whole remainder. Minutes are not reserved: sessions that run at once use the same minutes.
+//   whole remainder. Minutes are not reserved: sessions that run at once use the same minutes. The runtime also times
+//   each replay with the tracker, ending a replay that hangs in workflow code once the minutes run out.
 // - A session's end and a raise are confirmed on disk: `events.ndjson` must hold that event's line, later lines allowed,
 //   and is then synced. The bus swallows a consumer's failure, so one that can't be confirmed is latched, and the
 //   runtime crashes the run with it before anything else is journaled.
@@ -189,11 +190,15 @@ const usedText = ({ budget, limit, used }: Over): string =>
 export const raiseFlag = (budget: Over['budget']): string =>
   budget === 'usd' ? '--raise-budget <usd>' : '--raise-minutes <minutes>';
 
-/** A run suspended on its budget before `before`: its `run:suspended`, and why, for people. */
-export function suspension(over: Over, before: string): { event: NewEvent; message: string } {
+/** A run suspended on its budget at `place`: its `run:suspended`, and why, for people. */
+export function suspension(
+  over: Over,
+  place: string,
+  when: 'before' | 'during' = 'before',
+): { event: NewEvent; message: string } {
   return {
     event: { type: 'run:suspended', stopReason: 'budget_exceeded', ...over },
-    message: `${usedText(over)} used before ${before}: raise it with ${raiseFlag(over.budget)}`,
+    message: `${usedText(over)} used ${when} ${place}: raise it with ${raiseFlag(over.budget)}`,
   };
 }
 
@@ -246,6 +251,8 @@ export interface BudgetTracker {
   observe(event: SailEvent): void;
   /** The budget the run has used up, dollars first, or undefined while it has some left. Emits what has come due. */
   over(): Over | undefined;
+  /** Milliseconds left of the minute budget, or undefined without one. */
+  minutesLeftMs(): number | undefined;
   /** Throws the failure to confirm a session's end on disk, if one came. */
   assertRecorded(): void;
   /**
@@ -330,6 +337,8 @@ export function trackBudget(options: BudgetOptions): BudgetTracker | undefined {
       due();
     },
     over: () => overOf(budget, due()),
+    minutesLeftMs: () =>
+      budget.maxMinutes === undefined ? undefined : Math.max(0, (budget.maxMinutes - used().minutes) * 60_000),
     assertRecorded() {
       if (unrecorded !== undefined) throw unrecorded;
     },

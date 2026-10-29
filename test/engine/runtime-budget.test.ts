@@ -317,6 +317,60 @@ test('a session handed less time than it needs ends over the minutes, and the ru
   });
 });
 
+test("a replay that hangs in the workflow's own code is suspended with budget_exceeded once the run's minutes are used up", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(sail, 'project.yaml', BUDGET, 'budgets: { run: { maxMinutes: 0.01 } }');
+    edit(
+      sail,
+      'workflows/ticket-to-pr/workflow.ts',
+      STUB_SPEC_CALL,
+      `  await new Promise<void>(() => {});\n${STUB_SPEC_CALL}`,
+    );
+    const end = await Promise.race([
+      ran(repo.dir),
+      Bun.sleep(2000).then(() => {
+        throw new Error('hung replay did not suspend within two seconds');
+      }),
+    ]);
+    expect({
+      status: end.status,
+      reason: end.stopReason,
+      budget: end.budget,
+      statusFile: status(end.dir),
+      journal: keys(end.dir),
+    }).toEqual({
+      status: 'suspended',
+      reason: 'budget_exceeded',
+      budget: 'minutes',
+      statusFile: 'suspended budget_exceeded\n',
+      journal: ['intake#1'],
+    });
+    expect(end.message).toMatch(
+      /^[\d.]+ of its 0.01 minutes used during the replay: raise it with --raise-minutes <minutes>$/,
+    );
+    const trail = budgetTrail(readEvents(end.dir));
+    expect(trail.map((event) => event.type)).toEqual(['budget:warning', 'budget:exceeded', 'run:suspended', 'run:end']);
+    expect(trail[1]).toEqual({ type: 'budget:exceeded', budget: 'minutes', limit: 0.01, used: expect.any(Number) });
+    expect(trail[2]).toEqual({
+      type: 'run:suspended',
+      stopReason: 'budget_exceeded',
+      budget: 'minutes',
+      limit: 0.01,
+      used: expect.any(Number),
+    });
+  });
+});
+
+test("a replay that settles before the budget's timer still ends the run its own way", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const end = await ran(repo.dir);
+    expect(end.status).toBe('completed');
+    expect(readEvents(end.dir).filter((event) => event.type === 'run:suspended')).toEqual([]);
+  });
+});
+
 test("a workflow that waits past the run's minutes before its first stage is suspended before that stage starts", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);
@@ -339,7 +393,7 @@ test("a workflow that waits past the run's minutes before its first stage is sus
     }).toEqual({
       stopReason: 'budget_exceeded',
       budget: 'minutes',
-      message: '<used> of its 0.01 minutes used before spec#1: raise it with --raise-minutes <minutes>',
+      message: '<used> of its 0.01 minutes used during the replay: raise it with --raise-minutes <minutes>',
       specStarted: false,
       journal: ['intake#1'],
     });
