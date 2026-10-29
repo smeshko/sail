@@ -322,6 +322,38 @@ test('reopenRun reopens a suspended run with the header on disk and STATUS runni
   });
 });
 
+test.each(['workspace reopen', 'unreadable events'])(
+  'a refused resume after %s marks its renewed lease as held by no process',
+  async (failure) => {
+    await withTempRepo(async (repo) => {
+      const run = await suspendedCopy(repo.dir);
+      const dir = join(repo.dir, '.sail-runs', run.runId);
+      const adapters = await fakeAdapters(repo.dir);
+      if (failure === 'workspace reopen') {
+        adapters.ports.workspace.reopen = async () => {
+          throw new PortError('workspace', 'reopen', 'unavailable', 'workspace unavailable');
+        };
+      } else {
+        writeFileSync(join(dir, 'events.ndjson'), 'invalid json\n');
+      }
+      const result = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters });
+      expect(result).toHaveProperty('refused');
+      expect(readStatus(dir)).toEqual({ status: 'suspended', stopReason: 'budget_exceeded' });
+      const { branch, repository } = run.header;
+      if (branch === undefined || repository === undefined) throw new Error('the run header names no branch');
+      expect(await adapters.ports.workspace.holder(repository.url, branch)).toMatchObject({ suspended: true });
+      // A different process can renew even while this resume's pid is still alive.
+      expect(
+        await adapters.ports.workspace.lease(repository.url, branch, {
+          runId: run.runId,
+          runDir: dir,
+          pid: process.ppid,
+        }),
+      ).toMatchObject({ leased: true });
+    });
+  },
+);
+
 test('a still-running refusal from an adapter that names no lease file says to remove its lease', async () => {
   await withTempRepo(async (repo) => {
     const run = await suspendedCopy(repo.dir);

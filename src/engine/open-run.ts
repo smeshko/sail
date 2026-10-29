@@ -643,7 +643,7 @@ export function changedAdapters(
 /**
  * Renews the run's lease and reopens its workspace, or says why the run can't resume there: it predates workspaces, it
  * is still alive in another process, another run holds its branch, or its workspace is gone or has lost its base. A
- * refusal from `reopen()` leaves the lease renewed, since the run still owns it.
+ * refusal from `reopen()` keeps the run's lease, marked as held by no process.
  */
 async function resumeWorkspace(
   port: WorkspacePort,
@@ -684,8 +684,39 @@ async function resumeWorkspace(
     const reopened = await port.reopen(run, { branch, baseSha: repository.baseSha });
     return { path: reopened.path, branch, baseSha: repository.baseSha, remote: repository.url };
   } catch (error) {
-    return { refused: `run ${run.runId}'s workspace can't be reopened: ${portRefusal(error)}` };
+    return refuseRenewedWorkspace(
+      port,
+      run,
+      header,
+      `run ${run.runId}'s workspace can't be reopened: ${portRefusal(error)}`,
+    );
   }
+}
+
+/** A refused resume no longer has a process, but still owns its branch. */
+async function refuseRenewedWorkspace(
+  port: WorkspacePort,
+  run: RunRef,
+  header: RunHeader,
+  refused: string,
+): Promise<{ refused: string }> {
+  const { branch, repository } = header;
+  if (branch === undefined || repository === undefined) return { refused };
+  try {
+    const marked = await port.lease(repository.url, branch, {
+      runId: run.runId,
+      runDir: run.runDir,
+      pid: process.pid,
+      suspended: true,
+    });
+    if (!marked.leased)
+      return { refused: `${refused}; its lease on ${branch} could not be marked as held by no process` };
+  } catch (error) {
+    return {
+      refused: `${refused}; its lease on ${branch} could not be marked as held by no process: ${portRefusal(error)}`,
+    };
+  }
+  return { refused };
 }
 
 /**
@@ -721,7 +752,14 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   if ('refused' in workspace) return workspace;
   // Last of the checks, since it cuts a torn tail: only a resume that goes ahead changes the file.
   const firstSeq = nextSeq(run.dir);
-  if (typeof firstSeq !== 'number') return firstSeq;
+  if (typeof firstSeq !== 'number') {
+    return refuseRenewedWorkspace(
+      options.adapters.ports.workspace,
+      { runId, runDir: run.dir },
+      run.header,
+      firstSeq.refused,
+    );
+  }
 
   writeStatus(run.dir, 'running');
   return {
