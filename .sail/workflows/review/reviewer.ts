@@ -2,6 +2,7 @@
 // may run and may spend, and each names the model alias it runs on. A reviewer reads the change and never writes to it,
 // so all six run beside each other.
 import { agent, file, value, z } from 'sail';
+import { readonly } from '../../lib/permissions';
 import { Reviewed } from './schemas';
 
 export function reviewer<const N extends string>(name: N, model: string) {
@@ -10,28 +11,7 @@ export function reviewer<const N extends string>(name: N, model: string) {
     consumes: { brief: file('brief.md'), requirements: file('requirements.md'), base: value(z.string()) },
     output: Reviewed,
     model,
-    permissions: {
-      read: ['**'],
-      write: ['$STAGE_OUT/**'],
-      commands: [
-        'cat *',
-        'grep *',
-        'head *',
-        'tail *',
-        'wc *',
-        'ls *',
-        'sed -n *',
-        'echo *',
-        'git log *',
-        'git diff *',
-        'git show *',
-        'git grep *',
-        'git ls-files *',
-        'git blame *',
-        'bun run test *',
-        'bun run typecheck',
-      ],
-    },
+    permissions: readonly,
     budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 20 },
   });
 }

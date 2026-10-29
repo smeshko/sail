@@ -2,6 +2,7 @@
 // each becomes: fixed on this pull request, filed as a ticket, or dropped. It names the reviews too thin to trust,
 // which stop the merge. The workflow routes on its verdicts.
 import { agent, file, value } from 'sail';
+import { readonly } from '../../../../lib/permissions';
 import { Evidence, Findings, Judgement } from '../../schemas';
 
 export const judge = agent('judge', {
@@ -14,23 +15,6 @@ export const judge = agent('judge', {
   },
   output: Judgement,
   model: 'deep',
-  permissions: {
-    read: ['**'],
-    write: ['$STAGE_OUT/**'],
-    commands: [
-      'cat *',
-      'grep *',
-      'head *',
-      'tail *',
-      'wc *',
-      'ls *',
-      'sed -n *',
-      'echo *',
-      'git log *',
-      'git diff *',
-      'git show *',
-      'git grep *',
-    ],
-  },
+  permissions: readonly,
   budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 15 },
 });

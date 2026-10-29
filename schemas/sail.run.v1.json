@@ -185,6 +185,7 @@
         "read": { "type": "array", "items": { "type": "string" } },
         "write": { "type": "array", "items": { "type": "string" } },
         "commands": { "type": "array", "items": { "type": "string" } },
+        "deny": { "type": "array", "items": { "type": "string" } },
         "network": {
           "oneOf": [{ "const": "none" }, { "type": "array", "items": { "type": "string" } }]
         },
