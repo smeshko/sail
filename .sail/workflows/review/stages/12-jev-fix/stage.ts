@@ -7,6 +7,7 @@ import { Findings, FixAsked, Fixed } from '../../schemas';
 
 export const jevFix = script('jev-fix', {
   run: './run.sh',
+  ports: ['jev'],
   consumes: { findings: value(Findings), fixed: value(Fixed), since: value(z.string()) },
   output: FixAsked,
   exitCodes: { passed: [0], failed: [] },

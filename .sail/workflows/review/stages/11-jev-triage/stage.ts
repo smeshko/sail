@@ -5,6 +5,7 @@ import { Findings, Triaged } from '../../schemas';
 
 export const jevTriage = script('jev-triage', {
   run: './run.sh',
+  ports: ['jev'],
   consumes: { findings: value(Findings), diff: file('diff.patch') },
   output: Triaged,
   exitCodes: { passed: [0], failed: [] },
