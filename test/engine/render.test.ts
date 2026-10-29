@@ -39,6 +39,16 @@ function foldedTags(text: string): RegExpMatchArray | null {
     .match(/<\s*\/?\s*untrusted-?input/gi);
 }
 
+test('the untrusted-input fragment names every bracket LOOKALIKE escapes, and only those', () => {
+  const fragment = readFileSync(
+    join(import.meta.dir, '..', '..', 'src', 'builtins', 'prompts', '_shared', 'untrusted-input.md'),
+    'utf8',
+  );
+  const sentence = fragment.match(/`&lt;` stands for [^.]*\./)?.[0] ?? '';
+  const brackets = [...sentence.matchAll(/`(.)`/gu)].map((match) => match[1]);
+  expect(new Set(brackets)).toEqual(new Set(LOOKALIKE_BRACKETS));
+});
+
 // TASK-001: variables, placeholders and render errors
 
 test('render fills a path from the values, spaces inside the braces or not', () => {
