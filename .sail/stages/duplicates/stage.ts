@@ -1,6 +1,6 @@
 // duplicates: names the team's other open tickets a ticket may duplicate, each with Jev's probability. One request asks
 // a `noul` per other ticket, in one `sail port jev ask`; a ticket answered under 0.5 is left out. Shared: groom judges
-// a ticket with it, and anything that files a ticket can check it against the backlog first.
+// a ticket with it. The check is shared with filers in .sail/lib/duplicates.mjs.
 import { script, untrusted, value, z } from 'sail';
 
 /** Other tickets the given one may duplicate, each with how sure Jev is. */

@@ -4,7 +4,12 @@
 // tickets Jev answered at 0.5 or more, highest first. With no other open ticket it asks nothing.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const { openTickets, wrap, excerpt, sameWork, LIKELY } = await import(
+  pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
+);
 
 const ticket = JSON.parse(readFileSync(process.env.INPUT_TICKET, 'utf8'));
 const out = process.env.STAGE_OUT;
@@ -20,18 +25,7 @@ function port(args, input) {
 }
 
 const json = (args) => JSON.parse(port(args).trim().split('\n').at(-1));
-const wrap = (text, source) => port(['render', '--untrusted', '--source', source], text).trimEnd();
-
-/** The most of each other ticket's description the request carries: enough to judge, not the whole backlog. */
-const DESCRIPTION_CHARS = 600;
-const excerpt = (text) => (text.length > DESCRIPTION_CHARS ? `${text.slice(0, DESCRIPTION_CHARS)}…` : text);
-/** Jev answers at or above this are probably the same work. */
-const LIKELY = 0.5;
-
-const open = [
-  ...json(['ticket-source', 'list', '--state', 'unstarted']),
-  ...json(['ticket-source', 'list', '--state', 'started']),
-].filter((other) => other.ticketKey !== ticket.ticketKey);
+const open = openTickets().filter((other) => other.ticketKey !== ticket.ticketKey);
 
 const state = {
   ticket: {
@@ -51,17 +45,7 @@ const state = {
   ),
 };
 const questions = Object.fromEntries(
-  open.map((other) => [
-    other.ticketKey,
-    {
-      type: 'noul',
-      instructions: `Do \`ticket\` and \`others["${other.ticketKey}"]\` describe the same work?`,
-      criteria: {
-        true: 'the same change: the same outcome in the same place, worded differently',
-        false: 'a different change, even in the same area',
-      },
-    },
-  ]),
+  open.map((other) => [other.ticketKey, sameWork('ticket', `others["${other.ticketKey}"]`)]),
 );
 const requestFile = join(out, 'request.json');
 writeFileSync(requestFile, `${JSON.stringify({ state, questions }, null, 2)}\n`);
