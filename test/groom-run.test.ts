@@ -1,7 +1,7 @@
 // sail's own `groom` workflow, end to end through the CLI on the fakes: `sail FAKE-2 --workflow groom` in a temporary
 // repository that holds a copy of the repository's own `.sail/`, its ports all fake (.sail/fake/*.json).
 import { expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFakeCodeHost } from '../src/adapters/fake/code-host';
 import { createFakeTicketSource } from '../src/adapters/fake/ticket-source';
@@ -82,6 +82,66 @@ test("groom's intake wraps the ticket and the other tickets as untrusted input",
     expect(others).toContain('<untrusted-input source="ticket FAKE-1, labels">');
     expect(others).toContain('<untrusted-input source="ticket FAKE-1, description">');
     expect(others).toContain('A run with no agent calls prints `total $0.00`');
+  });
+}, 120_000);
+
+test('groom wraps every title and description among 150 additional open tickets', async () => {
+  await withTempRepo(async (repo) => {
+    const sailDir = writeGroomRepo(repo);
+    const file = join(sailDir, 'fake', 'tickets.json');
+    const seed = JSON.parse(readFileSync(file, 'utf8'));
+    for (let n = 100; n < 250; n++)
+      seed.tickets.push({
+        ...seed.tickets[0],
+        ticketKey: `FAKE-${n}`,
+        title: `Ticket ${n}`,
+        description: `Work ${n}.`,
+        labels: [],
+        comments: [],
+        links: [],
+        attachments: [],
+      });
+    writeFileSync(file, JSON.stringify(seed));
+    repo.git('commit', '-am', 'seed many open tickets');
+    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    // Observe real CLI starts when the intake runs over the same large backlog.
+    const bin = join(repo.home, 'counted-bin');
+    const out = join(repo.home, 'counted-out');
+    mkdirSync(bin);
+    mkdirSync(out);
+    const calls = join(repo.home, 'port-calls');
+    const shim = join(bin, 'sail');
+    writeFileSync(
+      shim,
+      `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nexec '${process.execPath}' '${join(import.meta.dir, '..', 'src', 'cli', 'main.ts')}' "$@"\n`,
+    );
+    chmodSync(shim, 0o755);
+    const source = join(repo.home, 'source.json');
+    writeFileSync(source, JSON.stringify({ ticketKey: 'FAKE-2' }));
+    const child = Bun.spawnSync([process.execPath, join(sailDir, 'workflows', 'groom', 'read.mjs')], {
+      cwd: repo.dir,
+      env: {
+        ...repo.env,
+        PATH: `${bin}:${repo.env.PATH}`,
+        SAIL_CONFIG: join(sailDir, 'project.yaml'),
+        INPUT_SOURCE: source,
+        STAGE_OUT: out,
+      },
+    });
+    expect({ code: child.exitCode, stderr: child.stderr.toString() }).toEqual({ code: 0, stderr: '' });
+    expect(
+      readFileSync(calls, 'utf8')
+        .split('\n')
+        .filter((line) => line.startsWith('port render')),
+    ).toEqual(['port render --untrusted --each']);
+    const others = readFileSync(join(out, 'others.md'), 'utf8');
+    for (let n = 100; n < 250; n++) {
+      expect(others).toContain(`<untrusted-input source="ticket FAKE-${n}, title">\nTicket ${n}\n</untrusted-input>`);
+      expect(others).toContain(
+        `<untrusted-input source="ticket FAKE-${n}, description">\nWork ${n}.\n</untrusted-input>`,
+      );
+    }
   });
 }, 120_000);
 

@@ -1,6 +1,6 @@
 // Files the follow-ups in $INPUT_FOLLOWUPS as tickets, bugs first, at most MAX_FILED of them: the rest are noted on the
-// pull request, not filed. Before filing, one `sail port jev ask` checks each follow-up against open tickets and earlier
-// follow-ups; duplicates are skipped. When Jev can't be asked, as in a repository
+// pull request, not filed. Before filing, `sail port jev ask` checks each follow-up against open tickets and earlier
+// follow-ups in groups bounded by question count and serialized bytes; duplicates are skipped. When Jev can't be asked, as in a repository
 // with no Jev adapter, every follow-up is filed unchecked. A ticket gets its type as a label, `code-review` too for a
 // deferred review finding, and `groom`, so the groom workflow judges whether it earns its place; never the factory's
 // designation label, which would hand it to the next run. Each description ends with how the problem is reached and
@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const { openTickets, wrapAll, excerpt, sameWork, SAME_WORK } = await import(
+const { openTickets, wrapAll, excerpt, sameWork, SAME_WORK, MAX_QUESTIONS, MAX_REQUEST_BYTES } = await import(
   pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
 );
 
@@ -39,7 +39,7 @@ function port(args, body) {
 }
 
 /**
- * Open and earlier batch twins for each follow-up, with Jev's answers: one request for every pair. Throws when the
+ * Open and earlier batch twins for each follow-up: requests bounded by questions and UTF-8 bytes. Throws when the
  * tickets can't be listed or Jev can't be asked, and the caller files unchecked.
  */
 function duplicatesOf(candidates) {
@@ -47,56 +47,67 @@ function duplicatesOf(candidates) {
   if (candidates.length === 0 || (open.length === 0 && candidates.length < 2)) return new Map();
   const passages = [
     ...candidates.flatMap((each, index) => [
-      { text: each.title, source: `follow-up ${index + 1}, title` },
-      { text: each.description, source: `follow-up ${index + 1}, description` },
+      { text: excerpt(each.title), source: `follow-up ${index + 1}, title` },
+      { text: excerpt(each.description), source: `follow-up ${index + 1}, description` },
     ]),
     ...open.flatMap((ticket) => [
-      { text: ticket.title, source: `ticket ${ticket.ticketKey}, title` },
+      { text: excerpt(ticket.title), source: `ticket ${ticket.ticketKey}, title` },
       { text: excerpt(ticket.description || '(none)'), source: `ticket ${ticket.ticketKey}, description` },
     ]),
   ];
   const wrapped = wrapAll(passages);
+  let next = 0;
+  const entry = () => ({ title: wrapped[next++], description: wrapped[next++] });
   const state = {
-    followUps: Object.fromEntries(
-      candidates.map((_, index) => [
-        `follow-up-${index + 1}`,
-        {
-          title: wrapped[index * 2],
-          description: wrapped[index * 2 + 1],
-        },
-      ]),
-    ),
-    tickets: Object.fromEntries(
-      open.map((ticket, index) => [
-        ticket.ticketKey,
-        {
-          title: wrapped[(candidates.length + index) * 2],
-          description: wrapped[(candidates.length + index) * 2 + 1],
-        },
-      ]),
-    ),
+    followUps: Object.fromEntries(candidates.map((_, index) => [`follow-up-${index + 1}`, entry()])),
+    tickets: Object.fromEntries(open.map((ticket) => [ticket.ticketKey, entry()])),
   };
-  const questions = {};
+  const pairs = [];
   candidates.forEach((_, index) => {
-    for (const ticket of open) {
-      questions[`follow-up-${index + 1}:${ticket.ticketKey}`] = sameWork(
-        `followUps["follow-up-${index + 1}"]`,
-        `tickets["${ticket.ticketKey}"]`,
-      );
-    }
+    const a = `follow-up-${index + 1}`;
+    for (const ticket of open) pairs.push({ name: `${a}:${ticket.ticketKey}`, a, b: ticket.ticketKey });
     for (let earlier = 0; earlier < index; earlier++) {
-      questions[`follow-up-${index + 1}:follow-up-${earlier + 1}`] = sameWork(
-        `followUps["follow-up-${index + 1}"]`,
-        `followUps["follow-up-${earlier + 1}"]`,
-      );
+      const b = `follow-up-${earlier + 1}`;
+      pairs.push({ name: `${a}:${b}`, a, b });
     }
   });
-  const { answer, error } = port(['jev', 'ask'], JSON.stringify({ state, questions }));
-  if (error !== undefined) throw new Error(error);
+  const answers = {};
+  const empty = () => ({ state: { followUps: {}, tickets: {} }, questions: {} });
+  let request = empty();
+  const ask = () => {
+    const { answer, error } = port(['jev', 'ask'], JSON.stringify(request));
+    if (error !== undefined) throw new Error(error);
+    Object.assign(answers, answer.answers);
+  };
+  for (const { name, a, b } of pairs) {
+    const collection = Object.hasOwn(state.followUps, b) ? 'followUps' : 'tickets';
+    const add = () => {
+      const next = {
+        state: { followUps: { ...request.state.followUps }, tickets: { ...request.state.tickets } },
+        questions: { ...request.questions, [name]: sameWork(`followUps["${a}"]`, `${collection}["${b}"]`) },
+      };
+      next.state.followUps[a] = state.followUps[a];
+      next.state[collection][b] = state[collection][b];
+      return next;
+    };
+    let next = add();
+    if (
+      Object.keys(next.questions).length > MAX_QUESTIONS ||
+      Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_REQUEST_BYTES
+    ) {
+      if (Object.keys(request.questions).length > 0) ask();
+      request = empty();
+      next = add();
+    }
+    if (Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_REQUEST_BYTES)
+      throw new Error('one duplicate-check pair exceeds the Jev request byte limit');
+    request = next;
+  }
+  if (Object.keys(request.questions).length > 0) ask();
   const found = new Map();
   candidates.forEach((_, index) => {
     for (const ticket of open) {
-      const yes = answer.answers[`follow-up-${index + 1}:${ticket.ticketKey}`]?.noul ?? 0;
+      const yes = answers[`follow-up-${index + 1}:${ticket.ticketKey}`]?.noul ?? 0;
       if (yes >= SAME_WORK && yes > (found.get(index)?.open?.confidence ?? 0)) {
         found.set(index, {
           ...found.get(index),
@@ -105,7 +116,7 @@ function duplicatesOf(candidates) {
       }
     }
     for (let earlier = 0; earlier < index; earlier++) {
-      const yes = answer.answers[`follow-up-${index + 1}:follow-up-${earlier + 1}`]?.noul ?? 0;
+      const yes = answers[`follow-up-${index + 1}:follow-up-${earlier + 1}`]?.noul ?? 0;
       if (yes >= SAME_WORK) {
         const match = found.get(index) ?? {};
         match.batch ??= [];

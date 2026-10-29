@@ -3,7 +3,10 @@ import { spawnSync } from 'node:child_process';
 
 /** Confidence at which a filer treats two pieces of work as the same. */
 export const SAME_WORK = 0.8;
-/** Maximum description length in the request. */
+/** Bound requests by count and serialized UTF-8 bytes, as ADW-387 bounds banned-word questions. */
+export const MAX_QUESTIONS = 64;
+export const MAX_REQUEST_BYTES = 64_000;
+/** Maximum passage length in the request; full text is retained when filing. */
 export const DESCRIPTION_CHARS = 600;
 /** An excerpt with a marker when cut. */
 export const excerpt = (text) => (text.length > DESCRIPTION_CHARS ? `${text.slice(0, DESCRIPTION_CHARS)}…` : text);

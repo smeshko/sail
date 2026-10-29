@@ -4,7 +4,8 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_OK } from '../src/cli/exit-codes';
-import { seedHarness } from './helpers/fixture';
+import { readEvents } from '../src/events/consumers/ndjson';
+import { edit, seedHarness } from './helpers/fixture';
 import { fakeTicket, onlyRun } from './helpers/groom-fixture';
 import { nouls, OWN_SAIL, writeOwnSail } from './helpers/own-sail';
 import { runCaptured } from './helpers/run-captured';
@@ -184,6 +185,160 @@ test("the factory files its one follow-up Jev finds new, with how it's reached a
     expect(ticket.labels).toEqual(['bug', 'groom']);
     expect(ticket.description).toContain('Reached by: `sail show <run>` on a run started with `--from-run`');
     expect(prComment(repo.dir)).toContain('- [FAKE-3](');
+  });
+}, 120_000);
+
+test.each([false, true])(
+  '152 open tickets are checked in bounded requests, including a late duplicate: %s',
+  async (duplicate) => {
+    await withTempRepo(async (repo) => {
+      const keys = ['FAKE-1', 'FAKE-2', ...Array.from({ length: 150 }, (_, i) => `FAKE-${100 + i}`)];
+      const answers = Object.fromEntries(
+        keys.map((key) => [`follow-up-1:${key}`, duplicate && key === 'FAKE-249' ? 0.9 : 0]),
+      );
+      setUp(repo, { jev: jevSeed(answers) });
+      const sailDir = join(repo.dir, '.sail');
+      const ticketsFile = join(sailDir, 'fake', 'tickets.json');
+      const seed = JSON.parse(readFileSync(ticketsFile, 'utf8'));
+      for (let n = 100; n < 250; n++)
+        seed.tickets.push({
+          ...seed.tickets[0],
+          ticketKey: `FAKE-${n}`,
+          title: `Ticket ${n}`,
+          description: `Work ${n}.`,
+          labels: [],
+          comments: [],
+          links: [],
+          attachments: [],
+        });
+      writeFileSync(ticketsFile, JSON.stringify(seed));
+      // Record the actual requests while retaining the fake's answers and provider events.
+      const requestsFile = join(repo.home, 'jev-requests.ndjson');
+      writeFileSync(
+        join(sailDir, 'record-jev.ts'),
+        `
+import { appendFileSync } from 'node:fs';
+import { createFakeJev } from '${join(import.meta.dir, '..', 'src', 'adapters', 'fake', 'jev')}';
+export default { create(_options, context) {
+  const fake = createFakeJev({ seed: context.sailDir + '/fake/jev.json', emit: context.emit });
+  return { ...fake, async ask(request) {
+    appendFileSync(${JSON.stringify(requestsFile)}, JSON.stringify(request) + '\\n');
+    return fake.ask(request);
+  } };
+} };
+`,
+      );
+      edit(sailDir, 'project.yaml', 'jev: { use: fake, seed: ./fake/jev.json }', 'jev: { use: ./record-jev.ts }');
+      repo.git('add', '.sail/fake/tickets.json', '.sail/record-jev.ts', '.sail/project.yaml');
+      repo.git('commit', '-m', 'seed many open tickets and record Jev requests');
+      const { code, stderr } = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+      expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+      const dir = onlyRun(repo.dir);
+      const output = filedOutput(dir);
+      expect(output.unchecked).toBeNull();
+      const counts = readEvents(dir)
+        .filter((event) => event.type === 'jev:asked' && event.key === 'file-follow-ups#1')
+        .map((event) => (event as { questions?: number }).questions);
+      expect(counts).toEqual([64, 64, 24]);
+      if (duplicate) {
+        expect(output.filed).toEqual([]);
+        expect(output.skipped).toEqual([
+          {
+            title: "sail show's footer ignores calls replayed from a seeded run",
+            duplicateOf: 'FAKE-249',
+            confidence: 0.9,
+          },
+        ]);
+      } else {
+        expect(output.filed.map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['FAKE-250']);
+        expect(output.skipped).toEqual([]);
+      }
+      const requests = readFileSync(requestsFile, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+        .filter((request) => Object.keys(request.questions).some((name) => name.startsWith('follow-up-')));
+      expect(requests).toHaveLength(3);
+      expect(requests.flatMap((request) => Object.keys(request.questions)).sort()).toEqual(
+        keys.map((key) => `follow-up-1:${key}`).sort(),
+      );
+      for (const request of requests) {
+        expect(Object.keys(request.state.followUps)).toEqual(['follow-up-1']);
+        expect(Object.keys(request.state.tickets).sort()).toEqual(
+          Object.keys(request.questions)
+            .map((name) => name.split(':')[1] ?? '')
+            .sort(),
+        );
+      }
+    });
+  },
+  120_000,
+);
+
+test('duplicate requests stay within 64,000 bytes with long UTF-8 passages and check every pair', async () => {
+  await withTempRepo(async (repo) => {
+    const followUps = [follow('First crash', 'bug'), follow('Second crash', 'bug')].map((each) => ({
+      ...each,
+      description: '故障の説明'.repeat(15_000),
+    }));
+    const keys = ['FAKE-1', 'FAKE-2', ...Array.from({ length: 70 }, (_, i) => `FAKE-${100 + i}`)];
+    const names = followUps.flatMap((_, i) => [
+      ...keys.map((key) => `follow-up-${i + 1}:${key}`),
+      ...(i === 1 ? ['follow-up-2:follow-up-1'] : []),
+    ]);
+    setUp(repo, {
+      followUps,
+      jev: jevSeed(Object.fromEntries(names.map((name) => [name, name === 'follow-up-2:FAKE-169' ? 0.9 : 0]))),
+    });
+    const sailDir = join(repo.dir, '.sail');
+    const ticketsFile = join(sailDir, 'fake', 'tickets.json');
+    const seed = JSON.parse(readFileSync(ticketsFile, 'utf8'));
+    for (const ticketKey of keys.slice(2))
+      seed.tickets.push({
+        ...seed.tickets[0],
+        ticketKey,
+        title: `A realistic ticket ${ticketKey}`,
+        description: '説明文'.repeat(200),
+        labels: [],
+        comments: [],
+        links: [],
+        attachments: [],
+      });
+    writeFileSync(ticketsFile, JSON.stringify(seed));
+    const requestsFile = join(repo.home, 'bounded-jev.ndjson');
+    writeFileSync(
+      join(sailDir, 'bounded-jev.ts'),
+      `
+import { appendFileSync } from 'node:fs';
+import { createFakeJev } from '${join(import.meta.dir, '..', 'src', 'adapters', 'fake', 'jev')}';
+export default { create(_options, context) {
+  const fake = createFakeJev({ seed: context.sailDir + '/fake/jev.json', emit: context.emit });
+  return { ...fake, async ask(request) {
+    appendFileSync(${JSON.stringify(requestsFile)}, JSON.stringify(request) + '\\n');
+    return fake.ask(request);
+  } };
+} };
+`,
+    );
+    edit(sailDir, 'project.yaml', 'jev: { use: fake, seed: ./fake/jev.json }', 'jev: { use: ./bounded-jev.ts }');
+    repo.git('add', '.sail/fake/tickets.json', '.sail/bounded-jev.ts', '.sail/project.yaml');
+    repo.git('commit', '-m', 'seed long passages and record requests');
+    const { code } = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect(code).toBe(EXIT_OK);
+    const requests = readFileSync(requestsFile, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((request) => Object.keys(request.questions).some((name) => name.startsWith('follow-up-')));
+    for (const request of requests) {
+      expect(Buffer.byteLength(JSON.stringify(request), 'utf8')).toBeLessThanOrEqual(64_000);
+      expect(Object.keys(request.questions).length).toBeLessThanOrEqual(64);
+    }
+    expect(requests.flatMap((request) => Object.keys(request.questions)).sort()).toEqual(names.sort());
+    const output = filedOutput(onlyRun(repo.dir));
+    expect(output.unchecked).toBeNull();
+    expect(output.skipped).toEqual([{ title: 'Second crash', duplicateOf: 'FAKE-169', confidence: 0.9 }]);
+    expect(fakeTicket(repo.dir, 'FAKE-170').description).toContain('故障の説明'.repeat(15_000));
   });
 }, 120_000);
 
