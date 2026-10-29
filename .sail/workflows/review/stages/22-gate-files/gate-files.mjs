@@ -17,7 +17,11 @@ export const GATE_FILES = [
 export const GATE_DIRS = ['.github/'];
 
 export function isGateFile(path) {
-  return GATE_FILES.includes(path) || GATE_DIRS.some((dir) => path.startsWith(dir));
+  return (
+    GATE_FILES.includes(path) ||
+    GATE_DIRS.some((dir) => path.startsWith(dir)) ||
+    ['.gitignore', 'biome.json', 'biome.jsonc'].includes(path.split('/').at(-1))
+  );
 }
 
 function git(...args) {

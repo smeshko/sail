@@ -83,6 +83,18 @@ test('gate paths with non-ASCII and control characters are named verbatim', asyn
   });
 });
 
+test('ignore files and nested Biome configs are gate files at any depth', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    const paths = ['.gitignore', 'biome.jsonc', 'src/.gitignore', 'src/biome.json', 'src/deep/biome.jsonc'];
+    for (const path of paths) put(repo, path);
+    commit(repo, ...paths);
+    expect(stage(repo, base)).toEqual({ code: 0, output: { base, touched: paths } });
+    expect(lib.isGateFile('src/not-biome.json')).toBe(false);
+    expect(lib.isGateFile('src/not.gitignore')).toBe(false);
+  });
+});
+
 test('a deleted tsconfig is named', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);
