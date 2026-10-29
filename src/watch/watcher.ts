@@ -564,6 +564,9 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     try {
       const swept = await workspace.sweep(runs);
       if (swept.paths.length > 0) print(sweptLine(swept.paths.length, now()));
+      for (const { path, reason } of swept.failed) {
+        print(errorLine(undefined, `the worktree ${path} of an ended run was not removed: ${reason}`, now()));
+      }
     } catch (error) {
       print(errorLine(undefined, `the worktrees of ended runs were not swept: ${messageOf(error)}`, now()));
     }
