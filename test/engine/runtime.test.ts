@@ -53,7 +53,7 @@ import {
 import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, type SteppingClock, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { holdTempRepo } from '../helpers/held-repo';
-import { TRIO, TRIO_GROUP, TRIO_KEYS, writeTrio } from '../helpers/review-fixture';
+import { orderTrio, TRIO, TRIO_GROUP, TRIO_KEYS, writeTrio } from '../helpers/review-fixture';
 import {
   copyRun,
   interruptWhenAsleep,
@@ -2070,9 +2070,20 @@ const ofType = <T extends SailEvent['type']>(list: readonly SailEvent[], type: T
 /** The events a group's calls emit: those carrying one of its keys. */
 const CALL_TYPES = ['stage:', 'harness:', 'agent:', 'usage:', 'prompt:', 'input:', 'output:', 'file:'];
 
+test('trio journal gates override the order its delays would give', async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 0, b: 200, c: 100 });
+    orderTrio(repo.dir, ['b', 'c', 'a']);
+    const end = await ranTrio(repo.dir);
+    expect(end.status).toBe('completed');
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'b#1 done', 'c#1 done', 'a#1 done', 'd#1 done']);
+  });
+}, 30_000);
+
 test("a group's calls run at once and are journaled as each completes, the workflow gets their results in the order given, and all:start and all:end bracket them", async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    orderTrio(repo.dir, ['b', 'c', 'a']);
     const end = await ranTrio(repo.dir);
 
     expect(end).toMatchObject({ status: 'completed', result: { names: ['a', 'b', 'c'], last: 'done' } });
@@ -2230,6 +2241,7 @@ test('a call of a group that throws inside sail stops its siblings, and the erro
 test("until naming a group's stage suspends the run once the whole group is journaled, before the next call", async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 100, b: 300, c: 200 });
+    orderTrio(repo.dir, ['a', 'c', 'b']);
     const end = await ranTrio(repo.dir, { until: 'b' });
 
     expect(end).toMatchObject({
@@ -2246,6 +2258,7 @@ test("a resume that runs one call of a group stamps what an adapter emits during
   await withTempRepo(async (repo) => {
     const runId = await withTempRepo(async (from) => {
       writeTrio(from.dir, { a: 50, b: 100, c: 20_000 });
+      orderTrio(from.dir, ['a', 'b']);
       const controller = new AbortController();
       const end = await ranTrio(from.dir, {
         signal: controller.signal,
@@ -2277,6 +2290,7 @@ test("a resume that runs one call of a group stamps what an adapter emits during
 test('an abort as the last call of a group is journaled still ends the group with all:end, since the journal holds it whole', async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    orderTrio(repo.dir, ['b', 'c', 'a']);
     const controller = new AbortController();
     const end = await ranTrio(repo.dir, {
       signal: controller.signal,
@@ -2298,6 +2312,7 @@ test('an abort as the last call of a group is journaled still ends the group wit
 test("a call of a group that throws after the journal holds the group whole keeps its crash when the journal can't be read for all:end", async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    orderTrio(repo.dir, ['b', 'c', 'a']);
     const crashed = ranTrio(repo.dir, {
       onCall: (entry) => {
         if (entry.key !== 'a#1') return;
@@ -2321,6 +2336,7 @@ test("a call of a group that throws after the journal holds the group whole keep
 test("a group whose calls all completed crashes with the journal's error when it can't be read for all:end", async () => {
   await withTempRepo(async (repo) => {
     writeTrio(repo.dir, { a: 300, b: 100, c: 200 });
+    orderTrio(repo.dir, ['b', 'c', 'a']);
     const crashed = ranTrio(repo.dir, {
       onCall: (entry) => {
         if (entry.key === 'a#1') appendFileSync(join(onlyRun(repo.dir), JOURNAL_FILE), '\n');

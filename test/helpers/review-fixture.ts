@@ -1,8 +1,9 @@
 // Groups on the fake harness. `writeTrio()` adds `trio` to a copy of the fixture's `.sail/`: three agents `a`, `b` and
 // `c` on the brief in one `run.all()`, then `d`, so a test can see what runs after a group. Each agent submits its own
-// name, after the delay the test gives it. The fixture's own `review` workflow runs its six reviewers the same way, and
-// the rest is for it: its reviewers' delays, a reviewer that ends in error, the reviewers swapped in its group, and a
-// wait for a run's journal to hold so many lines.
+// name. With `writeTrio()` alone, completion order depends on delays; callers can add `orderTrio()`'s journal gates
+// to fix the order, with delays only spacing the calls. The fixture's own `review` workflow runs its six reviewers
+// in a group too, and the rest is for it: its reviewers' delays, a reviewer that ends in error, the reviewers swapped
+// in its group, and a wait for a run's journal to hold so many lines.
 //
 // The harness script is `.sail/fake/harness.json`, read afresh by every session, so a resume in another process takes
 // the delays as they are written by then.
@@ -102,17 +103,30 @@ export function writeTrio(
   return sail;
 }
 
+/** Gates trio's done answers on the preceding call's journal line. */
+export function orderTrio(repoDir: string, order: readonly ('a' | 'b' | 'c')[]): void {
+  const script = harnessScript(repoDir);
+  for (const [index, name] of order.entries()) {
+    const previous = order[index - 1];
+    script[name] = (script[name] ?? []).map((answer) =>
+      answer.outcome === 'done' ? { ...answer, after: previous === undefined ? [] : [`${previous}#1`] } : answer,
+    );
+  }
+  writeHarnessScript(repoDir, script);
+}
+
 /** What a source run of trio journals: its group in the order its calls completed, then d. */
 export const TRIO_JOURNAL = ['intake#1', 'b#1', 'c#1', 'a#1', 'd#1'];
 
 /**
- * Runs trio to its end in a repository of its own, with a at 300 ms, b at 100 and c at 200, so its group is journaled
- * b, c, a. Then copies that repository into `to`, where a seeded run can reuse it, and answers with the run's id and
+ * Runs trio to its end in a repository of its own, gated to journal b, c, a. Delays of 300, 100 and 200 ms
+ * for a, b and c only space the calls. Then copies that repository into `to`, where a seeded run can reuse it, and answers with the run's id and
  * the keys it journaled, for the test to check against `TRIO_JOURNAL` before it seeds.
  */
 export async function trioRunInto(to: string): Promise<{ runId: string; keys: string[] }> {
   return withTempRepo(async (from) => {
     writeTrio(from.dir, { a: 300, b: 100, c: 200 });
+    orderTrio(from.dir, ['b', 'c', 'a']);
     const end = await runWorkflow({
       cwd: from.dir,
       adapters: await fakeAdapters(from.dir),

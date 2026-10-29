@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { createFakeHarness, type HarnessScript, type ScriptedAnswer } from '../../../src/adapters/fake/harness';
+import { appendJournal, createJournal } from '../../../src/engine/journal';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import type { HarnessResult } from '../../../src/ports/types';
 import { captureEvents, eventIssues } from '../../helpers/ports';
@@ -42,6 +43,123 @@ function request(key: string, tryNumber = 1, env?: Record<string, string>): Harn
     budget: { maxTurns: 5, maxUsd: 1, maxMinutes: 5 },
     outputSchema: { type: 'object' },
   };
+}
+
+function gatedRequest(): { runDir: string; req: HarnessRequest } {
+  const runDir = join(tempDir(), 'run');
+  const out = join(runDir, '01-a', 'call-1', 'try-2');
+  mkdirSync(out, { recursive: true });
+  createJournal(runDir);
+  return { runDir, req: request('spec#1', 1, { STAGE_OUT: out }) };
+}
+
+function journalKey(runDir: string, stage: string): void {
+  appendJournal(runDir, {
+    key: `${stage}#1`,
+    stage,
+    call: 1,
+    outcome: 'done',
+    output: {},
+    reason: null,
+    files: {},
+    resultPath: `01-${stage}/call-1/result.json`,
+  });
+}
+
+test("an answer with after submits only once its run's journal holds every key it names", async () => {
+  const { runDir, req } = gatedRequest();
+  let appended = false;
+  const harness = createFakeHarness({
+    script: {
+      spec: [{ outcome: 'done', output: 'ready', delayMs: 5, after: ['x#1', 'y#1'], files: { 'ready.txt': 'ready' } }],
+    },
+  });
+  journalKey(runDir, 'x');
+  const timer = setTimeout(() => {
+    journalKey(runDir, 'y');
+    appended = true;
+  }, 80);
+  try {
+    const result = await harness.run(req);
+    expect(appended).toBe(true);
+    expect(summary(result)).toBe('ready');
+    expect(readFileSync(join(req.env.STAGE_OUT ?? '', 'ready.txt'), 'utf8')).toBe('ready');
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+test('an answer with after ends as aborted when the signal aborts during its wait', async () => {
+  const { req } = gatedRequest();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 40);
+  try {
+    const result = await createFakeHarness({ script: { spec: [{ outcome: 'done', output: {}, after: ['x#1'] }] } }).run(
+      { ...req, signal: controller.signal },
+    );
+    expect(summary(result)).toBe('error: aborted');
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+test('an answer whose after names a key never journaled ends at maxMinutes as budget_exceeded', async () => {
+  const { req } = gatedRequest();
+  const events: HarnessEvent[] = [];
+  const result = await createFakeHarness({
+    script: { spec: [{ outcome: 'done', output: {}, delayMs: 40, after: ['x#1'] }] },
+  }).run({
+    ...req,
+    budget: { ...req.budget, maxMinutes: 0.002 },
+    onEvent: (event) => {
+      events.push(event);
+    },
+  });
+  expect(summary(result)).toBe('error: budget exceeded: maxMinutes 0.002');
+  expect(result.outcome === 'error' ? result.reason : null).toBe('budget_exceeded');
+  expect(events.find((event) => event.type === 'budget:exceeded')).toEqual({
+    type: 'budget:exceeded',
+    budget: 'minutes',
+    limit: 0.002,
+    used: 0.002,
+  });
+});
+
+test('an empty after needs no run directory', async () => {
+  const result = await createFakeHarness({ script: { spec: [{ outcome: 'done', output: 'ready', after: [] }] } }).run(
+    request('spec#1', 1, {}),
+  );
+  expect(summary(result)).toBe('ready');
+});
+
+test('after waits through a corrupt journal until it is readable', async () => {
+  const { runDir, req } = gatedRequest();
+  const path = join(runDir, 'journal.ndjson');
+  writeFileSync(path, 'corrupt\n');
+  let repaired = false;
+  const timer = setTimeout(() => {
+    writeFileSync(path, '');
+    journalKey(runDir, 'x');
+    repaired = true;
+  }, 40);
+  try {
+    const result = await createFakeHarness({
+      script: { spec: [{ outcome: 'done', output: 'ready', after: ['x#1'] }] },
+    }).run(req);
+    expect(repaired).toBe(true);
+    expect(summary(result)).toBe('ready');
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
+for (const hasStageOut of [true, false]) {
+  test(`an answer with after and no journal above STAGE_OUT ends in error naming it (${hasStageOut ? 'missing' : 'absent'})`, async () => {
+    const result = await createFakeHarness({ script: { spec: [{ outcome: 'done', output: {}, after: ['x#1'] }] } }).run(
+      request('spec#1', 1, hasStageOut ? { STAGE_OUT: stageOut() } : {}),
+    );
+    expect(summary(result)).toBe('error: fake harness: after needs a run directory above STAGE_OUT');
+  });
 }
 
 const done = (output: unknown): ScriptedAnswer => ({ outcome: 'done', output });
