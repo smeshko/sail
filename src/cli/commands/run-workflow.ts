@@ -248,6 +248,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     runWorkflow({
+      secrets: credentialValues(io.env ?? process.env),
       cwd: io.cwd,
       workflow,
       ticket,

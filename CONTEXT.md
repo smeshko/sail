@@ -411,6 +411,10 @@ _Avoid_: consumption, spend, billing, metering
 
 ### Guardrails
 
+**Redaction**:
+Masking credential-named values of at least eight characters from the run's environment, their parts and URL userinfo, raw, URL-encoded and in base64, as `[redacted]` in the run header, events, summary, journal, results, completed script logs, port events and transcripts, and the terminal view. Produced files, prompts and bindings are not masked, nor are live script logs before the process ends.
+_Avoid_: scrubbing, censoring, sanitising
+
 **Guardrail**:
 Any limit the engine enforces on a run: permissions, budgets, untrusted-input wrapping, the designation label. Guardrails are enforced by code, never requested in a prompt.
 _Avoid_: policy, safety prompt, rule
