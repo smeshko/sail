@@ -1,6 +1,7 @@
-// What the leak-check, jev-tasks and jev-fix stages share: ask Jev whether each item of a set is done, and read its answers. A
-// stage that finds every answer a clear yes hands the agent's job to Jev; anything else, Jev unreachable included, is
-// the agent's. The state builders live here too, so the agreement script asks Jev exactly what the stages do.
+// Shared Jev requests, answer readers and state builders for leak-check, jev-tasks and jev-fix.
+// The task and fix checks hand the agent's job to Jev only when every item is a clear yes; otherwise the agent checks.
+// Leak-check instead asks whether added lines name other projects and forwards individual LEAK_YES hits to the judge,
+// with no agent fallback. The agreement script uses these same state builders.
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';

@@ -1,5 +1,5 @@
-// leak-check: the public repository's rule, checked without judgment. It scans the lines the pull request adds for a
-// tracker key other than sail's own and for each term of a private denylist kept outside git, and reports every hit.
+// leak-check: exact matches and Jev judgments about the public repository's naming rule. It scans added lines for
+// tracker keys other than sail's own and terms of a private denylist kept outside git, and reports every exact hit.
 // Jev also checks added comment, doc and commit-message lines; each hit reaches the judge as a finding.
 import { file, script, value, z } from 'sail';
 
