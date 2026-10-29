@@ -291,7 +291,7 @@ The status of a run that has exited with nothing running and a resume expected, 
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
-A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. The run takes it before its intake and before each call.
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call.
 _Avoid_: signal file, kill file, flag
 
 **Resume**:
