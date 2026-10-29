@@ -154,6 +154,32 @@ function completed(): Promise<Completed> {
   return completedOnce;
 }
 
+test('run credentials are masked in events, summary, journal and header', async () => {
+  await withTempRepo(async (repo) => {
+    const marker = 'ghp_RUNTIME_MARKER_0123456789';
+    writeAgentFixture(repo.dir, [submits({ ...SPEC, summary: marker }, 0.125, { messages: [`echo ${marker}`] })]);
+    edit(
+      join(repo.dir, '.sail'),
+      WORKFLOW_FILE,
+      "return run.stage(publish, { spec: s.files['spec.md'] });",
+      'return s;',
+    );
+    const adapters = await fakeAdapters(repo.dir);
+    adapters.entries.harness.versions = { marker };
+    const end = await ran(repo.dir, { workflow: AGENT_WORKFLOW, adapters, secrets: [marker] });
+    expect(end.status).toBe('completed');
+    for (const file of ['events.ndjson', 'summary.json', 'journal.ndjson', 'run.json']) {
+      const text = readFileSync(join(end.dir, file), 'utf8');
+      expect(text.includes(marker)).toBe(false);
+      expect(text.includes('[redacted]')).toBe(true);
+    }
+    expect(readJournal(end.dir).entries.find((entry) => entry.key === 'spec#1')?.output).toEqual({
+      ...SPEC,
+      summary: '[redacted]',
+    });
+  });
+});
+
 test('the stub runs to completion through its fix loop, and every call ran once', async () => {
   const { repoDir, end, journaled, header } = await completed();
   expect(end).toMatchObject({

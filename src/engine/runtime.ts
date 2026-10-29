@@ -450,6 +450,7 @@ async function drive(
   const bus = createBus({
     runId,
     firstSeq: opened.firstSeq,
+    mask: opened.redact.value,
     now: clock,
     // The events file first: the summary seeds itself from it on a resume, and it must already hold the event in hand.
     consumers: [ndjsonConsumer(dir), summaryConsumer(dir), ...(options.consumers ?? [])],
@@ -642,7 +643,7 @@ async function drive(
   /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
   const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
     tracker?.assertRecorded();
-    const journaled = appendJournal(dir, entryFrom(dir, result, paths, group), clock());
+    const journaled = appendJournal(dir, opened.redact.value(entryFrom(dir, result, paths, group)), clock());
     bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
     reached ||= journaled.key === last;
     return journaled;

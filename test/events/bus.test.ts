@@ -1,5 +1,6 @@
 // The event bus: stamping, synchronous fan-out, and a consumer that throws reported as an event of its own.
 import { expect, test } from 'bun:test';
+import { redactor } from '../../src/engine/redact';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import { createBus } from '../../src/events/bus';
 import type { Consumer, NewEvent, SailEvent } from '../../src/events/types';
@@ -38,6 +39,22 @@ function keeper(): Consumer & { events: SailEvent[] } {
 
 const issues = (events: SailEvent[]) =>
   events.flatMap((event) => validateDocument('sail.event.v1', event)).map(formatIssue);
+
+test('masking reaches every consumer without masking the bus envelope', () => {
+  const first = keeper();
+  const second = keeper();
+  const bus = createBus({
+    runId: RUN_ID,
+    firstSeq: 9,
+    now,
+    consumers: [first, second],
+    mask: redactor([RUN_ID, TS, 'credential']).value,
+  });
+  bus.emit({ type: 'error:crash', message: 'credential' });
+  const expected: SailEvent[] = [{ seq: 9, ts: TS, type: 'error:crash', runId: RUN_ID, message: '[redacted]' }];
+  expect(first.events).toEqual(expected);
+  expect(second.events).toEqual(expected);
+});
 
 test('events are numbered from firstSeq, stamped with ts and runId, and keep their key and payload', () => {
   const kept = keeper();

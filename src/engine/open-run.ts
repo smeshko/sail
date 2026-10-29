@@ -62,6 +62,7 @@ import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
+import { credentialValues, type Redactor, redactor } from './redact';
 import { harnessesReached, modelProblems } from './roster';
 import {
   copyStageFolders,
@@ -93,6 +94,7 @@ import { watchLabel } from './watchable';
 const claimed = new Set<string>();
 
 export interface OpenedRun {
+  redact: Redactor;
   runId: string;
   /** The absolute run directory. */
   dir: string;
@@ -145,6 +147,7 @@ export interface OpenedWorkspace {
 }
 
 export interface OpenRunOptions {
+  secrets?: readonly string[];
   /** Where the run starts from: `.sail/` is found from here up to the git root. */
   cwd: string;
   /** The workflow's name, its folder under `.sail/workflows/`. */
@@ -538,10 +541,11 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   });
   if ('refused' in opened) return opened;
   const { made } = opened;
-  const header: RunHeader = {
+  const redact = redactor(options.secrets ?? credentialValues(process.env));
+  const header: RunHeader = redact.value({
     ...preflighted,
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
-  };
+  });
   // A failure from here is thrown, not refused: these are sail's own files.
   const dir = run.runDir;
   try {
@@ -561,6 +565,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     runId,
     dir,
     header,
+    redact,
     sailDir: found.dir,
     adapters: options.adapters.ports,
     harnesses,
@@ -575,6 +580,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
 }
 
 export interface ReopenRunOptions {
+  secrets?: readonly string[];
   /** Where the run is resumed from: `.sail/` is found from here up to the git root, and the run beside it. */
   cwd: string;
   /** The run's id, its directory under `.sail-runs/`. */
@@ -725,6 +731,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     runId,
     dir: run.dir,
     header: run.header,
+    redact: redactor(options.secrets ?? credentialValues(process.env)),
     sailDir: found.dir,
     adapters: options.adapters.ports,
     harnesses: named.ports,
