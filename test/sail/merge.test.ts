@@ -115,7 +115,7 @@ test('a red check with no log to read is handed back saying so', async () => {
   });
 }, 60_000);
 
-test('on the last try a red check comments what the review took, takes the label off and exits 1', async () => {
+test('on the last try a red check comments what the review took, swaps the label for needs-human and exits 1', async () => {
   await withTempRepo(async (repo) => {
     writeOwnSail(repo);
     seedPullRequest(repo, [{ name: 'verify', statuses: ['failed'], log: 'boom' }]);
@@ -124,8 +124,9 @@ test('on the last try a red check comments what the review took, takes the label
     expect(output).toMatchObject({ merged: false, retry: null, reason: 'checks failed: verify' });
     const pr = port(repo, 'get-pull-request', '7');
     expect(pr.labels).not.toContain('factory');
+    expect(pr.labels).toContain('needs-human');
     expect(pr.comments.map((each) => each.body)).toEqual([
-      '## sail review\n\nNot merged: checks failed: verify\n\nBefore that, the review:\n\n- merged the base in\n- reran verify once\n\nThe `factory` label is off: this pull request needs a human.\n',
+      '## sail review\n\nNot merged: checks failed: verify\n\nBefore that, the review:\n\n- merged the base in\n- reran verify once\n\nThe `factory` label is off and `needs-human` is on: this pull request needs a human.\n',
     ]);
   });
 }, 60_000);

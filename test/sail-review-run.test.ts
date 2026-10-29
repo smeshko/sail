@@ -249,8 +249,9 @@ test('landing shares the three fix passes: after two review rounds, one fix for 
     expect(landing(keys)).toEqual(['merge#1', 'fix#3', 'validate#4', 'push#2', 'merge#2']);
     const pr = await pullRequest(repo);
     expect(pr.labels).not.toContain('factory');
+    expect(pr.labels).toContain('needs-human');
     expect(pr.comments.at(-1)).toBe(
-      '## sail review\n\nNot merged: checks failed: verify\n\nBefore that, the review:\n\n- reran verify once: still red\n- fixed the failed checks verify in 3 commits\n- reran verify once\n\nThe `factory` label is off: this pull request needs a human.\n',
+      '## sail review\n\nNot merged: checks failed: verify\n\nBefore that, the review:\n\n- reran verify once: still red\n- fixed the failed checks verify in 3 commits\n- reran verify once\n\nThe `factory` label is off and `needs-human` is on: this pull request needs a human.\n',
     );
   });
 }, 120_000);
