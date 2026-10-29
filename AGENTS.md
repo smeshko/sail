@@ -54,6 +54,8 @@ Linear, team `ADW`. Issues are `ADW-<n>`. Apply every label that fits:
 - Platform: `core`, `cli`, `dashboard`
 - Source: `dogfooding`, `code-review`, `field-report`
 - `epic` marks an epic's parent issue.
+- `groom` goes on every ticket filed into the backlog, so the groom workflow judges it, as sail's follow-up filing
+  does. An epic and its planned phases skip it.
 
 ## Vocabulary
 
