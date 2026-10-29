@@ -32,6 +32,15 @@ const runDirOf = (repoDir: string): string => {
 
 const headerOf = (dir: string): RunHeader => JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
 
+test('the repository intake fixture passes preflight without declaring its fetch file again on the last step', async () => {
+  await withTempRepo(async (repo) => {
+    groomRepo(repo.dir);
+    const { code, stderr } = await runCaptured(['FAKE-1', '--workflow', 'groom', '--dry-run'], repo.dir);
+    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+    expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
+  });
+});
+
 test('sail FAKE-1 --workflow groom runs the repository intake as intake#1 and completes with its input and files', async () => {
   await withTempRepo(async (repo) => {
     groomRepo(repo.dir);

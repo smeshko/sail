@@ -427,6 +427,7 @@ test("problems() refuses a produced name that differs from an engine file's or a
       In: 'file',
       Steps: 'file',
       'Session.Log': 'file',
+      'Port-Events.NDJSON': 'file',
       'Try-2': 'file',
       'Notes.md': 'file',
     },
@@ -438,7 +439,19 @@ test("problems() refuses a produced name that differs from an engine file's or a
     `'In' can't be produced: the engine writes 'in' in $STAGE_OUT, ${tail}`,
     `'Steps' can't be produced: the engine writes 'steps' in $STAGE_OUT, ${tail}`,
     `'Session.Log' can't be produced: the engine writes 'session.log' in $STAGE_OUT, ${tail}`,
+    `'Port-Events.NDJSON' can't be produced: the engine writes 'port-events.ndjson' in $STAGE_OUT, ${tail}`,
     `'Try-2' can't be produced: the engine uses 'try-2' for a later try, ${tail}`,
+  ]);
+});
+
+test('problems() refuses two produced names that differ only by case', () => {
+  const pair = script('tests', {
+    run: './run.sh',
+    produces: { 'Notes.md': 'file', 'notes.md': 'file' },
+    output: TestReport,
+  });
+  expect(scriptKind.problems(pair)).toEqual([
+    "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
   ]);
 });
 

@@ -126,7 +126,7 @@ function outputKey(schema: z.ZodType, key: string, seen = new Set<z.ZodType>()):
  * binding (D4, D19). The types catch a misnamed `fromStep()`, and these are erased at run time, so loading checks it
  * again, with what the types can't see: a file the named step doesn't produce, an output key its schema has no field
  * for (read through wrappers, pipes and every member of a union), two steps of one name or one producing what another
- * does, and an engine binding on the stage itself.
+ * does (even with a name that differs only by case), and an engine binding on the stage itself.
  */
 export function stepProblems(stage: Stage): string[] {
   const at = `stage '${stage.name}'`;
@@ -137,15 +137,23 @@ export function stepProblems(stage: Stage): string[] {
     }
   }
   const seen = new Set<string>();
-  const producer = new Map<string, string>();
+  const producer = new Map<string, { step: string; name: string }>();
   stage.steps.forEach((step, index) => {
     if (!NAME.test(step.name)) found.push(`${at}: step '${step.name}' has a name outside [a-z0-9-]+`);
     if (seen.has(step.name)) found.push(`${at}: two steps are named '${step.name}'`);
     seen.add(step.name);
-    for (const name of Object.keys(step.produces)) {
-      const first = producer.get(name);
-      if (first === undefined) producer.set(name, step.name);
-      else found.push(`${at}: steps '${first}' and '${step.name}' both produce '${name}'`);
+    // The last step also writes the stage-owned files into the shared $STAGE_OUT.
+    const produces = index === stage.steps.length - 1 ? withStageProduces(step, stage).produces : step.produces;
+    for (const name of Object.keys(produces)) {
+      const folded = name.toLowerCase();
+      const first = producer.get(folded);
+      if (first === undefined) producer.set(folded, { step: step.name, name });
+      else
+        found.push(
+          first.name === name
+            ? `${at}: steps '${first.step}' and '${step.name}' both produce '${name}'`
+            : `${at}: steps '${first.step}' and '${step.name}' produce '${first.name}' and '${name}', and a file system that ignores case takes them for one`,
+        );
     }
     // A step's own $STAGE_IN is materialised only as it starts: what would collide there is refused now.
     for (const problem of collisionProblems(step.consumes)) found.push(`${at}: step '${step.name}': ${problem}`);

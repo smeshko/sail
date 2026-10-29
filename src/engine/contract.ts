@@ -62,10 +62,11 @@ function sha256(path: string): string {
  * What is wrong with a step's `produces`, found before it runs. Later calls consume a file by its name, so each name is
  * a plain file name in `$STAGE_OUT`, and none is one the engine writes there, or a later try's directory. The
  * comparison ignores case: macOS's default file system takes `Prompt.md` for `prompt.md`, so the engine's file would
- * overwrite the produced one.
+ * overwrite the produced one. Two produced names that fold to one are refused too.
  */
 export function producesProblems(produces: Readonly<Record<string, unknown>>): string[] {
   const found: string[] = [];
+  const first = new Map<string, string>();
   const tail = 'and a file system that ignores case takes them for one';
   for (const name of Object.keys(produces)) {
     const folded = name.toLowerCase();
@@ -82,6 +83,11 @@ export function producesProblems(produces: Readonly<Record<string, unknown>>): s
           ? `'${name}' can't be produced: the engine uses it for a later try`
           : `'${name}' can't be produced: the engine uses '${folded}' for a later try, ${tail}`,
       );
+    else {
+      const earlier = first.get(folded);
+      if (earlier !== undefined) found.push(`'${name}' can't be produced: '${earlier}' is produced too, ${tail}`);
+      else first.set(folded, name);
+    }
   }
   return found;
 }

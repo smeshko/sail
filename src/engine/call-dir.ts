@@ -7,6 +7,7 @@
 //   NN-<stage>/call-N/result.json the engine's record of the call
 //   NN-<stage>/call-N/prompt.md   an agent step's prompt, as its session was sent it
 //   NN-<stage>/call-N/session.log an agent step's transcript
+//   NN-<stage>/call-N/port-events.ndjson a script step's port events file
 //   NN-<stage>/call-N/try-M/      a later try of the same call, after an interruption or to correct an agent step's
 //                                 output, with its own in/, logs and result.json
 //   NN-<stage>/call-N/steps/      a multi-step call's steps: `<i>-<step>/` each, with the step's own in/, logs and
@@ -19,6 +20,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { createDir, syncDir } from './durable';
+import { PORT_EVENTS_FILE } from './port-events';
 
 /** The absolute paths of one call's directory and what the engine writes in it. */
 export interface CallPaths {
@@ -41,6 +43,7 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'result.json',
   'prompt.md',
   'session.log',
+  PORT_EVENTS_FILE,
   'steps',
 ]);
 

@@ -9,7 +9,7 @@ import type { Supplied } from '../../src/engine/bindings';
 import { type CallRequest, callProblems, runCall } from '../../src/engine/call';
 import type { JournalEntry } from '../../src/engine/journal';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
-import { runStageCall, type StageHooks } from '../../src/engine/stage-call';
+import { runStageCall, type StageHooks, stepProblems } from '../../src/engine/stage-call';
 import type { NewEvent } from '../../src/events/types';
 import { agent, doc, fromStep, gitDiff, type Stage, script, stage, value, z } from '../../src/sdk/index';
 import { type Recorded, recording } from '../helpers/scripted-harness';
@@ -622,6 +622,38 @@ test("callProblems of a multi-step stage checks the stage's own produces with it
   expect(callProblems(reserved, {}, { harness, model: MODEL })).toEqual([
     "step 'b': 'result.json' can't be produced: the engine writes it in $STAGE_OUT",
     "step 'b': '../outside.txt' can't be produced: it is not a plain file name",
+  ]);
+});
+
+test('stage-owned produces cannot collide with an earlier step (review R1)', () => {
+  for (const name of ['notes.md', 'Notes.md']) {
+    const pair = stage('pair', {
+      produces: { [name]: 'file' },
+      output: PrInfo,
+      steps: [
+        script('a', { run: './a.sh', produces: { 'Notes.md': 'file' }, output: z.object({}) }),
+        script('b', { run: './b.sh', output: PrInfo }),
+      ],
+    });
+    expect(stepProblems(pair)).toEqual([
+      name === 'Notes.md'
+        ? "stage 'pair': steps 'a' and 'b' both produce 'Notes.md'"
+        : "stage 'pair': steps 'a' and 'b' produce 'Notes.md' and 'notes.md', and a file system that ignores case takes them for one",
+    ]);
+  }
+});
+
+test("callProblems of a multi-step stage refuses its own produces name that differs from its last step's only by case", () => {
+  const pair = stage('pair', {
+    produces: { 'Notes.md': 'file' },
+    output: PrInfo,
+    steps: [
+      script('a', { run: './a.sh', output: z.object({}) }),
+      script('b', { run: './b.sh', produces: { 'notes.md': 'file' }, output: PrInfo }),
+    ],
+  });
+  expect(callProblems(pair, {})).toEqual([
+    "step 'b': 'Notes.md' can't be produced: 'notes.md' is produced too, and a file system that ignores case takes them for one",
   ]);
 });
 
