@@ -7,6 +7,10 @@ file for what it is about: the commands, files, modules, events and error messag
 outcome, with their synonyms and the other ways the backlog might put it. Read the sections the matches fall in, and
 search again with the words you find there. Stop when no new search turns up a ticket you haven't read.
 
+Run at least three searches with different terms before you answer: one for the names the ticket uses (the files,
+functions or commands), one for the symptom or outcome in plain words, and one for the area or module it touches. A
+duplicate is often worded nothing like the ticket, so an empty answer needs all three behind it.
+
 Two tickets are the same work when doing one would do the other: the same outcome in the same place, however each is
 worded. A ticket in the same area that asks for a different change is not a duplicate, and neither is one that is only
 a step of the other.
