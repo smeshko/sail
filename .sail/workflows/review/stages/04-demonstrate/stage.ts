@@ -9,7 +9,7 @@ export const demonstrate = agent('demonstrate', {
   prompt: './prompt.md',
   consumes: { brief: file('brief.md'), requirements: file('requirements.md'), base: value(z.string()) },
   output: Demonstrated,
-  model: 'terra',
+  model: 'default',
   permissions: readonly,
   budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 40 },
 });

@@ -2,4 +2,4 @@
 import { checker } from '../../checker';
 import { Staleness } from '../../schemas';
 
-export const staleness = checker('staleness', Staleness);
+export const staleness = checker('staleness', Staleness, 'fast');

@@ -3,4 +3,4 @@
 // what each finding becomes.
 import { reviewer } from '../../reviewer';
 
-export const reviewConventions = reviewer('review-conventions', 'terra');
+export const reviewConventions = reviewer('review-conventions', 'default');

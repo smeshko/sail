@@ -4,4 +4,4 @@
 import { checker } from '../../checker';
 import { Duplicates } from '../../schemas';
 
-export const duplicates = checker('duplicates', Duplicates);
+export const duplicates = checker('duplicates', Duplicates, 'fast');

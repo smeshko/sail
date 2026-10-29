@@ -3,4 +3,4 @@
 // finding becomes.
 import { reviewer } from '../../reviewer';
 
-export const reviewBugs = reviewer('review-bugs', 'default');
+export const reviewBugs = reviewer('review-bugs', 'deep');

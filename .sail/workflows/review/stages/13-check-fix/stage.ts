@@ -9,7 +9,7 @@ export const checkFix = agent('check-fix', {
   // jev: what Jev answered about each finding before this agent was called, a hint where to look.
   consumes: { findings: value(Findings), fixed: value(Fixed), since: value(z.string()), jev: value(FixAsked) },
   output: FixChecked,
-  model: 'deep',
+  model: 'default',
   permissions: readonly,
   budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 30 },
 });

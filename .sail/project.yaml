@@ -27,6 +27,7 @@ adapters:
 models:
   default: claude-sonnet-5-5
   deep: claude-opus-5-5
+  fast: claude-haiku-5-5
   luna: { harness: codex, model: openai-codex/gpt-6-luna }
   terra: { harness: codex, model: openai-codex/gpt-6.1-terra }
   sol: { harness: codex, model: openai-codex/gpt-6.1-sol }

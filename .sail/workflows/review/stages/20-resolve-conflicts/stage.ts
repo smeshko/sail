@@ -15,7 +15,7 @@ export const resolveConflicts = agent('resolve-conflicts', {
   prompt: './prompt.md',
   consumes: { requirements: file('requirements.md'), synced: value(Synced) },
   output: Resolved,
-  model: 'sol',
+  model: 'deep',
   permissions: builder,
   budget: { maxTurns: 80, maxUsd: 4, maxMinutes: 90 },
 });
