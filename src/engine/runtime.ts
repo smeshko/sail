@@ -352,10 +352,13 @@ async function unlessStopped(
         const arm = () => {
           const left = tracker?.minutesLeftMs();
           if (left === undefined) return;
-          budgetTimer = setTimeout(() => {
-            if (tracker?.over() !== undefined) resolve({ stopped: 'budget' });
-            else arm();
-          }, left);
+          budgetTimer = setTimeout(
+            () => {
+              if (tracker?.over() !== undefined) resolve({ stopped: 'budget' });
+              else arm();
+            },
+            Math.min(left, 2 ** 31 - 1),
+          );
         };
         arm();
       }),

@@ -3,7 +3,7 @@
 // out of the run's budget left unjournaled, and a resume given a raise takes it on from there. Each case has a temp
 // repository of its own: one run per .sail/ in a process, so a resume runs in a copy of the repository it was suspended
 // in (copyRun()).
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { chmodSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessScript } from '../../src/adapters/fake/harness';
@@ -359,6 +359,23 @@ test("a replay that hangs in the workflow's own code is suspended with budget_ex
       limit: 0.01,
       used: expect.any(Number),
     });
+  });
+});
+
+test('a large minute budget caps each replay timer wait at the signed 32-bit maximum', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(sail, 'project.yaml', BUDGET, 'budgets: { run: { maxMinutes: 40000 } }');
+    const timer = spyOn(globalThis, 'setTimeout');
+    try {
+      const end = await ran(repo.dir);
+      expect(end.status).toBe('completed');
+      const waits = timer.mock.calls.map((call) => call[1] ?? 0);
+      expect(waits.some((wait) => wait === 2 ** 31 - 1)).toBe(true);
+      expect(waits.every((wait) => wait <= 2 ** 31 - 1)).toBe(true);
+    } finally {
+      timer.mockRestore();
+    }
   });
 });
 
