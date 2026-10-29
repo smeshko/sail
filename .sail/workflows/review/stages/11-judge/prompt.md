@@ -18,8 +18,9 @@ overrule Jev, after reading its code; omitting it keeps Jev's verdict. Spend you
 
 ## 1. Check each finding before you decide on it
 
-Reviewers overreach, and two lenses often report one problem. For each finding, read the code it points at and confirm
-it is real: the trigger exists, and what it says goes wrong does. Merge duplicates: decide the first, and drop the
+Reviewers overreach, and two lenses often report one problem. For each finding in `judge`, and any Jev-decided finding
+you consider overruling, read the code it points at and confirm it is real: the trigger exists, and what it says goes
+wrong does. You need not inspect the code for Jev decisions you keep. Merge duplicates: decide the first, and drop the
 others as duplicates of it. A failed validation or an unshown criterion is real unless its evidence shows the check
 itself went wrong.
 
