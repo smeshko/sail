@@ -162,6 +162,14 @@ for (const opener of ['`', '``', '<untrusted-input source="ticket">', '<untruste
   });
 }
 
+test('a stray backtick cannot pair with backticks inside placeholder hints (review R2)', () => {
+  const text = 'Use the `x flag\n{{criteria: one `- [ ]` item}}\n{{tasks: one `TASK-001: title` item}}';
+  expect(noPlaceholders().validate(parsed(text, [], [], ['criteria', 'tasks']))).toEqual({
+    problems: ['line 2 still holds the placeholder {{criteria: …}}', 'line 3 still holds the placeholder {{tasks: …}}'],
+  });
+  expect(noPlaceholders().validate(parsed('`{{tasks: one `item`}}`'))).toEqual({ problems: [] });
+});
+
 test('inline backticks must close with exactly the opening run length', () => {
   expect(noPlaceholders().validate(parsed('`{{tasks: left}}``'))).toEqual({
     problems: ['line 1 still holds the placeholder {{tasks: …}}'],

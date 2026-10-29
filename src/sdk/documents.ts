@@ -192,10 +192,13 @@ function skippedRanges(text: string): Range[] {
   if (fence !== undefined) fences.push([fence.from, text.length]);
 
   const code: Range[] = [];
+  // A brace tag is indivisible: its hint's backticks cannot close a code span opened in prose. Mask only
+  // those backticks, preserving offsets and allowing a complete tag to remain inside agent-written code.
+  const inlineText = text.replace(/\{\{[\s\S]*?\}\}/g, (tag) => tag.replace(/`/g, ' '));
   // Pair each backtick run with the next of exactly its length, in each region outside fences. Looking up the
   // partner avoids rescanning the remainder of the text for every unmatched opening run.
   const inline = (start: number, end: number) => {
-    const runs = [...text.slice(start, end).matchAll(/`+/g)];
+    const runs = [...inlineText.slice(start, end).matchAll(/`+/g)];
     const next = new Map<number, number>();
     const partners: (number | undefined)[] = [];
     for (let index = runs.length - 1; index >= 0; index -= 1) {
