@@ -32,6 +32,11 @@ function run(command: string, open: Partial<Permissions>, cwd?: string): Decisio
 }
 
 const DENY = (name: string): Want => ['commands', `default deny: ${name}`];
+
+test('git programs: a grant cannot allow a program option', () => {
+  const want = DENY('git program option');
+  expect(verdict(run('git push --exec=x origin', { commands: ['git *'] }), want)).toEqual(want);
+});
 const CANT: Want = ['commands', "can't be checked:"];
 const UNLISTED = (text: string): Want => ['commands', `\`${text}\` matches none of the step's commands`];
 

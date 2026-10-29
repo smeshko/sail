@@ -420,7 +420,7 @@ What a step may do, declared per step: paths it may read and write, commands it 
 _Avoid_: policy, allowlist, sandbox, scope
 
 **Deny set**:
-The commands no step's permissions can allow: `rm -rf`, a forced push, `git reset --hard`, `git clean -f`, `git branch -D`, `git checkout`, `git switch`, `sudo`, `curl` piped into a shell, and git configuration overrides. Checked before the step's own commands.
+The commands no step's permissions can allow: `rm -rf`, a forced push, `git reset --hard`, `git clean -f`, `git branch -D`, `git checkout`, `git switch`, `sudo`, `curl` piped into a shell, git options that name a program for git to run, and git configuration overrides. Checked before the step's own commands.
 _Avoid_: blocklist, denylist, banned commands, safe commands
 
 **Tool call**:
