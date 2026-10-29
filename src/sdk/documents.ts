@@ -29,6 +29,8 @@ export interface DocumentContent {
   /** The file's name in `$STAGE_OUT`. */
   readonly name: string;
   readonly text: string;
+  /** The names of the placeholders its template held, each once, in order. */
+  readonly placeholders: readonly string[];
   /** Every heading, in order. Fenced code holds none. */
   readonly headings: readonly DocumentHeading[];
   /** One per heading, in order. */
@@ -73,7 +75,7 @@ export interface CountOptions extends Bounds {
 
 /**
  * Declares a document in an agent step's `produces`: `template` is rendered into `$STAGE_OUT` before the session,
- * with the step's bindings filled and its `{{name: hint}}` placeholders left for the agent, and `validators` check
+ * with the step's bindings filled and the template's `{{name: hint}}` placeholders left for the agent, and `validators` check
  * what the session left there.
  */
 export function doc(template: string, validators: readonly Validator[] = []): Document {
@@ -152,27 +154,119 @@ export function hasSections(...names: string[]): Validator {
 /** A placeholder's name as a problem may quote it: a path, as the renderer reads a variable's. */
 const PLACEHOLDER_NAME = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
 
-/** Passes when no `{{name: hint}}` placeholder is left: a tag whose body holds a colon, as the renderer reads one. */
+/** Tags whose bodies hold a colon, named from the last opener before that colon. */
+export function* placeholderTags(text: string): Generator<{ from: number; name: string }> {
+  for (let start = text.indexOf('{{'); start !== -1; ) {
+    const close = text.indexOf('}}', start + 2);
+    if (close === -1) break;
+    const colon = text.slice(start + 2, close).lastIndexOf(':');
+    if (colon !== -1) {
+      const from = text.lastIndexOf('{{', start + colon);
+      const body = text.slice(from + 2, close);
+      yield { from, name: body.slice(0, body.indexOf(':')).trim() };
+    }
+    start = text.indexOf('{{', close + 2);
+  }
+}
+
+/** The raw template's placeholder names, each once, in order, including tags in code and untaken branches. */
+export function placeholderNames(text: string): string[] {
+  return [...new Set([...placeholderTags(text)].map(({ name }) => name))];
+}
+
+type Range = readonly [number, number];
+
+/** Sorted code and untrusted-input ranges, computed with forward scans and a linear merge. */
+function skippedRanges(text: string): Range[] {
+  const untrusted: Range[] = [];
+  // Quoted text must not open or close code outside its wrapper. Blank it before either code scan,
+  // retaining offsets and line boundaries for the ranges and the validator's problem locations.
+  text = text.replace(/<untrusted-input(?=\s|>)[\s\S]*?<\/untrusted-input>/g, (span, from: number) => {
+    untrusted.push([from, from + span.length]);
+    return span.replace(/[^\n]/g, ' ');
+  });
+  const fences: Range[] = [];
+  let fence: { from: number; char: string; length: number } | undefined;
+  for (const match of text.matchAll(/^ {0,3}(`{3,}|~{3,})([^\n]*)/gm)) {
+    const run = match[1] ?? '';
+    if (fence === undefined) {
+      fence = { from: match.index, char: run[0] ?? '', length: run.length };
+    } else if (run[0] === fence.char && run.length >= fence.length && (match[2] ?? '').trim() === '') {
+      fences.push([fence.from, match.index + match[0].length]);
+      fence = undefined;
+    }
+  }
+  if (fence !== undefined) fences.push([fence.from, text.length]);
+
+  const code: Range[] = [];
+  // A brace tag is indivisible: its hint's backticks cannot close a code span opened in prose. Mask only
+  // those backticks, preserving offsets and allowing a complete tag to remain inside agent-written code.
+  const inlineText = text.replace(/\{\{[\s\S]*?\}\}/g, (tag) => tag.replace(/`/g, ' '));
+  // Pair each backtick run with the next of exactly its length, in each region outside fences. Looking up the
+  // partner avoids rescanning the remainder of the text for every unmatched opening run.
+  const inline = (start: number, end: number) => {
+    const runs = [...inlineText.slice(start, end).matchAll(/`+/g)];
+    const next = new Map<number, number>();
+    const partners: (number | undefined)[] = [];
+    for (let index = runs.length - 1; index >= 0; index -= 1) {
+      const length = runs[index]?.[0].length ?? 0;
+      partners[index] = next.get(length);
+      next.set(length, index);
+    }
+    for (let index = 0; index < runs.length; index += 1) {
+      const partner = partners[index];
+      if (partner === undefined) continue;
+      const opening = runs[index];
+      const closing = runs[partner];
+      if (opening !== undefined && closing !== undefined) {
+        code.push([start + opening.index, start + closing.index + closing[0].length]);
+      }
+      index = partner;
+    }
+  };
+  let start = 0;
+  for (const range of fences) {
+    inline(start, range[0]);
+    code.push(range);
+    start = range[1];
+  }
+  inline(start, text.length);
+
+  const ranges: Range[] = [];
+  let left = 0;
+  let right = 0;
+  while (left < code.length || right < untrusted.length) {
+    const a = code[left];
+    const b = untrusted[right];
+    const range = a !== undefined && (b === undefined || a[0] <= b[0]) ? code[left++] : untrusted[right++];
+    if (range === undefined) continue;
+    const previous = ranges.at(-1);
+    if (previous !== undefined && range[0] <= previous[1]) {
+      ranges[ranges.length - 1] = [previous[0], Math.max(previous[1], range[1])];
+    } else ranges.push(range);
+  }
+  return ranges;
+}
+
+/** Passes when none of the template's placeholders is left outside untrusted input, fenced code or inline code. */
 export function noPlaceholders(): Validator {
   return {
     check: 'noPlaceholders',
     derives: [],
-    validate: ({ text }) => {
+    validate: ({ text, placeholders }) => {
+      const names = new Set(placeholders);
+      const ranges = skippedRanges(text);
+      let range = 0;
       const problems: string[] = [];
       // The line is counted on from the last tag, and `newline` is the first not yet counted, so each newline is found
       // once however many tags the text holds.
       let line = 1;
       let newline = text.indexOf('\n');
-      for (let start = text.indexOf('{{'); start !== -1; ) {
-        const close = text.indexOf('}}', start + 2);
-        if (close === -1) break;
-        const colon = text.slice(start + 2, close).lastIndexOf(':');
-        if (colon !== -1) {
-          // An unclosed `{{` runs on into the tag after it: the tag named is the last `{{` before the colon.
-          const from = text.lastIndexOf('{{', start + colon);
+      for (const { from, name } of placeholderTags(text)) {
+        while (ranges[range] !== undefined && (ranges[range]?.[1] ?? 0) <= from) range += 1;
+        if (from >= (ranges[range]?.[0] ?? Infinity)) continue;
+        if (names.has(name)) {
           for (; newline !== -1 && newline < from; newline = text.indexOf('\n', newline + 1)) line += 1;
-          const body = text.slice(from + 2, close);
-          const name = body.slice(0, body.indexOf(':')).trim();
           // The problem goes into the corrective prompt, outside any untrusted wrapper, so it names the placeholder
           // only when the name is one a template author writes: never the text of a ticket the document quotes.
           problems.push(
@@ -181,7 +275,6 @@ export function noPlaceholders(): Validator {
               : `line ${line} still holds a placeholder`,
           );
         }
-        start = text.indexOf('{{', close + 2);
       }
       return { problems };
     },

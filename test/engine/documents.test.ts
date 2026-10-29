@@ -19,13 +19,18 @@ import {
   documentProblems,
   MAX_DOCUMENT_BYTES,
   MAX_PROBLEMS_PER_CHECK,
-  readDocument,
+  readDocument as read,
   renderDocuments,
-  validateDocuments,
+  validateDocuments as validate,
 } from '../../src/engine/documents';
 import { untrustedInput } from '../../src/engine/render';
 import { formatIssue, validateDocument } from '../../src/engine/schemas';
 import { countItems, doc, hasSections, noPlaceholders, type Validator } from '../../src/sdk/index';
+
+const readDocument = (name: string, text: string, placeholders: string[] = []) => read(name, text, placeholders);
+const validateDocuments = (
+  options: Omit<Parameters<typeof validate>[0], 'placeholders'> & { placeholders?: Record<string, string[]> },
+) => validate({ placeholders: { 'plan.md': ['steps'], 'spec.md': ['x'] }, ...options });
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -76,7 +81,8 @@ const SPEC = `# Spec
 `;
 
 test('readDocument reads each heading with its level, and each section as the top-level items up to the next heading of its level or a higher one: fenced code holds neither, a nested item is its parent, and a task item keeps checked', () => {
-  const read = readDocument('spec.md', SPEC);
+  const read = readDocument('spec.md', SPEC, ['tasks']);
+  expect([read.placeholders, Object.isFrozen(read.placeholders)]).toEqual([['tasks'], true]);
   expect([read.name, read.text]).toEqual(['spec.md', SPEC]);
   expect(read.headings).toEqual([
     { text: 'Spec', level: 1 },
@@ -135,13 +141,45 @@ test('renderDocuments writes each template into $STAGE_OUT under its name, with 
     'plan.md': doc('plan.md'),
   };
 
-  expect(renderDocuments({ produces, stageDir, values, outDir })).toEqual({ ok: true });
+  expect(renderDocuments({ produces, stageDir, values, outDir })).toEqual({
+    ok: true,
+    placeholders: { 'spec.md': ['tasks'], 'plan.md': ['plan'] },
+  });
   expect(readdirSync(outDir).sort()).toEqual(['plan.md', 'spec.md']);
   expect(readFileSync(join(outDir, 'spec.md'), 'utf8')).toBe(
     '# Spec for FAKE-1\n\n<untrusted-input source="ticket FAKE-1, title">\nAdd a --shout flag\n</untrusted-input>\n\n' +
       '## Tasks\n\n{{tasks: one item per task, in order}}\n',
   );
   expect(readFileSync(join(outDir, 'plan.md'), 'utf8')).toBe('{{ plan : the plan, {{ nested }} }}\n');
+});
+
+test('raw template names include duplicates only once and dropped branches, never inserted values', () => {
+  const stageDir = tempDir();
+  writeFileSync(
+    join(stageDir, 'spec.md'),
+    '{{value}}\n{{tasks: first}}\n{{tasks: again}}\n{{#if show}}{{hidden: hint}}{{/if}}',
+  );
+  expect(
+    renderDocuments({
+      produces: { 'spec.md': doc('spec.md') },
+      stageDir,
+      outDir: tempDir(),
+      values: { value: '{{color: red}}', show: false },
+    }),
+  ).toEqual({ ok: true, placeholders: { 'spec.md': ['tasks', 'hidden'] } });
+});
+
+test('validation filters inserted tags but reports the template name exactly', () => {
+  const out = produced({ 'spec.md': '{{color: red}}\n{{tasks: left}}' });
+  expect(
+    validateDocuments({
+      produces: { 'spec.md': doc('spec.md', [noPlaceholders()]) },
+      placeholders: { 'spec.md': ['tasks'] },
+      ...out,
+    }).errors,
+  ).toEqual([
+    { reason: 'invalid_output', message: 'spec.md: noPlaceholders: line 2 still holds the placeholder {{tasks: …}}' },
+  ]);
 });
 
 test('renderDocuments stops at a template that is missing, names an unknown variable, or meets a file already in $STAGE_OUT, with a message naming the document and its template', () => {
@@ -444,7 +482,10 @@ test("renderDocuments told to replace writes the template afresh over what an ea
   writeFileSync(join(outDir, 'plan.md'), '# Plan\n\n1. half done\n');
   symlinkSync(elsewhere, join(outDir, 'linked.md'));
   const produces = { 'plan.md': doc('plan.md'), 'linked.md': doc('plan.md') };
-  expect(renderDocuments({ produces, stageDir, values: {}, outDir, replace: true })).toEqual({ ok: true });
+  expect(renderDocuments({ produces, stageDir, values: {}, outDir, replace: true })).toEqual({
+    ok: true,
+    placeholders: { 'plan.md': ['steps'], 'linked.md': ['steps'] },
+  });
   expect(readFileSync(join(outDir, 'plan.md'), 'utf8')).toBe('# Plan\n\n{{steps: the steps}}\n');
   expect([lstatSync(join(outDir, 'linked.md')).isSymbolicLink(), readFileSync(elsewhere, 'utf8')]).toEqual([
     false,
