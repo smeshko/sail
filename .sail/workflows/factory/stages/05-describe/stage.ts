@@ -20,7 +20,7 @@ export const describe = agent('describe', {
   output: PrDescription,
   model: 'luna',
   permissions: readonly,
-  budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 5 },
+  budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 15 },
   // The body is written in the vocabulary, and the prompt states the rules of AGENTS.md it follows.
   conventions: ['CONTEXT.md'],
 });

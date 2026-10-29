@@ -27,5 +27,5 @@ export const implement = agent('implement', {
   output: Implemented,
   model: 'terra',
   permissions: withTools(builder, ['WebFetch']),
-  budget: { maxTurns: 250, maxUsd: 10, maxMinutes: 60 },
+  budget: { maxTurns: 250, maxUsd: 10, maxMinutes: 90 },
 });

@@ -17,5 +17,5 @@ export const fix = agent('fix', {
   output: Fixed,
   model: 'sol',
   permissions: builder,
-  budget: { maxTurns: 150, maxUsd: 6, maxMinutes: 40 },
+  budget: { maxTurns: 150, maxUsd: 6, maxMinutes: 90 },
 });

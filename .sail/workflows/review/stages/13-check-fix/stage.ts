@@ -11,5 +11,5 @@ export const checkFix = agent('check-fix', {
   output: FixChecked,
   model: 'deep',
   permissions: readonly,
-  budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 15 },
+  budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 30 },
 });

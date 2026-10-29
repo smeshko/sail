@@ -12,6 +12,6 @@ export function reviewer<const N extends string>(name: N, model: string) {
     output: Reviewed,
     model,
     permissions: readonly,
-    budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 20 },
+    budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 45 },
   });
 }

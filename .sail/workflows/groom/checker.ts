@@ -11,6 +11,6 @@ export function checker<const N extends string, O extends z.ZodType>(name: N, ou
     output,
     model: 'default',
     permissions: readonly,
-    budget: { maxTurns: 40, maxUsd: 1, maxMinutes: 10 },
+    budget: { maxTurns: 40, maxUsd: 1, maxMinutes: 20 },
   });
 }

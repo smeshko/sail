@@ -1,11 +1,10 @@
 // Polls `sail port codehost checks` until every check on $INPUT_HEADSHA has passed or been skipped, then merges with
-// `--expected-head-sha`. A pull request with no checks at all is merged once a few reads have found none, since CI
-// may not have registered its run yet. Failed checks are rerun once, to rule out a flake. Still red, it reads each
-// failed check's log and hands them back to the workflow as a retry, `checks`; a merge the host rejects, which a
-// conflict with the base gives, is a retry too, `base`. On the last try ($INPUT_LASTTRY), a retry, a moved head, a
-// refused merge, the time running out or a reason in $INPUT_BLOCKED instead comments why, removes the label in
-// $INPUT_LABEL and exits 1. A merge after anything in $INPUT_LANDING, or after a rerun, comments what it took.
-// Prints the Merged.
+// `--expected-head-sha`. A pull request with no checks at all is merged once a few reads have found none, since CI may
+// not have registered its run yet. Failed checks are rerun once, to rule out a flake. Still red, it reads each failed
+// check's log and hands them back to the workflow as a retry, `checks`; a merge the host rejects, which a conflict with
+// the base gives, is a retry too, `base`. On the last try ($INPUT_LASTTRY), a retry, a moved head, a refused merge, the
+// time running out or a reason in $INPUT_BLOCKED instead comments why, swaps the label in $INPUT_LABEL for needs-human
+// and exits 1. A merge after anything in $INPUT_LANDING, or after a rerun, comments what it took. Prints the Merged.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -52,10 +51,12 @@ function fail(reason) {
   process.stderr.write(`${reason}\n`);
   const tried = landing.length + rerun.length > 0 ? `\n\nBefore that, the review:\n\n${taken()}\n` : '\n';
   comment(
-    `## sail review\n\nNot merged: ${reason}${tried}\nThe \`${label}\` label is off: this pull request needs a human.\n`,
+    `## sail review\n\nNot merged: ${reason}${tried}\nThe \`${label}\` label is off and \`needs-human\` is on: this pull request needs a human.\n`,
   );
   const unlabelled = port(['remove-label', String(pr.number), label]);
   if (unlabelled.error) process.stderr.write(`removing the label failed: ${unlabelled.error}\n`);
+  const labelled = port(['add-label', String(pr.number), 'needs-human']);
+  if (labelled.error) process.stderr.write(`adding needs-human failed: ${labelled.error}\n`);
   console.log(JSON.stringify({ merged: false, sha: null, reason, retry: null, failed: [], rerun }));
   process.exit(1);
 }

@@ -11,5 +11,5 @@ export const demonstrate = agent('demonstrate', {
   output: Demonstrated,
   model: 'terra',
   permissions: readonly,
-  budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 15 },
+  budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 40 },
 });

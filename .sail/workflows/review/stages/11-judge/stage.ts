@@ -16,5 +16,5 @@ export const judge = agent('judge', {
   output: Judgement,
   model: 'deep',
   permissions: readonly,
-  budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 15 },
+  budget: { maxTurns: 60, maxUsd: 3, maxMinutes: 40 },
 });

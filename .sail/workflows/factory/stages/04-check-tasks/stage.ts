@@ -11,7 +11,7 @@ export const checkTasks = agent('check-tasks', {
   output: TasksChecked,
   model: 'default',
   permissions: readonly,
-  budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 10 },
+  budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 20 },
   // It compares commits with the plan's tasks: neither the conventions nor the vocabulary bear on that.
   conventions: [],
 });
