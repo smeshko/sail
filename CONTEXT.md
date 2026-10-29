@@ -431,6 +431,10 @@ _Avoid_: tool use, action, request, invocation
 A tool call refused for falling outside the step's permissions, recorded with the permissions that refused it. The agent carries on.
 _Avoid_: block, violation, rejection
 
+**Pid-held file**:
+A record file created whole by an exclusive link and removed only under its drop token, `<file>.drop`, after checking the record is unchanged. The drop token is itself a pid-held file; a dead holder's token is broken under the next drop token, with bounded depth.
+_Avoid_: lock, mutex
+
 **Exclusive slot**:
 A script step's machine-wide hold on a named slot, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/`. One step on the machine holds a name at a time; a step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
 _Avoid_: lock, mutex, semaphore
