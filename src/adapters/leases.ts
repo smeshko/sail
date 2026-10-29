@@ -1,5 +1,6 @@
 // Branch leases (ADR-0018, D9): one pid-held file per remote and branch in the selected machine directory's `leases/`
 // (`$SAIL_HOME/leases/`, or `~/.sail/leases/`), so manual and watched runs sharing that directory never hold the same branch.
+// Keys ignore scheme, user and port, and normalise host and path case, `.git` and trailing slashes.
 // Different machine directories have independent leases. The shared primitive serialises removals under drop tokens.
 // Every built-in Workspace adapter takes its leases here. A run resumed under another `SAIL_HOME` finds no lease
 // of its own there.
@@ -35,9 +36,38 @@ export function defaultLeasesDir(env: Readonly<Record<string, string | undefined
   return join(machineDir(env), 'leases');
 }
 
-/** The lease file for `remote` and `branch`: the first 16 hex of sha256(`<remote>\n<branch>`), plus `.json`. */
+/**
+ * A remote's host/path key: `git@github.com:o/r.git`, `ssh://github.com:2222/O/R/` and
+ * `https://user:token@GitHub.com/o/r.git/` all name `github.com/o/r`. Hostless remotes pass through.
+ */
+export function leaseKey(remote: string): string {
+  const url = /^[^/]+:\/\/([^/]*)(\/.*)?$/.exec(remote);
+  let host: string;
+  let path: string;
+  if (url) {
+    const authority = (url[1] ?? '').split('@').at(-1) ?? '';
+    host = authority.startsWith('[') ? authority.slice(0, authority.indexOf(']') + 1) : (authority.split(':')[0] ?? '');
+    path = url[2] ?? '';
+  } else {
+    if (remote.includes('://')) return remote;
+    const scp = /^([^/:]+):(.*)$/.exec(remote);
+    if (!scp) return remote;
+    host = (scp[1] ?? '').split('@').at(-1) ?? '';
+    path = scp[2] ?? '';
+  }
+  if (!host) return remote;
+  path = path
+    .toLowerCase()
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
+  return `${host.toLowerCase()}/${path}`;
+}
+
+/** The lease file: first 16 hex of sha256(`<leaseKey(remote)>\n<branch>`), plus `.json`. */
 export function leaseFile(dir: string, remote: string, branch: string): string {
-  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  const hex = new Bun.CryptoHasher('sha256').update(`${leaseKey(remote)}\n${branch}`).digest('hex');
   return join(dir, `${hex.slice(0, 16)}.json`);
 }
 

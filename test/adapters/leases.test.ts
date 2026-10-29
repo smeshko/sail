@@ -5,7 +5,15 @@ import * as fs from 'node:fs';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { defaultLeasesDir, heldLease, readLease, releaseLease, takeLease } from '../../src/adapters/leases';
+import {
+  leaseFile as actualLeaseFile,
+  defaultLeasesDir,
+  heldLease,
+  leaseKey,
+  readLease,
+  releaseLease,
+  takeLease,
+} from '../../src/adapters/leases';
 import { type Status, type StopReason, writeStatus } from '../../src/engine/run-dir';
 import { type Lease, type LeaseHolder, LeaseResult, Released } from '../../src/ports/types';
 import { caught, messageOf, parseIssues, portFailure } from '../helpers/ports';
@@ -27,9 +35,9 @@ function tempDir(): string {
   return dir;
 }
 
-/** Where a lease on `remote` and `branch` lives: the first 16 hex of sha256(`<remote>\n<branch>`), plus `.json`. */
+/** Where a lease on `remote` and `branch` lives: the first 16 hex of sha256(`<leaseKey(remote)>\n<branch>`) , plus `.json`. */
 function leaseFile(dir: string, remote: string, branch: string): string {
-  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  const hex = new Bun.CryptoHasher('sha256').update(`${leaseKey(remote)}\n${branch}`).digest('hex');
   return join(dir, `${hex.slice(0, 16)}.json`);
 }
 
@@ -60,6 +68,38 @@ function bare(result: { raw: unknown }): Record<string, unknown> {
   const { raw: _raw, ...rest } = result;
   return rest;
 }
+
+test.each([
+  ['git@github.com:o/r.git', 'github.com/o/r'],
+  ['ssh://git@github.com/o/r', 'github.com/o/r'],
+  ['ssh://github.com:2222/O/R/', 'github.com/o/r'],
+  ['https://GitHub.com/o/r.git/', 'github.com/o/r'],
+  ['https://x:tok@github.com/o/r', 'github.com/o/r'],
+  ['ssh://git@[2001:DB8::1]:2222/O/R.git/', '[2001:db8::1]/o/r'],
+  ['host:/O/R/.git///', 'host/o/r'],
+  ['watcher', 'watcher'],
+  ['/srv/repo.git', '/srv/repo.git'],
+  ['file:///srv/repo.git', 'file:///srv/repo.git'],
+])('leaseKey normalises %s to %s', (remote, key) => {
+  expect(leaseKey(remote)).toBe(key);
+});
+
+test('a live scp lease refuses an https taker and preserves the holder remote spelling', () => {
+  const dir = tempDir();
+  const r1 = run('r1', process.pid, 'running');
+  const remote = 'git@github.com:o/r.git';
+  takeLease(dir, remote, BRANCH, r1, NOW);
+  expect(bare(takeLease(dir, 'https://github.com/o/r', BRANCH, run('r2', process.pid, 'running'), LATER))).toEqual({
+    leased: false,
+    holder: { ...leaseOf(r1, NOW), remote },
+  });
+});
+
+test('the watcher queue lease keeps its raw-remote file name', () => {
+  const dir = tempDir();
+  const hex = new Bun.CryptoHasher('sha256').update('watcher\nqueue').digest('hex');
+  expect(actualLeaseFile(dir, 'watcher', 'queue')).toBe(join(dir, `${hex.slice(0, 16)}.json`));
+});
 
 test('a first lease creates its file, and readLease gives it back', () => {
   const dir = tempDir();
