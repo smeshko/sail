@@ -200,6 +200,35 @@ test('a takeover reports the new-file holder rather than the legacy holder when 
   });
 });
 
+test('a legacy takeover overtaken after its read refuses with the new holder', () => {
+  const dir = tempDir();
+  const file = legacyFile(dir);
+  writeFileSync(file, JSON.stringify(leaseOf(run('r1', process.pid, 'completed'), NOW)));
+  const r2 = run('r2', process.pid, 'running');
+  const r3 = run('r3', process.pid, 'running');
+  const real = fs.readFileSync;
+  const read = spyOn(fs, 'readFileSync').mockImplementation(((
+    path: fs.PathOrFileDescriptor,
+    options: BufferEncoding,
+  ) => {
+    const text = real(path, options);
+    if (String(path) === file) {
+      read.mockRestore();
+      takeLease(dir, REMOTE, BRANCH, r2, LATER);
+    }
+    return text;
+  }) as typeof fs.readFileSync);
+  try {
+    expect(bare(takeLease(dir, REMOTE, BRANCH, r3, LATER))).toEqual({
+      leased: false,
+      holder: leaseOf(r2, LATER),
+    });
+  } finally {
+    read.mockRestore();
+  }
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r2, LATER));
+});
+
 test('a legacy lease that cannot be dropped refuses a takeover as a conflict', () => {
   const dir = tempDir();
   const old = leaseOf(run('r1', process.pid, 'completed'), NOW);

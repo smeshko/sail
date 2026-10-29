@@ -142,7 +142,7 @@ export function takeLease(
   const old = legacy === undefined ? undefined : readRecord(legacy, leaseKind);
   if (old && legacy) {
     if (blocks(old)) return { leased: false, holder: old, raw: old };
-    if (!dropRecord(legacy, old, leaseKind)) {
+    if (!dropRecord(legacy, old, leaseKind) && readRecord(legacy, leaseKind) !== undefined) {
       throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
     }
   }
