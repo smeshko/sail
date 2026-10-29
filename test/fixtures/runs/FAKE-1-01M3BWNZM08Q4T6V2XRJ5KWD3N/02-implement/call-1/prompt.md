@@ -4,6 +4,7 @@ tests, or review findings.
 Write the combined diff of your commits to `diff.patch`.
 
 Submit the commits, the files you changed, and a short note on anything you did differently from the spec.
+Give each commit's sha as `git commit` prints it.
 
 ## About untrusted input
 
