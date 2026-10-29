@@ -44,6 +44,15 @@ test("the rail shows alpha's failed FAKE-2 in its opened failed section, its clo
   expect(markup).toContain('<div class="rail-h"><span>repositories</span><span class="c">4 runs</span></div>');
 });
 
+test('a running stalled row names the key with a warning marker', () => {
+  const repos = railRepos(index(m.registryDir), NOW);
+  const run = repos[0]?.workflows[0]?.runs[0];
+  if (!run) throw new Error('missing fixture run');
+  run.status = 'running';
+  run.stalled = 'spec#1';
+  expect(renderRail(repos, initialUi(0), NOW).value).toContain('running · <span class="stalled">stalled spec#1</span>');
+});
+
 test('the failed and completed sections stay closed unless opened or holding the selection', () => {
   expect(shown(rail())).toEqual([`beta ${FAKE_3_ID}`]);
   expect(rail()).toContain(

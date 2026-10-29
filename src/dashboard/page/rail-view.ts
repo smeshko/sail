@@ -19,7 +19,7 @@ function runRow(repo: string, run: RailRun, ui: UiState): SafeHtml {
   return html`<button class="run${selected ? ' sel' : ''}" data-action="select-run" data-repo="${repo}" data-run="${run.runId}">
 <span class="st ${pillOf(run.status)}"></span><span class="r-main"><span class="r-id">${run.ticketKey ?? run.runId}</span>${
     run.title === undefined ? '' : html` <span class="r-title">${run.title}</span>`
-  }<span class="r-sub">${run.status}${run.stopReason === undefined ? '' : html` · <span class="why">${run.stopReason}</span>`} · ${facts}</span>${
+  }<span class="r-sub">${run.status}${run.status === 'running' && run.stalled !== undefined ? html` · <span class="stalled">stalled ${run.stalled}</span>` : ''}${run.stopReason === undefined ? '' : html` · <span class="why">${run.stopReason}</span>`} · ${facts}</span>${
     run.problem === undefined ? '' : html`<span class="r-problem">${run.problem}</span>`
   }</span></button>`;
 }
