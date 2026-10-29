@@ -18,7 +18,7 @@ export const describe = agent('describe', {
   consumes: { ticket: value(TicketInput), plan: file('plan.md') },
   produces: { 'pr-body.md': 'file' },
   output: PrDescription,
-  model: 'luna',
+  model: 'fast',
   permissions: readonly,
   budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 15 },
   // The body is written in the vocabulary, and the prompt states the rules of AGENTS.md it follows.
