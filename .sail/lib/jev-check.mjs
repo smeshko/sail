@@ -1,4 +1,4 @@
-// Shared Jev requests, answer readers and state builders for leak-check, jev-tasks and jev-fix.
+// Shared Jev requests, answer readers and state builders for leak-check, banned-words, jev-tasks and jev-fix.
 // The task and fix checks hand the agent's job to Jev only when every item is a clear yes; otherwise the agent checks.
 // Leak-check instead asks whether added lines name other projects and forwards individual LEAK_YES hits to the judge,
 // with no agent fallback. The agreement script uses these same state builders.
@@ -139,6 +139,141 @@ export function leakQuestions(lines) {
         ),
       ];
     }),
+  );
+}
+
+// --- banned-words: is each avoided word used in the sense the glossary forbids?
+
+/** Provisional until ADW-416 calibrates it. */
+export const BANNED_YES = 0.8;
+export const BANNED_CONTEXT = 3;
+
+export function parseGlossary(text) {
+  const entries = [];
+  let entry;
+  for (const line of text.split('\n')) {
+    const heading = /^\*\*(.+?)\*\*:\s*$/.exec(line);
+    if (heading) {
+      entry = { term: heading[1], definition: [], avoid: [] };
+      continue;
+    }
+    if (!entry) continue;
+    const avoid = /^_Avoid_:\s*(.*)$/.exec(line);
+    if (!avoid) {
+      if (/^#/.test(line)) entry = undefined;
+      else entry.definition.push(line);
+      continue;
+    }
+    let depth = 0;
+    let item = '';
+    const items = [];
+    for (const char of `${avoid[1]},`) {
+      if (char === '(') depth++;
+      if (char === ')') depth--;
+      if ((char === ',' || char === ';') && depth === 0) {
+        items.push(item);
+        item = '';
+      } else if (depth === 0 && char !== ')') item += char;
+    }
+    for (const value of items) {
+      const clean = value.trim();
+      const quoted = [...clean.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+      if (quoted.length) entry.avoid.push(...quoted);
+      else if (clean && !/^(using|and)\s/i.test(clean) && clean.split(/\s+/).length <= 3) entry.avoid.push(clean);
+    }
+    entries.push({
+      term: entry.term,
+      definition: entry.definition.join('\n').trim(),
+      avoid: [...new Set(entry.avoid)],
+    });
+    entry = undefined;
+  }
+  return entries;
+}
+
+export function bannedLines(diffText) {
+  const lines = [];
+  let file = '';
+  let line = 0;
+  let hunk = [];
+  function flush() {
+    for (const each of hunk) {
+      if (each.added)
+        lines.push({
+          file,
+          line: each.line,
+          text: each.text,
+          context: hunk
+            .filter((other) => other !== each && Math.abs(other.line - each.line) <= BANNED_CONTEXT)
+            .map(({ line, text }) => ({ line, text })),
+        });
+    }
+    hunk = [];
+  }
+  for (const text of diffText.split('\n')) {
+    if (text.startsWith('+++ ')) {
+      flush();
+      file = text.slice(4).replace(/^b\//, '');
+      if (
+        file === '/dev/null' ||
+        /^(CONTEXT\.md|bun\.lock)$/.test(file) ||
+        /\.(ndjson|json)$/i.test(file) ||
+        /^(types\/|test\/fixtures\/(runs\/|terminal\/|dashboard\/views\/))/.test(file)
+      )
+        file = '';
+      continue;
+    }
+    const header = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
+    if (header) {
+      flush();
+      line = Number(header[1]);
+    } else if (file && (text.startsWith('+') || text.startsWith(' '))) {
+      hunk.push({ line: line++, text: text.slice(1), added: text.startsWith('+') });
+    }
+  }
+  flush();
+  return lines;
+}
+
+export function messageContext(lines) {
+  return lines.map((each) => ({
+    ...each,
+    context: lines
+      .filter(
+        (other) => other !== each && other.file === each.file && Math.abs(other.line - each.line) <= BANNED_CONTEXT,
+      )
+      .map(({ line, text }) => ({ line, text })),
+  }));
+}
+
+export function bannedCandidates(lines, glossary) {
+  const patterns = glossary.flatMap((entry) =>
+    entry.avoid.map((word) => ({
+      entry,
+      word,
+      pattern: new RegExp(
+        `(?<![\\w-])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}(?![\\w-])`,
+        'i',
+      ),
+    })),
+  );
+  return lines.flatMap((line) =>
+    patterns.filter(({ pattern }) => pattern.test(line.text)).map(({ entry, word }) => ({ ...line, ...entry, word })),
+  );
+}
+export function bannedState(candidates) {
+  return { candidates: Object.fromEntries(candidates.map((candidate, i) => [`word-${i + 1}`, candidate])) };
+}
+export function bannedQuestions(candidates) {
+  return Object.fromEntries(
+    candidates.map((candidate, i) => [
+      `word-${i + 1}`,
+      noul(
+        `In candidates.word-${i + 1}, is "${candidate.word}" used in the sense the glossary entry for ${candidate.term} forbids, where "${candidate.term}" should be used instead?`,
+        'The word names what the glossary entry defines, so the entry’s term belongs there.',
+        'The word means something else, is mentioned as a word, or is a name the line cannot change, such as a language keyword or another system’s API.',
+      ),
+    ]),
   );
 }
 
