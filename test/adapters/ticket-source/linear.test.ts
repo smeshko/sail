@@ -77,6 +77,25 @@ const SEED: LinearWorldSeed = {
   ],
 };
 
+test('listDesignated interrupted after its first page sends no further request', async () => {
+  const controller = new AbortController();
+  const sent: string[] = [];
+  const adapter = createLinearTicketSource({
+    team: 'ADW',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    fetch: async (_, init) => {
+      sent.push(JSON.parse(String(init.body)).operationName);
+      controller.abort();
+      return Response.json({ data: { issues: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'next' } } } });
+    },
+  });
+  const error = await rejection(adapter.listDesignated('sail', { signal: controller.signal }));
+  expect(portFailure(error)).toEqual({ port: 'ticketSource', op: 'listDesignated', code: 'unavailable' });
+  expect(messageOf(error)).toBe('ticketSource.listDesignated: the request to Linear at api.linear.app was interrupted');
+  expect(sent).toEqual(['SailDesignated']);
+});
+
 interface Made {
   world: LinearWorld;
   adapter: TicketSource;
