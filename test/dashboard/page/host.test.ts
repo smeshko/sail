@@ -298,8 +298,10 @@ test("render keeps an opened tool call's result box, and an opened script's stdo
   const golden = foldRun(readEvents(GOLDEN_RUN)).cards.find((card) => card.key === 'publish#1') as StageCard;
   const drawn = () =>
     renderTimeline(golden, { ...initialUi(0), timeline: true, opened: ['script:0'] }, NOW, {
-      stdout: { state: 'loaded', value: 'out\n'.repeat(80) },
-      stderr: { state: 'loaded', value: 'err\n'.repeat(80) },
+      'publish#1/open': {
+        stdout: { state: 'loaded', value: 'out\n'.repeat(80) },
+        stderr: { state: 'loaded', value: 'err\n'.repeat(80) },
+      },
     }).value;
   host.render('main', drawn());
   const stdout = main.boxes.get('stdout:script:0');
