@@ -54,6 +54,8 @@ interface Grammar {
   readonly flags: readonly string[];
   /** Options that take a value, attached (`-n1`, `--max-args=1`) or as the next word. */
   readonly valued: readonly string[];
+  /** Long options whose value attaches only with `=`. */
+  readonly optional?: readonly string[];
   /** Options of the form `-<digits>`. */
   readonly numeric?: boolean;
   /** Words to skip after the options, such as `timeout`'s duration. */
@@ -75,7 +77,8 @@ const WRAPPERS: Readonly<Record<string, Grammar>> = {
   },
   xargs: {
     flags: ['-0', '--null', '-r', '--no-run-if-empty', '-t', '--verbose', '-p', '--interactive', '-x', '--exit', '-o'],
-    valued: ['-n', '--max-args', '-L', '--max-lines', '-P', '--max-procs', '-I', '--replace', '-d', '--delimiter'],
+    valued: ['-n', '--max-args', '-L', '-P', '--max-procs', '-I', '-d', '--delimiter'],
+    optional: ['--replace', '--max-lines'],
   },
 };
 
@@ -91,7 +94,8 @@ function skipOptions(args: readonly Word[], grammar: Grammar): { at: number } | 
     if (arg === '--') return { at: i + 1 };
     if (!arg.startsWith('-') || (arg === '-' && !grammar.flags.includes('-'))) break;
     const name = arg.startsWith('--') ? (arg.split('=')[0] as string) : arg;
-    if (grammar.flags.includes(arg)) i++;
+    if (grammar.optional?.includes(name)) i++;
+    else if (grammar.flags.includes(arg)) i++;
     else if (grammar.valued.includes(name) && name !== arg) i++;
     else if (grammar.valued.includes(arg)) i += 2;
     else if (!arg.startsWith('--') && arg.length > 2 && grammar.valued.includes(arg.slice(0, 2))) i++;

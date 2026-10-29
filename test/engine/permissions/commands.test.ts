@@ -81,6 +81,11 @@ test.each([
 });
 
 test.each([
+  ['ls | xargs --replace bun ls x', { commands: ['ls *'] }, UNLISTED('bun ls x')],
+  ['ls | xargs --replace=X echo X', { commands: ['ls *', 'echo *'] }, 'allow'],
+  ['xargs --max-lines rm -rf', {}, DENY('rm -rf')],
+  ['xargs --max-lines=2 rm -rf', {}, DENY('rm -rf')],
+  ['xargs -L 2 rm -rf', {}, DENY('rm -rf')],
   ['xargs rm -rf', {}, DENY('rm -rf')],
   ['xargs -0 -n1 rm -rf', {}, DENY('rm -rf')],
   ['git ls-files | xargs rm', { commands: ['git ls-files *', 'rm *'] }, DENY('rm -rf')],
