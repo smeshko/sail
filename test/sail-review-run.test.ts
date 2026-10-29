@@ -103,9 +103,22 @@ const asked = (dir: string, key: string) =>
 test('a leak-check Jev hit reaches the judge as L1', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed({ 'leak-1': 0.97 }));
+    const sail = join(repo.dir, '.sail');
+    const [answer] = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8')).judge;
+    answer.output.decisions.push({
+      finding: 'L1',
+      verdict: 'drop',
+      rationale: 'The planted line is harmless.',
+      ticket: null,
+    });
+    seedHarness(sail, 'judge', [answer]);
     const { code, dir } = await review(repo);
-    expect(code).toBe(1);
-    expect(JSON.stringify(readEvents(dir))).toContain('judge left L1 undecided');
+    expect(code).toBe(0);
+    const folder = readdirSync(dir).find((name) => name.endsWith('-judge'));
+    const input = JSON.parse(readFileSync(join(dir, folder ?? '', 'call-1', 'in', 'findings.json'), 'utf8'));
+    expect(input.findings).toContainEqual(
+      expect.objectContaining({ id: 'L1', source: 'leak-check', file: 'notes.txt:1' }),
+    );
   });
 }, 120_000);
 
