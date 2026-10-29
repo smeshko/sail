@@ -606,6 +606,7 @@ async function drive(
       {
         runDir: dir,
         runId,
+        redact: opened.redact,
         stageIndex: call.stageIndex,
         call: call.call,
         try: nextTry(dir, call.stageIndex, call.stage, call.call),
@@ -667,6 +668,7 @@ async function drive(
       {
         runDir: dir,
         runId,
+        redact: opened.redact,
         stageIndex: INTAKE_INDEX,
         call: 1,
         try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
@@ -737,6 +739,7 @@ async function drive(
           : await runIntake({
               runDir: dir,
               runId,
+              redact: opened.redact,
               intake: loaded.intake,
               body,
               source: header.source,

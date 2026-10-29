@@ -400,7 +400,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
       const failed = unstarted(request, step, index, supplied);
       emitStep(start(failed.tryNumber));
       createCallDir(failed.paths);
-      writeResult(failed.paths.result, failed.result);
+      writeResult(failed.paths.result, failed.result, request.redact === undefined ? {} : { redact: request.redact });
       emitStep(end(failed.tryNumber, failed.result, runRelative(runDir, failed.paths.result)));
       ran = { result: failed.result, paths: failed.paths };
     } else if (step.kind === 'agent') {
@@ -459,7 +459,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
   }));
   const result = buildStageResult({ runId, stage: name, call, consumed, steps });
   const paths = callPaths(runDir, stageIndex, name, call);
-  writeResult(paths.result, result);
+  writeResult(paths.result, result, request.redact === undefined ? {} : { redact: request.redact });
   emitCall({
     type: 'stage:end',
     stage: name,
