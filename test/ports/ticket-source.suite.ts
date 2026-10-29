@@ -81,6 +81,18 @@ export function ticketSourceSuite(label: string, make: MakeTicketSource): void {
     return { capture, ...(await make(capture.emit)) };
   };
 
+  for (const op of ['get', 'listDesignated'] as const) {
+    test(`${label}: ${op} with an aborted signal rejects unavailable and emits nothing`, async () => {
+      const { adapter, world, capture } = await start();
+      const error = await rejection(
+        adapter[op](op === 'get' ? world.designated : world.label, { signal: AbortSignal.abort() }),
+      );
+      expect(portFailure(error)).toEqual({ port: 'ticketSource', op, code: 'unavailable' });
+      expect(error instanceof Error ? error.message.includes('interrupted') : false).toBe(true);
+      expect(capture.events).toEqual([]);
+    });
+  }
+
   test(`${label}: parseKey gives the ticket key each ref names, and nothing for anything else`, async () => {
     const { adapter, world } = await start();
     expect(world.refs.map(([ref]) => adapter.parseKey(ref))).toEqual(world.refs.map(([, ticketKey]) => ticketKey));

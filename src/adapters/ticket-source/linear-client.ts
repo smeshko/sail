@@ -1,6 +1,6 @@
 // One GraphQL request to Linear over plain `fetch` (DECISIONS D1). Every failure becomes a PortError that keeps Linear's
 // own message: an HTTP status, a GraphQL `errors[]`, a network failure or a timeout. The API key goes in the request
-// header alone, so no message and no `raw` can carry it.
+// header alone, so no message and no `raw` can carry it. Caller aborts cut requests and body reads short.
 import { PortError, type PortErrorCode } from '../../ports/errors';
 
 export const LINEAR_ENDPOINT = 'https://api.linear.app/graphql';
@@ -17,8 +17,14 @@ export interface LinearClientOptions {
 }
 
 export interface LinearClient {
-  /** `data` of the answer to `query`, or a PortError of the TicketSource operation `op`. */
-  request<T>(op: string, operationName: string, query: string, variables: Record<string, unknown>): Promise<T>;
+  /** `data` of the answer to `query`, or a PortError of `op`; caller aborts reject as unavailable. */
+  request<T>(
+    op: string,
+    operationName: string,
+    query: string,
+    variables: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<T>;
 }
 
 interface GraphQLError {
@@ -77,15 +83,24 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
   const host = new URL(options.endpoint).host;
   const timeoutMs = options.timeoutMs ?? 30_000;
   /** A failure of the transport, before the answer or while its body is read, as a PortError `unavailable`. */
-  const transport = (op: string, error: unknown, failed: string): PortError => {
+  const transport = (op: string, error: unknown, failed: string, signal?: AbortSignal): PortError => {
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
-    const message = timedOut
-      ? `Linear at ${host} did not answer within ${timeoutMs} ms`
-      : `${failed}: ${error instanceof Error ? error.message : String(error)}`;
+    const message = signal?.aborted
+      ? `the request to Linear at ${host} was interrupted`
+      : timedOut
+        ? `Linear at ${host} did not answer within ${timeoutMs} ms`
+        : `${failed}: ${error instanceof Error ? error.message : String(error)}`;
     return new PortError('ticketSource', op, 'unavailable', message);
   };
   return {
-    async request<T>(op: string, operationName: string, query: string, variables: Record<string, unknown>) {
+    async request<T>(
+      op: string,
+      operationName: string,
+      query: string,
+      variables: Record<string, unknown>,
+      signal?: AbortSignal,
+    ) {
+      if (signal?.aborted) throw transport(op, signal.reason, '', signal);
       const send = options.fetch ?? fetch;
       let response: Response;
       let text: string;
@@ -94,15 +109,18 @@ export function createLinearClient(options: LinearClientOptions): LinearClient {
           method: 'POST',
           headers: { Authorization: options.apiKey, 'Content-Type': 'application/json' },
           body: JSON.stringify({ query, variables, operationName }),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal:
+            signal === undefined
+              ? AbortSignal.timeout(timeoutMs)
+              : AbortSignal.any([AbortSignal.timeout(timeoutMs), signal]),
         });
       } catch (error) {
-        throw transport(op, error, `Linear is unreachable at ${host}`);
+        throw transport(op, error, `Linear is unreachable at ${host}`, signal);
       }
       try {
         text = await response.text();
       } catch (error) {
-        throw transport(op, error, `the answer from Linear at ${host} broke off`);
+        throw transport(op, error, `the answer from Linear at ${host} broke off`, signal);
       }
       let body: Body;
       try {
