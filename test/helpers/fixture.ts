@@ -127,14 +127,14 @@ const Groomed = z.object({ title: z.string() });
 const fetch = script('fetch', {
   run: './fetch.sh',
   consumes: { source: value(z.object({ kind: z.string(), ticketKey: z.string() }).passthrough()) },
-  produces: { 'brief.md': 'file' },
+  produces: { 'fetched.md': 'file' },
   output: z.object({ ticketKey: z.string() }),
   exitCodes: { passed: [0], failed: [1] },
 });
 
 const shape = agent('${agentStep}', {
   prompt: './shape.md',
-  consumes: { fetched: fromStep('fetch').file('brief.md') },
+  consumes: { fetched: fromStep('fetch').file('fetched.md') },
   output: Groomed,
   model: 'default',
   permissions: { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] },
@@ -156,6 +156,7 @@ mkdir -p "$STUB"
 echo "$STAGE#$CALL/fetch" >>"$STUB/executions.log"
 key=$("\${SAIL_BUN:-bun}" -e 'console.log(JSON.parse(await Bun.file(process.argv[1]).text()).ticketKey)' "$INPUT_SOURCE")
 echo "# Brief for $key" >"$STAGE_OUT/brief.md"
+cp "$STAGE_OUT/brief.md" "$STAGE_OUT/fetched.md"
 printf '{"ticketKey": "%s"}\\n' "$key"
 if [ "${fetchExit}" != 0 ]; then echo "no brief for $key" >&2; fi
 exit ${fetchExit}
