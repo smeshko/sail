@@ -42,6 +42,19 @@ test('the default slots directory is ~/.sail/slots', () => {
   expect(defaultSlotsDir()).toBe(join(homedir(), '.sail', 'slots'));
 });
 
+test('the default slots directory is $SAIL_HOME/slots when SAIL_HOME is set', () => {
+  const dir = tempDir();
+  expect(defaultSlotsDir({ SAIL_HOME: dir })).toBe(join(dir, 'slots'));
+});
+
+test('the default slots directory is ~/.sail/slots when SAIL_HOME is empty', () => {
+  expect(defaultSlotsDir({ SAIL_HOME: '' })).toBe(join(homedir(), '.sail', 'slots'));
+});
+
+test('the default slots directory is ~/.sail/slots when SAIL_HOME is unset', () => {
+  expect(defaultSlotsDir({})).toBe(join(homedir(), '.sail', 'slots'));
+});
+
 test('takes a free slot and refuses a second holder while the first is alive', () => {
   const dir = tempDir();
   const first = takeSlot(dir, 'verify', holder('RUN-A'), NOW);

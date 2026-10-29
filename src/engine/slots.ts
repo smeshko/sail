@@ -1,10 +1,12 @@
-// Machine-wide exclusive slots: one pid-held file per name in `~/.sail/slots/`. The shared primitive serialises
-// removals under drop tokens. A slot is stale only once its holder's pid is dead, never on a timer.
+// Exclusive slots: one pid-held file per slot name in the selected machine directory's `slots/`
+// (`$SAIL_HOME/slots/`, or `~/.sail/slots/`), so a heavy script step runs only while no other step sharing that directory
+// holds its name. Different machine directories have independent slots. The shared primitive serialises removals
+// under drop tokens. A slot is stale only once its holder's pid is dead, never on a timer.
 // Accepted risks: a reused pid reads as alive; a SIGKILL frees the slot while its script's process group may live on.
 import { mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { machineDir } from './machine-dir';
 import { dropRecord, type PidFileKind, readRecord, takeRecord } from './pid-file';
 import { isAlive } from './process';
 
@@ -34,8 +36,8 @@ const slotKind: PidFileKind<Slot> = {
 };
 
 /** Where slots live unless a caller names a directory. Computed per call, so importing this reads nothing. */
-export function defaultSlotsDir(): string {
-  return join(homedir(), '.sail', 'slots');
+export function defaultSlotsDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(machineDir(env), 'slots');
 }
 
 export function slotFile(dir: string, name: string): string {

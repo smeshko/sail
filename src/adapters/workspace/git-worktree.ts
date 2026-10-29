@@ -1,7 +1,7 @@
 // The built-in `git-worktree` Workspace adapter (ADR-0018, D6): a run works in a detached worktree of the repository at
 // `<runDir>/workspace`, made from `<remote>/<default branch>` right after a fetch, so the clone's own checkout, index
-// and working files are never touched. Leases are machine-wide, in `~/.sail/leases/`, keyed by the remote's URL with
-// any credentials taken out.
+// and working files are never touched. Leases are shared within the selected machine directory, in `$SAIL_HOME/leases/`
+// (or `~/.sail/leases/`), keyed by the remote's URL with any credentials taken out.
 //
 // It ports the loop's `engine/worktree.ts`: fetch, then `worktree add --detach`, and on release `remove --force`, then
 // a plain removal, then `prune`. It refuses to port two things. Nothing is symlinked or copied into the worktree, secrets
@@ -54,7 +54,7 @@ export interface GitWorktreeOptions extends ProviderOptions {
   readonly remote?: string;
   /** The branch a run starts from. Left out, what `refs/remotes/<remote>/HEAD` points to. */
   readonly defaultBranch?: string;
-  /** Where leases live. `defaultLeasesDir()` when left out. */
+  /** Where leases live. `defaultLeasesDir(env)` when left out. */
   readonly leasesDir?: string;
   /** The environment for every git call. This process's when left out. */
   readonly env?: Readonly<Record<string, string>>;
@@ -107,7 +107,7 @@ async function setUp(
 export function createGitWorktreeWorkspace(options: GitWorktreeOptions): WorkspacePort {
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
-  const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
+  const leasesDir = () => options.leasesDir ?? defaultLeasesDir(options.env ?? process.env);
   const { repo, env } = options;
   const remote = options.remote ?? 'origin';
 

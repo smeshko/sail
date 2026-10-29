@@ -14,9 +14,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BUILTINS } from '../../../src/adapters/index';
+import { readLease } from '../../../src/adapters/leases';
 import { createGitWorktreeWorkspace, gitWorktreeDefinition } from '../../../src/adapters/workspace/git-worktree';
 import { resolveAdapters } from '../../../src/engine/adapters';
 import { readConfig } from '../../../src/engine/config';
@@ -124,6 +125,23 @@ describe('the port suite', () => {
     const repo = clone();
     const w = world(repo);
     return { adapter: adapterOf(repo, w, { emit }), world: w };
+  });
+});
+
+test('with SAIL_HOME in its env and no leases directory named, a lease lands in $SAIL_HOME/leases', async () => {
+  await withTempRepo(async (repo) => {
+    const home = join(repo.dir, '.machine');
+    const workspace = createGitWorktreeWorkspace({ repo: repo.dir, env: { ...repo.env, SAIL_HOME: home } });
+    const remote = 'fake://home-test';
+    const branch = 'sail/git-home';
+    try {
+      await workspace.lease(remote, branch, { runId: 'r1', runDir: join(repo.dir, 'r1'), pid: process.pid });
+      expect(readLease(join(home, 'leases'), remote, branch)?.runId).toBe('r1');
+      expect(readLease(join(homedir(), '.sail', 'leases'), remote, branch)).toBeUndefined();
+    } finally {
+      await workspace.releaseLease(remote, branch, 'r1');
+    }
+    expect(readLease(join(home, 'leases'), remote, branch)).toBeUndefined();
   });
 });
 

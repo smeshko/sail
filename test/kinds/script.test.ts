@@ -1023,6 +1023,24 @@ function slotsDir(): string {
   return dir;
 }
 
+test('an exclusive step with no slots directory named holds its slot under SAIL_HOME', async () => {
+  await withTempRepo(async (repo) => {
+    const home = join(repo.dir, '.machine');
+    const previous = process.env.SAIL_HOME;
+    try {
+      process.env.SAIL_HOME = home;
+      const s = setup();
+      s.run('test -f "$SAIL_HOME/slots/verify.json" && echo \'{}\'');
+      const run = await scriptKind.run(verify(), s.context);
+      expect(run.outcome).toBe('passed');
+      expect(existsSync(join(home, 'slots', 'verify.json'))).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.SAIL_HOME;
+      else process.env.SAIL_HOME = previous;
+    }
+  });
+});
+
 test('exclusive steps of two runs run one after the other', async () => {
   const slots = slotsDir();
   const log = join(slots, 'log.txt');

@@ -2,8 +2,9 @@
 // repository name, written atomically and read without ever throwing for a bad file.
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { machineDir as engineMachineDir } from '../../src/engine/machine-dir';
 import { validateDocument } from '../../src/engine/schemas';
 import {
   claimWatcher,
@@ -49,10 +50,8 @@ function put(dir: string, file: string, data: unknown): void {
   writeFileSync(join(dir, file), typeof data === 'string' ? data : `${JSON.stringify(data)}\n`);
 }
 
-test('machineDir is SAIL_HOME when it is set and not empty, and ~/.sail otherwise', () => {
-  expect(machineDir({ SAIL_HOME: '/x' })).toBe('/x');
-  expect(machineDir({})).toBe(join(homedir(), '.sail'));
-  expect(machineDir({ SAIL_HOME: '' })).toBe(join(homedir(), '.sail'));
+test('the registry re-exports the engine machineDir', () => {
+  expect(machineDir).toBe(engineMachineDir);
 });
 
 test('a recorded entry reads back, a second record of the name replaces it, and no temp file is left', () => {

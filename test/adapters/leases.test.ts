@@ -301,6 +301,19 @@ test('leases live in ~/.sail/leases unless a caller names a directory', () => {
   expect(defaultLeasesDir()).toBe(join(homedir(), '.sail', 'leases'));
 });
 
+test('leases live in $SAIL_HOME/leases when SAIL_HOME is set', () => {
+  const dir = tempDir();
+  expect(defaultLeasesDir({ SAIL_HOME: dir })).toBe(join(dir, 'leases'));
+});
+
+test('leases live in ~/.sail/leases when SAIL_HOME is empty', () => {
+  expect(defaultLeasesDir({ SAIL_HOME: '' })).toBe(join(homedir(), '.sail', 'leases'));
+});
+
+test('leases live in ~/.sail/leases when SAIL_HOME is unset', () => {
+  expect(defaultLeasesDir({})).toBe(join(homedir(), '.sail', 'leases'));
+});
+
 test('two runs racing for one stale lease leave exactly one holder, whom the file names', async () => {
   const dir = tempDir();
   takeLease(dir, REMOTE, BRANCH, run('r0', await deadPid(), 'running'), NOW);
