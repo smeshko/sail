@@ -238,12 +238,58 @@ test('a fetch that rejects is unavailable, naming the endpoint’s host and the 
   });
 });
 
+test.each(['headers', 'body'])(
+  'a caller abort interrupts pending %s without waiting for the timeout',
+  async (phase) => {
+    const controller = new AbortController();
+    const waiting: Fetch = (_, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      });
+    const stalled = bodyThat((stream, signal) => signal?.addEventListener('abort', () => stream.error(signal.reason)));
+    const pending = rejection(
+      clientOf(phase === 'headers' ? waiting : stalled, 60_000).request(
+        'get',
+        'SailTicket',
+        QUERY,
+        {},
+        controller.signal,
+      ),
+    );
+    await Bun.sleep(1);
+    controller.abort();
+    const error = await Promise.race([pending, Bun.sleep(100).then(() => 'still pending')]);
+    expect(failureFields(error)).toEqual({
+      port: 'ticketSource',
+      op: 'get',
+      code: 'unavailable',
+      message: 'ticketSource.get: the request to Linear at api.linear.app was interrupted',
+      raw: undefined,
+    });
+  },
+);
+
+test('a pre-aborted caller sends no request', async () => {
+  const { fetch, sent } = answering({ status: 200, body: { data: {} } });
+  const error = await rejection(clientOf(fetch).request('get', 'SailTicket', QUERY, {}, AbortSignal.abort()));
+  expect(failureFields(error)).toEqual({
+    port: 'ticketSource',
+    op: 'get',
+    code: 'unavailable',
+    message: 'ticketSource.get: the request to Linear at api.linear.app was interrupted',
+    raw: undefined,
+  });
+  expect(sent).toEqual([]);
+});
+
 test('a request Linear never answers is aborted at the timeout, and is unavailable, naming the host and the time', async () => {
   const fetch: Fetch = (_, init) =>
     new Promise((_resolve, reject) => {
       init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
     });
-  const error = await rejection(clientOf(fetch, 5).request('claim', 'SailTicket', QUERY, {}));
+  const error = await rejection(
+    clientOf(fetch, 5).request('claim', 'SailTicket', QUERY, {}, new AbortController().signal),
+  );
   expect(failureFields(error)).toEqual({
     port: 'ticketSource',
     op: 'claim',
