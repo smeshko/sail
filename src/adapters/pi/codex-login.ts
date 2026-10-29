@@ -210,6 +210,7 @@ export function keychainCodexStore(env: Env): CredentialStore {
   return keychainStore({
     account: accountOf(env),
     security: systemSecurity(env),
+    // Stays in ~/.sail/locks whatever SAIL_HOME is: it guards the per-user keychain item every sail shares.
     lockFile: join(homedir(), '.sail', 'locks', `${CODEX_PROVIDER}.lock`),
   });
 }

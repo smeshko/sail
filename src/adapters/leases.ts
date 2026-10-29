@@ -1,5 +1,7 @@
-// Machine-wide branch leases (ADR-0018, D9): one file per remote and branch in `~/.sail/leases/`, so manual and watched
-// runs never hold the same branch. Every built-in Workspace adapter takes its leases here.
+// Machine-wide branch leases (ADR-0018, D9): one file per remote and branch in the machine directory's `leases/`
+// (`$SAIL_HOME/leases/`, or `~/.sail/leases/`), so manual and watched runs never hold the same branch.
+// Every built-in Workspace adapter takes its leases here. A run resumed under another `SAIL_HOME` finds no lease
+// of its own there.
 //
 // A lease is taken before its run directory exists, since a leased branch is a refusal, and a refusal leaves no run
 // directory. So a lease is stale once its run has ended, or once its pid is dead while the run is running or has no
@@ -12,8 +14,8 @@
 // and two resumes of one run can't both go ahead. A reused pid refuses a resume until that process ends: the same
 // accepted risk.
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { machineDir } from '../engine/machine-dir';
 import { isAlive } from '../engine/process';
 import { readStatus } from '../engine/run-dir';
 import { PortError } from '../ports/errors';
@@ -22,8 +24,8 @@ import { Lease, LeaseHolder, type LeaseResult, type Released } from '../ports/ty
 export { isAlive };
 
 /** Where leases live unless a caller names a directory. Computed per call, so importing this reads nothing. */
-export function defaultLeasesDir(): string {
-  return join(homedir(), '.sail', 'leases');
+export function defaultLeasesDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(machineDir(env), 'leases');
 }
 
 /** The lease file for `remote` and `branch`: the first 16 hex of sha256(`<remote>\n<branch>`), plus `.json`. */

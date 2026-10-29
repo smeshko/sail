@@ -11,13 +11,14 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { createFakeWorkspace } from '../../../src/adapters/fake/workspace';
 import { defaultLeasesDir, readLease } from '../../../src/adapters/leases';
 import { writeStatus } from '../../../src/engine/run-dir';
 import { holdTempRepo } from '../../helpers/held-repo';
 import { portFailure, rejection, settle } from '../../helpers/ports';
+import { withTempRepo } from '../../helpers/temp-repo';
 import { type WorkspaceWorld, workspaceSuite } from '../../ports/workspace.suite';
 
 const REMOTE = 'fake://codehost/fixture';
@@ -93,6 +94,22 @@ test('with no leases directory named, a lease lands in ~/.sail/leases', async ()
   const held = readLease(defaultLeasesDir(), REMOTE, 'sail/default-dir')?.runId;
   await workspace.releaseLease(REMOTE, 'sail/default-dir', 'r1');
   expect([held, readLease(defaultLeasesDir(), REMOTE, 'sail/default-dir')]).toEqual(['r1', undefined]);
+});
+
+test('with SAIL_HOME in its env and no leases directory named, a lease lands in $SAIL_HOME/leases', async () => {
+  await withTempRepo(async (repo) => {
+    const home = join(repo.dir, '.machine');
+    const workspace = createFakeWorkspace({ repo: repo.dir, env: { ...repo.env, SAIL_HOME: home } });
+    const branch = 'sail/fake-home';
+    try {
+      await workspace.lease(REMOTE, branch, { runId: 'r1', runDir: join(repo.dir, 'r1'), pid: process.pid });
+      expect(readLease(join(home, 'leases'), REMOTE, branch)?.runId).toBe('r1');
+      expect(readLease(join(homedir(), '.sail', 'leases'), REMOTE, branch)).toBeUndefined();
+    } finally {
+      await workspace.releaseLease(REMOTE, branch, 'r1');
+    }
+    expect(readLease(join(home, 'leases'), REMOTE, branch)).toBeUndefined();
+  });
 });
 
 test('a released workspace is gone from git worktree list too', async () => {

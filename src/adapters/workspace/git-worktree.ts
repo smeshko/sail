@@ -54,7 +54,7 @@ export interface GitWorktreeOptions extends ProviderOptions {
   readonly remote?: string;
   /** The branch a run starts from. Left out, what `refs/remotes/<remote>/HEAD` points to. */
   readonly defaultBranch?: string;
-  /** Where leases live. `defaultLeasesDir()` when left out. */
+  /** Where leases live. `defaultLeasesDir(env)` when left out. */
   readonly leasesDir?: string;
   /** The environment for every git call. This process's when left out. */
   readonly env?: Readonly<Record<string, string>>;
@@ -107,7 +107,7 @@ async function setUp(
 export function createGitWorktreeWorkspace(options: GitWorktreeOptions): WorkspacePort {
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
-  const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
+  const leasesDir = () => options.leasesDir ?? defaultLeasesDir(options.env ?? process.env);
   const { repo, env } = options;
   const remote = options.remote ?? 'origin';
 

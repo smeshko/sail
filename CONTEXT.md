@@ -550,7 +550,7 @@ The machine-level record of repositories in `~/.sail/watchers/` (`$SAIL_HOME/wat
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
 
 **Branch lease**:
-A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are machine-wide in `~/.sail/leases/`, keyed by remote and branch, and are stale only once the run is neither running nor suspended. A lease whose run has no status yet is stale once its pid is dead, and the same run leasing again renews it (a resume). Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
+A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are machine-wide in `~/.sail/leases/` (`$SAIL_HOME/leases/` when set), keyed by remote and branch, and are stale only once the run is neither running nor suspended. A lease whose run has no status yet is stale once its pid is dead, and the same run leasing again renews it (a resume). Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:

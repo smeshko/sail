@@ -30,7 +30,7 @@ export interface FakeWorkspaceOptions extends ProviderOptions {
   readonly remote?: string;
   /** The branch a workspace starts from when `create()` is given no base. `main` when left out. */
   readonly defaultBranch?: string;
-  /** Where leases live. `defaultLeasesDir()` when left out. */
+  /** Where leases live. `defaultLeasesDir(env)` when left out. */
   readonly leasesDir?: string;
   /** The environment for the git the fake runs. */
   readonly env?: Readonly<Record<string, string>>;
@@ -39,7 +39,7 @@ export interface FakeWorkspaceOptions extends ProviderOptions {
 export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePort {
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
-  const leasesDir = () => options.leasesDir ?? defaultLeasesDir();
+  const leasesDir = () => options.leasesDir ?? defaultLeasesDir(options.env ?? process.env);
   const { repo, env } = options;
   const defaultBranch = options.defaultBranch ?? 'main';
 

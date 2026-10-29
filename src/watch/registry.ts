@@ -8,7 +8,7 @@
 // is dead is no watcher, so a field a crash left behind holds nothing. Registration carries the field forward, so a
 // run refreshing its repository's entry never erases the watcher that started it.
 //
-// The machine directory is `SAIL_HOME`, or `~/.sail`. Branch leases don't follow `SAIL_HOME` yet.
+// The machine directory is `SAIL_HOME`, or `~/.sail`; branch leases and exclusive slots live there too.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../adapters/leases';
