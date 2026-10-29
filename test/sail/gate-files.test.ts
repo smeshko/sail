@@ -73,6 +73,16 @@ test('changed and added gate files are named exactly in git order', async () => 
   });
 });
 
+test('gate paths with non-ASCII and control characters are named verbatim', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    const paths = ['.github/workflows/vérify.yml', '.github/workflows/verify\n.yml\n'];
+    for (const path of paths) put(repo, path);
+    commit(repo, ...paths);
+    expect(stage(repo, base)).toEqual({ code: 0, output: { base, touched: paths.toSorted() } });
+  });
+});
+
 test('a deleted tsconfig is named', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);

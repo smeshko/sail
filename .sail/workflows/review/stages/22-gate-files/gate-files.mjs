@@ -23,7 +23,7 @@ export function isGateFile(path) {
 function git(...args) {
   const result = spawnSync('git', args, { encoding: 'utf8' });
   if (result.stderr) process.stderr.write(result.stderr);
-  return { code: result.status, out: (result.stdout ?? '').trim() };
+  return { code: result.status, out: result.stdout ?? '' };
 }
 
 if (process.env.INPUT_PR) {
@@ -38,11 +38,11 @@ if (process.env.INPUT_PR) {
       throw new Error(`fetching ${details.base} failed`);
     const fetched = git('rev-parse', 'FETCH_HEAD');
     if (fetched.code !== 0) throw new Error('resolving FETCH_HEAD failed');
-    base = fetched.out;
+    base = fetched.out.trim();
   }
-  const diff = git('diff', '--name-only', '--no-renames', `${base}...${headSha}`);
+  const diff = git('diff', '-z', '--name-only', '--no-renames', `${base}...${headSha}`);
   if (diff.code !== 0) throw new Error('diffing the pull request failed');
-  const touched = diff.out.split('\n').filter(isGateFile);
+  const touched = diff.out.split('\0').filter(isGateFile);
   console.error(`gate files: ${touched.length}`);
   console.log(JSON.stringify({ base, touched }));
 }
