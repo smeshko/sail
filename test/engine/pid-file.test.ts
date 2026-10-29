@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { dropRecord, type PidFileKind, readRecord, takeRecord } from '../../src/engine/pid-file';
 
+import { threeTakers } from '../helpers/three-takers';
+
 const schema = z.object({ runId: z.string(), pid: z.number() });
 type Record = z.infer<typeof schema>;
 const kind: PidFileKind<Record> = {
@@ -51,28 +53,18 @@ test('a stale file is taken with took', () => {
 test('three contenders leave exactly A with B and C refused naming A', () => {
   const { file, dir } = setup();
   put(file, stale);
-  const read = fs.readFileSync;
-  let fired = false;
-  let ar: unknown;
-  let cr: unknown;
-  const hook = spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof fs.readFileSync>) => {
-    const text = read(...args);
-    if (args[0] === file && !fired) {
-      fired = true;
-      ar = takeRecord(file, a, kind, blocks);
-      cr = takeRecord(file, c, kind, blocks);
-    }
-    return text;
-  }) as typeof fs.readFileSync);
-  try {
-    expect(takeRecord(file, b, kind, blocks)).toEqual({ taken: false, holder: a });
-    expect(ar).toEqual({ taken: true, took: stale });
-    expect(cr).toEqual({ taken: false, holder: a });
-    expect(readRecord(file, kind)).toEqual(a);
-    expect(fs.readdirSync(dir)).toEqual(['record']);
-  } finally {
-    hook.mockRestore();
-  }
+  const result = threeTakers(
+    file,
+    () => takeRecord(file, a, kind, blocks),
+    () => takeRecord(file, b, kind, blocks),
+    () => takeRecord(file, c, kind, blocks),
+  );
+  expect(result.b).toEqual({ taken: false, holder: a });
+  expect(result.a).toEqual({ taken: true, took: stale });
+  expect(result.c).toEqual({ taken: false, holder: a });
+  expect(result.protectedRecheck).toBe(true);
+  expect(readRecord(file, kind)).toEqual(a);
+  expect(fs.readdirSync(dir)).toEqual(['record']);
 });
 test('a drop whose record was replaced leaves the replacement', () => {
   const { file, dir } = setup();

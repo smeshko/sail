@@ -15,6 +15,8 @@ import {
   takeSlot,
 } from '../../src/engine/slots';
 
+import { threeTakers } from '../helpers/three-takers';
+
 const SLOTS = join(import.meta.dir, '..', '..', 'src', 'engine', 'slots.ts');
 const NOW = new Date('2026-10-27T09:00:00.000Z');
 
@@ -170,29 +172,19 @@ test('a takeover overtaken by another takeover leaves one holder', async () => {
   const dead = Bun.spawn(['true']);
   await dead.exited;
   takeSlot(dir, 'verify', holder('dead', dead.pid), NOW);
-  const read = fs.readFileSync;
-  let fired = false;
-  let first: unknown;
-  let third: unknown;
-  const hook = spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof fs.readFileSync>) => {
-    const text = read(...args);
-    if (args[0] === file && !fired) {
-      fired = true;
-      first = takeSlot(dir, 'verify', holder('A'), NOW);
-      third = takeSlot(dir, 'verify', holder('C'), NOW);
-    }
-    return text;
-  }) as typeof fs.readFileSync);
+  const result = threeTakers(
+    file,
+    () => takeSlot(dir, 'verify', holder('A'), NOW),
+    () => takeSlot(dir, 'verify', holder('B'), NOW),
+    () => takeSlot(dir, 'verify', holder('C'), NOW),
+  );
   const slot = { name: 'verify', ...holder('A'), takenAt: NOW.toISOString() };
-  try {
-    expect(takeSlot(dir, 'verify', holder('B'), NOW)).toEqual({ taken: false, holder: slot });
-    expect(first).toEqual({ taken: true, slot, took: 'dead' });
-    expect(third).toEqual({ taken: false, holder: slot });
-    expect(readSlot(dir, 'verify')).toEqual(slot);
-    expect(fs.readdirSync(dir)).toEqual(['verify.json']);
-  } finally {
-    hook.mockRestore();
-  }
+  expect(result.b).toEqual({ taken: false, holder: slot });
+  expect(result.a).toEqual({ taken: true, slot, took: 'dead' });
+  expect(result.c).toEqual({ taken: false, holder: slot });
+  expect(result.protectedRecheck).toBe(true);
+  expect(readSlot(dir, 'verify')).toEqual(slot);
+  expect(fs.readdirSync(dir)).toEqual(['verify.json']);
 });
 
 test('a live drop token gives SlotContended instead of taking a stale slot', async () => {
