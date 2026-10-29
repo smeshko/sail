@@ -90,16 +90,26 @@ export function citedHunks(diffText, file) {
   const hunks = [];
   let current = '';
   let hunk = null;
+  let oldRemaining = 0;
+  let newRemaining = 0;
   for (const text of diffText.split(/(?<=\n)/)) {
+    if ((oldRemaining > 0 || newRemaining > 0) && /^[ +\\-]/.test(text)) {
+      if (text[0] === ' ' || text[0] === '-') oldRemaining--;
+      if (text[0] === ' ' || text[0] === '+') newRemaining--;
+      if (hunk) hunk.text += text;
+      continue;
+    }
     if (text.startsWith('diff --git ') || text.startsWith('--- ') || text.startsWith('+++ ')) {
       hunk = null;
       if (text.startsWith('diff --git ')) current = '';
       if (text.startsWith('+++ ')) current = text.trimEnd().slice(4).replace(/^b\//, '');
       continue;
     }
-    const header = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(text);
+    const header = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(text);
     if (header) {
-      hunk = current === path ? { start: Number(header[1]), count: Number(header[2] ?? 1), text: '' } : null;
+      oldRemaining = Number(header[1] ?? 1);
+      newRemaining = Number(header[3] ?? 1);
+      hunk = current === path ? { start: Number(header[2]), count: newRemaining, text: '' } : null;
       if (hunk) hunks.push(hunk);
     }
     if (hunk) hunk.text += text;

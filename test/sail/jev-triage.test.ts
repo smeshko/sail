@@ -29,6 +29,19 @@ test('citedHunks picks the hunk holding the cited line', () => {
   expect(lib.citedHunks('+++ /dev/null\n@@ -1 +0,0 @@\n-old\n', 'notes.txt')).toBe('');
 });
 
+test('citedHunks keeps header-like content and later hunks in the cited file', () => {
+  const removedComment = '@@ -1,2 +1 @@\n--- old comment\n-select 1;\n+select 2;\n';
+  const addedIncrement = '@@ -5 +4,2 @@\n value\n+++ x\n';
+  const later = '@@ -9 +9 @@\n-before\n+after\n';
+  const other = 'diff --git a/other.txt b/other.txt\n--- a/other.txt\n+++ b/other.txt\n@@ -0,0 +1 @@\n+other\n';
+  const diff = `diff --git a/query.sql b/query.sql\n--- a/query.sql\n+++ b/query.sql\n${removedComment}${addedIncrement}${later}${other}`;
+  expect(lib.citedHunks(diff, 'query.sql:1')).toBe(removedComment);
+  expect(lib.citedHunks(diff, 'query.sql:5')).toBe(addedIncrement);
+  expect(lib.citedHunks(diff, 'query.sql:9')).toBe(later);
+  expect(lib.citedHunks(diff, 'query.sql')).toBe(removedComment + addedIncrement + later);
+  expect(lib.citedHunks(diff, 'other.txt:1')).toBe('@@ -0,0 +1 @@\n+other\n');
+});
+
 test('triageQuestions asks a noul and a choice per finding', () => {
   const q = lib.triageQuestions(['R1', 'R2']);
   expect(Object.keys(q)).toEqual(['R1:supported', 'R1:verdict', 'R2:supported', 'R2:verdict']);
