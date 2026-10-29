@@ -149,6 +149,28 @@ export type Check = z.infer<typeof Check>;
 export const Checks = z.object({ number: z.number().int(), headSha: z.string(), checks: z.array(Check), raw: Raw });
 export type Checks = z.infer<typeof Checks>;
 
+/** The checks `rerunChecks` ran again, by name: none when nothing had failed or nothing could be rerun. */
+export const Rerun = z.object({
+  number: z.number().int(),
+  headSha: z.string(),
+  rerun: z.array(z.string()),
+  raw: Raw,
+});
+export type Rerun = z.infer<typeof Rerun>;
+
+/** How many characters of a check's log `checkLog` answers: the last of them. */
+export const CHECK_LOG_TAIL = 20_000;
+
+/** The tail of one check's log. */
+export const CheckLog = z.object({
+  number: z.number().int(),
+  name: z.string(),
+  log: z.string(),
+  url: z.string().optional(),
+  raw: Raw,
+});
+export type CheckLog = z.infer<typeof CheckLog>;
+
 // Merges
 
 export const MergeMethod = z.enum(['merge', 'squash', 'rebase']);

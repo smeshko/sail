@@ -93,6 +93,8 @@ export const PORT_OPERATIONS = {
     'listDesignated',
     'getPullRequest',
     'checks',
+    'rerunChecks',
+    'checkLog',
     'merge',
     'addLabel',
     'removeLabel',

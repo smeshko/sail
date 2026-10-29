@@ -15,7 +15,7 @@ import { holdsLabel, sameLabel } from '../../ports/labels';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import { type Labelled, MergeRequest, type MergeResult, mergeRequestIssue, type PullRequest } from '../../ports/types';
 import { gitSync, stripUserinfo } from '../workspace/git';
-import { readChecks } from './github-checks';
+import { readCheckLog, readChecks, rerunFailed } from './github-checks';
 import { createGitHubClient, type Fetch, GITHUB_API_URL } from './github-client';
 import {
   type GitHubComment,
@@ -247,6 +247,19 @@ export function createGitHubCodeHost(options: GitHubCodeHostOptions): CodeHost {
           checks: checks.map(({ name, status }) => ({ name, status })),
         });
         return { number, headSha: pr.headSha, checks, raw };
+      }),
+    rerunChecks: (number) =>
+      guarded(async () => {
+        const pr = await read('rerunChecks', number);
+        const rerun = await rerunFailed(client, 'rerunChecks', pr.headSha);
+        if (rerun.length > 0) emit({ type: 'codehost:checks_rerun', number, headSha: pr.headSha, checks: rerun });
+        return { number, headSha: pr.headSha, rerun, raw: { rerun } };
+      }),
+    checkLog: (number, name) =>
+      guarded(async () => {
+        const pr = await read('checkLog', number);
+        const { log, url } = await readCheckLog(client, 'checkLog', pr.headSha, name);
+        return { number, name, log, ...(url === undefined ? {} : { url }), raw: { name, headSha: pr.headSha } };
       }),
     merge: (number, request) =>
       guarded(async (): Promise<MergeResult> => {

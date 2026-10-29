@@ -900,6 +900,10 @@ test('at trace, an event of every type prints a line of its own', () => {
       head('', '· codehost:checks {"number":1,"headSha":"b4efb0c","checks":[{"name":"ci","status":"passed"}]}', w),
     ],
     [
+      { type: 'codehost:checks_rerun', number: 1, headSha: 'b4efb0c', checks: ['ci'] },
+      head('', '· codehost:checks_rerun {"number":1,"headSha":"b4efb0c","checks":["ci"]}', w),
+    ],
+    [
       { type: 'codehost:labelled', number: 1, label: 'sail', change: 'added' },
       head('', '· codehost:labelled {"number":1,"label":"sail","change":"added"}', w),
     ],

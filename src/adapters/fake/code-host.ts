@@ -8,6 +8,7 @@ import { PortError } from '../../ports/errors';
 import { holdsLabel, sameLabel } from '../../ports/labels';
 import type { ProviderOptions } from '../../ports/ticket-source';
 import {
+  CHECK_LOG_TAIL,
   CheckStatus,
   Comment,
   type Labelled,
@@ -28,7 +29,9 @@ export interface FakeCodeHostOptions extends ProviderOptions {
   readonly env?: Readonly<Record<string, string>>;
 }
 
-const CheckScripts = z.array(z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1) }));
+const CheckScripts = z.array(
+  z.object({ name: z.string(), statuses: z.array(CheckStatus).min(1), log: z.string().optional() }),
+);
 const MergeScripts = z.array(z.enum(['merged', 'pending', 'refused', 'rejected'])).min(1);
 
 /** A pull request as the seed holds it, with its scripts and how far each has been read. */
@@ -47,7 +50,9 @@ const StoredPullRequest = z.object({
   checks: CheckScripts.default([]),
   /** What each merge call is answered, the last repeating: `rejected` is the host refusing it, a PortError. */
   merges: MergeScripts.default(['merged']),
-  reads: z.object({ checks: z.number().int(), merges: z.number().int() }).default({ checks: 0, merges: 0 }),
+  reads: z
+    .object({ checks: z.number().int(), merges: z.number().int(), reruns: z.number().int().default(0) })
+    .default({ checks: 0, merges: 0, reruns: 0 }),
   comments: z.array(Comment).default([]),
   /** Who opened it: `sail` unless the seed says otherwise. Left out of `raw` when the seed leaves it out. */
   author: z.string().optional(),
@@ -250,6 +255,33 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       });
       emit({ type: 'codehost:checks', number, headSha: checks.headSha, checks: checks.checks });
       return checks;
+    },
+    async rerunChecks(number) {
+      const rerun = store.change((world) => {
+        const pr = find(world, 'rerunChecks', number);
+        // The statuses of the read the script last gave; with none read yet, the first.
+        const current = Math.max(0, pr.reads.checks - 1);
+        const failed = pr.checks
+          .filter(({ statuses }) => scripted(statuses, current) === 'failed')
+          .map(({ name }) => name);
+        if (failed.length > 0) {
+          pr.reads.reruns++;
+          // The scripted statuses carry on from the next read.
+          pr.reads.checks = current + 1;
+        }
+        return { number, headSha: pr.headSha, rerun: failed, raw: structuredClone(pr) };
+      });
+      if (rerun.rerun.length > 0) {
+        emit({ type: 'codehost:checks_rerun', number, headSha: rerun.headSha, checks: rerun.rerun });
+      }
+      return rerun;
+    },
+    async checkLog(number, name) {
+      const pr = find(store.read(), 'checkLog', number);
+      const log = pr.checks.find((check) => check.name === name)?.log;
+      if (log === undefined)
+        throw new PortError('codeHost', 'checkLog', 'not_found', `no log of a check named ${name}`);
+      return { number, name, log: log.slice(-CHECK_LOG_TAIL), raw: structuredClone(pr) };
     },
     async merge(number, request) {
       // A request from outside TypeScript, such as `sail port`, is checked before anything is read.

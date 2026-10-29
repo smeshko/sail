@@ -60,7 +60,7 @@
       "state": "open",
       "labels": ["sail"],
       "ticketKey": "FAKE-4",
-      "checks": [{ "name": "ci", "statuses": ["pending", "failed"] }]
+      "checks": [{ "name": "ci", "statuses": ["pending", "failed"], "log": "(fail) sail whisper prints nothing" }]
     }
   ]
 }

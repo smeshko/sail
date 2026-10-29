@@ -76,6 +76,8 @@ export interface WorldSeedPull {
   readonly checkRuns?: readonly WorldCheckRun[];
   /** The commit statuses on its head sha. */
   readonly statuses?: readonly WorldStatus[];
+  /** The log of each GitHub Actions job on its head sha, by the job's id, which is its check run's id. */
+  readonly jobLogs?: Readonly<Record<number, string>>;
   /** The GitHub Actions workflow runs on its head sha, or the status GitHub refuses them with. */
   readonly workflowRuns?: readonly WorldWorkflowRun[] | 403 | 404;
   /** Its author's login: `sail-bot` unless given. */
@@ -454,6 +456,20 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
       if (refused !== undefined) return json(refused, { message: 'Resource not accessible by integration' });
       const runs = seeded.flatMap((runs) => (typeof runs === 'number' ? [] : runs));
       return json(200, { total_count: runs.length, workflow_runs: page(runs, query) });
+    }
+    const jobLog = /^\/actions\/jobs\/(\d+)\/logs$/.exec(path);
+    if (method === 'GET' && jobLog !== null) {
+      const log = (seed.pullRequests ?? [])
+        .map((pr) => pr.jobLogs?.[Number(jobLog[1])])
+        .find((each) => each !== undefined);
+      return log === undefined ? notFound() : { status: 200, body: log };
+    }
+    const rerun = /^\/actions\/runs\/(\d+)\/rerun-failed-jobs$/.exec(path);
+    if (method === 'POST' && rerun !== null) {
+      const known = (seed.pullRequests ?? []).some(
+        (pr) => typeof pr.workflowRuns === 'object' && pr.workflowRuns.some((run) => run.id === Number(rerun[1])),
+      );
+      return known ? { status: 201 } : notFound();
     }
     const status = /^\/commits\/([^/]+)\/status$/.exec(path);
     if (method === 'GET' && status !== null) {
