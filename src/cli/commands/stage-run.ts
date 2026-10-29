@@ -210,8 +210,9 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
       definition,
       stageFile,
       // In the directory that holds `.sail/`, and on no branch: a stage in isolation belongs to no run, so it has no
-      // workspace or branch of its own.
+      // workspace or branch of its own. Keep a hook's GIT_INDEX_FILE: it names the index being committed here.
       workspace,
+      inClone: true,
       root: workspace,
       branch: '',
       config: join(found.dir, 'project.yaml'),

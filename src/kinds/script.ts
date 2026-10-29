@@ -248,8 +248,12 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
   const timeoutSeconds = step.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
   const portEvents = join(context.paths.dir, PORT_EVENTS_FILE);
   const variables = [...preamble(context), { name: 'SAIL_EVENTS', value: portEvents, path: true }];
-  // Without the variables that tie git to a repository: the step's git must work on the workspace it runs in.
-  const inherited = withoutRepositoryVariables(process.env);
+  // A step in a run's workspace must not have its git point at the clone. A step in the clone keeps what a hook set.
+  const inherited = context.inClone
+    ? Object.fromEntries(
+        Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+      )
+    : withoutRepositoryVariables(process.env);
 
   // Recorded relative to the root, and only these variables: the inherited environment may hold secrets. The script
   // runs in the workspace.

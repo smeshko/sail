@@ -145,6 +145,48 @@ export const where = script('where', { run: './run.sh', output: z.object({ cwd: 
   });
 });
 
+test('a stage run from a pre-commit hook sees the index being committed: GIT_INDEX_FILE reaches its script', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(fixtureCopy(repo), 'stages', 'cached');
+    mkdirSync(dir);
+    writeFileSync(join(repo.dir, 'a'), 'original a');
+    writeFileSync(join(repo.dir, 'b'), 'original b');
+    repo.git('add', 'a', 'b');
+    repo.git('commit', '-m', 'add a and b');
+    writeFileSync(join(repo.dir, 'a'), 'changed a');
+    writeFileSync(join(repo.dir, 'b'), 'changed b');
+    repo.git('add', 'b');
+    const index = join(repo.dir, '.git', 'alt-index');
+    for (const args of [
+      ['read-tree', 'HEAD'],
+      ['add', 'a'],
+    ]) {
+      const git = Bun.spawnSync(['git', ...args], { cwd: repo.dir, env: { ...repo.env, GIT_INDEX_FILE: index } });
+      expect(git.exitCode).toBe(0);
+    }
+    writeFileSync(
+      join(dir, 'stage.ts'),
+      `import { script, z } from 'sail';
+export const cached = script('cached', { run: './run.sh', output: z.object({ cached: z.string() }) });
+`,
+    );
+    writeScript(join(dir, 'run.sh'), 'printf \'{"cached":"%s"}\\n\' "$(git diff --cached --name-only)"');
+    const saved = process.env.GIT_INDEX_FILE;
+    process.env.GIT_INDEX_FILE = index;
+    try {
+      const { code, stdout, stderr } = await runCaptured(['stage', 'run', '.sail/stages/cached'], repo.dir);
+      expect({ code, stderr, output: readResult(callDirOf(stdout, repo.dir)).output }).toEqual({
+        code: EXIT_OK,
+        stderr: '',
+        output: { cached: 'a' },
+      });
+    } finally {
+      if (saved === undefined) delete process.env.GIT_INDEX_FILE;
+      else process.env.GIT_INDEX_FILE = saved;
+    }
+  });
+});
+
 test('a stage run in isolation gets SAIL_EVENTS too: it has no stream, so what the script reports stays in the file', async () => {
   await withTempRepo(async (repo) => {
     const dir = join(fixtureCopy(repo), 'stages', 'reports');

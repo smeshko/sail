@@ -73,6 +73,23 @@ export function sharedSource(): SharedSource {
   };
 }
 
+/** Reorders every journal line exactly once and renumbers seq in completion order. */
+export function reorderJournal(runDir: string, keys: string[]): void {
+  const path = join(runDir, 'journal.ndjson');
+  const lines = readFileSync(path, 'utf8')
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const byKey = new Map(lines.map((line) => [line.key, line]));
+  if (keys.length !== lines.length || new Set(keys).size !== keys.length || keys.some((key) => !byKey.has(key))) {
+    throw new Error('keys must name every journal line exactly once');
+  }
+  writeFileSync(
+    path,
+    `${keys.map((key, index) => JSON.stringify({ ...byKey.get(key), seq: index + 1 })).join('\n')}\n`,
+  );
+}
+
 /** Keeps the first `count` lines of a run's journal: a source that stopped there. */
 export function cutJournal(runDir: string, count: number): void {
   const path = join(runDir, 'journal.ndjson');

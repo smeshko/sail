@@ -1,8 +1,9 @@
 // The environment variables that tie git to one repository: what `git rev-parse --local-env-vars` lists, but the
 // user's own `-c` config (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`), which git keeps when it enters another
 // repository too. git exports them to its hooks, so a sail started from a hook would point every git it starts at the
-// clone, its index and HEAD included, whatever directory that git runs in. The Workspace adapters' git and every script
-// step go without them.
+// clone, its index and HEAD included, whatever directory that git runs in. The Workspace adapters' git, the fake code
+// host's git and every script step outside the clone go without them. A stage run in isolation keeps them, since it
+// runs in the clone.
 
 const REPOSITORY_VARIABLES: ReadonlySet<string> = new Set([
   'GIT_ALTERNATE_OBJECT_DIRECTORIES',

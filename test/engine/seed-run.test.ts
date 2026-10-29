@@ -6,6 +6,7 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -17,13 +18,125 @@ import { type JournalEntry, readJournal } from '../../src/engine/journal';
 import type { OpenedRun } from '../../src/engine/open-run';
 import { readStatus } from '../../src/engine/run-dir';
 import { type RunHeader, readRunHeader } from '../../src/engine/run-header';
+import { runWorkflow } from '../../src/engine/runtime';
 import { openSeededRun, type SeededRunOptions } from '../../src/engine/seed-run';
 import { fakeAdapters } from '../helpers/adapters';
+import { AGENT_WORKFLOW } from '../helpers/agent-fixture';
 import { edit } from '../helpers/fixture';
 import { TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
-import { cutJournal, runIds, SOURCE_BRANCH, sharedSource } from '../helpers/seeded';
+import { cutJournal, reorderJournal, runIds, SOURCE_BRANCH, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { writeTwoStep } from '../helpers/two-step';
+
+/** Copies a completed source with publish's two steps grouped with notify into the case's repository. */
+async function groupedTwoStepInto(to: string): Promise<string> {
+  return withTempRepo(async (from) => {
+    writeTwoStep(from.dir, { grouped: true });
+    const end = await runWorkflow({
+      cwd: from.dir,
+      adapters: await fakeAdapters(from.dir),
+      workflow: AGENT_WORKFLOW,
+      ticket: 'FAKE-1',
+    });
+    if ('refused' in end) throw new Error(end.refused);
+    expect(end.status).toBe('completed');
+    copyRun(from.dir, to);
+    return end.runId;
+  });
+}
+
+test('seeding an interrupted group with only step lines is refused without writing anything', async () => {
+  await withTempRepo(async (repo) => {
+    const fromRun = await withTempRepo(async (from) => {
+      const sail = writeTwoStep(from.dir, { grouped: true });
+      edit(
+        sail,
+        `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`,
+        "import { script, value, z } from 'sail';",
+        "import { script, stage, value, z } from 'sail';\nconst Url = z.string();",
+      );
+      edit(
+        sail,
+        `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`,
+        "export const notify = script('notify', {",
+        "const send = script('send', {",
+      );
+      edit(sail, `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`, 'value(z.string())', 'value(Url)');
+      const notifyPath = join(sail, `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`);
+      writeFileSync(
+        notifyPath,
+        `${readFileSync(notifyPath, 'utf8')}\nconst Sent = z.object({ sent: z.boolean() });
+export const notify = stage('notify', {
+  consumes: { url: value(Url) },
+  output: Sent,
+  steps: [send, script('confirm', { run: './run.sh', output: Sent })],
+});\n`,
+      );
+      const end = await runWorkflow({
+        cwd: from.dir,
+        adapters: await fakeAdapters(from.dir),
+        workflow: AGENT_WORKFLOW,
+        ticket: 'FAKE-1',
+      });
+      if ('refused' in end) throw new Error(end.refused);
+      expect(end.status).toBe('completed');
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+    const fromDir = join(repo.dir, '.sail-runs', fromRun);
+    reorderJournal(fromDir, [
+      'intake#1',
+      'brief#1',
+      'spec#1',
+      'publish#1/describe',
+      'notify#1/send',
+      'publish#1/open',
+      'publish#1',
+      'notify#1/confirm',
+      'notify#1',
+    ]);
+    cutJournal(fromDir, 5);
+    writeFileSync(join(fromDir, 'STATUS'), 'running\n');
+    const before = runIds(repo.dir);
+    const worktrees = repo.git('worktree', 'list', '--porcelain');
+    expect(await seed(repo, { fromRun, stage: 'notify' })).toEqual({
+      refused: `run ${fromRun}'s notify#1 has only step lines and no recorded group: sail resume ${fromRun} before seeding it`,
+    });
+    expect(runIds(repo.dir)).toEqual(before);
+    expect(repo.git('worktree', 'list', '--porcelain')).toBe(worktrees);
+  });
+}, 60_000);
+
+test('seeding an interrupted sequential multi-step call reuses only its preceding calls', async () => {
+  await withTempRepo(async (repo) => {
+    const fromRun = await withTempRepo(async (from) => {
+      writeTwoStep(from.dir);
+      const end = await runWorkflow({
+        cwd: from.dir,
+        adapters: await fakeAdapters(from.dir),
+        workflow: AGENT_WORKFLOW,
+        ticket: 'FAKE-1',
+      });
+      if ('refused' in end) throw new Error(end.refused);
+      expect(end.status).toBe('completed');
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+    const fromDir = join(repo.dir, '.sail-runs', fromRun);
+    cutJournal(fromDir, 4);
+    writeFileSync(join(fromDir, 'STATUS'), 'running\n');
+    expect(readJournal(fromDir).entries.map((entry) => entry.key)).toEqual([
+      'intake#1',
+      'brief#1',
+      'spec#1',
+      'publish#1/describe',
+    ]);
+    const opened = openedFrom(await seed(repo, { fromRun, stage: 'publish' }));
+    expect(readJournal(opened.dir).entries.map((entry) => entry.key)).toEqual(['intake#1', 'brief#1', 'spec#1']);
+    expect(existsSync(join(opened.dir, '03-publish/call-1'))).toBe(false);
+  });
+}, 60_000);
 
 const source = sharedSource();
 afterAll(() => source.release());
@@ -396,6 +509,42 @@ test('a link a reused call does not point at is copied as a link, and seeding op
     expect(lstatSync(copied).isSymbolicLink()).toBe(true);
   });
 }, 60_000);
+
+test.each([
+  {
+    stage: 'notify',
+    order: ['intake#1', 'brief#1', 'spec#1', 'publish#1/describe', 'publish#1/open', 'publish#1', 'notify#1'],
+    behaviour: "seeding a sibling cuts before a grouped member's earlier step lines",
+  },
+  {
+    stage: 'publish',
+    order: ['intake#1', 'brief#1', 'spec#1', 'notify#1', 'publish#1/describe', 'publish#1/open', 'publish#1'],
+    behaviour: "seeding a multi-step member cuts before its sibling's earlier call line",
+  },
+])(
+  '$behaviour',
+  async ({ stage, order }) => {
+    await withTempRepo(async (repo) => {
+      const fromRun = await groupedTwoStepInto(repo.dir);
+      const fromDir = join(repo.dir, '.sail-runs', fromRun);
+      reorderJournal(fromDir, [...order]);
+      expect(readJournal(fromDir).entries.map((entry) => entry.key)).toEqual([...order]);
+      const opened = openedFrom(await seed(repo, { fromRun, stage }));
+      expect({
+        journal: readJournal(opened.dir).entries.map((entry) => entry.key),
+        reused: opened.seeded?.entries.map((entry) => entry.key),
+        members: readdirSync(opened.dir).filter((name) => name.endsWith('-publish') || name.endsWith('-notify')),
+        until: opened.until,
+      }).toEqual({
+        journal: ['intake#1', 'brief#1', 'spec#1'],
+        reused: ['intake#1', 'brief#1', 'spec#1'],
+        members: [],
+        until: stage,
+      });
+    });
+  },
+  60_000,
+);
 
 test("seeding a stage whose first call belongs to a group copies only the calls before the group, and none of its members, though the stage's call was journaled last", async () => {
   await withTempRepo(async (repo) => {

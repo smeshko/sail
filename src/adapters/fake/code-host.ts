@@ -18,6 +18,7 @@ import {
   type PullRequest,
   type PullRequestDetails,
 } from '../../ports/types';
+import { gitSync } from '../workspace/git';
 import { createStore } from './store';
 
 export interface FakeCodeHostOptions extends ProviderOptions {
@@ -25,7 +26,7 @@ export interface FakeCodeHostOptions extends ProviderOptions {
   readonly seed: string;
   /** Where the world's changes are kept. Read instead of `seed` once it exists. */
   readonly state: string;
-  /** The environment for the git the fake runs. */
+  /** The environment for the git the fake runs, without the variables that tie git to a repository. */
   readonly env?: Readonly<Record<string, string>>;
 }
 
@@ -165,17 +166,11 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       if (branch === store.read().defaultBranch) {
         throw new PortError('codeHost', 'push', 'invalid', `${branch} is the default branch`);
       }
-      let headSha: string;
-      try {
-        const git = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], {
-          cwd,
-          ...(options.env ? { env: { ...options.env } } : {}),
-        });
-        if (git.exitCode !== 0) throw new Error(git.stderr.toString().trim());
-        headSha = git.stdout.toString().trim();
-      } catch (error) {
-        throw new PortError('codeHost', 'push', 'invalid', `${cwd} is not a git checkout: ${(error as Error).message}`);
+      const git = gitSync(cwd, ['rev-parse', 'HEAD'], options.env);
+      if (git.code !== 0) {
+        throw new PortError('codeHost', 'push', 'invalid', `${cwd} is not a git checkout: ${git.stderr}`);
       }
+      const headSha = git.stdout.trim();
       store.change((world) => {
         world.branches[branch] = headSha;
         // An open pull request from the branch moves to the new head, whose checks start again.
