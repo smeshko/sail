@@ -70,12 +70,15 @@ test('the stage, with Jev answering word-1 0.97, reports the hit with its word a
     });
   });
 });
-test('the stage, with Jev answering word-1 0.05, reports no hit', async () => {
+test('the stage reports no hit for an allowed shell invocation when Jev answers 0.05', async () => {
   await withTempRepo((repo) => {
     setup(repo, { 'word-1': 0.05 });
-    const result = stage(repo, doc);
+    const result = stage(repo, '+++ b/note.md\n@@ -0,0 +1 @@\n+A shell invocation runs the command.\n');
     expect(result.output.hits).toEqual([]);
     expect(result.output.jev.asked).toBe(true);
+    expect(JSON.parse(readFileSync(result.request, 'utf8')).state.candidates['word-1'].text).toBe(
+      'A shell invocation runs the command.',
+    );
   });
 });
 test('the stage asks Jev nothing when no added line holds an avoided word', async () => {
