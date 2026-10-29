@@ -136,6 +136,8 @@ export function optionValues(
 const GIT_PROGRAMS: Record<string, { long: string[]; short?: string; path?: true }> = {
   clone: { long: ['--upload-pack', '--template'], short: 'u' },
   fetch: { long: ['--upload-pack'] },
+  'fetch-pack': { long: ['--upload-pack', '--exec'] },
+  'send-pack': { long: ['--receive-pack', '--exec'] },
   pull: { long: ['--upload-pack'] },
   'ls-remote': { long: ['--upload-pack', '--exec'] },
   push: { long: ['--receive-pack', '--exec'] },
@@ -157,6 +159,11 @@ const FETCHERS = new Set(['curl', 'wget']);
 const ELEVATORS = new Set(['sudo', 'doas']);
 
 export const DENY_SET: readonly CommandEntry[] = [
+  {
+    name: 'git remote-ext',
+    why: 'the remote helper runs an arbitrary program',
+    matches: (argv) => git(argv, 'remote-ext') !== undefined,
+  },
   {
     name: 'git program option',
     why: 'the option names a program, or a template of hooks, for git to run',
