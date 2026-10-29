@@ -1,9 +1,5 @@
 {
   "answers": {
-    "FAKE-1": {
-      "type": "noul",
-      "noul": 0.6
-    },
     "TASK-001": {
       "type": "noul",
       "noul": 0.5

@@ -1,13 +1,13 @@
 // groom: a groom-labelled ticket in, one comment out. The ticket is read without a claim, so it stays where it is unless
-// groom cancels it, merges it into another, or marks it a duplicate. Four checks look at it at once (duplicates, a shared
-// stage that asks Jev; and the worth, staleness and open-questions agents); a judge writes the report, chooses actions from a fixed set and confirms the open
+// groom cancels it, merges it into another, or marks it a duplicate. Four agent checks look at it at once (duplicates,
+// worth, staleness and open questions); a judge writes the report, chooses actions from a fixed set and confirms the open
 // questions; the act step applies what the workflow lets through, comments the report, takes the `groom` label off and
 // puts `groomed` or `open-questions` on, so the watcher grooms each ticket once. Composition only: every contract lives
 // on its stage.
 import { workflow, type z } from 'sail';
-import { duplicates } from '../../stages/duplicates/stage';
 import { readTicket } from './intake';
 import type { Decision, Findings, Plan } from './schemas';
+import { duplicates } from './stages/01-duplicates/stage';
 import { worth } from './stages/02-worth/stage';
 import { staleness } from './stages/03-staleness/stage';
 import { questions } from './stages/04-questions/stage';
@@ -29,9 +29,8 @@ const REVIEW_CANCEL = { cancel: 0.5, keep: 0.7 };
 const MERGE_CONFIDENCE = 0.65;
 
 /**
- * The confidence the duplicates check, Jev's probability that two tickets describe the same work, must give for a
- * `duplicate` action, or a `merge` it alone names, to pass. To be set from comparing Jev's candidates with the agent's
- * on past grooms.
+ * The confidence the duplicates check must give that two tickets describe the same work for a `duplicate` action, or a
+ * `merge` it alone names, to pass.
  */
 const DUPLICATE_CONFIDENCE = 0.8;
 
@@ -58,14 +57,16 @@ interface Context {
  */
 function shortOfMerge(findings: z.infer<typeof Findings>, key: string): string | undefined {
   const worth = findings.worth.merges.filter((each) => each.ticketKey === key).map((each) => each.confidence);
-  const jev = findings.duplicates.candidates.filter((each) => each.ticketKey === key).map((each) => each.confidence);
-  if (worth.length === 0 && jev.length === 0) return `${key} not named by the worth or duplicates check`;
-  if (worth.some((each) => each >= MERGE_CONFIDENCE) || jev.some((each) => each >= DUPLICATE_CONFIDENCE)) {
+  const named = findings.duplicates.candidates.filter((each) => each.ticketKey === key).map((each) => each.confidence);
+  if (worth.length === 0 && named.length === 0) return `${key} not named by the worth or duplicates check`;
+  if (worth.some((each) => each >= MERGE_CONFIDENCE) || named.some((each) => each >= DUPLICATE_CONFIDENCE)) {
     return undefined;
   }
   const said = [
     ...(worth.length > 0 ? [`worth ${Math.max(...worth).toFixed(2)}, under ${MERGE_CONFIDENCE.toFixed(2)}`] : []),
-    ...(jev.length > 0 ? [`duplicates ${Math.max(...jev).toFixed(2)}, under ${DUPLICATE_CONFIDENCE.toFixed(2)}`] : []),
+    ...(named.length > 0
+      ? [`duplicates ${Math.max(...named).toFixed(2)}, under ${DUPLICATE_CONFIDENCE.toFixed(2)}`]
+      : []),
   ];
   return `${key} at ${said.join('; ')}`;
 }
@@ -206,11 +207,12 @@ export default workflow(
     const { ticketKey } = run.input;
 
     const [dup, earned, stale, open] = await run.all([
-      [duplicates, { ticket: { ticketKey, title: run.input.title, description: run.input.description } }],
+      [duplicates, { brief, others }],
       [worth, { brief, others }],
       [staleness, { brief, others }],
       [questions, { brief, others }],
     ]);
+    if (dup.outcome === 'blocked') return run.fail(`duplicates blocked: ${dup.reason}`);
     if (earned.outcome === 'blocked') return run.fail(`worth blocked: ${earned.reason}`);
     if (stale.outcome === 'blocked') return run.fail(`staleness blocked: ${stale.reason}`);
     if (open.outcome === 'blocked') return run.fail(`questions blocked: ${open.reason}`);

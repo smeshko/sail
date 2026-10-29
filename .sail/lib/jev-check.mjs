@@ -1,6 +1,7 @@
-// What the jev-tasks and jev-fix stages share: ask Jev whether each item of a set is done, and read its answers. A
-// stage that finds every answer a clear yes hands the agent's job to Jev; anything else, Jev unreachable included, is
-// the agent's. The state builders live here too, so the agreement script asks Jev exactly what the stages do.
+// Shared Jev requests, answer readers and state builders for leak-check, jev-tasks and jev-fix.
+// The task and fix checks hand the agent's job to Jev only when every item is a clear yes; otherwise the agent checks.
+// Leak-check instead asks whether added lines name other projects and forwards individual LEAK_YES hits to the judge,
+// with no agent fallback. The agreement script uses these same state builders.
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,6 +67,79 @@ export function clearYes(answers, ids, threshold = CLEAR_YES) {
   if (ids.length === 0) return false;
   const given = yesses(answers, ids);
   return given.length === ids.length && given.every((each) => each.yes >= threshold);
+}
+
+// --- leak-check: does each added line name another project?
+
+/** Provisional until ADW-416 calibrates it. */
+export const LEAK_YES = 0.8;
+export const SAIL_NOTE =
+  'sail is a public open-source software factory. Its own names are sail, its Linear team ADW, ADW-<n> issues and test keys such as FAKE-1. Its providers and tools include Linear, GitHub, Anthropic, Claude, Claude Code, TypeSafe, Jev, System One, pi, OpenAI, Codex, ChatGPT, Jira, Bun, Node, TypeScript, Biome, Zod, git and macOS.';
+
+export function leakLines(diffText) {
+  const lines = [];
+  let file = '';
+  let line = 0;
+  for (const text of diffText.split('\n')) {
+    if (text.startsWith('+++ ')) {
+      file = text === '+++ /dev/null' ? '' : text.slice(4).replace(/^b\//, '');
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
+    if (hunk) {
+      line = Number(hunk[1]);
+      continue;
+    }
+    if (text.startsWith('-') || text.startsWith('\\')) continue;
+    if (text.startsWith('+') && file && !/\.json$/i.test(file)) {
+      const added = text.slice(1);
+      const trimmed = added.trim();
+      const doc = /\.(md|mdx|txt|rst|adoc)$/i.test(file);
+      const hash =
+        /\.(sh|bash|yaml|yml|toml|py|rb)$/i.test(file) ||
+        /(^|\/)Dockerfile$/.test(file) ||
+        !file.split('/').at(-1).includes('.');
+      if (/[a-z]/i.test(trimmed) && (doc || /^(\/\/|\/\*|\*|<!--)/.test(trimmed) || (hash && /^#(?!!)/.test(trimmed))))
+        lines.push({ file, line, text: added });
+    }
+    line++;
+  }
+  return lines;
+}
+
+export function commitLines(log) {
+  const lines = [];
+  for (const record of log.split('\x1e')) {
+    const zero = record.indexOf('\0');
+    if (zero < 0) continue;
+    const file = `commit ${record.slice(0, zero).trim()}`;
+    record
+      .slice(zero + 1)
+      .split('\n')
+      .forEach((text, index) => {
+        if (/[a-z]/i.test(text)) lines.push({ file, line: index + 1, text });
+      });
+  }
+  return lines;
+}
+
+export function leakState(lines) {
+  return { note: SAIL_NOTE, lines: Object.fromEntries(lines.map((line, i) => [`leak-${i + 1}`, line])) };
+}
+export function leakQuestions(lines) {
+  return Object.fromEntries(
+    lines.map((line, i) => {
+      const id = `leak-${i + 1}`;
+      return [
+        id,
+        noul(
+          `Does lines.${id} name a project, company, product or issue tracker other than sail, or a private ticket?`,
+          'A name the note does not list as sail’s own or as a tool sail integrates with.',
+          'Only sail’s names, those tools, or generic words.',
+        ),
+      ];
+    }),
+  );
 }
 
 // --- jev-tasks: is each task of the plan implemented?

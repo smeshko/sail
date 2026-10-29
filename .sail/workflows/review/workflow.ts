@@ -1,4 +1,4 @@
-// review: a factory-labelled pull request in, merged out. Validation, the leak check, the demonstration and six
+// review: a factory-labelled pull request in, merged out. Validation, the leak check (including its Jev pass), the demonstration and six
 // reviewers look at it at once; a judge decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
 // fresh validation. Then
@@ -78,7 +78,7 @@ export default workflow(
     // Everything that looks at the pull request, at once. The reviewers come last, in LENSES' order.
     const [validated, leaks, shown, ...reviews] = await run.all([
       [validate],
-      [leakCheck, { diff: run.intake.files['diff.patch'] }],
+      [leakCheck, { diff: run.intake.files['diff.patch'], base }],
       [demonstrate, reading],
       [reviewRequirements, reading],
       [reviewArchitecture, reading],
@@ -111,12 +111,19 @@ export default workflow(
         source: 'leak-check',
         severity: 'high',
         file: `${hit.file}:${hit.line}`,
-        title: hit.kind === 'key' ? `A tracker key other than ADW: ${hit.match}` : 'A term from the private denylist',
-        // A denylisted term is private by definition: the finding names its line, never the term.
+        title:
+          hit.kind === 'key'
+            ? `A tracker key other than ADW: ${hit.match}`
+            : hit.kind === 'jev'
+              ? 'Jev reads a line as naming another project'
+              : 'A term from the private denylist',
+        // Denylist and Jev findings name the line, never its potentially private text.
         detail:
           hit.kind === 'key'
             ? `${hit.file}:${hit.line} adds ${hit.match}. Committed text names only sail and its ADW-<n> issues.`
-            : `${hit.file}:${hit.line} adds a term on the leak denylist. Committed text names only sail and its ADW-<n> issues.`,
+            : hit.kind === 'jev'
+              ? `${hit.file}:${hit.line}: the leak check's Jev pass answers yes at ${hit.yes} (hit from ${leaks.output.jev.threshold}). Committed text names only sail and its ADW-<n> issues.`
+              : `${hit.file}:${hit.line} adds a term on the leak denylist. Committed text names only sail and its ADW-<n> issues.`,
       });
     }
     for (const criterion of shown.output.criteria.filter((each) => !each.shown)) {
