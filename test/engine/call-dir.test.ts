@@ -107,6 +107,7 @@ test('createCallDir creates the call directory and in/, and refuses to reuse one
 test('no produced file may take the name of what the engine writes beside it, the prompt and transcript of an agent included', () => {
   expect([...RESERVED_NAMES].sort()).toEqual([
     'in',
+    'port-events.ndjson',
     'prompt.md',
     'result.json',
     'session.log',
