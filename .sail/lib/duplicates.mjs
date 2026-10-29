@@ -23,9 +23,6 @@ export function openTickets() {
   return [...list('unstarted'), ...list('started')];
 }
 
-/** Wrap human-written text as untrusted input. */
-export const wrap = (text, source) => port(['render', '--untrusted', '--source', source], text).trimEnd();
-
 /** The shared same-work question for two state paths. */
 export function sameWork(a, b) {
   return {

@@ -48,19 +48,6 @@ test('open tickets combines the last JSON line of both open states', () => {
   }
 });
 
-test('wrap sends text and its source to the untrusted renderer', () => {
-  const spawn = spyOn(childProcess, 'spawnSync').mockReturnValue(result('<untrusted-input>text</untrusted-input>\n'));
-  try {
-    expect(lib.wrap('text', 'follow-up')).toBe('<untrusted-input>text</untrusted-input>');
-    expect(spawn).toHaveBeenCalledWith('sail', ['port', 'render', '--untrusted', '--source', 'follow-up'], {
-      encoding: 'utf8',
-      input: 'text',
-    });
-  } finally {
-    spawn.mockRestore();
-  }
-});
-
 test('a failed listing reports the port command and provider error', () => {
   const spawn = spyOn(childProcess, 'spawnSync').mockReturnValue(result('', 1, 'provider unavailable\n'));
   try {

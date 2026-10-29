@@ -5,7 +5,8 @@
 // whether a review filed the ticket.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const { ticketKey } = JSON.parse(readFileSync(process.env.INPUT_SOURCE, 'utf8'));
 const out = process.env.STAGE_OUT;
@@ -21,10 +22,16 @@ function port(args, input) {
 }
 
 const json = (args) => JSON.parse(port(args).trim().split('\n').at(-1));
-const wrap = (text, source) => port(['render', '--untrusted', '--source', source], text).trimEnd();
+const passages = [];
+// Keep passage indices in the document lines until every passage is collected.
+const wrap = (text, source) => passages.push({ text, source }) - 1;
 
 const ticket = json(['ticket-source', 'get', ticketKey]);
 writeFileSync(join(out, 'ticket.json'), `${JSON.stringify(ticket, null, 2)}\n`);
+const open = [
+  ...json(['ticket-source', 'list', '--state', 'unstarted']),
+  ...json(['ticket-source', 'list', '--state', 'started']),
+].filter((other) => other.ticketKey !== ticketKey);
 
 const brief = [
   `# ${ticket.ticketKey}`,
@@ -57,33 +64,29 @@ const brief = [
       ])),
   '',
 ];
-writeFileSync(join(out, 'brief.md'), brief.join('\n'));
-
-const open = [
-  ...json(['ticket-source', 'list', '--state', 'unstarted']),
-  ...json(['ticket-source', 'list', '--state', 'started']),
-].filter((other) => other.ticketKey !== ticketKey);
 /** The most of each other ticket's description others.md carries: enough to judge a merge, not the whole backlog. */
 const DESCRIPTION_CHARS = 600;
 const excerpt = (text) => (text.length > DESCRIPTION_CHARS ? `${text.slice(0, DESCRIPTION_CHARS)}…` : text);
-const others = open.map((other) =>
-  [
-    `## ${other.ticketKey}`,
-    '',
-    wrap(other.state.name, `ticket ${other.ticketKey}, state`),
-    wrap(other.labels.join(', ') || '(no labels)', `ticket ${other.ticketKey}, labels`),
-    wrap(other.title, `ticket ${other.ticketKey}, title`),
-    wrap(excerpt(other.description || '(none)'), `ticket ${other.ticketKey}, description`),
-    '',
-  ].join('\n'),
-);
+const others = open.map((other) => [
+  `## ${other.ticketKey}`,
+  '',
+  wrap(other.state.name, `ticket ${other.ticketKey}, state`),
+  wrap(other.labels.join(', ') || '(no labels)', `ticket ${other.ticketKey}, labels`),
+  wrap(other.title, `ticket ${other.ticketKey}, title`),
+  wrap(excerpt(other.description || '(none)'), `ticket ${other.ticketKey}, description`),
+  '',
+]);
+const { wrapAll } = await import(pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'untrusted.mjs')).href);
+const wrapped = wrapAll(passages);
+const lines = (document) => document.map((line) => (typeof line === 'number' ? wrapped[line] : line)).join('\n');
+writeFileSync(join(out, 'brief.md'), lines(brief));
 /** A started ticket or an epic is someone's work in hand: groom never cancels it or merges it away. */
 const kept = [ticket, ...open]
   .filter((each) => each.state.type === 'started' || each.labels.includes('epic'))
   .map((each) => each.ticketKey);
 writeFileSync(
   join(out, 'others.md'),
-  ['# Other open tickets', '', ...(others.length === 0 ? ['None.'] : others), ''].join('\n'),
+  ['# Other open tickets', '', ...(others.length === 0 ? ['None.'] : others.map(lines)), ''].join('\n'),
 );
 
 console.log(

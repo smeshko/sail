@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const { openTickets, wrap, excerpt, sameWork, SAME_WORK } = await import(
+const { wrapAll } = await import(pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'untrusted.mjs')).href);
+const { openTickets, excerpt, sameWork, SAME_WORK } = await import(
   pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
 );
 
@@ -45,25 +46,22 @@ function port(args, body) {
 function duplicatesOf(candidates) {
   const open = openTickets();
   if (candidates.length === 0 || (open.length === 0 && candidates.length < 2)) return new Map();
+  const passages = [
+    ...candidates.flatMap((each, index) => [
+      { text: each.title, source: `follow-up ${index + 1}, title` },
+      { text: each.description, source: `follow-up ${index + 1}, description` },
+    ]),
+    ...open.flatMap((ticket) => [
+      { text: ticket.title, source: `ticket ${ticket.ticketKey}, title` },
+      { text: excerpt(ticket.description || '(none)'), source: `ticket ${ticket.ticketKey}, description` },
+    ]),
+  ];
+  const wrapped = wrapAll(passages);
+  let next = 0;
+  const entry = () => ({ title: wrapped[next++], description: wrapped[next++] });
   const state = {
-    followUps: Object.fromEntries(
-      candidates.map((each, index) => [
-        `follow-up-${index + 1}`,
-        {
-          title: wrap(each.title, `follow-up ${index + 1}, title`),
-          description: wrap(each.description, `follow-up ${index + 1}, description`),
-        },
-      ]),
-    ),
-    tickets: Object.fromEntries(
-      open.map((ticket) => [
-        ticket.ticketKey,
-        {
-          title: wrap(ticket.title, `ticket ${ticket.ticketKey}, title`),
-          description: wrap(excerpt(ticket.description || '(none)'), `ticket ${ticket.ticketKey}, description`),
-        },
-      ]),
-    ),
+    followUps: Object.fromEntries(candidates.map((_, index) => [`follow-up-${index + 1}`, entry()])),
+    tickets: Object.fromEntries(open.map((ticket) => [ticket.ticketKey, entry()])),
   };
   const questions = {};
   candidates.forEach((_, index) => {
