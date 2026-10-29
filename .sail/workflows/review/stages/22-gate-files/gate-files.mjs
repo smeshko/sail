@@ -13,6 +13,7 @@ export const GATE_FILES = [
   'test/coverage-census.test.ts',
   'biome.json',
   'scripts/full-suite.ts',
+  'scripts/bun-version.ts',
 ];
 export const GATE_DIRS = ['.github/'];
 

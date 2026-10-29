@@ -95,6 +95,15 @@ test('ignore files and nested Biome configs are gate files at any depth', async 
   });
 });
 
+test('the Bun version preflight script is a gate file', async () => {
+  await withTempRepo((repo) => {
+    const base = setup(repo);
+    put(repo, 'scripts/bun-version.ts');
+    commit(repo, 'scripts/bun-version.ts');
+    expect(stage(repo, base)).toEqual({ code: 0, output: { base, touched: ['scripts/bun-version.ts'] } });
+  });
+});
+
 test('a deleted tsconfig is named', async () => {
   await withTempRepo((repo) => {
     const base = setup(repo);
