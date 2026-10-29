@@ -120,7 +120,7 @@ function stream(name: string, id: string, loaded: Loaded<string> | undefined): S
 
 function outputOf(id: string, output: CallOutput | undefined): SafeHtml {
   const streams = html`${stream('stdout', id, output?.stdout)}${stream('stderr', id, output?.stderr)}`;
-  return html`<div class="tout">${streams.value === '' ? html`<div class="code">the call printed nothing</div>` : streams}</div>`;
+  return html`<div class="tout">${streams.value === '' ? html`<div class="code">the script printed nothing</div>` : streams}</div>`;
 }
 
 function script(entry: TimelineScript, id: string, ui: UiState, output: CallOutput | undefined): SafeHtml {

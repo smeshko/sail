@@ -284,5 +284,5 @@ test("an opened script shows its step's stdout and stderr, escaped, the last lin
     renderTimeline(golden, opened, NOW, {
       'publish#1/open': { stdout: { state: 'loaded', value: '' }, stderr: { state: 'missing' } },
     }).value,
-  ).toContain('<div class="tout"><div class="code">the call printed nothing</div></div>');
+  ).toContain('<div class="tout"><div class="code">the script printed nothing</div></div>');
 });
