@@ -185,6 +185,7 @@ export function parseGlossary(text) {
       term: entry.term,
       definition: entry.definition.join('\n').trim(),
       avoid: [...new Set(entry.avoid)],
+      avoidText: avoid[1],
     });
     entry = undefined;
   }

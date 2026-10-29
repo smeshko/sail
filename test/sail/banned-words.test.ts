@@ -8,6 +8,7 @@ interface Entry {
   term: string;
   definition: string;
   avoid: string[];
+  avoidText?: string;
 }
 interface Line {
   file: string;
@@ -120,6 +121,7 @@ test('the Jev request holds the glossary entry, added line and its context', asy
       candidates: {
         'word-1': {
           ...entry,
+          avoidText: 'invocation',
           word: 'invocation',
           file: 'a.ts',
           line: 2,
@@ -188,11 +190,36 @@ _Avoid_: status, status
 No avoid line.
 `),
   ).toEqual([
-    { term: 'Call', definition: 'One invocation.', avoid: ['attempt', 'execution', 'stage run', 'invocation'] },
-    { term: 'Watcher registry', definition: 'The record.', avoid: ['registry', 'roster', 'manifest'] },
-    { term: 'Loop', definition: 'A repetition.', avoid: ['cycle', 'retry loop', 'while', 'loop'] },
-    { term: 'System One', definition: 'The API.', avoid: [] },
-    { term: 'Outcome', definition: 'How it ended:\n- passed\n- failed', avoid: ['status'] },
+    {
+      term: 'Call',
+      definition: 'One invocation.',
+      avoid: ['attempt', 'execution', 'stage run', 'invocation'],
+      avoidText: 'attempt, execution, stage run, invocation',
+    },
+    {
+      term: 'Watcher registry',
+      definition: 'The record.',
+      avoid: ['registry', 'roster', 'manifest'],
+      avoidText: 'registry (alone; the config also has an adapter registry), roster, manifest',
+    },
+    {
+      term: 'Loop',
+      definition: 'A repetition.',
+      avoid: ['cycle', 'retry loop', 'while', 'loop'],
+      avoidText: 'cycle, retry loop, while; and "loop" for a watched workflow',
+    },
+    {
+      term: 'System One',
+      definition: 'The API.',
+      avoid: [],
+      avoidText: 'using it for the Jev port or its adapter',
+    },
+    {
+      term: 'Outcome',
+      definition: 'How it ended:\n- passed\n- failed',
+      avoid: ['status'],
+      avoidText: 'status, status',
+    },
   ]);
 });
 test('parseGlossary reads real Call and Branch entries without long prose words', () => {
@@ -201,6 +228,13 @@ test('parseGlossary reads real Call and Branch entries without long prose words'
   expect(entries.find((e) => e.term === 'Branch')?.avoid).toEqual(['branch']);
   expect(entries.flatMap((e) => e.avoid).filter((word) => word.split(/\s+/).length > 3)).toEqual([]);
 });
+test('Jev receives the full Avoid wording, including sense qualifiers', () => {
+  const glossary = lib.parseGlossary('**Call**:\nOne invocation.\n_Avoid_: invocation (as a noun), execution\n');
+  const candidates = lib.bannedCandidates([line], glossary);
+  expect(candidates.map((candidate) => candidate.word)).toEqual(['invocation']);
+  expect(JSON.stringify(lib.bannedState(candidates))).toContain('invocation (as a noun), execution');
+});
+
 test('bannedCandidates matches whole words ignoring case but not plurals or hyphen joins', () => {
   const glossary = [entry, { term: 'sail', definition: 'Tool.', avoid: ['ADW', 'loop', 'retry loop', 'a.b'] }];
   expect(lib.bannedCandidates([line], glossary)).toEqual([{ ...line, ...entry, word: 'invocation' }]);
