@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process';
 
 /** Confidence at which a filer treats two pieces of work as the same. */
 export const SAME_WORK = 0.8;
+/** Keep each request within what TypeSafe accepts, as ADW-387 bounds banned-word questions. */
+export const MAX_QUESTIONS = 64;
 /** Maximum description length in the request. */
 export const DESCRIPTION_CHARS = 600;
 /** An excerpt with a marker when cut. */
