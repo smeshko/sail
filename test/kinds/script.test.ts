@@ -415,6 +415,17 @@ test("problems() refuses a produced name that differs from an engine file's or a
   ]);
 });
 
+test('problems() refuses two produced names that differ only by case', () => {
+  const pair = script('tests', {
+    run: './run.sh',
+    produces: { 'Notes.md': 'file', 'notes.md': 'file' },
+    output: TestReport,
+  });
+  expect(scriptKind.problems(pair)).toEqual([
+    "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
+  ]);
+});
+
 test('problems() reports overlapping exit codes, a produced name that is reserved or not plain, and a timeout that is not positive', () => {
   expect(scriptKind.problems(tests())).toEqual([]);
   expect(scriptKind.problems(tests({ exitCodes: { passed: [0], failed: [0, 1], error: [1] } }))).toEqual([

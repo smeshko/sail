@@ -625,6 +625,20 @@ test("callProblems of a multi-step stage checks the stage's own produces with it
   ]);
 });
 
+test("callProblems of a multi-step stage refuses its own produces name that differs from its last step's only by case", () => {
+  const pair = stage('pair', {
+    produces: { 'Notes.md': 'file' },
+    output: PrInfo,
+    steps: [
+      script('a', { run: './a.sh', output: z.object({}) }),
+      script('b', { run: './b.sh', produces: { 'notes.md': 'file' }, output: PrInfo }),
+    ],
+  });
+  expect(callProblems(pair, {})).toEqual([
+    "step 'b': 'Notes.md' can't be produced: 'notes.md' is produced too, and a file system that ignores case takes them for one",
+  ]);
+});
+
 test("callProblems of a multi-step stage refuses its own produces name that differs from an engine file's only by case", () => {
   const harness = createFakeHarness({ script: {} });
   const variant = stage('variant', {

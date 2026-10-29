@@ -99,6 +99,20 @@ test('producesProblems refuses a name that is not a plain file name, or that the
   ]);
 });
 
+test('producesProblems refuses a name that differs from another produced name only by case', () => {
+  expect(producesProblems({ 'Notes.md': 'file', 'notes.md': 'file', 'NOTES.MD': 'file', 'other.md': 'file' })).toEqual([
+    "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
+    "'NOTES.MD' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
+  ]);
+});
+
+test('producesProblems reports reserved case pairs only as reserved names', () => {
+  expect(producesProblems({ 'Result.json': 'file', 'result.json': 'file' })).toEqual([
+    "'Result.json' can't be produced: the engine writes 'result.json' in $STAGE_OUT, and a file system that ignores case takes them for one",
+    "'result.json' can't be produced: the engine writes it in $STAGE_OUT",
+  ]);
+});
+
 test("producesProblems refuses try-<n>, the name of a later try's directory", () => {
   expect(producesProblems({ 'try-2': 'file', 'try-x': 'file', 'try-2.txt': 'file' })).toEqual([
     "'try-2' can't be produced: the engine uses it for a later try",
