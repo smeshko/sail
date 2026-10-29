@@ -13,6 +13,7 @@ import type {
   DocumentSection,
   Validator,
 } from '../sdk/documents';
+import { placeholderNames } from '../sdk/documents';
 import type { ContractError, FileEntry } from './contract';
 import { type RenderValues, render } from './render';
 
@@ -90,7 +91,7 @@ export function documentProblems(produces: Readonly<Record<string, unknown>>): s
  * a nested list's items are not its parent's section's. A section runs from its heading to the next heading of the
  * same or a higher level.
  */
-export function readDocument(name: string, text: string): DocumentContent {
+export function readDocument(name: string, text: string, placeholders: readonly string[]): DocumentContent {
   // Bun calls an element's callback after its children's, so a heading inside a list item comes before the item. Each
   // callback returns a token for its mark instead, in front of its children, and the rendered text holds the tokens in
   // the document's order. The nonce keeps a document's own text, code included, from passing for a token.
@@ -132,6 +133,7 @@ export function readDocument(name: string, text: string): DocumentContent {
   return Object.freeze({
     name,
     text,
+    placeholders: Object.freeze([...placeholders]),
     headings: Object.freeze(headings),
     sections: Object.freeze(sections),
     items: Object.freeze(items),
@@ -156,7 +158,10 @@ export interface RenderDocumentsOptions {
  * Renders each document's template into `outDir`, under the document's name, as a new file. It stops at the first that
  * can't be: its template can't be read or rendered, or the file can't be written.
  */
-export function renderDocuments(options: RenderDocumentsOptions): { ok: true } | { ok: false; message: string } {
+export function renderDocuments(
+  options: RenderDocumentsOptions,
+): { ok: true; placeholders: Record<string, string[]> } | { ok: false; message: string } {
+  const placeholders: Record<string, string[]> = {};
   for (const [name, document] of documentsOf(options.produces)) {
     const of = `'${name}': template ${document.template}`;
     let template: string;
@@ -165,6 +170,7 @@ export function renderDocuments(options: RenderDocumentsOptions): { ok: true } |
     } catch (error) {
       return { ok: false, message: `${of} can't be read (${codeOf(error)})` };
     }
+    placeholders[name] = placeholderNames(template);
     let text: string;
     try {
       text = render(template, options.values).text;
@@ -181,7 +187,7 @@ export function renderDocuments(options: RenderDocumentsOptions): { ok: true } |
       return { ok: false, message: `${of} can't be written to $STAGE_OUT (${codeOf(error)})` };
     }
   }
-  return { ok: true };
+  return { ok: true, placeholders };
 }
 
 /** A value `result.json`'s `derived` can hold: a finite number, a string, a boolean, or a list of them. */
@@ -227,6 +233,7 @@ function judge(
 }
 
 export interface ValidateDocumentsOptions {
+  placeholders: Record<string, string[]>;
   produces: Readonly<Record<string, unknown>>;
   /** The files the try recorded: a document it didn't produce is a missing file, and isn't validated. */
   files: Readonly<Record<string, FileEntry>>;
@@ -266,7 +273,7 @@ export function validateDocuments(options: ValidateDocumentsOptions): Validated 
       refuse(`can't be read (${codeOf(error)})`);
       continue;
     }
-    const content = readDocument(name, text);
+    const content = readDocument(name, text, options.placeholders[name] ?? []);
     let ok = true;
     for (const validator of document.validators) {
       const verdict = judge(validator, content);

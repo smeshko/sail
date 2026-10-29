@@ -29,6 +29,8 @@ export interface DocumentContent {
   /** The file's name in `$STAGE_OUT`. */
   readonly name: string;
   readonly text: string;
+  /** The names of the placeholders its template held, each once, in order. */
+  readonly placeholders: readonly string[];
   /** Every heading, in order. Fenced code holds none. */
   readonly headings: readonly DocumentHeading[];
   /** One per heading, in order. */
@@ -73,7 +75,7 @@ export interface CountOptions extends Bounds {
 
 /**
  * Declares a document in an agent step's `produces`: `template` is rendered into `$STAGE_OUT` before the session,
- * with the step's bindings filled and its `{{name: hint}}` placeholders left for the agent, and `validators` check
+ * with the step's bindings filled and the template's `{{name: hint}}` placeholders left for the agent, and `validators` check
  * what the session left there.
  */
 export function doc(template: string, validators: readonly Validator[] = []): Document {
@@ -152,27 +154,41 @@ export function hasSections(...names: string[]): Validator {
 /** A placeholder's name as a problem may quote it: a path, as the renderer reads a variable's. */
 const PLACEHOLDER_NAME = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/;
 
-/** Passes when no `{{name: hint}}` placeholder is left: a tag whose body holds a colon, as the renderer reads one. */
+/** Tags whose bodies hold a colon, named from the last opener before that colon. */
+export function* placeholderTags(text: string): Generator<{ from: number; name: string }> {
+  for (let start = text.indexOf('{{'); start !== -1; ) {
+    const close = text.indexOf('}}', start + 2);
+    if (close === -1) break;
+    const colon = text.slice(start + 2, close).lastIndexOf(':');
+    if (colon !== -1) {
+      const from = text.lastIndexOf('{{', start + colon);
+      const body = text.slice(from + 2, close);
+      yield { from, name: body.slice(0, body.indexOf(':')).trim() };
+    }
+    start = text.indexOf('{{', close + 2);
+  }
+}
+
+/** The raw template's placeholder names, each once, in order, including tags in code and untaken branches. */
+export function placeholderNames(text: string): string[] {
+  return [...new Set([...placeholderTags(text)].map(({ name }) => name))];
+}
+
+/** Passes when none of the template's `{{name: hint}}` placeholders is left. */
 export function noPlaceholders(): Validator {
   return {
     check: 'noPlaceholders',
     derives: [],
-    validate: ({ text }) => {
+    validate: ({ text, placeholders }) => {
+      const names = new Set(placeholders);
       const problems: string[] = [];
       // The line is counted on from the last tag, and `newline` is the first not yet counted, so each newline is found
       // once however many tags the text holds.
       let line = 1;
       let newline = text.indexOf('\n');
-      for (let start = text.indexOf('{{'); start !== -1; ) {
-        const close = text.indexOf('}}', start + 2);
-        if (close === -1) break;
-        const colon = text.slice(start + 2, close).lastIndexOf(':');
-        if (colon !== -1) {
-          // An unclosed `{{` runs on into the tag after it: the tag named is the last `{{` before the colon.
-          const from = text.lastIndexOf('{{', start + colon);
+      for (const { from, name } of placeholderTags(text)) {
+        if (names.has(name)) {
           for (; newline !== -1 && newline < from; newline = text.indexOf('\n', newline + 1)) line += 1;
-          const body = text.slice(from + 2, close);
-          const name = body.slice(0, body.indexOf(':')).trim();
           // The problem goes into the corrective prompt, outside any untrusted wrapper, so it names the placeholder
           // only when the name is one a template author writes: never the text of a ticket the document quotes.
           problems.push(
@@ -181,7 +197,6 @@ export function noPlaceholders(): Validator {
               : `line ${line} still holds a placeholder`,
           );
         }
-        start = text.indexOf('{{', close + 2);
       }
       return { problems };
     },

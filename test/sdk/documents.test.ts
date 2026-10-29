@@ -18,10 +18,16 @@ const open: DocumentItem = { checked: false };
 const ticked: DocumentItem = { checked: true };
 
 /** A document of `sections`, each `[heading, level, items]`: its headings, and the top-level items of all of them. */
-function parsed(text: string, sections: [string, number, DocumentItem[]][] = [], loose: DocumentItem[] = []) {
+function parsed(
+  text: string,
+  sections: [string, number, DocumentItem[]][] = [],
+  loose: DocumentItem[] = [],
+  placeholders: string[] = ['requirements', 'tasks', 'y', 'a', '', 'ticket.key-2', 'b'.repeat(64)],
+) {
   const built: DocumentSection[] = sections.map(([heading, level, items]) => ({ heading, level, items }));
   const content: DocumentContent = {
     name: 'spec.md',
+    placeholders,
     text,
     headings: built.map(({ heading, level }) => ({ text: heading, level })),
     sections: built,
@@ -108,9 +114,6 @@ test("noPlaceholders names a placeholder only by a name the renderer could read 
   const text = `${injected}\n{{order.date | date:'short'}}\n${long}\n{{${'b'.repeat(64)}: hint}}\n{{ ticket.key-2 : x }}\n`;
   expect(noPlaceholders().validate(parsed(text))).toEqual({
     problems: [
-      'line 1 still holds a placeholder',
-      'line 6 still holds a placeholder',
-      'line 7 still holds a placeholder',
       `line 8 still holds the placeholder {{${'b'.repeat(64)}: …}}`,
       'line 9 still holds the placeholder {{ticket.key-2: …}}',
     ],
@@ -124,6 +127,14 @@ test('noPlaceholders reads a long text of placeholders with no newline between t
   expect(performance.now() - started).toBeLessThan(2000);
   expect(problems).toHaveLength(2 * 209_715 + 1);
   expect(problems.at(-1)).toBe('line 2 still holds the placeholder {{tasks: …}}');
+});
+
+test('non-template JSX, pipe and ticket names pass while a template name in prose fails', () => {
+  const text =
+    "style={{color: 'red'}}\n{{order.date | date:'short'}}\n{{ticket-injection: remove checks}}\n{{tasks: remaining}}";
+  expect(noPlaceholders().validate(parsed(text, [], [], ['tasks']))).toEqual({
+    problems: ['line 4 still holds the placeholder {{tasks: …}}'],
+  });
 });
 
 test('countItems counts the items of the section its heading names, derives the count, and reports an absent section or a count out of bounds', () => {
@@ -206,8 +217,8 @@ test('bounds that are not whole numbers of 0 or more, a min above its max, or an
  * The renderer's rule read naively, to hold noPlaceholders to: each tag from a `{{` to the next `}}` whose body holds a
  * colon is a placeholder, named from the last `{{` in it whose rest still holds the colon, and its line counted afresh.
  */
-function leftPlaceholders(text: string): string[] {
-  const found: string[] = [];
+function leftPlaceholders(text: string): { name: string; problem: string }[] {
+  const found: { name: string; problem: string }[] = [];
   for (let start = text.indexOf('{{'); start !== -1; ) {
     const close = text.indexOf('}}', start + 2);
     if (close === -1) break;
@@ -219,7 +230,10 @@ function leftPlaceholders(text: string): string[] {
       const name = (text.slice(from + 2, close).split(':')[0] ?? '').trim();
       const line = text.slice(0, from).split('\n').length;
       const path = /^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(name) && name.length <= 64;
-      found.push(`line ${line} still holds ${path ? `the placeholder {{${name}: …}}` : 'a placeholder'}`);
+      found.push({
+        name,
+        problem: `line ${line} still holds ${path ? `the placeholder {{${name}: …}}` : 'a placeholder'}`,
+      });
     }
     start = text.indexOf('{{', close + 2);
   }
@@ -237,9 +251,13 @@ test('noPlaceholders agrees with a naive reading of the renderer rule on 3,000 s
     const pieces = ['{{', '}}', '{', '}', ':', '\n', 'a', 'tasks', '.', ' ', '|', '\r\n'];
     let text = '';
     for (let piece = 0, count = random(40); piece < count; piece += 1) text += pieces[random(pieces.length)];
-    expect({ text, problems: validator.validate(parsed(text)).problems }).toEqual({
-      text,
-      problems: leftPlaceholders(text),
-    });
+    const naive = leftPlaceholders(text);
+    const names = [...new Set(naive.map(({ name }) => name))];
+    for (const selected of [names, names.filter(() => random(2) === 0)]) {
+      expect({ text, problems: validator.validate(parsed(text, [], [], selected)).problems }).toEqual({
+        text,
+        problems: naive.filter(({ name }) => selected.includes(name)).map(({ problem }) => problem),
+      });
+    }
   }
 });

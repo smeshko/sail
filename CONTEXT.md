@@ -179,7 +179,7 @@ A `{{path}}` in a template or a prompt, which the renderer fills from the values
 _Avoid_: placeholder (the agent fills that), parameter, token
 
 **Placeholder**:
-A marked slot in a template, written `{{name: hint}}`, that the agent must replace. Any tag with a colon is one. A document with one left is invalid.
+A marked slot in a template, written `{{name: hint}}`, that the agent must replace. Any tag with a colon is one in a template. A document with one of its template's placeholders left is invalid; text the template never held is not a placeholder.
 _Avoid_: variable (what the renderer fills), TODO, slot
 
 **Validator**:
