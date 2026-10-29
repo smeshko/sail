@@ -142,7 +142,9 @@ export function stepProblems(stage: Stage): string[] {
     if (!NAME.test(step.name)) found.push(`${at}: step '${step.name}' has a name outside [a-z0-9-]+`);
     if (seen.has(step.name)) found.push(`${at}: two steps are named '${step.name}'`);
     seen.add(step.name);
-    for (const name of Object.keys(step.produces)) {
+    // The last step also writes the stage-owned files into the shared $STAGE_OUT.
+    const produces = index === stage.steps.length - 1 ? withStageProduces(step, stage).produces : step.produces;
+    for (const name of Object.keys(produces)) {
       const folded = name.toLowerCase();
       const first = producer.get(folded);
       if (first === undefined) producer.set(folded, { step: step.name, name });
