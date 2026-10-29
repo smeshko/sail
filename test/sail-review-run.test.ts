@@ -21,7 +21,11 @@ const TARGETS = ['V1', 'D1', 'R2'];
 
 /** Jev's seed: every targeted finding at `0.99` but those `overrides` names. */
 const seed = (overrides: Record<string, number> = {}) =>
-  nouls(Object.fromEntries(TARGETS.map((id) => [id, overrides[id] ?? 0.99])));
+  nouls({
+    'leak-1': overrides['leak-1'] ?? 0,
+    'leak-2': 0,
+    ...Object.fromEntries(TARGETS.map((id) => [id, overrides[id] ?? 0.99])),
+  });
 
 /** The repository's own `.sail/` on fakes, with fake pull request #7 pointed at commits the repository holds. */
 function setUp(repo: TempRepo, jev?: object): void {
@@ -95,6 +99,15 @@ function jevHint(dir: string, stage: string, call: number): { asked: boolean; an
 
 const asked = (dir: string, key: string) =>
   readEvents(dir).filter((event) => event.type === 'jev:asked' && (event as { key?: string }).key === key);
+
+test('a leak-check Jev hit reaches the judge as L1', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo, seed({ 'leak-1': 0.97 }));
+    const { code, dir } = await review(repo);
+    expect(code).toBe(1);
+    expect(JSON.stringify(readEvents(dir))).toContain('judge left L1 undecided');
+  });
+}, 120_000);
 
 test('with Jev answering every targeted finding a clear yes, jev-fix#1 runs, check-fix never does, and the fix loop ends after one round', async () => {
   await withTempRepo(async (repo) => {
