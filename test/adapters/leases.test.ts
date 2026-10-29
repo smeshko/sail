@@ -41,6 +41,11 @@ function leaseFile(dir: string, remote: string, branch: string): string {
   return join(dir, `${hex.slice(0, 16)}.json`);
 }
 
+function legacyFile(dir: string, remote = REMOTE, branch = BRANCH): string {
+  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  return join(dir, `${hex.slice(0, 16)}.json`);
+}
+
 /** The pid of a process that has exited. */
 async function deadPid(): Promise<number> {
   const child = Bun.spawn(['true']);
@@ -99,6 +104,121 @@ test('the watcher queue lease keeps its raw-remote file name', () => {
   const dir = tempDir();
   const hex = new Bun.CryptoHasher('sha256').update('watcher\nqueue').digest('hex');
   expect(actualLeaseFile(dir, 'watcher', 'queue')).toBe(join(dir, `${hex.slice(0, 16)}.json`));
+});
+
+test('a live legacy lease refuses another run with its exact holder', () => {
+  const dir = tempDir();
+  const old = leaseOf(run('r1', process.pid, 'running'), NOW);
+  writeFileSync(legacyFile(dir), JSON.stringify(old));
+  expect(bare(takeLease(dir, REMOTE, BRANCH, run('r2', process.pid, 'running'), LATER))).toEqual({
+    leased: false,
+    holder: old,
+  });
+});
+
+test('renewing a legacy lease moves it to the new name and updates its time', () => {
+  const dir = tempDir();
+  const r1 = run('r1', process.pid, 'running');
+  writeFileSync(legacyFile(dir), JSON.stringify(leaseOf(r1, NOW)));
+  expect(bare(takeLease(dir, REMOTE, BRANCH, r1, LATER))).toEqual({ leased: true, lease: leaseOf(r1, LATER) });
+  expect(existsSync(legacyFile(dir))).toBe(false);
+  expect(existsSync(leaseFile(dir, REMOTE, BRANCH))).toBe(true);
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r1, LATER));
+});
+
+test('taking over a completed legacy lease names its run and removes the old file', () => {
+  const dir = tempDir();
+  writeFileSync(legacyFile(dir), JSON.stringify(leaseOf(run('r1', process.pid, 'completed'), NOW)));
+  const r2 = run('r2', process.pid, 'running');
+  expect(bare(takeLease(dir, REMOTE, BRANCH, r2, LATER))).toEqual({
+    leased: true,
+    lease: leaseOf(r2, LATER),
+    took: 'r1',
+  });
+  expect(existsSync(legacyFile(dir))).toBe(false);
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r2, LATER));
+});
+
+test('readLease and heldLease find a live legacy lease', () => {
+  const dir = tempDir();
+  const old = leaseOf(run('r1', process.pid, 'running'), NOW);
+  writeFileSync(legacyFile(dir), JSON.stringify(old));
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(old);
+  expect(heldLease(dir, REMOTE, BRANCH)).toEqual(old);
+});
+
+test('only the legacy holder can release its old-named file', () => {
+  const dir = tempDir();
+  const old = leaseOf(run('r1', process.pid, 'running'), NOW);
+  writeFileSync(legacyFile(dir), JSON.stringify(old));
+  expect(releaseLease(dir, REMOTE, BRANCH, 'r2')).toEqual({ released: false, raw: old });
+  expect(existsSync(legacyFile(dir))).toBe(true);
+  expect(releaseLease(dir, REMOTE, BRANCH, 'r1')).toEqual({ released: true, raw: old });
+  expect(existsSync(legacyFile(dir))).toBe(false);
+});
+
+test('a watcher renewal leaves exactly one lease file when old and new names coincide', () => {
+  const dir = tempDir();
+  const r1 = run('r1', process.pid, 'running');
+  const old = { ...leaseOf(r1, NOW), remote: 'watcher', branch: 'queue' };
+  writeFileSync(legacyFile(dir, 'watcher', 'queue'), JSON.stringify(old));
+  expect(bare(takeLease(dir, 'watcher', 'queue', r1, LATER))).toEqual({
+    leased: true,
+    lease: { ...old, takenAt: LATER.toISOString() },
+  });
+  expect(readdirSync(dir)).toEqual([basename(legacyFile(dir, 'watcher', 'queue'))]);
+});
+
+test('a legacy renewal refuses while its pid is another live process', () => {
+  const dir = tempDir();
+  const r1 = run('r1', process.ppid, 'suspended', 'interrupted');
+  const old = leaseOf(r1, NOW);
+  writeFileSync(legacyFile(dir), JSON.stringify(old));
+  expect(bare(takeLease(dir, REMOTE, BRANCH, { ...r1, pid: process.pid }, LATER))).toEqual({
+    leased: false,
+    holder: old,
+  });
+});
+
+test('readLease prefers the new name when both names exist', () => {
+  const dir = tempDir();
+  const r2 = run('r2', process.pid, 'running');
+  takeLease(dir, REMOTE, BRANCH, r2, LATER);
+  writeFileSync(legacyFile(dir), JSON.stringify(leaseOf(run('r1', process.pid, 'completed'), NOW)));
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r2, LATER));
+});
+
+test('a takeover reports the new-file holder rather than the legacy holder when both are stale', () => {
+  const dir = tempDir();
+  takeLease(dir, REMOTE, BRANCH, run('r2', process.pid, 'completed'), NOW);
+  writeFileSync(legacyFile(dir), JSON.stringify(leaseOf(run('r1', process.pid, 'completed'), NOW)));
+  const r3 = run('r3', process.pid, 'running');
+  expect(bare(takeLease(dir, REMOTE, BRANCH, r3, LATER))).toEqual({
+    leased: true,
+    lease: leaseOf(r3, LATER),
+    took: 'r2',
+  });
+});
+
+test('a legacy lease that cannot be dropped refuses a takeover as a conflict', () => {
+  const dir = tempDir();
+  const old = leaseOf(run('r1', process.pid, 'completed'), NOW);
+  writeFileSync(legacyFile(dir), JSON.stringify(old));
+  writeFileSync(`${legacyFile(dir)}.drop`, JSON.stringify({ pid: process.pid, nonce: 'live' }));
+  const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r2', process.pid, 'running'), LATER));
+  expect(portFailure(error)).toEqual({ port: 'workspace', op: 'lease', code: 'conflict' });
+  expect(messageOf(error)).toBe(`workspace.lease: ${REMOTE} ${BRANCH}: the lease kept changing hands`);
+  expect(readLease(dir, REMOTE, BRANCH)).toEqual(old);
+  expect(existsSync(leaseFile(dir, REMOTE, BRANCH))).toBe(false);
+});
+
+test('release removes both names when its run holds both', () => {
+  const dir = tempDir();
+  const r1 = run('r1', process.pid, 'running');
+  takeLease(dir, REMOTE, BRANCH, r1, NOW);
+  writeFileSync(legacyFile(dir), JSON.stringify(leaseOf(r1, NOW)));
+  expect(bare(releaseLease(dir, REMOTE, BRANCH, 'r1'))).toEqual({ released: true });
+  expect(readdirSync(dir)).toEqual([]);
 });
 
 test('a first lease creates its file, and readLease gives it back', () => {

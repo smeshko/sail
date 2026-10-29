@@ -71,9 +71,19 @@ export function leaseFile(dir: string, remote: string, branch: string): string {
   return join(dir, `${hex.slice(0, 16)}.json`);
 }
 
+// Bridge for one release (ADW-175): drop with the next release.
+function legacyLeaseFile(dir: string, remote: string, branch: string): string | undefined {
+  const hex = new Bun.CryptoHasher('sha256').update(`${remote}\n${branch}`).digest('hex');
+  const file = join(dir, `${hex.slice(0, 16)}.json`);
+  return file === leaseFile(dir, remote, branch) ? undefined : file;
+}
+
 /** The lease on `remote` and `branch`, or undefined when there is none. Invalid or unreadable files throw. */
 export function readLease(dir: string, remote: string, branch: string): Lease | undefined {
-  return readRecord(leaseFile(dir, remote, branch), leaseKind);
+  const lease = readRecord(leaseFile(dir, remote, branch), leaseKind);
+  if (lease) return lease;
+  const legacy = legacyLeaseFile(dir, remote, branch);
+  return legacy === undefined ? undefined : readRecord(legacy, leaseKind);
 }
 
 /** Whether `lease`'s run no longer holds it: its run has ended, or it isn't suspended and its pid is dead. */
@@ -127,12 +137,20 @@ export function takeLease(
   const file = leaseFile(dir, remote, branch);
   const { runId, runDir, pid } = checked.data;
   const lease: Lease = { remote, branch, runId, runDir, pid, takenAt: now.toISOString() };
-  const result = takeRecord(file, lease, leaseKind, (held) =>
-    held.runId === runId ? stillRunning(held, pid) : !isStale(held),
-  );
+  const blocks = (held: Lease) => (held.runId === runId ? stillRunning(held, pid) : !isStale(held));
+  const legacy = legacyLeaseFile(dir, remote, branch);
+  const old = legacy === undefined ? undefined : readRecord(legacy, leaseKind);
+  if (old && legacy) {
+    if (blocks(old)) return { leased: false, holder: old, raw: old };
+    if (!dropRecord(legacy, old, leaseKind)) {
+      throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
+    }
+  }
+  const result = takeRecord(file, lease, leaseKind, blocks);
   if (result.taken) {
-    return result.took && result.took.runId !== runId
-      ? { leased: true, lease, took: result.took.runId, raw: lease }
+    const took = result.took ?? old;
+    return took && took.runId !== runId
+      ? { leased: true, lease, took: took.runId, raw: lease }
       : { leased: true, lease, raw: lease };
   }
   if ('holder' in result) return { leased: false, holder: result.holder, raw: result.holder };
@@ -141,9 +159,18 @@ export function takeLease(
 
 /** Removes the lease, only when `runId` holds it: a lease taken over since it was read is left to its new holder. */
 export function releaseLease(dir: string, remote: string, branch: string, runId: string): Released {
-  const file = leaseFile(dir, remote, branch);
-  const held = readRecord(file, leaseKind);
-  if (held === undefined || held.runId !== runId) return { released: false, raw: held ?? null };
-  if (dropRecord(file, held, leaseKind)) return { released: true, raw: held };
-  return { released: false, raw: readRecord(file, leaseKind) ?? null };
+  const files = [leaseFile(dir, remote, branch), legacyLeaseFile(dir, remote, branch)];
+  let released: Lease | undefined;
+  let remaining: Lease | undefined;
+  for (const file of files) {
+    if (file === undefined) continue;
+    const held = readRecord(file, leaseKind);
+    if (held?.runId === runId) {
+      if (dropRecord(file, held, leaseKind)) released = held;
+      else remaining ??= readRecord(file, leaseKind);
+    } else {
+      remaining ??= held;
+    }
+  }
+  return released ? { released: true, raw: released } : { released: false, raw: remaining ?? null };
 }
