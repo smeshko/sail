@@ -240,14 +240,29 @@ test('a filter that hides every entry says so, and a call with no entries has no
   expect(renderTimeline(spec([]), ui(), NOW).value).not.toContain('class="tl-f"');
 });
 
-test("an opened script shows the call's stdout and stderr, escaped, the last lines of a long one, loading, and says when it printed nothing", () => {
+test('a step script ignores output keyed only by its call', () => {
+  const card = foldRun(readEvents(GOLDEN_RUN)).cards.find((card) => card.key === 'publish#1') as StageCard;
+  expect(
+    renderTimeline(card, ui({ opened: ['script:0'] }), NOW, {
+      'publish#1': { stdout: { state: 'loaded', value: 'WRONG' }, stderr: { state: 'missing' } },
+    }).value,
+  ).toContain(
+    '<div class="tout"><div class="grp-t">stdout</div><div class="code">loading…</div><div class="grp-t">stderr</div><div class="code">loading…</div></div>',
+  );
+});
+
+test("an opened script shows its step's stdout and stderr, escaped, the last lines of a long one, loading, and says when it printed nothing", () => {
   const golden = foldRun(readEvents(GOLDEN_RUN)).cards.find((card) => card.key === 'publish#1') as StageCard;
   const opened = ui({ opened: ['script:0'] });
-  expect(renderTimeline(golden, ui(), NOW, { stdout: { state: 'loaded', value: 'x' } }).value).not.toContain('tout');
+  expect(
+    renderTimeline(golden, ui(), NOW, { 'publish#1/open': { stdout: { state: 'loaded', value: 'x' } } }).value,
+  ).not.toContain('tout');
   const long = Array.from({ length: OUTPUT_LINES + 5 }, (_, i) => `line ${i}`).join('\n');
   const both = renderTimeline(golden, opened, NOW, {
-    stdout: { state: 'loaded', value: '{"ok":"<yes>"}\n' },
-    stderr: { state: 'loaded', value: `${long}\n` },
+    'publish#1/open': {
+      stdout: { state: 'loaded', value: '{"ok":"<yes>"}\n' },
+      stderr: { state: 'loaded', value: `${long}\n` },
+    },
   }).value;
   expect(both).toContain(
     '<div class="tcall t-completed open"><button class="trow" data-action="toggle-tool" data-call="script:0">',
@@ -258,12 +273,16 @@ test("an opened script shows the call's stdout and stderr, escaped, the last lin
   expect(both).toContain(`line ${OUTPUT_LINES + 4}</pre></div></div>`);
   expect(both).not.toContain('line 4\n');
   expect(
-    renderTimeline(golden, opened, NOW, { stdout: { state: 'loading' }, stderr: { state: 'missing' } }).value,
+    renderTimeline(golden, opened, NOW, {
+      'publish#1/open': { stdout: { state: 'loading' }, stderr: { state: 'missing' } },
+    }).value,
   ).toContain('<div class="tout"><div class="grp-t">stdout</div><div class="code">loading…</div></div>');
   expect(renderTimeline(golden, opened, NOW, undefined).value).toContain(
     '<div class="tout"><div class="grp-t">stdout</div><div class="code">loading…</div><div class="grp-t">stderr</div><div class="code">loading…</div></div>',
   );
   expect(
-    renderTimeline(golden, opened, NOW, { stdout: { state: 'loaded', value: '' }, stderr: { state: 'missing' } }).value,
+    renderTimeline(golden, opened, NOW, {
+      'publish#1/open': { stdout: { state: 'loaded', value: '' }, stderr: { state: 'missing' } },
+    }).value,
   ).toContain('<div class="tout"><div class="code">the call printed nothing</div></div>');
 });

@@ -441,6 +441,15 @@ test("a card's timeline holds its messages, steps and script commands with their
       outcome: 'failed',
     },
   ]);
+  expect(timeline('publish#1')?.find((entry) => entry.kind === 'script')).toEqual({
+    kind: 'script',
+    ts: '2026-09-25T09:00:15.300Z',
+    command: '.sail/workflows/ticket-to-pr/stages/publish/open.sh',
+    step: 'open',
+    durationMs: 100,
+    code: 0,
+    outcome: 'passed',
+  });
   expect(timeline('publish#1')?.map((entry) => (entry.kind === 'step' ? `step ${entry.step}` : entry.kind))).toEqual([
     'step describe',
     'message',
