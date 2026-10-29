@@ -1,4 +1,4 @@
-// Find added uses of CONTEXT.md's avoided words; Jev judges each candidate's sense in one request.
+// Find added uses of CONTEXT.md's avoided words; Jev judges a bounded request, reporting omissions.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -9,8 +9,7 @@ const {
   messageContext,
   commitLines,
   bannedCandidates,
-  bannedState,
-  bannedQuestions,
+  bannedRequest,
   askNouls,
   yesses,
   git,
@@ -23,10 +22,11 @@ const lines = [
   ...bannedLines(diff),
   ...messageContext(commitLines(git(['log', '--format=%h%x00%B%x1e', `${base}..HEAD`]))),
 ];
-const candidates = bannedCandidates(lines, entries);
+const allCandidates = bannedCandidates(lines, entries);
+const { candidates, questions, state, note } = bannedRequest(allCandidates);
 const answer = candidates.length
-  ? askNouls(bannedQuestions(candidates), bannedState(candidates), process.env.STAGE_OUT)
-  : { asked: false, note: present ? 'no avoided word on an added line' : 'no CONTEXT.md' };
+  ? askNouls(questions, state, process.env.STAGE_OUT)
+  : { asked: false, note: allCandidates.length ? '' : present ? 'no avoided word on an added line' : 'no CONTEXT.md' };
 const hits = [];
 if (answer.asked) {
   for (const { id, yes } of yesses(
@@ -41,11 +41,11 @@ if (answer.asked) {
 const glossary = { entries: entries.length, words: entries.reduce((sum, entry) => sum + entry.avoid.length, 0) };
 const jev = {
   asked: answer.asked,
-  note: answer.asked ? '' : answer.note,
+  note: [answer.asked ? '' : answer.note, note].filter(Boolean).join('; '),
   threshold: BANNED_YES,
-  candidates: candidates.length,
+  candidates: allCandidates.length,
 };
 process.stderr.write(
-  `${hits.length} hits; glossary: ${glossary.entries} entries, ${glossary.words} words; jev: ${answer.asked ? `${candidates.length} asked, ${hits.length} over ${BANNED_YES}` : `not asked (${jev.note})`}\n`,
+  `${hits.length} hits; glossary: ${glossary.entries} entries, ${glossary.words} words; jev: ${answer.asked ? `${candidates.length} asked, ${hits.length} over ${BANNED_YES}${note ? `; ${note}` : ''}` : `not asked (${jev.note})`}\n`,
 );
 console.log(JSON.stringify({ hits, glossary, jev }));

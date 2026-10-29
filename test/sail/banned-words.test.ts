@@ -76,11 +76,53 @@ test('the stage reports no hit for an allowed shell invocation when Jev answers 
     const result = stage(repo, '+++ b/note.md\n@@ -0,0 +1 @@\n+A shell invocation runs the command.\n');
     expect(result.output.hits).toEqual([]);
     expect(result.output.jev.asked).toBe(true);
-    expect(JSON.parse(readFileSync(result.request, 'utf8')).state.candidates['word-1'].text).toBe(
+    expect(JSON.parse(readFileSync(result.request, 'utf8')).state.lines['line-1'].text).toBe(
       'A shell invocation runs the command.',
     );
   });
 });
+test('large changes have bounded Jev questions and request bytes, with omissions reported', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`word-${i + 1}`, i === 0 ? 0.97 : 0.05])));
+    const diff = `+++ b/note.md\n@@ -0,0 +1,1000 @@\n${'+invocation\n'.repeat(1000)}`;
+    const result = stage(repo, diff);
+    const request = readFileSync(result.request, 'utf8');
+    expect(Object.keys(JSON.parse(request).questions).length).toBeLessThanOrEqual(64);
+    expect(Buffer.byteLength(request)).toBeLessThanOrEqual(64_000);
+    expect(result.output.jev.note).toContain('omitted');
+    expect(result.output.hits).toEqual([{ file: 'note.md', line: 1, word: 'invocation', term: 'Call', yes: 0.97 }]);
+  });
+});
+test('request byte limit stops below the question limit for long multibyte lines', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, {});
+    const diff = `+++ b/note.md\n@@ -0,0 +1,30 @@\n${`+invocation ${'界'.repeat(1000)}\n`.repeat(30)}`;
+    const result = stage(repo, diff);
+    const request = readFileSync(result.request, 'utf8');
+    expect(Buffer.byteLength(request)).toBeLessThanOrEqual(64_000);
+    expect(Object.keys(JSON.parse(request).questions).length).toBeLessThan(30);
+    expect(result.output.jev.note).toContain('omitted');
+  });
+});
+test('Jev state includes a repeated definition and line context only once', () => {
+  const candidates = lib.bannedCandidates(
+    [{ ...line, text: 'invocation execution' }],
+    [{ ...entry, avoid: ['invocation', 'execution'] }],
+  );
+  const state = JSON.stringify(lib.bannedState(candidates));
+  expect(state.split(entry.definition).length - 1).toBe(1);
+  expect(state.split('invocation execution').length - 1).toBe(1);
+});
+test('a single oversized candidate makes no Jev request and reports the omission', async () => {
+  await withTempRepo((repo) => {
+    setup(repo, {});
+    const result = stage(repo, `+++ b/note.md\n@@ -0,0 +1 @@\n+invocation ${'x'.repeat(100_000)}\n`);
+    expect(existsSync(result.request)).toBe(false);
+    expect(result.output.jev.asked).toBe(false);
+    expect(result.output.jev.note).toContain('1 candidates omitted');
+  });
+});
+
 test('the stage asks Jev nothing when no added line holds an avoided word', async () => {
   await withTempRepo((repo) => {
     setup(repo, {});
@@ -121,17 +163,16 @@ test('the Jev request holds the glossary entry, added line and its context', asy
     const result = stage(repo, '+++ b/a.ts\n@@ -1 +1,2 @@\n before\n+invocation\n');
     expect(existsSync(result.request)).toBe(true);
     expect(JSON.parse(readFileSync(result.request, 'utf8')).state).toEqual({
-      candidates: {
-        'word-1': {
-          ...entry,
-          avoidText: 'invocation',
-          word: 'invocation',
+      entries: { Call: { ...entry, avoidText: 'invocation' } },
+      lines: {
+        'line-1': {
           file: 'a.ts',
           line: 2,
           text: 'invocation',
           context: [{ line: 1, text: 'before' }],
         },
       },
+      candidates: { 'word-1': { word: 'invocation', entry: 'Call', location: 'line-1' } },
     });
   });
 });
@@ -312,12 +353,16 @@ test('messageContext uses only nearby lines from the same commit', () => {
 });
 test('bannedState and bannedQuestions name each candidate word-n with a noul and glossary sense', () => {
   const candidate = { ...line, ...entry, word: 'invocation' };
-  expect(lib.bannedState([candidate])).toEqual({ candidates: { 'word-1': candidate } });
+  expect(lib.bannedState([candidate])).toEqual({
+    entries: { Call: { ...entry, avoidText: undefined } },
+    lines: { 'line-1': line },
+    candidates: { 'word-1': { word: 'invocation', entry: 'Call', location: 'line-1' } },
+  });
   const questions = lib.bannedQuestions([candidate, candidate]);
   expect(Object.keys(questions)).toEqual(['word-1', 'word-2']);
   expect(questions['word-1']?.type).toBe('noul');
   expect(questions['word-2']?.instructions).toBe(
-    'In candidates.word-2, is "invocation" used in the sense the glossary entry for Call forbids, where "Call" should be used instead?',
+    'In candidates.word-2, read its location in lines and its glossary entry in entries (including avoidText). Is "invocation" used in the sense that entry forbids, where "Call" should be used instead?',
   );
   expect(lib.BANNED_YES).toBe(0.8);
 });
