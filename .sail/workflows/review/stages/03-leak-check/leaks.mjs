@@ -51,10 +51,8 @@ for (const text of diff.split('\n')) {
   }
   line++;
 }
-const lines = [
-  ...leakLines(diff),
-  ...commitLines(git(['log', '--format=%h%x00%B%x1e', `${process.env.INPUT_BASE}..HEAD`])),
-];
+const base = readFileSync(process.env.INPUT_BASE, 'utf8').trim();
+const lines = [...leakLines(diff), ...commitLines(git(['log', '--format=%h%x00%B%x1e', `${base}..HEAD`]))];
 const answer = lines.length
   ? askNouls(leakQuestions(lines), leakState(lines), process.env.STAGE_OUT)
   : { asked: false, note: 'no comment, doc or commit-message line added' };

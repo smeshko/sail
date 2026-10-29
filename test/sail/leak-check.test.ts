@@ -23,11 +23,13 @@ const lines = [
   { file: 'a.ts', line: 4, text: '// comment' },
 ];
 
-function stage(repo: TempRepo, diff: string) {
+function stage(repo: TempRepo, diff: string, base = repo.git('rev-parse', 'HEAD').trim()) {
   const out = join(repo.home, 'out');
   mkdirSync(out);
   const patch = join(repo.home, 'diff');
   writeFileSync(patch, diff);
+  const baseFile = join(repo.home, 'base.txt');
+  writeFileSync(baseFile, `${base}\n`);
   const child = Bun.spawnSync([join(repo.dir, '.sail/workflows/review/stages/03-leak-check/run.sh')], {
     cwd: repo.dir,
     env: {
@@ -38,7 +40,7 @@ function stage(repo: TempRepo, diff: string) {
       SAIL_HOME: repo.home,
       STAGE_OUT: out,
       INPUT_DIFF: patch,
-      INPUT_BASE: 'HEAD',
+      INPUT_BASE: baseFile,
     },
   });
   return { code: child.exitCode, output: JSON.parse(child.stdout.toString()), request: join(out, 'jev-request.json') };
@@ -88,6 +90,19 @@ test('the stage, with no adapters.jev, exits 0 with the exact scan’s hits', as
     expect(result.output.hits).toEqual([{ file: 'x.ts', line: 1, match: 'XYZ-123', kind: 'key' }]);
     expect(result.output.jev.asked).toBe(false);
     expect(typeof result.output.jev.note).toBe('string');
+  });
+});
+
+test('the stage reads the base binding file before listing commit messages', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'leak-1': 0.97 }) });
+    const base = repo.git('rev-parse', 'HEAD').trim();
+    repo.git('commit', '--allow-empty', '-m', 'Some project');
+    const sha = repo.git('rev-parse', '--short', 'HEAD').trim();
+    const result = stage(repo, '', base);
+    expect(result.output.hits).toEqual([
+      { file: `commit ${sha}`, line: 1, match: 'Some project', kind: 'jev', yes: 0.97 },
+    ]);
   });
 });
 
