@@ -1,6 +1,6 @@
-// judge: reads the findings of validation, the leak check, the demonstration and the six reviewers alongside
-// Jev's triage, deciding what it leaves open or overruling a clear decision. It names the reviews too thin to trust,
-// which stop the merge. The workflow routes on its verdicts.
+// judge: reads the findings of validation, the leak check, the banned-words check, the demonstration and the six
+// reviewers alongside Jev's triage, deciding what it leaves open or overruling a clear decision. It names the reviews
+// too thin to trust, which stop the merge. The workflow routes on its verdicts.
 import { agent, file, value } from 'sail';
 import { readonly } from '../../../../lib/permissions';
 import { Evidence, Findings, Judgement, Triaged } from '../../schemas';
