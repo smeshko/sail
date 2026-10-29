@@ -467,6 +467,13 @@ class Collector {
       if (body === undefined || body.trim() === '') {
         this.out.refusals.push('git submodule foreach without a resolvable command');
       } else this.parse(body, 'git submodule foreach', from, depth);
+    } else if (
+      subcommand === 'submodule' &&
+      // Git's use_shell runs argv[0] as shell text when it contains a metacharacter,
+      // appending the remaining arguments as "$@". That is not a plain argv.
+      /[|&;<>()$`\\"' \t\n*?[#~=%]/.test(this.known(inner[0] as Word) ?? ' ')
+    ) {
+      this.out.refusals.push('git submodule foreach with shell text and extra arguments');
     } else {
       this.unwrap(inner, inner.map((word) => word.text).join(' '), from, depth, false);
     }
