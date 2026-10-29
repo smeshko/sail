@@ -226,6 +226,7 @@ test('an assignment that changes which program runs, or makes one run another, i
 
 test('the deny set holds its entries in order, each with one readable clause of why', () => {
   expect(DENY_SET.map((entry) => entry.name)).toEqual([
+    'git remote-ext',
     'git program option',
     'rm -rf',
     'find -delete',
