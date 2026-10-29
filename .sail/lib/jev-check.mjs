@@ -72,7 +72,6 @@ export function clearYes(answers, ids, threshold = CLEAR_YES) {
 
 /** Provisional until ADW-416 calibrates it. */
 export const LEAK_YES = 0.8;
-export const MAX_LEAK_LINES = 400;
 export const SAIL_NOTE =
   'sail is a public open-source software factory. Its own names are sail, its Linear team ADW, ADW-<n> issues and test keys such as FAKE-1. Its providers and tools include Linear, GitHub, Anthropic, Claude, Claude Code, TypeSafe, Jev, System One, pi, OpenAI, Codex, ChatGPT, Jira, Bun, Node, TypeScript, Biome, Zod, git and macOS.';
 

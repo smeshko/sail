@@ -7,8 +7,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-const { LEAK_YES, MAX_LEAK_LINES, leakLines, commitLines, leakState, leakQuestions, askNouls, yesses, git } =
-  await import(join(dirname(process.env.SAIL_CONFIG), 'lib', 'jev-check.mjs'));
+const { LEAK_YES, leakLines, commitLines, leakState, leakQuestions, askNouls, yesses, git } = await import(
+  join(dirname(process.env.SAIL_CONFIG), 'lib', 'jev-check.mjs')
+);
 
 /** Prefixes that look like tracker keys but are sail's own, or no tracker's at all. */
 const ALLOWED = new Set(['ADW', 'FAKE', 'ADR', 'TASK', 'UTF', 'SHA', 'ISO', 'RFC']);
@@ -50,12 +51,10 @@ for (const text of diff.split('\n')) {
   }
   line++;
 }
-const selected = [
+const lines = [
   ...leakLines(diff),
   ...commitLines(git(['log', '--format=%h%x00%B%x1e', `${process.env.INPUT_BASE}..HEAD`])),
 ];
-const lines = selected.slice(0, MAX_LEAK_LINES);
-const omitted = selected.length - lines.length;
 const answer = lines.length
   ? askNouls(leakQuestions(lines), leakState(lines), process.env.STAGE_OUT)
   : { asked: false, note: 'no comment, doc or commit-message line added' };
@@ -71,9 +70,7 @@ if (answer.asked) {
     count++;
   }
 }
-const note = [answer.asked ? '' : answer.note, omitted ? `${omitted} lines omitted at cap` : '']
-  .filter(Boolean)
-  .join('; ');
+const note = answer.asked ? '' : answer.note;
 const jev = { asked: answer.asked, note, threshold: LEAK_YES, lines: lines.length };
 process.stderr.write(
   `${hits.length} hit${hits.length === 1 ? '' : 's'}; denylist: ${terms.length > 0 ? listed : 'none'}; jev: ${answer.asked ? `${lines.length} asked, ${count} over ${LEAK_YES}` : `not asked (${note})`}\n`,

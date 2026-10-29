@@ -91,6 +91,22 @@ test('the stage, with no adapters.jev, exits 0 with the exact scan’s hits', as
   });
 });
 
+test('the stage asks about every added doc line beyond 400', async () => {
+  await withTempRepo((repo) => {
+    writeOwnSail(repo, { jev: nouls({ 'leak-401': 0.97 }) });
+    const diff = `+++ b/note.md\n@@ -0,0 +1,401 @@\n${Array.from({ length: 401 }, () => '+Some project').join('\n')}\n`;
+    const result = stage(repo, diff);
+    expect(result.output.jev.lines).toBe(401);
+    expect(result.output.hits).toContainEqual({
+      file: 'note.md',
+      line: 401,
+      match: 'Some project',
+      kind: 'jev',
+      yes: 0.97,
+    });
+  });
+});
+
 test('leakLines picks doc, comment and only comment lines', () => {
   const diff =
     '+++ b/a.md\n@@ -1,2 +2,4 @@\n+Hello\n+123\n+ \n-removed\n+++ b/a.ts\n@@ -1 +4,3 @@\n+// comment\n+const x = 1;\n+#private\n+++ b/a.yaml\n@@ -0,0 +1 @@\n+# config\n+++ b/a.json\n@@ -0,0 +1 @@\n+// no';
