@@ -12,7 +12,7 @@ import { type Result, workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
-import { validate } from '../../stages/validate/stage';
+import { redTests, validate } from '../../stages/validate/stage';
 import type { FixChecked, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
@@ -81,6 +81,9 @@ export default workflow(
       [reviewConventions, reading],
     ]);
     if (shown.outcome === 'blocked') return run.fail(`demonstrate blocked: ${shown.reason}`);
+    if (validated.outcome === 'failed' && validated.output.baseRed) {
+      return run.fail(`staging is red: ${redTests(validated.output)}`);
+    }
     const findings: z.infer<typeof NumberedFinding>[] = [];
     if (validated.outcome === 'failed') {
       const { uncommitted, verify } = validated.output;
@@ -190,6 +193,8 @@ export default workflow(
           checked = agent.output;
           again = validated;
         }
+        if (again.outcome === 'failed' && again.output.baseRed)
+          return run.fail(`staging is red: ${redTests(again.output)}`);
         rounds.push({ round, fixed: fixed.output, checked, validated: again.outcome === 'passed' });
 
         const items = new Map(checked.items.map((each) => [each.finding, each]));

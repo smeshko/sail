@@ -6,7 +6,7 @@
 import { workflow } from 'sail';
 import { ticket } from 'sail/intakes';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
-import { validate } from '../../stages/validate/stage';
+import { redTests, validate } from '../../stages/validate/stage';
 import { PassFeedback } from './schemas';
 import { plan } from './stages/01-plan/stage';
 import { implement } from './stages/02-implement/stage';
@@ -34,7 +34,7 @@ export default workflow(
     const commit = { ticketKey: run.input.ticketKey, slug: p.output.slug, scope: p.output.scope };
 
     // implement-plan, its final validation, then a surface check that every task is implemented: a failed validation,
-    // or a task left out, goes back to implement.
+    // or a task left out, goes back to implement. Tests failing on the base too end the run: no pass would fix them.
     // A failed last pass would fail the run with the loop exceeded: break instead, so the run fails below, saying why.
     let implemented = false;
     let passes = 0;
@@ -43,6 +43,7 @@ export default workflow(
       const impl = await run.stage(implement, { plan: planFile, commit, feedback: iteration.previous });
       if (impl.outcome === 'blocked') return run.fail(`implement blocked: ${impl.reason}`);
       const v = await run.stage(validate);
+      if (v.outcome === 'failed' && v.output.baseRed) return run.fail(`staging is red: ${redTests(v.output)}`);
       if (v.outcome === 'failed') {
         if (passes === IMPLEMENT_PASSES) break;
         iteration.fail({ validation: v.output, tasks: null });
