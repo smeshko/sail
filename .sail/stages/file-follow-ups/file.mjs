@@ -1,22 +1,23 @@
 // Files the follow-ups in $INPUT_FOLLOWUPS as tickets, bugs first, at most MAX_FILED of them: the rest are noted on the
-// pull request, not filed. Before filing, one `sail port jev ask` checks each follow-up against the team's open tickets;
-// one Jev answers at DUPLICATE or more is commented on that ticket instead. When Jev can't be asked, as in a repository
+// pull request, not filed. Before filing, one `sail port jev ask` checks each follow-up against open tickets and earlier
+// follow-ups; duplicates are skipped. When Jev can't be asked, as in a repository
 // with no Jev adapter, every follow-up is filed unchecked. A ticket gets its type as a label, `code-review` too for a
 // deferred review finding, and `groom`, so the groom workflow judges whether it earns its place; never the factory's
 // designation label, which would hand it to the next run. Each description ends with how the problem is reached and
-// where it came from. A pull request comment then lists the tickets, the comments, the notes and the failures. Prints
+// where it came from. A pull request comment then lists the tickets, duplicates, notes and failures. Prints
 // the Filed.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const { openTickets, wrap, excerpt, sameWork, SAME_WORK } = await import(
+  pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
+);
 
 /** The most tickets one run files: a run that finds more has found mostly small things. */
 const MAX_FILED = 2;
-/** Jev answers at or above this are the same work as an open ticket, which gets a comment instead of a twin. */
-const DUPLICATE = 0.8;
-/** The most of each open ticket's description the duplicate check carries. */
-const DESCRIPTION_CHARS = 600;
 
 const read = (name) => readFileSync(process.env[name], 'utf8');
 const { followUps } = JSON.parse(read('INPUT_FOLLOWUPS'));
@@ -37,29 +38,13 @@ function port(args, body) {
   return { error: (result.stderr || result.error?.message || `exit ${result.status}`).trim() };
 }
 
-/** Runs `sail port render --untrusted`: the text wrapped, or the error. */
-function wrap(text, source) {
-  const result = spawnSync('sail', ['port', 'render', '--untrusted', '--source', source], {
-    encoding: 'utf8',
-    input: text,
-  });
-  if (result.status !== 0) throw new Error((result.stderr || `exit ${result.status}`).trim());
-  return result.stdout.trimEnd();
-}
-
 /**
- * The open ticket each follow-up is the same work as, by index, with Jev's answer: one request for every pair. Throws
- * when the tickets can't be listed or Jev can't be asked, and the caller files unchecked.
+ * Open and earlier batch twins for each follow-up, with Jev's answers: one request for every pair. Throws when the
+ * tickets can't be listed or Jev can't be asked, and the caller files unchecked.
  */
 function duplicatesOf(candidates) {
-  const open = [];
-  for (const state of ['unstarted', 'started']) {
-    const { answer, error } = port(['ticket-source', 'list', '--state', state]);
-    if (error !== undefined) throw new Error(error);
-    open.push(...answer);
-  }
-  if (open.length === 0 || candidates.length === 0) return new Map();
-  const excerpt = (text) => (text.length > DESCRIPTION_CHARS ? `${text.slice(0, DESCRIPTION_CHARS)}…` : text);
+  const open = openTickets();
+  if (candidates.length === 0 || (open.length === 0 && candidates.length < 2)) return new Map();
   const state = {
     followUps: Object.fromEntries(
       candidates.map((each, index) => [
@@ -83,14 +68,16 @@ function duplicatesOf(candidates) {
   const questions = {};
   candidates.forEach((_, index) => {
     for (const ticket of open) {
-      questions[`follow-up-${index + 1}:${ticket.ticketKey}`] = {
-        type: 'noul',
-        instructions: `Do \`followUps["follow-up-${index + 1}"]\` and \`tickets["${ticket.ticketKey}"]\` describe the same work?`,
-        criteria: {
-          true: 'the same change: the same outcome in the same place, worded differently, or one is a step of the other',
-          false: 'a different change, even in the same area',
-        },
-      };
+      questions[`follow-up-${index + 1}:${ticket.ticketKey}`] = sameWork(
+        `followUps["follow-up-${index + 1}"]`,
+        `tickets["${ticket.ticketKey}"]`,
+      );
+    }
+    for (let earlier = 0; earlier < index; earlier++) {
+      questions[`follow-up-${index + 1}:follow-up-${earlier + 1}`] = sameWork(
+        `followUps["follow-up-${index + 1}"]`,
+        `followUps["follow-up-${earlier + 1}"]`,
+      );
     }
   });
   const { answer, error } = port(['jev', 'ask'], JSON.stringify({ state, questions }));
@@ -99,8 +86,20 @@ function duplicatesOf(candidates) {
   candidates.forEach((_, index) => {
     for (const ticket of open) {
       const yes = answer.answers[`follow-up-${index + 1}:${ticket.ticketKey}`]?.noul ?? 0;
-      if (yes >= DUPLICATE && yes > (found.get(index)?.confidence ?? 0)) {
-        found.set(index, { ticketKey: ticket.ticketKey, confidence: yes });
+      if (yes >= SAME_WORK && yes > (found.get(index)?.open?.confidence ?? 0)) {
+        found.set(index, {
+          ...found.get(index),
+          open: { ticketKey: ticket.ticketKey, url: ticket.url, confidence: yes },
+        });
+      }
+    }
+    for (let earlier = 0; earlier < index; earlier++) {
+      const yes = answer.answers[`follow-up-${index + 1}:follow-up-${earlier + 1}`]?.noul ?? 0;
+      if (yes >= SAME_WORK) {
+        const match = found.get(index) ?? {};
+        match.batch ??= [];
+        match.batch.push({ index: earlier, confidence: yes });
+        found.set(index, match);
       }
     }
   });
@@ -112,42 +111,53 @@ const ordered = [
   ...followUps.filter((each) => each.type === 'bug'),
   ...followUps.filter((each) => each.type !== 'bug'),
 ];
-const candidates = ordered.slice(0, MAX_FILED);
-const noted = ordered.slice(MAX_FILED).map(({ title }) => ({ title }));
+const noted = [];
 
 let same = new Map();
 let unchecked = null;
 try {
-  same = duplicatesOf(candidates);
+  same = duplicatesOf(ordered);
 } catch (error) {
   unchecked = error.message.split('\n')[0];
   process.stderr.write(`filing unchecked, the duplicate check failed: ${unchecked}\n`);
 }
 
 const filed = [];
-const existing = [];
+const skipped = [];
+const skipLinks = [];
+const resolved = [];
 const failed = [];
-candidates.forEach(({ title, description, type, trigger, fromReview }, index) => {
+let slots = 0;
+ordered.forEach(({ title, description, type, trigger, fromReview }, index) => {
   const body = `${description}\n\nReached by: ${trigger}\n\nFrom ${origin}: ${pr.url}`;
-  const twin = same.get(index);
+  const matches = same.get(index);
+  const batch = matches?.batch?.filter((each) => resolved[each.index]).sort((a, b) => b.confidence - a.confidence)[0];
+  const twin = matches?.open ?? (batch && { ...resolved[batch.index], confidence: batch.confidence });
   if (twin !== undefined) {
-    const { error } = port(
-      ['ticket-source', 'comment', twin.ticketKey],
-      `${origin} found this again (${pr.url}), and it was not filed as a ticket of its own:\n\n**${title}**\n\n${description}\n\nReached by: ${trigger}\n`,
-    );
-    if (error === undefined) {
-      existing.push({ title, ticketKey: twin.ticketKey, confidence: twin.confidence });
-      process.stderr.write(`commented on ${twin.ticketKey}: ${title}\n`);
-    } else {
-      failed.push({ title, error });
-      process.stderr.write(`failed: ${title}: ${error}\n`);
+    if (matches?.open) {
+      const { error } = port(
+        ['ticket-source', 'comment', twin.ticketKey],
+        `${origin} found this again (${pr.url}), and it was not filed as a ticket of its own:\n\n**${title}**\n\n${description}\n\nReached by: ${trigger}\n`,
+      );
+      if (error !== undefined) process.stderr.write(`comment on ${twin.ticketKey} failed: ${error}\n`);
     }
+    skipped.push({ title, duplicateOf: twin.ticketKey, confidence: twin.confidence });
+    skipLinks.push({ title, ticketKey: twin.ticketKey, url: twin.url });
+    resolved[index] = twin;
+    process.stderr.write(`duplicate of ${twin.ticketKey} (${twin.confidence.toFixed(2)}), not filed: ${title}\n`);
     return;
   }
+  if (slots >= MAX_FILED) {
+    noted.push({ title });
+    return;
+  }
+  slots++;
   const labels = [type, ...(fromReview ? ['code-review'] : []), 'groom'].flatMap((label) => ['--label', label]);
   const { answer, error } = port(['ticket-source', 'create', '--title', title, ...labels], body);
-  if (answer) filed.push({ title, ticketKey: answer.ticketKey, url: answer.url });
-  else failed.push({ title, error });
+  if (answer) {
+    filed.push({ title, ticketKey: answer.ticketKey, url: answer.url });
+    resolved[index] = { ticketKey: answer.ticketKey, url: answer.url };
+  } else failed.push({ title, error });
   process.stderr.write(answer ? `filed ${answer.ticketKey}: ${title}\n` : `failed: ${title}: ${error}\n`);
 });
 
@@ -156,7 +166,7 @@ if (followUps.length > 0) {
     'Follow-ups:',
     '',
     ...filed.map((each) => `- [${each.ticketKey}](${each.url}) ${each.title}`),
-    ...existing.map((each) => `- already ${each.ticketKey}, commented there: ${each.title}`),
+    ...skipLinks.map((each) => `- duplicate of [${each.ticketKey}](${each.url}), not filed: ${each.title}`),
     ...noted.map((each) => `- noted, not filed (over ${MAX_FILED} per run): ${each.title}`),
     ...failed.map((each) => `- not filed: ${each.title} (${each.error.split('\n')[0]})`),
     ...(unchecked === null ? [] : ['', `Filed without the duplicate check, which failed: ${unchecked}`]),
@@ -164,4 +174,4 @@ if (followUps.length > 0) {
   const { error } = port(['codehost', 'comment', String(pr.number)], `${lines.join('\n')}\n`);
   if (error) process.stderr.write(`the pull request comment failed: ${error}\n`);
 }
-console.log(JSON.stringify({ filed, existing, noted, failed, unchecked }));
+console.log(JSON.stringify({ filed, skipped, noted, failed, unchecked }));

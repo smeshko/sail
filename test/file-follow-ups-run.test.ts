@@ -1,6 +1,5 @@
 // sail's own file-follow-ups stage, as the factory and review workflows run it on the fakes: at most two tickets, bugs
-// first, the rest noted; a follow-up Jev finds already open is commented there; without Jev every follow-up is filed
-// unchecked; and review never files a low-severity finding.
+// first, the rest noted; duplicates of open tickets and other follow-ups are skipped; without Jev filing is unchecked.
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,7 +63,7 @@ test("the factory files its one follow-up Jev finds new, with how it's reached a
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
     const output = filedOutput(onlyRun(repo.dir));
-    expect(output).toMatchObject({ existing: [], noted: [], failed: [], unchecked: null });
+    expect(output).toMatchObject({ skipped: [], noted: [], failed: [], unchecked: null });
     expect(output.filed.map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['FAKE-3']);
     const ticket = fakeTicket(repo.dir, 'FAKE-3');
     expect(ticket.labels).toEqual(['bug', 'groom']);
@@ -81,9 +80,10 @@ test('a follow-up Jev answers at 0.8 or more as an open ticket is commented on t
 
     const output = filedOutput(onlyRun(repo.dir));
     expect(output.filed).toEqual([]);
-    expect(output.existing).toEqual([
-      { title: "sail show's footer ignores calls replayed from a seeded run", ticketKey: 'FAKE-2', confidence: 0.8 },
+    expect(output.skipped).toEqual([
+      { title: "sail show's footer ignores calls replayed from a seeded run", duplicateOf: 'FAKE-2', confidence: 0.8 },
     ]);
+    expect(prComment(repo.dir)).toContain('- duplicate of [FAKE-2](fake://tickets/FAKE-2), not filed:');
     expect(fakeTicket(repo.dir, 'FAKE-2').comments.at(-1)?.body).toContain(
       "**sail show's footer ignores calls replayed from a seeded run**",
     );
@@ -104,6 +104,11 @@ test('of three follow-ups the bug and the first other are filed, and the third i
         'follow-up-1:FAKE-2': 0,
         'follow-up-2:FAKE-1': 0,
         'follow-up-2:FAKE-2': 0,
+        'follow-up-3:FAKE-1': 0,
+        'follow-up-3:FAKE-2': 0,
+        'follow-up-2:follow-up-1': 0,
+        'follow-up-3:follow-up-1': 0,
+        'follow-up-3:follow-up-2': 0,
       }),
       followUps,
     });
@@ -114,6 +119,65 @@ test('of three follow-ups the bug and the first other are filed, and the third i
     expect(output.filed.map((each: { title: string }) => each.title)).toEqual(['A crash', 'Add a flag']);
     expect(output.noted).toEqual([{ title: 'Move a helper' }]);
     expect(prComment(repo.dir)).toContain('- noted, not filed (over 2 per run): Move a helper');
+  });
+}, 120_000);
+
+test('two follow-ups Jev answers as the same work file one ticket, the second skipped as a duplicate of it', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo, {
+      followUps: [follow('A crash', 'bug'), follow('The same crash', 'bug')],
+      jev: jevSeed({
+        'follow-up-1:FAKE-1': 0,
+        'follow-up-1:FAKE-2': 0,
+        'follow-up-2:FAKE-1': 0,
+        'follow-up-2:FAKE-2': 0,
+        'follow-up-2:follow-up-1': 0.9,
+      }),
+    });
+    const { code } = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect(code).toBe(EXIT_OK);
+    const output = filedOutput(onlyRun(repo.dir));
+    expect(output.filed.map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['FAKE-3']);
+    expect(output.skipped).toEqual([{ title: 'The same crash', duplicateOf: 'FAKE-3', confidence: 0.9 }]);
+    expect(() => fakeTicket(repo.dir, 'FAKE-4')).toThrow();
+    expect(prComment(repo.dir)).toContain('- duplicate of [FAKE-3](');
+  });
+}, 120_000);
+
+test('a duplicate does not take a filing slot, and an open ticket wins over a batch twin', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo, {
+      followUps: [follow('First', 'bug'), follow('Duplicate', 'bug'), follow('Last', 'bug')],
+      jev: jevSeed({
+        'follow-up-1:FAKE-1': 0,
+        'follow-up-1:FAKE-2': 0,
+        'follow-up-2:FAKE-1': 0,
+        'follow-up-2:FAKE-2': 0.9,
+        'follow-up-3:FAKE-1': 0,
+        'follow-up-3:FAKE-2': 0,
+        'follow-up-2:follow-up-1': 0.95,
+        'follow-up-3:follow-up-1': 0,
+        'follow-up-3:follow-up-2': 0,
+      }),
+    });
+    const { code } = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect(code).toBe(EXIT_OK);
+    const output = filedOutput(onlyRun(repo.dir));
+    expect(output.filed.map((each: { title: string }) => each.title)).toEqual(['First', 'Last']);
+    expect(output.skipped).toEqual([{ title: 'Duplicate', duplicateOf: 'FAKE-2', confidence: 0.9 }]);
+    expect(output.noted).toEqual([]);
+  });
+}, 120_000);
+
+test('when Jev fails, the follow-ups are filed unchecked, and the pull request says so', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo, { jev: { ...jevSeed(), error: { status: 500 } } });
+    const { code } = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    expect(code).toBe(EXIT_OK);
+    const output = filedOutput(onlyRun(repo.dir));
+    expect(output.filed.map((each: { ticketKey: string }) => each.ticketKey)).toEqual(['FAKE-3']);
+    expect(output.unchecked).toEqual(expect.any(String));
+    expect(prComment(repo.dir)).toContain('Filed without the duplicate check, which failed:');
   });
 }, 120_000);
 
