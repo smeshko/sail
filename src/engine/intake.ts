@@ -9,6 +9,7 @@
 // An intake of the repository's own runs no body: its steps are the stage `intake`, so they run as any stage's do, as
 // the call `intake#1`, and intakeEmit() reports that call as the intake's events.
 import { BUILTIN_INTAKES, type IntakeBody } from '../builtins/intakes/index';
+import { readEvents } from '../events/consumers/ndjson';
 import type { Emit } from '../events/types';
 import type { StepRun } from '../kinds/index';
 import type { CodeHost } from '../ports/code-host';
@@ -202,9 +203,17 @@ export async function runIntake(request: IntakeRequest): Promise<RanIntake> {
   let returned: unknown;
   let failure: ContractError | undefined;
   const recorded: Record<string, unknown> = {};
+  const source = request.source;
+  const claimedEarlier =
+    (request.try ?? 1) > 1 &&
+    source.kind === 'ticket' &&
+    readEvents(runDir).some(
+      (event) => event.type === 'ticket:claimed' && event.key === INTAKE_KEY && event.ticketKey === source.ticketKey,
+    );
   try {
     returned = await request.body({
       runId,
+      claimedEarlier,
       record: (fields) => {
         Object.assign(recorded, fields);
       },

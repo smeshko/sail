@@ -108,25 +108,33 @@ export interface ClaimSourceOptions {
   ticketSource: TicketSource;
   /** The checks `--force` overrode at the start: with `state`, a claim that didn't take moves the ticket instead. */
   forced: readonly Forced[];
+  /** An earlier try of this call claimed the ticket, as the run's stream records. */
+  claimedEarlier?: boolean;
 }
 
 /**
  * The claim the ticket intake makes: claims the ticket, then comments with the run id. The claim's own answer decides,
  * not an earlier fetch: two starts can both read a ticket as in a pick-up state, and one claim takes. A claim that
- * didn't take is this run's own earlier claim when the ticket's latest claim comment names the run, as on a later try
- * of the intake. Otherwise it moves the ticket to In Progress through `update` when `forced` has `state`, and is lost when it
+ * didn't take is this run's own earlier claim when the ticket's latest claim comment names the run, or when
+ * `claimedEarlier` records it and no claim comment names another run. A missing comment is posted. Otherwise it moves the ticket to In Progress through `update` when `forced` has `state`, and is lost when it
  * doesn't. A port call that fails throws its PortError, a lost claim a `conflict`, and nothing is moved back.
  */
 export async function claimSource(options: ClaimSourceOptions): Promise<ClaimRecord> {
-  const { ticketKey, runId, ticketSource, forced } = options;
+  const { ticketKey, runId, ticketSource, forced, claimedEarlier = false } = options;
   const answer = await ticketSource.claim(ticketKey);
-  const claimed = answer.claimed;
+  let claimed = answer.claimed;
   let state = stateOf(answer.state);
   if (!claimed) {
     const ticket = await getTicket(ticketSource, ticketKey);
-    if (claimedBy(ticket) === runId) return { claimed: true, state: stateOf(ticket.state) };
-    if (!forced.includes('state')) throw new PortError('ticketSource', 'claim', 'conflict', lostClaim(state));
-    state = stateOf((await ticketSource.update(ticketKey, { state: 'in-progress' })).state);
+    const owner = claimedBy(ticket);
+    if (owner === runId) return { claimed: true, state: stateOf(ticket.state) };
+    if (claimedEarlier && owner === undefined) {
+      claimed = true;
+      state = stateOf(ticket.state);
+    } else {
+      if (!forced.includes('state')) throw new PortError('ticketSource', 'claim', 'conflict', lostClaim(state));
+      state = stateOf((await ticketSource.update(ticketKey, { state: 'in-progress' })).state);
+    }
   }
   try {
     await ticketSource.comment(ticketKey, claimComment(runId));

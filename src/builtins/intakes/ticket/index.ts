@@ -3,7 +3,7 @@
 // splits the description into the request and the acceptance criteria, and leaves `ticket.json` and `brief.md` in the
 // call directory. A claim lost to another start is a PortError, so the intake ends in `error`. Every string
 // the provider returned is wrapped as untrusted input in the brief. It returns the run's input, unvalidated: the engine
-// checks it against `TicketInput`.
+// checks it against `TicketInput`. A later try completes an earlier claim whose comment never posted.
 //
 // The ticket key the brief prints bare, and the one in the output, is the run's own: the source's, never the one the
 // provider sent back.
@@ -61,6 +61,7 @@ export async function ticketIntake(context: IntakeContext): Promise<unknown> {
     runId: context.runId,
     ticketSource: context.ticketSource,
     forced: source.forced,
+    claimedEarlier: context.claimedEarlier,
   });
   context.record({ claim });
   const ticket = await getTicket(context.ticketSource, key);

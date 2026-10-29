@@ -36,6 +36,7 @@ const RUN_ID = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 /** The context's run id and record, which collects what the body reports for its call's result. */
 const running = (records: Record<string, unknown>[] = []) => ({
   runId: RUN_ID,
+  claimedEarlier: false,
   record: (fields: Record<string, unknown>) => void records.push(fields),
 });
 
