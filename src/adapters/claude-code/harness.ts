@@ -9,6 +9,7 @@
 // credentials from the Bash tool's environment (D3), returns that tool to the workspace after each command (D4), and
 // runs it under bash, the shell decide() reads. Each SDK message also goes to the request's onRaw as it comes, for a recording (11.3 D3). The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { allowlisted } from '../../engine/env-allowlist';
 import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
@@ -48,37 +49,6 @@ const SYSTEM_TIMERS: BudgetTimers = {
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
-/** The names of sail's environment a session may see, beside its call's preamble (D7). */
-export const ENV_ALLOWLIST: readonly string[] = [
-  'PATH',
-  'HOME',
-  'USER',
-  'LOGNAME',
-  'SHELL',
-  'TMPDIR',
-  'LANG',
-  'LC_*',
-  'TERM',
-  'CLAUDE_CONFIG_DIR',
-  'ANTHROPIC_*',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX',
-  'AWS_*',
-  'CLOUD_ML_REGION',
-  'ANTHROPIC_VERTEX_PROJECT_ID',
-  'GOOGLE_APPLICATION_CREDENTIALS',
-  'GOOGLE_CLOUD_PROJECT',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'NO_PROXY',
-  // Jev's key, so a session can prove the Jev adapter with a live call.
-  'TYPESAFE_API_KEY',
-];
-
-const allowed = (name: string): boolean =>
-  ENV_ALLOWLIST.some((entry) => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry));
-
 /**
  * The switches every session runs with, which nothing else in its environment overrides. The CLI runs the Bash tool
  * under zsh when it finds one, but decide() reads commands as bash, and the two differ (zsh's `>!` writes its next
@@ -95,7 +65,7 @@ const SWITCHES: Readonly<Record<string, string>> = {
 /** The session's environment: the allowlisted names of `env`, the preamble, which wins a clash, then the switches. */
 export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env): Record<string, string> {
   const picked = Object.entries(env).filter(
-    (entry): entry is [string, string] => entry[1] !== undefined && allowed(entry[0]),
+    (entry): entry is [string, string] => entry[1] !== undefined && allowlisted(entry[0]),
   );
   return {
     ...Object.fromEntries(picked),
