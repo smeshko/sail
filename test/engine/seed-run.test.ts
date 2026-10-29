@@ -6,6 +6,7 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -17,13 +18,33 @@ import { type JournalEntry, readJournal } from '../../src/engine/journal';
 import type { OpenedRun } from '../../src/engine/open-run';
 import { readStatus } from '../../src/engine/run-dir';
 import { type RunHeader, readRunHeader } from '../../src/engine/run-header';
+import { runWorkflow } from '../../src/engine/runtime';
 import { openSeededRun, type SeededRunOptions } from '../../src/engine/seed-run';
 import { fakeAdapters } from '../helpers/adapters';
+import { AGENT_WORKFLOW } from '../helpers/agent-fixture';
 import { edit } from '../helpers/fixture';
 import { TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
-import { cutJournal, runIds, SOURCE_BRANCH, sharedSource } from '../helpers/seeded';
+import { cutJournal, reorderJournal, runIds, SOURCE_BRANCH, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { writeTwoStep } from '../helpers/two-step';
+
+/** Copies a completed source with publish's two steps grouped with notify into the case's repository. */
+async function groupedTwoStepInto(to: string): Promise<string> {
+  return withTempRepo(async (from) => {
+    writeTwoStep(from.dir, { grouped: true });
+    const end = await runWorkflow({
+      cwd: from.dir,
+      adapters: await fakeAdapters(from.dir),
+      workflow: AGENT_WORKFLOW,
+      ticket: 'FAKE-1',
+    });
+    if ('refused' in end) throw new Error(end.refused);
+    expect(end.status).toBe('completed');
+    copyRun(from.dir, to);
+    return end.runId;
+  });
+}
 
 const source = sharedSource();
 afterAll(() => source.release());
@@ -396,6 +417,42 @@ test('a link a reused call does not point at is copied as a link, and seeding op
     expect(lstatSync(copied).isSymbolicLink()).toBe(true);
   });
 }, 60_000);
+
+test.each([
+  {
+    stage: 'notify',
+    order: ['intake#1', 'brief#1', 'spec#1', 'publish#1/describe', 'publish#1/open', 'publish#1', 'notify#1'],
+    behaviour: "seeding a sibling cuts before a grouped member's earlier step lines",
+  },
+  {
+    stage: 'publish',
+    order: ['intake#1', 'brief#1', 'spec#1', 'notify#1', 'publish#1/describe', 'publish#1/open', 'publish#1'],
+    behaviour: "seeding a multi-step member cuts before its sibling's earlier call line",
+  },
+])(
+  '$behaviour',
+  async ({ stage, order }) => {
+    await withTempRepo(async (repo) => {
+      const fromRun = await groupedTwoStepInto(repo.dir);
+      const fromDir = join(repo.dir, '.sail-runs', fromRun);
+      reorderJournal(fromDir, [...order]);
+      expect(readJournal(fromDir).entries.map((entry) => entry.key)).toEqual([...order]);
+      const opened = openedFrom(await seed(repo, { fromRun, stage }));
+      expect({
+        journal: readJournal(opened.dir).entries.map((entry) => entry.key),
+        reused: opened.seeded?.entries.map((entry) => entry.key),
+        members: readdirSync(opened.dir).filter((name) => name.endsWith('-publish') || name.endsWith('-notify')),
+        until: opened.until,
+      }).toEqual({
+        journal: ['intake#1', 'brief#1', 'spec#1'],
+        reused: ['intake#1', 'brief#1', 'spec#1'],
+        members: [],
+        until: stage,
+      });
+    });
+  },
+  60_000,
+);
 
 test("seeding a stage whose first call belongs to a group copies only the calls before the group, and none of its members, though the stage's call was journaled last", async () => {
   await withTempRepo(async (repo) => {

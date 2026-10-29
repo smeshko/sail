@@ -11,8 +11,8 @@
 //   3. the workflow as it reads now, its model aliases, and no stage named `intake`;
 //   4. the stage, which must be a stage of that workflow;
 //   5. the source's journal, which must read: an `intake#1` that passed, and a call of the stage. The seed is every
-//      entry before the stage's first call, or before its group's first line when that call belongs to a group: a seed
-//      never splits a group, so the seeded run runs the whole group again. Each of its entries must point inside its
+//      entry before the stage's first call, or before the first line of any of its group's calls, their steps' lines
+//      included: a seed never splits a group, so the seeded run runs the whole group again. Each entry must point inside its
 //      own call directory, at regular files, since that is what a run writes and all the copy takes.
 // Then the run id is minted and the header built and checked, with `fromRun` and no claim: a seeded run reads no
 // ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by
@@ -162,6 +162,20 @@ function callDirs(sourceDir: string, runId: string, entries: readonly JournalEnt
 }
 
 /**
+ * The seed's cut before stage's first call or any line of its group. Step lines carry no group, so read the group
+ * from call lines, then include every member's step lines when finding its start. No line of stage means -1.
+ */
+function seedEnd(entries: readonly JournalEntry[], stage: string): number {
+  const first = entries.findIndex((entry) => entry.stage === stage);
+  if (first === -1) return -1;
+  const own = `${stage}#${entries[first]?.call}`;
+  const group = entries.find((entry) => entry.step === undefined && entry.group?.includes(own))?.group;
+  if (group === undefined) return first;
+  const members = new Set(group);
+  return entries.findIndex((entry) => members.has(`${entry.stage}#${entry.call}`));
+}
+
+/**
  * Opens a run seeded with `fromRun`'s calls before `stage`, or says why it can't, having written nothing. The run stops
  * after the stage's first call unless `continue`.
  */
@@ -210,11 +224,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if (intake?.key !== INTAKE_KEY || intake.outcome !== 'passed') {
     return { refused: `run ${fromRun}'s intake didn't pass: there is nothing to reuse` };
   }
-  const first = entries.findIndex((entry) => entry.stage === stage);
-  if (first === -1) return { refused: `run ${fromRun} never ran '${stage}': sail resume ${fromRun} continues it` };
-  // A group's lines are one run in completion order, each naming the group: the seed ends before the first of them.
-  const group = entries[first]?.group?.join('\n');
-  const at = group === undefined ? first : entries.findIndex((entry) => entry.group?.join('\n') === group);
+  const at = seedEnd(entries, stage);
+  if (at === -1) return { refused: `run ${fromRun} never ran '${stage}': sail resume ${fromRun} continues it` };
   const seed = entries.slice(0, at);
   const copied = callDirs(source.dir, fromRun, seed);
   if ('refused' in copied) return copied;
