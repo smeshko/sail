@@ -29,6 +29,7 @@
 // Once its first workflows are added, a starting watcher sweeps the worktrees of ended runs (`workspace.sweep()`): a
 // completed or failed run whose worktree was left behind, as when its release failed. Runs that are running,
 // suspended or interrupted keep theirs. It is the one slow git step in the watcher's own process, and rare.
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { isAlive as processIsAlive, releaseLease, takeLease } from '../adapters/leases';
 import { DEFAULT_BRANCH_PREFIX } from '../engine/branch';
@@ -565,7 +566,8 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       const swept = await workspace.sweep(runs);
       if (swept.paths.length > 0) print(sweptLine(swept.paths.length, now()));
       for (const { path, reason } of swept.failed) {
-        print(errorLine(undefined, `the worktree ${path} of an ended run was not removed: ${reason}`, now()));
+        const result = existsSync(path) ? 'was not removed' : 'was removed, but its release failed';
+        print(errorLine(undefined, `the worktree ${path} of an ended run ${result}: ${reason}`, now()));
       }
     } catch (error) {
       print(errorLine(undefined, `the worktrees of ended runs were not swept: ${messageOf(error)}`, now()));

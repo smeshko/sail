@@ -891,17 +891,40 @@ test.skipIf(process.getuid?.() === 0)(
   },
 );
 
+test('a watcher distinguishes a removed workspace whose commits were not kept', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({}));
+    const path = join(w.runs, 'gone/workspace');
+    const workspace = new Proxy(w.adapters.ports.workspace, {
+      get: (target, property) =>
+        property === 'sweep'
+          ? async () => ({ paths: [], failed: [{ path, reason: 'its commits were not kept' }], raw: null })
+          : Reflect.get(target, property),
+    });
+    const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
+    try {
+      expect(w.out.find((line) => line.includes(path))).toBe(
+        `09:00:00 error: the worktree ${path} of an ended run was removed, but its release failed: its commits were not kept\n`,
+      );
+    } finally {
+      await watcher.stop();
+    }
+  });
+});
+
 test('a watcher reports every sweep failure with its exact reason even when no workspace was swept', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+    const paths = ['a', 'b'].map((name) => join(w.runs, name, 'workspace'));
+    for (const path of paths) mkdirSync(path, { recursive: true });
     const workspace = new Proxy(w.adapters.ports.workspace, {
       get: (target, property) =>
         property === 'sweep'
           ? async () => ({
               paths: [],
               failed: [
-                { path: '/runs/a/workspace', reason: 'permission denied' },
-                { path: '/runs/b/workspace', reason: 'its commits were not kept' },
+                { path: paths[0] as string, reason: 'permission denied' },
+                { path: paths[1] as string, reason: 'its commits were not kept' },
               ],
               raw: null,
             })
@@ -910,8 +933,8 @@ test('a watcher reports every sweep failure with its exact reason even when no w
     const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
     try {
       expect(w.out.filter((line) => line.includes('swept') || line.includes('not removed'))).toEqual([
-        '09:00:00 error: the worktree /runs/a/workspace of an ended run was not removed: permission denied\n',
-        '09:00:00 error: the worktree /runs/b/workspace of an ended run was not removed: its commits were not kept\n',
+        `09:00:00 error: the worktree ${paths[0]} of an ended run was not removed: permission denied\n`,
+        `09:00:00 error: the worktree ${paths[1]} of an ended run was not removed: its commits were not kept\n`,
       ]);
       await w.timers.advance(1000);
       expect(w.order('a')).toEqual(['FAKE-1']);
