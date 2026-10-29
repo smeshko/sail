@@ -3,13 +3,14 @@
 //
 //   bun test/helpers/lease-race.ts release <dir>   A's run has completed, and A releases while B takes over
 //   bun test/helpers/lease-race.ts renew <dir>     A's old pid is dead, and A resumes while B takes over
+//   bun test/helpers/lease-race.ts three <dir>     B reads A, then C takes over and D is refused
 //
 // test/adapters/leases.test.ts spawns it, so the patched module never reaches the test process.
 import { mock } from 'bun:test';
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 
-const [mode, dir] = process.argv.slice(2) as ['release' | 'renew', string];
+const [mode, dir] = process.argv.slice(2) as ['release' | 'renew' | 'three', string];
 const REMOTE = 'fake://codehost/fixture';
 const BRANCH = 'sail/FAKE-1';
 
@@ -52,15 +53,26 @@ function bare(result: {
 file = leaseFile(dir, REMOTE, BRANCH);
 const dead = Bun.spawn(['true']);
 await dead.exited;
-const aDir = runDir('A', mode === 'release' ? 'completed' : 'running');
-takeLease(dir, REMOTE, BRANCH, { runId: 'A', runDir: aDir, pid: mode === 'release' ? process.pid : dead.pid });
+const aDir = runDir('A', mode !== 'renew' ? 'completed' : 'running');
+takeLease(dir, REMOTE, BRANCH, { runId: 'A', runDir: aDir, pid: mode !== 'renew' ? process.pid : dead.pid });
 
-let b: ReturnType<typeof bare> | undefined;
-afterRead = () => {
-  b = bare(takeLease(dir, REMOTE, BRANCH, { runId: 'B', runDir: runDir('B', 'running'), pid: process.pid }));
-};
-const a =
-  mode === 'release'
-    ? bare(releaseLease(dir, REMOTE, BRANCH, 'A'))
-    : bare(takeLease(dir, REMOTE, BRANCH, { runId: 'A', runDir: aDir, pid: process.pid }));
-console.log(JSON.stringify({ a, b, file: readLease(dir, REMOTE, BRANCH)?.runId ?? null }));
+if (mode === 'three') {
+  let c: ReturnType<typeof bare> | undefined;
+  let d: ReturnType<typeof bare> | undefined;
+  afterRead = () => {
+    c = bare(takeLease(dir, REMOTE, BRANCH, { runId: 'C', runDir: runDir('C', 'running'), pid: process.pid }));
+    d = bare(takeLease(dir, REMOTE, BRANCH, { runId: 'D', runDir: runDir('D', 'running'), pid: process.pid }));
+  };
+  const b = bare(takeLease(dir, REMOTE, BRANCH, { runId: 'B', runDir: runDir('B', 'running'), pid: process.pid }));
+  console.log(JSON.stringify({ b, c, d, file: readLease(dir, REMOTE, BRANCH)?.runId ?? null }));
+} else {
+  let b: ReturnType<typeof bare> | undefined;
+  afterRead = () => {
+    b = bare(takeLease(dir, REMOTE, BRANCH, { runId: 'B', runDir: runDir('B', 'running'), pid: process.pid }));
+  };
+  const a =
+    mode === 'release'
+      ? bare(releaseLease(dir, REMOTE, BRANCH, 'A'))
+      : bare(takeLease(dir, REMOTE, BRANCH, { runId: 'A', runDir: aDir, pid: process.pid }));
+  console.log(JSON.stringify({ a, b, file: readLease(dir, REMOTE, BRANCH)?.runId ?? null }));
+}
