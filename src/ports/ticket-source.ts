@@ -134,15 +134,15 @@ export interface TicketSource {
   capabilities(): TicketSourceCapabilities;
 }
 
-/**
- * The ticket `source.get()` answers with, checked against the port's schema: an adapter's answer crosses a trust
- * boundary. An answer that is no Ticket is a PortError of `get`, code `invalid`, saying where it isn't one.
- */
 export function fetchInterrupted(op: string, what: string): PortError {
   return new PortError('ticketSource', op, 'unavailable', `the fetch of ${what} was interrupted`);
 }
 
-/** Checks the answer and bounds even an adapter that ignores the caller's signal. */
+/**
+ * The ticket `source.get()` answers with, checked against the port's schema: an adapter's answer crosses a trust
+ * boundary. An answer that is no Ticket is a PortError of `get`, code `invalid`, saying where it isn't one.
+ * Bounds even an adapter that ignores the caller's signal.
+ */
 export async function getTicket(source: TicketSource, ticketKey: string, signal?: AbortSignal): Promise<Ticket> {
   if (signal?.aborted) throw fetchInterrupted('get', ticketKey);
   let stop: (() => void) | undefined;
