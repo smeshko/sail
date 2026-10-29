@@ -144,9 +144,11 @@ export default workflow(
     const undecided = findings.filter((finding) => !decided.has(finding.id)).map((finding) => finding.id);
     if (undecided.length > 0) return run.fail(`judge left ${undecided.join(', ')} undecided`);
     let targets = findings.filter((finding) => decided.get(finding.id)?.verdict === 'fix');
+    // A low-severity finding is never worth a ticket of its own, whatever the judge chose.
     const tickets: z.infer<typeof FollowUp>[] = [];
     for (const decision of judgement.decisions) {
-      if (decision.verdict === 'ticket' && decision.ticket !== null)
+      const severity = findings.find((finding) => finding.id === decision.finding)?.severity;
+      if (decision.verdict === 'ticket' && decision.ticket !== null && severity !== 'low')
         tickets.push({ ...decision.ticket, fromReview: true });
     }
     const { thin } = judgement;

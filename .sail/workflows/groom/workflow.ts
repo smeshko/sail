@@ -18,15 +18,20 @@ import { act } from './stages/06-act/stage';
 const LABEL = 'groom';
 
 /**
- * The confidence a check must give for an action that removes a ticket to pass: a `merge` with the tickets the worth or duplicates check named, a `cancel` the worth check
- * gave. Each cancels a ticket, so the judge can ask for it but only this number, which the judge didn't measure, lets it
- * through.
+ * The worth check's numbers that let a `cancel` through: a `cancel` verdict at `cancel` or more, or a `keep` under
+ * `keep`, which is no case for keeping it. A ticket a review filed carries no person's ask, so its bar is lower. The
+ * judge can ask for a cancel but only these numbers, which the judge didn't measure, let it through.
  */
-const CONFIDENCE = 0.8;
+const CANCEL = { cancel: 0.6, keep: 0.6 };
+const REVIEW_CANCEL = { cancel: 0.5, keep: 0.7 };
+
+/** The confidence the worth check must name another ticket at for a `merge` with it to pass. */
+const MERGE_CONFIDENCE = 0.65;
 
 /**
  * The confidence the duplicates check, Jev's probability that two tickets describe the same work, must give for a
- * `duplicate` action to pass. To be set from comparing Jev's candidates with the agent's on past grooms.
+ * `duplicate` action, or a `merge` it alone names, to pass. To be set from comparing Jev's candidates with the agent's
+ * on past grooms.
  */
 const DUPLICATE_CONFIDENCE = 0.8;
 
@@ -43,12 +48,26 @@ interface Context {
   readonly others: readonly string[];
   /** The tickets never canceled or merged away: started ones and epics. */
   readonly kept: readonly string[];
+  /** Whether a review filed the ticket, which lowers the bar a cancel must clear. */
+  readonly fromReview: boolean;
 }
 
-/** The highest confidence the worth or duplicates check named `key` at for a merge with the ticket. */
-function mergeConfidence(findings: z.infer<typeof Findings>, key: string): number | undefined {
-  const named = [...findings.worth.merges, ...findings.duplicates.candidates].filter((each) => each.ticketKey === key);
-  return named.length === 0 ? undefined : Math.max(...named.map((each) => each.confidence));
+/**
+ * Why `key` falls short of a merge with the ticket, or undefined when a check named it high enough: the worth check at
+ * `MERGE_CONFIDENCE`, or the duplicates check at `DUPLICATE_CONFIDENCE`.
+ */
+function shortOfMerge(findings: z.infer<typeof Findings>, key: string): string | undefined {
+  const worth = findings.worth.merges.filter((each) => each.ticketKey === key).map((each) => each.confidence);
+  const jev = findings.duplicates.candidates.filter((each) => each.ticketKey === key).map((each) => each.confidence);
+  if (worth.length === 0 && jev.length === 0) return `${key} not named by the worth or duplicates check`;
+  if (worth.some((each) => each >= MERGE_CONFIDENCE) || jev.some((each) => each >= DUPLICATE_CONFIDENCE)) {
+    return undefined;
+  }
+  const said = [
+    ...(worth.length > 0 ? [`worth ${Math.max(...worth).toFixed(2)}, under ${MERGE_CONFIDENCE.toFixed(2)}`] : []),
+    ...(jev.length > 0 ? [`duplicates ${Math.max(...jev).toFixed(2)}, under ${DUPLICATE_CONFIDENCE.toFixed(2)}`] : []),
+  ];
+  return `${key} at ${said.join('; ')}`;
 }
 
 /** Why the workflow holds back the merge, or undefined when it lets it through. */
@@ -64,11 +83,8 @@ function heldMerge(action: Extract<Action, { kind: 'merge' }>, context: Context)
   const held = action.absorb.filter((key) => kept.includes(key));
   if (held.length > 0) return `${held.join(', ')} started or an epic`;
   for (const key of tickets.filter((each) => each !== ticketKey)) {
-    const confidence = mergeConfidence(findings, key);
-    if (confidence === undefined) return `${key} not named by the worth or duplicates check`;
-    if (confidence < CONFIDENCE) {
-      return `${key} at confidence ${confidence.toFixed(2)}, under ${CONFIDENCE.toFixed(2)}`;
-    }
+    const short = shortOfMerge(findings, key);
+    if (short !== undefined) return short;
   }
   return undefined;
 }
@@ -78,14 +94,18 @@ function heldCancel(context: Context): string | undefined {
   const { worth: judged, staleness: stale } = context.findings;
   if (context.kept.includes(context.ticketKey)) return 'started or an epic';
   if (stale.stale) return undefined;
-  if (judged.verdict === 'cancel' && judged.confidence >= CONFIDENCE) return undefined;
-  return `the worth check gave ${judged.verdict} at ${judged.confidence.toFixed(2)}, and the ticket is not stale`;
+  const bar = context.fromReview ? REVIEW_CANCEL : CANCEL;
+  if (judged.verdict === 'cancel' && judged.confidence >= bar.cancel) return undefined;
+  if (judged.verdict === 'keep' && judged.confidence < bar.keep) return undefined;
+  const needed = judged.verdict === 'cancel' ? `under ${bar.cancel.toFixed(2)}` : `at or over ${bar.keep.toFixed(2)}`;
+  return `the worth check gave ${judged.verdict} at ${judged.confidence.toFixed(2)}, ${needed}, and the ticket is not stale`;
 }
 
 /**
  * Splits the judge's actions into those to apply and those to report, and picks the label the ticket ends with. A
  * `duplicate`, a `cancel` or a `merge` that absorbs this ticket ends it, and no other of them applies after that; a
- * ticket that survives a merge is never canceled. A `cancel` or `merge` passes the checks' numbers as `CONFIDENCE` says,
+ * ticket that survives a merge is never canceled. A `cancel` passes the worth check's numbers as `CANCEL` says, a `merge`
+ * as `MERGE_CONFIDENCE` and `DUPLICATE_CONFIDENCE` say,
  * never for a kept ticket, and one `merge` and one `labels` apply per run. An `edit` that names nothing to change is reported. A relation of any kind is applied only to one of `others`,
  * never to `ticketKey` itself: the judge and the checks read the ticket's text, which can name any key.
  */
@@ -207,7 +227,13 @@ export default workflow(
     const acted = await run.stage(act, {
       ticketKey,
       report: decided.files['report.md'],
-      actions: limit(decided.output, { findings, ticketKey, others: run.input.others, kept: run.input.kept }),
+      actions: limit(decided.output, {
+        findings,
+        ticketKey,
+        others: run.input.others,
+        kept: run.input.kept,
+        fromReview: run.input.fromReview,
+      }),
       label: LABEL,
     });
     return acted.output;

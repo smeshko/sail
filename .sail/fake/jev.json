@@ -19,6 +19,14 @@
     "R2": {
       "type": "noul",
       "noul": 0.5
+    },
+    "follow-up-1:FAKE-1": {
+      "type": "noul",
+      "noul": 0.1
+    },
+    "follow-up-1:FAKE-2": {
+      "type": "noul",
+      "noul": 0.2
     }
   }
 }

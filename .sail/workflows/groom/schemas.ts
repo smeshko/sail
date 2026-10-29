@@ -12,6 +12,8 @@ export const GroomInput = z.object({
   others: z.array(z.string()),
   /** The ticket keys, this one's among them, that groom never cancels or merges away: started tickets and epics. */
   kept: z.array(z.string()),
+  /** True when the ticket carries `code-review`: a review filed it, not a person, so groom cancels it more readily. */
+  fromReview: z.boolean(),
 });
 
 /** Whether the repository already does what the ticket asks. */

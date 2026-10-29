@@ -1,13 +1,14 @@
 // sail's own `review` workflow, end to end through the CLI on the fakes: `sail '#7' --workflow review` in a temporary
 // repository that holds a copy of the repository's own `.sail/`, its ports all fake and, where a case seeds one, a fake
 // Jev. The cases are about check-fix: Jev's clear yes on every targeted finding ends a fix round without an agent
-// session, anything else leaves it to the agent, with Jev's answers as its hint.
+// session, anything else leaves it to the agent, with Jev's answers as its hint. One case is about the tickets it files.
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../src/engine/journal';
 import { readEvents } from '../src/events/consumers/ndjson';
 import type { Summary } from '../src/events/summary';
+import { seedHarness } from './helpers/fixture';
 import { onlyRun } from './helpers/groom-fixture';
 import { nouls, writeOwnSail } from './helpers/own-sail';
 import { runCaptured } from './helpers/run-captured';
@@ -112,5 +113,27 @@ test('with no adapters.jev, check-fix runs beside validate every round as the fa
     expect(keys.filter((key) => key.startsWith('jev-fix#'))).toEqual(['jev-fix#1', 'jev-fix#2']);
     expect([jevHint(dir, 'check-fix', 1).asked, jevHint(dir, 'check-fix', 1).answers]).toEqual([false, []]);
     expect(readEvents(dir).filter((event) => event.type === 'jev:asked')).toEqual([]);
+  });
+}, 120_000);
+
+test('a low-severity finding the judge sends to a ticket is not filed, and a medium one is', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo);
+    const sail = join(repo.dir, '.sail');
+    const [answer] = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8')).judge;
+    const r4 = answer.output.decisions.find((each: { finding: string }) => each.finding === 'R4');
+    Object.assign(r4, {
+      verdict: 'ticket',
+      ticket: { title: 'Rename tot', description: 'A terse name.', type: 'refactoring', trigger: 'reading show.ts' },
+    });
+    seedHarness(sail, 'judge', [answer]);
+    const { code, stderr, dir } = await review(repo);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+
+    const folder = readdirSync(dir).find((name) => name.endsWith('-file-follow-ups'));
+    const output = JSON.parse(readFileSync(join(dir, folder ?? '', 'call-1', 'result.json'), 'utf8')).output;
+    expect(output.filed.map((each: { title: string }) => each.title)).toEqual([
+      'sail runs sums call costs without rounding',
+    ]);
   });
 }, 120_000);

@@ -14,7 +14,7 @@ import { edit, seedHarness } from './helpers/fixture';
 import { fakeTicket, onlyRun, writeGroomRepo } from './helpers/groom-fixture';
 import { runCaptured } from './helpers/run-captured';
 import { sail } from './helpers/sail-process';
-import { withTempRepo } from './helpers/temp-repo';
+import { type TempRepo, withTempRepo } from './helpers/temp-repo';
 
 const RUN = ['FAKE-2', '--workflow', 'groom'];
 
@@ -350,7 +350,7 @@ test('groom cancels a ticket the worth check gave cancel at the threshold, and l
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
     reseed(sailDir, 'worth', (output) => {
-      Object.assign(output, { verdict: 'cancel', confidence: 0.8 });
+      Object.assign(output, { verdict: 'cancel', confidence: 0.6 });
     });
     reseed(sailDir, 'decide', (output) => {
       output.actions = [{ kind: 'cancel', reason: 'a tidy-up nobody would notice' }];
@@ -392,13 +392,72 @@ test('groom reports, never applies, a cancel the checks do not back', async () =
 
     expect(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe('unstarted');
     expect(lastComment(repo.dir)).toContain(
-      '- reported, not marked: cancel (the worth check gave keep at 0.70, and the ticket is not stale)',
+      '- reported, not marked: cancel (the worth check gave keep at 0.70, at or over 0.60, and the ticket is not stale)',
     );
     expect(readEvents(onlyRun(repo.dir)).map((event) => event.type)).not.toContain('ticket:updated');
   });
 }, 120_000);
 
+/** Runs groom with the worth check at `verdict` and `confidence`, FAKE-2 labelled `code-review` when `fromReview`. */
+async function cancelWith(repo: TempRepo, verdict: string, confidence: number, fromReview = false) {
+  const sailDir = writeGroomRepo(repo);
+  if (fromReview) edit(sailDir, 'fake/tickets.json', '"labels": ["groom"]', '"labels": ["groom", "code-review"]');
+  reseed(sailDir, 'worth', (output) => {
+    Object.assign(output, { verdict, confidence });
+  });
+  reseed(sailDir, 'decide', (output) => {
+    output.actions = [{ kind: 'cancel', reason: 'no case for it' }];
+  });
+  const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+  expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+  return fakeTicket(repo.dir, 'FAKE-2').state.type;
+}
+
+test.each([
+  ['a cancel at 0.59', 'cancel', 0.59, false, 'unstarted'],
+  ['a keep under 0.60', 'keep', 0.59, false, 'canceled'],
+  ['a keep at 0.60', 'keep', 0.6, false, 'unstarted'],
+  ['a cancel at 0.50 on a code-review ticket', 'cancel', 0.5, true, 'canceled'],
+  ['a cancel at 0.49 on a code-review ticket', 'cancel', 0.49, true, 'unstarted'],
+  ['a keep at 0.69 on a code-review ticket', 'keep', 0.69, true, 'canceled'],
+  ['a keep at 0.70 on a code-review ticket', 'keep', 0.7, true, 'unstarted'],
+])(
+  'with the worth check giving %s, the judge asking for a cancel leaves FAKE-2 %s',
+  async (_name, verdict, confidence, fromReview, state) => {
+    await withTempRepo(async (repo) => {
+      expect<string>(await cancelWith(repo, verdict as string, confidence as number, fromReview as boolean)).toBe(
+        state as string,
+      );
+    });
+  },
+  120_000,
+);
+
 const MERGED = 'Print the total.\n\n## Merged from FAKE-2\n\nShow the cost total.';
+
+test.each([
+  ['the worth check names FAKE-1 at 0.65', 0.65, 0.6, 'canceled'],
+  ['the duplicates check alone names FAKE-1 at 0.79', 0.3, 0.79, 'unstarted'],
+  ['the duplicates check alone names FAKE-1 at 0.80', 0.3, 0.8, 'canceled'],
+])(
+  'when %s, a merge of FAKE-2 into FAKE-1 leaves FAKE-2 %s',
+  async (_name, worth, jev, state) => {
+    await withTempRepo(async (repo) => {
+      const sailDir = writeGroomRepo(repo);
+      seedDuplicate(sailDir, jev as number);
+      reseed(sailDir, 'worth', (output) => {
+        output.merges = [{ ticketKey: 'FAKE-1', confidence: worth, why: 'one footer line' }];
+      });
+      reseed(sailDir, 'decide', (output) => {
+        output.actions = [{ kind: 'merge', into: 'FAKE-1', absorb: ['FAKE-2'], description: MERGED }];
+      });
+      const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
+      expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+      expect<string>(fakeTicket(repo.dir, 'FAKE-2').state.type).toBe(state as string);
+    });
+  },
+  120_000,
+);
 
 test('groom merges the ticket into another the worth check named: the survivor takes the description, the ticket is canceled as its duplicate', async () => {
   await withTempRepo(async (repo) => {
@@ -445,7 +504,7 @@ test('groom reports a merge under the threshold, and one that would absorb a sta
     expect(fakeTicket(repo.dir, 'FAKE-1').description).not.toBe(MERGED);
     const comment = lastComment(repo.dir);
     expect(comment).toContain(
-      '- reported, not marked: merge of FAKE-2 into FAKE-1 (FAKE-1 at confidence 0.60, under 0.80)',
+      '- reported, not marked: merge of FAKE-2 into FAKE-1 (FAKE-1 at worth 0.60, under 0.65; duplicates 0.60, under 0.80)',
     );
     expect(comment).toContain('- reported, not marked: merge of FAKE-1 into FAKE-2 (FAKE-1 started or an epic)');
   });

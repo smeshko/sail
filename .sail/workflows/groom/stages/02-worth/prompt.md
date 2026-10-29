@@ -17,7 +17,10 @@ Give `cancel` when the ticket is not worth doing on its own and no other ticket 
 - a test for code with no reported failure, or a test that only restates what another already proves
 - anything so small that writing it up cost more than doing it would
 
-Give `keep` otherwise. A real bug is kept however small; a missing feature that someone asked for is kept.
+Give `keep` only when you can name what makes it worth doing: the failure and the path that reaches it, the person or
+ticket that asked for the behaviour, or the measured cost. Put that in `why`. A real bug is kept however small; a missing
+feature that someone asked for is kept. A ticket you can't make that case for is a `cancel`, and a ticket a review filed
+(labelled `code-review`) has no person behind it, so it needs the case made from the code alone.
 
 ## Merge
 
@@ -32,8 +35,10 @@ For each, give its `ticketKey`, a one-sentence `why`, and a confidence from 0 to
 - 0.6 to 0.9: very likely, but you have only the titles and descriptions to go on.
 - under 0.6: the same area, probably separate work.
 
-Be calibrated: a confidence of 0.8 or more on the verdict cancels the ticket, and on a merge lets the judge merge the
-tickets, so give it only when you would do so yourself. List no ticket you would put under 0.3.
+Be calibrated, because the numbers act. A `cancel` at 0.6 or more lets the judge cancel the ticket, and so does a
+`keep` under 0.6: a keep you are unsure of is no case for keeping. For a ticket labelled `code-review` the bars are a
+`cancel` at 0.5 and a `keep` under 0.7. A merge at 0.65 or more lets the judge merge the tickets. Give each number as
+you would act on it yourself. List no ticket you would put under 0.3.
 
 You only read. Don't change any file.
 
