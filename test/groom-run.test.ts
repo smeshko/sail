@@ -30,13 +30,9 @@ test('a groom run on fakes reads FAKE-2 unclaimed, comments the report and swaps
     expect(keys[0]).toBe('intake#1');
     expect(keys.slice(1, 5).sort()).toEqual(['duplicates#1', 'questions#1', 'staleness#1', 'worth#1']);
     expect(keys.slice(5)).toEqual(['decide#1', 'act#1']);
-    const { entry, asked } = duplicatesCall(dir);
-    expect(entry.output).toEqual({
+    expect(duplicatesCall(dir).output).toEqual({
       candidates: [{ ticketKey: 'FAKE-1', confidence: 0.6, why: expect.any(String) }],
     });
-    expect(
-      asked.map((event) => [(event as { key?: string }).key, (event as { questions?: number }).questions]),
-    ).toEqual([['duplicates#1', 1]]);
 
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.state).toEqual({ type: 'unstarted', name: 'Backlog' });
@@ -130,20 +126,19 @@ const NEW_TITLE = "Show the run's total cost in sail show's footer";
 /** The comment groom left on FAKE-2: its last. */
 const lastComment = (repoDir: string) => fakeTicket(repoDir, 'FAKE-2').comments.at(-1)?.body ?? '';
 
-/** Reseeds the fake Jev's answer for FAKE-1, the one question the duplicates stage asks, with `noul`. */
-function seedDuplicate(sailDir: string, noul: number): void {
-  const path = join(sailDir, 'fake', 'jev.json');
-  const seed = JSON.parse(readFileSync(path, 'utf8'));
-  seed.answers['FAKE-1'].noul = noul;
-  writeFileSync(path, `${JSON.stringify(seed, null, 2)}\n`);
+/** Reseeds the duplicates check's answer: FAKE-1 named at `confidence`, or no ticket named without one. */
+function seedDuplicate(sailDir: string, confidence?: number): void {
+  const [answer] = JSON.parse(readFileSync(join(sailDir, 'fake', 'harness.json'), 'utf8')).duplicates;
+  answer.output.candidates =
+    confidence === undefined ? [] : [{ ticketKey: 'FAKE-1', confidence, why: 'the same footer total' }];
+  seedHarness(sailDir, 'duplicates', [answer]);
 }
 
-/** The duplicates call's journal entry, and the events the run left under its key. */
+/** The duplicates call's journal entry. */
 function duplicatesCall(runDir: string) {
   const entry = readJournal(runDir).entries.find((each) => each.key === 'duplicates#1');
   if (entry === undefined) throw new Error('no duplicates#1 in the journal');
-  const asked = readEvents(runDir).filter((event) => event.type === 'jev:asked');
-  return { entry, asked };
+  return entry;
 }
 
 test("groom applies the judge's edit and reports a duplicate under the threshold without marking it", async () => {
@@ -234,11 +229,11 @@ test('groom marks a duplicate the check named at exactly the threshold', async (
 test('groom reports, never marks, a duplicate of a ticket the check did not name', async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
-    seedDuplicate(sailDir, 0.1);
+    seedDuplicate(sailDir);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
-    expect(duplicatesCall(onlyRun(repo.dir)).entry.output).toEqual({ candidates: [] });
+    expect(duplicatesCall(onlyRun(repo.dir)).output).toEqual({ candidates: [] });
     const ticket = fakeTicket(repo.dir, 'FAKE-2');
     expect(ticket.state.type).toBe('unstarted');
     expect(ticket.links).toEqual([]);
@@ -441,10 +436,10 @@ test.each([
   ['the duplicates check alone names FAKE-1 at 0.80', 0.3, 0.8, 'canceled'],
 ])(
   'when %s, a merge of FAKE-2 into FAKE-1 leaves FAKE-2 %s',
-  async (_name, worth, jev, state) => {
+  async (_name, worth, duplicate, state) => {
     await withTempRepo(async (repo) => {
       const sailDir = writeGroomRepo(repo);
-      seedDuplicate(sailDir, jev as number);
+      seedDuplicate(sailDir, duplicate as number);
       reseed(sailDir, 'worth', (output) => {
         output.merges = [{ ticketKey: 'FAKE-1', confidence: worth, why: 'one footer line' }];
       });
@@ -574,34 +569,7 @@ test("groom's intake names the sail port command when sail can't start, rather t
   });
 });
 
-/** The request the duplicates stage wrote, read from the file the journal records for the call. */
-function duplicatesRequest(runDir: string): { state: Record<string, unknown>; questions: Record<string, unknown> } {
-  const { entry } = duplicatesCall(runDir);
-  return JSON.parse(readFileSync(join(runDir, entry.files['request.json'] as string), 'utf8'));
-}
-
-test("groom's duplicates stage leaves the ticket itself out of what it asks Jev", async () => {
-  await withTempRepo(async (repo) => {
-    const sailDir = writeGroomRepo(repo);
-    seedDuplicate(sailDir, 0.1);
-    const path = join(sailDir, 'fake', 'jev.json');
-    const seed = JSON.parse(readFileSync(path, 'utf8'));
-    seed.answers['FAKE-2'] = { type: 'noul', noul: 1 };
-    writeFileSync(path, JSON.stringify(seed));
-    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
-    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
-
-    const dir = onlyRun(repo.dir);
-    const request = duplicatesRequest(dir);
-    expect(Object.keys(request.questions)).toEqual(['FAKE-1']);
-    const state = JSON.stringify(request.state);
-    expect(state).toContain('<untrusted-input source=\\"ticket FAKE-1, title\\">');
-    expect(state).toContain('<untrusted-input source=\\"ticket FAKE-2, description\\">');
-    expect(duplicatesCall(dir).entry.output).toEqual({ candidates: [] });
-  });
-}, 120_000);
-
-test("groom's duplicates stage asks about and returns a started ticket", async () => {
+test("groom's duplicates check searches a started ticket among the others", async () => {
   await withTempRepo(async (repo) => {
     const sailDir = writeGroomRepo(repo);
     edit(
@@ -611,88 +579,13 @@ test("groom's duplicates stage asks about and returns a started ticket", async (
       '"type": "started",\n        "name": "In Progress"',
     );
     repo.git('commit', '-am', 'FAKE-1 is started');
-    seedDuplicate(sailDir, 0.95);
     const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
     expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
 
-    const dir = onlyRun(repo.dir);
-    expect(Object.keys(duplicatesRequest(dir).questions)).toEqual(['FAKE-1']);
-    expect(duplicatesCall(dir).entry.output).toEqual({
-      candidates: [{ ticketKey: 'FAKE-1', confidence: 0.95, why: expect.any(String) }],
-    });
-    expect(duplicatesCall(dir).asked).toHaveLength(1);
-  });
-}, 120_000);
-
-test("groom's duplicates stage includes 0.5, excludes 0.49 and orders candidates highest first", async () => {
-  await withTempRepo(async (repo) => {
-    const sailDir = writeGroomRepo(repo);
-    const ticketsPath = join(sailDir, 'fake', 'tickets.json');
-    const tickets = JSON.parse(readFileSync(ticketsPath, 'utf8'));
-    for (const ticketKey of ['FAKE-3', 'FAKE-4']) {
-      tickets.tickets.push({ ...tickets.tickets[0], ticketKey });
-    }
-    writeFileSync(ticketsPath, JSON.stringify(tickets));
-    repo.git('commit', '-am', 'Add two open tickets');
-    const jevPath = join(sailDir, 'fake', 'jev.json');
-    const seed = JSON.parse(readFileSync(jevPath, 'utf8'));
-    seed.answers = {
-      'FAKE-1': { type: 'noul', noul: 0.5 },
-      'FAKE-3': { type: 'noul', noul: 0.9 },
-      'FAKE-4': { type: 'noul', noul: 0.49 },
-    };
-    writeFileSync(jevPath, JSON.stringify(seed));
-    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
-    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
-
-    const dir = onlyRun(repo.dir);
-    expect(Object.keys(duplicatesRequest(dir).questions).sort()).toEqual(['FAKE-1', 'FAKE-3', 'FAKE-4']);
-    expect(duplicatesCall(dir).entry.output).toEqual({
-      candidates: [
-        { ticketKey: 'FAKE-3', confidence: 0.9, why: expect.any(String) },
-        { ticketKey: 'FAKE-1', confidence: 0.5, why: expect.any(String) },
-      ],
-    });
-  });
-}, 120_000);
-
-test("groom's duplicates stage excerpts other descriptions at 600 characters inside the untrusted wrapper", async () => {
-  await withTempRepo(async (repo) => {
-    const sailDir = writeGroomRepo(repo);
-    const path = join(sailDir, 'fake', 'tickets.json');
-    const seed = JSON.parse(readFileSync(path, 'utf8'));
-    const prefix = 'a'.repeat(600);
-    seed.tickets[0].description = `${prefix}DO NOT INCLUDE THIS TAIL`;
-    writeFileSync(path, JSON.stringify(seed));
-    repo.git('commit', '-am', 'FAKE-1 has a long description');
-    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
-    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
-
-    const request = duplicatesRequest(onlyRun(repo.dir));
-    const others = request.state.others as Record<string, { description: string }>;
-    expect(others['FAKE-1']?.description).toBe(
-      `<untrusted-input source="ticket FAKE-1, description">\n${prefix}…\n</untrusted-input>`,
-    );
-  });
-}, 120_000);
-
-test("groom's duplicates stage asks Jev nothing when no other ticket is open", async () => {
-  await withTempRepo(async (repo) => {
-    const sailDir = writeGroomRepo(repo);
-    edit(
-      sailDir,
-      'fake/tickets.json',
-      '"type": "unstarted",\n        "name": "Todo"',
-      '"type": "completed",\n        "name": "Done"',
-    );
-    repo.git('commit', '-am', 'FAKE-1 is done');
-    const { code, stderr } = await runCaptured(RUN, repo.dir, { env: repo.env });
-    expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
-
-    const dir = onlyRun(repo.dir);
-    const { entry, asked } = duplicatesCall(dir);
-    expect(asked).toEqual([]);
-    expect(entry.output).toEqual({ candidates: [] });
-    expect(readStatus(dir)).toEqual({ status: 'completed' });
+    const call = join(onlyRun(repo.dir), '01-duplicates', 'call-1');
+    const others = readFileSync(join(call, 'in', 'others.md'), 'utf8');
+    expect(others).toContain('## FAKE-1');
+    expect(others).toContain('In Progress');
+    expect(readFileSync(join(call, 'prompt.md'), 'utf8')).toContain(join(call, 'in', 'others.md'));
   });
 }, 120_000);
