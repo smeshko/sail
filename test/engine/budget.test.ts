@@ -188,6 +188,39 @@ function observe(tracker: BudgetTracker, from: number, ...list: NewEvent[]): voi
   }
 }
 
+test('minutesLeftMs is undefined with only a dollar budget', () => {
+  expect(tracked({ maxUsd: 1 }).tracker.minutesLeftMs()).toBeUndefined();
+});
+
+test('minutesLeftMs subtracts earlier minutes and this process elapsed time', () => {
+  const prior = events(
+    [0, runStart({ maxMinutes: 3 })],
+    [MINUTE, runEnd('suspended', 1, { stopReason: 'interrupted' })],
+  );
+  const { tracker, world } = tracked({ maxMinutes: 3 }, prior);
+  world.now = 30_000;
+  expect(tracker.minutesLeftMs()).toBe(90_000);
+});
+
+test('minutesLeftMs is zero once the minute budget is used up', () => {
+  const { tracker, world } = tracked({ maxMinutes: 1 });
+  world.now = 120_000;
+  expect(tracker.minutesLeftMs()).toBe(0);
+});
+
+test('minutesLeftMs reads the raised minute budget', () => {
+  const { tracker } = tracked({ maxMinutes: 1 });
+  tracker.raise({ minutes: 2 });
+  expect(tracker.minutesLeftMs()).toBe(180_000);
+});
+
+test('suspension places a minute budget end during the replay', () => {
+  expect(suspension({ budget: 'minutes', limit: 1, used: 1 }, 'the replay', 'during')).toEqual({
+    event: { type: 'run:suspended', stopReason: 'budget_exceeded', budget: 'minutes', limit: 1, used: 1 },
+    message: '1 of its 1 minutes used during the replay: raise it with --raise-minutes <minutes>',
+  });
+});
+
 test('a run with no budget gets no tracker, and a run with one does', () => {
   const options = { prior: [], emit: (event: NewEvent) => event as SailEvent, record: () => {}, elapsed: () => 0 };
   expect([trackBudget({ ...options, budget: undefined }), trackBudget({ ...options, budget: { maxUsd: 1 } })]).toEqual([

@@ -8,7 +8,7 @@ import { readStatus } from '../../src/engine/run-dir';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { copyFixture, edit } from '../helpers/fixture';
-import { interruptWhenAsleep, stubExecutions, writeStub } from '../helpers/stub-workflow';
+import { interruptWhenAsleep, STUB_SPEC_CALL, stubExecutions, writeStub } from '../helpers/stub-workflow';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
@@ -16,6 +16,110 @@ const shim = join(import.meta.dir, '..', '..', 'src', 'cli', 'main.ts');
 /** The repository's one run: the entry of `.sail-runs/` that isn't `fake/`, where the fake adapters keep their state. */
 const runIdIn = (repoDir: string): string =>
   readdirSync(join(repoDir, '.sail-runs')).filter((name) => name !== 'fake')[0] ?? '';
+
+/** Runs a workflow with a live interval, bounding even the pre-fix process that never exits. */
+async function withOpenHandle(hang: boolean, minutes: number, interrupt = false) {
+  return withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(
+      sail,
+      'project.yaml',
+      'budgets: { run: { maxUsd: 25, maxMinutes: 90 } }',
+      `budgets: { run: { maxMinutes: ${minutes} } }`,
+    );
+    // sail check's workflow globals omit timers; declare the runtime's real timer for this fixture.
+    edit(
+      sail,
+      'workflows/ticket-to-pr/workflow.ts',
+      "import { workflow } from 'sail';",
+      "import { workflow } from 'sail';\ndeclare function setInterval(callback: () => void, ms: number): unknown;",
+    );
+    edit(
+      sail,
+      'workflows/ticket-to-pr/workflow.ts',
+      STUB_SPEC_CALL,
+      `  setInterval(() => {}, 1000);\n${hang ? '  await new Promise<void>(() => {});\n' : ''}${STUB_SPEC_CALL}`,
+    );
+    const child = Bun.spawn([process.execPath, shim, 'FAKE-1'], {
+      cwd: repo.dir,
+      env: repo.env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const stdout = new Response(child.stdout).text();
+    const stderr = new Response(child.stderr).text();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const code = await Promise.race([
+        (async () => {
+          if (interrupt) {
+            while (true) {
+              const root = join(repo.dir, '.sail-runs');
+              const id = existsSync(root) ? runIdIn(repo.dir) : '';
+              const journal = join(root, id, 'journal.ndjson');
+              if (
+                id &&
+                existsSync(journal) &&
+                readJournal(join(root, id)).entries.some((entry) => entry.key === 'intake#1')
+              )
+                break;
+              await Bun.sleep(20);
+            }
+            await Bun.sleep(100);
+            child.kill('SIGINT');
+          }
+          return child.exited;
+        })(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('shim did not exit within ten seconds')), 10_000);
+        }),
+      ]);
+      expect(await stderr).toBe('');
+      return {
+        code,
+        stdout: await stdout,
+        stderr: await stderr,
+        status: readStatus(join(repo.dir, '.sail-runs', runIdIn(repo.dir))),
+        runId: runIdIn(repo.dir),
+      };
+    } finally {
+      clearTimeout(timer);
+      child.kill();
+      await child.exited;
+    }
+  });
+}
+
+test('the shim exits 0 once the run completes, though the workflow left an interval running', async () => {
+  const result = await withOpenHandle(false, 90);
+  expect({ code: result.code, stderr: result.stderr, status: result.status }).toEqual({
+    code: 0,
+    stderr: '',
+    status: { status: 'completed' },
+  });
+});
+
+test('the shim exits 2 once the minute budget ends a replay that hangs, though the workflow holds a timer open', async () => {
+  const result = await withOpenHandle(true, 0.01);
+  expect({ code: result.code, stderr: result.stderr, status: result.status }).toEqual({
+    code: 2,
+    stderr: '',
+    status: { status: 'suspended', stopReason: 'budget_exceeded' },
+  });
+  expect(result.stdout).toContain('  stop     budget_exceeded: ');
+  expect(result.stdout).toContain('minutes used during the replay: raise it with --raise-minutes <minutes>');
+  expect(result.stdout).toEndWith(`resume it with: sail resume ${result.runId} --raise-minutes <minutes>\n`);
+});
+
+test('SIGINT during a replay that hangs suspends the run and the shim exits 2, though the workflow holds a timer open', async () => {
+  const result = await withOpenHandle(true, 90, true);
+  expect({ code: result.code, stderr: result.stderr, status: result.status }).toEqual({
+    code: 2,
+    stderr: '',
+    status: { status: 'suspended', stopReason: 'interrupted' },
+  });
+  expect(result.stdout).toContain('  stop     interrupted: stopped during the replay');
+});
 
 test('bun runs the shim from another directory', async () => {
   await withTempRepo((repo) => {
