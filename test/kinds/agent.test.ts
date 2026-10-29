@@ -187,6 +187,12 @@ test("problems() refuses a produced name that differs from an engine file's only
   ]);
 });
 
+test('problems() refuses two produced names that differ only by case', () => {
+  expect(agentKind.problems(spec({ produces: { 'Notes.md': 'file', 'notes.md': 'file' } }))).toEqual([
+    "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
+  ]);
+});
+
 test('problems() reports a produced name the engine writes, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
   expect(agentKind.kind).toBe('agent');
   expect(agentKind.problems(spec())).toEqual([]);

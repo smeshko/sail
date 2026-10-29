@@ -53,11 +53,12 @@
 // the abort and the control file: a run that has used it up is suspended with `budget_exceeded`, `run:suspended` then
 // STATUS then `run:end`, keeping its workspace and lease. Within a multi-step call it is checked again after each step
 // that passed with another to follow: once used up, the call stops there unjournaled, and the check before it suspends
-// the run. A resume given a raise records it as `budget:raised` before anything runs.
+// the run. Each replay also races the remaining minutes, suspending even when workflow code awaits forever between
+// calls. A resume given a raise records it as `budget:raised` before anything runs.
 //
 // An abort stops the running call and suspends the run with `interrupted`. The interrupted call is left unjournaled, so
 // a resume runs it again as its next try. An abort also stops a replay that hangs in the workflow's own code, since
-// Ctrl-C no longer ends the process once sail listens for it. One seen while a fresh run is being opened, before its
+// Ctrl-C no longer directly ends the process once sail listens for it. One seen while a fresh run is being opened, before its
 // workspace is made, refuses the start instead: nothing was written, so there is no run to suspend.
 //
 // A call (or a step of one) that hit the provider's usage limit suspends the run with `usage_limit`, `run:suspended`
@@ -88,8 +89,8 @@
 // `run:start` for a fresh run, `journal:append` for each call it journals, `run:end` once STATUS says how the run
 // ended, and `error:crash` before an exception inside sail propagates. The call emits its own events, and the replay
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
-// `run:end` ends the stream: a replay an abort abandoned may move on once its workflow stops waiting, since the CLI
-// only sets an exit code, but nothing it reports after that is emitted.
+// `run:end` ends the stream: a replay abandoned by an interrupt or budget may move on once its workflow stops waiting,
+// but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
 import { dirname, join, relative } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer, readEvents } from '../events/consumers/ndjson';
@@ -328,23 +329,45 @@ function finishedSteps(
 }
 
 /**
- * How the replay ended, or undefined when `signal` aborted while it hung in the workflow's own code. The abort only wins
- * a task later: a replay settles in microtasks, so one that ends the run still ends it when the abort came first.
+ * Races the replay against an interrupt and its minute budget. Both stops win only a task later, so a replay that
+ * settles in microtasks still ends its own way. A timer that fires early re-arms from the tracker's remaining time.
  */
-function unlessAborted(replaying: Promise<ReplayEnd>, signal: AbortSignal | undefined): Promise<ReplayEnd | undefined> {
-  if (signal === undefined) return replaying;
-  return new Promise((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const abandon = () => {
-      timer = setTimeout(() => resolve(undefined), 0);
-    };
-    if (signal.aborted) abandon();
-    else signal.addEventListener('abort', abandon, { once: true });
-    replaying.then(resolve, reject).finally(() => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', abandon);
-    });
-  });
+async function unlessStopped(
+  replaying: Promise<ReplayEnd>,
+  signal: AbortSignal | undefined,
+  tracker: BudgetTracker | undefined,
+): Promise<ReplayEnd | { stopped: 'interrupted' | 'budget' }> {
+  let interruptTimer: ReturnType<typeof setTimeout> | undefined;
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  let abandon = () => {};
+  try {
+    return await Promise.race([
+      replaying,
+      new Promise<{ stopped: 'interrupted' | 'budget' }>((resolve) => {
+        abandon = () => {
+          interruptTimer = setTimeout(() => resolve({ stopped: 'interrupted' }), 0);
+        };
+        if (signal?.aborted) abandon();
+        else signal?.addEventListener('abort', abandon, { once: true });
+        const arm = () => {
+          const left = tracker?.minutesLeftMs();
+          if (left === undefined) return;
+          budgetTimer = setTimeout(
+            () => {
+              if (tracker?.over() !== undefined) resolve({ stopped: 'budget' });
+              else arm();
+            },
+            Math.min(left, 2 ** 31 - 1),
+          );
+        };
+        arm();
+      }),
+    ]);
+  } finally {
+    clearTimeout(interruptTimer);
+    clearTimeout(budgetTimer);
+    signal?.removeEventListener('abort', abandon);
+  }
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -510,11 +533,11 @@ async function drive(
   const suspended = (stopReason: 'interrupted' | 'until' | 'unwatched', message: string): Promise<RunEnd> =>
     finish({ runId, dir, status: 'suspended', stopReason, message });
   /** How the run ends at the boundary before `key` once it has used up its budget, or undefined to go on. */
-  const overBudget = (key: string): Promise<RunEnd> | undefined => {
+  const overBudget = (key: string, when?: 'before' | 'during'): Promise<RunEnd> | undefined => {
     tracker?.assertRecorded();
     const over = tracker?.over();
     if (over === undefined) return undefined;
-    const { event, message } = suspension(over, key);
+    const { event, message } = suspension(over, key, when);
     bus.emit(event);
     return finish({ runId, dir, status: 'suspended', stopReason: 'budget_exceeded', message, budget: over.budget });
   };
@@ -763,8 +786,13 @@ async function drive(
         intake: journaledIntake,
         emit: replayEmit,
       });
-      const end = await unlessAborted(replaying, signal);
-      if (end === undefined) return await interrupted('stopped during the replay');
+      const end = await unlessStopped(replaying, signal, tracker);
+      if ('stopped' in end) {
+        if (end.stopped === 'interrupted') return await interrupted('stopped during the replay');
+        const budgetEnd = overBudget('the replay', 'during');
+        if (budgetEnd === undefined) throw new Error('replay stopped without an exceeded budget');
+        return await budgetEnd;
+      }
       // Every step line belongs to a call the journal holds, or to one the workflow asks for now.
       const asked = new Set(end.kind === 'call' ? [end.call.key] : end.kind === 'group' ? end.keys : []);
       const held = new Set(entries.map((entry) => entry.key));

@@ -5,9 +5,9 @@
 // of the worktree and the lease, and a clone that is as it was. Every `sail` is a process of its own, spawned with the
 // repository's env: a script step's `sail port` calls inherit that process's environment. Both keys are markers.
 //
-// One run per repository: the cases that read what a completed run left share one, and the refused claim has a
-// repository of its own.
-import { afterAll, expect, test } from 'bun:test';
+// One run per repository: the cases that read what a completed run left share one, started in beforeAll under its
+// own timeout before any case runs. The refused claim has a repository of its own.
+import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
@@ -162,7 +162,7 @@ interface Ran extends Clone {
 let release = (): void => {};
 let shared: Promise<Ran> | undefined;
 
-/** `sail ADW-1` in a clone on every real adapter, run once and kept until the file's last case. */
+/** `sail ADW-1` in a clone on every real adapter, started once in beforeAll and kept until the file's last case. */
 function firstRun(): Promise<Ran> {
   shared ??= new Promise<Ran>((resolve, reject) => {
     withClone(async (clone) => {
@@ -177,10 +177,15 @@ function firstRun(): Promise<Ran> {
   });
   return shared;
 }
+// Spawn once before any case so no case pays for it; failures surface in each case's completed().
+beforeAll(async () => {
+  await firstRun().catch(() => undefined);
+}, 300_000);
 afterAll(() => release());
 
 /** The shared run, which must have completed. */
 async function completed(): Promise<Ran> {
+  expect(shared).toBeInstanceOf(Promise);
   const ran = await firstRun();
   expect([ran.code, ran.stderr, existsSync(ran.dir) ? readFileSync(join(ran.dir, 'STATUS'), 'utf8') : '']).toEqual([
     EXIT_OK,

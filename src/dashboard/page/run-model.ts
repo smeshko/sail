@@ -65,6 +65,8 @@ export interface TimelineTool {
 
 /** A script's command on a timeline, with its exit once it has one: its duration, and its code or the signal that ended it. */
 export interface TimelineScript {
+  /** The step named by the command's event key, absent for a single-step call. */
+  step?: string;
   kind: 'script';
   ts: string;
   command: string;
@@ -593,7 +595,7 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
     case 'script:exec': {
       const command = str(e.command);
       if (card === undefined || command === undefined) return false;
-      card.timeline.push({ kind: 'script', ts, command });
+      card.timeline.push({ kind: 'script', ts, command, ...(key?.includes('/') ? { step: key.split('/')[1] } : {}) });
       return true;
     }
     case 'script:exit': {

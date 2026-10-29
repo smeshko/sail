@@ -5,7 +5,7 @@ import { detectTty } from './tty';
 
 const tty = detectTty(process.stdout, process.env);
 
-process.exitCode = await run(process.argv.slice(2), {
+const code = await run(process.argv.slice(2), {
   cwd: process.cwd(),
   stdout: quietOnClosedPipe(process.stdout),
   stderr: quietOnClosedPipe(process.stderr),
@@ -21,3 +21,9 @@ process.exitCode = await run(process.argv.slice(2), {
   stdin: () => Bun.stdin.text(),
   ...(tty === undefined ? {} : { tty }),
 });
+
+// Workflow code may still hold timers or I/O handles open after the command ends.
+await Promise.all(
+  [process.stdout, process.stderr].map((stream) => new Promise<void>((resolve) => stream.write('', () => resolve()))),
+);
+process.exit(code);

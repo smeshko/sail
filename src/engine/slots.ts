@@ -1,15 +1,13 @@
-// Exclusive slots: one file per slot name in the selected machine directory's `slots/`
+// Exclusive slots: one pid-held file per slot name in the selected machine directory's `slots/`
 // (`$SAIL_HOME/slots/`, or `~/.sail/slots/`), so a heavy script step runs only while no other step sharing that directory
-// holds its name. Different machine directories have independent slots. A slot is stale only once its holder's pid is
-// dead, never on a timer.
-//
-// Two accepted risks, as with branch leases: a reused pid makes a dead holder read as alive, so a waiter waits until that
-// process ends; and a holder killed with SIGKILL frees its slot at once while its script's process group may still be
-// running, so two scripts can overlap for a while.
-import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+// holds its name. Different machine directories have independent slots. The shared primitive serialises removals
+// under drop tokens. A slot is stale only once its holder's pid is dead, never on a timer.
+// Accepted risks: a reused pid reads as alive; a SIGKILL frees the slot while its script's process group may live on.
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { machineDir } from './machine-dir';
+import { dropRecord, type PidFileKind, readRecord, takeRecord } from './pid-file';
 import { isAlive } from './process';
 
 export const SlotHolder = z.object({
@@ -31,6 +29,12 @@ export class SlotError extends Error {}
 /** A slot that kept changing hands while it was being taken: contention, so taking it again later may succeed. */
 export class SlotContended extends SlotError {}
 
+const slotKind: PidFileKind<Slot> = {
+  schema: Slot,
+  error: (_, message) => new SlotError(message),
+  tag: (slot) => slot.runId,
+};
+
 /** Where slots live unless a caller names a directory. Computed per call, so importing this reads nothing. */
 export function defaultSlotsDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
   return join(machineDir(env), 'slots');
@@ -40,33 +44,9 @@ export function slotFile(dir: string, name: string): string {
   return join(dir, `${name}.json`);
 }
 
-const unavailable = (path: string, error: unknown): SlotError => new SlotError(`${path}: ${(error as Error).message}`);
-
-function readFile(file: string): Slot | undefined {
-  let text: string;
-  try {
-    text = readFileSync(file, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw unavailable(file, error);
-  }
-  let data: unknown;
-  try {
-    data = JSON.parse(text);
-  } catch (error) {
-    throw unavailable(file, error);
-  }
-  const result = Slot.safeParse(data);
-  if (!result.success) {
-    const [issue] = result.error.issues;
-    throw new SlotError(`${file}: ${issue?.path.join('.')} ${issue?.message}`);
-  }
-  return result.data;
-}
-
 /** The slot `name`, or undefined when there is none. A file that isn't a slot throws a `SlotError` naming it. */
 export function readSlot(dir: string, name: string): Slot | undefined {
-  return readFile(slotFile(dir, name));
+  return readRecord(slotFile(dir, name), slotKind);
 }
 
 /** Whether `slot`'s holder is gone: its pid is dead. */
@@ -74,83 +54,27 @@ export function isStaleSlot(slot: Slot): boolean {
   return !isAlive(slot.pid);
 }
 
-/** Creates `file` holding `slot` all at once, by linking a written temp file to it. False when `file` exists. */
-function create(file: string, slot: Slot): boolean {
-  const tmp = `${file}.${slot.runId}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, `${JSON.stringify(slot)}\n`);
-  } catch (error) {
-    throw unavailable(tmp, error);
-  }
-  try {
-    linkSync(tmp, file);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    throw unavailable(file, error);
-  } finally {
-    rmSync(tmp, { force: true });
-  }
-}
-
-/**
- * Drops the slot in `file` when it is still `read`: moves it aside under a name only this process uses, then checks that
- * what moved is that slot and not one another taker has just written in its place, which is put back.
- */
-function dropIfStill(file: string, read: Slot, runId: string): boolean {
-  const aside = `${file}.${runId}.${process.pid}.aside`;
-  try {
-    renameSync(file, aside);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw unavailable(file, error);
-  }
-  const moved = readFile(aside);
-  const same = moved !== undefined && JSON.stringify(moved) === JSON.stringify(read);
-  if (!same) {
-    try {
-      linkSync(aside, file);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw unavailable(file, error);
-    }
-  }
-  rmSync(aside, { force: true });
-  return same;
-}
-
-/**
- * Gives slot `name` to `holder`: a new slot, or a stale one taken over, with `took` naming the run it replaced. A slot a
- * live holder has is refused, naming it. A takeover replaces only the slot it read.
- */
+/** Gives a free or stale slot to `holder`, with `took` naming the replaced run. Live holders are refused. */
 export function takeSlot(dir: string, name: string, holder: SlotHolder, now = new Date()): SlotResult {
   try {
     mkdirSync(dir, { recursive: true });
   } catch (error) {
-    throw unavailable(dir, error);
+    throw new SlotError(`${dir}: ${(error as Error).message}`);
   }
   const file = slotFile(dir, name);
   const slot: Slot = { name, ...holder, takenAt: now.toISOString() };
-  // A second round only follows another taker winning a step of the first.
-  for (let round = 0; round < 2; round++) {
-    const held = readFile(file);
-    if (held === undefined) {
-      if (create(file, slot)) return { taken: true, slot };
-      continue;
-    }
-    if (!isStaleSlot(held)) return { taken: false, holder: held };
-    if (dropIfStill(file, held, holder.runId) && create(file, slot)) return { taken: true, slot, took: held.runId };
-  }
-  const current = readFile(file);
-  if (current !== undefined) return { taken: false, holder: current };
+  const result = takeRecord(file, slot, slotKind, (held) => !isStaleSlot(held));
+  if (result.taken) return result.took ? { taken: true, slot, took: result.took.runId } : { taken: true, slot };
+  if ('holder' in result) return { taken: false, holder: result.holder };
   throw new SlotContended(`${file}: the slot kept changing hands`);
 }
 
 /** Removes slot `name`, only while it still names `holder`'s run, key and pid. True when it was removed. */
 export function releaseSlot(dir: string, name: string, holder: SlotHolder): boolean {
   const file = slotFile(dir, name);
-  const held = readFile(file);
+  const held = readRecord(file, slotKind);
   if (held === undefined || held.runId !== holder.runId || held.key !== holder.key || held.pid !== holder.pid) {
     return false;
   }
-  return dropIfStill(file, held, holder.runId);
+  return dropRecord(file, held, slotKind);
 }

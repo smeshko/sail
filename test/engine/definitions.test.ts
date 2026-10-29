@@ -418,6 +418,11 @@ test.each([
     "stage 'publish': step 'Describe' has a name outside [a-z0-9-]+",
   ],
   [
+    'two steps producing names that differ only by case',
+    "describe('describe'), open({}, { produces: { 'PR-body.md': 'file' } })",
+    "stage 'publish': steps 'describe' and 'open' produce 'pr-body.md' and 'PR-body.md', and a file system that ignores case takes them for one",
+  ],
+  [
     'two steps producing one file',
     "describe('describe'), open({}, { produces: { 'pr-body.md': 'file' } })",
     "stage 'publish': steps 'describe' and 'open' both produce 'pr-body.md'",

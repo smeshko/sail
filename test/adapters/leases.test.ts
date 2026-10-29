@@ -249,31 +249,25 @@ test('taking a free branch whose link fails with an error other than EEXIST is u
   expect(readdirSync(dir)).toEqual([]);
 });
 
-test("a release that moves aside another taker's lease and can't link it back is unavailable, naming the lease file", () => {
+test("a release whose drop can't remove the lease file is unavailable, naming it, and leaves no drop token", () => {
   const dir = tempDir();
   const file = leaseFile(dir, REMOTE, BRANCH);
   takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW);
-  const realRename = fs.renameSync;
-  const realLink = fs.linkSync;
-  const rename = spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-    if (String(from) === file) writeFileSync(file, JSON.stringify(leaseOf(run('r2', process.pid, 'running'), LATER)));
-    return realRename(from, to);
-  });
-  const link = spyOn(fs, 'linkSync').mockImplementation((from, to) => {
-    if (String(to) === file) throw errno('EIO', 'i/o error, link');
-    return realLink(from, to);
+  const real = fs.rmSync;
+  const remove = spyOn(fs, 'rmSync').mockImplementation((path, options) => {
+    if (String(path) === file) throw errno('EIO', 'i/o error, remove');
+    return real(path, options);
   });
   try {
     const error = caught(() => releaseLease(dir, REMOTE, BRANCH, 'r1'));
-    expect(rename).toHaveBeenCalled();
-    expect(link).toHaveBeenCalled();
     expect(portFailure(error)).toEqual(unavailable);
     expect(messageOf(error)).toStartWith(`workspace.lease: ${file}: `);
     expect(messageOf(error)).toContain('EIO');
   } finally {
-    link.mockRestore();
-    rename.mockRestore();
+    remove.mockRestore();
   }
+  expect(readdirSync(dir)).toEqual([basename(file)]);
+  expect(readLease(dir, REMOTE, BRANCH)?.runId).toBe('r1');
 });
 
 test.skipIf(asRoot)(
@@ -361,7 +355,7 @@ test('two runs racing for one stale lease leave exactly one holder, whom the fil
 const RACE = join(import.meta.dir, '..', 'helpers', 'lease-race.ts');
 
 /** What runs A and B got when B took the lease the moment A had read it, and whom the file names after. */
-async function race(mode: 'release' | 'renew'): Promise<unknown> {
+async function race(mode: 'release' | 'renew' | 'three'): Promise<unknown> {
   const child = Bun.spawn([process.execPath, RACE, mode, tempDir()], { stdout: 'pipe', stderr: 'pipe' });
   const [code, stdout, stderr] = await Promise.all([
     child.exited,
@@ -382,6 +376,42 @@ test('a renewal overtaken by a takeover is refused, naming the new holder, and n
     b: { leased: true, took: 'A' },
     file: 'B',
   });
+});
+
+test('three runs on one stale lease leave exactly one holder', async () => {
+  expect(await race('three')).toEqual({
+    b: { leased: false, holder: 'C' },
+    c: { leased: true, took: 'A' },
+    d: { leased: false, holder: 'C' },
+    file: 'C',
+  });
+});
+
+test('a lease that kept changing hands is a conflict', () => {
+  const dir = tempDir();
+  const file = leaseFile(dir, REMOTE, BRANCH);
+  const real = fs.linkSync;
+  const link = spyOn(fs, 'linkSync').mockImplementation((from, to) => {
+    if (String(to) === file) throw errno('EEXIST', 'exists');
+    return real(from, to);
+  });
+  try {
+    const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'running'), NOW));
+    expect(portFailure(error)).toEqual({ port: 'workspace', op: 'lease', code: 'conflict' });
+    expect(messageOf(error)).toBe(`workspace.lease: ${REMOTE} ${BRANCH}: the lease kept changing hands`);
+  } finally {
+    link.mockRestore();
+  }
+});
+
+test('a live drop token gives a lease conflict naming remote and branch', () => {
+  const dir = tempDir();
+  takeLease(dir, REMOTE, BRANCH, run('r1', process.pid, 'completed'), NOW);
+  writeFileSync(`${leaseFile(dir, REMOTE, BRANCH)}.drop`, JSON.stringify({ pid: process.pid, nonce: 'live' }));
+  const error = caught(() => takeLease(dir, REMOTE, BRANCH, run('r2', process.pid, 'running'), NOW));
+  expect(portFailure(error)).toEqual({ port: 'workspace', op: 'lease', code: 'conflict' });
+  expect(messageOf(error)).toBe(`workspace.lease: ${REMOTE} ${BRANCH}: the lease kept changing hands`);
+  expect(readLease(dir, REMOTE, BRANCH)?.runId).toBe('r1');
 });
 
 test('two branches of one remote, and one branch of two remotes, lease apart', () => {

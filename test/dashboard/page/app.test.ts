@@ -755,6 +755,82 @@ test("a file name opens the drawer with the file's markdown as HTML, another fil
   expect(page.ui.file).toBeUndefined();
 });
 
+test("opening a multi-step call's script command reads its step's stdout and stderr by step key", async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, GOLDEN(), false);
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  const base = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls/publish%231%2Fopen/log`;
+  const reads = () => host.reads.map((read) => read.path).filter((path) => path.includes('/log?'));
+  expect(reads()).toEqual([`${base}?stream=stdout`, `${base}?stream=stderr`]);
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain('data-scroll="stdout:script:0">{&quot;number&quot;:5');
+  const at = { ts: '2026-10-01T12:00:00.000Z', runId: GOLDEN_RUN_ID, key: 'publish#1' };
+  host.push(socket, {
+    kind: 'event',
+    event: { ...at, seq: 990, type: 'stage:start', stage: 'publish', call: 1, try: 2, kind: 'stage' },
+  });
+  host.push(socket, {
+    kind: 'event',
+    event: { ...at, key: 'publish#1/open', seq: 991, type: 'script:exec', command: 'more', cwd: '.', envKeys: [] },
+  });
+  expect(reads()).toEqual([`${base}?stream=stdout`, `${base}?stream=stderr`]);
+  host.advance(1000);
+  expect(reads()).toEqual([
+    `${base}?stream=stdout`,
+    `${base}?stream=stderr`,
+    `${base}?stream=stdout`,
+    `${base}?stream=stderr`,
+  ]);
+});
+
+test("opening a second script step keeps the first step's output while reading both keys", async () => {
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  replay(socket, GOLDEN(), false);
+  host.push(socket, {
+    kind: 'event',
+    event: {
+      ts: '2026-10-01T12:00:00.000Z',
+      runId: GOLDEN_RUN_ID,
+      key: 'publish#1/verify',
+      seq: 990,
+      type: 'script:exec',
+      command: 'verify',
+      cwd: '.',
+      envKeys: [],
+    },
+  });
+  const base = `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/calls`;
+  host.bodies.set(`${base}/publish%231%2Fverify/log?stream=stdout`, { status: 200, body: 'VERIFIED' });
+  host.bodies.set(`${base}/publish%231%2Fverify/log?stream=stderr`, { status: 200, body: '' });
+  host.click({ action: 'select-card', key: 'publish#1' });
+  host.click({ action: 'toggle-tool', call: 'script:0' });
+  await settle();
+  host.advance(100);
+  host.hold = true;
+  const before = host.reads.length;
+  host.click({ action: 'toggle-tool', call: 'script:1' });
+  expect(host.reads.slice(before).map((read) => read.path)).toEqual([
+    `${base}/publish%231%2Fopen/log?stream=stdout`,
+    `${base}/publish%231%2Fopen/log?stream=stderr`,
+    `${base}/publish%231%2Fverify/log?stream=stdout`,
+    `${base}/publish%231%2Fverify/log?stream=stderr`,
+  ]);
+  host.advance(100);
+  expect(host.regions.main).toContain('data-scroll="stdout:script:0">{&quot;number&quot;:5');
+  expect(host.regions.main).toContain('<div class="code">loading…</div>');
+  for (const read of host.reads.slice(before)) read.resolve();
+  await settle();
+  host.advance(100);
+  expect(host.regions.main).toContain('data-scroll="stdout:script:0">{&quot;number&quot;:5');
+  expect(host.regions.main).toContain('data-scroll="stdout:script:1">VERIFIED</pre>');
+});
+
 test("opening a script command reads the call's stdout and stderr once, shows them, and a running call's are read again at most once a second", async () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());

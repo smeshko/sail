@@ -1,5 +1,6 @@
 // Exclusive slots: one holder per name machine-wide, stale only once the holder's pid is dead.
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,11 +8,14 @@ import {
   defaultSlotsDir,
   readSlot,
   releaseSlot,
+  SlotContended,
   SlotError,
   type SlotHolder,
   slotFile,
   takeSlot,
 } from '../../src/engine/slots';
+
+import { threeTakers } from '../helpers/three-takers';
 
 const SLOTS = join(import.meta.dir, '..', '..', 'src', 'engine', 'slots.ts');
 const NOW = new Date('2026-10-27T09:00:00.000Z');
@@ -134,6 +138,76 @@ test('one of several takers wins a stale slot', async () => {
   const winners = outputs.filter((line) => line.endsWith(' true'));
   expect(winners).toHaveLength(1);
   expect(readSlot(dir, 'verify')?.runId).toBe(winners[0]?.split(' ')[0]);
+});
+
+test('a slot that kept changing hands throws SlotContended', () => {
+  const dir = tempDir();
+  const file = slotFile(dir, 'verify');
+  const link = fs.linkSync;
+  const hook = spyOn(fs, 'linkSync').mockImplementation((src, dst) => {
+    if (dst === file) throw Object.assign(new Error('exists'), { code: 'EEXIST' });
+    return link(src, dst);
+  });
+  try {
+    expect(() => takeSlot(dir, 'verify', holder('B'), NOW)).toThrow(SlotContended);
+  } finally {
+    hook.mockRestore();
+  }
+});
+
+test('a release overtaken by a takeover leaves the new holder its slot', () => {
+  const dir = tempDir();
+  const file = slotFile(dir, 'verify');
+  takeSlot(dir, 'verify', holder('A'), NOW);
+  const replacement = { name: 'verify', ...holder('B'), takenAt: NOW.toISOString() };
+  const read = fs.readFileSync;
+  let fired = false;
+  const hook = spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof fs.readFileSync>) => {
+    const text = read(...args);
+    if (args[0] === file && !fired) {
+      fired = true;
+      writeFileSync(file, JSON.stringify(replacement));
+    }
+    return text;
+  }) as typeof fs.readFileSync);
+  try {
+    expect(releaseSlot(dir, 'verify', holder('A'))).toBe(false);
+    expect(readSlot(dir, 'verify')).toEqual(replacement);
+    expect(fs.readdirSync(dir)).toEqual(['verify.json']);
+  } finally {
+    hook.mockRestore();
+  }
+});
+
+test('a takeover overtaken by another takeover leaves one holder', async () => {
+  const dir = tempDir();
+  const file = slotFile(dir, 'verify');
+  const dead = Bun.spawn(['true']);
+  await dead.exited;
+  takeSlot(dir, 'verify', holder('dead', dead.pid), NOW);
+  const result = threeTakers(
+    file,
+    () => takeSlot(dir, 'verify', holder('A'), NOW),
+    () => takeSlot(dir, 'verify', holder('B'), NOW),
+    () => takeSlot(dir, 'verify', holder('C'), NOW),
+  );
+  const slot = { name: 'verify', ...holder('A'), takenAt: NOW.toISOString() };
+  expect(result.b).toEqual({ taken: false, holder: slot });
+  expect(result.a).toEqual({ taken: true, slot, took: 'dead' });
+  expect(result.c).toEqual({ taken: false, holder: slot });
+  expect(result.protectedRecheck).toBe(true);
+  expect(readSlot(dir, 'verify')).toEqual(slot);
+  expect(fs.readdirSync(dir)).toEqual(['verify.json']);
+});
+
+test('a live drop token gives SlotContended instead of taking a stale slot', async () => {
+  const dir = tempDir();
+  const dead = Bun.spawn(['true']);
+  await dead.exited;
+  takeSlot(dir, 'verify', holder('dead', dead.pid), NOW);
+  writeFileSync(`${slotFile(dir, 'verify')}.drop`, JSON.stringify({ pid: process.pid, nonce: 'live' }));
+  expect(() => takeSlot(dir, 'verify', holder('A'), NOW)).toThrow(SlotContended);
+  expect(readSlot(dir, 'verify')?.runId).toBe('dead');
 });
 
 test('an invalid slot file is refused, naming it', () => {

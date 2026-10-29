@@ -41,7 +41,7 @@ import { type QueueStream, queueId, renderQueue } from './queue-view';
 import { renderRail } from './rail-view';
 import { applyEvent, emptyRun, type RunModel } from './run-model';
 import { renderRun, renderStatus } from './run-view';
-import { type CallOutput, renderTimeline } from './timeline-view';
+import { type CallOutput, outputKey, renderTimeline, scriptId } from './timeline-view';
 import {
   FILTERS,
   type InspectorTab,
@@ -126,8 +126,8 @@ export function boot(host: PageHost): Page {
   let run: OpenRun | undefined;
   let result: Loaded<unknown> | undefined;
   let log: Loaded<string> | undefined;
-  /** The selected call's stdout and stderr, once one of its script commands is opened. */
-  let output: CallOutput | undefined;
+  /** The selected call's script output by call or step key, once a command is opened. */
+  let outputs: Record<string, CallOutput> | undefined;
   let outputRead = 0;
   let lastOutputRead = Number.NEGATIVE_INFINITY;
   let outputTimer: number | undefined;
@@ -186,7 +186,7 @@ export function boot(host: PageHost): Page {
       const view =
         card === undefined
           ? renderRun(run.model, summaryOf(run), ui, host.now())
-          : renderTimeline(card, ui, host.now(), output);
+          : renderTimeline(card, ui, host.now(), outputs);
       return html`${error}${view}`.value;
     },
     inspector: () => renderInspector(selected(), run?.model.roster, result, log, ui).value,
@@ -296,7 +296,17 @@ export function boot(host: PageHost): Page {
     }, wait);
   };
 
-  /** Reads the selected call's stdout and stderr for its timeline. */
+  /** The read keys of the selected call's opened script rows. */
+  const openedOutputKeys = (): string[] => {
+    const card = run?.model.cards.find((entry) => entry.key === ui.key);
+    if (card === undefined) return [];
+    return card.timeline
+      .filter((entry) => entry.kind === 'script')
+      .filter((_, index) => ui.opened.includes(scriptId(index)))
+      .map((entry) => outputKey(card, entry));
+  };
+
+  /** Reads stdout and stderr for opened script rows and keys already read. */
   const readOutput = () => {
     const open = run;
     const key = ui.key;
@@ -304,13 +314,18 @@ export function boot(host: PageHost): Page {
     const asked = ++outputRead;
     const forSelection = selection;
     lastOutputRead = host.now();
-    output ??= { stdout: { state: 'loading' }, stderr: { state: 'loading' } };
-    for (const stream of ['stdout', 'stderr'] as const) {
-      void host.get(`${callPath(open, key)}/log?stream=${stream}`).then((answer) => {
-        if (asked !== outputRead || forSelection !== selection || output === undefined) return;
-        output[stream] = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
-        mark('main');
-      });
+    outputs ??= {};
+    const keys = new Set([...Object.keys(outputs), ...openedOutputKeys()]);
+    for (const key of keys) {
+      outputs[key] ??= { stdout: { state: 'loading' }, stderr: { state: 'loading' } };
+      const output = outputs[key];
+      for (const stream of ['stdout', 'stderr'] as const) {
+        void host.get(`${callPath(open, key)}/log?stream=${stream}`).then((answer) => {
+          if (asked !== outputRead || forSelection !== selection || outputs === undefined) return;
+          output[stream] = answer.status === 200 ? { state: 'loaded', value: answer.body } : { state: 'missing' };
+          mark('main');
+        });
+      }
     }
   };
 
@@ -325,13 +340,11 @@ export function boot(host: PageHost): Page {
     }, wait);
   };
 
-  const scriptOpened = () => ui.opened.some((id) => id.startsWith('script:'));
-
   const clearCall = () => {
     selection++;
     result = undefined;
     log = undefined;
-    output = undefined;
+    outputs = undefined;
     if (logTimer !== undefined) host.cancel(logTimer);
     logTimer = undefined;
     if (outputTimer !== undefined) host.cancel(outputTimer);
@@ -381,7 +394,7 @@ export function boot(host: PageHost): Page {
         const ended = (event.type === 'stage:end' || event.type === 'intake:end') && event.key === key;
         if (ended) readResult();
         if (ui.tab === 'log' && (card?.state === 'running' || ended)) refreshLog();
-        if (ui.timeline && output !== undefined && (card?.state === 'running' || ended)) refreshOutput();
+        if (ui.timeline && outputs !== undefined && (card?.state === 'running' || ended)) refreshOutput();
       }
     } else if (message?.kind === 'end') {
       open.ended = true;
@@ -635,7 +648,7 @@ export function boot(host: PageHost): Page {
       const call = data.call;
       if (call === undefined) return;
       ui.opened = ui.opened.includes(call) ? ui.opened.filter((each) => each !== call) : [...ui.opened, call];
-      if (output === undefined && scriptOpened()) readOutput();
+      if (openedOutputKeys().some((key) => outputs?.[key] === undefined)) readOutput();
       mark('main');
     },
     'toggle-filter': (data) => {

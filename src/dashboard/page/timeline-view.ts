@@ -1,7 +1,7 @@
 // The timeline: one call's events in order, drawn in the centre when its stage card is opened. Thinking and messages
 // are blocks of text. A tool call is one row with its input and, once it ends, its duration and how it ended; opened, it
 // shows its whole input, the start of its result and any denial. Steps and tries are separators, and a script's
-// command is a row with its exit; opened, it shows the end of the call's stdout and stderr, which the shell reads. Everything
+// command is a row with its exit; opened, it shows the end of its step's stdout and stderr, which the shell reads. Everything
 // else comes from the card, so a running call's timeline grows with its events. An opened box carries a data-scroll key,
 // by which the host keeps its scroll across a redraw.
 // Above the entries, a chip for each kind the call has, with its count, shows or hides that kind; separators always stay.
@@ -11,7 +11,7 @@ import type { Loaded } from './inspector-view';
 import { elapsedMs, type StageCard, type TimelineEntry, type TimelineScript, type TimelineTool } from './run-model';
 import { FILTERS, pillOf, type TimelineFilter, type UiState } from './ui-state';
 
-/** A call's stdout and stderr, as the shell read them for its timeline. */
+/** A call or step's stdout and stderr, as the shell read them for its timeline. */
 export interface CallOutput {
   stdout?: Loaded<string>;
   stderr?: Loaded<string>;
@@ -22,6 +22,11 @@ export const OUTPUT_LINES = 200;
 
 /** The id a script command's row is opened by: its place among the call's commands. */
 export const scriptId = (index: number) => `script:${index}`;
+
+/** The key whose stdout and stderr belong to this script row. */
+export function outputKey(card: StageCard, entry: TimelineScript): string {
+  return entry.step === undefined ? card.key : `${card.key}/${entry.step}`;
+}
 
 /** The longest a tool's input runs on its row. */
 const SUMMARY_LENGTH = 160;
@@ -115,7 +120,7 @@ function stream(name: string, id: string, loaded: Loaded<string> | undefined): S
 
 function outputOf(id: string, output: CallOutput | undefined): SafeHtml {
   const streams = html`${stream('stdout', id, output?.stdout)}${stream('stderr', id, output?.stderr)}`;
-  return html`<div class="tout">${streams.value === '' ? html`<div class="code">the call printed nothing</div>` : streams}</div>`;
+  return html`<div class="tout">${streams.value === '' ? html`<div class="code">the script printed nothing</div>` : streams}</div>`;
 }
 
 function script(entry: TimelineScript, id: string, ui: UiState, output: CallOutput | undefined): SafeHtml {
@@ -157,10 +162,15 @@ function entryOf(
 }
 
 /**
- * The timeline of `card`. `now` is ms since the epoch, for a running call's duration, and `output` the call's stdout
- * and stderr for an opened script.
+ * The timeline of `card`. `now` is ms since the epoch, for a running call's duration, and `outputs` holds the end
+ * of each opened script's step's stdout and stderr, by read key.
  */
-export function renderTimeline(card: StageCard, ui: UiState, now: number, output?: CallOutput): SafeHtml {
+export function renderTimeline(
+  card: StageCard,
+  ui: UiState,
+  now: number,
+  outputs?: Record<string, CallOutput>,
+): SafeHtml {
   const running = card.state === 'running';
   const state = running ? 'running' : (card.outcome ?? 'settled');
   const denials = card.denials.length;
@@ -188,7 +198,9 @@ ${filters(entries, ui)}</div><div class="tl">${
       ? html`<div class="qempty">${running ? 'nothing yet: the timeline fills as the call works' : 'this call recorded no timeline'}</div>`
       : hidesAll
         ? html`<div class="qempty">the filter hides every entry</div>`
-        : shown.map((entry) => entryOf(entry, ui, scripts, output))
+        : shown.map((entry) =>
+            entryOf(entry, ui, scripts, entry.kind === 'script' ? outputs?.[outputKey(card, entry)] : undefined),
+          )
   }${
     running
       ? html`<div class="streaming"><i></i>${card.key} is working…</div>`
