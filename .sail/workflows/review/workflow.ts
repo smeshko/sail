@@ -1,5 +1,6 @@
 // review: a factory-labelled pull request in, merged out. Validation, the leak check (including its Jev pass), the
-// banned-words check, the demonstration and six reviewers look at it at once; a judge decides what each finding becomes (fixed here, filed as a ticket, or dropped)
+// banned-words check, the demonstration and six reviewers look at it at once; Jev triages clear findings, then a judge
+// decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
 // fresh validation. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
@@ -14,7 +15,7 @@ import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
 import { redTests, validate } from '../../stages/validate/stage';
-import type { FixChecked, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord } from './schemas';
+import type { FixChecked, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord, Triaged } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
 import { bannedWords } from './stages/02-banned-words/stage';
@@ -26,6 +27,7 @@ import { reviewBugs } from './stages/07-review-bugs/stage';
 import { reviewTests } from './stages/08-review-tests/stage';
 import { reviewSecurity } from './stages/09-review-security/stage';
 import { reviewConventions } from './stages/10-review-conventions/stage';
+import { jevTriage } from './stages/11-jev-triage/stage';
 import { judge } from './stages/11-judge/stage';
 import { fix } from './stages/12-fix/stage';
 import { jevFix } from './stages/12-jev-fix/stage';
@@ -166,14 +168,26 @@ export default workflow(
 
     // The judge decides what each finding becomes, and which reviews it can't trust. It runs with no findings too: a
     // clean review is only as good as what its coverage says it checked.
+    const triaged = await run.stage(jevTriage, { findings: { findings }, diff: run.intake.files['diff.patch'] });
+    const triage: z.infer<typeof Triaged> = triaged.output;
     const judged = await run.stage(judge, {
+      triage,
       brief,
       requirements: reading.requirements,
       findings: { findings },
       evidence: { validation: validated.output, demonstration: shown.output, reviews: summaries },
     });
     if (judged.outcome === 'blocked') return handOff(`judge blocked: ${judged.reason}`);
-    const judgement: z.infer<typeof Judgement> = judged.output;
+    const overridden = new Set(judged.output.decisions.map((decision) => decision.finding));
+    const judgement: z.infer<typeof Judgement> = {
+      ...judged.output,
+      decisions: [
+        ...triage.decided
+          .filter((decision) => !overridden.has(decision.finding))
+          .map((decision) => ({ ...decision, ticket: null })),
+        ...judged.output.decisions,
+      ],
+    };
     const decided = new Map(judgement.decisions.map((each) => [each.finding, each]));
     const undecided = findings.filter((finding) => !decided.has(finding.id)).map((finding) => finding.id);
     if (undecided.length > 0) return run.fail(`judge left ${undecided.join(', ')} undecided`);
