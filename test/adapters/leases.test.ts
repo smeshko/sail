@@ -61,6 +61,83 @@ function bare(result: { raw: unknown }): Record<string, unknown> {
   return rest;
 }
 
+test('a run marks its own lease as held by no process, and a renewal takes it while the old pid is alive in another process', async () => {
+  const dir = tempDir();
+  const child = Bun.spawn(['sleep', '30']);
+  try {
+    const holder = run('r1', child.pid, 'suspended', 'until');
+    takeLease(dir, REMOTE, BRANCH, holder, NOW);
+    expect(takeLease(dir, REMOTE, BRANCH, { ...holder, suspended: true }, LATER)).toEqual({
+      leased: true,
+      lease: leaseOf({ ...holder, suspended: true }, LATER),
+      raw: leaseOf({ ...holder, suspended: true }, LATER),
+    });
+    expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf({ ...holder, suspended: true }, LATER));
+    const renewed = { ...holder, pid: process.pid };
+    expect(bare(takeLease(dir, REMOTE, BRANCH, renewed, LATER))).toEqual({
+      leased: true,
+      lease: leaseOf(renewed, LATER),
+    });
+  } finally {
+    child.kill();
+    await child.exited;
+  }
+});
+
+test.each(['run', 'pid', 'absent'] as const)(
+  'a mark leaves a %s mismatch unchanged and creates none on a free branch',
+  (kind) => {
+    const dir = tempDir();
+    const holder = run('r1', process.pid, 'suspended', 'until');
+    if (kind !== 'absent') takeLease(dir, REMOTE, BRANCH, holder, NOW);
+    const file = leaseFile(dir, REMOTE, BRANCH);
+    const before = kind === 'absent' ? undefined : fs.readFileSync(file, 'utf8');
+    const marking = {
+      ...holder,
+      suspended: true as const,
+      ...(kind === 'run' ? { runId: 'r2' } : kind === 'pid' ? { pid: process.ppid } : {}),
+    };
+    const result = takeLease(dir, REMOTE, BRANCH, marking, LATER);
+    expect(result).toEqual({
+      leased: false,
+      holder: kind === 'absent' ? leaseOf(marking, LATER) : leaseOf(holder, NOW),
+      file,
+      raw: kind === 'absent' ? null : leaseOf(holder, NOW),
+    });
+    expect(existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined).toBe(before);
+  },
+);
+
+test('a marked lease still keeps another run off the branch while its run is suspended', () => {
+  const dir = tempDir();
+  const holder = run('r1', process.pid, 'suspended', 'until');
+  takeLease(dir, REMOTE, BRANCH, holder, NOW);
+  takeLease(dir, REMOTE, BRANCH, { ...holder, suspended: true }, NOW);
+  const other = run('r2', process.pid, 'running');
+  expect(bare(takeLease(dir, REMOTE, BRANCH, other, LATER))).toEqual({
+    leased: false,
+    holder: leaseOf({ ...holder, suspended: true }, NOW),
+    file: leaseFile(dir, REMOTE, BRANCH),
+  });
+  writeStatus(holder.runDir, 'failed', 'workflow_failed');
+  expect(bare(takeLease(dir, REMOTE, BRANCH, other, LATER))).toEqual({
+    leased: true,
+    lease: leaseOf(other, LATER),
+    took: 'r1',
+  });
+});
+
+test('a refused renewal names the lease file', () => {
+  const dir = tempDir();
+  const holder = run('r1', process.ppid, 'suspended', 'until');
+  takeLease(dir, REMOTE, BRANCH, holder, NOW);
+  expect(bare(takeLease(dir, REMOTE, BRANCH, { ...holder, pid: process.pid }, LATER))).toEqual({
+    leased: false,
+    holder: leaseOf(holder, NOW),
+    file: leaseFile(dir, REMOTE, BRANCH),
+  });
+});
+
 test('a first lease creates its file, and readLease gives it back', () => {
   const dir = tempDir();
   const r1 = run('r1', process.pid, 'running');
@@ -78,7 +155,7 @@ test('a second run is refused while the first is running, and told who holds the
   takeLease(dir, REMOTE, BRANCH, r1, NOW);
   const refused = takeLease(dir, REMOTE, BRANCH, run('r2', process.pid, 'running'), LATER);
   expect(parseIssues(LeaseResult, refused)).toEqual([]);
-  expect(bare(refused)).toEqual({ leased: false, holder: leaseOf(r1, NOW) });
+  expect(bare(refused)).toEqual({ leased: false, holder: leaseOf(r1, NOW), file: leaseFile(dir, REMOTE, BRANCH) });
   expect(readLease(dir, REMOTE, BRANCH)).toEqual(leaseOf(r1, NOW));
 });
 
@@ -120,7 +197,7 @@ test.each([
   const r1 = run('r1', pid === 'live' ? process.pid : await deadPid(), status, stopReason);
   takeLease(dir, REMOTE, BRANCH, r1, NOW);
   const refused = takeLease(dir, REMOTE, BRANCH, run('r2', process.pid, 'running'), LATER);
-  expect(bare(refused)).toEqual({ leased: false, holder: leaseOf(r1, NOW) });
+  expect(bare(refused)).toEqual({ leased: false, holder: leaseOf(r1, NOW), file: leaseFile(dir, REMOTE, BRANCH) });
 });
 
 test('only the holder releases a lease: another run leaves the file where it is', () => {

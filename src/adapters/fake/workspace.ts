@@ -50,7 +50,7 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     },
     async lease(remote, branch, holder) {
       const result = takeLease(leasesDir(), remote, branch, holder, now());
-      if (result.leased) {
+      if (result.leased && !holder.suspended) {
         emit({ type: 'workspace:leased', remote, branch, ...(result.took === undefined ? {} : { took: result.took }) });
       }
       return result;

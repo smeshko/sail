@@ -6,13 +6,13 @@
 //
 // A lease is taken before its run directory exists, since a leased branch is a refusal, and a refusal leaves no run
 // directory. So a lease is stale once its run has ended, or once its pid is dead while the run is running or has no
-// STATUS yet. A suspended run holds its lease whatever its pid. Accepted risk: a reused pid reads as alive.
+// STATUS yet. A suspended run holds its lease whatever its pid.
 //
 // A renewal is the same run taking its lease again: a resume, with its own pid. It is refused while the pid on the lease
 // is alive and isn't the renewing one, whatever STATUS says: a run's STATUS reads `suspended` both while another
 // resume is starting it and while its own process is suspending it. So a resume can't run a run that is still running,
-// and two resumes of one run can't both go ahead. A reused pid refuses a resume until that process ends: the same
-// accepted risk.
+// and two resumes of one run can't both go ahead. A renewal takes a lease its run marked as it suspended.
+// Only after a crash or kill can a reused pid refuse a resume until that process ends.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { machineDir } from '../engine/machine-dir';
@@ -68,7 +68,7 @@ export function heldLease(dir: string, remote: string, branch: string): Lease | 
 
 /** Whether `lease`'s run is alive in a process other than `pid`: its pid is alive and isn't `pid`. */
 function stillRunning(lease: Lease, pid: number): boolean {
-  return lease.pid !== pid && isAlive(lease.pid);
+  return !lease.suspended && lease.pid !== pid && isAlive(lease.pid);
 }
 
 /**
@@ -89,6 +89,13 @@ export function takeLease(
     const [issue] = checked.error.issues;
     throw new PortError('workspace', 'lease', 'invalid', `holder: ${issue?.path.join('.')} ${issue?.message}`);
   }
+  if (checked.data.suspended) {
+    const result = markLease(dir, remote, branch, checked.data, now);
+    const lease: Lease = { remote, branch, ...checked.data, takenAt: now.toISOString() };
+    return result.marked
+      ? { leased: true, lease: result.lease, raw: result.lease }
+      : { leased: false, holder: result.held ?? lease, file: leaseFile(dir, remote, branch), raw: result.held ?? null };
+  }
   try {
     mkdirSync(dir, { recursive: true });
   } catch (error) {
@@ -105,7 +112,32 @@ export function takeLease(
       ? { leased: true, lease, took: result.took.runId, raw: lease }
       : { leased: true, lease, raw: lease };
   }
-  if ('holder' in result) return { leased: false, holder: result.holder, raw: result.holder };
+  if ('holder' in result) return { leased: false, holder: result.holder, file, raw: result.holder };
+  throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
+}
+
+/** Marks only this run and pid's existing lease; never takes a free branch. */
+export function markLease(
+  dir: string,
+  remote: string,
+  branch: string,
+  holder: LeaseHolder,
+  now = new Date(),
+): { marked: true; lease: Lease } | { marked: false; held: Lease | undefined } {
+  const checked = LeaseHolder.safeParse(holder);
+  if (!checked.success) {
+    const [issue] = checked.error.issues;
+    throw new PortError('workspace', 'lease', 'invalid', `holder: ${issue?.path.join('.')} ${issue?.message}`);
+  }
+  const { runId, pid } = checked.data;
+  const file = leaseFile(dir, remote, branch);
+  const held = readRecord(file, leaseKind);
+  if (!held || held.runId !== runId || held.pid !== pid) return { marked: false, held };
+  const lease: Lease = { remote, branch, ...checked.data, suspended: true, takenAt: now.toISOString() };
+  // If the second round finds no file after dropping our own lease, create restores it marked.
+  const result = takeRecord(file, lease, leaseKind, (current) => current.runId !== runId || current.pid !== pid);
+  if (result.taken) return { marked: true, lease };
+  if ('holder' in result) return { marked: false, held: result.holder };
   throw new PortError('workspace', 'lease', 'conflict', `${remote} ${branch}: the lease kept changing hands`);
 }
 
