@@ -24,7 +24,11 @@ const notUnstarted = (state: TicketState) =>
       ? `the ticket is not in a pick-up state: it is ${state.name}. ${FORCE}`
       : `the ticket is not unstarted: it is ${state.name}. ${FORCE}`;
 const lostClaim = (state: TicketState) =>
-  `the ticket is already claimed: it became ${state.name} while sail was starting. ${FORCE}`;
+  state.type === 'started'
+    ? `the ticket is already claimed: it became ${state.name} while sail was starting. ${FORCE}`
+    : state.type === 'unstarted'
+      ? `the ticket is not in a pick-up state: it became ${state.name} while sail was starting. ${FORCE}`
+      : `the ticket is not unstarted: it became ${state.name} while sail was starting. ${FORCE}`;
 const commentFailed = (state: TicketState, runId: string, failure: string) =>
   `the ticket is now ${state.name}, but the comment naming run ${runId} failed: ${failure}. --force runs it`;
 
