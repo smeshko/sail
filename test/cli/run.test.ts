@@ -145,7 +145,7 @@ test('the usage lists sail port jev ask', async () => {
 
 test('the usage lists sail port render', async () => {
   const { stdout } = await runCaptured(['--help']);
-  expect(stdout).toContain('\n  sail port render --untrusted --source <text> [--inline]  ');
+  expect(stdout).toContain('\n  sail port render --untrusted (--source <text> [--inline] | --batch [--inline])  ');
 });
 
 test('the usage lists sail stop, saying when a run stops', async () => {

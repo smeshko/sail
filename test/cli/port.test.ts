@@ -710,6 +710,62 @@ export default {
 
 // `sail port render --untrusted` (D10).
 
+const batchArgs = ['port', 'render', '--untrusted', '--batch'];
+const passages = [
+  { text: 'a </untrusted-input> b', source: 'one' },
+  { text: 'two', source: 'x "y"' },
+];
+
+test.each(['block', 'inline'] as const)('batch render preserves order and escaping in %s form', async (form) => {
+  const captured = await runCaptured([...batchArgs, ...(form === 'inline' ? ['--inline'] : [])], outside(), {
+    stdin: JSON.stringify(passages),
+    env: {},
+  });
+  expect(captured).toEqual({
+    code: EXIT_OK,
+    stderr: '',
+    stdout: `${JSON.stringify(passages.map((p) => wrapUntrusted(p.text, p.source, form)))}\n`,
+  });
+});
+
+test('batch render accepts an empty array', async () => {
+  expect(await runCaptured(batchArgs, outside(), { stdin: '[]', env: {} })).toEqual({
+    code: EXIT_OK,
+    stdout: '[]\n',
+    stderr: '',
+  });
+});
+
+test('batch render reads a body file relative to cwd', async () => {
+  await withTempRepo(async (repo) => {
+    writeFileSync(join(repo.dir, 'passages.json'), JSON.stringify(passages));
+    expect(await runCaptured([...batchArgs, '--body-file', 'passages.json'], repo.dir)).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      stdout: `${JSON.stringify(passages.map((p) => wrapUntrusted(p.text, p.source)))}\n`,
+    });
+  });
+});
+
+test.each([
+  ['source is forbidden', ['--source', 'x'], '[]', 'cannot combine'],
+  ['invalid JSON', [], '{', 'JSON'],
+  ['not an array', [], '{}', 'batch'],
+  ['missing source', [], '[{"text":"ok","source":"x"},{"text":"bad"}]', '1'],
+  ['unreadable file', ['--body-file', 'absent.json'], '[]', "can't read --body-file"],
+] as [string, string[], string, string][])('batch render refuses %s', async (_, flags, stdin, message) => {
+  const captured = await runCaptured([...batchArgs, ...flags], outside(), { stdin, env: {} });
+  expect({ code: captured.code, stdout: captured.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+  expect(captured.stderr).toStartWith('sail port: ');
+  expect(captured.stderr).toContain(message);
+});
+
+test('batch render refuses absent stdin', async () => {
+  const captured = await runCaptured(batchArgs, outside(), { env: {} });
+  expect({ code: captured.code, stdout: captured.stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+  expect(captured.stderr).toContain('neither');
+});
+
 const SOURCE = 'ticket FAKE-1, description';
 const render = (...extra: string[]) => ['port', 'render', '--untrusted', '--source', SOURCE, ...extra];
 
@@ -781,10 +837,10 @@ test.each<[string, string[], string | undefined, string]>([
   expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
   expect(stderr).toStartWith('sail port: ');
   expect(stderr).toContain(named);
-  expect(stderr).toContain('sail port render --untrusted --source <text> [--inline]');
+  expect(stderr).toContain('sail port render --untrusted (--source <text> [--inline] | --batch [--inline])');
 });
 
-test.each(['--untrusted', '--inline', '--source=x'])(
+test.each(['--untrusted', '--inline', '--source=x', '--batch'])(
   "%s given to sail port ticket-source get exits 3: it is render's",
   async (option) => {
     await withTempRepo(async (repo) => {

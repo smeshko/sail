@@ -20,12 +20,12 @@
 //                                                   uploads the file and attaches it: its type from its extension
 //   sail port codehost <operation> ...              a CodeHost operation: the table is in port-codehost.ts
 //   sail port jev ask [--model <id>] [--body-file <path>]    asks Jev the questions in the JSON body: port-jev.ts
-//   sail port render --untrusted --source <text> [--inline]    stdin, wrapped as untrusted input
+//   sail port render --untrusted (--source <text> [--inline] | --batch [--inline])    text or JSON passages, wrapped
 //
 // Arguments go in as positionals and flags, and a result comes out as one line of JSON on stdout, so a bash script
 // builds no JSON. A failed port call exits 1 with the port's message, and anything refused before a call is made exits
-// 3: every refusal comes before the port is called, and before stdin is read, but for one. A body that is empty, from
-// the file or from stdin, is refused once it has been read, which is the last thing before the port is called.
+// 3: every refusal comes before the port is called, and before stdin is read, except an empty port body or an invalid
+// render batch body. Those are refused once read.
 //
 // Each port is a table of operations of one shape: an operation names its positionals and its options, and returns the
 // value to print. This module dispatches over the tables, checks a command line against the operation's row, reads a
@@ -75,8 +75,8 @@ import { findProject, refuseAs } from './run-workflow';
 const COMMAND = 'sail port';
 
 /** The options that are `render`'s alone. */
-const RENDER_OPTIONS = ['untrusted', 'source', 'inline'] as const;
-const RENDER_USAGE = 'render --untrusted --source <text> [--inline]';
+const RENDER_OPTIONS = ['untrusted', 'source', 'inline', 'batch'] as const;
+const RENDER_USAGE = 'render --untrusted (--source <text> [--inline] | --batch [--inline])';
 
 /** How an operation takes one of its options. */
 export interface OptionUse {
@@ -493,8 +493,7 @@ function portErrorEvent(error: PortError): PortErrorEvent | undefined {
 }
 
 /**
- * `sail port render --untrusted --source <text> [--inline]`: stdin, wrapped exactly as the engine wraps a passage. Every
- * refusal comes before stdin is read.
+ * Wrap stdin or a batch of JSON passages exactly as the engine does. An invalid batch is refused after reading.
  */
 async function render(args: Parsed, io: Io, usage: (message: string) => ExitCode): Promise<ExitCode> {
   const [, extra] = args.positionals;
@@ -503,6 +502,38 @@ async function render(args: Parsed, io: Io, usage: (message: string) => ExitCode
     return usage('render needs --untrusted: it wraps untrusted input, and nothing else yet');
   }
   const { source } = args.values;
+  if (args.values.batch === true) {
+    if (source !== undefined) return usage('render cannot combine --source with --batch');
+    const bodyFile = args.values['body-file'];
+    let text: string;
+    if (typeof bodyFile === 'string') {
+      try {
+        text = readFileSync(resolve(io.cwd, bodyFile), 'utf8');
+      } catch (error) {
+        return usage(
+          `can't read --body-file ${bodyFile}: ${(error as NodeJS.ErrnoException).code ?? (error as Error).message}`,
+        );
+      }
+    } else {
+      if (io.stdin === undefined) return usage('render batch reads --body-file or stdin, and there is neither');
+      text = await io.stdin();
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return usage('render batch needs valid JSON');
+    }
+    const parsed = z.array(z.object({ text: z.string(), source: z.string() })).safeParse(body);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return usage(`invalid render batch at ${issue?.path.join('.') || 'body'}: ${issue?.message}`);
+    }
+    io.stdout(
+      `${JSON.stringify(parsed.data.map((p) => wrapUntrusted(p.text, p.source, args.values.inline === true ? 'inline' : 'block')))}\n`,
+    );
+    return EXIT_OK;
+  }
   if (typeof source !== 'string') return usage('render needs --source <text>, which says where the text came from');
   if (io.stdin === undefined) return usage('render reads the text on stdin, and there is no stdin');
   const text = await io.stdin();
