@@ -57,7 +57,7 @@ const IN_NAME = `[${INVISIBLE}]*`;
 const OUTER = `[\\s${INVISIBLE}]*`;
 const NAME = ['untrusted', 'input']
   .map((part) => [...part].join(IN_NAME))
-  .join(`${IN_NAME}[\\p{Pd}\\u2212]?${IN_NAME}`);
+  .join(`${IN_NAME}(?:[\\p{Pd}\\u2212]${IN_NAME})?`);
 const LOOKALIKE = new RegExp(`[${LOOKALIKE_BRACKETS}](?=${OUTER}(?:[/／∕⁄⧸╱]${OUTER})?${NAME})`, 'giu');
 
 function escapeSource(source: string): string {

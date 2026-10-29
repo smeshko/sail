@@ -370,6 +370,18 @@ test('a long run of non-Cf invisibles after a bracket homoglyph does not cause q
   expect(performance.now() - start).toBeLessThan(500);
 });
 
+test.each(['\u200b', '\u3164'])(
+  'a long run of %j between untrusted and input does not cause quadratic backtracking',
+  (invisible) => {
+    const text = `<untrusted${invisible.repeat(40_000)}x>`;
+    const start = performance.now();
+    const out = wrapUntrusted(text, 's', 'inline');
+    const elapsed = performance.now() - start;
+    expect(out).toBe(`<untrusted-input source="s">${text}</untrusted-input>`);
+    expect(elapsed).toBeLessThan(1_000);
+  },
+);
+
 test('untrusted text that is not a lookalike is unchanged', () => {
   const text = 'a < b && c <div>x</div> <untrusted>';
   const out = render('{{note}}', { note: untrustedInput(text, 's') }).text;
