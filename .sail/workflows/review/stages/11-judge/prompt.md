@@ -35,11 +35,11 @@ hands the pull request to a human, so name one only for a real gap, never for a 
 | Verdict | When |
 |---|---|
 | `fix` | it is real and belongs to this pull request: it breaks or misses what the requirements ask, fails validation, or ships a bug, and fixing it stays inside the change's scope |
-| `ticket` | it is real but outside this pull request: older code the change only exposed, a refactor or a design question bigger than the change, an improvement the requirements didn't ask for |
-| `drop` | it isn't real, it duplicates another finding, it contradicts the requirements, or it is taste |
+| `ticket` | it is real, outside this pull request, and worth a ticket of its own as below: a bug in older code the change only exposed, a design question bigger than the change |
+| `drop` | it isn't real, it duplicates another finding, it contradicts the requirements, it is taste, or it is real, out of scope and not worth a ticket |
 
 A failed validation and an unshown criterion are `fix` unless the problem lies outside the change. Never `drop` a real
-problem to keep the pull request moving: a real problem out of scope is a `ticket`.
+problem in scope to keep the pull request moving.
 
 An unshown criterion is `fix` only when the demonstration ran its scenario and saw the wrong thing. When its evidence
 says the harness couldn't run the scenario at all (a pipe, a second command alongside the first, a background process,
@@ -47,8 +47,16 @@ a test), no fix to the code can show it either: read the tests the change adds f
 criterion, `drop` the finding as covered by that test, naming it; when none does, it is `fix`, and the fix is that
 test, never another attempt at the demonstration.
 
+A ticket costs a reader's attention every time they pass it, and sail has one maintainer, who writes every adapter and
+workflow. File one only when doing it changes something a person would notice: a failure someone hit or can reach
+through a real path, a behaviour someone asked for, or a measured cost. Never file hardening against a misuse no caller
+makes or an input no path produces, a tidy-up with no behaviour behind it (a rename, a move, a shared helper, a
+comment, an unused field), a test for code with no reported failure, or anything smaller than writing it up. A
+low-severity finding is never filed, and a run files at most two tickets, bugs first.
+
 For a `ticket`, write the ticket: a title, a description a reader can act on without this run (the files, what is
-wrong, what triggers it), and its type: `bug`, `feature` or `refactoring`.
+wrong), the `trigger` (the command, input or code path that reaches the problem), and its type: `bug`, `feature` or
+`refactoring`. A finding you can name no trigger for is not a ticket.
 
 You decide only. Don't change any file.
 

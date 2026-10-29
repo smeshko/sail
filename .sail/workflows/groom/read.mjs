@@ -1,7 +1,8 @@
 // Reads the ticket in $INPUT_SOURCE through `sail port ticket-source get`, and the team's unstarted and started tickets
 // through `list`. Writes ticket.json, brief.md (the ticket, with every passage a person wrote wrapped as untrusted
 // input) and others.md (the other open tickets, their states, labels, titles and the start of their descriptions wrapped
-// the same way). Makes no claim. Prints the GroomInput (the ticket's key, title, description and state), with the other open tickets' keys and the keys groom keeps.
+// the same way). Makes no claim. Prints the GroomInput (the ticket's key, title, description and state), with the other open tickets' keys, the keys groom keeps, and
+// whether a review filed the ticket.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -93,5 +94,6 @@ console.log(
     state: ticket.state,
     others: open.map((other) => other.ticketKey),
     kept,
+    fromReview: ticket.labels.includes('code-review'),
   }),
 );

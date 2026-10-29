@@ -63,7 +63,8 @@
           {
             "title": "sail show's footer ignores calls replayed from a seeded run",
             "description": "`src/cli/commands/show.ts` sums `costUsd` over the calls this run made, so a run seeded with `--from-run` prints a total without the replayed calls' cost. Left out: the plan scoped the footer to this run's own calls.",
-            "type": "bug"
+            "type": "bug",
+            "trigger": "`sail show <run>` on a run started with `--from-run`"
           }
         ]
       },
@@ -191,7 +192,8 @@
             "ticket": {
               "title": "sail runs sums call costs without rounding",
               "description": "`src/cli/commands/runs.ts` sums `costUsd` as floats and prints them unrounded, as show.ts did before its review.",
-              "type": "bug"
+              "type": "bug",
+              "trigger": "`sail runs` in a repository whose runs cost fractions of a cent"
             }
           },
           {

@@ -20,7 +20,13 @@ Submit the title, a Conventional Commits subject ending with the ticket key in p
 body file.
 
 Submit as `followUps` the work outside this branch that the plan's Out of Scope or the implementation's notes
-surfaced, and that someone should pick up: a bug the change exposed, a guard left inconsistent, a refactor it
-put off. Give each a title, a description a reader can act on without this run (the files, what is wrong, why it was
-left), and its type: `bug`, `feature` or `refactoring`. Leave out anything the plan rules out as unwanted. Submit none when there is none: an empty list is the usual
-answer.
+surfaced, and that is worth a ticket of its own: usually a bug the change exposed. A ticket costs a reader's attention every time they pass it, and sail has one maintainer, who writes every adapter and
+workflow. File one only when doing it changes something a person would notice: a failure someone hit or can reach
+through a real path, a behaviour someone asked for, or a measured cost. Never file hardening against a misuse no caller
+makes or an input no path produces, a tidy-up with no behaviour behind it (a rename, a move, a shared helper, a
+comment, an unused field), a test for code with no reported failure, or anything smaller than writing it up. A run
+files at most two tickets, bugs first.
+
+Give each a title, a description a reader can act on without this run (the files, what is wrong, why it was left), the
+`trigger` (the command, input or code path that reaches the problem), and its type: `bug`, `feature` or `refactoring`.
+Leave out anything the plan rules out as unwanted. Submit none when there is none: an empty list is the usual answer.
