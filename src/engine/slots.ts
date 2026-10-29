@@ -1,5 +1,7 @@
-// Machine-wide exclusive slots: one file per slot name in the machine directory's `slots/`
-// (`$SAIL_HOME/slots/`, or `~/.sail/slots/`), so a heavy script step runs only while no other step holds its name. A slot is stale only once its holder's pid is dead, never on a timer.
+// Exclusive slots: one file per slot name in the selected machine directory's `slots/`
+// (`$SAIL_HOME/slots/`, or `~/.sail/slots/`), so a heavy script step runs only while no other step sharing that directory
+// holds its name. Different machine directories have independent slots. A slot is stale only once its holder's pid is
+// dead, never on a timer.
 //
 // Two accepted risks, as with branch leases: a reused pid makes a dead holder read as alive, so a waiter waits until that
 // process ends; and a holder killed with SIGKILL frees its slot at once while its script's process group may still be

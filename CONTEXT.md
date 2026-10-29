@@ -432,7 +432,7 @@ A tool call refused for falling outside the step's permissions, recorded with th
 _Avoid_: block, violation, rejection
 
 **Exclusive slot**:
-A script step's machine-wide hold on a named slot, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/` (`$SAIL_HOME/slots/` when set). One step on the machine holds a name at a time; a step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
+A script step's hold on a named slot within the selected machine directory, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/` (`$SAIL_HOME/slots/` when set). One step sharing that directory holds a name at a time; different machine directories have independent slots. A step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
 _Avoid_: lock, mutex, semaphore
 
 **Budget**:
@@ -550,7 +550,7 @@ The machine-level record of repositories in `~/.sail/watchers/` (`$SAIL_HOME/wat
 _Avoid_: registry (alone; the config also has an adapter registry), roster, manifest
 
 **Branch lease**:
-A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are machine-wide in `~/.sail/leases/` (`$SAIL_HOME/leases/` when set), keyed by remote and branch, and are stale only once the run is neither running nor suspended. A lease whose run has no status yet is stale once its pid is dead, and the same run leasing again renews it (a resume). Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
+A run's exclusive hold on its git branch, from workspace creation to release, kept while the run is suspended. Leases are shared within the selected machine directory, in `~/.sail/leases/` (`$SAIL_HOME/leases/` when set); different machine directories have independent leases. They are keyed by remote and branch, and are stale only once the run is neither running nor suspended. A lease whose run has no status yet is stale once its pid is dead, and the same run leasing again renews it (a resume). Dispatch skips a source whose branch is leased, and manual runs take leases too. Because worktrees are detached, leases are the only thing keeping runs apart (ADR-0018).
 _Avoid_: lock, branch lock, reservation
 
 **Adoption**:

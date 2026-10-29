@@ -1,7 +1,7 @@
 // The built-in `git-worktree` Workspace adapter (ADR-0018, D6): a run works in a detached worktree of the repository at
 // `<runDir>/workspace`, made from `<remote>/<default branch>` right after a fetch, so the clone's own checkout, index
-// and working files are never touched. Leases are machine-wide, in `~/.sail/leases/`, keyed by the remote's URL with
-// any credentials taken out.
+// and working files are never touched. Leases are shared within the selected machine directory, in `$SAIL_HOME/leases/`
+// (or `~/.sail/leases/`), keyed by the remote's URL with any credentials taken out.
 //
 // It ports the loop's `engine/worktree.ts`: fetch, then `worktree add --detach`, and on release `remove --force`, then
 // a plain removal, then `prune`. It refuses to port two things. Nothing is symlinked or copied into the worktree, secrets

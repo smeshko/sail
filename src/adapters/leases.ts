@@ -1,5 +1,6 @@
-// Machine-wide branch leases (ADR-0018, D9): one file per remote and branch in the machine directory's `leases/`
-// (`$SAIL_HOME/leases/`, or `~/.sail/leases/`), so manual and watched runs never hold the same branch.
+// Branch leases (ADR-0018, D9): one file per remote and branch in the selected machine directory's `leases/`
+// (`$SAIL_HOME/leases/`, or `~/.sail/leases/`), so manual and watched runs sharing that directory never hold the same branch.
+// Different machine directories have independent leases.
 // Every built-in Workspace adapter takes its leases here. A run resumed under another `SAIL_HOME` finds no lease
 // of its own there.
 //
