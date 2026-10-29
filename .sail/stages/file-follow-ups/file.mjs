@@ -1,6 +1,6 @@
 // Files the follow-ups in $INPUT_FOLLOWUPS as tickets, bugs first, at most MAX_FILED of them: the rest are noted on the
 // pull request, not filed. Before filing, `sail port jev ask` checks each follow-up against open tickets and earlier
-// follow-ups in groups of at most MAX_QUESTIONS; duplicates are skipped. When Jev can't be asked, as in a repository
+// follow-ups in groups bounded by question count and serialized bytes; duplicates are skipped. When Jev can't be asked, as in a repository
 // with no Jev adapter, every follow-up is filed unchecked. A ticket gets its type as a label, `code-review` too for a
 // deferred review finding, and `groom`, so the groom workflow judges whether it earns its place; never the factory's
 // designation label, which would hand it to the next run. Each description ends with how the problem is reached and
@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const { wrapAll } = await import(pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'untrusted.mjs')).href);
-const { openTickets, excerpt, sameWork, SAME_WORK, MAX_QUESTIONS } = await import(
+const { openTickets, excerpt, sameWork, SAME_WORK, MAX_QUESTIONS, MAX_REQUEST_BYTES } = await import(
   pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
 );
 
@@ -40,7 +40,7 @@ function port(args, body) {
 }
 
 /**
- * Open and earlier batch twins for each follow-up: one request per group of at most MAX_QUESTIONS pairs. Throws when the
+ * Open and earlier batch twins for each follow-up: requests bounded by questions and UTF-8 bytes. Throws when the
  * tickets can't be listed or Jev can't be asked, and the caller files unchecked.
  */
 function duplicatesOf(candidates) {
@@ -48,11 +48,11 @@ function duplicatesOf(candidates) {
   if (candidates.length === 0 || (open.length === 0 && candidates.length < 2)) return new Map();
   const passages = [
     ...candidates.flatMap((each, index) => [
-      { text: each.title, source: `follow-up ${index + 1}, title` },
-      { text: each.description, source: `follow-up ${index + 1}, description` },
+      { text: excerpt(each.title), source: `follow-up ${index + 1}, title` },
+      { text: excerpt(each.description), source: `follow-up ${index + 1}, description` },
     ]),
     ...open.flatMap((ticket) => [
-      { text: ticket.title, source: `ticket ${ticket.ticketKey}, title` },
+      { text: excerpt(ticket.title), source: `ticket ${ticket.ticketKey}, title` },
       { text: excerpt(ticket.description || '(none)'), source: `ticket ${ticket.ticketKey}, description` },
     ]),
   ];
@@ -73,20 +73,38 @@ function duplicatesOf(candidates) {
     }
   });
   const answers = {};
-  for (let offset = 0; offset < pairs.length; offset += MAX_QUESTIONS) {
-    const group = pairs.slice(offset, offset + MAX_QUESTIONS);
-    const subset = { followUps: {}, tickets: {} };
-    const questions = {};
-    for (const { name, a, b } of group) {
-      subset.followUps[a] = state.followUps[a];
-      const collection = Object.hasOwn(state.followUps, b) ? 'followUps' : 'tickets';
-      subset[collection][b] = state[collection][b];
-      questions[name] = sameWork(`followUps["${a}"]`, `${collection}["${b}"]`);
-    }
-    const { answer, error } = port(['jev', 'ask'], JSON.stringify({ state: subset, questions }));
+  const empty = () => ({ state: { followUps: {}, tickets: {} }, questions: {} });
+  let request = empty();
+  const ask = () => {
+    const { answer, error } = port(['jev', 'ask'], JSON.stringify(request));
     if (error !== undefined) throw new Error(error);
     Object.assign(answers, answer.answers);
+  };
+  for (const { name, a, b } of pairs) {
+    const collection = Object.hasOwn(state.followUps, b) ? 'followUps' : 'tickets';
+    const add = () => {
+      const next = {
+        state: { followUps: { ...request.state.followUps }, tickets: { ...request.state.tickets } },
+        questions: { ...request.questions, [name]: sameWork(`followUps["${a}"]`, `${collection}["${b}"]`) },
+      };
+      next.state.followUps[a] = state.followUps[a];
+      next.state[collection][b] = state[collection][b];
+      return next;
+    };
+    let next = add();
+    if (
+      Object.keys(next.questions).length > MAX_QUESTIONS ||
+      Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_REQUEST_BYTES
+    ) {
+      if (Object.keys(request.questions).length > 0) ask();
+      request = empty();
+      next = add();
+    }
+    if (Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_REQUEST_BYTES)
+      throw new Error('one duplicate-check pair exceeds the Jev request byte limit');
+    request = next;
   }
+  if (Object.keys(request.questions).length > 0) ask();
   const found = new Map();
   candidates.forEach((_, index) => {
     for (const ticket of open) {
