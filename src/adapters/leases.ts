@@ -50,7 +50,7 @@ export function leaseKey(remote: string): string {
     path = url[2] ?? '';
   } else {
     if (remote.includes('://')) return remote;
-    const scp = /^([^/:]+):(.*)$/.exec(remote);
+    const scp = /^((?:[^/@:]+@)?\[[^\]]+\]|[^/:]+):(.*)$/.exec(remote);
     if (!scp) return remote;
     host = (scp[1] ?? '').split('@').at(-1) ?? '';
     path = scp[2] ?? '';

@@ -81,6 +81,8 @@ test.each([
   ['https://GitHub.com/o/r.git/', 'github.com/o/r'],
   ['https://x:tok@github.com/o/r', 'github.com/o/r'],
   ['ssh://git@[2001:DB8::1]:2222/O/R.git/', '[2001:db8::1]/o/r'],
+  ['git@[2001:DB8::1]:O/R.git', '[2001:db8::1]/o/r'],
+  ['[::1]:o/r.git', '[::1]/o/r'],
   ['host:/O/R/.git///', 'host/o/r'],
   ['watcher', 'watcher'],
   ['/srv/repo.git', '/srv/repo.git'],
