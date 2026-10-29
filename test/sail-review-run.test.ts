@@ -136,6 +136,31 @@ test('a banned-words Jev hit reaches the judge as B1', async () => {
   });
 }, 120_000);
 
+test.each([
+  [
+    'question cap',
+    Array.from({ length: 65 }, (_, i) => `**Edit ${i}**:\nAn alteration.\n_Avoid_: change\n`).join(''),
+    '1 candidates omitted',
+  ],
+  ['oversized candidate', `**Edit**:\n${'x'.repeat(70_000)}\n_Avoid_: change\n`, '1 candidates omitted'],
+])(
+  'the review comment discloses banned-words omissions from %s',
+  async (_name, glossary, note) => {
+    await withTempRepo(async (repo) => {
+      const answers = seed() as { answers: Record<string, unknown> };
+      for (let i = 1; i <= 64; i++) answers.answers[`word-${i}`] = { type: 'noul', noul: 0.05 };
+      setUp(repo, answers, glossary);
+      const { code } = await review(repo);
+      expect(code).toBe(0);
+      const pr = await pullRequest(repo);
+      expect(pr.comments.find((body) => body.includes('## sail review'))).toContain(
+        `Banned-words check incomplete: ${note} (request limits)`,
+      );
+    });
+  },
+  120_000,
+);
+
 test('a leak-check Jev hit reaches the judge as L1', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed({ 'leak-1': 0.97 }));

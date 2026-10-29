@@ -137,6 +137,8 @@ export const FixFeedback = z.object({
 
 /** Everything the review did, for its pull request comment. */
 export const ReviewRecord = z.object({
+  /** Limitations of the banned-words check, shown even when it flagged nothing. */
+  bannedWordsNote: z.string().optional(),
   findings: z.array(NumberedFinding),
   judgement: Judgement.nullable(),
   rounds: z.array(z.object({ round: z.number().int(), fixed: Fixed, checked: FixChecked, validated: z.boolean() })),

@@ -44,6 +44,7 @@ lines.push(
   '',
 );
 if (record.judgement) lines.push(record.judgement.summary, '');
+if (record.bannedWordsNote) lines.push(`Banned-words check incomplete: ${cell(record.bannedWordsNote)}.`, '');
 if (record.findings.length === 0) {
   lines.push(
     'No findings: validation passed, the leak check found nothing, the banned-words check returned no flagged hits, the demonstration showed every criterion, and no reviewer found anything.',

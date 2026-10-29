@@ -267,7 +267,15 @@ export default workflow(
       await run.stage(attachDemonstration, { demonstration: shown.output, ticketKey, pr: pullRequest });
     }
     await run.stage(report, {
-      record: { findings, judgement, rounds, resolved, open, thin },
+      record: {
+        findings,
+        judgement,
+        rounds,
+        resolved,
+        open,
+        thin,
+        bannedWordsNote: banned.output.jev.candidates > 0 ? banned.output.jev.note : '',
+      },
       pr: pullRequest,
       label: LABEL,
     });
