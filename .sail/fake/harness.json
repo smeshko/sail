@@ -509,6 +509,28 @@
       }
     }
   ],
+  "duplicates": [
+    {
+      "outcome": "done",
+      "output": {
+        "candidates": [
+          {
+            "ticketKey": "FAKE-1",
+            "confidence": 0.6,
+            "why": "FAKE-1 asks for the same total in sail show's footer."
+          }
+        ]
+      },
+      "turns": 4,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.1
+      }
+    }
+  ],
   "worth": [
     {
       "outcome": "done",
