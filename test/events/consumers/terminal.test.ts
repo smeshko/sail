@@ -649,6 +649,10 @@ test('at trace, an event of every type prints a line of its own', () => {
   const cases: [NewEvent, string][] = [
     [rosterStart(), 'sail · ticket-to-pr v1 · RUN-1'],
     [
+      { type: 'step:stalled', key: 'spec#1', idleMs: 1200, since: '2026-10-27T09:00:00.000Z' },
+      detail('spec#1', 'stalled · no event for 1.2s', w),
+    ],
+    [
       { type: 'intake:start', key: 'intake#1', intake: 'ticket', kind: 'script', origin: 'builtin', consumed: {} },
       head('intake#1', '▶ intake ticket · script', w),
     ],
@@ -1016,6 +1020,12 @@ test.each([
     },
   ]);
   expect(render(events, verbosity)).toBe(expected);
+});
+
+test('stalled steps print at normal but not quiet', () => {
+  const events = stream([{ type: 'step:stalled', key: 'spec#1', idleMs: 1200, since: '2026-10-27T09:00:00.000Z' }]);
+  expect(render(events, 'normal')).toBe(view(detail('spec#1', 'stalled · no event for 1.2s')));
+  expect(render(events, 'quiet')).toBe('');
 });
 
 test('verbose leaves the cwd off a command run in the workspace, and routes to the end or a fail', () => {

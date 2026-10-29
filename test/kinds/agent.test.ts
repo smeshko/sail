@@ -167,6 +167,66 @@ async function tried(step: AgentStep, harness: Harness, template?: string): Prom
   return { run: await agentKind.run(step, s.context(harness)), s };
 }
 
+test('a silent session stalls once and leaves no timer after returning', async () => {
+  const step = bare(z.any());
+  const limited = { ...step, budget: { ...budget, maxIdleMinutes: 0.001 } };
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(180);
+      return done(null);
+    },
+  };
+  const { s } = await tried(limited, harness);
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 60, since: expect.any(String) },
+  ]);
+  const count = s.events.length;
+  await Bun.sleep(100);
+  expect(s.events.length).toBe(count);
+});
+
+test('the default idle limit is a quarter of the own minute budget', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxMinutes: 0.02 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(70);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+});
+
+test('every event resets silence and a speaking stalled session can stall again', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 0.002 } };
+  const s = setup(step);
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run(req) {
+      await Bun.sleep(70);
+      req.onEvent?.({ type: 'agent:message', text: 'working' });
+      await Bun.sleep(70);
+      expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+      await Bun.sleep(140);
+      expect(s.events.filter((e) => e.type === 'step:stalled')).toHaveLength(1);
+      req.onEvent?.({ type: 'agent:thinking', text: 'again' });
+      await Bun.sleep(170);
+      return done(null);
+    },
+  };
+  await agentKind.run(step, s.context(harness));
+  expect(s.events.filter((e) => e.type === 'step:stalled').map((e) => e.idleMs)).toEqual([120, 120]);
+});
+
+test('non-positive and non-finite idle limits are step problems', () => {
+  for (const maxIdleMinutes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(agentKind.problems({ ...bare(z.any()), budget: { ...budget, maxIdleMinutes } })).toEqual([
+      `budget.maxIdleMinutes must be a positive number: ${maxIdleMinutes}`,
+    ]);
+  }
+});
+
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 const types = (events: readonly CallEvent[]): string[] => events.map((event) => event.type);
 

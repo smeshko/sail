@@ -32,7 +32,12 @@ const RecordedTry = z.object({
   try: z.number().int().min(1),
   request: z.object({
     model: z.string(),
-    budget: z.object({ maxTurns: z.number(), maxUsd: z.number(), maxMinutes: z.number() }),
+    budget: z.object({
+      maxTurns: z.number(),
+      maxUsd: z.number(),
+      maxMinutes: z.number(),
+      maxIdleMinutes: z.number().optional(),
+    }),
     promptSha256: z.string(),
   }),
   events: z.array(z.looseObject({ type: z.string() })),

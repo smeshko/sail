@@ -439,8 +439,16 @@ _Avoid_: lock, mutex
 A script step's hold on a named slot within the selected machine directory, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/` (`$SAIL_HOME/slots/` when set). One step sharing that directory holds a name at a time; different machine directories have independent slots. A step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
 _Avoid_: lock, mutex, semaphore
 
+**Idle limit**:
+An agent step's `budget.maxIdleMinutes`, by default a quarter of `maxMinutes`: how long it may emit no event before it is marked stalled. Agent steps only.
+_Avoid_: inactivity timeout, heartbeat
+
+**Stalled**:
+A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit.
+_Avoid_: hung, stuck, frozen
+
 **Budget**:
-The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
+An agent step's budget also names its idle limit, which warns rather than ends it. The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
 _Avoid_: limit, quota, cap, allowance
 
 **Usage limit**:

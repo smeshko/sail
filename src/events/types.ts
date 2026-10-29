@@ -28,6 +28,7 @@ export const EVENT_TYPES = [
   'step:start',
   'step:end',
   'step:queued',
+  'step:stalled',
   'loop:iteration',
   'loop:exit',
   'all:start',
@@ -190,6 +191,7 @@ interface Payloads {
     /** Exactly when the outcome is `error`. */
     errors?: ContractError[];
   };
+  'step:stalled': { key: string; idleMs: number; since: string };
   'step:queued': {
     key: string;
     /** The exclusive slot the step waits for. */

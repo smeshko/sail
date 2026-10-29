@@ -39,6 +39,8 @@ export interface Budget {
   readonly maxTurns: number;
   readonly maxUsd: number;
   readonly maxMinutes: number;
+  /** Agent steps only: warn after this silence, default maxMinutes / 4; never ends the step. */
+  readonly maxIdleMinutes?: number;
 }
 
 /** The files a stage or step must leave in `$STAGE_OUT`, by name. */
