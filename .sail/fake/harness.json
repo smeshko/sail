@@ -507,28 +507,6 @@
       }
     }
   ],
-  "duplicates": [
-    {
-      "outcome": "done",
-      "output": {
-        "candidates": [
-          {
-            "ticketKey": "FAKE-1",
-            "confidence": 0.6,
-            "why": "Both add a total cost line to sail show, but FAKE-2 does not say where the total goes."
-          }
-        ]
-      },
-      "turns": 6,
-      "usage": {
-        "inputTokens": 0,
-        "cacheReadTokens": 0,
-        "cacheWriteTokens": 0,
-        "outputTokens": 0,
-        "costUsd": 0.1
-      }
-    }
-  ],
   "worth": [
     {
       "outcome": "done",

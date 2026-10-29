@@ -347,11 +347,23 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   const finish = () => {
     if (stopped) return;
     stopped = true;
-    if (timer !== undefined) timers.clear(timer);
-    for (const workflow of watching()) remove(workflow);
-    clearWatcher(options.registryDir, options.entry.name, pid);
-    release?.();
-    resolveDone();
+    try {
+      if (timer !== undefined) timers.clear(timer);
+      for (const workflow of watching()) {
+        try {
+          remove(workflow);
+        } catch (error) {
+          print(errorLine(workflow, error, now()));
+        }
+      }
+      clearWatcher(options.registryDir, options.entry.name, pid);
+    } finally {
+      try {
+        release?.();
+      } finally {
+        resolveDone();
+      }
+    }
   };
 
   /** The status of the run `runId`, `<status>[ <stop reason>]`, or undefined when it has none. */
@@ -505,21 +517,30 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     release?.();
     return refusal;
   };
-  const targets = await open(options.workflows);
-  if ('refused' in targets) return refuse(targets);
-  if (targets.length === 0) return refuse({ refused: 'name at least one workflow to watch' });
-  clearCommands(runs);
-  const refused = claim(labelsOf(targets));
-  if (refused !== undefined) return refuse({ refused });
-  for (const target of targets) await add(target);
-  print(setLine(watching(), now()));
   try {
-    const swept = await workspace.sweep(runs);
-    if (swept.paths.length > 0) print(sweptLine(swept.paths.length, now()));
+    const targets = await open(options.workflows);
+    if ('refused' in targets) return refuse(targets);
+    if (targets.length === 0) return refuse({ refused: 'name at least one workflow to watch' });
+    clearCommands(runs);
+    const refused = claim(labelsOf(targets));
+    if (refused !== undefined) return refuse({ refused });
+    for (const target of targets) await add(target);
+    print(setLine(watching(), now()));
+    try {
+      const swept = await workspace.sweep(runs);
+      if (swept.paths.length > 0) print(sweptLine(swept.paths.length, now()));
+    } catch (error) {
+      print(errorLine(undefined, `the worktrees of ended runs were not swept: ${messageOf(error)}`, now()));
+    }
+    schedule(tickMs);
   } catch (error) {
-    print(errorLine(undefined, `the worktrees of ended runs were not swept: ${messageOf(error)}`, now()));
+    try {
+      finish();
+    } catch {
+      // Cleanup must not replace the error that prevented startup.
+    }
+    throw error;
   }
-  schedule(tickMs);
 
   return {
     done,

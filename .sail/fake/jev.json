@@ -1,3 +1,24 @@
 {
-  "error": { "status": 503, "detail": "Demo keeps the check agents and their implement loop in the route." }
+  "answers": {
+    "FAKE-1": {
+      "type": "noul",
+      "noul": 0.6
+    },
+    "TASK-001": {
+      "type": "noul",
+      "noul": 0.5
+    },
+    "V1": {
+      "type": "noul",
+      "noul": 0.5
+    },
+    "D1": {
+      "type": "noul",
+      "noul": 0.5
+    },
+    "R2": {
+      "type": "noul",
+      "noul": 0.5
+    }
+  }
 }

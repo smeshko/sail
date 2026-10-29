@@ -29,7 +29,9 @@ test("new --own holds the repository's own .sail/ with every adapter, named harn
       adapters: { harnesses?: Record<string, unknown> } & Record<string, unknown>;
     };
     const jev = JSON.parse(readFileSync(join(dir, 'repo', '.sail', 'fake', 'jev.json'), 'utf8'));
-    expect(jev.error?.status).toBe(503);
+    // The fake factory's task and its fix pass's findings answer below a clear yes, so the check agents still run.
+    const checks = ['TASK-001', 'V1', 'D1', 'R2'].map((id) => jev.answers?.[id]?.noul);
+    expect(checks.every((noul: number | undefined) => noul !== undefined && noul < 0.95)).toBe(true);
     const { harnesses, ...ports } = own.adapters;
     expect({
       code,

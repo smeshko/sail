@@ -207,6 +207,27 @@ test('a 401 fails unauthorized, a 429 and a 503 unavailable, each with its statu
   });
 });
 
+test('a 403 fails forbidden, a 404 not_found and a 409 conflict, each with its status in the message', async () => {
+  expect(await failure(403, { detail: 'no access to this model' })).toEqual({
+    port: 'jev',
+    op: 'ask',
+    code: 'forbidden',
+    message: 'jev.ask: TypeSafe answered 403 Forbidden: no access to this model',
+  });
+  expect(await failure(404, { detail: 'no such endpoint' })).toEqual({
+    port: 'jev',
+    op: 'ask',
+    code: 'not_found',
+    message: 'jev.ask: TypeSafe answered 404 Not Found: no such endpoint',
+  });
+  expect(await failure(409, { detail: 'request in flight' })).toEqual({
+    port: 'jev',
+    op: 'ask',
+    code: 'conflict',
+    message: 'jev.ask: TypeSafe answered 409 Conflict: request in flight',
+  });
+});
+
 test('an error body that is no JSON is kept as text in the message', async () => {
   const jev = asking(scripted(() => new Response('upstream connect error', { status: 502 })).fetch);
   const error = (await rejection(jev.ask(THREE_QUESTIONS))) as PortError;
@@ -244,6 +265,22 @@ test('a network failure fails unavailable, keeping the cause', async () => {
   });
 });
 
+test('an answer whose body breaks off while read fails unavailable, keeping the cause', async () => {
+  const fetch = scripted(
+    () =>
+      ({
+        ok: true,
+        status: 200,
+        text: () => Promise.reject(new Error('socket hang up')),
+      }) as unknown as Response,
+  ).fetch;
+  const error = (await rejection(asking(fetch).ask(THREE_QUESTIONS))) as PortError;
+  expect({ code: error.code, message: error.message }).toEqual({
+    code: 'unavailable',
+    message: 'jev.ask: the answer from TypeSafe at api.typesafe.ai broke off: socket hang up',
+  });
+});
+
 test('an answer that lacks a question fails invalid, naming it', async () => {
   const { clear: _clear, ...partial } = DOCS_ANSWER.answers;
   const error = (await rejection(
@@ -272,6 +309,16 @@ test('a 200 that is no JSON object fails invalid', async () => {
     code: 'invalid',
     message: 'jev.ask: TypeSafe answered 200 with no JSON answer: <html>',
   });
+});
+
+test("a 200 object that breaks the answer's shape fails invalid, naming where, and keeps the body", async () => {
+  const { model: _model, ...noModel } = DOCS_ANSWER;
+  const error = (await rejection(asking(scripted(() => json(noModel)).fetch).ask(THREE_QUESTIONS))) as PortError;
+  expect({ code: error.code, message: error.message }).toEqual({
+    code: 'invalid',
+    message: "jev.ask: TypeSafe's answer breaks its shape at model: Invalid input: expected string, received undefined",
+  });
+  expect(error.raw).toEqual(noModel);
 });
 
 test('an answer echoing the key leaves it masked in the message', async () => {
