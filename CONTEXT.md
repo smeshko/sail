@@ -432,7 +432,7 @@ A tool call refused for falling outside the step's permissions, recorded with th
 _Avoid_: block, violation, rejection
 
 **Exclusive slot**:
-A script step's machine-wide hold on a named slot, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/`. One step on the machine holds a name at a time; a step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
+A script step's machine-wide hold on a named slot, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/` (`$SAIL_HOME/slots/` when set). One step on the machine holds a name at a time; a step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
 _Avoid_: lock, mutex, semaphore
 
 **Budget**:

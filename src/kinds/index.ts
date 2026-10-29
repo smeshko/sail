@@ -56,7 +56,7 @@ export interface StepContext {
   signal?: AbortSignal;
   /** Between SIGTERM and SIGKILL when the step is stopped. */
   graceMs?: number;
-  /** Where exclusive slots live and how often a waiting step looks again; `~/.sail/slots` and 1000 ms when left out. */
+  /** Where exclusive slots live and how often a waiting step looks again; `$SAIL_HOME/slots`, or `~/.sail/slots`, and 1000 ms when left out. */
   slots?: { dir?: string; pollMs?: number };
   /** Where the step's events go. The call stamps each with its key. */
   emit?: CallEmit;

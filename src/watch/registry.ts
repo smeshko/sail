@@ -10,7 +10,6 @@
 //
 // The machine directory is `SAIL_HOME`, or `~/.sail`. Branch leases don't follow `SAIL_HOME` yet.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../adapters/leases';
 import { runsDir } from '../engine/run-dir';
@@ -55,11 +54,7 @@ export interface RegistryProblem {
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-/** sail's machine-level directory: `SAIL_HOME` when it is set and not empty, else `~/.sail`. */
-export function machineDir(env: Env): string {
-  const home = env.SAIL_HOME;
-  return home === undefined || home === '' ? join(homedir(), '.sail') : home;
-}
+export { machineDir } from '../engine/machine-dir';
 
 /** Where the registry's entries live, in `machineDir`. */
 export function registryDir(machine: string): string {

@@ -1,13 +1,13 @@
-// Machine-wide exclusive slots: one file per slot name in `~/.sail/slots/`, so a heavy script step runs only while no
-// other step on the machine holds its name. A slot is stale only once its holder's pid is dead, never on a timer.
+// Machine-wide exclusive slots: one file per slot name in the machine directory's `slots/`
+// (`$SAIL_HOME/slots/`, or `~/.sail/slots/`), so a heavy script step runs only while no other step holds its name. A slot is stale only once its holder's pid is dead, never on a timer.
 //
 // Two accepted risks, as with branch leases: a reused pid makes a dead holder read as alive, so a waiter waits until that
 // process ends; and a holder killed with SIGKILL frees its slot at once while its script's process group may still be
 // running, so two scripts can overlap for a while.
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { machineDir } from './machine-dir';
 import { isAlive } from './process';
 
 export const SlotHolder = z.object({
@@ -30,8 +30,8 @@ export class SlotError extends Error {}
 export class SlotContended extends SlotError {}
 
 /** Where slots live unless a caller names a directory. Computed per call, so importing this reads nothing. */
-export function defaultSlotsDir(): string {
-  return join(homedir(), '.sail', 'slots');
+export function defaultSlotsDir(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(machineDir(env), 'slots');
 }
 
 export function slotFile(dir: string, name: string): string {
