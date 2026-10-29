@@ -214,7 +214,7 @@ test('a check still red after its rerun goes to fix as a finding, then validate,
     const { code, stderr, keys, dir } = await review(repo);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
 
-    expect(landing(keys)).toEqual(['merge#1', 'fix#2', 'validate#3', 'push#2', 'merge#2']);
+    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'fix#2', 'validate#3', 'push#2', 'merge#2']);
     const findings = JSON.parse(
       readFileSync(
         join(dir, readdirSync(dir).find((name) => /^\d+-fix$/.test(name)) ?? '', 'call-2', 'in', 'findings.json'),
@@ -254,17 +254,49 @@ test('a merge the host rejects after the base moved merges the base in, then val
   });
 }, 120_000);
 
-test('a base that conflicts goes to resolve-conflicts before validate, push and merge again', async () => {
+test('a base that conflicts is caught before any check is read and goes to resolve-conflicts, and a head still conflicting after it is caught again by the next merge', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
     moveBase(repo, 'notes.txt', 'the base wrote here\n');
-    editPullRequest(repo, { merges: ['rejected', 'merged'] });
-    const { code, stderr, keys } = await review(repo);
-    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+    // The fake agent answers that it resolved the conflict without touching the workspace, so the head never takes
+    // the base: each merge's probe finds the conflict, with no rejection by the host, until the passes run out.
+    const { code, keys, dir } = await review(repo);
+    expect(code).not.toBe(0);
 
-    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'resolve-conflicts#1', 'validate#3', 'push#2', 'merge#2']);
+    expect(landing(keys)).toEqual([
+      'merge#1',
+      'sync-base#1',
+      'resolve-conflicts#1',
+      'validate#3',
+      'push#2',
+      'merge#2',
+      'sync-base#2',
+      'resolve-conflicts#2',
+      'validate#4',
+      'push#3',
+      'merge#3',
+    ]);
+    expect(readEvents(dir).filter((event) => event.type === 'codehost:checks')).toEqual([]);
     expect((await pullRequest(repo)).comments.at(-1)).toBe(
-      '## sail review\n\nMerged after the review:\n\n- merged the base in, resolving conflicts in notes.txt\n',
+      '## sail review\n\nNot merged: it conflicts with its base in notes.txt\n\nBefore that, the review:\n\n- merged the base in, resolving conflicts in notes.txt\n- merged the base in, resolving conflicts in notes.txt\n\nThe `factory` label is off and `needs-human` is on: this pull request needs a human.\n',
+    );
+  });
+}, 120_000);
+
+test('a red check whose base has moved merges the base in before the fix, so the fix is pushed on the current base', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo, seed());
+    const moved = moveBase(repo, 'other.txt', 'from the base\n');
+    // The push moves the head, so the fake's checks start again and stay red: the passes run out after the first.
+    editPullRequest(repo, { checks: [{ name: 'verify', statuses: ['failed'], log: 'boom' }] });
+    const { code, keys } = await review(repo);
+    expect(code).not.toBe(0);
+
+    expect(landing(keys).slice(0, 6)).toEqual(['merge#1', 'sync-base#1', 'fix#2', 'validate#3', 'push#2', 'merge#2']);
+    const pr = await pullRequest(repo);
+    expect(repo.git('log', '-1', '--format=%P', pr.headSha).trim().split(' ')).toContain(moved);
+    expect(pr.comments.at(-1)).toContain(
+      '- reran verify once: still red\n- merged the base in\n- fixed the failed checks verify in 3 commits\n',
     );
   });
 }, 120_000);
@@ -277,7 +309,7 @@ test('landing shares the three fix passes: after two review rounds, one fix for 
     expect(code).not.toBe(0);
 
     expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2', 'fix#3']);
-    expect(landing(keys)).toEqual(['merge#1', 'fix#3', 'validate#4', 'push#2', 'merge#2']);
+    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'fix#3', 'validate#4', 'push#2', 'merge#2']);
     const pr = await pullRequest(repo);
     expect(pr.labels).not.toContain('factory');
     expect(pr.labels).toContain('needs-human');
@@ -298,7 +330,7 @@ test('a fix that blocks while landing blocks the next merge, which comments why,
     const { code, keys } = await review(repo);
     expect(code).not.toBe(0);
 
-    expect(landing(keys)).toEqual(['merge#1', 'fix#2', 'merge#2']);
+    expect(landing(keys)).toEqual(['merge#1', 'sync-base#1', 'fix#2', 'merge#2']);
     const pr = await pullRequest(repo);
     expect(pr.labels).not.toContain('factory');
     expect(pr.comments.at(-1)).toStartWith(

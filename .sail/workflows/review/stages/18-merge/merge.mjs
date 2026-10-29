@@ -1,10 +1,13 @@
 // Polls `sail port codehost checks` until every check on $INPUT_HEADSHA has passed or been skipped, then merges with
 // `--expected-head-sha`. A pull request with no checks at all is merged once a few reads have found none, since CI may
-// not have registered its run yet. Failed checks are rerun once, to rule out a flake. Still red, it reads each failed
-// check's log and hands them back to the workflow as a retry, `checks`; a merge the host rejects, which a conflict with
-// the base gives, is a retry too, `base`. On the last try ($INPUT_LASTTRY), a retry, a moved head, a refused merge, the
-// time running out or a reason in $INPUT_BLOCKED instead comments why, swaps the label in $INPUT_LABEL for needs-human
-// and exits 1. A merge after anything in $INPUT_LANDING, or after a rerun, comments what it took. Prints the Merged.
+// not have registered its run yet. A head the host reports that $INPUT_HEADSHA descends from is the host not having
+// caught up with the push, so it is read again for a while; any other head has moved. Failed checks are rerun once, to
+// rule out a flake. Still red, it reads each failed check's log and hands them back to the workflow as a retry,
+// `checks`. A head that conflicts with its base, probed before the first read and on every read with no checks, since
+// a host runs no CI on a conflicting pull request, is a retry too, `base`, as is a merge the host rejects. On the last
+// try ($INPUT_LASTTRY), a retry, a moved head, a refused merge, the time running out or a reason in $INPUT_BLOCKED
+// instead comments why, swaps the label in $INPUT_LABEL for needs-human and exits 1. A merge after anything in
+// $INPUT_LANDING, or after a rerun, comments what it took. Prints the Merged.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,6 +23,9 @@ const blocked = process.env.INPUT_BLOCKED ? read('INPUT_BLOCKED').trim() : null;
 const fake = /codeHost:\s*\{\s*use:\s*fake/.test(readFileSync(process.env.SAIL_CONFIG, 'utf8'));
 const intervalMs = fake ? 100 : 30_000;
 const emptyReads = fake ? 2 : 10;
+// GitHub can report the old head for seconds after a push: two minutes of quicker reads before giving up on it.
+const lagMs = fake ? 100 : 5_000;
+const lagReads = fake ? 3 : 24;
 const deadline = Date.now() + 55 * 60_000;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rerun = [];
@@ -29,6 +35,47 @@ function port(args) {
   const result = spawnSync('sail', ['port', 'codehost', ...args], { encoding: 'utf8' });
   if (result.status !== 0) return { error: (result.stderr || `exit ${result.status}`).trim() };
   return { answer: JSON.parse(result.stdout.trim().split('\n').at(-1)) };
+}
+
+/** Runs git in the workspace: its exit code and trimmed stdout. */
+function git(...args) {
+  const result = spawnSync('git', args, { encoding: 'utf8' });
+  return { code: result.status, out: (result.stdout ?? '').trim(), err: (result.stderr ?? '').trim() };
+}
+
+/** The base's tip, fetched from `origin` when the workspace has one, as sync-base does, else the host's base sha. */
+function baseTip() {
+  const { answer, error } = port(['get-pull-request', String(pr.number)]);
+  if (error) return { error };
+  if (git('remote', 'get-url', 'origin').code !== 0) return { sha: answer.baseSha };
+  const fetched = git('fetch', 'origin', `refs/heads/${answer.base}`);
+  if (fetched.code !== 0) return { error: fetched.err };
+  return { sha: git('rev-parse', 'FETCH_HEAD').out };
+}
+
+/** The paths merging the base into the head would leave conflicted, probed with no checkout touched: none when clean. */
+function conflicts() {
+  const tip = baseTip();
+  if (tip.error) {
+    process.stderr.write(`the base could not be read, so it was not probed: ${tip.error}\n`);
+    return [];
+  }
+  const probe = git('merge-tree', '--write-tree', '--name-only', headSha, tip.sha);
+  if (probe.code === 0) return [];
+  if (probe.code !== 1) {
+    process.stderr.write(`probing the base failed: ${probe.err || `exit ${probe.code}`}\n`);
+    return [];
+  }
+  // The tree's id, then the conflicted paths up to a blank line, then git's messages.
+  const lines = probe.out.split('\n').slice(1);
+  const end = lines.indexOf('');
+  return lines.slice(0, end === -1 ? undefined : end);
+}
+
+/** Hands a conflict with the base back as a `base` retry, when the head has one. */
+function probeBase() {
+  const conflicted = conflicts();
+  if (conflicted.length > 0) retry('base', `it conflicts with its base in ${conflicted.join(', ')}`);
 }
 
 /** What this landing took, as the comment's bullets: the workflow's, then the rerun. */
@@ -70,13 +117,24 @@ function retry(kind, reason, failed = []) {
 }
 
 if (blocked !== null) fail(blocked);
+probeBase();
 
 let empty = 0;
+let lagging = 0;
 for (;;) {
   if (Date.now() > deadline) fail(`its checks were still pending after 55 minutes`);
   const { answer, error } = port(['checks', String(pr.number)]);
   if (error) fail(`its checks could not be read: ${error}`);
-  if (answer.headSha !== headSha) fail(`its head moved to ${answer.headSha.slice(0, 7)} during the review`);
+  if (answer.headSha !== headSha) {
+    const shown = answer.headSha.slice(0, 7);
+    if (git('merge-base', '--is-ancestor', answer.headSha, headSha).code !== 0) {
+      fail(`its head moved to ${shown} during the review`);
+    }
+    if (++lagging > lagReads) fail(`the host still shows ${shown} as its head, not the pushed ${headSha.slice(0, 7)}`);
+    process.stderr.write(`the host still shows ${shown}, behind the pushed ${headSha.slice(0, 7)}: reading again\n`);
+    await sleep(lagMs);
+    continue;
+  }
   const failed = answer.checks.filter((check) => check.status === 'failed');
   if (failed.length > 0 && rerun.length === 0) {
     const again = port(['rerun-checks', String(pr.number)]);
@@ -98,6 +156,7 @@ for (;;) {
   const pending = answer.checks.filter((check) => check.status === 'pending');
   process.stderr.write(`checks: ${answer.checks.length - pending.length}/${answer.checks.length} done\n`);
   if (answer.checks.length > 0 && pending.length === 0) break;
+  if (answer.checks.length === 0) probeBase();
   if (answer.checks.length === 0 && ++empty >= emptyReads) break;
   await sleep(intervalMs);
 }

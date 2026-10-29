@@ -123,6 +123,19 @@ test('checks scripted pending then failed read pending, then failed from then on
   ]);
 });
 
+test('a pull request scripted with heads reports each on its checks read, the last repeating, and without them its headSha', async () => {
+  const host = createFakeCodeHost(
+    files((seed) => {
+      Object.assign(seed.pullRequests[3] as object, { heads: ['a'.repeat(40), 'b'.repeat(40)] });
+    }),
+  );
+  const reads: string[] = [];
+  for (let i = 0; i < 3; i++) reads.push((await host.checks(4)).headSha);
+  expect(reads).toEqual(['a'.repeat(40), 'b'.repeat(40), 'b'.repeat(40)]);
+  const plain = createFakeCodeHost(files());
+  expect((await plain.checks(4)).headSha).toBe((await plain.getPullRequest(4)).headSha);
+});
+
 test('checks scripted failed then passed read passed after the failed one is rerun, whether or not it was read first', async () => {
   const script = (seed: { pullRequests: Record<string, unknown>[] }) =>
     seed.pullRequests.push(seeded(7, { checks: [{ name: 'verify', statuses: ['failed', 'passed'] }] }));
