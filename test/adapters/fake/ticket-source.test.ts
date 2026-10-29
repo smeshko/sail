@@ -68,6 +68,7 @@ ticketSourceSuite('fake', async (emit) => ({
 
 test("addLabel gives the label in the team's own spelling, however it is written, and adds nothing the ticket carries under another case", async () => {
   const source = createFakeTicketSource(files(['sail', 'cli', 'Bug']));
+  expect(source.scope).toBeUndefined();
   expect((await source.addLabel('FAKE-1', 'bug')).labels).toEqual(['sail', 'Bug']);
   expect((await source.addLabel('FAKE-1', 'BUG')).labels).toEqual(['sail', 'Bug']);
   expect((await source.removeLabel('FAKE-1', 'SAIL')).labels).toEqual(['Bug']);

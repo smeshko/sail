@@ -123,6 +123,17 @@ const context = (env: Env): AdapterContext => ({
   env,
 });
 
+test("the source's scope is its team", () => {
+  expect(linear().adapter.scope).toBe('ADW');
+  const source = createLinearTicketSource({
+    team: 'SCA',
+    endpoint: LINEAR_ENDPOINT,
+    apiKey: KEY,
+    fetch: createLinearWorld(SEED).fetch,
+  });
+  expect(source.scope).toBe('SCA');
+});
+
 // The port suite, offline: a fresh world per case, its review state named Code Review.
 
 describe('the port suite', () => {
