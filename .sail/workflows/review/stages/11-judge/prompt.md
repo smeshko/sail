@@ -11,6 +11,11 @@ six reviewers, each with the reviewer it came from. `$STAGE_IN/evidence.json` ho
 validation's output, the demonstration's criteria and transcript, and each reviewer's summary and coverage: what it
 checked, how, and with what result.
 
+`$STAGE_IN/triage.json` holds Jev's answers, its clear `decided` findings, and the `judge` ids it left to you.
+Decide every finding in `judge` as below. A merge-stopping finding (high severity, or from validation, leak-check,
+demonstration or checks) is always yours, whatever Jev answered. For a Jev-decided finding, submit a decision only to
+overrule Jev, after reading its code; omitting it keeps Jev's verdict. Spend your work on what remains unclear.
+
 ## 1. Check each finding before you decide on it
 
 Reviewers overreach, and two lenses often report one problem. For each finding, read the code it points at and confirm
@@ -70,5 +75,6 @@ You decide only. Don't change any file.
 ## Submit
 
 Submit a one-paragraph summary of the pull request's state; the thin reviews, each with its reviewer and what it left
-out, none when every review holds; and a decision for every finding in `findings.json`: its id, verdict and a
-one-sentence rationale, and for a `ticket` the ticket, null otherwise.
+out, none when every review holds; and a decision for every id in `triage.json`'s `judge`, plus any Jev-decided
+finding you overrule: its id, verdict and a one-sentence rationale, and for a `ticket` the ticket, null otherwise.
+Do not restate Jev decisions you keep.
