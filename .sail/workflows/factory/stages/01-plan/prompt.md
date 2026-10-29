@@ -10,8 +10,8 @@ Gather enough context to plan without guessing:
 - Check recent history for related changes: `git log --oneline -20`.
 - Note the files likely to change, the patterns to follow, the constraints, and what is still uncertain.
 
-You read and never run: the tests, the gate and scratch files outside `$STAGE_OUT` are denied. Reason from the code
-and the tests as written.
+You read and never run: not the tests, not the gate, and no scratch file outside `$STAGE_OUT`. Reason from the code
+and the tests as written: the tests take minutes, and validation runs them after implement.
 
 ## 2. Resolve every question yourself
 
