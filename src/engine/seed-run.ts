@@ -12,8 +12,9 @@
 //   4. the stage, which must be a stage of that workflow;
 //   5. the source's journal, which must read: an `intake#1` that passed, and a call of the stage. The seed is every
 //      entry before the stage's first call, or before the first line of any of its group's calls, their steps' lines
-//      included: a seed never splits a group, so the seeded run runs the whole group again. Each entry must point inside its
-//      own call directory, at regular files, since that is what a run writes and all the copy takes.
+//      included: a seed never splits a group, so the seeded run runs the whole group again. A stage with only step lines
+//      and no recorded group is refused, since its group membership is unknown. Each entry must point inside its own
+//      call directory, at regular files, since that is what a run writes and all the copy takes.
 // Then the run id is minted and the header built and checked, with `fromRun` and no claim: a seeded run reads no
 // ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by
 // then refuses. Then, as a start does, the branch is leased and the run directory and the workspace made, each undone
@@ -164,13 +165,17 @@ function callDirs(sourceDir: string, runId: string, entries: readonly JournalEnt
 /**
  * The seed's cut before stage's first call or any line of its group. Step lines carry no group, so read the group
  * from call lines, then include every member's step lines when finding its start. No line of stage means -1.
+ * With only steps and no group-bearing call, membership is unknown: refuse rather than risk splitting a group.
  */
-function seedEnd(entries: readonly JournalEntry[], stage: string): number {
+function seedEnd(entries: readonly JournalEntry[], stage: string): number | { incomplete: string } {
   const first = entries.findIndex((entry) => entry.stage === stage);
   if (first === -1) return -1;
   const own = `${stage}#${entries[first]?.call}`;
   const group = entries.find((entry) => entry.step === undefined && entry.group?.includes(own))?.group;
-  if (group === undefined) return first;
+  if (group === undefined) {
+    if (!entries.some((entry) => entry.key === own && entry.step === undefined)) return { incomplete: own };
+    return first;
+  }
   const members = new Set(group);
   return entries.findIndex((entry) => members.has(`${entry.stage}#${entry.call}`));
 }
@@ -225,6 +230,11 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     return { refused: `run ${fromRun}'s intake didn't pass: there is nothing to reuse` };
   }
   const at = seedEnd(entries, stage);
+  if (typeof at !== 'number') {
+    return {
+      refused: `run ${fromRun}'s ${at.incomplete} has only step lines and no recorded group: sail resume ${fromRun} before seeding it`,
+    };
+  }
   if (at === -1) return { refused: `run ${fromRun} never ran '${stage}': sail resume ${fromRun} continues it` };
   const seed = entries.slice(0, at);
   const copied = callDirs(source.dir, fromRun, seed);

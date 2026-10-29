@@ -46,6 +46,68 @@ async function groupedTwoStepInto(to: string): Promise<string> {
   });
 }
 
+test('seeding an interrupted group with only step lines is refused without writing anything', async () => {
+  await withTempRepo(async (repo) => {
+    const fromRun = await withTempRepo(async (from) => {
+      const sail = writeTwoStep(from.dir, { grouped: true });
+      edit(
+        sail,
+        `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`,
+        "import { script, value, z } from 'sail';",
+        "import { script, stage, value, z } from 'sail';\nconst Url = z.string();",
+      );
+      edit(
+        sail,
+        `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`,
+        "export const notify = script('notify', {",
+        "const send = script('send', {",
+      );
+      edit(sail, `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`, 'value(z.string())', 'value(Url)');
+      const notifyPath = join(sail, `workflows/${AGENT_WORKFLOW}/stages/notify/stage.ts`);
+      writeFileSync(
+        notifyPath,
+        `${readFileSync(notifyPath, 'utf8')}\nconst Sent = z.object({ sent: z.boolean() });
+export const notify = stage('notify', {
+  consumes: { url: value(Url) },
+  output: Sent,
+  steps: [send, script('confirm', { run: './run.sh', output: Sent })],
+});\n`,
+      );
+      const end = await runWorkflow({
+        cwd: from.dir,
+        adapters: await fakeAdapters(from.dir),
+        workflow: AGENT_WORKFLOW,
+        ticket: 'FAKE-1',
+      });
+      if ('refused' in end) throw new Error(end.refused);
+      expect(end.status).toBe('completed');
+      copyRun(from.dir, repo.dir);
+      return end.runId;
+    });
+    const fromDir = join(repo.dir, '.sail-runs', fromRun);
+    reorderJournal(fromDir, [
+      'intake#1',
+      'brief#1',
+      'spec#1',
+      'publish#1/describe',
+      'notify#1/send',
+      'publish#1/open',
+      'publish#1',
+      'notify#1/confirm',
+      'notify#1',
+    ]);
+    cutJournal(fromDir, 5);
+    writeFileSync(join(fromDir, 'STATUS'), 'running\n');
+    const before = runIds(repo.dir);
+    const worktrees = repo.git('worktree', 'list', '--porcelain');
+    expect(await seed(repo, { fromRun, stage: 'notify' })).toEqual({
+      refused: `run ${fromRun}'s notify#1 has only step lines and no recorded group: sail resume ${fromRun} before seeding it`,
+    });
+    expect(runIds(repo.dir)).toEqual(before);
+    expect(repo.git('worktree', 'list', '--porcelain')).toBe(worktrees);
+  });
+}, 60_000);
+
 const source = sharedSource();
 afterAll(() => source.release());
 
