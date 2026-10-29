@@ -48,14 +48,31 @@ test('open tickets combines the last JSON line of both open states', () => {
   }
 });
 
-test('wrap sends text and its source to the untrusted renderer', () => {
-  const spawn = spyOn(childProcess, 'spawnSync').mockReturnValue(result('<untrusted-input>text</untrusted-input>\n'));
+test('wrapAll sends every passage to one renderer and parses its last JSON line', () => {
+  const passages = [
+    { text: 'first', source: 'follow-up' },
+    { text: 'second', source: 'ticket' },
+  ];
+  const wrapped = ['<untrusted-input>first</untrusted-input>', '<untrusted-input>second</untrusted-input>'];
+  const spawn = spyOn(childProcess, 'spawnSync').mockReturnValue(result(`notice\n${JSON.stringify(wrapped)}\n`));
   try {
-    expect(lib.wrap('text', 'follow-up')).toBe('<untrusted-input>text</untrusted-input>');
-    expect(spawn).toHaveBeenCalledWith('sail', ['port', 'render', '--untrusted', '--source', 'follow-up'], {
+    expect(lib.wrapAll(passages)).toEqual(wrapped);
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith('sail', ['port', 'render', '--untrusted', '--each'], {
       encoding: 'utf8',
-      input: 'text',
+      input: JSON.stringify(passages),
+      maxBuffer: 64 * 1024 * 1024,
     });
+  } finally {
+    spawn.mockRestore();
+  }
+});
+
+test('wrapAll with no passages returns an empty array without starting sail', () => {
+  const spawn = spyOn(childProcess, 'spawnSync');
+  try {
+    expect(lib.wrapAll([])).toEqual([]);
+    expect(spawn).toHaveBeenCalledTimes(0);
   } finally {
     spawn.mockRestore();
   }

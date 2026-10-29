@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const { openTickets, wrap, excerpt, sameWork, SAME_WORK } = await import(
+const { openTickets, wrapAll, excerpt, sameWork, SAME_WORK } = await import(
   pathToFileURL(join(dirname(process.env.SAIL_CONFIG), 'lib', 'duplicates.mjs')).href
 );
 
@@ -45,22 +45,33 @@ function port(args, body) {
 function duplicatesOf(candidates) {
   const open = openTickets();
   if (candidates.length === 0 || (open.length === 0 && candidates.length < 2)) return new Map();
+  const passages = [
+    ...candidates.flatMap((each, index) => [
+      { text: each.title, source: `follow-up ${index + 1}, title` },
+      { text: each.description, source: `follow-up ${index + 1}, description` },
+    ]),
+    ...open.flatMap((ticket) => [
+      { text: ticket.title, source: `ticket ${ticket.ticketKey}, title` },
+      { text: excerpt(ticket.description || '(none)'), source: `ticket ${ticket.ticketKey}, description` },
+    ]),
+  ];
+  const wrapped = wrapAll(passages);
   const state = {
     followUps: Object.fromEntries(
-      candidates.map((each, index) => [
+      candidates.map((_, index) => [
         `follow-up-${index + 1}`,
         {
-          title: wrap(each.title, `follow-up ${index + 1}, title`),
-          description: wrap(each.description, `follow-up ${index + 1}, description`),
+          title: wrapped[index * 2],
+          description: wrapped[index * 2 + 1],
         },
       ]),
     ),
     tickets: Object.fromEntries(
-      open.map((ticket) => [
+      open.map((ticket, index) => [
         ticket.ticketKey,
         {
-          title: wrap(ticket.title, `ticket ${ticket.ticketKey}, title`),
-          description: wrap(excerpt(ticket.description || '(none)'), `ticket ${ticket.ticketKey}, description`),
+          title: wrapped[(candidates.length + index) * 2],
+          description: wrapped[(candidates.length + index) * 2 + 1],
         },
       ]),
     ),

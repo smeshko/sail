@@ -8,8 +8,12 @@ export const DESCRIPTION_CHARS = 600;
 /** An excerpt with a marker when cut. */
 export const excerpt = (text) => (text.length > DESCRIPTION_CHARS ? `${text.slice(0, DESCRIPTION_CHARS)}…` : text);
 
-function port(args, input) {
-  const result = spawnSync('sail', ['port', ...args], { encoding: 'utf8', input: input ?? '' });
+function port(args, input, maxBuffer) {
+  const result = spawnSync('sail', ['port', ...args], {
+    encoding: 'utf8',
+    input: input ?? '',
+    ...(maxBuffer === undefined ? {} : { maxBuffer }),
+  });
   if (result.status !== 0)
     throw new Error(
       `sail port ${args.join(' ')}: ${(result.stderr || result.error?.message || `exit ${result.status ?? result.signal}`).trim()}`,
@@ -23,8 +27,16 @@ export function openTickets() {
   return [...list('unstarted'), ...list('started')];
 }
 
-/** Wrap human-written text as untrusted input. */
-export const wrap = (text, source) => port(['render', '--untrusted', '--source', source], text).trimEnd();
+/** Wrap all human-written passages as untrusted input in one call; nothing starts for no passages. */
+export const wrapAll = (passages) =>
+  passages.length === 0
+    ? []
+    : JSON.parse(
+        port(['render', '--untrusted', '--each'], JSON.stringify(passages), 64 * 1024 * 1024)
+          .trim()
+          .split('\n')
+          .at(-1),
+      );
 
 /** The shared same-work question for two state paths. */
 export function sameWork(a, b) {

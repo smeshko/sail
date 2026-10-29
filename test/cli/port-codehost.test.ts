@@ -406,6 +406,7 @@ const USAGE = `${TICKET_USAGE}${UPDATE_USAGE}${CREATE_USAGE}${RELABEL_USAGE}${AT
        sail port codehost comment <pr> [--body-file <path>]
        sail port jev ask [--model <id>] [--body-file <path>]
        sail port render --untrusted --source <text> [--inline]
+       sail port render --untrusted --each [--inline]
 `;
 
 test("get-pull-request prints the pull request with its details, as the port's PullRequestDetails, named by its number, by #number or by its URL", async () => {
