@@ -22,7 +22,10 @@ import {
   nonInteractive,
   removeWorktree,
   stripUserinfo,
+  sweepEnded,
 } from '../../../src/adapters/workspace/git';
+import { writeStatus } from '../../../src/engine/run-dir';
+import { PortError } from '../../../src/ports/errors';
 import { messageOf, portFailure } from '../../helpers/ports';
 import { withTempRepo } from '../../helpers/temp-repo';
 
@@ -140,6 +143,53 @@ test("a remote's URL keys and logs without its credentials, and any other URL as
     'https://github.com/o/r.git',
     '/srv/git/r.git',
   ]);
+});
+
+test('a sweep reports every thrown removal reason in path order, including a ref failure after removal', async () => {
+  await withTempRepo(async (repo) => {
+    const runsDir = join(repo.dir, 'runs');
+    for (const name of ['z', 'a', 'm', 'b', 'c']) {
+      const runDir = join(runsDir, name);
+      mkdirSync(join(runDir, 'workspace'), { recursive: true });
+      writeStatus(runDir, 'completed');
+    }
+    let swept: unknown;
+    try {
+      swept = sweepEnded(runsDir, (runDir) => {
+        const name = runDir.slice(runDir.lastIndexOf('/') + 1);
+        if (name === 'a') throw new Error('plain failure');
+        if (name === 'm') throw 'non-error failure';
+        if (name === 'z') {
+          rmSync(join(runDir, 'workspace'), { recursive: true });
+          throw new PortError('workspace', 'sweep', 'unavailable', 'its commits were not kept');
+        }
+      });
+    } catch (error) {
+      swept = messageOf(error);
+    }
+    expect(swept).toEqual({
+      paths: [join(runsDir, 'b/workspace'), join(runsDir, 'c/workspace')],
+      failed: [
+        { path: join(runsDir, 'a/workspace'), reason: 'plain failure' },
+        { path: join(runsDir, 'm/workspace'), reason: 'non-error failure' },
+        { path: join(runsDir, 'z/workspace'), reason: 'its commits were not kept' },
+      ],
+    });
+    expect(existsSync(join(runsDir, 'z/workspace'))).toBe(false);
+  });
+});
+
+test('a sweep of a missing runs directory resolves with no paths or failures', async () => {
+  await withTempRepo(async (repo) => {
+    expect(
+      sweepEnded(join(repo.dir, 'missing'), () => {
+        throw new Error('unexpected removal');
+      }),
+    ).toEqual({
+      paths: [],
+      failed: [],
+    });
+  });
 });
 
 test('a diff over <rev>... or <rev>...HEAD whose rev shares no commit with HEAD is invalid, saying so, while <rev> alone diffs', async () => {

@@ -242,7 +242,11 @@ export const WorkspaceReleased = z.object({
 });
 export type WorkspaceReleased = z.infer<typeof WorkspaceReleased>;
 
-export const Swept = z.object({ paths: z.array(z.string()), raw: Raw });
+export const Swept = z.object({
+  paths: z.array(z.string()),
+  failed: z.array(z.object({ path: z.string(), reason: z.string() })),
+  raw: Raw,
+});
 export type Swept = z.infer<typeof Swept>;
 
 // Harness
