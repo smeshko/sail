@@ -1,7 +1,7 @@
 Describe the change on this branch for its pull request into `staging`, from the ticket, the plan at `{{plan}}`, and
 the commits (`git log origin/staging..HEAD`).
 
-Write `pr-body.md` with these sections:
+Write `$STAGE_OUT/pr-body.md`, never a path in the repository, with these sections:
 
 - **Summary**: what changes and why, in two or three sentences, in `CONTEXT.md`'s terms.
 - **Changes**: one bullet per commit or group of related commits.
@@ -16,8 +16,8 @@ Write `pr-body.md` with these sections:
 End the body with `Closes <ticket key>` on its own line. The repository is public: name only sail and its `ADW-<n>`
 issues, never another project or tracker.
 
-Submit the title, a Conventional Commits subject ending with the ticket key in parentheses, and `pr-body.md` as the
-body file.
+Submit the title, a Conventional Commits subject ending with the ticket key in parentheses, and
+`$STAGE_OUT/pr-body.md` as the body file.
 
 Submit as `followUps` the work outside this branch that the plan's Out of Scope or the implementation's notes
 surfaced, and that is worth a ticket of its own: usually a bug the change exposed. A ticket costs a reader's attention every time they pass it, and sail has one maintainer, who writes every adapter and
