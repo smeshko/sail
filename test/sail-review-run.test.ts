@@ -119,6 +119,11 @@ test('a leak-check Jev hit reaches the judge as L1', async () => {
     expect(input.findings).toContainEqual(
       expect.objectContaining({ id: 'L1', source: 'leak-check', file: 'notes.txt:1' }),
     );
+    const leak = input.findings.find((finding: { id: string }) => finding.id === 'L1');
+    expect(`${leak.title}\n${leak.detail}`).not.toContain('a change');
+    expect(leak.detail).toContain('0.97');
+    expect(leak.detail).toContain('0.8');
+    expect(asked(dir, 'leak-check#1')).toHaveLength(1);
   });
 }, 120_000);
 

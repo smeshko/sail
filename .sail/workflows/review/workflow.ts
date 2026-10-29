@@ -115,14 +115,14 @@ export default workflow(
           hit.kind === 'key'
             ? `A tracker key other than ADW: ${hit.match}`
             : hit.kind === 'jev'
-              ? `Jev reads a line as naming another project: ${hit.match.slice(0, 80)}`
+              ? 'Jev reads a line as naming another project'
               : 'A term from the private denylist',
-        // A denylisted term is private by definition: the finding names its line, never the term.
+        // Denylist and Jev findings name the line, never its potentially private text.
         detail:
           hit.kind === 'key'
             ? `${hit.file}:${hit.line} adds ${hit.match}. Committed text names only sail and its ADW-<n> issues.`
             : hit.kind === 'jev'
-              ? `${hit.file}:${hit.line} adds "${hit.match}". The leak check's Jev pass answers yes at ${hit.yes} (hit from ${leaks.output.jev.threshold}). Committed text names only sail and its ADW-<n> issues.`
+              ? `${hit.file}:${hit.line}: the leak check's Jev pass answers yes at ${hit.yes} (hit from ${leaks.output.jev.threshold}). Committed text names only sail and its ADW-<n> issues.`
               : `${hit.file}:${hit.line} adds a term on the leak denylist. Committed text names only sail and its ADW-<n> issues.`,
       });
     }
