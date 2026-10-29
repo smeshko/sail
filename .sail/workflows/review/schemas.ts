@@ -73,6 +73,22 @@ export const Evidence = z.object({
 
 export const Verdict = z.enum(['fix', 'ticket', 'drop']);
 
+/** Jev's provisional decisions and everything still needing the judge. */
+export const Triaged = z.object({
+  /** Whether Jev answered this review's request. */
+  asked: z.boolean(),
+  /** Why Jev was not reached, or what it decided. */
+  note: z.string(),
+  /** Provisional clear-support, clear-no and verdict-confidence thresholds. */
+  thresholds: z.object({ supported: z.number(), unsupported: z.number(), verdict: z.number() }),
+  /** Complete supported-and-verdict answers, including merge-stopping findings. */
+  answers: z.array(z.object({ id: z.string(), supported: z.number(), verdict: Verdict, confidence: z.number() })),
+  /** Clear decisions the judge may overrule. */
+  decided: z.array(z.object({ finding: z.string(), verdict: z.enum(['fix', 'drop']), rationale: z.string() })),
+  /** Finding ids the judge must decide, in findings order. */
+  judge: z.array(z.string()),
+});
+
 export const Judgement = z.object({
   /** The pull request's state in a paragraph: what holds, and what doesn't. */
   summary: z.string(),

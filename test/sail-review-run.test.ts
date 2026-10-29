@@ -3,7 +3,7 @@
 // Jev. The first cases are about check-fix: Jev's clear yes on every targeted finding ends a fix round without an agent
 // session, anything else leaves it to the agent, with Jev's answers as its hint. One is about the tickets it files. The
 // rest are about landing: a check still red after its rerun goes to fix, a rejected merge merges the base in, and both
-// take the fix passes left.
+// take the fix passes left. Triage cases show Jev decisions surviving omissions and judge overrides winning.
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -99,6 +99,89 @@ function jevHint(dir: string, stage: string, call: number): { asked: boolean; an
 
 const asked = (dir: string, key: string) =>
   readEvents(dir).filter((event) => event.type === 'jev:asked' && (event as { key?: string }).key === key);
+
+type TriageHint = {
+  decided: { finding: string; verdict: string; rationale: string }[];
+  answers: { id: string; supported: number; verdict: string; confidence: number }[];
+  judge: string[];
+};
+
+function callInput(dir: string, stage: string, name: string) {
+  const folder = readdirSync(dir).find((entry) => entry.endsWith(`-${stage}`));
+  return JSON.parse(readFileSync(join(dir, folder ?? '', 'call-1', 'in', `${name}.json`), 'utf8'));
+}
+
+const choice = (verdict: string) => ({ type: 'choice', choice: verdict, confidence: 0.95 });
+
+test.each([
+  ['jev-triage runs before the judge and a clear drop the judge omits stays dropped', false],
+  ['a clear fix the judge omits becomes a fix target', false],
+  ['the judge overrules a Jev-decided finding', true],
+  ["a high finding Jev would drop routes on the judge's verdict", true],
+])(
+  '%s',
+  async (_name, overrule) => {
+    await withTempRepo(async (repo) => {
+      const baseSeed = seed() as { answers: Record<string, object> };
+      for (const [id, supported, verdict] of [
+        ['R1', 0.97, 'fix'],
+        ['R2', 0.97, 'drop'],
+        ['R3', 0.6, 'drop'],
+        ['R4', 0.97, 'drop'],
+      ] as const) {
+        baseSeed.answers[`${id}:supported`] = { type: 'noul', noul: supported };
+        baseSeed.answers[`${id}:verdict`] = choice(verdict);
+      }
+      setUp(repo, baseSeed);
+      const sail = join(repo.dir, '.sail');
+      const harness = JSON.parse(readFileSync(join(sail, 'fake/harness.json'), 'utf8'));
+      for (const stage of ['review-requirements', 'review-bugs', 'review-conventions']) {
+        const answer = harness[stage][0];
+        for (const finding of answer.output.findings) finding.file = 'notes.txt:1';
+        seedHarness(sail, stage, [answer]);
+      }
+      const answer = harness.judge[0];
+      answer.output.decisions = answer.output.decisions.filter(
+        (d: { finding: string }) => d.finding !== 'R4' && (overrule || d.finding !== 'R1'),
+      );
+      for (const decision of answer.output.decisions) {
+        if (decision.finding === 'R1' || decision.finding === 'R3')
+          Object.assign(decision, { verdict: 'drop', ticket: null });
+      }
+      seedHarness(sail, 'judge', [answer]);
+      const { code, keys, dir } = await review(repo);
+      expect(code).toBe(0);
+      expect(keys.slice(keys.indexOf('judge#1') - 1, keys.indexOf('judge#1') + 1)).toEqual(['jev-triage#1', 'judge#1']);
+      const triage = callInput(dir, 'judge', 'triage') as TriageHint;
+      expect(triage.decided.map((d) => [d.finding, d.verdict])).toEqual([
+        ['R1', 'fix'],
+        ['R4', 'drop'],
+      ]);
+      expect(triage.answers).toEqual([
+        { id: 'R1', supported: 0.97, verdict: 'fix', confidence: 0.95 },
+        { id: 'R2', supported: 0.97, verdict: 'drop', confidence: 0.95 },
+        { id: 'R3', supported: 0.6, verdict: 'drop', confidence: 0.95 },
+        { id: 'R4', supported: 0.97, verdict: 'drop', confidence: 0.95 },
+      ]);
+      expect(triage.judge).toEqual(['V1', 'D1', 'R2', 'R3']);
+      expect(triage.decided.every((d) => d.rationale.includes('Jev'))).toBe(true);
+      expect(callInput(dir, 'fix', 'findings').findings.map((f: { id: string }) => f.id)).toEqual(
+        overrule ? ['V1', 'D1', 'R2'] : ['V1', 'D1', 'R1', 'R2'],
+      );
+      const decisions = callInput(dir, 'report', 'record').judgement.decisions;
+      expect(decisions.find((d: { finding: string }) => d.finding === 'R4')).toEqual({
+        finding: 'R4',
+        verdict: 'drop',
+        rationale: 'Jev: supported at 0.97 (clear from 0.9), drop at 0.95 (clear from 0.9).',
+        ticket: null,
+      });
+      expect(decisions.find((d: { finding: string }) => d.finding === 'R1').verdict).toBe(overrule ? 'drop' : 'fix');
+      expect(asked(dir, 'jev-triage#1')).toHaveLength(1);
+      expect((await pullRequest(repo)).comments.join('\n')).toContain('R4');
+    });
+  },
+  120_000,
+);
 
 test('a leak-check Jev hit reaches the judge as L1', async () => {
   await withTempRepo(async (repo) => {
