@@ -17,9 +17,11 @@ import {
   readEntry,
   readRegistry,
   recordEntry,
+  ticketSourceKey,
   type WatcherFields,
   withoutUserinfo,
 } from '../../src/watch/registry';
+import { holderRefusal } from '../../src/watch/watcher';
 import { withTempRepo } from '../helpers/temp-repo';
 
 const dirs: string[] = [];
@@ -194,6 +196,35 @@ test('findHolder names a live watcher polling one of my labels on my ticket sour
     here: { kind: 'here', entry: here, watcher: hereWatcher },
     deadOnly: undefined,
   });
+});
+
+test('findHolder lets watchers on different linear teams poll the same label (ADW-431)', () => {
+  const claim = { name: 'scalpel', ...watcher(222, '/work/scalpel/.sail', ['factory', 'groom'], 'linear:SCA') };
+  const other = entry('sail', {
+    watcher: watcher(111, '/work/sail/.sail', ['factory', 'groom'], 'linear:ADW'),
+  });
+  expect(findHolder([other], claim, alive(111, 222))).toBeUndefined();
+});
+
+test('findHolder still refuses a label on the same linear team, and holderRefusal names the team', () => {
+  const claim = { name: 'scalpel', ...watcher(222, '/work/scalpel/.sail', ['factory', 'groom'], 'linear:ADW') };
+  const polling = watcher(111, '/work/sail/.sail', ['factory', 'groom'], 'linear:ADW');
+  const other = entry('sail', { watcher: polling });
+  const holder = findHolder([other], claim, alive(111, 222));
+  expect(holder).toEqual({ kind: 'label', label: 'factory', entry: other, watcher: polling });
+  if (holder === undefined) throw new Error('expected a label holder');
+  expect(holderRefusal(holder, 'scalpel')).toBe(
+    "the label 'factory' on the linear:ADW ticket source is polled by the watcher of 'sail' in /work/sail (pid 111)",
+  );
+});
+
+test('ticketSourceKey joins a scope to the name, and leaves a source without one as its name', () => {
+  expect(ticketSourceKey({ name: 'linear', scope: 'ADW' })).toBe('linear:ADW');
+  expect(ticketSourceKey({ name: 'fake' })).toBe('fake');
+});
+
+test('ticketSourceKey leaves a source with an empty scope as its name', () => {
+  expect(ticketSourceKey({ name: 'fake', scope: '' })).toBe('fake');
 });
 
 test('a holder that writes between the claim and its read-back makes claimWatcher take its field back and answer it', () => {

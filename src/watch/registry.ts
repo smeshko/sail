@@ -3,7 +3,8 @@
 // every repository before any watcher exists.
 //
 // A live watcher records itself in its repository's entry, as `watcher`: its pid, the `.sail/` it watches, and the
-// labels it polls on its ticket source. It writes the field as it starts and whenever its labels change, reads the
+// labels it polls, compared on the same ticket source and scope. It writes the field as it starts and whenever its
+// labels change, reads the
 // registry again to see whether another watcher wrote meanwhile, and clears the field as it stops. A watcher whose pid
 // is dead is no watcher, so a field a crash left behind holds nothing. Registration carries the field forward, so a
 // run refreshing its repository's entry never erases the watcher that started it.
@@ -14,7 +15,13 @@ import { join } from 'node:path';
 import { isAlive as processIsAlive } from '../adapters/leases';
 import { runsDir } from '../engine/run-dir';
 import { formatIssue, validateDocument } from '../engine/schemas';
+import type { TicketSource } from '../ports/ticket-source';
 import { QUEUE_DIR } from './queue-store';
+
+/** The adapter and scope that share a watcher's label space. */
+export function ticketSourceKey(source: Pick<TicketSource, 'name' | 'scope'>): string {
+  return source.scope === undefined || source.scope === '' ? source.name : `${source.name}:${source.scope}`;
+}
 
 /** A repository's live watcher, as its registry entry records it. */
 export interface WatcherFields {
@@ -23,7 +30,10 @@ export interface WatcherFields {
   startedAt: string;
   /** The `.sail/` it watches, absolute. */
   sailDir: string;
-  /** The `name` of its ticket source's adapter, such as `linear` or `fake`. */
+  /**
+   * Its ticket source's adapter `name` with its scope, such as `linear:ADW`, or the name alone, such as `fake`,
+   * for a source with no scope.
+   */
   ticketSource: string;
   /** The labels its watch set polls on that ticket source. */
   labels: string[];

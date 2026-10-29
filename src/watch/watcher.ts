@@ -64,6 +64,7 @@ import {
   type IsAlive,
   keepWatcher,
   type RegistryEntry,
+  ticketSourceKey,
   type WatcherFields,
 } from './registry';
 import { type SpawnedRun, type SpawnResumeOptions, type SpawnRunOptions, spawnResume, spawnRun } from './spawn';
@@ -228,7 +229,13 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   let recorded: WatcherFields | undefined;
   /** Records the watcher with `labels`, or gives the refusal of what holds one of them. */
   const claim = (labels: string[]): string | undefined => {
-    const fields = { pid, startedAt, sailDir: options.entry.sailDir, ticketSource: ticketSource.name, labels };
+    const fields = {
+      pid,
+      startedAt,
+      sailDir: options.entry.sailDir,
+      ticketSource: ticketSourceKey(ticketSource),
+      labels,
+    };
     const claimed = claimWatcher(options.registryDir, options.entry, fields, isAlive);
     if ('holder' in claimed) return holderRefusal(claimed.holder, options.entry.name);
     recorded = fields;

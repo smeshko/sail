@@ -357,6 +357,21 @@ test("a watch command for a workflow on a watched workflow's label is rejected w
   });
 });
 
+test('a watcher on a scoped ticket source records its name and scope in the registry', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 1 }], tickets({ 'FAKE-1': 'sail-a' }));
+    const ticketSource = new Proxy(w.adapters.ports.ticketSource, {
+      get: (target, property) => (property === 'scope' ? 'ADW' : Reflect.get(target, property)),
+    });
+    const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, ticketSource } });
+    try {
+      expect(readEntry(w.registryDir, 'stub')?.watcher?.ticketSource).toBe('fake:ADW');
+    } finally {
+      await watcher.stop();
+    }
+  });
+});
+
 test('unwatching every workflow stops the watcher: each stream ends with its watch:removed, and the registry entry loses its watcher', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
