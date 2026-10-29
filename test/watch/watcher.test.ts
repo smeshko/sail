@@ -875,7 +875,7 @@ test.skipIf(process.getuid?.() === 0)(
           expect(lines).toHaveLength(2);
           expect(lines[0]).toBe('09:00:00 swept 1 worktree of ended runs\n');
           expect(lines[1]).toStartWith(
-            `09:00:00 error: the worktree ${worktrees[1]} of an ended run was not removed: `,
+            `09:00:00 error: the workspace ${worktrees[1]} of an ended run was not removed: `,
           );
           expect(lines[1]).toContain('EACCES');
           expect(worktrees.map((path) => existsSync(path))).toEqual([false, true]);
@@ -904,7 +904,7 @@ test('a watcher distinguishes a removed workspace whose commits were not kept', 
     const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
     try {
       expect(w.out.find((line) => line.includes(path))).toBe(
-        `09:00:00 error: the worktree ${path} of an ended run was removed, but its release failed: its commits were not kept\n`,
+        `09:00:00 error: the workspace ${path} of an ended run was removed, but its release failed: its commits were not kept\n`,
       );
     } finally {
       await watcher.stop();
@@ -933,8 +933,8 @@ test('a watcher reports every sweep failure with its exact reason even when no w
     const watcher = await w.start(['a'], { adapters: { ...w.adapters.ports, workspace } });
     try {
       expect(w.out.filter((line) => line.includes('swept') || line.includes('not removed'))).toEqual([
-        `09:00:00 error: the worktree ${paths[0]} of an ended run was not removed: permission denied\n`,
-        `09:00:00 error: the worktree ${paths[1]} of an ended run was not removed: its commits were not kept\n`,
+        `09:00:00 error: the workspace ${paths[0]} of an ended run was not removed: permission denied\n`,
+        `09:00:00 error: the workspace ${paths[1]} of an ended run was not removed: its commits were not kept\n`,
       ]);
       await w.timers.advance(1000);
       expect(w.order('a')).toEqual(['FAKE-1']);
