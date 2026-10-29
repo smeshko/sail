@@ -5,11 +5,12 @@
 // has spent `maxUsd`, so a session's last turn may pass it, and it ends a scripted delay at `maxMinutes`. It never
 // checks `output` against the schema: invalid output is scripted as a `done` answer whose
 // output doesn't conform, which the agent kind rejects. Every session that starts ends once, with its id, the turns it
-// ran and what it spent.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// ran and what it spent. A done answer's `after` keys gate submission on its run's journal.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
+import { JOURNAL_FILE, readJournal } from '../../engine/journal';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import { HarnessFailure, type HarnessResult, Usage } from '../../ports/types';
 
@@ -27,6 +28,7 @@ const ScriptedAnswer = z.discriminatedUnion('outcome', [
     turns,
     usage: Usage.optional(),
     delayMs: z.number().int().min(0).optional(),
+    after: z.array(z.string().min(1)).optional(),
   }),
   z.object({ outcome: z.literal('blocked'), reason: z.string().min(1), messages, turns, usage: Usage.optional() }),
   z.object({
@@ -54,6 +56,27 @@ async function wait(ms: number, signal: AbortSignal | undefined): Promise<boolea
     return false;
   } catch {
     return true;
+  }
+}
+
+/** The nearest run directory, including call, step and later-try directories below it. */
+function runDirAbove(stageOut: string | undefined): string | undefined {
+  if (stageOut === undefined) return undefined;
+  let dir = resolve(stageOut);
+  while (true) {
+    if (existsSync(resolve(dir, JOURNAL_FILE))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+/** A journal being written may not be readable yet. */
+function journaledKeys(runDir: string): Set<string> {
+  try {
+    return new Set(readJournal(runDir).entries.map((entry) => entry.key));
+  } catch {
+    return new Set();
   }
 }
 
@@ -215,10 +238,23 @@ export function createFakeHarness(options: FakeHarnessOptions): Harness {
     // Every turn ran, so all of it is spent, exactly as scripted.
     progress.spent = usage;
 
+    const waitStarted = performance.now();
     if (answer.outcome === 'done' && answer.delayMs !== undefined) {
       const allowed = maxMinutes * 60_000;
       if (await wait(Math.min(answer.delayMs, allowed), request.signal)) return failed('aborted');
       if (answer.delayMs > allowed) return exceeded('minutes', maxMinutes, maxMinutes);
+    }
+    if (answer.outcome === 'done' && answer.after !== undefined && answer.after.length > 0) {
+      const runDir = runDirAbove(request.env.STAGE_OUT);
+      if (runDir === undefined) return failed('fake harness: after needs a run directory above STAGE_OUT');
+      while (true) {
+        if (stopped()) return failed('aborted');
+        const remaining = maxMinutes * 60_000 - (performance.now() - waitStarted);
+        if (remaining <= 0) return exceeded('minutes', maxMinutes, maxMinutes);
+        const keys = journaledKeys(runDir);
+        if (answer.after.every((key) => keys.has(key))) break;
+        if (await wait(Math.min(10, remaining), request.signal)) return failed('aborted');
+      }
     }
     if (answer.outcome === 'done' && answer.files !== undefined) {
       const out = request.env.STAGE_OUT;
