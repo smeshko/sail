@@ -219,6 +219,14 @@ test('a ticket whose claim did not take, unforced, throws a conflict PortError w
   expect((await fake.get('FAKE-2')).comments).toEqual([]);
 });
 
+test.each([DONE, CANCELED])('a lost claim on $name says the ticket is not unstarted', async (state) => {
+  const { source } = world({ claim: async () => ({ claimed: false, state, raw: null }) });
+  expect(await rejection(claim('FAKE-1', source))).toMatchObject({
+    code: 'conflict',
+    message: `ticketSource.claim: the ticket is not unstarted: it became ${state.name} while sail was starting. --force runs it anyway`,
+  });
+});
+
 test('a ticket claimed by another run is lost even when its latest claim comment names that run', async () => {
   const { source, fake } = world();
   await fake.claim('FAKE-1');
@@ -236,6 +244,49 @@ test('a claim that did not take on a ticket whose latest claim comment names thi
   expect(calls).toEqual(['claim', 'get']);
   expect((await fake.get('FAKE-1')).comments).toHaveLength(1);
 });
+
+test.each<[Forced[]]>([[[]], [['state']]])(
+  'an earlier claim without a comment is completed without moving it, forced %j',
+  async (forced) => {
+    const { source, calls, fake } = world();
+    await fake.claim('FAKE-1');
+    expect(
+      await claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source, forced, claimedEarlier: true }),
+    ).toEqual({ claimed: true, state: IN_PROGRESS });
+    expect(calls).toEqual(['claim', 'get', 'comment']);
+    expect((await fake.get('FAKE-1')).comments.map(({ body }) => body)).toEqual([COMMENT]);
+  },
+);
+
+test('an earlier claim is completed despite a previous run’s claim comment', async () => {
+  const { source, fake, calls } = world();
+  const oldComment = claimComment('FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3M');
+  await fake.claim('FAKE-1');
+  await fake.comment('FAKE-1', oldComment);
+  await fake.update('FAKE-1', { state: 'unstarted' });
+  await fake.claim('FAKE-1');
+  expect(
+    await claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source, forced: [], claimedEarlier: true }),
+  ).toEqual({ claimed: true, state: IN_PROGRESS });
+  expect(calls).toEqual(['claim', 'get', 'comment']);
+  expect((await fake.get('FAKE-1')).comments.map(({ body }) => body)).toEqual([oldComment, COMMENT]);
+});
+
+test.each(['FAKE-1-other', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P'])(
+  'an earlier claim still loses to another run’s latest claim comment: %s',
+  async (owner) => {
+    const { source, fake, calls } = world();
+    await fake.claim('FAKE-1');
+    await fake.comment('FAKE-1', claimComment(owner));
+    expect(
+      await rejection(
+        claimSource({ ticketKey: 'FAKE-1', runId: RUN_ID, ticketSource: source, forced: [], claimedEarlier: true }),
+      ),
+    ).toMatchObject({ code: 'conflict' });
+    expect(calls).toEqual(['claim', 'get']);
+    expect((await fake.get('FAKE-1')).comments.map(({ body }) => body)).toEqual([claimComment(owner)]);
+  },
+);
 
 test.each<[string, string]>([
   ['a started ticket', 'FAKE-2'],
@@ -386,7 +437,11 @@ test('with pickUp [Todo], a start refuses the Backlog ticket, accepts the Todo o
 test('with pickUp [Todo], a claim of the Backlog ticket with state forced moves it to In Progress, and without it is lost', async () => {
   const source = pickUpWorld();
   const lost = claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source, forced: [] });
-  expect(await rejection(lost)).toMatchObject({ code: 'conflict' });
+  expect(await rejection(lost)).toMatchObject({
+    code: 'conflict',
+    message:
+      'ticketSource.claim: the ticket is not in a pick-up state: it became Backlog while sail was starting. --force runs it anyway',
+  });
   expect((await source.get('FAKE-2')).state).toEqual({ type: 'unstarted', name: 'Backlog' });
   const claimed = await claimSource({ ticketKey: 'FAKE-2', runId: RUN_ID, ticketSource: source, forced: ['state'] });
   expect([claimed, (await source.get('FAKE-2')).state]).toEqual([{ claimed: false, state: IN_PROGRESS }, IN_PROGRESS]);

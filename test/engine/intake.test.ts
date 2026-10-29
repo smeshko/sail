@@ -37,6 +37,7 @@ import { readStatus, type Source, writeStatus } from '../../src/engine/run-dir';
 import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateDocument, validateRunDir } from '../../src/engine/schemas';
+import { ndjsonConsumer } from '../../src/events/consumers/ndjson';
 import type { Consumer, Emit, NewEvent, SailEvent } from '../../src/events/types';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -69,13 +70,25 @@ afterEach(() => {
 });
 
 /** An empty run directory, and the fake TicketSource over a copy of the fixture's seed. */
-function world(): { runDir: string; ticketSource: TicketSource } {
+function world(
+  emit?: NonNullable<Parameters<typeof createFakeTicketSource>[0]>['emit'],
+  withoutComments = false,
+): { runDir: string; ticketSource: TicketSource } {
   const dir = mkdtempSync(join(tmpdir(), 'sail-intake-'));
   dirs.push(dir);
   copyFileSync(join(FIXTURES, 'repo', '.sail', 'fake', 'tickets.json'), join(dir, 'tickets.json'));
+  if (withoutComments) {
+    const seed = JSON.parse(readFileSync(join(dir, 'tickets.json'), 'utf8')) as { tickets: { comments: unknown[] }[] };
+    for (const ticket of seed.tickets) ticket.comments = [];
+    writeFileSync(join(dir, 'tickets.json'), JSON.stringify(seed));
+  }
   const runDir = join(dir, RUN_ID);
   mkdirSync(runDir);
-  const ticketSource = createFakeTicketSource({ seed: join(dir, 'tickets.json'), state: join(dir, 'state.json') });
+  const ticketSource = createFakeTicketSource({
+    seed: join(dir, 'tickets.json'),
+    state: join(dir, 'state.json'),
+    ...(emit === undefined ? {} : { emit }),
+  });
   return { runDir, ticketSource };
 }
 
@@ -350,6 +363,94 @@ test("an output JSON can't hold is invalid_output, and the result is still writt
   expect(JSON.parse(readFileSync(paths.result, 'utf8'))).toEqual(result);
 });
 
+test('a later try completes the claim its crashed try made before commenting', async () => {
+  let persist: Emit = () => {};
+  const { runDir, ticketSource } = world((event) => {
+    if (event.type === 'ticket:claimed') persist({ ...event, key: INTAKE_KEY });
+  }, true);
+  const consumer = ndjsonConsumer(runDir);
+  let seq = 0;
+  persist = (event) =>
+    consumer.onEvent({ ...event, seq: ++seq, ts: '2026-10-06T09:00:00.000Z', runId: RUN_ID } as SailEvent);
+  const request = {
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: ticketIntake,
+    source: SOURCE,
+    ticketSource,
+    emit: persist,
+  };
+  const crashed = {
+    ...ticketSource,
+    comment: async () => {
+      throw new TypeError('process died before comment');
+    },
+  };
+  expect(await rejection(runIntake({ ...request, ticketSource: crashed }))).toEqual(
+    new TypeError('process died before comment'),
+  );
+  expect(existsSync(join(runDir, '00-intake', 'call-1', 'result.json'))).toBe(false);
+  const second = await runIntake({ ...request, try: 2 });
+  expect(JSON.parse(readFileSync(second.paths.result, 'utf8'))).toMatchObject({
+    outcome: 'passed',
+    claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
+  });
+  expect((await ticketSource.get('FAKE-1')).comments.map(({ body }) => body)).toEqual([`sail run ${RUN_ID} started`]);
+});
+
+test.each([
+  [2, SOURCE, 'intake#1', 'FAKE-1', true],
+  [1, SOURCE, 'intake#1', 'FAKE-1', false],
+  [2, SOURCE, 'other#1', 'FAKE-1', false],
+  [2, SOURCE, 'intake#1', 'FAKE-2', false],
+  [2, { kind: 'pr', number: 1, headSha: 'abc', via: 'cli', forced: [] } as Source, 'intake#1', 'FAKE-1', false],
+] as const)(
+  'earlier claim signal on try %s, source %j, key %s, ticket %s is %s',
+  async (tryNumber, source, key, ticketKey, expected) => {
+    const { runDir, ticketSource } = world();
+    ndjsonConsumer(runDir).onEvent({
+      type: 'ticket:claimed',
+      key,
+      ticketKey,
+      state: { type: 'started', name: 'In Progress' },
+      seq: 1,
+      ts: '2026-10-06T09:00:00.000Z',
+      runId: RUN_ID,
+    });
+    let claimedEarlier: boolean | undefined;
+    const body: IntakeBody = async (context) => {
+      claimedEarlier = context.claimedEarlier;
+      return leaving(BOTH, VALID)(context);
+    };
+    await runIntake({ runDir, runId: RUN_ID, intake: LOADED, body, source, ticketSource, try: tryNumber });
+    expect(claimedEarlier).toBe(expected);
+  },
+);
+
+test('a later try with no earlier claim event still loses an uncommented claim', async () => {
+  const { runDir, ticketSource } = world();
+  await ticketSource.claim('FAKE-1');
+  writeFileSync(join(runDir, 'events.ndjson'), '');
+  const { result } = await runIntake({
+    runDir,
+    runId: RUN_ID,
+    intake: LOADED,
+    body: ticketIntake,
+    source: SOURCE,
+    ticketSource,
+    try: 2,
+  });
+  expect(result.outcome).toBe('error');
+  expect(result.errors).toEqual([
+    {
+      reason: 'port',
+      message:
+        'ticketSource.claim: the ticket is already claimed: it became In Progress while sail was starting. --force runs it anyway (conflict)',
+    },
+  ]);
+});
+
 test('a later try writes into try-N, its result and events say so, and a try whose directory exists throws', async () => {
   const { runDir, ticketSource } = world();
   const request = { runDir, runId: RUN_ID, intake: LOADED, body: ticketIntake, source: SOURCE, ticketSource };
@@ -401,6 +502,7 @@ test("the body is given the request's source, ticket source and signal, and the 
     source: SOURCE,
     ticketSource,
     runId: RUN_ID,
+    claimedEarlier: false,
     record: expect.any(Function),
     out: join(runDir, '00-intake', 'call-1'),
     signal,

@@ -3,8 +3,9 @@
 // - The file is append-only across a resume (ADR-0012): a resumed run continues it from `nextSeq()`. The prototype's
 //   consumer truncated it in `init()`.
 // - Each line is one `O_APPEND` write with no fsync. A killed process loses nothing, since the kernel has the bytes; a
-//   power cut can lose or tear the tail. Events are observability, not resume state, so the journal alone pays for
-//   durability.
+//   power cut can lose or tear the tail. The journal durably records completed calls, but events also support claim
+//   recovery: a later try of the built-in ticket intake reads ticket:claimed here to recognise its unjournaled claim
+//   when the claim comment never posted. Losing that event loses this recovery evidence; it is not fsynced.
 // - A write that fails keeps its line for the next event's write, which first cuts whatever the failed write left. So
 //   a file whose writes recover, say once a full disk has room again, still holds every `seq` in order.
 // - Streaming chunks arrive with Epic 07, coalesced into whole events: a chunk never takes a `seq`.

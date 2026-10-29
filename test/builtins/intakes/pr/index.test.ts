@@ -87,6 +87,7 @@ async function made(repo: TempRepo): Promise<Made> {
       workspace: { port, path: workspace.path },
       branchPrefix: 'sail/',
       runId: 'pr-3-run',
+      claimedEarlier: false,
       record: () => undefined,
       out,
     });

@@ -24,7 +24,11 @@ const notUnstarted = (state: TicketState) =>
       ? `the ticket is not in a pick-up state: it is ${state.name}. ${FORCE}`
       : `the ticket is not unstarted: it is ${state.name}. ${FORCE}`;
 const lostClaim = (state: TicketState) =>
-  `the ticket is already claimed: it became ${state.name} while sail was starting. ${FORCE}`;
+  state.type === 'started'
+    ? `the ticket is already claimed: it became ${state.name} while sail was starting. ${FORCE}`
+    : state.type === 'unstarted'
+      ? `the ticket is not in a pick-up state: it became ${state.name} while sail was starting. ${FORCE}`
+      : `the ticket is not unstarted: it became ${state.name} while sail was starting. ${FORCE}`;
 const commentFailed = (state: TicketState, runId: string, failure: string) =>
   `the ticket is now ${state.name}, but the comment naming run ${runId} failed: ${failure}. --force runs it`;
 
@@ -104,25 +108,40 @@ export interface ClaimSourceOptions {
   ticketSource: TicketSource;
   /** The checks `--force` overrode at the start: with `state`, a claim that didn't take moves the ticket instead. */
   forced: readonly Forced[];
+  /** An earlier try of this call claimed the ticket, as the run's stream records. */
+  claimedEarlier?: boolean;
 }
 
 /**
  * The claim the ticket intake makes: claims the ticket, then comments with the run id. The claim's own answer decides,
  * not an earlier fetch: two starts can both read a ticket as in a pick-up state, and one claim takes. A claim that
- * didn't take is this run's own earlier claim when the ticket's latest claim comment names the run, as on a later try
- * of the intake. Otherwise it moves the ticket to In Progress through `update` when `forced` has `state`, and is lost when it
+ * didn't take is this run's own earlier claim when the ticket's latest claim comment names the run, or when
+ * `claimedEarlier` records it and no claim comment names a newer run (or an unrecognised run id). A missing comment is
+ * posted. Otherwise it moves the ticket to In Progress through `update` when `forced` has `state`, and is lost when it
  * doesn't. A port call that fails throws its PortError, a lost claim a `conflict`, and nothing is moved back.
  */
 export async function claimSource(options: ClaimSourceOptions): Promise<ClaimRecord> {
-  const { ticketKey, runId, ticketSource, forced } = options;
+  const { ticketKey, runId, ticketSource, forced, claimedEarlier = false } = options;
   const answer = await ticketSource.claim(ticketKey);
-  const claimed = answer.claimed;
+  let claimed = answer.claimed;
   let state = stateOf(answer.state);
   if (!claimed) {
     const ticket = await getTicket(ticketSource, ticketKey);
-    if (claimedBy(ticket) === runId) return { claimed: true, state: stateOf(ticket.state) };
-    if (!forced.includes('state')) throw new PortError('ticketSource', 'claim', 'conflict', lostClaim(state));
-    state = stateOf((await ticketSource.update(ticketKey, { state: 'in-progress' })).state);
+    const owner = claimedBy(ticket);
+    if (owner === runId) return { claimed: true, state: stateOf(ticket.state) };
+    // Run ids end in time-ordered ULIDs. A previous run's comment survives a return to a pick-up state;
+    // it is not evidence against this run's recorded claim. Unknown ids remain conflicts.
+    const olderOwner =
+      owner?.startsWith(`${ticketKey}-`) &&
+      /^[0-9A-HJKMNP-TV-Z]{26}$/.test(owner.slice(ticketKey.length + 1)) &&
+      owner < runId;
+    if (claimedEarlier && (owner === undefined || olderOwner)) {
+      claimed = true;
+      state = stateOf(ticket.state);
+    } else {
+      if (!forced.includes('state')) throw new PortError('ticketSource', 'claim', 'conflict', lostClaim(state));
+      state = stateOf((await ticketSource.update(ticketKey, { state: 'in-progress' })).state);
+    }
   }
   try {
     await ticketSource.comment(ticketKey, claimComment(runId));

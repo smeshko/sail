@@ -808,6 +808,7 @@ test("what render prints for a ticket's description is, byte for byte, what the 
     source: { kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] },
     ticketSource,
     runId: 'FAKE-1-RUN',
+    claimedEarlier: false,
     record: () => undefined,
     out,
   });
