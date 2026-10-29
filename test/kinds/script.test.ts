@@ -22,6 +22,7 @@ import { KINDS, type StepContext, type StepRun } from '../../src/kinds/index';
 import { BIN_DIR, DEFAULT_TIMEOUT_SECONDS, exitCodeMap, lastLine, scriptKind } from '../../src/kinds/script';
 import { doc, type ExitCodes, noPlaceholders, type ScriptStep, script, z } from '../../src/sdk/index';
 import { steppingClock } from '../helpers/clock';
+import { withTempRepo } from '../helpers/temp-repo';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -379,6 +380,32 @@ test("a script inherits none of the variables that tie git to a repository: a sa
       else process.env[name] = value;
     }
   }
+});
+
+test('a script step that runs in the clone keeps the variables a git hook set: its git sees the commit being made', async () => {
+  await withTempRepo(async () => {
+    const s = setup();
+    const names = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_CONFIG_COUNT'];
+    const hooked = { GIT_DIR: '/clone/.git', GIT_WORK_TREE: '/clone', GIT_INDEX_FILE: '/clone/.git/index' };
+    writeFileSync(
+      join(s.context.stageDir, 'git-env.ts'),
+      `#!${process.execPath}\n` +
+        `console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(names)}.map((name) => [name, process.env[name] ?? 'unset']))));\n`,
+    );
+    chmodSync(join(s.context.stageDir, 'git-env.ts'), 0o755);
+    const step = script('git-env', { run: './git-env.ts', output: z.record(z.string(), z.string()) });
+    const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    Object.assign(process.env, hooked, { GIT_CONFIG_COUNT: '0' });
+    try {
+      const run = await scriptKind.run(step, { ...s.context, inClone: true });
+      expect(run.output).toEqual({ ...hooked, GIT_CONFIG_COUNT: '0' });
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
 });
 
 test('a script on a later try sees TRY as that try', async () => {

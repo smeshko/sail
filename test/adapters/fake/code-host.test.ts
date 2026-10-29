@@ -8,6 +8,7 @@ import { createFakeCodeHost } from '../../../src/adapters/fake/code-host';
 import { PullRequestDetails } from '../../../src/ports/types';
 import { holdTempRepo } from '../../helpers/held-repo';
 import { captureEvents, parseIssues, portFailure, rejection } from '../../helpers/ports';
+import { withTempRepo } from '../../helpers/temp-repo';
 import { codeHostSuite } from '../../ports/code-host.suite';
 
 const SEED = join(import.meta.dir, '..', '..', 'fixtures', 'repo', '.sail', 'fake', 'prs.json');
@@ -265,6 +266,20 @@ test("a push to an open pull request's branch moves its head, and its scripted c
     pr: (await host.getPullRequest(4)).headSha,
     checks: [after.headSha, after.checks[0]?.status],
   }).toEqual({ reads: ['pending', 'failed'], pushed: true, pr: headSha, checks: [headSha, 'pending'] });
+});
+
+test("a push records the workspace's own HEAD, even under a git hook's GIT_DIR naming another repository", async () => {
+  await withTempRepo(async (other) => {
+    writeFileSync(join(other.dir, 'other'), 'a different commit');
+    other.git('add', 'other');
+    other.git('commit', '-m', 'another repository');
+    const ownHead = repo().git('rev-parse', 'HEAD');
+    const otherHead = other.git('rev-parse', 'HEAD');
+    const host = createFakeCodeHost({ ...files(), env: { ...repo().env, GIT_DIR: join(other.dir, '.git') } });
+    const pushed = await host.push(repo().dir, 'sail/FAKE-9');
+    expect(pushed.headSha).toBe(ownHead);
+    expect(pushed.headSha).not.toBe(otherHead);
+  });
 });
 
 test('opening from a head never pushed, or pushing from outside a git checkout, is invalid', async () => {

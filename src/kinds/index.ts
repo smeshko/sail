@@ -42,6 +42,8 @@ export interface StepContext {
   stageDir: string;
   /** Where the step runs: the run's workspace. */
   workspace: string;
+  /** The step runs in the clone itself, not a run's workspace, so it keeps a git hook's repository variables. */
+  inClone?: boolean;
   /** The directory that holds `.sail/`: every path a result or an event records is relative to it. */
   root: string;
   /** The run's branch, which the step pushes. Empty for a stage run in isolation, which no run owns. */
