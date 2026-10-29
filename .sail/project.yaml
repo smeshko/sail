@@ -30,7 +30,8 @@ models:
   luna: { harness: codex, model: openai-codex/gpt-6-luna }
   terra: { harness: codex, model: openai-codex/gpt-6.1-terra }
   sol: { harness: codex, model: openai-codex/gpt-6.1-sol }
-# No dollar cap on the run: each agent stage carries its own.
-budgets: { run: { maxMinutes: 120 } }
+# No dollar cap on the run: each agent stage carries its own, with its turns. Minutes are wall time, which a machine
+# busy with two runs and a gate stretches: each stage's maxMinutes, and the run's, only stop a session that hung.
+budgets: { run: { maxMinutes: 360 } }
 # AGENTS.md carries the conventions, and CONTEXT.md the vocabulary every identifier and commit message uses.
 conventions: [AGENTS.md, CONTEXT.md]

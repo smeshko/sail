@@ -6,13 +6,14 @@
 // request merged once its checks pass. Landing it takes what fix passes are left: checks still red after a rerun go to
 // fix as findings, and a merge the host rejects merges the base in, an agent resolving any conflict; each is validated
 // and pushed before the next try. A review that leaves findings open, one too thin to trust, or a pull request that
-// can't land in the passes left, comments why, takes the label off and fails, leaving the pull request to a human.
+// can't land in the passes left, comments why, takes the label off and fails, leaving the pull request to a human; so
+// does one a stage blocked, which also puts needs-human on, since no run of it would get further.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
 import { type Result, workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
-import { validate } from '../../stages/validate/stage';
+import { redTests, validate } from '../../stages/validate/stage';
 import type { FixChecked, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
@@ -34,6 +35,7 @@ import { report } from './stages/17-report/stage';
 import { merge } from './stages/18-merge/stage';
 import { syncBase } from './stages/19-sync-base/stage';
 import { resolveConflicts } from './stages/20-resolve-conflicts/stage';
+import { handOver } from './stages/21-hand-over/stage';
 
 /** The designation label: the factory's pull requests carry it, and a review that can't finish takes it off. */
 const LABEL = 'factory';
@@ -64,6 +66,11 @@ export default workflow(
     const brief = run.intake.files['brief.md'];
     const { baseSha: base, headSha: since, ticketKey, number } = run.input;
     const pullRequest = { number, url: run.input.url };
+    /** A stage blocked on what no run of this review can change: the pull request goes to a human, and the run fails. */
+    const handOff = async (reason: string) => {
+      await run.stage(handOver, { pr: pullRequest, label: LABEL, reason });
+      return run.fail(reason);
+    };
 
     const req = await run.stage(requirements, { ticketKey: ticketKey ?? '' });
     const reading = { brief, requirements: req.files['requirements.md'], base };
@@ -80,7 +87,10 @@ export default workflow(
       [reviewSecurity, reading],
       [reviewConventions, reading],
     ]);
-    if (shown.outcome === 'blocked') return run.fail(`demonstrate blocked: ${shown.reason}`);
+    if (shown.outcome === 'blocked') return handOff(`demonstrate blocked: ${shown.reason}`);
+    if (validated.outcome === 'failed' && validated.output.baseRed) {
+      return run.fail(`staging is red: ${redTests(validated.output)}`);
+    }
     const findings: z.infer<typeof NumberedFinding>[] = [];
     if (validated.outcome === 'failed') {
       const { uncommitted, verify } = validated.output;
@@ -123,7 +133,7 @@ export default workflow(
       [];
     for (const [index, reviewed] of reviews.entries()) {
       const lens = LENSES[index] ?? 'bugs';
-      if (reviewed.outcome === 'blocked') return run.fail(`review-${lens} blocked: ${reviewed.reason}`);
+      if (reviewed.outcome === 'blocked') return handOff(`review-${lens} blocked: ${reviewed.reason}`);
       summaries.push({ lens, summary: reviewed.output.summary, coverage: reviewed.output.coverage });
       for (const finding of reviewed.output.findings) {
         findings.push({
@@ -142,7 +152,7 @@ export default workflow(
       findings: { findings },
       evidence: { validation: validated.output, demonstration: shown.output, reviews: summaries },
     });
-    if (judged.outcome === 'blocked') return run.fail(`judge blocked: ${judged.reason}`);
+    if (judged.outcome === 'blocked') return handOff(`judge blocked: ${judged.reason}`);
     const judgement: z.infer<typeof Judgement> = judged.output;
     const decided = new Map(judgement.decisions.map((each) => [each.finding, each]));
     const undecided = findings.filter((finding) => !decided.has(finding.id)).map((finding) => finding.id);
@@ -172,7 +182,7 @@ export default workflow(
           ticketKey,
           base,
         });
-        if (fixed.outcome === 'blocked') return run.fail(`fix blocked: ${fixed.reason}`);
+        if (fixed.outcome === 'blocked') return handOff(`fix blocked: ${fixed.reason}`);
         // Jev first: when it finds every target resolved with a clear yes, the agent's session is not paid for and
         // validation runs alone, which also stands in for what the fixes broke.
         const asked = await run.stage(jevFix, { findings: { findings: targets }, fixed: fixed.output, since });
@@ -186,10 +196,12 @@ export default workflow(
             [checkFix, { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output }],
             [validate],
           ]);
-          if (agent.outcome === 'blocked') return run.fail(`check-fix blocked: ${agent.reason}`);
+          if (agent.outcome === 'blocked') return handOff(`check-fix blocked: ${agent.reason}`);
           checked = agent.output;
           again = validated;
         }
+        if (again.outcome === 'failed' && again.output.baseRed)
+          return run.fail(`staging is red: ${redTests(again.output)}`);
         rounds.push({ round, fixed: fixed.output, checked, validated: again.outcome === 'passed' });
 
         const items = new Map(checked.items.map((each) => [each.finding, each]));

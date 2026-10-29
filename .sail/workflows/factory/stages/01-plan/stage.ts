@@ -1,6 +1,7 @@
 // plan: turns the brief into an implementation plan, as create-plan does. The plan is a document: its template is in
 // place before the session, and its sections and tasks are checked after it.
 import { agent, countItems, doc, file, hasSections, noPlaceholders } from 'sail';
+import { readonly, withTools } from '../../../../lib/permissions';
 import { PlanOutput } from '../../schemas';
 
 export const plan = agent('plan', {
@@ -16,26 +17,6 @@ export const plan = agent('plan', {
   },
   output: PlanOutput,
   model: 'deep',
-  permissions: {
-    read: ['**'],
-    write: ['$STAGE_OUT/**'],
-    commands: [
-      'cat *',
-      'grep *',
-      'head *',
-      'tail *',
-      'wc *',
-      'sed -n *',
-      'echo *',
-      'bun --version',
-      'git log *',
-      'git diff *',
-      'git show *',
-      'git grep *',
-      'ls *',
-    ],
-    // A ticket can name an outside API's docs, and the plan is only as right as its reading of them.
-    tools: ['WebFetch'],
-  },
-  budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 15 },
+  permissions: withTools(readonly, ['WebFetch']),
+  budget: { maxTurns: 80, maxUsd: 3, maxMinutes: 45 },
 });

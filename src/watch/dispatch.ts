@@ -98,6 +98,8 @@ export interface DispatcherOptions {
   onError?: (message: string) => void;
   /** Hears a run's process end: the watcher ticks again at once. */
   onExit?: () => void;
+  /** Whether the dispatch is paused, as while the config names a model no harness runs: nothing starts or resumes. */
+  paused?: () => boolean;
 }
 
 export interface Dispatcher {
@@ -257,7 +259,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         store.hold(answer.until, runId, answer.reason);
         break;
       case 'resume':
-        if (holding()) break;
+        if (holding() || options.paused?.() === true) break;
         // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
         if (inFlight() >= options.maxConcurrentRuns) break;
         // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
@@ -395,7 +397,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   };
 
   const dispatch = async () => {
-    if (holding()) return;
+    if (holding() || options.paused?.() === true) return;
     let remote: string | undefined;
     for (const item of store.due()) {
       if (inFlight() >= options.maxConcurrentRuns) return;

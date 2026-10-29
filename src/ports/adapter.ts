@@ -30,6 +30,12 @@ export interface AdapterContext extends ProviderOptions {
   readonly env: Env;
 }
 
+/** A model a harness can't run, and why. */
+export interface ModelProblem {
+  readonly model: string;
+  readonly problem: string;
+}
+
 export interface AdapterDefinition<A> {
   /**
    * The environment variables this adapter needs, given its options, the environment and, for a harness, the model ids
@@ -38,6 +44,11 @@ export interface AdapterDefinition<A> {
    */
   requires?(options: AdapterOptions, env: Env, models?: readonly string[]): readonly (string | readonly string[])[];
   versions?(): Readonly<Record<string, string>>;
+  /**
+   * For a harness: why it can't run each of `models`, the model ids the config's aliases route to it, found the way a
+   * session would find them. A model it can run is left out. `sail check` and `sail watch` ask before any run does.
+   */
+  checkModels?(options: AdapterOptions, env: Env, models: readonly string[]): Promise<readonly ModelProblem[]>;
   create(options: AdapterOptions, context: AdapterContext): A | Promise<A>;
 }
 

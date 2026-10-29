@@ -1,6 +1,6 @@
 // Formats the ReviewRecord in $INPUT_RECORD as REVIEW.md, comments it on the pull request, and, when findings are
-// still open or a review was too thin to trust, removes the designation label in $INPUT_LABEL. Prints whether it removed
-// it.
+// still open or a review was too thin to trust, swaps the designation label in $INPUT_LABEL for needs-human. Prints
+// whether it removed it.
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -40,7 +40,7 @@ const lines = ['## sail review', ''];
 lines.push(
   mergeable
     ? 'Every finding to fix is fixed, and validation passes.'
-    : `${why.join(', and ')}: this pull request needs a human, and its \`${label}\` label is off.`,
+    : `${why.join(', and ')}: this pull request needs a human: its \`${label}\` label is off and \`needs-human\` is on.`,
   '',
 );
 if (record.judgement) lines.push(record.judgement.summary, '');
@@ -81,5 +81,8 @@ lines.push('');
 const body = join(process.env.STAGE_OUT, 'REVIEW.md');
 writeFileSync(body, lines.join('\n'));
 port(['codehost', 'comment', String(pr.number), '--body-file', body]);
-if (!mergeable) port(['codehost', 'remove-label', String(pr.number), label]);
+if (!mergeable) {
+  port(['codehost', 'remove-label', String(pr.number), label]);
+  port(['codehost', 'add-label', String(pr.number), 'needs-human']);
+}
 console.log(JSON.stringify({ unlabelled: !mergeable }));

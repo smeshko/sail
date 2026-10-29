@@ -2,13 +2,14 @@
 // itself on fake timers and a fake spawner, handed in through the commands' deps, with Ctrl-C through a fake
 // `io.onInterrupt`. Each case has a temp repository of its own and a registry under its own SAIL_HOME.
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { unwatchCommand, type WatchDeps, watchCommand } from '../../src/cli/commands/watch';
+import { configChecker, unwatchCommand, type WatchDeps, watchCommand } from '../../src/cli/commands/watch';
 import { EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import type { Io } from '../../src/cli/index';
 import { commandsDir } from '../../src/watch/inbox';
 import { readEntry } from '../../src/watch/registry';
+import { addCatalog, setModels } from '../helpers/catalog-harness';
 import { fakeTimers } from '../helpers/fake-timers';
 import { writePrWorkflow } from '../helpers/pr-workflow';
 import { fakeInterrupts, runCaptured } from '../helpers/run-captured';
@@ -135,6 +136,35 @@ test('sail watch outside a git repository, without .sail/, with no names, naming
       { code: EXIT_REFUSED, stderr: expect.stringMatching(/^sail watch: .*'nope'/) },
       { code: EXIT_REFUSED, stderr: "sail watch: workflow 'ticket-to-pr' isn't watched: it declares no watch" },
     ]);
+    expect(existsSync(join(repo.home, 'sail-home', 'watchers'))).toBe(false);
+  });
+});
+
+test("sail watch is refused naming a model alias its harness can't run, and configChecker() follows project.yaml's edits", async () => {
+  await withTempRepo(async (repo) => {
+    const { sail, env } = repository(repo, (dir) => {
+      addCatalog(dir);
+      setModels(dir, '{ default: claude-sonnet-5, deep: { harness: cat, model: gpt-typo } }');
+    });
+    const interrupts = fakeInterrupts();
+    const refused = await runCaptured(['watch', 'a'], repo.dir, { env, onInterrupt: interrupts.onInterrupt });
+    const check = configChecker(io(repo.dir, env).io, sail);
+    const answers = [await check()];
+    setModels(sail, '{ default: claude-sonnet-5, deep: { harness: cat, model: gpt-ok } }');
+    answers.push(await check(), await check());
+    rmSync(join(sail, 'project.yaml'));
+    answers.push((await check())?.replace(/: .*/, ': …'));
+    expect({ code: refused.code, stderr: refused.stderr, answers }).toEqual({
+      code: EXIT_REFUSED,
+      stderr:
+        'sail watch: .sail/project.yaml  /models/deep gpt-typo on cat (./adapters/catalog-harness.ts): no model gpt-typo\n',
+      answers: [
+        '.sail/project.yaml  /models/deep gpt-typo on cat (./adapters/catalog-harness.ts): no model gpt-typo',
+        undefined,
+        undefined,
+        ".sail/project.yaml can't be read: …",
+      ],
+    });
     expect(existsSync(join(repo.home, 'sail-home', 'watchers'))).toBe(false);
   });
 });

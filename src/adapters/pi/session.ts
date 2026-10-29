@@ -53,7 +53,14 @@ export interface PiSession {
 
 export type PiSessionFactory = (params: PiSessionParams) => Promise<PiSession>;
 
-export const createPiSession: PiSessionFactory = async (params) => {
+/** What a model is looked up with: the session's model, credentials and catalogs. */
+export type PiModelParams = Pick<PiSessionParams, 'model' | 'env' | 'providers' | 'catalogBaseUrl'>;
+
+/**
+ * pi's runtime with the credential for `params.model`'s provider, and the model, found in pi's built-in catalog or
+ * else in the provider's pi.dev one. Throws naming the model when neither has it, or the credential that is missing.
+ */
+export async function findPiModel(params: PiModelParams) {
   const slash = params.model.indexOf('/');
   const provider = slash < 0 ? '' : params.model.slice(0, slash);
   const modelId = slash < 0 ? '' : params.model.slice(slash + 1);
@@ -89,6 +96,12 @@ export const createPiSession: PiSessionFactory = async (params) => {
   }
   const model = runtime.getModel(provider, modelId);
   if (model === undefined) throw new Error(`no model ${params.model}`);
+  return { runtime, model };
+}
+
+export const createPiSession: PiSessionFactory = async (params) => {
+  const { runtime, model } = await findPiModel(params);
+  const sdk = await import('@earendil-works/pi-coding-agent');
 
   const agentDir = await mkdtemp(join(tmpdir(), 'sail-pi-'));
   try {

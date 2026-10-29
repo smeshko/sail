@@ -45,7 +45,7 @@ export interface ProjectConfig {
   adapters: Record<RunPort, AdapterConfig> & {
     /** The Jev adapter, which only `sail port jev` resolves. */
     jev?: AdapterConfig;
-    /** The named harnesses, which a model alias may name. Each is preflighted only when a run reaches it. */
+    /** The named harnesses, which a model alias may name. A run preflights each only when it reaches it. */
     harnesses?: Record<string, AdapterConfig>;
   };
   /** Model aliases: alias → model id, or the model id on a named harness. Empty when `project.yaml` has none. */

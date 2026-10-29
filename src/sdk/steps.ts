@@ -19,6 +19,11 @@ export interface Permissions {
   readonly write: readonly string[];
   /** Command patterns the step may run, such as `git diff *`. */
   readonly commands: readonly string[];
+  /**
+   * Command patterns the step may never run, though `commands` matches them: `commands: ['*']` with
+   * `deny: ['git push *']` runs anything but a push. Matched like `commands`, on every command a call would run.
+   */
+  readonly deny?: readonly string[];
   /** The hosts the step may reach, or `'none'`. */
   readonly network?: 'none' | readonly string[];
   /**

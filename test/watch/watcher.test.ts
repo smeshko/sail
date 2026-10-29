@@ -249,6 +249,39 @@ test('two workflows at caps 2 and 1 dispatch six tickets once each, in queue ord
   });
 });
 
+test('a config the check refuses pauses the dispatch, said once, until the check passes again, which is said and dispatches', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await watched(repo, [{ name: 'a', label: 'sail-a', cap: 2 }], tickets({ 'FAKE-1': 'sail-a' }));
+    let problem: string | undefined = 'models.terra: no model x';
+    let checks = 0;
+    const checkConfig = async () => {
+      checks++;
+      return problem;
+    };
+    const watcher = await w.start(['a'], { checkConfig });
+    await w.timers.advance(1000);
+    await w.timers.advance(1000);
+    const paused = { spawned: w.order('a'), said: w.out.filter((line) => line.includes('dispatch paused')).length };
+    problem = undefined;
+    await w.timers.advance(1000);
+    expect({
+      paused,
+      spawned: w.order('a'),
+      lines: w.out.filter((line) => line.includes('dispatch ')).map((line) => line.replace(/^\S+\s+/, '').trim()),
+      asked: checks >= 3,
+    }).toEqual({
+      paused: { spawned: [], said: 1 },
+      spawned: ['FAKE-1'],
+      lines: [
+        'error: dispatch paused until the config is fixed: models.terra: no model x',
+        'dispatch resumed: the config can be dispatched on again',
+      ],
+      asked: true,
+    });
+    await watcher.stop();
+  });
+});
+
 test('a watcher started again over the same runs, while they are alive, spawns nothing for them, and the next slot goes to the next ticket', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(

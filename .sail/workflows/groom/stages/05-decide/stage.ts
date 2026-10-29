@@ -3,6 +3,7 @@
 // title or description; and lists the open questions it confirmed. The workflow limits what it applies; the stage only
 // chooses.
 import { agent, doc, file, hasSections, noPlaceholders, value } from 'sail';
+import { readonly } from '../../../../lib/permissions';
 import { Decision, Findings } from '../../schemas';
 
 export const decide = agent('decide', {
@@ -16,10 +17,6 @@ export const decide = agent('decide', {
   },
   output: Decision,
   model: 'deep',
-  permissions: {
-    read: ['**'],
-    write: ['$STAGE_OUT/**'],
-    commands: ['cat *', 'grep *', 'head *', 'tail *', 'wc *', 'ls *', 'sed -n *', 'echo *', 'git log *', 'git grep *'],
-  },
-  budget: { maxTurns: 40, maxUsd: 2, maxMinutes: 10 },
+  permissions: readonly,
+  budget: { maxTurns: 40, maxUsd: 2, maxMinutes: 20 },
 });

@@ -36,7 +36,12 @@ hands the pull request to a human, so name one only for a real gap, never for a 
 |---|---|
 | `fix` | it is real and belongs to this pull request: it breaks or misses what the requirements ask, fails validation, or ships a bug, and fixing it stays inside the change's scope |
 | `ticket` | it is real, outside this pull request, and worth a ticket of its own as below: a bug in older code the change only exposed, a design question bigger than the change |
-| `drop` | it isn't real, it duplicates another finding, it contradicts the requirements, it is taste, or it is real, out of scope and not worth a ticket |
+| `drop` | it isn't real, it duplicates another finding, it contradicts the requirements, it is taste, wording included, or it is real, out of scope and not worth a ticket |
+
+A finding that only rewords a comment, a header, a help line, a doc or glossary phrasing is `drop`, as taste, unless
+the text as it stands is wrong in a way that would mislead a reader or the next agent: a comment that names a
+behaviour the code doesn't have, a help line that gives a wrong flag, a glossary term the change misuses. Then it is
+`fix`, at its own severity, and the fix stage commits the minor ones together.
 
 A failed validation and an unshown criterion are `fix` unless the problem lies outside the change. Never `drop` a real
 problem in scope to keep the pull request moving.

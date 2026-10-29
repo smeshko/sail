@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { EXIT_INTERNAL, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { editorDeclarations } from '../../src/engine/editor';
+import { withCatalog } from '../helpers/catalog-harness';
 import { dropReview } from '../helpers/review-fixture';
 import { runCaptured } from '../helpers/run-captured';
 import { copyRun, writeStub } from '../helpers/stub-workflow';
@@ -175,6 +176,20 @@ test('a copy of the fixture checks from a subdirectory with no node_modules in r
     expect(stdout).not.toContain(repo.dir);
     expect(nodeModulesAbove(repo.dir)).toEqual([]);
     expect([...new Bun.Glob('**/node_modules').scanSync({ cwd: repo.dir, dot: true, onlyFiles: false })]).toEqual([]);
+  });
+});
+
+test('a model alias whose harness cannot run its model is refused last, naming the alias, its model and harness', async () => {
+  await withTempRepo(async (repo) => {
+    withCatalog(
+      repo.dir,
+      '{ default: claude-sonnet-5, deep: { harness: cat, model: gpt-typo }, sol: { harness: cat, model: gpt-ok } }',
+    );
+    expect(await runCaptured(['check'], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: '.sail/project.yaml  /models/deep gpt-typo on cat (./adapters/catalog-harness.ts): no model gpt-typo\n',
+    });
   });
 });
 

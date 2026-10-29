@@ -231,7 +231,7 @@ class Collector {
       }
     }
     if (name === 'find') this.find(args, text, cwd, depth);
-    if (name === 'git') this.git(argv, open, text, cwd);
+    if (name === 'git') this.git(argv, fed ? undefined : words, open, text, cwd);
     return undefined;
   }
 
@@ -341,14 +341,38 @@ class Collector {
     }
   }
 
+  /**
+   * Whether every argument the shell expands in a git command comes after a literal subcommand and can't become an
+   * option: a glob whose first character is a literal other than `-`, which expands only into names starting with it,
+   * or the message after `git commit -m`, which git reads as the message, and among whose words, split, no commit
+   * option names a command or a file to write.
+   */
+  private harmlessExpansions(words: readonly Word[] | undefined, at: number, subcommand: string | undefined): boolean {
+    if (words === undefined || subcommand === undefined) return false;
+    return words.every((word, i) => {
+      if (this.known(word) !== undefined) return true;
+      if (i <= at) return false;
+      const first = word.raw[0] ?? '-';
+      if (word.glob && word.vars.length === 0 && word.nested.length === 0) return !'-*?[~{\\'.includes(first);
+      const previous = words[i - 1];
+      return subcommand === 'commit' && previous !== undefined && ['-m', '--message'].includes(previous.raw);
+    });
+  }
+
   /** git's directory options must stay inside the roots, and `--output` is a write. */
-  private git(argv: readonly string[], open: boolean, text: string, cwd: Cwd): void {
+  private git(
+    argv: readonly string[],
+    words: readonly Word[] | undefined,
+    open: boolean,
+    text: string,
+    cwd: Cwd,
+  ): void {
     const invocation = gitInvocation(argv);
     if (invocation.unknown !== undefined) {
       this.out.refusals.push(`git's option ${invocation.unknown} isn't known: ${quote(text)}`);
       return;
     }
-    if (open) {
+    if (open && !this.harmlessExpansions(words, argv.length - invocation.args.length - 1, invocation.subcommand)) {
       this.out.refusals.push(
         `git's arguments hold an expansion, which could name another subcommand or --output: ${quote(text)}`,
       );
@@ -396,7 +420,7 @@ function checkTargets(
 
 /**
  * The verdict for `command`, run from `cwd` (the worktree when absent): the deny set over every command it would
- * run, then what can't be checked, then the step's commands over each, then `cd` and git's paths, then every
+ * run, then what can't be checked, then the step's denied commands and its commands over each, then `cd` and git's paths, then every
  * redirection's target.
  */
 export function decideCommand(command: string, permissions: Permissions, ctx: DecideContext, cwd?: string): Decision {
@@ -426,6 +450,9 @@ export function decideCommand(command: string, permissions: Permissions, ctx: De
   const refusal = out.refusals[0];
   if (refusal !== undefined) return deny('commands', `can't be checked: ${refusal}`);
   for (const run of out.runs) {
+    if (permissions.deny !== undefined && matchesCommand(run.match, permissions.deny)) {
+      return deny('commands', `${quote(run.text)} is among the step's denied commands`);
+    }
     if (!matchesCommand(run.match, permissions.commands)) {
       return deny('commands', `${quote(run.text)} matches none of the step's commands`);
     }

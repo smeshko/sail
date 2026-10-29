@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BUILTINS } from '../../src/adapters/index';
-import { providerRelay, type ResolvedAdapters, resolveAdapters } from '../../src/engine/adapters';
+import { checkModelAliases, providerRelay, type ResolvedAdapters, resolveAdapters } from '../../src/engine/adapters';
 import { type AdapterConfig, PORTS, type Port, type ProjectConfig, readConfig } from '../../src/engine/config';
 import { runsDir } from '../../src/engine/run-dir';
 import { type AdapterEntry, type RunHeader, validateRunHeader } from '../../src/engine/run-header';
@@ -855,4 +855,81 @@ test('a named harness emits into the relay a run attaches, and into the emit the
   const leased = { type: 'workspace:leased', remote: 'r', branch: 'b' };
   expect(seen).toEqual([leased as never]);
   expect(emitted).toEqual([leased]);
+});
+
+// Model aliases: each harness the aliases route to says which of its models it can't run, before any run reaches one.
+
+/** A harness definition whose checkModels() refuses each model in `unknown`, recording what it was asked. */
+function checking(unknown: readonly string[], asked: string[][], options: object[] = []): object {
+  return {
+    create: () => stubAdapter('harness'),
+    checkModels: async (given: object, _env: Env, models: readonly string[]) => {
+      asked.push([...models]);
+      options.push(given);
+      return models
+        .filter((model) => unknown.includes(model))
+        .map((model) => ({ model, problem: `no model ${model}` }));
+    },
+  };
+}
+
+function aliased(models: ProjectConfig['models'], harnesses?: Record<string, AdapterConfig>): ProjectConfig {
+  const config = configOf({ harness: { use: 'checked', region: 'eu' } });
+  return { ...config, models, adapters: { ...config.adapters, ...(harnesses === undefined ? {} : { harnesses }) } };
+}
+
+test('a model alias whose harness cannot run its model is an issue at /models/<alias>, naming the model and harness', async () => {
+  const { sailDir } = repo();
+  const asked: string[][] = [];
+  const options: object[] = [];
+  const builtins = {
+    ...builtin('checked', 'harness', checking(['typo-1'], asked, options)),
+    ...builtin('second', 'harness', checking(['typo-2'], asked)),
+  } as Builtins;
+  const config = aliased(
+    {
+      default: 'good-1',
+      deep: 'typo-1',
+      also: 'typo-1',
+      terra: { harness: 'codex', model: 'typo-2' },
+      sol: { harness: 'codex', model: 'good-2' },
+    },
+    { codex: { use: 'second' } },
+  );
+  const issues = await checkModelAliases({ sailDir, config, builtins: { ...BUILTINS, ...builtins }, env: {} });
+  expect({ issues, asked, options }).toEqual({
+    issues: [
+      { path: '/models/deep', message: 'typo-1 on checked: no model typo-1' },
+      { path: '/models/also', message: 'typo-1 on checked: no model typo-1' },
+      { path: '/models/terra', message: 'typo-2 on codex (second): no model typo-2' },
+    ],
+    asked: [
+      ['good-1', 'typo-1'],
+      ['typo-2', 'good-2'],
+    ],
+    options: [{ region: 'eu' }],
+  });
+});
+
+test('a harness with no checkModels(), or one the config does not name, is left to the run, and one that throws refuses its models', async () => {
+  const { sailDir } = repo();
+  const builtins = {
+    ...builtin('checked', 'harness', { create: () => stubAdapter('harness') }),
+    ...builtin('broken', 'harness', {
+      create: () => stubAdapter('harness'),
+      checkModels: async () => {
+        throw new Error('catalog down');
+      },
+    }),
+  } as Builtins;
+  const quiet = aliased({ default: 'any' });
+  const broken = aliased(
+    { deep: { harness: 'b', model: 'm' }, gone: { harness: 'nowhere', model: 'x' } },
+    { b: { use: 'broken' } },
+  );
+  const all = { ...BUILTINS, ...builtins };
+  expect([
+    await checkModelAliases({ sailDir, config: quiet, builtins: all, env: {} }),
+    await checkModelAliases({ sailDir, config: broken, builtins: all, env: {} }),
+  ]).toEqual([[], [{ path: '/models/deep', message: 'm on b (broken): checkModels() failed: catalog down' }]]);
 });

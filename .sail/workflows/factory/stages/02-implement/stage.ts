@@ -1,5 +1,6 @@
 // implement: walks the plan's tasks in order, test first, one commit per task: red, green, refactor, commit.
 import { agent, file, value, z } from 'sail';
+import { builder, withTools } from '../../../../lib/permissions';
 import { CommitInfo, PassFeedback } from '../../schemas';
 
 export const Implemented = z.object({
@@ -25,63 +26,6 @@ export const implement = agent('implement', {
   },
   output: Implemented,
   model: 'terra',
-  permissions: {
-    read: ['**'],
-    write: [
-      'src/**',
-      'test/**',
-      'types/**',
-      'schemas/**',
-      'bin/**',
-      'scripts/**',
-      '.sail/**',
-      '.githooks/**',
-      'package.json',
-      'bun.lock',
-      'bunfig.toml',
-      'tsconfig.json',
-      'biome.json',
-      'AGENTS.md',
-      'CONTEXT.md',
-      '$STAGE_OUT/**',
-    ],
-    commands: [
-      'cat *',
-      'grep *',
-      'head *',
-      'tail *',
-      'wc *',
-      'ls *',
-      'sed -n *',
-      'echo *',
-      'bun --version',
-      'bun scripts/affected-tests.ts --list',
-      // A new dependency, pinned: the package an adapter imports, such as pi's or Codex's SDK.
-      'bun add --exact *',
-      'bun run test *',
-      'bun run typecheck',
-      'bun run lint',
-      'bun run fix',
-      'bun run types',
-      'bun run golden',
-      'git add *',
-      'git commit *',
-      'git diff *',
-      'git status *',
-      'git log *',
-      'git show *',
-      'git grep *',
-      'git rev-parse *',
-      'git restore *',
-      // A new script stage's run.sh is run directly, and the Write tool creates it 0644.
-      'chmod +x .sail/*',
-      'chmod +x bin/*',
-      // A task that deletes or moves files: `rm` is the run's to deny.
-      'git rm *',
-      'git mv *',
-    ],
-    // An adapter is written against its API's docs: the wire format, auth and errors.
-    tools: ['WebFetch'],
-  },
-  budget: { maxTurns: 250, maxUsd: 10, maxMinutes: 60 },
+  permissions: withTools(builder, ['WebFetch']),
+  budget: { maxTurns: 250, maxUsd: 10, maxMinutes: 90 },
 });

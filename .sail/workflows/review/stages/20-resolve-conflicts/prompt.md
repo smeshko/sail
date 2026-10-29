@@ -14,8 +14,8 @@ What the pull request should do is at `{{requirements}}`.
 4. Stage the resolved paths by name, then finish the merge with `git commit --no-edit`. Never start another merge,
    rebase or reset.
 
-Read files with the Read tool, or `sed -n` for a range. Change them only with Edit and Write: `sed -i`, `python3` and
-a heredoc into a file are denied, and each denial costs a turn.
+Read files with the Read tool, or `sed -n` for a range, and change them with Edit and Write. Pushing, `gh` and network
+clients are denied: the review's own stages push the merge.
 
 If a conflict can't be resolved without deciding what the pull request should become, leave the merge unfinished
 and say why.

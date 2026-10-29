@@ -7,9 +7,11 @@
 //
 // A live watcher is one the registry records for this repository's `name` with a pid that is alive. One recorded for
 // the same `name` in another clone refuses both commands. Every refusal is exit code 3: no `.sail/project.yaml`, no
-// names, a name that isn't a watched workflow, two workflows on one label (the live set's included), or a live watcher
-// in the way, named with its clone and pid.
+// names, a name that isn't a watched workflow, two workflows on one label (the live set's included), a live watcher
+// in the way, named with its clone and pid, or a model alias whose harness can't run its model.
 //
+// A watcher starts only when every model alias's harness can run its model, and pauses its dispatch while an edit of
+// project.yaml names one it can't: `configChecker()` answers both, asking each harness only when the file changed.
 // The watcher runs until its set empties, or until Ctrl-C or SIGTERM, and exits 0 either way. Its runs carry on.
 //
 // A second command waits up to 15 s for the watcher to take its command. One it hasn't taken by then stays in the
@@ -19,10 +21,14 @@
 //
 // `sail queue` shares the live watcher's lookup and the wait for a command to be taken: `findWatcher()` and `taken()`.
 // The set read back from the queue streams is `liveSet()`, which the dashboard shares too.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { BUILTINS } from '../../adapters/index';
 import { isAlive as processIsAlive } from '../../adapters/leases';
-import type { ProjectConfig, RunPort } from '../../engine/config';
+import { checkModelAliases } from '../../engine/adapters';
+import { type ProjectConfig, type RunPort, readConfig } from '../../engine/config';
 import { runsDir as runsDirOf } from '../../engine/run-dir';
+import { formatIssue } from '../../engine/schemas';
 import { sameLabel } from '../../ports/labels';
 import { dropCommand } from '../../watch/inbox';
 import { readWatch, systemTimers, type Timers, type WatchDeclaration } from '../../watch/poll';
@@ -120,6 +126,33 @@ export async function taken(file: string, deps: WatchDeps): Promise<boolean> {
   return true;
 }
 
+/**
+ * Why the runs can't start on `sailDir`'s project.yaml as it is now: it doesn't validate, or a model alias names a
+ * model its harness can't run. Undefined when they can. The answer is kept until the file's text changes.
+ */
+export function configChecker(io: Io, sailDir: string): () => Promise<string | undefined> {
+  const path = join(sailDir, 'project.yaml');
+  let seen: { text: string; problem: string | undefined } | undefined;
+  return async () => {
+    let text: string;
+    try {
+      text = readFileSync(path, 'utf8');
+    } catch (error) {
+      return `${at(io, path)} can't be read: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    if (seen?.text === text) return seen.problem;
+    const file = at(io, path);
+    const config = readConfig(sailDir);
+    const issues =
+      'issues' in config
+        ? config.issues
+        : await checkModelAliases({ sailDir, config, builtins: BUILTINS, env: io.env ?? process.env });
+    const problem = issues.length === 0 ? undefined : issues.map((issue) => formatIssue({ ...issue, file })).join('; ');
+    seen = { text, problem };
+    return problem;
+  };
+}
+
 /** `sail watch`, on `deps`. */
 export function watchCommand(deps: WatchDeps = {}): Command {
   return async (args, io) => {
@@ -177,6 +210,11 @@ export function watchCommand(deps: WatchDeps = {}): Command {
 
     const onInterrupt = io.onInterrupt;
     if (onInterrupt === undefined) return refuse('nothing can stop it here: run it from a terminal');
+    // A model no harness can run would fail every run that reaches it: the watcher refuses to start on one, and
+    // pauses its dispatch while an edit of project.yaml names one.
+    const checkConfig = configChecker(io, sailDir);
+    const problem = await checkConfig();
+    if (problem !== undefined) return refuse(problem);
     const started = await startWatcher({
       sailDir,
       config,
@@ -194,6 +232,7 @@ export function watchCommand(deps: WatchDeps = {}): Command {
       ...(deps.pid === undefined ? {} : { pid: deps.pid }),
       write: (text) => io.stdout(text),
       lines: io.tty === undefined ? {} : { tty: io.tty },
+      checkConfig,
     });
     if ('refused' in started) return refuse(started.refused);
     const unregister = onInterrupt(() => {

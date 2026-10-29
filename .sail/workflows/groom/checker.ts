@@ -2,6 +2,7 @@
 // reads, may run and may spend. A checker reads the ticket and the repository and never writes to either, so all three
 // run beside each other.
 import { agent, file, type z } from 'sail';
+import { readonly } from '../../lib/permissions';
 
 export function checker<const N extends string, O extends z.ZodType>(name: N, output: O) {
   return agent(name, {
@@ -9,24 +10,7 @@ export function checker<const N extends string, O extends z.ZodType>(name: N, ou
     consumes: { brief: file('brief.md'), others: file('others.md') },
     output,
     model: 'default',
-    permissions: {
-      read: ['**'],
-      write: ['$STAGE_OUT/**'],
-      commands: [
-        'cat *',
-        'grep *',
-        'head *',
-        'tail *',
-        'wc *',
-        'ls *',
-        'sed -n *',
-        'echo *',
-        'git log *',
-        'git show *',
-        'git grep *',
-        'git ls-files *',
-      ],
-    },
-    budget: { maxTurns: 40, maxUsd: 1, maxMinutes: 10 },
+    permissions: readonly,
+    budget: { maxTurns: 40, maxUsd: 1, maxMinutes: 20 },
   });
 }

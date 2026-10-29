@@ -1,6 +1,7 @@
 // fix: fixes what the judge decided to fix on this pull request, one commit each, test first. A later pass reads what
 // check-fix found still open, what the fixes broke, and a failed validation.
 import { agent, file, value, z } from 'sail';
+import { builder } from '../../../../lib/permissions';
 import { Findings, Fixed, FixFeedback } from '../../schemas';
 
 export const fix = agent('fix', {
@@ -15,52 +16,6 @@ export const fix = agent('fix', {
   },
   output: Fixed,
   model: 'sol',
-  permissions: {
-    read: ['**'],
-    write: [
-      'src/**',
-      'test/**',
-      'types/**',
-      'schemas/**',
-      'bin/**',
-      'scripts/**',
-      '.sail/**',
-      '.githooks/**',
-      'package.json',
-      'bun.lock',
-      'bunfig.toml',
-      'tsconfig.json',
-      'biome.json',
-      'AGENTS.md',
-      'CONTEXT.md',
-      '$STAGE_OUT/**',
-    ],
-    commands: [
-      'cat *',
-      'grep *',
-      'head *',
-      'tail *',
-      'wc *',
-      'ls *',
-      'sed -n *',
-      'echo *',
-      'bun --version',
-      'bun scripts/affected-tests.ts --list',
-      'bun run test *',
-      'bun run typecheck',
-      'bun run lint',
-      'bun run fix',
-      'bun run types',
-      'bun run golden',
-      'git add *',
-      'git commit *',
-      'git diff *',
-      'git status *',
-      'git log *',
-      'git show *',
-      'git grep *',
-      'git rev-parse *',
-    ],
-  },
-  budget: { maxTurns: 150, maxUsd: 6, maxMinutes: 40 },
+  permissions: builder,
+  budget: { maxTurns: 150, maxUsd: 6, maxMinutes: 90 },
 });

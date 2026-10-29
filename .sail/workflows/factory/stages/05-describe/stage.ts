@@ -3,6 +3,7 @@
 // files itself.
 import { agent, file, value, z } from 'sail';
 import { TicketInput } from 'sail/intakes';
+import { readonly } from '../../../../lib/permissions';
 import { FollowUp } from '../../../../stages/file-follow-ups/stage';
 
 export const PrDescription = z.object({
@@ -18,12 +19,8 @@ export const describe = agent('describe', {
   produces: { 'pr-body.md': 'file' },
   output: PrDescription,
   model: 'luna',
-  permissions: {
-    read: ['**'],
-    write: ['$STAGE_OUT/**'],
-    commands: ['cat *', 'grep *', 'head *', 'tail *', 'wc *', 'git log *', 'git diff *', 'git show *'],
-  },
-  budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 5 },
+  permissions: readonly,
+  budget: { maxTurns: 30, maxUsd: 1, maxMinutes: 15 },
   // The body is written in the vocabulary, and the prompt states the rules of AGENTS.md it follows.
   conventions: ['CONTEXT.md'],
 });

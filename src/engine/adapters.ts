@@ -101,7 +101,7 @@ function unawaited(value: unknown): unknown {
 /** The definition a module default-exports, or why it isn't one. */
 function asDefinition(value: unknown): AdapterDefinition<unknown> | undefined {
   if (!isObject(value) || typeof value.create !== 'function') return undefined;
-  for (const optional of ['requires', 'versions']) {
+  for (const optional of ['requires', 'versions', 'checkModels']) {
     if (value[optional] !== undefined && typeof value[optional] !== 'function') return undefined;
   }
   return value as unknown as AdapterDefinition<unknown>;
@@ -361,4 +361,39 @@ async function resolveHarnesses(
   }
   if (issues.length > 0) return { issues };
   return { ports, entries };
+}
+
+/**
+ * Every model alias whose harness can't run its model, as an issue at `/models/<alias>`: each harness the aliases
+ * route to, the default one or a named one, is asked for the model ids it is routed, the way a session would find
+ * them. A harness that can't be found, or whose definition has no `checkModels()`, is the run's to refuse.
+ */
+export async function checkModelAliases(
+  options: Pick<ResolveOptions<Port>, 'sailDir' | 'config' | 'builtins' | 'env'>,
+): Promise<SchemaIssue[]> {
+  const { config } = options;
+  const harnesses = new Set(Object.keys(config.models).map((alias) => aliasOf(config, alias)?.harness));
+  const issues: SchemaIssue[] = [];
+  for (const name of harnesses) {
+    const adapter = name === undefined ? config.adapters.harness : config.adapters.harnesses?.[name];
+    if (adapter === undefined) continue;
+    const found = await find('harness', adapter.use, options);
+    if (typeof found === 'string' || found.definition.checkModels === undefined) continue;
+    const { use: _use, ...rest } = adapter;
+    let problems: readonly { model: string; problem: string }[];
+    try {
+      problems = await found.definition.checkModels(rest, options.env, modelsOf(config, name));
+    } catch (error) {
+      problems = modelsOf(config, name).map((model) => ({ model, problem: `checkModels() failed: ${message(error)}` }));
+    }
+    for (const { model, problem } of problems) {
+      for (const alias of Object.keys(config.models)) {
+        const routed = aliasOf(config, alias);
+        if (routed?.model !== model || routed.harness !== name) continue;
+        const on = name === undefined ? adapter.use : `${name} (${adapter.use})`;
+        issues.push({ path: `/models/${alias}`, message: `${model} on ${on}: ${problem}` });
+      }
+    }
+  }
+  return issues;
 }

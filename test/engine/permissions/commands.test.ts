@@ -1,6 +1,7 @@
 // The command decision: every simple command a command string would run, wrappers unwrapped and nested shells and
-// substitutions recursed into (D9), checked against the deny set, then the step's commands, then where cd, git's
-// directory options and every redirection lead. Each row runs decideCommand() against a run's directories on disk.
+// substitutions recursed into (D9), checked against the deny set, then the step's deny and its commands, then where cd,
+// git's directory options and every redirection lead. Each row runs decideCommand() against a run's directories on
+// disk.
 import { afterAll, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { decideCommand } from '../../../src/engine/permissions/commands';
@@ -225,6 +226,41 @@ test.each([
   ["$'rm' -rf x", {}, ['commands', "can't be checked: an ANSI-C quote"]],
   ['a |', { commands: ['a *'] }, ['commands', "can't be checked: a command that ends with |"]],
 ] as [string, Partial<Permissions>, Want][])('refusals: %j under %j is %j', (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
+const DENIED = (text: string): Want => ['commands', `\`${text}\` is among the step's denied commands`];
+const PROFILE = { commands: ['*'], deny: ['git push *', 'gh *', 'curl *'] };
+
+test.each([
+  ['git push origin HEAD', PROFILE, DENIED('git push origin HEAD')],
+  ['git status --short', PROFILE, 'allow'],
+  ['sed -n 1,5p src/a.ts | cut -c1-80', PROFILE, 'allow'],
+  ['git log -1 && gh pr view 1', PROFILE, DENIED('gh pr view 1')],
+  ["bash -c 'curl -s example.com'", PROFILE, DENIED('curl -s example.com')],
+  ['echo $(gh auth token)', PROFILE, DENIED('gh auth token')],
+  ['rm -rf src', PROFILE, DENY('rm -rf')],
+  ['git push', { commands: ['git *'], deny: ['git push *'] }, DENIED('git push')],
+] as [string, Partial<Permissions>, Want][])("a step's deny: %j under %j is %j", (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
+const GIT_OPEN: Want = ['commands', "can't be checked: git's arguments hold an expansion"];
+const GIT = { commands: ['git *'] };
+
+test.each([
+  ['git grep -n x -- src/adapters/git-worktree*', GIT, 'allow'],
+  ['git log --oneline -- src/**/paths.ts', GIT, 'allow'],
+  ['git commit -q -m "$(cat <<\'EOF\'\nfix: a thing\nEOF\n)"', { commands: ['git *', 'cat *'] }, 'allow'],
+  ['git commit --message "$MSG"', GIT, 'allow'],
+  ['git pu* origin', GIT, GIT_OPEN],
+  ['git $SUB', GIT, GIT_OPEN],
+  ['git diff *', GIT, GIT_OPEN],
+  ['git diff -- -*', GIT, GIT_OPEN],
+  ['git diff "$(echo --output=x)"', { commands: ['git *', 'echo *'] }, GIT_OPEN],
+  ['git log -m "$X"', GIT, GIT_OPEN],
+  ['ls | xargs git add', { commands: ['git *', 'ls *', 'xargs *'] }, GIT_OPEN],
+] as [string, Partial<Permissions>, Want][])('git expansions: %j under %j is %j', (command, open, want) => {
   expect(verdict(run(command, open), want)).toEqual(want);
 });
 
