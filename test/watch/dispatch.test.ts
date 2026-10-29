@@ -56,6 +56,7 @@ async function world(
     claiming?: boolean;
     source?: (own: TicketSource) => TicketSource;
     workspace?: (own: WorkspacePort) => WorkspacePort;
+    paused?: () => boolean;
   } = {},
 ): Promise<World> {
   writeTickets(writeStub(repo.dir), designated(count));
@@ -95,6 +96,7 @@ async function world(
       isAlive: spawner.isAlive,
       onSettled: (each) => settled.push(each),
       onError: (message) => errors.push(message),
+      ...(options.paused === undefined ? {} : { paused: options.paused }),
     });
   return { runs, clock, store, ticketSource, adapters, spawner, settled, errors, dispatcher };
 }
@@ -278,6 +280,37 @@ test("a run that failed fails its item with the stop reason and parks it on the 
       'FAKE-1 parked',
     ]);
     expect(queueEventIssues(queueDir(w.runs, 'a'))).toEqual([]);
+  });
+});
+
+test('a paused dispatch starts and resumes nothing but still settles what ended, and once unpaused it starts and resumes as before', async () => {
+  await withTempRepo(async (repo) => {
+    let paused = false;
+    const w = await world(repo, 3, 2, { paused: () => paused });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    paused = true;
+    await w.spawner.end('FAKE-1');
+    await w.spawner.end('FAKE-2', { status: 'suspended', stopReason: 'interrupted' });
+    await dispatcher.tick();
+    const whilePaused = { spawned: spawnedKeys(w.spawner), resumes: w.spawner.resumes.length, states: states(w.store) };
+    paused = false;
+    await dispatcher.tick();
+    expect({
+      whilePaused,
+      after: { spawned: spawnedKeys(w.spawner), resumes: w.spawner.resumes.length, states: states(w.store) },
+    }).toEqual({
+      whilePaused: {
+        spawned: ['FAKE-1', 'FAKE-2'],
+        resumes: 0,
+        states: ['FAKE-1 done 1', 'FAKE-2 dispatched 1', 'FAKE-3 queued 0'],
+      },
+      after: {
+        spawned: ['FAKE-1', 'FAKE-2', 'FAKE-3'],
+        resumes: 1,
+        states: ['FAKE-1 done 1', 'FAKE-2 dispatched 1', 'FAKE-3 dispatched 1'],
+      },
+    });
   });
 });
 

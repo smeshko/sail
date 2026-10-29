@@ -1,11 +1,12 @@
 // The built-in pi adapter: the Harness over pi's coding-agent SDK, whose providers include non-Anthropic and local
 // models. Preflight needs the key of each provider the `provider/model` ids the config routes to it use. It takes one
-// option, `provider`, whose key preflight needs as well.
+// option, `provider`, whose key preflight needs as well. Its models are checked the way a session finds them.
 import { z } from 'zod';
-import type { AdapterDefinition, AdapterOptions, Env } from '../../ports/adapter';
+import type { AdapterDefinition, AdapterOptions, Env, ModelProblem } from '../../ports/adapter';
 import type { Harness } from '../../ports/harness';
 import { createPiHarness } from './harness';
 import { keyNames } from './providers';
+import { findPiModel, type PiModelParams } from './session';
 
 export { createPiHarness } from './harness';
 
@@ -28,9 +29,28 @@ export function requires(options: AdapterOptions, _env: Env, models: readonly st
   });
 }
 
+/** Each of `models` pi can't run: one no catalog lists, or whose provider's credential is missing. */
+export async function checkModels(
+  _options: AdapterOptions,
+  env: Env,
+  models: readonly string[],
+  find: (params: PiModelParams) => Promise<unknown> = findPiModel,
+): Promise<ModelProblem[]> {
+  const problems: ModelProblem[] = [];
+  for (const model of models) {
+    try {
+      await find({ model, env });
+    } catch (error) {
+      problems.push({ model, problem: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return problems;
+}
+
 export const piAdapters: { harness: AdapterDefinition<Harness> } = {
   harness: {
     requires,
+    checkModels: (options, env, models) => checkModels(options, env, models),
     versions: () => ({ '@earendil-works/pi-coding-agent': PI_VERSION }),
     create(options, context) {
       const parsed = Options.safeParse(options);

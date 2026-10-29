@@ -7,8 +7,9 @@
 // only then does each workflow get its `watch:added`, a poller of its own and a dispatcher. Its inbox is emptied
 // before it is live because a second `sail watch` drops its command only once it sees a live watcher in the registry.
 //
-// A tick every second, never two at once, drains the inbox, then runs each workflow's dispatch in the order the set was
-// formed. A run's process ending asks for a tick at once. The commands:
+// A tick every second, never two at once, drains the inbox, asks `checkConfig()` whether the config can be dispatched
+// on, then runs each workflow's dispatch in the order the set was formed: one the config can't be dispatched on settles
+// what ended but starts and resumes nothing. A run's process ending asks for a tick at once. The commands:
 // - `watch`: opens the workflows not watched yet, refuses a label the set or another watcher already polls, records
 //   the new labels, and adds them. Watched already, it changes nothing.
 // - `unwatch`: asks each live run of the workflow to suspend at its next call boundary, through its control file, then
@@ -123,6 +124,11 @@ export interface WatcherOptions {
   policy?: QueuePolicy;
   /** The pid the watcher records itself under: this process's when left out. */
   pid?: number;
+  /**
+   * Why the config can't be dispatched on now, such as a model alias its harness can't run, or undefined when it can.
+   * Asked at every tick: while it answers a reason, nothing starts or resumes, and the reason is printed once.
+   */
+  checkConfig?: () => Promise<string | undefined>;
 }
 
 export interface Watcher {
@@ -244,6 +250,26 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
   };
 
   let stopped = false;
+  /** Why the config can't be dispatched on, as `checkConfig()` last answered. */
+  let configProblem: string | undefined;
+  /** Asks `checkConfig()` again, and prints a line when its answer changed. */
+  const recheck = async () => {
+    if (options.checkConfig === undefined) return;
+    let problem: string | undefined;
+    try {
+      problem = await options.checkConfig();
+    } catch (error) {
+      problem = `the config can't be checked: ${messageOf(error)}`;
+    }
+    if (problem !== configProblem) {
+      print(
+        problem === undefined
+          ? { at: now(), text: 'dispatch resumed: the config can be dispatched on again' }
+          : errorLine(undefined, `dispatch paused until the config is fixed: ${problem}`, now()),
+      );
+    }
+    configProblem = problem;
+  };
   /** Gives back the queues' lease: set once it is taken. */
   let release: (() => void) | undefined;
   let timer: unknown;
@@ -298,6 +324,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
       onSettled: (settled) => print(settledLine(workflow, settled, now())),
       onError: (message) => print(errorLine(workflow, message, now())),
       onExit: kick,
+      paused: () => configProblem !== undefined,
     });
     set.set(workflow, { target, poller, dispatcher });
     await atMost(poller.start(), options.firstPollMs ?? FIRST_POLL_MS);
@@ -478,6 +505,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
           finish();
           return;
         }
+        await recheck();
         for (const [workflow, watched] of [...set]) {
           if (stopped) break;
           try {

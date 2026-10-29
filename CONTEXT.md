@@ -249,11 +249,11 @@ The repository's `.sail/project.yaml`: its `name`, which adapter fills each port
 _Avoid_: settings, project file, manifest, config.ts
 
 **Model alias**:
-A name in the config's `models` that an agent step picks with its `model` (`default` when it names none). It is a model id on the default harness, or `{ harness, model }`: a model id on the named harness it names. A `models` entry that names a harness `adapters.harnesses` doesn't define is refused wherever the config is read.
+A name in the config's `models` that an agent step picks with its `model` (`default` when it names none). It is a model id on the default harness, or `{ harness, model }`: a model id on the named harness it names. A `models` entry that names a harness `adapters.harnesses` doesn't define is refused wherever the config is read. `sail check`, and `sail watch` before it starts and whenever `project.yaml` changes, ask each alias's harness whether it can run the alias's model, and refuse, or pause the dispatch, on one it can't.
 _Avoid_: model name, model preset, model profile
 
 **Named harness**:
-A harness the config declares under `adapters.harnesses`, beside the default `adapters.harness`, for a model alias to name. It is resolved and preflighted only when a run reaches an alias that names it, and the run header records the ones it reached. A call on one records its name; a call on the default harness records none.
+A harness the config declares under `adapters.harnesses`, beside the default `adapters.harness`, for a model alias to name. A run resolves and preflights it only when it reaches an alias that names it, and the run header records the ones it reached; its models are checked before any run, as the model alias says. A call on one records its name; a call on the default harness records none.
 _Avoid_: extra harness, secondary harness, provider (the external system behind an adapter)
 
 **Editor declarations**:

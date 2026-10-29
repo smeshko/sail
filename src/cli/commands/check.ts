@@ -1,5 +1,6 @@
-// `sail check [--list]`: finds `.sail/`, validates its config, refreshes the editor declarations, type-checks it, then
-// loads its definitions and applies the layout's rules, in that order. The first step with a problem refuses, with
+// `sail check [--list]`: finds `.sail/`, validates its config, refreshes the editor declarations, type-checks it,
+// loads its definitions and applies the layout's rules, then asks each harness whether it can run the models the
+// aliases route to it, in that order. The first step with a problem refuses, with
 // every problem it found located relative to where the user ran it.
 //
 // The editor declarations are the one thing it writes: where `.sail/tsconfig.json` shows the repository uses them, the
@@ -7,6 +8,8 @@
 // for the editor. A write that fails is a line on stderr and nothing more: the check's answer is the check's own.
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
+import { BUILTINS } from '../../adapters/index';
+import { checkModelAliases } from '../../engine/adapters';
 import { readConfig } from '../../engine/config';
 import { byFile, type Definitions, loadDefinitions, type StageEntry } from '../../engine/definitions';
 import { EditorWriteError, writeEditorDeclarations } from '../../engine/editor';
@@ -108,10 +111,9 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
   const sail = `${at(found.dir)}/`;
 
   const config = readConfig(found.dir);
-  const issues = 'issues' in config ? config.issues : [];
-  if (issues.length > 0) {
+  if ('issues' in config) {
     const file = at(join(found.dir, 'project.yaml'));
-    for (const issue of issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);
+    for (const issue of config.issues) io.stderr(`${formatIssue({ ...issue, file })}\n`);
     return EXIT_REFUSED;
   }
 
@@ -139,6 +141,19 @@ export async function check(args: Parsed, io: Io): Promise<ExitCode> {
   const { workflows, stages } = definitions;
   if (problems.length > 0) {
     for (const problem of problems) io.stderr(`${at(problem.file)}  ${problem.message}\n`);
+    return EXIT_REFUSED;
+  }
+
+  // Last, as the one step that may reach a provider: a model alias whose harness can't run its model.
+  const models = await checkModelAliases({
+    sailDir: found.dir,
+    config,
+    builtins: BUILTINS,
+    env: io.env ?? process.env,
+  });
+  if (models.length > 0) {
+    const file = at(join(found.dir, 'project.yaml'));
+    for (const issue of models) io.stderr(`${formatIssue({ ...issue, file })}\n`);
     return EXIT_REFUSED;
   }
 
