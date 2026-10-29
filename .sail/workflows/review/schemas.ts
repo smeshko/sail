@@ -18,13 +18,22 @@ export const Finding = z.object({
 export const Lens = z.enum(['requirements', 'architecture', 'bugs', 'tests', 'security', 'conventions']);
 
 /**
- * What found it: validation, the leak check, the demonstration, one reviewer, check-fix reviewing the fixes, or the
+ * What found it: validation, the leak check, the banned-words check (`B<n>`), the demonstration, one reviewer, check-fix reviewing the fixes, or the
  * checks, failing at merge.
  */
-export const Source = z.enum(['validate', 'leak-check', 'demonstrate', ...Lens.options, 'check-fix', 'checks']);
+export const Source = z.enum([
+  'validate',
+  'leak-check',
+  'banned-words',
+  'demonstrate',
+  ...Lens.options,
+  'check-fix',
+  'checks',
+]);
 
 /**
- * A finding the workflow numbered: `V1` from validation, `L<n>` from the leak check, `D<n>` from the demonstration,
+ * A finding the workflow numbered: `V1` from validation, `L<n>` from the leak check, `B<n>` from the banned-words check,
+ * `D<n>` from the demonstration,
  * `R<n>` from a reviewer, `F<round>-<n>` from check-fix, and `C<pass>-<n>` from a check that failed at merge.
  */
 export const NumberedFinding = Finding.extend({ id: z.string(), source: Source });

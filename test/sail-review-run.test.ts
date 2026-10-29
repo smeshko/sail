@@ -28,8 +28,13 @@ const seed = (overrides: Record<string, number> = {}) =>
   });
 
 /** The repository's own `.sail/` on fakes, with fake pull request #7 pointed at commits the repository holds. */
-function setUp(repo: TempRepo, jev?: object): void {
+function setUp(repo: TempRepo, jev?: object, glossary?: string): void {
   writeOwnSail(repo, jev === undefined ? {} : { jev });
+  if (glossary !== undefined) {
+    writeFileSync(join(repo.dir, 'CONTEXT.md'), glossary);
+    repo.git('add', 'CONTEXT.md');
+    repo.git('commit', '-m', 'define vocabulary');
+  }
   const base = repo.git('rev-parse', 'HEAD').trim();
   writeFileSync(join(repo.dir, 'notes.txt'), 'a change\n');
   repo.git('add', 'notes.txt');
@@ -100,6 +105,37 @@ function jevHint(dir: string, stage: string, call: number): { asked: boolean; an
 const asked = (dir: string, key: string) =>
   readEvents(dir).filter((event) => event.type === 'jev:asked' && (event as { key?: string }).key === key);
 
+test('a banned-words Jev hit reaches the judge as B1', async () => {
+  await withTempRepo(async (repo) => {
+    const answers = seed() as { answers: Record<string, unknown> };
+    answers.answers['word-1'] = { type: 'noul', noul: 0.97 };
+    setUp(repo, answers, '**Edit**:\nAn alteration.\n_Avoid_: change\n');
+    const sail = join(repo.dir, '.sail');
+    const [answer] = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8')).judge;
+    answer.output.decisions.push({
+      finding: 'B1',
+      verdict: 'drop',
+      rationale: 'The planted word is harmless.',
+      ticket: null,
+    });
+    seedHarness(sail, 'judge', [answer]);
+    const { code, dir } = await review(repo);
+    expect(code).toBe(0);
+    const folder = readdirSync(dir).find((name) => name.endsWith('-judge'));
+    const input = JSON.parse(readFileSync(join(dir, folder ?? '', 'call-1', 'in', 'findings.json'), 'utf8'));
+    expect(input.findings).toContainEqual({
+      id: 'B1',
+      source: 'banned-words',
+      severity: 'medium',
+      file: 'notes.txt:1',
+      title: 'Avoided word "change": use Edit',
+      detail:
+        'notes.txt:1 uses "change", which CONTEXT.md\'s Edit entry lists under _Avoid_. Jev answers yes at 0.97 (hit from 0.8). Use Edit.',
+    });
+    expect(asked(dir, 'banned-words#1')).toHaveLength(1);
+  });
+}, 120_000);
+
 test('a leak-check Jev hit reaches the judge as L1', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed({ 'leak-1': 0.97 }));
@@ -124,6 +160,7 @@ test('a leak-check Jev hit reaches the judge as L1', async () => {
     expect(leak.detail).toContain('0.97');
     expect(leak.detail).toContain('0.8');
     expect(asked(dir, 'leak-check#1')).toHaveLength(1);
+    expect(asked(dir, 'banned-words#1')).toEqual([]);
   });
 }, 120_000);
 

@@ -46,7 +46,7 @@ lines.push(
 if (record.judgement) lines.push(record.judgement.summary, '');
 if (record.findings.length === 0) {
   lines.push(
-    'No findings: validation passed, the leak check found nothing, the demonstration showed every criterion, and no reviewer found anything.',
+    'No findings: validation passed, the leak check found nothing, the banned-words check found no avoided word, the demonstration showed every criterion, and no reviewer found anything.',
   );
 } else {
   lines.push('| Finding | From | Severity | Verdict | |', '|---|---|---|---|---|');

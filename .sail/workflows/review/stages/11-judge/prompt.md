@@ -6,7 +6,7 @@ pull request merges into `staging` on its own. A finding you `drop` ships as it 
 look that part of the change gets.
 
 `$STAGE_IN/findings.json` holds every finding, numbered: `V1` when validation (`bun run gate`) failed, `L<n>` for each
-line the leak check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
+line the leak check flagged, `B<n>` for each avoided word the banned-words check flagged, `D<n>` for each acceptance criterion the demonstration couldn't show, and `R<n>` from the
 six reviewers, each with the reviewer it came from. `$STAGE_IN/evidence.json` holds how each check went as a whole:
 validation's output, the demonstration's criteria and transcript, and each reviewer's summary and coverage: what it
 checked, how, and with what result.
@@ -23,6 +23,10 @@ It is real unless the line shows it is something else: a test's placeholder key 
 standard's name. A Jev-pass hit is a comment, doc or commit-message line Jev reads as naming a project, company,
 product or tracker other than sail. It is real unless the name is sail's own, a provider or tool sail integrates with,
 or a generic word.
+
+A banned-words hit (`B<n>`) is a word `CONTEXT.md` lists under an entry's `_Avoid_`, which Jev reads as used in the
+forbidden sense. It is real when the line uses the word for what that entry defines. It isn't when the word means
+something else, is quoted as a word, or is a name the change can't rename. A real one is a `fix` inside the change.
 
 ## 2. Check each review's coverage
 

@@ -1,5 +1,5 @@
-// review: a factory-labelled pull request in, merged out. Validation, the leak check (including its Jev pass), the demonstration and six
-// reviewers look at it at once; a judge decides what each finding becomes (fixed here, filed as a ticket, or dropped)
+// review: a factory-labelled pull request in, merged out. Validation, the leak check (including its Jev pass), the
+// banned-words check, the demonstration and six reviewers look at it at once; a judge decides what each finding becomes (fixed here, filed as a ticket, or dropped)
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
 // fresh validation. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
@@ -17,6 +17,7 @@ import { redTests, validate } from '../../stages/validate/stage';
 import type { FixChecked, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
+import { bannedWords } from './stages/02-banned-words/stage';
 import { leakCheck } from './stages/03-leak-check/stage';
 import { demonstrate } from './stages/04-demonstrate/stage';
 import { reviewRequirements } from './stages/05-review-requirements/stage';
@@ -56,11 +57,12 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 3,
+    version: 4,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
-    description: 'validate, leak-check, demonstrate and review six ways at once, judge, fix in rounds, merge',
+    description:
+      'validate, leak-check, banned-words, demonstrate and review six ways at once, judge, fix in rounds, merge',
   },
   async (run) => {
     const brief = run.intake.files['brief.md'];
@@ -76,9 +78,10 @@ export default workflow(
     const reading = { brief, requirements: req.files['requirements.md'], base };
 
     // Everything that looks at the pull request, at once. The reviewers come last, in LENSES' order.
-    const [validated, leaks, shown, ...reviews] = await run.all([
+    const [validated, leaks, banned, shown, ...reviews] = await run.all([
       [validate],
       [leakCheck, { diff: run.intake.files['diff.patch'], base }],
+      [bannedWords, { diff: run.intake.files['diff.patch'], base }],
       [demonstrate, reading],
       [reviewRequirements, reading],
       [reviewArchitecture, reading],
@@ -124,6 +127,16 @@ export default workflow(
             : hit.kind === 'jev'
               ? `${hit.file}:${hit.line}: the leak check's Jev pass answers yes at ${hit.yes} (hit from ${leaks.output.jev.threshold}). Committed text names only sail and its ADW-<n> issues.`
               : `${hit.file}:${hit.line} adds a term on the leak denylist. Committed text names only sail and its ADW-<n> issues.`,
+      });
+    }
+    for (const [index, hit] of banned.output.hits.entries()) {
+      findings.push({
+        id: `B${index + 1}`,
+        source: 'banned-words',
+        severity: 'medium',
+        file: `${hit.file}:${hit.line}`,
+        title: `Avoided word "${hit.word}": use ${hit.term}`,
+        detail: `${hit.file}:${hit.line} uses "${hit.word}", which CONTEXT.md's ${hit.term} entry lists under _Avoid_. Jev answers yes at ${hit.yes} (hit from ${banned.output.jev.threshold}). Use ${hit.term}.`,
       });
     }
     for (const criterion of shown.output.criteria.filter((each) => !each.shown)) {
