@@ -20,7 +20,9 @@ itself went wrong.
 
 A leak-check hit is a tracker key other than `ADW-<n>`, or a term from a private denylist, on a line the change adds.
 It is real unless the line shows it is something else: a test's placeholder key such as `ZZZ-1`, a version, a
-standard's name.
+standard's name. A Jev-pass hit is a comment, doc or commit-message line Jev reads as naming a project, company,
+product or tracker other than sail. It is real unless the name is sail's own, a provider or tool sail integrates with,
+or a generic word.
 
 ## 2. Check each review's coverage
 
