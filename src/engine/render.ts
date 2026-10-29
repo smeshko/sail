@@ -48,11 +48,17 @@ export function isUntrustedInput(value: unknown): value is UntrustedInput {
   return value instanceof Marked;
 }
 
-/** Escape the bracket of a delimiter lookalike, including invisible characters splitting its name. */
-const IN_NAME = '[\\p{Cf}\\u0000]*';
-const OUTER = '[\\s\\p{Cf}\\u0000]*';
-const NAME = ['untrusted', 'input'].map((part) => [...part].join(IN_NAME)).join(`${IN_NAME}-?${IN_NAME}`);
-const LOOKALIKE = new RegExp(`[<＜](?=${OUTER}(?:[/／]${OUTER})?${NAME})`, 'giu');
+// src/builtins/prompts/_shared/untrusted-input.md names each bracket; a test keeps the lists together.
+export const LOOKALIKE_BRACKETS = '<＜﹤‹〈〈⟨❬❮❰⧼ᐸ˂';
+
+/** Escape delimiter lookalikes with format characters, default-ignorables, NUL or braille blank in their name. */
+const INVISIBLE = '\\p{Cf}\\p{Default_Ignorable_Code_Point}\\u0000\\u2800';
+const IN_NAME = `[${INVISIBLE}]*`;
+const OUTER = `[\\s${INVISIBLE}]*`;
+const NAME = ['untrusted', 'input']
+  .map((part) => [...part].join(IN_NAME))
+  .join(`${IN_NAME}[\\p{Pd}\\u2212]?${IN_NAME}`);
+const LOOKALIKE = new RegExp(`[${LOOKALIKE_BRACKETS}](?=${OUTER}(?:[/／∕⁄⧸╱]${OUTER})?${NAME})`, 'giu');
 
 function escapeSource(source: string): string {
   return source
