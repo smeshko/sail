@@ -60,6 +60,8 @@ export interface CallRequest {
   stageFile: string;
   /** Where the call's step runs. */
   workspace: string;
+  /** The step runs in the clone itself, not a run's workspace, so it keeps a git hook's repository variables. */
+  inClone?: boolean;
   /** The directory that holds `.sail/`: what the call records paths relative to. */
   root: string;
   /** The run's branch. Empty for a stage run in isolation. */
@@ -222,6 +224,7 @@ export async function runScriptTry(
     try: at.try,
     stageDir: dirname(request.stageFile),
     workspace: request.workspace,
+    ...(request.inClone ? { inClone: true } : {}),
     root: request.root,
     branch: request.branch,
     config: request.config,
