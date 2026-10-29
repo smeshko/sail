@@ -174,19 +174,96 @@ export function placeholderNames(text: string): string[] {
   return [...new Set([...placeholderTags(text)].map(({ name }) => name))];
 }
 
-/** Passes when none of the template's `{{name: hint}}` placeholders is left. */
+type Range = readonly [number, number];
+
+/** Sorted code and untrusted-input ranges, computed with forward scans and a linear merge. */
+function skippedRanges(text: string): Range[] {
+  const fences: Range[] = [];
+  let fence: { from: number; char: string; length: number } | undefined;
+  for (const match of text.matchAll(/^ {0,3}(`{3,}|~{3,})([^\n]*)/gm)) {
+    const run = match[1] ?? '';
+    if (fence === undefined) {
+      fence = { from: match.index, char: run[0] ?? '', length: run.length };
+    } else if (run[0] === fence.char && run.length >= fence.length && (match[2] ?? '').trim() === '') {
+      fences.push([fence.from, match.index + match[0].length]);
+      fence = undefined;
+    }
+  }
+  if (fence !== undefined) fences.push([fence.from, text.length]);
+
+  const code: Range[] = [];
+  // Pair each backtick run with the next of exactly its length, in each region outside fences. Looking up the
+  // partner avoids rescanning the remainder of the text for every unmatched opening run.
+  const inline = (start: number, end: number) => {
+    const runs = [...text.slice(start, end).matchAll(/`+/g)];
+    const next = new Map<number, number>();
+    const partners: (number | undefined)[] = [];
+    for (let index = runs.length - 1; index >= 0; index -= 1) {
+      const length = runs[index]?.[0].length ?? 0;
+      partners[index] = next.get(length);
+      next.set(length, index);
+    }
+    for (let index = 0; index < runs.length; index += 1) {
+      const partner = partners[index];
+      if (partner === undefined) continue;
+      const opening = runs[index];
+      const closing = runs[partner];
+      if (opening !== undefined && closing !== undefined) {
+        code.push([start + opening.index, start + closing.index + closing[0].length]);
+      }
+      index = partner;
+    }
+  };
+  let start = 0;
+  for (const range of fences) {
+    inline(start, range[0]);
+    code.push(range);
+    start = range[1];
+  }
+  inline(start, text.length);
+
+  const untrusted: Range[] = [];
+  const opener = /<untrusted-input(?=\s|>)/g;
+  for (let match = opener.exec(text); match !== null; match = opener.exec(text)) {
+    const close = text.indexOf('</untrusted-input>', opener.lastIndex);
+    if (close === -1) break;
+    const end = close + '</untrusted-input>'.length;
+    untrusted.push([match.index, end]);
+    opener.lastIndex = end;
+  }
+  const ranges: Range[] = [];
+  let left = 0;
+  let right = 0;
+  while (left < code.length || right < untrusted.length) {
+    const a = code[left];
+    const b = untrusted[right];
+    const range = a !== undefined && (b === undefined || a[0] <= b[0]) ? code[left++] : untrusted[right++];
+    if (range === undefined) continue;
+    const previous = ranges.at(-1);
+    if (previous !== undefined && range[0] <= previous[1]) {
+      ranges[ranges.length - 1] = [previous[0], Math.max(previous[1], range[1])];
+    } else ranges.push(range);
+  }
+  return ranges;
+}
+
+/** Passes when none of the template's placeholders is left outside untrusted input, fenced code or inline code. */
 export function noPlaceholders(): Validator {
   return {
     check: 'noPlaceholders',
     derives: [],
     validate: ({ text, placeholders }) => {
       const names = new Set(placeholders);
+      const ranges = skippedRanges(text);
+      let range = 0;
       const problems: string[] = [];
       // The line is counted on from the last tag, and `newline` is the first not yet counted, so each newline is found
       // once however many tags the text holds.
       let line = 1;
       let newline = text.indexOf('\n');
       for (const { from, name } of placeholderTags(text)) {
+        while (ranges[range] !== undefined && (ranges[range]?.[1] ?? 0) <= from) range += 1;
+        if (from >= (ranges[range]?.[0] ?? Infinity)) continue;
         if (names.has(name)) {
           for (; newline !== -1 && newline < from; newline = text.indexOf('\n', newline + 1)) line += 1;
           // The problem goes into the corrective prompt, outside any untrusted wrapper, so it names the placeholder

@@ -74,7 +74,7 @@ export declare function placeholderTags(text: string): Generator<{
 }>;
 /** The raw template's placeholder names, each once, in order, including tags in code and untaken branches. */
 export declare function placeholderNames(text: string): string[];
-/** Passes when none of the template's `{{name: hint}}` placeholders is left. */
+/** Passes when none of the template's placeholders is left outside untrusted input, fenced code or inline code. */
 export declare function noPlaceholders(): Validator;
 /**
  * Counts the top-level list items of `section`, from its heading to the next heading of the same or a higher level,

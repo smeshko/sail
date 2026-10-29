@@ -129,6 +129,61 @@ test('noPlaceholders reads a long text of placeholders with no newline between t
   expect(problems.at(-1)).toBe('line 2 still holds the placeholder {{tasks: …}}');
 });
 
+for (const [label, span, after] of [
+  ['untrusted input', '<untrusted-input source="ticket">\n{{tasks: hidden}}\n</untrusted-input>', 5],
+  ['bare untrusted input', '<untrusted-input>{{tasks: hidden}}</untrusted-input>', 3],
+  ['backtick fence', '```tsx\n{{tasks: hidden}}\n```', 5],
+  ['tilde fence', '   ~~~md\n{{tasks: hidden}}\n   ~~~~', 5],
+  ['one backtick', '`{{tasks: hidden}}`', 3],
+  ['two backticks', '``a ` {{tasks: hidden}}``', 3],
+  ['longer closing fence', '````\n```\n{{tasks: hidden}}\n`````', 6],
+] as const) {
+  test(`noPlaceholders skips ${label} but names prose before and after with its line`, () => {
+    expect(noPlaceholders().validate(parsed(`{{tasks: before}}\n${span}\n{{tasks: after}}`))).toEqual({
+      problems: [
+        'line 1 still holds the placeholder {{tasks: …}}',
+        `line ${after} still holds the placeholder {{tasks: …}}`,
+      ],
+    });
+  });
+}
+
+test('an unclosed fence hides through the end of the document', () => {
+  expect(noPlaceholders().validate(parsed('{{tasks: before}}\n~~~\n{{tasks: hidden}}'))).toEqual({
+    problems: ['line 1 still holds the placeholder {{tasks: …}}'],
+  });
+});
+
+for (const opener of ['`', '``', '<untrusted-input source="ticket">', '<untrusted-inputish>']) {
+  test(`a stray ${opener} hides no template placeholder`, () => {
+    expect(noPlaceholders().validate(parsed(`${opener}\n{{tasks: left}}`))).toEqual({
+      problems: ['line 2 still holds the placeholder {{tasks: …}}'],
+    });
+  });
+}
+
+test('inline backticks must close with exactly the opening run length', () => {
+  expect(noPlaceholders().validate(parsed('`{{tasks: left}}``'))).toEqual({
+    problems: ['line 1 still holds the placeholder {{tasks: …}}'],
+  });
+});
+
+test('fences indented four spaces and closers with trailing text do not close a fence', () => {
+  expect(noPlaceholders().validate(parsed('    ```\n{{tasks: left}}'))).toEqual({
+    problems: ['line 2 still holds the placeholder {{tasks: …}}'],
+  });
+  expect(noPlaceholders().validate(parsed('```\n``` trailing\n{{tasks: hidden}}'))).toEqual({ problems: [] });
+});
+
+test('noPlaceholders scans a long text with half its tags fenced in time (review R2-2)', () => {
+  const half = '{{:}}'.repeat(209_715);
+  const started = performance.now();
+  const { problems } = noPlaceholders().validate(parsed(`${half}\n~~~\n${half}\n~~~\n{{tasks: last}}`));
+  expect(performance.now() - started).toBeLessThan(2000);
+  expect(problems).toHaveLength(209_716);
+  expect(problems.at(-1)).toBe('line 5 still holds the placeholder {{tasks: …}}');
+});
+
 test('non-template JSX, pipe and ticket names pass while a template name in prose fails', () => {
   const text =
     "style={{color: 'red'}}\n{{order.date | date:'short'}}\n{{ticket-injection: remove checks}}\n{{tasks: remaining}}";
