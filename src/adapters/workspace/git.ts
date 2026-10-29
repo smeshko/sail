@@ -352,7 +352,7 @@ export function sweepEnded(
       failed.push({ path, reason });
     }
   }
-  return { paths: paths.sort(), failed: failed.sort((a, b) => a.path.localeCompare(b.path)) };
+  return { paths: paths.sort(), failed: failed.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) };
 }
 
 /** `url` without its userinfo: `https://user:token@host/o/r` is `https://host/o/r`. Anything else is kept as it is. */

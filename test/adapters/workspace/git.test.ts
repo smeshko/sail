@@ -179,6 +179,24 @@ test('a sweep reports every thrown removal reason in path order, including a ref
   });
 });
 
+test('a sweep sorts removed and failed paths in the same code-unit order for mixed-case run ids', async () => {
+  await withTempRepo(async (repo) => {
+    const runsDir = join(repo.dir, 'runs');
+    for (const name of ['XYZ-1', 'pr-167', 'XYZ-2', 'pr-168']) {
+      const runDir = join(runsDir, name);
+      mkdirSync(join(runDir, 'workspace'), { recursive: true });
+      writeStatus(runDir, 'completed');
+    }
+    const swept = sweepEnded(runsDir, (runDir) => {
+      if (runDir.endsWith('XYZ-2') || runDir.endsWith('pr-168')) throw new Error('kept');
+    });
+    expect(swept.paths).toEqual(['XYZ-1', 'pr-167'].map((name) => join(runsDir, name, 'workspace')));
+    expect(swept.failed.map(({ path }) => path)).toEqual(
+      ['XYZ-2', 'pr-168'].map((name) => join(runsDir, name, 'workspace')),
+    );
+  });
+});
+
 test('a sweep of a missing runs directory resolves with no paths or failures', async () => {
   await withTempRepo(async (repo) => {
     expect(
