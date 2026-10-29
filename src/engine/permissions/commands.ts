@@ -2,7 +2,15 @@
 // substitutions (D9), checked against the deny set first, then the step's commands, then where `cd`, git's directory
 // options and every redirection lead.
 import { statSync } from 'node:fs';
-import { commandName, type DenyEntry, denied, deniedAssignment, deniedPipeline, gitInvocation } from './deny';
+import {
+  commandName,
+  type DenyEntry,
+  denied,
+  deniedAssignment,
+  deniedPipeline,
+  gitInvocation,
+  optionValues,
+} from './deny';
 import { matchesCommand } from './glob';
 import { checkRead, checkWrite, expand, insideRoots, logical, resolvePhysical } from './paths';
 import { MAX_DEPTH, type Pipeline, parseCommand, type SimpleCommand, type Word } from './shell';
@@ -49,6 +57,25 @@ const VALUE_LETTERS: Record<string, string> = { sh: 'o', dash: 'o', zsh: 'o', ba
 const DECLARERS = new Set(['export', 'declare', 'typeset', 'local', 'readonly']);
 const GIT_PATHS = new Set(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']);
 const OUTPUT = /^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
+
+/** Git options whose values are shell commands, rather than program names. */
+const GIT_COMMANDS: Record<string, { long: string[]; short?: string }> = {
+  rebase: { long: ['--exec'], short: 'x' },
+  difftool: { long: ['--extcmd'], short: 'x' },
+  'filter-branch': {
+    long: [
+      '--setup',
+      '--env-filter',
+      '--tree-filter',
+      '--index-filter',
+      '--parent-filter',
+      '--msg-filter',
+      '--commit-filter',
+      '--tag-name-filter',
+    ],
+  },
+  'send-email': { long: ['--sendmail-cmd', '--to-cmd', '--cc-cmd', '--header-cmd'] },
+};
 
 interface Grammar {
   /** Options that take no value. */
@@ -248,7 +275,7 @@ class Collector {
       }
     }
     if (name === 'find') this.find(args, text, cwd, depth);
-    if (name === 'git') this.git(argv, fed ? undefined : words, open, text, cwd);
+    if (name === 'git') this.git(argv, fed ? undefined : words, open, text, cwd, depth);
     return undefined;
   }
 
@@ -377,13 +404,14 @@ class Collector {
     });
   }
 
-  /** git's directory options must stay inside the roots, and `--output` is a write. */
+  /** Confine git's paths, record `--output` writes, and collect commands its options and subcommands run. */
   private git(
     argv: readonly string[],
     words: readonly Word[] | undefined,
     open: boolean,
     text: string,
     cwd: Cwd,
+    depth: number,
   ): void {
     const invocation = gitInvocation(argv);
     if (invocation.unknown !== undefined) {
@@ -409,6 +437,39 @@ class Collector {
       if (path === undefined) this.out.refusals.push(`git ${arg} without its file: ${quote(text)}`);
       else this.out.writes.push({ word: path, text, cwd: here });
     });
+    const { subcommand, args } = invocation;
+    const from = { logical: here, physical: here };
+    const grammar = GIT_COMMANDS[subcommand ?? ''];
+    if (grammar !== undefined) {
+      for (const { option, value } of optionValues(args, grammar.long, grammar.short)) {
+        if (value === undefined || value.trim() === '') {
+          this.out.refusals.push(`git ${subcommand} ${option} without its command`);
+        } else this.parse(value, `git ${subcommand} ${option}`, from, depth);
+      }
+    }
+    let at: number | undefined;
+    if (subcommand === 'bisect' && args[0] === 'run') at = 1;
+    if (subcommand === 'submodule') {
+      let i = 0;
+      while (args[i]?.startsWith('-')) i++;
+      if (args[i] === 'foreach') {
+        i++;
+        while (['--recursive', '-q', '--quiet'].includes(args[i] ?? '')) i++;
+        at = i;
+      }
+    }
+    if (at === undefined) return;
+    const inner = words?.slice(argv.length - args.length + at) ?? [];
+    if (inner.length === 0) {
+      this.out.refusals.push(`git ${subcommand} without its command`);
+    } else if (subcommand === 'submodule' && inner.length === 1) {
+      const body = this.known(inner[0] as Word);
+      if (body === undefined || body.trim() === '') {
+        this.out.refusals.push('git submodule foreach without a resolvable command');
+      } else this.parse(body, 'git submodule foreach', from, depth);
+    } else {
+      this.unwrap(inner, inner.map((word) => word.text).join(' '), from, depth, false);
+    }
   }
 }
 

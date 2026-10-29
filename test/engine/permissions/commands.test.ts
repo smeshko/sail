@@ -275,6 +275,51 @@ const GIT_OPEN: Want = ['commands', "can't be checked: git's arguments hold an e
 const GIT = { commands: ['git *'] };
 
 test.each([
+  ['git rebase -x "rm -rf ." main', GIT, DENY('rm -rf')],
+  ['git rebase --exec="sudo x" main', GIT, DENY('sudo')],
+  ['git rebase -ix "rm -rf ." main', GIT, DENY('rm -rf')],
+  ['git rebase -x "bun test" main', GIT, UNLISTED('bun test')],
+  ['git rebase -x "bun test" main', { commands: ['git *', 'bun test *'] }, 'allow'],
+  ['git rebase -x "git status" -x "sudo x" main', GIT, DENY('sudo')],
+  ['git bisect run rm -rf x', GIT, DENY('rm -rf')],
+  ['git bisect run bun test', GIT, UNLISTED('bun test')],
+  ['git bisect run', GIT, CANT],
+  ['git submodule foreach "rm -rf ."', GIT, DENY('rm -rf')],
+  ['git submodule -q foreach --recursive git status', GIT, 'allow'],
+  ['git submodule foreach --quiet rm -rf .', GIT, DENY('rm -rf')],
+  ['git submodule foreach', GIT, CANT],
+  ['git submodule foreach ""', GIT, CANT],
+  ['git submodule foreach scripts/*', GIT, CANT],
+  ['git submodule foreach "bun test"', GIT, UNLISTED('bun test')],
+  ['git difftool --extcmd="rm -rf ."', GIT, DENY('rm -rf')],
+  ['git difftool -x "sudo x"', GIT, DENY('sudo')],
+  ['git filter-branch --tree-filter "rm -rf ." HEAD', GIT, DENY('rm -rf')],
+  ['git filter-branch --setup "sudo x" HEAD', GIT, DENY('sudo')],
+  ['git filter-branch --env-filter "sudo x" HEAD', GIT, DENY('sudo')],
+  ['git filter-branch --index-filter "sudo x" HEAD', GIT, DENY('sudo')],
+  ['git filter-branch --parent-filter "sudo x" HEAD', GIT, DENY('sudo')],
+  ['git filter-branch --msg-filter "sudo x" HEAD', GIT, DENY('sudo')],
+  ['git filter-branch --commit-filter "sudo x" HEAD', GIT, DENY('sudo')],
+  ['git filter-branch --tag-name-filter "sudo x" HEAD', GIT, DENY('sudo')],
+  ['git send-email --sendmail-cmd="rm -rf ." a.patch', GIT, DENY('rm -rf')],
+  ['git send-email --to-cmd="sudo x" a.patch', GIT, DENY('sudo')],
+  ['git send-email --cc-cmd="sudo x" a.patch', GIT, DENY('sudo')],
+  ['git send-email --header-cmd="sudo x" a.patch', GIT, DENY('sudo')],
+  ['git rebase -x "$CMD" main', GIT, GIT_OPEN],
+  ['git rebase -x', GIT, CANT],
+  ['git rebase --exec="" main', GIT, CANT],
+  ['git rebase -x "for x in y; do ls; done" main', GIT, CANT],
+  ['git -C sub rebase -x "echo x > a.txt" main', { commands: ['git *', 'echo *'], write: ['sub/**'] }, 'allow'],
+  [
+    'git -C sub rebase -x "echo x > a.txt" main',
+    { commands: ['git *', 'echo *'], write: ['a.txt'] },
+    ['write', 'sub/a.txt'],
+  ],
+] as [string, Partial<Permissions>, Want][])('git commands: %j under %j is %j', (command, open, want) => {
+  expect(verdict(run(command, open), want)).toEqual(want);
+});
+
+test.each([
   ['git grep -n x -- src/adapters/git-worktree*', GIT, 'allow'],
   ['git log --oneline -- src/**/paths.ts', GIT, 'allow'],
   ['git commit -q -m "$(cat <<\'EOF\'\nfix: a thing\nEOF\n)"', { commands: ['git *', 'cat *'] }, 'allow'],
