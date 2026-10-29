@@ -1,8 +1,9 @@
 // Groups on the fake harness. `writeTrio()` adds `trio` to a copy of the fixture's `.sail/`: three agents `a`, `b` and
 // `c` on the brief in one `run.all()`, then `d`, so a test can see what runs after a group. Each agent submits its own
-// name, with orderTrio's journal gates fixing completion order and delays only spacing the calls. The fixture's own `review` workflow runs its six reviewers the same way, and
-// the rest is for it: its reviewers' delays, a reviewer that ends in error, the reviewers swapped in its group, and a
-// wait for a run's journal to hold so many lines.
+// name. With `writeTrio()` alone, completion order depends on delays; callers can add `orderTrio()`'s journal gates
+// to fix the order, with delays only spacing the calls. The fixture's own `review` workflow runs its six reviewers
+// in a group too, and the rest is for it: its reviewers' delays, a reviewer that ends in error, the reviewers swapped
+// in its group, and a wait for a run's journal to hold so many lines.
 //
 // The harness script is `.sail/fake/harness.json`, read afresh by every session, so a resume in another process takes
 // the delays as they are written by then.
