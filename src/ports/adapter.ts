@@ -79,7 +79,7 @@ function operations<A>() {
 
 /** Each port's method names, `capabilities` included and `name` left out. */
 export const PORT_OPERATIONS = {
-  ticketSource: operations<TicketSource>()([
+  ticketSource: operations<Omit<TicketSource, 'scope'>>()([
     'parseKey',
     'get',
     'isDesignated',

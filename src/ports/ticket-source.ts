@@ -84,6 +84,11 @@ export function checkAttachment(file: NewAttachment): void {
 
 export interface TicketSource {
   readonly name: string;
+  /**
+   * The part of the provider this source reads, such as a Linear team key; undefined when it reads all of it.
+   * Watchers on the same name and scope share one label space.
+   */
+  readonly scope?: string;
   /** The ticket key `ref` names: a ticket key, or a URL the provider owns. Undefined for anything else. */
   parseKey(ref: string): string | undefined;
   /** The ticket with its comments, links and attachments. Emits `ticket:fetched`. */

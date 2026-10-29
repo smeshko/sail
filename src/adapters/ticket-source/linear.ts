@@ -439,6 +439,7 @@ function buildLinearTicketSource(options: LinearTicketSourceOptions): {
 
   const source: TicketSource = {
     name: 'linear',
+    scope: team,
     parseKey: (ref) => (KEY.test(ref) ? ref : URL_KEY.exec(ref)?.[1]),
     async get(ticketKey) {
       const started = now().getTime();
