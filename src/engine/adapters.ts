@@ -147,21 +147,65 @@ function modelsOf(config: ProjectConfig, harness: string | undefined): string[] 
   return [...new Set(ids)];
 }
 
-/** Pass 2: the issues for each environment variable `found` needs and `env` lacks, or none of the alternatives it lists. */
-function preflight(use: string, found: Found, options: AdapterOptions, env: Env, models: readonly string[]): string[] {
+/** Required environment names without instantiating an adapter. */
+export async function portVariables(
+  options: ResolveOptions<Port>,
+  port: Port,
+): Promise<readonly string[] | { problem: string }> {
+  const config = options.config.adapters[port];
+  if (config === undefined) return { problem: `${port} is not configured in project.yaml` };
+  try {
+    const found = await find(port, config.use, options);
+    if (typeof found === 'string') return { problem: `${port}: ${found}` };
+    const { use, ...adapterOptions } = config;
+    const names = requiredNames(use, found, adapterOptions, options.env, []);
+    if ('problem' in names) return { problem: `${port}: ${names.problem}` };
+    return [...new Set(names.flat())];
+  } catch (error) {
+    return { problem: `${port}: ${message(error)}` };
+  }
+}
+
+/** Lazily resolves only the ports reached, once per run or isolated stage. */
+export function portVariableResolver(options: ResolveOptions<Port>): (port: Port) => ReturnType<typeof portVariables> {
+  const cache = new Map<Port, ReturnType<typeof portVariables>>();
+  return (port) => {
+    let result = cache.get(port);
+    if (result === undefined) {
+      result = portVariables(options, port);
+      cache.set(port, result);
+    }
+    return result;
+  };
+}
+
+function requiredNames(
+  use: string,
+  found: Found,
+  options: AdapterOptions,
+  env: Env,
+  models: readonly string[],
+): (string | string[])[] | { problem: string } {
   if (found.definition.requires === undefined) return [];
   let names: unknown;
   try {
     names = unawaited(found.definition.requires(options, env, models));
   } catch (error) {
-    return [`${use}'s requires() failed: ${message(error)}`];
+    return { problem: `${use}'s requires() failed: ${message(error)}` };
   }
   const isName = (name: unknown): boolean => typeof name === 'string' && name !== '';
   const isEntry = (entry: unknown): boolean =>
     isName(entry) || (Array.isArray(entry) && entry.length > 0 && entry.every(isName));
   if (!Array.isArray(names) || !names.every(isEntry)) {
-    return [`${use}'s requires() must return environment variable names`];
+    return { problem: `${use}'s requires() must return environment variable names` };
   }
+  return names as (string | string[])[];
+}
+
+/** Pass 2: the issues for each environment variable `found` needs and `env` lacks, or none of the alternatives it lists. */
+function preflight(use: string, found: Found, options: AdapterOptions, env: Env, models: readonly string[]): string[] {
+  const names = requiredNames(use, found, options, env, models);
+  if ('problem' in names) return [names.problem];
   const unset = (name: string): boolean => env[name] === undefined || env[name] === '';
   return (names as (string | string[])[]).flatMap((entry) => {
     if (typeof entry === 'string') return unset(entry) ? [`needs ${entry}, which is not set`] : [];

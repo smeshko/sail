@@ -71,6 +71,29 @@ function writeScript(path: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
+test('a stage declaring unconfigured jev ends not_started without running its script', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(fixtureCopy(repo), 'stages', 'jev-less');
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, 'stage.ts'),
+      `import { script, z } from 'sail';
+export const jevLess = script('jev-less', { run: './run.sh', output: z.object({}), ports: ['jev'] });`,
+    );
+    writeScript(join(dir, 'run.sh'), 'touch "$STAGE_OUT/ran"\necho "{}"');
+    const { code, stdout } = await runCaptured(['stage', 'run', '.sail/stages/jev-less'], repo.dir);
+    expect(code).toBe(EXIT_FAILED);
+    const callDir = callDirOf(stdout, repo.dir);
+    expect(readResult(callDir)).toMatchObject({
+      outcome: 'error',
+      errors: [
+        { reason: 'not_started', message: 'the step declares the port jev, but jev is not configured in project.yaml' },
+      ],
+    });
+    expect(existsSync(join(callDir, 'ran'))).toBe(false);
+  });
+});
+
 test('the fixture tests stage runs in place from sail’s root, and fails as its first call does: with its report', async () => {
   const runs = join(inRepoFixture, '.sail-runs');
   const existing = existsSync(runs) ? readdirSync(runs) : [];

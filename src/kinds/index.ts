@@ -3,6 +3,7 @@
 import type { PreparedBindings } from '../engine/bindings';
 import type { CallPaths } from '../engine/call-dir';
 import type { Clock } from '../engine/clock';
+import type { Port } from '../engine/config';
 import type { ContractError, FileEntry } from '../engine/contract';
 import type { CallEmit } from '../events/types';
 import type { Env } from '../ports/adapter';
@@ -47,6 +48,7 @@ export interface StepContext {
   inClone?: boolean;
   /** The environment the step's own is picked from; process.env when left out. */
   env?: Env;
+  portVariables?: (port: Port) => Promise<readonly string[] | { problem: string }>;
   /** The directory that holds `.sail/`: every path a result or an event records is relative to it. */
   root: string;
   /** The run's branch, which the step pushes. Empty for a stage run in isolation, which no run owns. */

@@ -9,7 +9,13 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BUILTINS } from '../../src/adapters/index';
-import { checkModelAliases, providerRelay, type ResolvedAdapters, resolveAdapters } from '../../src/engine/adapters';
+import {
+  checkModelAliases,
+  portVariables,
+  providerRelay,
+  type ResolvedAdapters,
+  resolveAdapters,
+} from '../../src/engine/adapters';
 import { type AdapterConfig, PORTS, type Port, type ProjectConfig, readConfig } from '../../src/engine/config';
 import { runsDir } from '../../src/engine/run-dir';
 import { type AdapterEntry, type RunHeader, validateRunHeader } from '../../src/engine/run-header';
@@ -103,6 +109,78 @@ const resolvedOrThrow = <P extends Port>(
 const HARNESS_CAPABILITIES = '{ structuredOutput: true, permissions: true, usage: true, abort: true, budgets: [] }';
 const harnessModule = (extra = '') =>
   `export default { create() { return { name: 'echo', capabilities: () => (${HARNESS_CAPABILITIES}), run: async () => ({}) }; }, ${extra} };`;
+
+for (const [port, use, expected] of [
+  ['codeHost', 'github', ['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN']],
+  ['ticketSource', 'linear', ['LINEAR_API_KEY']],
+  ['jev', 'typesafe', ['TYPESAFE_API_KEY']],
+  ['codeHost', 'fake', []],
+] as const) {
+  test(`portVariables gives ${use} ${port} names`, async () => {
+    const { sailDir } = repo();
+    expect(
+      await portVariables({ sailDir, config: configOf({ [port]: { use } }), builtins: BUILTINS, env: {} }, port),
+    ).toEqual([...expected]);
+  });
+}
+
+test('portVariables names unconfigured jev', async () => {
+  expect(
+    await portVariables({ sailDir: repo().sailDir, config: configOf({}), builtins: BUILTINS, env: {} }, 'jev'),
+  ).toEqual({ problem: 'jev is not configured in project.yaml' });
+});
+
+test('portVariables reports a module whose requires throws without creating it', async () => {
+  const { sailDir } = repo();
+  write(
+    sailDir,
+    'broken.ts',
+    `export default { requires() { throw new Error('broken requirement'); }, create() { throw new Error('must not create'); } };`,
+  );
+  expect(
+    await portVariables(
+      { sailDir, config: configOf({ jev: { use: './broken.ts' } }), builtins: BUILTINS, env: {} },
+      'jev',
+    ),
+  ).toEqual({ problem: "jev: ./broken.ts's requires() failed: broken requirement" });
+});
+
+test('portVariables reports a missing adapter', async () => {
+  expect(
+    await portVariables(
+      { sailDir: repo().sailDir, config: configOf({ jev: { use: 'absent' } }), builtins: BUILTINS, env: {} },
+      'jev',
+    ),
+  ).toEqual({ problem: "jev: no built-in adapter 'absent' fills jev: the built-ins that do are fake, typesafe" });
+});
+
+for (const value of ['undefined', "['']", '[[]]']) {
+  test(`portVariables refuses malformed requires ${value}`, async () => {
+    const { sailDir } = repo();
+    write(sailDir, 'bad.ts', `export default { requires: () => ${value}, create() {} };`);
+    expect(
+      await portVariables(
+        { sailDir, config: configOf({ jev: { use: './bad.ts' } }), builtins: BUILTINS, env: {} },
+        'jev',
+      ),
+    ).toEqual({ problem: "jev: ./bad.ts's requires() must return environment variable names" });
+  });
+}
+
+test('portVariables flattens and deduplicates names without creating the adapter', async () => {
+  const { sailDir } = repo();
+  write(
+    sailDir,
+    'names.ts',
+    `export default { requires: () => ['A', ['B', 'A'], 'C'], create() { throw new Error('must not create'); } };`,
+  );
+  expect(
+    await portVariables(
+      { sailDir, config: configOf({ jev: { use: './names.ts' } }), builtins: BUILTINS, env: {} },
+      'jev',
+    ),
+  ).toEqual(['A', 'B', 'C']);
+});
 
 // TASK-004
 

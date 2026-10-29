@@ -97,7 +97,7 @@ const secrets = {
   CLAUDE_CODE_OAUTH_TOKEN: 'claude-secret',
 };
 
-async function environmentRun(declared: readonly string[] = [], inClone = false) {
+async function environmentRun(declared: readonly string[] = [], inClone = false, ports?: readonly 'codehost'[]) {
   const s = setup();
   const events: CallEvent[] = [];
   s.context.env = {
@@ -111,10 +111,11 @@ async function environmentRun(declared: readonly string[] = [], inClone = false)
     GIT_INDEX_FILE: '/test/index',
   };
   s.context.inClone = inClone;
+  s.context.portVariables = async () => ['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN'];
   s.context.emit = (event) => events.push(event);
   s.run('env > "$STAGE_OUT/environment"\necho "{}"');
   const result = await scriptKind.run(
-    script('tests', { run: './run.sh', output: z.object({}), env: declared }),
+    script('tests', { run: './run.sh', output: z.object({}), env: declared, ...(ports ? { ports } : {}) }),
     s.context,
   );
   expect(result.outcome).toBe('passed');
@@ -175,6 +176,46 @@ for (const [env, message] of [
   test(message, () =>
     expect(scriptKind.problems(script('x', { run: './x', output: z.object({}), env }))).toEqual([message]),
   );
+}
+
+test('ports codehost gets codehost variables and no other credential', async () => {
+  const { environment, events } = await environmentRun([], false, ['codehost']);
+  expect(environment.GITHUB_TOKEN).toBe('github-secret');
+  expect(environment.LINEAR_API_KEY).toBeUndefined();
+  const exec = events.find((e) => e.type === 'script:exec');
+  expect(exec?.type === 'script:exec' ? exec.envKeys.slice(-2) : []).toEqual(['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN']);
+});
+
+for (const resolver of [undefined, async () => ({ problem: 'jev is not configured in project.yaml' })]) {
+  test(`an unresolved port ends not_started with no script exec (${resolver ? 'problem' : 'missing resolver'})`, async () => {
+    const s = setup();
+    const events: CallEvent[] = [];
+    s.context.emit = (event) => events.push(event);
+    if (resolver) s.context.portVariables = resolver;
+    s.run('touch "$STAGE_OUT/ran"\necho "{}"');
+    const result = await scriptKind.run(
+      script('tests', { run: './run.sh', output: z.object({}), ports: ['jev'] }),
+      s.context,
+    );
+    expect(result.outcome).toBe('error');
+    expect(result.errors).toEqual([
+      {
+        reason: 'not_started',
+        message: `the step declares the port jev, but ${resolver ? 'jev is not configured in project.yaml' : 'no port variable resolver is available'}`,
+      },
+    ]);
+    expect(events).toEqual([]);
+    expect(existsSync(join(s.context.paths.dir, 'ran'))).toBe(false);
+  });
+}
+
+for (const ports of [['unknown'], ['jev', 'jev']]) {
+  test(`problems refuses ports ${ports.join(',')}`, () => {
+    const step = script('x', { run: './x', output: z.object({}), ports: ports as never });
+    expect(scriptKind.problems(step)).toEqual([
+      `ports names an unknown port '${ports.at(-1)}': ticket-source, codehost or jev`,
+    ]);
+  });
 }
 
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');

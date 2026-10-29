@@ -5,6 +5,13 @@ import { agent, file, fromStep, gitDiff, intake, type OutcomeOf, type ScriptOutc
 
 const Output = z.object({ ok: z.boolean() });
 
+script('bad-port', {
+  run: './x',
+  output: Output,
+  // @ts-expect-error TS2322: not a script port
+  ports: ['github'],
+});
+
 script('bad-env', {
   run: './x',
   output: Output,

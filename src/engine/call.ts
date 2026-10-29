@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { readEvents } from '../events/consumers/ndjson';
 import type { CallEmit, CallEvent, Emit, NewEvent, SailEvent } from '../events/types';
-import { KINDS, type StepRun } from '../kinds/index';
+import { KINDS, type StepContext, type StepRun } from '../kinds/index';
 import type { Harness } from '../ports/harness';
 import type { Usage } from '../ports/types';
 import type { AgentStep, ScriptStep, Stage, StageDefinition } from '../sdk/steps';
@@ -62,6 +62,8 @@ export interface CallRequest {
   workspace: string;
   /** The step runs in the clone itself, not a run's workspace, so it keeps a git hook's repository variables. */
   inClone?: boolean;
+  env?: StepContext['env'];
+  portVariables?: StepContext['portVariables'];
   /** The directory that holds `.sail/`: what the call records paths relative to. */
   root: string;
   /** The run's branch. Empty for a stage run in isolation. */
@@ -225,6 +227,8 @@ export async function runScriptTry(
     stageDir: dirname(request.stageFile),
     workspace: request.workspace,
     ...(request.inClone ? { inClone: true } : {}),
+    ...(request.env === undefined ? {} : { env: request.env }),
+    ...(request.portVariables === undefined ? {} : { portVariables: request.portVariables }),
     root: request.root,
     branch: request.branch,
     config: request.config,
