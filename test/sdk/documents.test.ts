@@ -148,6 +148,19 @@ for (const [label, span, after] of [
   });
 }
 
+for (const code of ['```ts\nconst a = 1', '~~~ts\nconst a = 1', 'one stray `']) {
+  test(`untrusted ${JSON.stringify(code)} cannot hide later placeholders (review R3)`, () => {
+    const text = `{{tasks: before}}\n<untrusted-input source="ticket">\n${code}\n</untrusted-input>\n{{tasks: after}}\n\`real code\``;
+    const after = code.split('\n').length + 4;
+    expect(noPlaceholders().validate(parsed(text))).toEqual({
+      problems: [
+        'line 1 still holds the placeholder {{tasks: …}}',
+        `line ${after} still holds the placeholder {{tasks: …}}`,
+      ],
+    });
+  });
+}
+
 test('an unclosed fence hides through the end of the document', () => {
   expect(noPlaceholders().validate(parsed('{{tasks: before}}\n~~~\n{{tasks: hidden}}'))).toEqual({
     problems: ['line 1 still holds the placeholder {{tasks: …}}'],

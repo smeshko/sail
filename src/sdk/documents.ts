@@ -178,6 +178,13 @@ type Range = readonly [number, number];
 
 /** Sorted code and untrusted-input ranges, computed with forward scans and a linear merge. */
 function skippedRanges(text: string): Range[] {
+  const untrusted: Range[] = [];
+  // Quoted text must not open or close code outside its wrapper. Blank it before either code scan,
+  // retaining offsets and line boundaries for the ranges and the validator's problem locations.
+  text = text.replace(/<untrusted-input(?=\s|>)[\s\S]*?<\/untrusted-input>/g, (span, from: number) => {
+    untrusted.push([from, from + span.length]);
+    return span.replace(/[^\n]/g, ' ');
+  });
   const fences: Range[] = [];
   let fence: { from: number; char: string; length: number } | undefined;
   for (const match of text.matchAll(/^ {0,3}(`{3,}|~{3,})([^\n]*)/gm)) {
@@ -225,15 +232,6 @@ function skippedRanges(text: string): Range[] {
   }
   inline(start, text.length);
 
-  const untrusted: Range[] = [];
-  const opener = /<untrusted-input(?=\s|>)/g;
-  for (let match = opener.exec(text); match !== null; match = opener.exec(text)) {
-    const close = text.indexOf('</untrusted-input>', opener.lastIndex);
-    if (close === -1) break;
-    const end = close + '</untrusted-input>'.length;
-    untrusted.push([match.index, end]);
-    opener.lastIndex = end;
-  }
   const ranges: Range[] = [];
   let left = 0;
   let right = 0;
