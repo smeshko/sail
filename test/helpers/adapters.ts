@@ -77,6 +77,7 @@ export const OPERATIONS: Record<Port, string[]> = {
   codeHost: [
     'addLabel',
     'capabilities',
+    'checkLog',
     'checks',
     'comment',
     'getPullRequest',
@@ -86,6 +87,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'parseRef',
     'push',
     'removeLabel',
+    'rerunChecks',
   ],
   harness: ['capabilities', 'run'],
   workspace: [

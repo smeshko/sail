@@ -158,6 +158,8 @@ export default {
     listDesignated: nothing,
     getPullRequest: nothing,
     checks: nothing,
+    rerunChecks: nothing,
+    checkLog: nothing,
     merge: nothing,
     addLabel: nothing,
     removeLabel: nothing,

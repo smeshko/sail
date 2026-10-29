@@ -3,8 +3,10 @@
 // and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
 // fresh validation. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
-// request merged once its checks pass. A review that leaves findings open, or one too thin to trust, comments why,
-// takes the label off and fails, leaving the pull request to a human.
+// request merged once its checks pass. Landing it takes what fix passes are left: checks still red after a rerun go to
+// fix as findings, and a merge the host rejects merges the base in, an agent resolving any conflict; each is validated
+// and pushed before the next try. A review that leaves findings open, one too thin to trust, or a pull request that
+// can't land in the passes left, comments why, takes the label off and fails, leaving the pull request to a human.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
 import { type Result, workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
@@ -30,6 +32,8 @@ import { push } from './stages/14-push/stage';
 import { attachDemonstration } from './stages/16-attach-demonstration/stage';
 import { report } from './stages/17-report/stage';
 import { merge } from './stages/18-merge/stage';
+import { syncBase } from './stages/19-sync-base/stage';
+import { resolveConflicts } from './stages/20-resolve-conflicts/stage';
 
 /** The designation label: the factory's pull requests carry it, and a review that can't finish takes it off. */
 const LABEL = 'factory';
@@ -238,9 +242,97 @@ export default workflow(
       return run.fail(`review: ${thin.map((each) => `review-${each.lens}`).join(', ')} too thin to trust`);
     }
 
-    // Merge once the checks on the pushed head pass.
-    const merged = await run.stage(merge, { pr: pullRequest, headSha: pushed.output.headSha, label: LABEL });
-    if (merged.outcome === 'failed') return run.fail(`merge: ${merged.output.reason}`);
-    return { merged: merged.output, pushed: pushed.output.pushed, tickets: tickets.length };
+    // Merge once the checks on the pushed head pass. A retry takes one of the fix passes the review left: red checks
+    // go to fix as findings, a rejected merge merges the base in. Each is validated, a failed validation going to fix
+    // too, then pushed. Anything a pass can't fix blocks the next merge, which comments it and fails, as the last
+    // pass's merge does instead of retrying.
+    let passes = rounds.length;
+    let headSha = pushed.output.headSha;
+    let blocked: string | undefined;
+    const landing: string[] = [];
+    for (const attempt of run.loop('land', { max: FIX_PASSES - passes + 1 })) {
+      const merged = await run.stage(merge, {
+        pr: pullRequest,
+        headSha,
+        label: LABEL,
+        lastTry: passes === FIX_PASSES,
+        landing,
+        ...(blocked === undefined ? {} : { blocked }),
+      });
+      if (merged.outcome === 'failed') return run.fail(`merge: ${merged.output.reason}`);
+      const { retry, failed, rerun } = merged.output;
+      if (rerun.length > 0) landing.push(`reran ${rerun.join(', ')} once: still red`);
+      if (retry === null) return { merged: merged.output, pushed: pushed.output.pushed, tickets: tickets.length };
+      passes++;
+      blocked = undefined;
+      let targets: z.infer<typeof NumberedFinding>[] = [];
+      if (retry === 'checks') {
+        targets = failed.map((check, index) => ({
+          id: `C${passes}-${index + 1}`,
+          source: 'checks' as const,
+          severity: 'high' as const,
+          file: '',
+          title: `Check ${check.name} fails`,
+          detail: [check.url ?? '', check.log].filter(Boolean).join('\n\n'),
+        }));
+      } else {
+        const synced = await run.stage(syncBase, {
+          pr: pullRequest,
+          ...(ticketKey === undefined ? {} : { ticketKey }),
+        });
+        // Rejected with the base already in, the merge has nothing a pass can fix.
+        if (!synced.output.moved) {
+          blocked = merged.output.reason;
+          continue;
+        }
+        if (synced.output.conflicts.length > 0) {
+          const resolved = await run.stage(resolveConflicts, {
+            requirements: reading.requirements,
+            synced: synced.output,
+          });
+          if (resolved.outcome === 'blocked' || resolved.output.commit === null) {
+            blocked = `the conflicts with the base in ${synced.output.conflicts.join(', ')} weren't resolved`;
+            continue;
+          }
+          landing.push(`merged the base in, resolving conflicts in ${synced.output.conflicts.join(', ')}`);
+        } else landing.push('merged the base in');
+      }
+      // A failed validation, or the failed checks, go to fix in this pass.
+      const validated = targets.length === 0 ? await run.stage(validate) : undefined;
+      if (validated?.outcome === 'failed') {
+        targets.push({
+          id: `V${passes}`,
+          source: 'validate',
+          severity: 'high',
+          file: validated.output.uncommitted[0] ?? '',
+          title: '`bun run gate` fails',
+          detail: validated.output.verify.tail,
+        });
+      }
+      if (targets.length > 0) {
+        const fixed = await run.stage(fix, {
+          requirements: reading.requirements,
+          findings: { findings: targets },
+          ticketKey,
+          base,
+        });
+        if (fixed.outcome === 'blocked') {
+          blocked = `fix blocked: ${fixed.reason}`;
+          continue;
+        }
+        const commits = fixed.output.fixes.filter((each) => each.commit !== null).length;
+        const what =
+          retry === 'checks' ? `the failed checks ${failed.map((each) => each.name).join(', ')}` : 'validation';
+        landing.push(`fixed ${what} in ${commits} commit${commits === 1 ? '' : 's'}`);
+        const again = await run.stage(validate);
+        if (again.outcome === 'failed') {
+          blocked = `validation failed after the fix: ${again.output.verify.tail.split('\n')[0] ?? ''}`;
+          continue;
+        }
+      }
+      headSha = (await run.stage(push, { since: headSha })).output.headSha;
+      attempt.fail();
+    }
+    return run.fail('merge: no fix pass left');
   },
 );

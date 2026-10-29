@@ -47,7 +47,15 @@ function repo(): TempRepo & { origin: string } {
   const repository = held();
   if (origin === undefined) {
     origin = withOrigin(repository).url;
-    for (const branch of ['sail/designated', 'sail/draft', 'sail/mergeable', 'sail/unmergeable', 'sail/pending']) {
+    const branches = [
+      'sail/designated',
+      'sail/draft',
+      'sail/mergeable',
+      'sail/unmergeable',
+      'sail/pending',
+      'sail/failing',
+    ];
+    for (const branch of branches) {
       commit(repository, branch);
       repository.git('push', '-q', 'origin', `HEAD:refs/heads/${branch}`);
     }
@@ -130,6 +138,13 @@ function suiteWorld(): GitHubWorld {
       { number: 10, head: 'sail/mergeable' },
       { number: 11, head: 'sail/unmergeable', mergeable: false },
       { number: 12, head: 'sail/pending' },
+      {
+        number: 13,
+        head: 'sail/failing',
+        checkRuns: [{ id: 1, name: 'verify', status: 'completed', conclusion: 'failure', check_suite: { id: 55 } }],
+        jobLogs: { 1: '(fail) sail show prints a zero total' },
+        workflowRuns: [{ id: 900, workflow_id: 5, check_suite_id: 55 }],
+      },
     ],
   });
   on.inject('PUT /pulls/12/merge', { status: 200, body: { merged: false, message: 'Merge already in progress' } });
@@ -146,6 +161,7 @@ const offline = (on: GitHubWorld): CodeHostWorld => ({
   missing: 99,
   pendingMerge: 12,
   rejectedMerge: 11,
+  failedCheck: { number: 13, name: 'verify', log: '(fail) sail show prints a zero total' },
   refs: [
     ['7', 7],
     ['#7', 7],
@@ -256,7 +272,7 @@ if (process.env.SAIL_LIVE_CODE_HOST === '1') {
       },
     };
   };
-  codeHostSuite('github (live)', makeLive, ['pendingMerge', 'rejectedMerge']);
+  codeHostSuite('github (live)', makeLive, ['pendingMerge', 'rejectedMerge', 'failedCheck']);
 
   test("github (live): a commit status posted on a pull request's head reads back as a passed check of that head", async () => {
     const sandbox = live();
@@ -859,6 +875,113 @@ test.each<[string, WorldCheckRun[], CheckStatus]>([
 ])('%s', async (_name, runs, status) => {
   const read = await settle(host(checksWorld(runs)).checks(7));
   expect('rejected' in read ? read : read.checks).toEqual([{ name: 'test', status }]);
+});
+
+const failedRun = (id: number, name: string, suite: number): WorldCheckRun => ({
+  id,
+  name,
+  status: 'completed',
+  conclusion: 'failure',
+  check_suite: { id: suite },
+});
+
+test('rerunChecks posts rerun-failed-jobs once per workflow run holding a failed check run, names every failed check, and leaves a failed commit status and a passed run alone', async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [
+          failedRun(1, 'verify', 55),
+          failedRun(2, 'lint', 55),
+          failedRun(3, 'unit', 56),
+          { id: 4, name: 'build', status: 'completed', conclusion: 'success', check_suite: { id: 57 } },
+        ],
+        statuses: [{ context: 'deploy', state: 'failure' }],
+        workflowRuns: [
+          { id: 900, workflow_id: 5, check_suite_id: 55 },
+          { id: 901, workflow_id: 6, check_suite_id: 56 },
+          { id: 902, workflow_id: 7, check_suite_id: 57 },
+        ],
+      },
+    ],
+  });
+  const capture = captureEvents();
+  const result = await settle(host(on, capture.emit).rerunChecks(7));
+  const headSha = on.pullRequests.find((pr) => pr.number === 7)?.headSha ?? '';
+  expect({
+    rerun: 'rejected' in result ? result : result.rerun,
+    posts: on.routes().filter((route) => route.startsWith('POST')),
+    events: capture.events,
+  }).toEqual({
+    rerun: ['verify', 'lint', 'unit'],
+    posts: ['POST /repos/o/r/actions/runs/900/rerun-failed-jobs', 'POST /repos/o/r/actions/runs/901/rerun-failed-jobs'],
+    events: [{ type: 'codehost:checks_rerun', number: 7, headSha, checks: ['verify', 'lint', 'unit'] }],
+  });
+});
+
+test('rerunChecks reruns no failed commit status and no failed check run without a workflow run, posts nothing, and emits nothing', async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [failedRun(1, 'external', 77)],
+        statuses: [{ context: 'deploy', state: 'failure' }],
+        workflowRuns: [{ id: 900, workflow_id: 5, check_suite_id: 55 }],
+      },
+    ],
+  });
+  const capture = captureEvents();
+  const result = await settle(host(on, capture.emit).rerunChecks(7));
+  expect({
+    rerun: 'rejected' in result ? result : result.rerun,
+    posts: on.routes().filter((route) => route.startsWith('POST')),
+    events: capture.events,
+  }).toEqual({ rerun: [], posts: [], events: [] });
+});
+
+test('rerunChecks leaves out a check whose workflow run GitHub refuses to rerun, 403, and names the others', async () => {
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [failedRun(1, 'verify', 55), failedRun(2, 'unit', 56)],
+        workflowRuns: [
+          { id: 900, workflow_id: 5, check_suite_id: 55 },
+          { id: 901, workflow_id: 6, check_suite_id: 56 },
+        ],
+      },
+    ],
+  });
+  on.inject('POST /actions/runs/900/rerun-failed-jobs', { status: 403, body: { message: 'Forbidden' } });
+  const result = await settle(host(on).rerunChecks(7));
+  expect('rejected' in result ? result : result.rerun).toEqual(['unit']);
+});
+
+test('checkLog answers the last 20 000 characters of the job log, and a commit status or an unknown name is not_found', async () => {
+  const log = `${'a'.repeat(15_000)}${'b'.repeat(10_000)}`;
+  const on = world({
+    pullRequests: [
+      {
+        number: 7,
+        head: 'sail/designated',
+        checkRuns: [failedRun(1, 'verify', 55)],
+        statuses: [{ context: 'deploy', state: 'failure' }],
+        jobLogs: { 1: log },
+      },
+    ],
+  });
+  const read = await settle(host(on).checkLog(7, 'verify'));
+  const status = await settle(host(on).checkLog(7, 'deploy'));
+  const unknown = await settle(host(on).checkLog(7, 'nope'));
+  const code = (each: typeof status) => ('rejected' in each ? (each.rejected as { code?: string }).code : 'answered');
+  expect({
+    tail: 'rejected' in read ? read : read.log === log.slice(-20_000),
+    status: code(status),
+    unknown: code(unknown),
+  }).toEqual({ tail: true, status: 'not_found', unknown: 'not_found' });
 });
 
 test("runs of different names are each kept in GitHub's order, beside the latest of a repeated one", async () => {

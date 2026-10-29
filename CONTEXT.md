@@ -454,7 +454,7 @@ The port to the ticket system: fetch a ticket with its comments, links and attac
 _Avoid_: tracker, task manager, board, issue source
 
 **CodeHost**:
-The port to the repository host: push a branch; open a pull request and link it to the ticket; poll designated pull requests; read their checks; label, comment on and merge them. A merge counts only once the host reports it, never when it was merely requested. v1 adapter: GitHub.
+The port to the repository host: push a branch; open a pull request and link it to the ticket; poll designated pull requests; read their checks, rerun the failed ones and read a check's log; label, comment on and merge them. A merge counts only once the host reports it, never when it was merely requested. v1 adapter: GitHub.
 _Avoid_: git provider, repo host, SCM, VCS
 
 **Checks**:

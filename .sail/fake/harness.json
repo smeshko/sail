@@ -595,5 +595,22 @@
         "costUsd": 0.4
       }
     }
+  ],
+  "resolve-conflicts": [
+    {
+      "outcome": "done",
+      "output": {
+        "commit": "3333333333333333333333333333333333333333",
+        "note": "Kept the cost footer and the base's new column."
+      },
+      "turns": 20,
+      "usage": {
+        "inputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "outputTokens": 0,
+        "costUsd": 0.8
+      }
+    }
   ]
 }

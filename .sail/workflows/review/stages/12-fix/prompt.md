@@ -1,6 +1,10 @@
 Fix this pull request's findings. A judge has read every finding of its review and decided these belong to it:
 `$STAGE_IN/findings.json` holds them, each with its id, severity, file and detail. What the pull request should do is
 at `{{requirements}}`, and its change so far is `git diff {{base}}...HEAD`.
+
+A finding from `checks` is a check that failed on the pushed pull request after a rerun: its detail is the tail of the
+check's log. Find the failing test or step in it, reproduce it by running that test file by name, and fix the cause.
+A test that fails only on timing is still yours to make deterministic.
 {{#if feedback}}
 
 ## The last pass didn't hold

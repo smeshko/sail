@@ -17,12 +17,15 @@ export const Finding = z.object({
 /** The reviewers, one stage each. */
 export const Lens = z.enum(['requirements', 'architecture', 'bugs', 'tests', 'security', 'conventions']);
 
-/** What found it: validation, the leak check, the demonstration, one reviewer, or check-fix reviewing the fixes. */
-export const Source = z.enum(['validate', 'leak-check', 'demonstrate', ...Lens.options, 'check-fix']);
+/**
+ * What found it: validation, the leak check, the demonstration, one reviewer, check-fix reviewing the fixes, or the
+ * checks, failing at merge.
+ */
+export const Source = z.enum(['validate', 'leak-check', 'demonstrate', ...Lens.options, 'check-fix', 'checks']);
 
 /**
  * A finding the workflow numbered: `V1` from validation, `L<n>` from the leak check, `D<n>` from the demonstration,
- * `R<n>` from a reviewer, and `F<round>-<n>` from check-fix.
+ * `R<n>` from a reviewer, `F<round>-<n>` from check-fix, and `C<pass>-<n>` from a check that failed at merge.
  */
 export const NumberedFinding = Finding.extend({ id: z.string(), source: Source });
 
