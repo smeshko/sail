@@ -26,9 +26,12 @@ import type { WorkspacePort } from '../../src/ports/workspace';
 import { fakeAdapters } from '../helpers/adapters';
 import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, steppingClock } from '../helpers/clock';
 import { copyFixture, edit, write } from '../helpers/fixture';
+import { writeLiveRun } from '../helpers/live-run';
 import { rejection } from '../helpers/ports';
+import { commitBranch, seedPullRequests, writePrWorkflow } from '../helpers/pr-workflow';
 import { copyRun, writePrOnly, writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { writeWatched } from '../helpers/watched';
 
 const GOLDEN = join(import.meta.dir, '..', 'fixtures', 'runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N');
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
@@ -687,7 +690,7 @@ async function ticketIn(repoDir: string, ticketKey: string) {
 }
 
 /** The repository's adapters, with `instead` answering in place of the Workspace port's own `op`. */
-async function workspaceWith<Op extends 'lease' | 'releaseLease'>(
+async function workspaceWith<Op extends 'lease' | 'releaseLease' | 'holder'>(
   repoDir: string,
   op: Op,
   instead: (own: WorkspacePort[Op]) => WorkspacePort[Op],
@@ -1349,5 +1352,227 @@ test("reopenRun of a run started from definitions loads its own copy, so it resu
       sha: source.sha,
       status: { status: 'running' },
     });
+  });
+});
+
+// The cap (ADW-201): a start of a watched workflow counts the workflow's live runs in this clone, and is refused at its
+// maxConcurrentRuns unless `--force`, which records `cap`. A dispatched start is never counted: the watcher counted it.
+
+const LIVE_A = 'FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3A';
+const LIVE_B = 'FAKE-3-01M3BWNZM08Q4T6V2XRJ5KWD3B';
+
+/** The stub with workflow `capped`, watched with `cap`, and `lives` runs of it alive in the clone. */
+async function cappedWithLive(repo: TempRepo, cap: number, lives: number) {
+  const sail = writeStub(repo.dir);
+  writeWatched(sail, 'capped', { label: 'sail', cap });
+  const adapters = await fakeAdapters(repo.dir);
+  const ids = [LIVE_A, LIVE_B].slice(0, lives);
+  const runs: Awaited<ReturnType<typeof writeLiveRun>>[] = [];
+  for (const [index, runId] of ids.entries()) {
+    runs.push(await writeLiveRun(repo.dir, { workflow: 'capped', ticketKey: `FAKE-${index + 2}`, runId, adapters }));
+  }
+  return { sail, ids, runs, release: () => Promise.all(runs.map((run) => run.release())) };
+}
+
+test('a start at its workflow full cap is refused naming the workflow, the cap and the live runs, and leaves no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 2, 2);
+    try {
+      const refused = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' });
+      expect(refused).toEqual({
+        refused: `workflow 'capped' has 2 live runs, its maxConcurrentRuns of 2: ${LIVE_A}, ${LIVE_B}; --force starts it anyway`,
+      });
+      expect(runIds(repo.dir).sort()).toEqual([LIVE_A, LIVE_B]);
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a refusal at a cap of 1 names the one live run in the singular', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      expect(await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' })).toEqual({
+        refused: `workflow 'capped' has 1 live run, its maxConcurrentRuns of 1: ${LIVE_A}; --force starts it anyway`,
+      });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a start under its cap opens and records no cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 2, 1);
+    try {
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: [] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a forced start at a full cap opens and records cap alone for a designated ticket in a pick-up state', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped', force: true });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toEqual({
+        kind: 'ticket',
+        ticketKey: 'FAKE-1',
+        via: 'cli',
+        forced: ['cap'],
+      });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a forced start of an undesignated ticket at a full cap records designation then cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      const run = await openStub(repo.dir, { ticket: 'FAKE-3', workflow: 'capped', force: true });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toEqual({
+        kind: 'ticket',
+        ticketKey: 'FAKE-3',
+        via: 'cli',
+        forced: ['designation', 'cap'],
+      });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a forced start with room under the cap records no cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 2, 1);
+    try {
+      const run = await openStub(repo.dir, { ticket: 'FAKE-3', workflow: 'capped', force: true });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ forced: ['designation'] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a suspended run of the workflow takes no slot', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      await live.runs[0]?.suspend();
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ forced: [] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a workflow that declares no maxConcurrentRuns is never held to a cap', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const live = await writeLiveRun(repo.dir, {
+      workflow: 'ticket-to-pr',
+      ticketKey: 'FAKE-2',
+      runId: LIVE_A,
+      adapters,
+    });
+    try {
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1' });
+      expect('refused' in run).toBe(false);
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a dispatched start at a full cap opens and records no cap, forced or not', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      const run = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped', dispatch: { runId: DISPATCHED } });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'watch', forced: [] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a forced dispatched start at a full cap records only what the ticket forced', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      const runId = 'FAKE-3-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+      const run = await openStub(repo.dir, { ticket: 'FAKE-3', workflow: 'capped', force: true, dispatch: { runId } });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ via: 'watch', forced: ['designation'] });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a lease that cannot be read refuses the start, naming the port error', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLive(repo, 1, 1);
+    try {
+      const adapters = await workspaceWith(repo.dir, 'holder', () => async () => {
+        throw new PortError('workspace', 'holder', 'unavailable', 'the leases are locked');
+      });
+      const refused = await openStub(repo.dir, { ticket: 'FAKE-1', workflow: 'capped' }, adapters);
+      expect(refused).toEqual({
+        refused: 'the branch leases could not be read: workspace.holder: the leases are locked (unavailable)',
+      });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+/** The stub with `review-pr` capped at 1, a designated pull request 1 and a live run of the workflow. */
+async function pullRequestAtCap(repo: TempRepo) {
+  const sail = writeStub(repo.dir);
+  writePrWorkflow(sail, 'review-pr', { watch: { label: 'sail', cap: 1 } });
+  commitBranch(repo, 'sail/FAKE-1-add-a-greeting', 'greet.txt');
+  seedPullRequests(sail, repo, [{ number: 1, head: 'sail/FAKE-1-add-a-greeting', ticketKey: 'FAKE-1' }]);
+  const adapters = await fakeAdapters(repo.dir);
+  return writeLiveRun(repo.dir, { workflow: 'review-pr', ticketKey: 'FAKE-2', runId: LIVE_A, adapters });
+}
+
+test('a pull-request start at a full cap is refused the same way', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await pullRequestAtCap(repo);
+    try {
+      expect(await openStub(repo.dir, { ticket: '#1', workflow: 'review-pr' })).toEqual({
+        refused: `workflow 'review-pr' has 1 live run, its maxConcurrentRuns of 1: ${LIVE_A}; --force starts it anyway`,
+      });
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('a forced pull-request start at a full cap opens and records cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await pullRequestAtCap(repo);
+    try {
+      const run = await openStub(repo.dir, { ticket: '#1', workflow: 'review-pr', force: true });
+      if ('refused' in run) throw new Error(run.refused);
+      expect(readRunHeader(run.dir).source).toMatchObject({ kind: 'pr', number: 1, via: 'cli', forced: ['cap'] });
+    } finally {
+      await live.release();
+    }
   });
 });
