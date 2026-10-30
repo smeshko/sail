@@ -222,7 +222,10 @@ interface DriveOptions extends EventOptions {
   onOpened?(): Promise<void>;
 }
 
-/** Why a call ended as it did, for the workflow: an error's problems, each with its reason, or a blocked agent's own. */
+/**
+ * Why a call ended as it did, for the workflow: an error's problems, each with its reason, or a blocked agent's own.
+ * `errorsOf` in stage-call.ts parses this `<reason>: <message>; …` format back from a step's older journal line.
+ */
 function reasonOf(result: Record<string, unknown>): string | null {
   if (result.outcome === 'blocked') return String(result.reason);
   if (result.outcome !== 'error') return null;

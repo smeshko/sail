@@ -43,7 +43,7 @@ import {
   stageOut,
   stepPaths,
 } from './call-dir';
-import { type ContractError, type ErrorReason, recordFiles } from './contract';
+import { type ContractError, ERROR_REASONS, type ErrorReason, recordFiles } from './contract';
 import type { JournalEntry } from './journal';
 import { buildResult, buildStageResult, type StepEntry, writeResult } from './result';
 import { checkoutPath } from './run-dir';
@@ -72,7 +72,7 @@ interface Done {
   files: Record<string, string>;
   /** The step's `result.json`, relative to the run directory. */
   resultPath: string;
-  /** Its result, as written now or read back for the stage's own: never what a later step reads. */
+  /** Its result, as it ran or as its journal line rebuilds it, for the stage's own: never what a later step reads. */
   result: Record<string, unknown>;
 }
 
@@ -244,24 +244,14 @@ function pick(runDir: string, source: Done, binding: FromStepBinding): Supplied 
     : { kind: 'fromStep', value: field, from: `${source.resultPath}#/output/${binding.key}` };
 }
 
-const REASONS: readonly ErrorReason[] = [
-  'invalid_output',
-  'missing_file',
-  'timeout',
-  'exit_code',
-  'not_started',
-  'budget_exceeded',
-  'harness',
-  'usage_limit',
-  'port',
-];
-const REASON_START = new RegExp(`(?:^|; )(?=(?:${REASONS.join('|')}): )`);
+// A line's `reason` joins its errors as `<reason>: <message>; …`, the format `reasonOf` in runtime.ts writes.
+const REASON_START = new RegExp(`(?:^|; )(?=(?:${ERROR_REASONS.join('|')}): )`);
 
 /** A step's errors: the line's own, or, for a line without them, its `reason` parsed back, or kept whole as a `harness` error. */
 function errorsOf(entry: JournalEntry): ContractError[] {
   if (entry.errors !== undefined) return entry.errors;
   const reason = entry.reason ?? '';
-  if (!REASONS.some((each) => reason.startsWith(`${each}: `))) {
+  if (!ERROR_REASONS.some((each) => reason.startsWith(`${each}: `))) {
     return [{ reason: 'harness', message: reason === '' ? 'the step ended in error' : reason }];
   }
   return reason.split(REASON_START).map((part) => {
