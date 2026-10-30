@@ -91,7 +91,7 @@
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
 // `run:end` ends the stream: a replay abandoned by an interrupt or budget may move on once its workflow stops waiting,
 // but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
-import { dirname, join, relative } from 'node:path';
+import { join, relative } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer, readEvents } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
@@ -445,7 +445,7 @@ async function drive(
   options: DriveOptions,
   { start, hold }: { start: boolean; hold: KeepAwakeHold },
 ): Promise<RunEnd> {
-  const { runId, dir, sailDir, loaded, header } = opened;
+  const { runId, dir, sailDir, root, loaded, header } = opened;
   const { signal, clock = systemClock } = options;
   const bus = createBus({
     runId,
@@ -475,7 +475,6 @@ async function drive(
     const stamped = bus.emit(event);
     tracker?.observe(stamped);
   };
-  const root = dirname(sailDir);
   /**
    * Emits what an adapter emitted, under the running call's key. A workspace event has none, nor one between calls, and
    * its path is relative to the repository root.

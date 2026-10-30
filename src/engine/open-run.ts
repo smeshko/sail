@@ -41,7 +41,7 @@
 // One run per `.sail/` per process: Bun can't reload a module, so a second run would execute the definitions the first
 // imported while its header hashes the files on disk. `sail <ticket>`, `sail resume` and the watcher's dispatch each
 // start one run per process.
-import { existsSync, realpathSync } from 'node:fs';
+import { cpSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile, nextSeq, readEvents } from '../events/consumers/ndjson';
 import type { Summary } from '../events/summary';
@@ -53,6 +53,7 @@ import type { Repository, Workspace } from '../ports/types';
 import type { RunRef, WorkspacePort } from '../ports/workspace';
 import type { SourceKind } from '../sdk/intake';
 import type { NamedHarnesses, ProviderRelay, ResolvedAdapters } from './adapters';
+import { DEFAULT_CONVENTIONS } from './agent-prompt';
 import { branchFor, DEFAULT_BRANCH_PREFIX } from './branch';
 import { type Raise, raiseProblem } from './budget';
 import { isPlainName } from './call-dir';
@@ -62,10 +63,11 @@ import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
-import { harnessesReached, modelProblems } from './roster';
+import { buildRoster, harnessesReached, modelProblems } from './roster';
 import {
   copyStageFolders,
   createRunDir,
+  DEFINITION_DIR,
   type RunStatus,
   readStatus,
   removeRunDir,
@@ -97,8 +99,13 @@ export interface OpenedRun {
   /** The absolute run directory. */
   dir: string;
   header: RunHeader;
-  /** The absolute `.sail/` the run started from. */
+  /**
+   * The absolute `.sail/` the run's definitions came from: the clone's, or for a run started from committed definitions
+   * the run's own copy in its definition folder.
+   */
   sailDir: string;
+  /** The repository root: the clone the run directory, the lease and the workspace belong to. */
+  root: string;
   /** The adapters the run was opened with, one per port. */
   adapters: Pick<PortAdapters, RunPort>;
   /** The named harnesses the run reached, by name. Empty when it reached none. */
@@ -176,6 +183,12 @@ export interface OpenRunOptions {
    * since is refused. Only a pull request takes it.
    */
   headSha?: string;
+  /**
+   * Definitions read from a commit into a directory of their own: `sailDir` is the `.sail/` there, `sha` the commit and
+   * `port` the Workspace port that read it. The config, the workflow and the conventions come from the commit; the run
+   * directory, the lease and the workspace stay the clone's. Every refusal that comes from them names the commit.
+   */
+  definitions?: { sailDir: string; sha: string; port: WorkspacePort };
 }
 
 /** Claims `sailDir` for this process. A second claim throws: that is a bug in the caller, never a refusal. */
@@ -189,16 +202,21 @@ export function claim(sailDir: string): void {
   claimed.add(real);
 }
 
+/** Reads the config of the `.sail/` at `dir`, refusing with its issues. */
+export function readConfigured(dir: string): { dir: string; config: ProjectConfig } | { refused: string } {
+  const config = readConfig(dir);
+  if ('issues' in config) {
+    const file = relative(dirname(dir), join(dir, 'project.yaml'));
+    return { refused: config.issues.map((issue) => formatIssue({ ...issue, file })).join('\n') };
+  }
+  return { dir, config };
+}
+
 /** Finds `.sail/` from `cwd` and reads its config, refusing on either. */
 export function findConfigured(cwd: string): { dir: string; config: ProjectConfig } | { refused: string } {
   const found = findSailDir(cwd);
   if ('refused' in found) return found;
-  const config = readConfig(found.dir);
-  if ('issues' in config) {
-    const file = relative(dirname(found.dir), join(found.dir, 'project.yaml'));
-    return { refused: config.issues.map((issue) => formatIssue({ ...issue, file })).join('\n') };
-  }
-  return { dir: found.dir, config };
+  return readConfigured(found.dir);
 }
 
 /** Why `loaded` can't run when one of its stages took the intake's name, as a refusal: the two would share a key. */
@@ -376,7 +394,10 @@ export async function startWorkspace(options: {
 
 /** What a start's preflight found: everything `openRun()` goes on with once nothing has refused. */
 export interface Preflight {
+  /** The `.sail/` the definitions were loaded from: the clone's, or the directory committed definitions were read into. */
   sailDir: string;
+  /** The clone's `.sail/`, which holds the runs directory. */
+  home: string;
   config: ProjectConfig;
   loaded: LoadedWorkflow;
   /** The ticket as fetched for the checks, with the checks `--force` overrode: a start from a ticket's. */
@@ -393,6 +414,16 @@ export interface Preflight {
 }
 
 /**
+ * Every convention file the run's prompts may read: the config's list, or the defaults, and each agent step's own list.
+ * A step's list replaces the config's, so each is a file the committed definitions must carry.
+ */
+function conventionPaths(config: ProjectConfig, header: Pick<RunHeader, 'intake' | 'stages'>): string[] {
+  const entries = [header.intake, ...Object.values(header.stages)];
+  const own = entries.flatMap((entry) => [entry, ...(entry.steps ?? [])].flatMap((each) => each.conventions ?? []));
+  return [...new Set([...(config.conventions ?? DEFAULT_CONVENTIONS), ...own])];
+}
+
+/**
  * A start's preflight: every check that can refuse, in the order the header comment gives, then the run id, the branch
  * and the header, built and checked. It writes nothing, but it claims the `.sail/` for the process.
  */
@@ -400,9 +431,13 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   const { cwd, workflow, ticket, force = false, dispatch } = options;
   // Read before anything can refuse, so the run id's time is the clock's first reading whatever else reads it later.
   const now = (options.clock ?? systemClock)();
-  const found = findConfigured(cwd);
+  const { definitions } = options;
+  const home = definitions === undefined ? undefined : findSailDir(cwd);
+  if (home !== undefined && 'refused' in home) return home;
+  const found = definitions === undefined ? findConfigured(cwd) : readConfigured(definitions.sailDir);
   if ('refused' in found) return found;
   const { config } = found;
+  const homeDir = home?.dir ?? found.dir;
   claim(found.dir);
   const loaded = await loadWorkflow(found.dir, workflow);
   if ('refused' in loaded) return loaded;
@@ -412,6 +447,17 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   if ('refused' in named) return named;
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
+  if (definitions !== undefined) {
+    const roster = buildRoster(loaded, config, dirname(found.dir));
+    try {
+      await definitions.port.readTree(dirname(found.dir), {
+        paths: conventionPaths(config, roster),
+        base: definitions.sha,
+      });
+    } catch (error) {
+      return { refused: `the conventions could not be read: ${portRefusal(error)}` };
+    }
+  }
   const { ticketSource, codeHost } = options.adapters.ports;
   // Both adapters read the ref (D6). One neither reads is taken as a ticket's for an intake that takes no pull request,
   // so the ticket source's own refusal names it, as before pull requests were sources.
@@ -442,13 +488,14 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
       adapters: options.adapters.entries,
       harnesses: named.entries,
       now,
+      ...(definitions === undefined ? {} : { definitionsSha: definitions.sha }),
     });
     assertRunHeader(header);
     return header;
   };
   const runIdOf = (key: string): string | { refused: string } => {
     if (dispatch === undefined) return newRunId(key, now.getTime(), options.random);
-    const refused = dispatchProblem(found.dir, key, dispatch.runId);
+    const refused = dispatchProblem(homeDir, key, dispatch.runId);
     return refused === undefined ? dispatch.runId : { refused };
   };
 
@@ -475,7 +522,18 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
     const source: Source = { kind: 'pr', number: pr.number, headSha: pr.headSha, via, forced: pullRequest.forced };
     const header = headerOf(runId, source);
     const harnesses = named.ports;
-    return { sailDir: found.dir, config, loaded, pullRequest, source, runId, branch: pr.head, header, harnesses };
+    return {
+      sailDir: found.dir,
+      home: homeDir,
+      config,
+      loaded,
+      pullRequest,
+      source,
+      runId,
+      branch: pr.head,
+      header,
+      harnesses,
+    };
   }
 
   if (options.headSha !== undefined) {
@@ -497,7 +555,18 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   // Built and checked before anything is written. Opening a run claims nothing, so it has no claim.
   const source: Source = { kind: 'ticket', ticketKey, via, forced: resolved.forced };
   const header = headerOf(runId, source);
-  return { sailDir: found.dir, config, loaded, resolved, source, runId, branch, header, harnesses: named.ports };
+  return {
+    sailDir: found.dir,
+    home: homeDir,
+    config,
+    loaded,
+    resolved,
+    source,
+    runId,
+    branch,
+    header,
+    harnesses: named.ports,
+  };
 }
 
 /**
@@ -516,12 +585,12 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const preflight = await preflightRun(options);
   if ('refused' in preflight) return preflight;
   const { config, loaded, source, runId, branch, header: preflighted, harnesses } = preflight;
-  const found = { dir: preflight.sailDir };
-  const { until } = options;
+  const { until, definitions } = options;
   // The last moment nothing is written. Everything up to here only read, so one check covers an abort at any of it.
   if (options.signal?.aborted) return { refused: 'stopped before the run was opened' };
-  const root = dirname(found.dir);
-  const run: RunRef = { runId, runDir: join(runsDir(found.dir), runId) };
+  const { home } = preflight;
+  const root = dirname(home);
+  const run: RunRef = { runId, runDir: join(runsDir(home), runId) };
   const { relay } = options.adapters;
   let started: ProviderEvent[] = [];
   const opened = await collecting(relay, root, async (events) => {
@@ -529,7 +598,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     return startWorkspace({
       port: options.adapters.ports.workspace,
       run,
-      sailDir: found.dir,
+      sailDir: home,
       branch,
       signal: options.signal,
       // A pull-request run starts at the head sha it was resolved at (D4).
@@ -546,7 +615,8 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
   const dir = run.runDir;
   try {
     assertRunHeader(header);
-    copyStageFolders(dir, root, header);
+    if (definitions === undefined) copyStageFolders(dir, root, header);
+    else cpSync(dirname(preflight.sailDir), join(dir, DEFINITION_DIR), { recursive: true, verbatimSymlinks: true });
     writeRunHeader(dir, header);
     createJournal(dir);
     createEventsFile(dir);
@@ -561,7 +631,8 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     runId,
     dir,
     header,
-    sailDir: found.dir,
+    sailDir: definitions === undefined ? preflight.sailDir : join(dir, DEFINITION_DIR, '.sail'),
+    root,
     adapters: options.adapters.ports,
     harnesses,
     relay,
@@ -725,9 +796,13 @@ async function refuseRenewedWorkspace(
  */
 export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | { refused: string }> {
   const { cwd, runId } = options;
-  const found = findConfigured(cwd);
+  const home = findSailDir(cwd);
+  if ('refused' in home) return home;
+  const run = findRun(home.dir, runId);
+  // A run started from committed definitions resumes from its own copy, whatever the clone's `.sail/` holds.
+  const committed = !('refused' in run) && run.header.definitionsSha !== undefined;
+  const found = readConfigured(committed ? join(run.dir, DEFINITION_DIR, '.sail') : home.dir);
   if ('refused' in found) return found;
-  const run = findRun(found.dir, runId);
   if ('refused' in run) return run;
   const budget = raiseProblem(runId, run.header.budget, readEvents(run.dir), options.raise);
   if (budget !== undefined) return { refused: budget };
@@ -744,8 +819,9 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
   const taken = intakeNameTaken(loaded, found.dir);
   if (taken !== undefined) return { refused: taken };
   const { relay } = options.adapters;
+  const root = dirname(home.dir);
   let started: ProviderEvent[] = [];
-  const workspace = await collecting(relay, dirname(found.dir), (events) => {
+  const workspace = await collecting(relay, root, (events) => {
     started = events;
     return resumeWorkspace(options.adapters.ports.workspace, { runId, runDir: run.dir }, run.header);
   });
@@ -767,6 +843,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     dir: run.dir,
     header: run.header,
     sailDir: found.dir,
+    root,
     adapters: options.adapters.ports,
     harnesses: named.ports,
     relay,
