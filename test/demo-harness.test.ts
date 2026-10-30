@@ -354,6 +354,15 @@ test.skipIf(chrome === undefined)(
         reason: status.split(' ')[1],
         shot: existsSync(join(dir, 'live-running.png')),
       }).toEqual({ code: 0, id: true, url: true, status: 'suspended', reason: 'interrupted', shot: true });
+      // The shot is of the live run while a call of it runs, not of an empty page or another run.
+      const page = readFileSync(join(dir, 'live-running.html'), 'utf8');
+      expect({
+        run: id !== undefined && page.includes(id),
+        running: /class="pill [\w-]+">running<\/span>/.test(page),
+      }).toEqual({
+        run: true,
+        running: true,
+      });
     });
   },
   120_000,
