@@ -14,13 +14,14 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
 import * as durable from '../../src/engine/durable';
 import * as journalModule from '../../src/engine/journal';
 import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
+import * as runDirModule from '../../src/engine/run-dir';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
@@ -2820,6 +2821,38 @@ test("events.ndjson is synced before each journal line, holding the call's end",
     expect(Object.keys(ended)).toEqual(keys(runDir));
   });
 }, 30_000);
+
+test('a run that ends syncs its last journal:append before STATUS, and its run:end after', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const order: string[] = [];
+    let runDir = '';
+    const realSync = durable.syncFile;
+    const syncSpy = spyOn(durable, 'syncFile').mockImplementation((path: string) => {
+      if (basename(path) === 'events.ndjson') {
+        runDir = join(path, '..');
+        const list = events(runDir);
+        order.push(`sync:${countOf(list, 'journal:append')}:${countOf(list, 'run:end')}`);
+      }
+      realSync(path);
+    });
+    const realStatus = runDirModule.writeStatus;
+    const statusSpy = spyOn(runDirModule, 'writeStatus').mockImplementation(((dir, status, stopReason) => {
+      order.push(`status:${status}`);
+      realStatus(dir, status, stopReason);
+    }) as typeof runDirModule.writeStatus);
+    try {
+      expect((await ran(repo.dir)).status).toBe('completed');
+    } finally {
+      syncSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+    const lines = keys(runDir).length;
+    const at = order.indexOf('status:completed');
+    expect(order[at - 1]).toBe(`sync:${lines}:0`);
+    expect(order.slice(at + 1)).toContain(`sync:${lines}:1`);
+  });
+}, 60_000);
 
 /** `events.ndjson` of `dir` cut back to the lines before the last `journal:append`, as a power loss after the last sync. */
 function cutBeforeLastAppend(dir: string): { lost: SailEvent } {

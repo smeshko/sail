@@ -95,7 +95,8 @@
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
 // `run:end` ends the stream: a replay abandoned by an interrupt or budget may move on once its workflow stops waiting,
 // but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
-// The events file is synced before each journal line, so a journaled call's events are on disk whenever its line is.
+// The events file is synced before each journal line, so a journaled call's events are on disk whenever its line is,
+// and before STATUS and after `run:end`, so an ended run, which no resume restores, keeps its last `journal:append`.
 import { dirname, join, relative } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer, readEvents, syncEvents } from '../events/consumers/ndjson';
@@ -499,9 +500,11 @@ async function drive(
 
   /**
    * Records how the run ended in STATUS, releases the workspace and the lease of a run that has ended for good, then
-   * reports it. A suspend marks its kept lease as held by no process as its last act, after run:end.
+   * reports it. A suspend marks its kept lease as held by no process as its last act, after run:end. The events are
+   * synced before STATUS and after run:end, since no resume restores the stream of a run that has ended.
    */
   const finish = async (end: RunEnd): Promise<RunEnd> => {
+    syncEvents(dir);
     writeStatus(dir, end.status, end.stopReason);
     const { status, stopReason } = end;
     let { message } = end;
@@ -533,6 +536,7 @@ async function drive(
       ...(status === 'completed' ? resultOf(end.result) : {}),
       replays,
     });
+    syncEvents(dir);
     if (status === 'suspended') {
       const { workspace } = opened;
       try {
