@@ -256,6 +256,23 @@ test('a call that asks for its error routes on it', async () => {
   );
 });
 
+test('a run hands a script step the variables of the ports it declares: publish naming codehost runs, and completes the run (review R7)', async () => {
+  await stubRun(
+    {},
+    (sail) =>
+      edit(
+        sail,
+        'workflows/ticket-to-pr/stages/publish/stage.ts',
+        'output: PrInfo });',
+        "output: PrInfo, ports: ['codehost'] });",
+      ),
+    (end) => {
+      expect(end).toMatchObject({ status: 'completed' });
+      expect(readJournal(end.dir).entries.at(-1)).toMatchObject({ key: 'publish#1', outcome: 'passed' });
+    },
+  );
+});
+
 test("the fixture's ticket-to-pr, with its harness script gone, gets as far as its spec: the intake leaves the brief spec#1 consumes, and the run fails there, where the fake harness has no script for it", async () => {
   await withTempRepo(async (repo) => {
     rmSync(join(copyFixture(repo.dir), 'fake', 'harness.json'));
