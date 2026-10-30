@@ -21,6 +21,9 @@ import type { StepContext, StepKind, StepRun } from './index';
 
 const POLICIES = ['retry-once', 'fail'];
 
+/** The longest delay a timer takes: a longer one fires at once, so a longer wait is set in steps. */
+const LONGEST_MS = 2 ** 31 - 1;
+
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** The schema the agent submits against: the output schema's input, as draft-07. Zod throws on what it can't write. */
@@ -224,10 +227,15 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     if (!armed) return;
     clearTimeout(timer);
     const since = new Date().toISOString();
-    timer = setTimeout(() => {
-      context.emit?.({ type: 'step:stalled', idleMs, since });
-    }, idleMs);
-    timer.unref();
+    const wait = (ms: number): void => {
+      const step = Math.min(ms, LONGEST_MS);
+      timer = setTimeout(() => {
+        if (ms > step) wait(ms - step);
+        else context.emit?.({ type: 'step:stalled', idleMs, since });
+      }, step);
+      timer.unref();
+    };
+    wait(idleMs);
   };
   try {
     const { agent } = context;

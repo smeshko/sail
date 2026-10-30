@@ -186,6 +186,19 @@ test('a silent session stalls once and leaves no timer after returning', async (
   expect(s.events.length).toBe(count);
 });
 
+test('an idle limit longer than a timer can wait does not stall a session at once (review R6)', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 1_000_000 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run(req) {
+      req.onEvent?.({ type: 'agent:message', text: 'working' });
+      await Bun.sleep(50);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+});
+
 test('the default idle limit is a quarter of the own minute budget', async () => {
   const step = { ...bare(z.any()), budget: { ...budget, maxMinutes: 0.02 } };
   const { s } = await tried(step, {
