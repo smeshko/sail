@@ -1092,6 +1092,28 @@ test('a dispatched pull-request start with a stopped hand-off ends failed stoppe
   });
 });
 
+test('a dispatched start sent a stop and then refused making its workspace leaves the stop in its hand-off, for the watcher to park its item (review R1)', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(sail, 'project.yaml', 'workspace: { use: fake }', 'workspace: { use: fake, defaultBranch: missing }');
+    const runs = join(repo.dir, '.sail-runs');
+    mkdirSync(runs, { recursive: true });
+    writeFileSync(handOffFile(runs, DISPATCHED), 'stopped\n');
+    const refused = await openStub(repo.dir, { ticket: 'FAKE-1', dispatch: { runId: DISPATCHED } });
+    expect({
+      refused,
+      files: readdirSync(runs).filter((name) => name.startsWith(DISPATCHED)),
+      handOff: existsSync(handOffFile(runs, DISPATCHED))
+        ? readFileSync(handOffFile(runs, DISPATCHED), 'utf8')
+        : undefined,
+    }).toEqual({
+      refused: { refused: 'the workspace could not be made: workspace.create: missing names no commit (invalid)' },
+      files: [`${DISPATCHED}.control`],
+      handOff: 'stopped\n',
+    });
+  });
+});
+
 /** The stub, watched on `sail-review`, with FAKE-6 carrying that label alone. */
 function watchedOnReview(repoDir: string): void {
   const sail = writeStub(repoDir);

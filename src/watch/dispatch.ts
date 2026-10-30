@@ -12,6 +12,7 @@
 //   reason is the last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding
 //   no slot.
 // - A hand-off file (`engine/control.ts`) the run never took is deleted when its item settles: done, failed or parked.
+//   A failure with a `stopped` hand-off, a start refused after `sail stop` reached it, parks the item instead.
 // - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
 //   or the back-off after it hit the limit. While held, nothing starts and no run is resumed, and no item's attempt is
 //   counted, failed or parked. A tick past the hold releases it (`queue:released`), and the run is resumed with the
@@ -39,7 +40,7 @@
 //   caller.
 import { join } from 'node:path';
 import { branchFor } from '../engine/branch';
-import { cancelUnwatch, dropHandOff } from '../engine/control';
+import { cancelUnwatch, dropHandOff, handOffStops } from '../engine/control';
 import { getPullRequestDetails } from '../engine/pr-source';
 import { readStatus } from '../engine/run-dir';
 import { newRunId } from '../engine/run-id';
@@ -147,8 +148,12 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const dispatchedItems = () => store.snapshot().items.filter((item) => item.state === 'dispatched');
   const inFlight = () => dispatchedItems().filter(alive).length;
 
-  /** Records a failed attempt, or a failure before any, and reports it. */
+  /** Records a failed attempt, or a failure before any, and reports it: parked instead, when a stop waits in the hand-off. */
   const fail = (item: QueueItem, runId: string, reason: string) => {
+    if (handOffStops(options.runsDir, runId)) {
+      park(item, runId, `run ${runId} was stopped: ${reason}`);
+      return;
+    }
     dropHandOff(options.runsDir, runId);
     const outcome = store.failed(item.dedupKey, reason);
     const retryAt = store.snapshot().items.find((each) => each.dedupKey === item.dedupKey)?.retryAt;

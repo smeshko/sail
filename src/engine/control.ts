@@ -14,7 +14,9 @@
 // `.sail-runs/<run id>.control`, written like `CONTROL` (`askToSuspend()`, `askToStop()`). The run moves it into
 // `CONTROL` right after it makes its directory (`takeHandOff()`), and a writer that finds the directory there once it has
 // written does the same, so a request written at either side of the directory's creation is moved in exactly once. The
-// watcher deletes a hand-off the run never took when it settles the item (`dropHandOff()`).
+// watcher deletes a hand-off the run never took when it settles the item (`dropHandOff()`). A start refused once its
+// directory exists gives a stop back to the hand-off before it removes the directory (`returnStop()`), so a stop sent to
+// a start that is then refused is still there for the watcher, which parks the item (`handOffStops()`).
 //
 // The watcher takes back an `unwatched` a dead run never took before it resumes the run, its workflow watched again
 // (`cancelUnwatch()`). It takes only a file that reads `unwatched`, and only a dead run's: a live run's file may be
@@ -144,6 +146,31 @@ export function takeHandOff(runsDir: string, runId: string): void {
     else requestUnwatch(runDir);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
+/**
+ * Gives a stop the run took back to its hand-off, as its start is refused and its run directory is about to go: the
+ * watcher finds it there and parks the item rather than retrying it. Anything else in `CONTROL` goes with the directory.
+ */
+export function returnStop(runsDir: string, runId: string): void {
+  let text: string;
+  try {
+    text = readFileSync(join(runsDir, runId, CONTROL_FILE), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (text === 'stopped\n') replaceFile(handOffFile(runsDir, runId), text, handOffName(runsDir, runId, 'tmp'));
+}
+
+/** Whether the run's hand-off asks it to stop: a stop sent to a start that was refused before it took it. */
+export function handOffStops(runsDir: string, runId: string): boolean {
+  try {
+    return readFileSync(handOffFile(runsDir, runId), 'utf8') === 'stopped\n';
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
   }
 }
 
