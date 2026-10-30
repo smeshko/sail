@@ -53,6 +53,7 @@ export {
   type Produces,
   type ScriptOptions,
   type ScriptOutcome,
+  type ScriptPort,
   type ScriptStep,
   type Stage,
   type StageDefinition,

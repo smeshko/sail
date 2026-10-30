@@ -22,7 +22,7 @@ import { readEvents } from '../../../src/events/consumers/ndjson';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import type { HarnessResult } from '../../../src/ports/types';
 import { runDirIn } from '../../helpers/agent-fixture';
-import { copyFixture, edit } from '../../helpers/fixture';
+import { commitGreet, copyFixture, edit } from '../../helpers/fixture';
 import { runCaptured } from '../../helpers/run-captured';
 import { withTempRepo } from '../../helpers/temp-repo';
 import { harnessSuite } from '../../ports/harness.suite';
@@ -82,6 +82,7 @@ describe.skipIf(!LIVE)('claude-code live', () => {
   async function specRun(extra: Record<string, string> = {}) {
     return withTempRepo(async (repo) => {
       const sail = copyFixture(repo.dir);
+      commitGreet(repo);
       edit(sail, 'project.yaml', 'harness: { use: fake }', 'harness: { use: claude-code }');
       edit(sail, 'project.yaml', 'deep: claude-opus-5-5', `deep: ${MODEL}`);
       const runEnv = { ...repo.env, ...extra };

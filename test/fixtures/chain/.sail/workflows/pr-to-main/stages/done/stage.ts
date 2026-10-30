@@ -5,6 +5,7 @@ export const Done = z.object({ ticketKey: z.string(), state: z.object({ type: z.
 
 export const done = script('done', {
   run: './run.sh',
+  ports: ['ticket-source'],
   consumes: { ticketKey: value(z.string()), url: value(z.string()), sha: value(z.string()) },
   output: Done,
   // A port call that failed is an error, never a verdict: no exit code means failed.

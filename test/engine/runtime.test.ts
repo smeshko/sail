@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
+import { BUILTINS } from '../../src/adapters/index';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
 import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
@@ -330,6 +331,56 @@ test('a call that asks for its error routes on it', async () => {
       expect(end).toMatchObject({ status: 'failed', stopReason: 'workflow_failed', message: `handled: ${UNMAPPED}` });
     },
   );
+});
+
+test('a run hands a script step the variables of the ports it declares: publish naming codehost runs, and completes the run (review R7)', async () => {
+  await stubRun(
+    {},
+    (sail) =>
+      edit(
+        sail,
+        'workflows/ticket-to-pr/stages/publish/stage.ts',
+        'output: PrInfo });',
+        "output: PrInfo, ports: ['codehost'] });",
+      ),
+    (end) => {
+      expect(end).toMatchObject({ status: 'completed' });
+      expect(readJournal(end.dir).entries.at(-1)).toMatchObject({ key: 'publish#1', outcome: 'passed' });
+    },
+  );
+});
+
+test("a script step's port variables come from the adapters the run was handed, not the engine's own built-ins (review R4)", async () => {
+  const fake = BUILTINS.fake?.codeHost;
+  if (fake === undefined) throw new Error('the built-ins have no fake code host');
+  const builtins = { ...BUILTINS, stubhost: { codeHost: { ...fake, requires: () => ['STUB_HOST_TOKEN'] } } };
+  process.env.STUB_HOST_TOKEN = 'stub-token';
+  try {
+    await withTempRepo(async (repo) => {
+      const sail = writeStub(repo.dir);
+      edit(sail, 'project.yaml', 'codeHost: { use: fake }', 'codeHost: { use: stubhost }');
+      edit(
+        sail,
+        'workflows/ticket-to-pr/stages/publish/stage.ts',
+        'output: PrInfo });',
+        "output: PrInfo, ports: ['codehost'] });",
+      );
+      edit(
+        sail,
+        'workflows/ticket-to-pr/stages/publish/run.sh',
+        'echo ',
+        '[ "$STUB_HOST_TOKEN" = stub-token ] || exit 3\necho ',
+      );
+      const adapters = await fakeAdapters(repo.dir, { STUB_HOST_TOKEN: 'stub-token' }, { builtins });
+      const end = await runWorkflow({ cwd: repo.dir, adapters, workflow: 'ticket-to-pr', ticket: 'FAKE-1' });
+      expect(end).toMatchObject({ status: 'completed' });
+      if ('refused' in end) return;
+      const exec = readEvents(end.dir).find((event) => event.type === 'script:exec' && event.key === 'publish#1');
+      expect(exec?.type === 'script:exec' && exec.envKeys).toContain('STUB_HOST_TOKEN');
+    });
+  } finally {
+    delete process.env.STUB_HOST_TOKEN;
+  }
 });
 
 test("the fixture's ticket-to-pr, with its harness script gone, gets as far as its spec: the intake leaves the brief spec#1 consumes, and the run fails there, where the fake harness has no script for it", async () => {

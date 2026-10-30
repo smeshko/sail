@@ -26,6 +26,8 @@ export interface FakeTicketSourceOptions extends ProviderOptions {
   readonly state: string;
   /** The state names a designated ticket is picked up from. Every unstarted state when left out. */
   readonly pickUp?: readonly string[];
+  /** How long a change waits for another process's lock on the world, in ms. The store's default when left out. */
+  readonly lockWaitMs?: number;
 }
 
 /** Every state the fake knows, with the type it reports it as. A `pickUp` entry is checked against it. */
@@ -147,7 +149,13 @@ const toListed = (stored: StoredTicket): ListedTicket => {
 };
 
 export function createFakeTicketSource(options: FakeTicketSourceOptions): TicketSource {
-  const store = createStore({ seed: options.seed, state: options.state, schema: World, port: 'ticketSource' });
+  const store = createStore({
+    seed: options.seed,
+    state: options.state,
+    schema: World,
+    port: 'ticketSource',
+    ...(options.lockWaitMs === undefined ? {} : { lockWaitMs: options.lockWaitMs }),
+  });
   const now = () => options.now?.() ?? new Date();
   const emit = (event: ProviderEvent) => options.emit?.(event);
   const { pickUp } = options;

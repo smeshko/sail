@@ -67,6 +67,7 @@ export interface AgentOptions<C extends Consumes, P extends AgentProduces, O ext
     /** What an invalid output leads to. The engine defaults to `retry-once`, feeding the errors back. */
     readonly onInvalidOutput?: 'retry-once' | 'fail';
 }
+export type ScriptPort = 'ticket-source' | 'codehost' | 'jev';
 export interface ScriptOptions<C extends Consumes, P extends Produces, O extends z.ZodType> {
     /** The script to run, relative to its stage directory. Its last stdout line is the JSON output. */
     readonly run: string;
@@ -75,6 +76,17 @@ export interface ScriptOptions<C extends Consumes, P extends Produces, O extends
     /** The schema the script's output is validated against. */
     readonly output: O;
     readonly exitCodes?: ExitCodes;
+    /**
+     * Extra environment names passed when set, credentials included; for example `env: ['JAVA_HOME']`.
+     * Defaults are non-credential allowlisted names, SSH_AUTH_SOCK, SAIL_* knobs, git identity and the preamble.
+     * script:exec records declared names, never their values.
+     */
+    readonly env?: readonly string[];
+    /**
+     * Ports called through sail port. The engine passes the variables their adapters require.
+     * A port call without its variable refuses, naming it.
+     */
+    readonly ports?: readonly ScriptPort[];
     /**
      * How long the script may run. The engine defaults to 600, and on a timeout stops the script's whole process group:
      * SIGTERM, then SIGKILL after a grace period.

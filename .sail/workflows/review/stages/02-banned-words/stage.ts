@@ -12,6 +12,7 @@ export const Banned = z.object({
 
 export const bannedWords = script('banned-words', {
   run: './run.sh',
+  ports: ['jev'],
   consumes: { diff: file('diff.patch'), base: value(z.string()) },
   output: Banned,
   exitCodes: { passed: [0], failed: [] },

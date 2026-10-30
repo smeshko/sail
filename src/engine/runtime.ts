@@ -65,6 +65,11 @@
 // naming the call and the reset time when the provider gave one. The call is left unjournaled, like an interrupted one,
 // and the workspace and lease are kept; in a group the members that passed are journaled first.
 //
+// A call (or a step of one) that ended in an `error` with the port error code `unavailable` (a provider that could not be
+// reached) suspends the run with `port_unavailable`, `run:suspended` naming the call. It is left unjournaled in the same
+// way, and `sail resume` runs it again; a usage limit in the same group takes precedence. A call that passed
+// `{ onError: 'return' }` is the exception: its workflow takes the error, as it takes any other.
+//
 // A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
 // and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
 // reported once, right after what opening the run did, as a `journal:append` with `fromRun`; the intake's also carries
@@ -163,6 +168,11 @@ export interface RunEnd {
   budget?: 'usd' | 'minutes';
   /** When the usage limit a run suspended with `usage_limit` hit resets, when the provider said. */
   resetsAt?: string;
+}
+
+/** A call whose step ended on a provider that was unavailable: its call's key. */
+interface Unavailable {
+  key: string;
 }
 
 /** A call that hit the provider's usage limit. */
@@ -587,6 +597,25 @@ async function drive(
       ...(resetsAt === undefined ? {} : { resetsAt }),
     });
   };
+  /** A call (or a step of one) that ended in `error` on an unavailable port, and doesn't return its errors: its key. */
+  const unavailableOf = (result: Record<string, unknown>, call: PendingCall): Unavailable | undefined => {
+    if (result.outcome !== 'error' || call.onError === 'return') return undefined;
+    const hit = ((result.errors ?? []) as { reason: string; code?: string }[]).some(
+      (error) => error.reason === 'port' && error.code === 'unavailable',
+    );
+    return hit ? { key: callKeyOf(String(result.key)) } : undefined;
+  };
+  /** Suspends the run on a port that was unavailable: the call is left unjournaled, and the workspace kept. */
+  const portUnavailable = (hit: Unavailable): Promise<RunEnd> => {
+    bus.emit({ type: 'run:suspended', stopReason: 'port_unavailable', key: hit.key });
+    return finish({
+      runId,
+      dir,
+      status: 'suspended',
+      stopReason: 'port_unavailable',
+      message: `${hit.key} could not reach a provider: a resume runs it again`,
+    });
+  };
   const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
   /** How the run ends at the boundary before `key`, when its control file asks it to, or undefined to go on. */
   const controlled = (key: string): Promise<RunEnd> | undefined => {
@@ -630,6 +659,7 @@ async function drive(
         branch: opened.workspace.branch,
         config: join(sailDir, 'project.yaml'),
         supplied,
+        portVariables: opened.portVariables,
         ...(callSignal === undefined ? {} : { signal: callSignal }),
         ...(agent === undefined ? {} : { agent }),
         emit: tapped,
@@ -642,7 +672,13 @@ async function drive(
         // from that step. The budget is checked before each further step as before each call: once a step that passed
         // has used it up, the next doesn't start, and the boundary before the call suspends the run.
         onStep: (result, paths) => {
-          if (callSignal?.aborted || ranOut(result) || limitedOf(result) !== undefined) return false;
+          if (
+            callSignal?.aborted ||
+            ranOut(result) ||
+            limitedOf(result) !== undefined ||
+            unavailableOf(result, call) !== undefined
+          )
+            return false;
           journal(result, paths);
           if (callSignal?.aborted) return false;
           return !(
@@ -692,6 +728,7 @@ async function drive(
         branch: opened.workspace.branch,
         config: join(sailDir, 'project.yaml'),
         supplied,
+        portVariables: opened.portVariables,
         ...(signal === undefined ? {} : { signal }),
         ...(agent === undefined ? {} : { agent }),
         emit: intakeEmit(tapped, definition, header.intake.origin),
@@ -876,6 +913,11 @@ async function drive(
           running = undefined;
           return await limitReached(limit);
         }
+        const unavailable = unavailableOf(result, one.call);
+        if (unavailable !== undefined) {
+          running = undefined;
+          return await portUnavailable(unavailable);
+        }
         // Stopped short of its last step, the call is left for the next replay to ask for again.
         if (stopped === true || ranOut(result)) {
           running = undefined;
@@ -897,6 +939,8 @@ async function drive(
       let journaledNow = 0;
       /** The first call of the group that hit the usage limit. */
       let usageLimited: Limited | undefined;
+      /** The first call of the group that ended on an unavailable port. */
+      let unavailable: Unavailable | undefined;
       // A resume may run one call of a group, and it isn't the group's first.
       running = live.size === 1 ? [...live][0] : undefined;
       /** The relay's key is the running call's while exactly one of the group's runs, and none otherwise. */
@@ -913,6 +957,11 @@ async function drive(
             const limit = limitedOf(result);
             if (limit !== undefined) {
               usageLimited ??= limit;
+              return;
+            }
+            const down = unavailableOf(result, each.call);
+            if (down !== undefined) {
+              unavailable ??= down;
               return;
             }
             if (stopped === true || ranOut(result)) return;
@@ -945,6 +994,7 @@ async function drive(
       if (rejected !== undefined) throw rejected.reason;
       if (signal?.aborted) return await interrupted(`stopped during ${what}`);
       if (usageLimited !== undefined) return await limitReached(usageLimited);
+      if (unavailable !== undefined) return await portUnavailable(unavailable);
     }
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });
