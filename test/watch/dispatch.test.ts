@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { branchFor } from '../../src/engine/branch';
-import { requestStop, requestUnwatch } from '../../src/engine/control';
+import { handOffFile, requestStop, requestUnwatch } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
 import { claimComment } from '../../src/engine/source';
 import type { CodeHost } from '../../src/ports/code-host';
@@ -810,6 +810,43 @@ test('a stopped run parks its item at once with the run named, and it is never r
       spawned: ['FAKE-1'],
       settled: ['FAKE-1 parked'],
     });
+  });
+});
+
+test('settling an item deletes the hand-off its run never took: a refused start, a completed run and a stopped run, each with its own run id', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 3, { claiming: false });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const ids = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
+    const handOffs = () => ids.map((id) => existsSync(handOffFile(w.runs, id)));
+    for (const id of ids) writeFileSync(handOffFile(w.runs, id), 'stopped\n');
+    const before = handOffs();
+    await w.spawner.end('FAKE-1', { refused: 'sail FAKE-1: refused' });
+    await w.spawner.end('FAKE-2');
+    await w.spawner.end('FAKE-3', { status: 'failed', stopReason: 'stopped' });
+    await dispatcher.tick();
+    expect({ before, after: handOffs(), items: states(w.store) }).toEqual({
+      before: [true, true, true],
+      after: [false, false, false],
+      items: ['FAKE-1 failed 1', 'FAKE-2 done 1', 'FAKE-3 parked 1'],
+    });
+  });
+});
+
+test('a run left to resume keeps its hand-off: only a settled item has it deleted', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const { runId } = w.spawner.run('FAKE-1');
+    writeFileSync(handOffFile(w.runs, runId), 'unwatched\n');
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    await dispatcher.tick();
+    expect({
+      resumes: w.spawner.resumes.map((resume) => resume.runId),
+      handOff: readFileSync(handOffFile(w.runs, runId), 'utf8'),
+    }).toEqual({ resumes: [runId], handOff: 'unwatched\n' });
   });
 });
 
