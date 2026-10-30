@@ -113,6 +113,7 @@ import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
 import type { Harness } from '../ports/harness';
+import type { Usage } from '../ports/types';
 import type { StageDefinition } from '../sdk/steps';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
@@ -120,6 +121,7 @@ import { type BudgetTracker, recordIn, suspension, trackBudget } from './budget'
 import { type AgentExecution, asStep, callProblems, type Ran, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
+import type { ContractError } from './contract';
 import { stopNowRequested, takeControl } from './control';
 import { bindingChanges } from './fingerprint';
 import {
@@ -232,7 +234,10 @@ interface DriveOptions extends EventOptions {
   onOpened?(): Promise<void>;
 }
 
-/** Why a call ended as it did, for the workflow: an error's problems, each with its reason, or a blocked agent's own. */
+/**
+ * Why a call ended as it did, for the workflow: an error's problems, each with its reason, or a blocked agent's own.
+ * `errorsOf` in stage-call.ts parses this `<reason>: <message>; …` format back from a step's older journal line.
+ */
 function reasonOf(result: Record<string, unknown>): string | null {
   if (result.outcome === 'blocked') return String(result.reason);
   if (result.outcome !== 'error') return null;
@@ -260,6 +265,15 @@ function entryFrom(
     files: Object.fromEntries(Object.entries(files).map(([name, file]) => [name, file.path])),
     resultPath: runRelative(runDir, paths.result),
     ...(group === undefined ? {} : { group }),
+    ...(typeof result.step === 'string'
+      ? {
+          ...(result.usage === undefined ? {} : { usage: result.usage as Usage }),
+          startedAt: result.startedAt as string,
+          finishedAt: result.finishedAt as string,
+          durationMs: result.durationMs as number,
+          ...(result.outcome === 'error' ? { errors: result.errors as ContractError[] } : {}),
+        }
+      : {}),
     ...(bindings === undefined ? {} : { bindings }),
   };
 }

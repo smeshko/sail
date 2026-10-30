@@ -143,7 +143,7 @@ How a call or step ended, from a fixed set per kind:
 - script: `passed`, `failed` or `error`, a verdict the engine maps from the exit code
 - agent: `done`, `blocked` or `error`, completion the agent declares; its judgments travel in the output
 
-The workflow routes on the outcome. An `error` fails the run with stop reason `stage_error`, unless the call passes `{ onError: 'return' }` to receive it. A multi-step stage's outcome is its last step's, or the outcome of the step that stopped it: a step that ends `blocked`, `failed` or `error` ends its stage, and the steps after it don't run.
+The workflow routes on the outcome. An `error` fails the run with stop reason `stage_error`, unless the call passes `{ onError: 'return' }` to receive it. A multi-step stage's outcome is its last step's, or the outcome of the step that stopped it: a step that ends `blocked`, `failed` or `error` ends its stage, and the steps after it don't run. A multi-step stage whose end finds a file one of its steps produced gone, or no longer a regular file, ends `error` whatever its steps' outcomes.
 _Avoid_: status (the run's word), result, state, verdict
 
 **Blocked**:
@@ -151,7 +151,7 @@ The agent outcome for "I cannot complete this", submitted with a reason. It hono
 _Avoid_: failed, stuck, gave up, incomplete
 
 **Error**:
-The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `usage_limit`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event. A `port` error carries the code `unavailable` when the provider could not be reached: a step that doesn't pass on it is an error, whatever its exit code, and suspends the run, unless its call passed `{ onError: 'return' }`, whose workflow takes the error. A dispatched run so suspended (`port_unavailable`) is held and resumed by its watcher on a growing back-off of 1, 2, 5, 10 and 30 minutes, and parked with the last port error once it is suspended past that schedule; a resume that gets past the call resets the count.
+The outcome when a contract was not honoured: invalid output, a missing declared file (one a later step of its stage removed included), a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `usage_limit`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event. A `port` error carries the code `unavailable` when the provider could not be reached: a step that doesn't pass on it is an error, whatever its exit code, and suspends the run, unless its call passed `{ onError: 'return' }`, whose workflow takes the error. A dispatched run so suspended (`port_unavailable`) is held and resumed by its watcher on a growing back-off of 1, 2, 5, 10 and 30 minutes, and parked with the last port error once it is suspended past that schedule; a resume that gets past the call resets the count.
 _Avoid_: crash, exception, failed
 
 **Output**:
@@ -343,7 +343,7 @@ What was asked, written once at start and never changed: the source, the workflo
 _Avoid_: manifest, metadata, config snapshot
 
 **Journal**:
-The append-only record of completed calls and steps (key, outcome, output, files, and on a call its binding fingerprints). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
+The append-only record of completed calls and steps (key, outcome, output, files, and on a call its binding fingerprints). A step's line also records its usage, times and, when it ended `error`, its errors, so a resume rebuilds the step from its line alone. A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
 _Avoid_: log, history, state file, checkpoint
 
 **Replay**:

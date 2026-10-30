@@ -89,12 +89,13 @@ function toIssue(error: ErrorObject): Pick<SchemaIssue, 'path' | 'message'> {
 const RESTATING = new Set(['if', 'propertyNames']);
 
 // Rules JSON Schema can't state, checked once a document matches its schema. A multi-step call's outcome is its last
-// step's, and JSON Schema can't compare against the last element of an array.
+// step's, or `error` when the stage's end found a step's file gone, and JSON Schema can't compare against the last
+// element of an array.
 function ruleIssues(schema: SchemaName, data: unknown): SchemaIssue[] {
   if (schema !== 'sail.result.v1') return [];
   const result = data as { outcome: string; steps?: { outcome: string }[] };
   const last = result.steps?.at(-1);
-  if (last === undefined || last.outcome === result.outcome) return [];
+  if (last === undefined || last.outcome === result.outcome || result.outcome === 'error') return [];
   return [{ schema, path: '/outcome', message: `must equal the last step's outcome (${last.outcome})` }];
 }
 

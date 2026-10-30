@@ -910,6 +910,39 @@ test('journal: an unknown outcome names the field', () => {
   expect(paths('sail.journal.v1', { ...journal, outcome: 'maybe' })).toEqual(['/outcome']);
 });
 
+const STEP_LINE = {
+  ...journal,
+  key: 'publish#1/describe',
+  stage: 'publish',
+  step: 'describe',
+  usage: { inputTokens: 800, outputTokens: 80, costUsd: 0.25 },
+  startedAt: TS,
+  finishedAt: TS,
+  durationMs: 1200,
+};
+
+test("journal: a step's line may carry usage, times and errors, and a line without them is valid too", () => {
+  expect(paths('sail.journal.v1', STEP_LINE)).toEqual([]);
+  expect(
+    paths('sail.journal.v1', {
+      ...STEP_LINE,
+      outcome: 'error',
+      errors: [{ reason: 'port', message: 'down', code: 'unavailable', resetsAt: TS }],
+    }),
+  ).toEqual([]);
+  expect(paths('sail.journal.v1', { ...journal, key: 'publish#1/describe' })).toEqual([]);
+});
+
+test("journal: a step's line with no errors in its errors, a usage without costUsd or a negative duration names the field", () => {
+  expect(paths('sail.journal.v1', { ...STEP_LINE, errors: [] })).toEqual(['/errors']);
+  expect(paths('sail.journal.v1', { ...STEP_LINE, usage: { inputTokens: 1 } })).toEqual(['/usage/costUsd']);
+  expect(paths('sail.journal.v1', { ...STEP_LINE, durationMs: -1 })).toEqual(['/durationMs']);
+  expect(paths('sail.journal.v1', { ...STEP_LINE, startedAt: 'yesterday' })).toEqual(['/startedAt']);
+  expect(paths('sail.journal.v1', { ...STEP_LINE, errors: [{ reason: 'nope', message: 'x' }] })).toEqual([
+    '/errors/0/reason',
+  ]);
+});
+
 test('property names in a path are escaped as JSON pointer segments', () => {
   expect(paths('sail.run.v1', { ...run, 'a/b~c': 1 })).toEqual(['/a~1b~0c']);
 });

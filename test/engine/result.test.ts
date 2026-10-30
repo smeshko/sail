@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildResult, writeResult } from '../../src/engine/result';
+import { buildResult, buildStageResult, type StepEntry, writeResult } from '../../src/engine/result';
 import { validateDocument } from '../../src/engine/schemas';
 import type { StepRun } from '../../src/kinds/index';
 
@@ -123,4 +123,42 @@ test("a built-in intake's result has no fields of a kind's own, and writeResult 
     writeResult(path, written);
     expect(readFileSync(path, 'utf8')).toBe(`${JSON.stringify(written, null, 2)}\n`);
   }
+});
+
+const stepEntry = (name: string, run: StepRun): StepEntry => ({
+  step: name,
+  kind: 'script',
+  result: buildResult({
+    runId: RUN_ID,
+    stage: 'tests',
+    call: 1,
+    kind: 'script',
+    run,
+    consumed: {},
+    startedAt,
+    finishedAt,
+  }),
+  resultPath: `tests/${name}/result.json`,
+});
+const stage = (steps: StepEntry[], errors?: { reason: 'missing_file'; message: string }[]) =>
+  buildStageResult({ runId: RUN_ID, stage: 'tests', call: 1, consumed: {}, steps, ...(errors ? { errors } : {}) });
+const GONE = { reason: 'missing_file', message: "step 'a': 'x.md' was not produced in $STAGE_OUT" } as const;
+
+test('stage-level errors turn a passed last step into an error, with no output', () => {
+  const result = stage([stepEntry('a', passed)], [GONE]);
+  expect(result).toMatchObject({ outcome: 'error', errors: [GONE], output: null });
+  expect(result).not.toHaveProperty('reason');
+  expect(validateDocument('sail.result.v1', result)).toEqual([]);
+});
+
+test("stage-level errors follow the last step's own errors, and replace a blocked or failed outcome", () => {
+  const own = { reason: 'exit_code', message: 'exited 9' } as const;
+  const failedRun: StepRun = { outcome: 'error', output: null, files: {}, errors: [own], record };
+  expect(stage([stepEntry('a', failedRun)], [GONE])).toMatchObject({ outcome: 'error', errors: [own, GONE] });
+  const failed: StepRun = { ...passed, outcome: 'failed' };
+  expect(stage([stepEntry('a', failed)], [GONE])).toMatchObject({ outcome: 'error', errors: [GONE], output: null });
+});
+
+test('no stage-level errors leave the last step as the stage outcome', () => {
+  expect(stage([stepEntry('a', passed)], [])).toMatchObject({ outcome: 'passed', output: { ok: true } });
 });

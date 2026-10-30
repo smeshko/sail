@@ -6,16 +6,18 @@ import { z } from 'zod';
 import { isPlainName, runRelative } from './call-dir';
 
 /** Why an outcome is `error`, as `sail.result.v1` names the reasons. */
-export type ErrorReason =
-  | 'invalid_output'
-  | 'missing_file'
-  | 'timeout'
-  | 'exit_code'
-  | 'not_started'
-  | 'budget_exceeded'
-  | 'harness'
-  | 'usage_limit'
-  | 'port';
+export const ERROR_REASONS = [
+  'invalid_output',
+  'missing_file',
+  'timeout',
+  'exit_code',
+  'not_started',
+  'budget_exceeded',
+  'harness',
+  'usage_limit',
+  'port',
+] as const;
+export type ErrorReason = (typeof ERROR_REASONS)[number];
 
 export interface ContractError {
   reason: ErrorReason;

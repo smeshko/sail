@@ -35,8 +35,55 @@
       "patternProperties": { ".": { "type": "string", "pattern": "^[0-9a-f]{16}$" } },
       "additionalProperties": false
     },
-    "recordedAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" }
+    "recordedAt": { "$ref": "#/$defs/ts" },
+    "usage": {
+      "description": "what a step spent: on a step's line only",
+      "type": "object",
+      "properties": {
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "cacheReadTokens": { "type": "integer", "minimum": 0 },
+        "cacheWriteTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 }
+      },
+      "required": ["costUsd"],
+      "additionalProperties": false
+    },
+    "startedAt": { "$ref": "#/$defs/ts" },
+    "finishedAt": { "$ref": "#/$defs/ts" },
+    "durationMs": { "type": "number", "minimum": 0 },
+    "errors": {
+      "description": "why a step ended error: every contract problem found, each with its reason. On a step's line only",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "enum": [
+              "invalid_output",
+              "missing_file",
+              "timeout",
+              "exit_code",
+              "not_started",
+              "budget_exceeded",
+              "harness",
+              "usage_limit",
+              "port"
+            ]
+          },
+          "message": { "type": "string", "minLength": 1 },
+          "resetsAt": { "$ref": "#/$defs/ts" },
+          "code": { "const": "unavailable" }
+        },
+        "required": ["reason", "message"],
+        "additionalProperties": false
+      }
+    }
   },
   "required": ["seq", "key", "stage", "call", "outcome", "output", "reason", "files", "resultPath", "recordedAt"],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "ts": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$" }
+  }
 }

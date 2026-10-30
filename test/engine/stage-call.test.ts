@@ -2,7 +2,7 @@
 // repository, each step's result.json and the stage's read back from disk. `publish` is the fixture's shape: an agent
 // `describe` that writes the pull request's body, then a script `open` that reads its title and that body.
 import { expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFakeHarness, type ScriptedAnswer } from '../../src/adapters/fake/harness';
 import type { Supplied } from '../../src/engine/bindings';
@@ -715,5 +715,181 @@ test('runCall refuses a multi-step stage with problems before anything is writte
     );
     expect(existsSync(join(repo.dir, '.sail-runs'))).toBe(false);
     expect(s.events).toEqual([]);
+  });
+});
+
+/** A first process: describe runs and stops the call before open. Returns describe's journal line. */
+async function journaledDescribe(s: Setup, change: Partial<JournalEntry> = {}): Promise<JournalEntry> {
+  let heard: Record<string, unknown> | undefined;
+  await runStageCall(s.request(), publish, {
+    onStep: (result) => {
+      heard = result;
+      return false;
+    },
+  });
+  return {
+    seq: 3,
+    key: 'publish#1/describe',
+    stage: 'publish',
+    call: 1,
+    step: 'describe',
+    outcome: 'done',
+    output: heard?.output,
+    reason: null,
+    files: { 'pr-body.md': `${CALL}/out/pr-body.md` },
+    resultPath: `${CALL}/steps/1-describe/result.json`,
+    recordedAt: TS,
+    ...change,
+  };
+}
+
+const INVALID = { reason: 'invalid_output', message: "'title' is required" } as const;
+
+test.each([
+  ['missing', undefined],
+  ['invalid JSON', '{ not json'],
+])(
+  "a journaled error step whose result.json is %s is rebuilt from its journal line: the stage result validates and carries the line's errors",
+  async (_name, replacement) => {
+    await withTempRepo(async (repo) => {
+      const s = setup(repo);
+      const entry = await journaledDescribe(s, {
+        outcome: 'error',
+        output: null,
+        reason: `invalid_output: ${INVALID.message}`,
+        files: {},
+        errors: [INVALID],
+      });
+      const path = join(s.runDir, entry.resultPath);
+      if (replacement === undefined) rmSync(path);
+      else writeFileSync(path, replacement);
+      const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+      expect(result).toMatchObject({ outcome: 'error', errors: [INVALID], steps: [{ step: 'describe' }] });
+      expect(json(s, `${CALL}/result.json`)).toMatchObject({ outcome: 'error', errors: [INVALID] });
+      expect(validateDocument('sail.result.v1', json(s, `${CALL}/result.json`)).map(formatIssue)).toEqual([]);
+    });
+  },
+);
+
+test("a journaled step's usage and times come from its journal line, not from a rewritten result.json", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const line = {
+      usage: { costUsd: 0.25 },
+      startedAt: '2026-10-23T08:59:00.000Z',
+      finishedAt: '2026-10-23T08:59:01.200Z',
+      durationMs: 1200,
+    };
+    const entry = await journaledDescribe(s, line);
+    const path = join(s.runDir, entry.resultPath);
+    writeFileSync(
+      path,
+      JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), usage: { costUsd: 0 }, durationMs: 0 }),
+    );
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    const openMs = json(s, `${CALL}/steps/2-open/result.json`).durationMs as number;
+    expect(result).toMatchObject({ startedAt: line.startedAt, usage: { costUsd: 0.25 } });
+    expect(result.durationMs).toBe(1200 + openMs);
+    expect((result.steps as { costUsd?: number }[])[0]?.costUsd).toBe(0.25);
+  });
+});
+
+test.each([
+  ['one error', 'harness: model failed', [{ reason: 'harness', message: 'model failed' }]],
+  [
+    'a message holding a semicolon',
+    'invalid_output: a; b; timeout: ran 5 minutes',
+    [
+      { reason: 'invalid_output', message: 'a; b' },
+      { reason: 'timeout', message: 'ran 5 minutes' },
+    ],
+  ],
+  ['a reason that parses as none', 'something broke', [{ reason: 'harness', message: 'something broke' }]],
+])('a journaled error step line without errors is rebuilt from its reason: %s', async (_name, reason, errors) => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const entry = await journaledDescribe(s, { outcome: 'error', output: null, reason, files: {} });
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    expect(result).toMatchObject({ outcome: 'error', errors });
+    expect(validateDocument('sail.result.v1', json(s, `${CALL}/result.json`)).map(formatIssue)).toEqual([]);
+  });
+});
+
+const GONE_BODY = {
+  reason: 'missing_file',
+  message: "step 'describe': 'pr-body.md' was not produced in $STAGE_OUT",
+} as const;
+
+test("a fresh call whose later step deletes an earlier step's file ends in error, missing_file, naming the step", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    s.script('open.sh', `${OPENS}\nrm "$STAGE_OUT/pr-body.md"`);
+    const { result } = await runStageCall(s.request(), publish);
+    expect(result).toMatchObject({ outcome: 'error', errors: [GONE_BODY], output: null });
+    const end = s.events.find((event) => event.type === 'stage:end');
+    expect(end).toMatchObject({ outcome: 'error', errors: [GONE_BODY] });
+    expect(json(s, `${CALL}/steps/2-open/result.json`)).toMatchObject({ outcome: 'passed' });
+    expect(Object.values(resultIssues(s)).flat()).toEqual([]);
+  });
+});
+
+test("a resume whose journaled step's file is missing ends in error, missing_file, and its later step still runs", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const entry = await journaledDescribe(s);
+    rmSync(join(s.runDir, CALL, 'out', 'pr-body.md'));
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    expect(result).toMatchObject({ outcome: 'error' });
+    expect(result.errors).toContainEqual(GONE_BODY);
+    expect(stepStarts(s.events)).toEqual(['publish#1/describe 1', 'publish#1/open 1']);
+    expect(Object.values(resultIssues(s)).flat()).toEqual([]);
+  });
+});
+
+test("a journaled step's file replaced by a directory ends the call in error, missing_file (not a regular file)", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const entry = await journaledDescribe(s);
+    const file = join(s.runDir, CALL, 'out', 'pr-body.md');
+    rmSync(file);
+    mkdirSync(file);
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    expect(result).toMatchObject({ outcome: 'error' });
+    expect(result.errors).toContainEqual({
+      reason: 'missing_file',
+      message: "step 'describe': 'pr-body.md' in $STAGE_OUT is not a regular file",
+    });
+  });
+});
+
+test("a journaled step's file changed after it was journaled is hashed again: the call passes and records the new sha256", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const entry = await journaledDescribe(s);
+    writeFileSync(join(s.runDir, CALL, 'out', 'pr-body.md'), 'Changed.\n');
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    const now = new Bun.CryptoHasher('sha256').update('Changed.\n').digest('hex');
+    expect(result).toMatchObject({ outcome: 'passed' });
+    expect((result.files as Record<string, { sha256: string; bytes: number }>)['pr-body.md']).toMatchObject({
+      sha256: now,
+      bytes: 9,
+    });
+  });
+});
+
+test("a fresh agent step's document keeps its validation in the call's result.json once the stage's end hashes it again (review R4)", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    writeFileSync(join(repo.dir, '.sail', 'workflows', 'ticket-to-pr', 'stages', 'publish', 'body.md'), 'Body.\n');
+    const always = { check: 'always', derives: [], validate: () => ({ problems: [] }) };
+    const documented = stage('publish', {
+      consumes: { ticketKey: value(TicketKey) },
+      output: PrInfo,
+      steps: [agent('describe', { ...describe, produces: { 'pr-body.md': doc('./body.md', [always]) } }), open],
+    });
+    const { result } = await runStageCall(s.request(documented), documented);
+    expect(result).toMatchObject({ outcome: 'passed' });
+    const files = (json(s, `${CALL}/result.json`).files ?? {}) as Record<string, Record<string, unknown>>;
+    expect(files['pr-body.md']).toMatchObject({ validation: { ok: true } });
   });
 });
