@@ -1,7 +1,10 @@
 // One watched workflow's dispatch: each tick settles the items whose run has ended, then starts due items while the
 // workflow is under its `maxConcurrentRuns`.
 //
-// - **In flight** is an item `dispatched` whose pid is alive. Only those count against the cap. Each tick hands every
+// - **In flight** is an item `dispatched` whose pid is alive. Those count against the cap, and so do the workflow's live
+//   manual runs: the live runs in this clone that no dispatched item owns, which `liveRuns()` finds once at the top of
+//   each tick, by their lease. A run that cannot be counted, because a lease cannot be read, starts and resumes
+//   nothing that tick, and is said once. Each tick hands every
 //   dispatched item to `reconcile.ts`, which answers by its run directory, its dispatch log and its lease: a live run is
 //   in flight, and adopted with `run:adopted` on this dispatcher's first tick, its control file left to it;
 //   `completed` is done; `failed stopped` parks the item at once; any other `failed` is a failed attempt, retried later
@@ -42,6 +45,7 @@ import { cancelUnwatch } from '../engine/control';
 import { getPullRequestDetails } from '../engine/pr-source';
 import { readStatus } from '../engine/run-dir';
 import { newRunId } from '../engine/run-id';
+import { liveRuns } from '../engine/runs';
 import { claimedBy } from '../engine/source';
 import type { ResumedFrom } from '../events/types';
 import type { CodeHost } from '../ports/code-host';
@@ -105,7 +109,7 @@ export interface DispatcherOptions {
 export interface Dispatcher {
   /** Settles what has ended, then starts what is due within the cap. */
   tick(): Promise<void>;
-  /** How many of the workflow's dispatched runs are alive. */
+  /** How many of the workflow's dispatched runs are alive. The live manual runs, which also fill the cap, are not in it. */
   inFlight(): number;
 }
 
@@ -145,6 +149,29 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   const alive = (item: QueueItem) => item.pid !== undefined && isAlive(item.pid);
   const dispatchedItems = () => store.snapshot().items.filter((item) => item.state === 'dispatched');
   const inFlight = () => dispatchedItems().filter(alive).length;
+
+  /** The live runs of the workflow that no dispatched item owns, this tick; undefined when they could not be counted. */
+  let manual: number | undefined;
+  /** The message reported for the live runs that could not be counted, until they are counted again. */
+  let uncounted: string | undefined;
+  const full = () => manual === undefined || inFlight() + manual >= options.maxConcurrentRuns;
+
+  const countManual = async () => {
+    try {
+      const owned = new Set(dispatchedItems().map((item) => item.runId));
+      const live = await liveRuns(options.runsDir, workflow, { workspace, isAlive });
+      manual = live.filter((runId) => !owned.has(runId)).length;
+      uncounted = undefined;
+    } catch (error) {
+      if (!(error instanceof PortError)) throw error;
+      manual = undefined;
+      const message = `the live runs of ${workflow} were not counted: ${error.message} (${error.code})`;
+      if (uncounted !== message) {
+        uncounted = message;
+        options.onError?.(message);
+      }
+    }
+  };
 
   /** Records a failed attempt, or a failure before any, and reports it. */
   const fail = (item: QueueItem, runId: string, reason: string) => {
@@ -261,7 +288,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
       case 'resume':
         if (holding() || options.paused?.() === true) break;
         // A resume takes a slot as a start does: over the cap, as after the cap was lowered, it waits a tick.
-        if (inFlight() >= options.maxConcurrentRuns) break;
+        if (full()) break;
         // Watched again: an `unwatched` the dead run never took would suspend its resume at once. Nothing else writes
         // to a dead run's control file: `sail stop` ends a run it finds dead itself.
         cancelUnwatch(runDir);
@@ -400,7 +427,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     if (holding() || options.paused?.() === true) return;
     let remote: string | undefined;
     for (const item of store.due()) {
-      if (inFlight() >= options.maxConcurrentRuns) return;
+      if (full()) return;
       let answer: false | { force: boolean };
       try {
         remote ??= (await workspace.repository()).url;
@@ -417,6 +444,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   return {
     async tick() {
       if (store.snapshot().held !== undefined && !holding()) store.release();
+      await countManual();
       await settle();
       await dispatch();
     },

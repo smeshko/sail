@@ -18,6 +18,7 @@ import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
 import { dispatchLog } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
+import { writeLiveRun } from '../helpers/live-run';
 import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
 import { manualClock, queueEventIssues, queueEvents, sourceKey, ticket } from '../helpers/queue';
 import { writeStub } from '../helpers/stub-workflow';
@@ -1190,5 +1191,125 @@ test('with one slot, a ticket whose priority was raised after it was queued is d
     await dispatcher.tick();
     expect(spawnedKeys(w.spawner)).toEqual(['FAKE-3']);
     expect(states(w.store)).toEqual(['FAKE-3 dispatched 1', 'FAKE-1 queued 0', 'FAKE-2 queued 0']);
+  });
+});
+
+// The cap counts runs started by hand too (ADW-201): the workflow's live runs in the clone that no dispatched item owns.
+
+const MANUAL = 'FAKE-9-01M3BWNZM08Q4T6V2XRJ5KWD3A';
+
+/** A live run of `workflow` in the world's clone, started by hand: its branch leased to this process. */
+const manualRun = (w: World, repo: TempRepo, workflow = 'a', runId = MANUAL) =>
+  writeLiveRun(repo.dir, { workflow, ticketKey: 'FAKE-9', runId, adapters: w.adapters });
+
+test('a live manual run fills a cap of 1: nothing starts across ticks, and once it ends the next tick starts the first due item', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 1);
+    const manual = await manualRun(w, repo);
+    const dispatcher = w.dispatcher();
+    try {
+      await dispatcher.tick();
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual([]);
+    } finally {
+      await manual.release();
+    }
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    expect(states(w.store)).toEqual(['FAKE-1 dispatched 1', 'FAKE-2 queued 0']);
+  });
+});
+
+test('one live manual run leaves a cap of 2 one slot: one item starts', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 2);
+    const manual = await manualRun(w, repo);
+    try {
+      const dispatcher = w.dispatcher();
+      await dispatcher.tick();
+      expect([spawnedKeys(w.spawner), dispatcher.inFlight()]).toEqual([['FAKE-1'], 1]);
+    } finally {
+      await manual.release();
+    }
+  });
+});
+
+test('a dead run whose resume is due waits while a live manual run fills the cap, and is resumed once it ends', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    const manual = await manualRun(w, repo);
+    try {
+      await dispatcher.tick();
+      expect(w.spawner.resumes).toEqual([]);
+    } finally {
+      await manual.release();
+    }
+    await dispatcher.tick();
+    expect(w.spawner.resumes.map((each) => each.runId)).toEqual([w.spawner.run('FAKE-1').runId]);
+  });
+});
+
+test('a suspended manual run, and a live run of another workflow, take no slot', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 2, 2);
+    const suspended = await manualRun(w, repo);
+    await suspended.suspend();
+    const other = await manualRun(w, repo, 'b', 'FAKE-8-01M3BWNZM08Q4T6V2XRJ5KWD3B');
+    try {
+      await w.dispatcher().tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    } finally {
+      await suspended.release();
+      await other.release();
+    }
+  });
+});
+
+test('a dispatched run whose directory also holds a live lease counts once', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 2);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2']);
+    const own = await manualRun(w, repo, 'a', w.spawner.run('FAKE-1').runId);
+    try {
+      await w.spawner.end('FAKE-2');
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1', 'FAKE-2', 'FAKE-3']);
+    } finally {
+      await own.release();
+    }
+  });
+});
+
+test('live runs that cannot be counted start nothing, say so once, and dispatch goes on once they read', async () => {
+  await withTempRepo(async (repo) => {
+    let broken: string | undefined;
+    let unreadable = true;
+    const w = await world(repo, 2, 2, {
+      workspace: failingHolder(
+        () => broken,
+        () => (unreadable ? new PortError('workspace', 'lease', 'invalid', 'lease.json: Unexpected token') : undefined),
+      ),
+    });
+    const manual = await manualRun(w, repo);
+    broken = manual.branch;
+    try {
+      const dispatcher = w.dispatcher();
+      await dispatcher.tick();
+      await dispatcher.tick();
+      expect({ spawned: spawnedKeys(w.spawner), errors: w.errors }).toEqual({
+        spawned: [],
+        errors: ['the live runs of a were not counted: workspace.lease: lease.json: Unexpected token (invalid)'],
+      });
+      unreadable = false;
+      await dispatcher.tick();
+      expect(spawnedKeys(w.spawner)).toEqual(['FAKE-1']);
+    } finally {
+      await manual.release();
+    }
   });
 });
