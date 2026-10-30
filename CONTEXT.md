@@ -411,6 +411,10 @@ _Avoid_: consumption, spend, billing, metering
 
 ### Guardrails
 
+**Gate file**:
+A file `bun run verify` reads: the toolchain configs, the test launcher and preload, the coverage census, the lint config and `.github/`. A pull request could change one to loosen its own `verify` check; sail's review workflow hands a pull request that changes one to a human rather than merging it.
+_Avoid_: protected file, CI file
+
 **Guardrail**:
 Any limit the engine enforces on a run: permissions, budgets, untrusted-input wrapping, the designation label. Guardrails are enforced by code, never requested in a prompt.
 _Avoid_: policy, safety prompt, rule
