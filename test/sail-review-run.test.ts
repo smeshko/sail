@@ -1,7 +1,7 @@
 // sail's own `review` workflow, end to end through the CLI on the fakes: `sail '#7' --workflow review` in a temporary
 // repository that holds a copy of the repository's own `.sail/`, its ports all fake and, where a case seeds one, a fake
-// Jev. The first cases are about check-fix: Jev's clear yes on every targeted finding ends a fix round without an agent
-// session, anything else leaves it to the agent, with Jev's answers as its hint. One is about the tickets it files. The
+// Jev. The first cases are about check-fix: it runs on every fix pass, a clear yes from Jev included, with Jev's answers as
+// its hint, and a regression it reports goes to the next pass. One is about the tickets it files. The
 // rest are about landing: a check still red after its rerun goes to fix, a rejected merge merges the base in, and both
 // take the fix passes left. Every merge is preceded by gate-files; a gate change is handed to a human instead.
 // Triage cases show Jev decisions surviving omissions and judge overrides winning.
@@ -87,6 +87,15 @@ async function pullRequest(repo: TempRepo): Promise<{ headSha: string; labels: s
 
 /** The keys from merge#1 on: the landing. */
 const landing = (keys: string[]) => keys.slice(keys.indexOf('merge#1'));
+
+/** Seeds `check-fix#1` with the fake's every-target-resolved answers, and `extra` targets resolved too, so the fix loop ends after one round. */
+function oneRound(repo: TempRepo, extra: string[] = []): void {
+  const sail = join(repo.dir, '.sail');
+  const seeds = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
+  const [answer] = seeds['check-fix'];
+  for (const finding of extra) answer.output.items.push({ finding, resolved: true, detail: 'Holds.' });
+  seedHarness(sail, 'check-fix#1', [answer]);
+}
 
 /** `sail '#7' --workflow review` in `repo`: its exit code and stderr, the keys its journal holds and its run directory. */
 async function review(repo: TempRepo): Promise<{ code: number; stderr: string; keys: string[]; dir: string }> {
@@ -215,6 +224,7 @@ test.each([
           Object.assign(decision, { verdict: 'drop', ticket: null });
       }
       seedHarness(sail, 'judge', [answer]);
+      oneRound(repo, overrule ? [] : ['R1']);
       const { code, keys, dir } = await review(repo);
       expect(code).toBe(0);
       expect(keys.slice(keys.indexOf('judge#1') - 1, keys.indexOf('judge#1') + 1)).toEqual(['jev-triage#1', 'judge#1']);
@@ -277,19 +287,54 @@ test('a leak-check Jev hit reaches the judge as L1', async () => {
   });
 }, 120_000);
 
-test('with Jev answering every targeted finding a clear yes, jev-fix#1 runs, check-fix never does, and the fix loop ends after one round', async () => {
+test('with Jev answering every targeted finding a clear yes, check-fix#1 still runs beside validate#2 with the answers as its hint, and the fix loop ends after one round', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
+    oneRound(repo);
     const { code, stderr, keys, dir } = await review(repo);
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
 
-    expect(keys.filter((key) => key.startsWith('check-fix#'))).toEqual([]);
+    expect(keys).toContain('check-fix#1');
     expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1']);
     const at = keys.indexOf('jev-fix#1');
-    expect(keys.slice(at - 1, at + 3)).toEqual(['fix#1', 'jev-fix#1', 'validate#2', 'push#1']);
+    expect(keys.slice(at - 1, at + 1)).toEqual(['fix#1', 'jev-fix#1']);
+    expect(keys).toContain('validate#2');
+    expect(jevHint(dir, 'check-fix', 1).answers).toEqual([
+      { id: 'V1', yes: 0.99 },
+      { id: 'D1', yes: 0.99 },
+      { id: 'R2', yes: 0.99 },
+    ]);
     expect(asked(dir, 'jev-fix#1')).toHaveLength(1);
     const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
     expect(summary.loops?.fix?.iterations).toBe(1);
+  });
+}, 120_000);
+
+test('with Jev clearing every target, a medium regression check-fix reports goes to fix#2 as F1-1, and a low one does not', async () => {
+  await withTempRepo(async (repo) => {
+    setUp(repo, seed());
+    const sail = join(repo.dir, '.sail');
+    const seeds = JSON.parse(readFileSync(join(sail, 'fake', 'harness.json'), 'utf8'));
+    const [resolved] = seeds['check-fix'];
+    const regressed = structuredClone(resolved);
+    regressed.output.findings = [
+      { severity: 'medium', file: 'notes.txt', title: 'the fix broke the footer', detail: 'x' },
+      { severity: 'low', file: 'notes.txt', title: 'a stray space', detail: 'y' },
+    ];
+    seedHarness(sail, 'check-fix#1', [regressed]);
+    const again = structuredClone(resolved);
+    again.output.items.push({ finding: 'F1-1', resolved: true, detail: 'Holds.' });
+    seedHarness(sail, 'check-fix#2', [again]);
+    const { code, stderr, keys, dir } = await review(repo);
+    expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+
+    expect(keys.filter((key) => key.startsWith('fix#'))).toEqual(['fix#1', 'fix#2']);
+    const folder = readdirSync(dir).find((name) => /^\d+-fix$/.test(name)) ?? '';
+    const input = JSON.parse(readFileSync(join(dir, folder, 'call-2', 'in', 'findings.json'), 'utf8'));
+    const fresh = input.findings.filter((finding: { id: string }) => finding.id.startsWith('F'));
+    expect(fresh).toEqual([
+      expect.objectContaining({ id: 'F1-1', source: 'check-fix', title: 'the fix broke the footer' }),
+    ]);
   });
 }, 120_000);
 
@@ -376,6 +421,7 @@ test('a pull request that changes a gate file is handed to a human before any me
 test('a check still red after its rerun goes to fix as a finding, then validate, push and merge again', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
+    oneRound(repo);
     editPullRequest(repo, {
       checks: [{ name: 'verify', statuses: ['failed', 'failed', 'passed'], log: '(fail) a timing test\n 1 fail' }],
     });
@@ -419,6 +465,7 @@ test('a check still red after its rerun goes to fix as a finding, then validate,
 test('a merge the host rejects after the base moved merges the base in, then validate, push and merge again', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
+    oneRound(repo);
     const moved = moveBase(repo, 'other.txt', 'from the base\n');
     editPullRequest(repo, { merges: ['rejected', 'merged'] });
     const { code, stderr, keys } = await review(repo);
@@ -434,6 +481,7 @@ test('a merge the host rejects after the base moved merges the base in, then val
 test('a base that conflicts is caught before any check is read and goes to resolve-conflicts, and a head still conflicting after it is caught again by the next merge', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
+    oneRound(repo);
     moveBase(repo, 'notes.txt', 'the base wrote here\n');
     // The fake agent answers that it resolved the conflict without touching the workspace, so the head never takes
     // the base: each merge's probe finds the conflict, with no rejection by the host, until the passes run out.
@@ -465,6 +513,7 @@ test('a base that conflicts is caught before any check is read and goes to resol
 test('a red check whose base has moved merges the base in before the fix, so the fix is pushed on the current base', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
+    oneRound(repo);
     const moved = moveBase(repo, 'other.txt', 'from the base\n');
     // The push moves the head, so the fake's checks start again and stay red: the passes run out after the first.
     editPullRequest(repo, { checks: [{ name: 'verify', statuses: ['failed'], log: 'boom' }] });
@@ -517,6 +566,7 @@ test('landing shares the three fix passes: after two review rounds, one fix for 
 test('a fix that blocks while landing blocks the next merge, which comments why, takes the label off and fails', async () => {
   await withTempRepo(async (repo) => {
     setUp(repo, seed());
+    oneRound(repo);
     editPullRequest(repo, { checks: [{ name: 'verify', statuses: ['failed'], log: 'boom' }] });
     const harness = join(repo.dir, '.sail', 'fake', 'harness.json');
     const script = JSON.parse(readFileSync(harness, 'utf8'));

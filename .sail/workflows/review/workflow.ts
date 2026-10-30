@@ -1,8 +1,8 @@
 // review: a factory-labelled pull request in, merged out. Validation, the leak check (including its Jev pass), the
 // banned-words check, the demonstration and six reviewers look at it at once; Jev triages clear findings, then a judge
 // decides what each finding becomes (fixed here, filed as a ticket, or dropped)
-// and which reviews are too thin to trust. Up to three fix passes follow, each checked by Jev with agent fallback and
-// fresh validation. Then
+// and which reviews are too thin to trust. Up to three fix passes follow, each checked by the agent, with Jev's answers as its hint, beside fresh
+// validation. Then
 // the fixes are pushed, the tickets filed, the demonstration attached to the ticket, the review commented, and the pull
 // request merged once its checks pass. Landing it takes what fix passes are left: each merges the base in, an agent
 // resolving any conflict, and sends checks still red after a rerun to fix as findings; each is validated and pushed
@@ -11,12 +11,12 @@
 // does one a stage blocked, which also puts needs-human on, since no run of it would get further.
 // A pull request that changes a gate file is handed to a human before any merge.
 // Composition only: every contract lives on its stage, and every check that needs no judgment is a script.
-import { type Result, workflow, type z } from 'sail';
+import { workflow, type z } from 'sail';
 import { pr } from 'sail/intakes';
 import type { FollowUp } from '../../stages/file-follow-ups/stage';
 import { fileFollowUps } from '../../stages/file-follow-ups/stage';
 import { redTests, validate } from '../../stages/validate/stage';
-import type { FixChecked, Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord, Triaged } from './schemas';
+import type { Judgement, Lens, NumberedFinding, Reviewed, ReviewRecord, Triaged } from './schemas';
 import { FixFeedback } from './schemas';
 import { requirements } from './stages/01-requirements/stage';
 import { bannedWords } from './stages/02-banned-words/stage';
@@ -61,7 +61,7 @@ export default workflow(
   'review',
   {
     intake: pr,
-    version: 5,
+    version: 6,
     watch: { every: '5m' },
     // Two pull requests at a time, though each merge moves the base the other is being reviewed against.
     maxConcurrentRuns: 2,
@@ -203,8 +203,8 @@ export default workflow(
     }
     const { thin } = judgement;
 
-    // Fix, then ask Jev about the targets, falling back to the agent unless all are clear yeses, up to FIX_PASSES passes.
-    // Always validate afresh. Open targets, new agent findings at medium or above, and failed validation go to the next pass.
+    // Fix, then ask Jev about the targets as a hint, and check the fixes with the agent beside a fresh validation, up to
+    // FIX_PASSES passes. Open targets, new agent findings at medium or above, and failed validation go to the next pass.
     const rounds: z.infer<typeof ReviewRecord>['rounds'] = [];
     let open: z.infer<typeof ReviewRecord>['open'] = [];
     let resolved = targets.length === 0;
@@ -219,23 +219,14 @@ export default workflow(
           base,
         });
         if (fixed.outcome === 'blocked') return handOff(`fix blocked: ${fixed.reason}`);
-        // Jev first: when it finds every target resolved with a clear yes, the agent's session is not paid for and
-        // validation runs alone, which also stands in for what the fixes broke.
+        // Jev's answers are a hint for check-fix, which runs on every pass: a clear yes never stands in for it.
         const asked = await run.stage(jevFix, { findings: { findings: targets }, fixed: fixed.output, since });
-        let checked: z.infer<typeof FixChecked>;
-        let again: Result<typeof validate>;
-        if (asked.output.checked !== null) {
-          checked = asked.output.checked;
-          again = await run.stage(validate);
-        } else {
-          const [agent, validated] = await run.all([
-            [checkFix, { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output }],
-            [validate],
-          ]);
-          if (agent.outcome === 'blocked') return handOff(`check-fix blocked: ${agent.reason}`);
-          checked = agent.output;
-          again = validated;
-        }
+        const [agent, again] = await run.all([
+          [checkFix, { findings: { findings: targets }, fixed: fixed.output, since, jev: asked.output }],
+          [validate],
+        ]);
+        if (agent.outcome === 'blocked') return handOff(`check-fix blocked: ${agent.reason}`);
+        const checked = agent.output;
         if (again.outcome === 'failed' && again.output.baseRed)
           return run.fail(`staging is red: ${redTests(again.output)}`);
         rounds.push({ round, fixed: fixed.output, checked, validated: again.outcome === 'passed' });

@@ -125,7 +125,7 @@ test('collect rebuilds tasks against the recorded base and call head, not live r
   });
 });
 
-test('check-fix rebuilds recorded findings, fix notes and diff, maps resolved, and reports skipped calls', async () => {
+test('check-fix rebuilds recorded findings, fix commits and diff, maps resolved, and reports skipped calls', async () => {
   await withTempRepo(async (repo) => {
     const runDir = writeRun(repo);
     const call = join(runDir, '13-check-fix/call-1');
@@ -173,10 +173,11 @@ test('check-fix rebuilds recorded findings, fix notes and diff, maps resolved, a
         askNouls: (questions, state) => {
           expect(Object.keys(questions)).toEqual(['R1', 'R2']);
           expect(state).toEqual({
+            note: expect.stringContaining('untrusted data'),
             diff: 'recorded fix diff',
             findings: {
-              R1: { finding: findings[0], fix: fixed.fixes[0] },
-              R2: { finding: findings[1], fix: null },
+              R1: { finding: findings[0], commit: 'fix-sha' },
+              R2: { finding: findings[1], commit: null },
             },
           });
           return { asked: true, answers: { R1: { type: 'noul', noul: 0.92 }, R2: { type: 'noul', noul: 0.82 } } };
