@@ -1,15 +1,14 @@
 // Reads a Claude Code session's SDK messages as sail's harness events (D3, D4, D14). The SDK sends one assistant
 // message per content block, and the messages of one turn share its `message.id`, each carrying usage that isn't final
 // until the turn is over: so a turn's usage is the last one its messages carried, and its `usage:update` is emitted
-// when the turn closes. Cost comes only from the result. No partial message is asked for, and one that comes anyway
+// when the turn closes. Cost is the price table's estimate of the closed turns until the result's own total replaces it. No partial message is asked for, and one that comes anyway
 // emits nothing, so no chunk ever reaches the bus.
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { HarnessEvent } from '../../ports/harness';
 import type { Usage } from '../../ports/types';
+import { type TurnUsage, turnCost } from './pricing';
 import type { Denial } from './tool-call';
 import { resetsFromEpoch } from './usage-limit';
-
-type TurnUsage = SDKAssistantMessage['message']['usage'];
 
 /** Token counts as a usage update carries them. */
 interface Tokens {
@@ -35,7 +34,7 @@ export interface ReaderState {
   readonly turns: number;
   readonly toolCalls: number;
   readonly denials: number;
-  /** Tokens over the closed turns, or the result's totals once it has come, with its cost. */
+  /** Tokens over the closed turns with their estimated cost, or the result's totals and cost once it has come. */
   readonly spent: Usage;
   /** The provider's text of every failure the session reported before its result, in order. */
   readonly failures: readonly string[];
@@ -138,7 +137,7 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
   // The last usage each of the session's own turns carried, by message id. A tool's result can come between two
   // messages of one turn, since the CLI runs a tool while the model still writes, so a turn closed early is reopened by
   // its id's next message and its usage replaced, never added twice.
-  const turnUsage = new Map<string, TurnUsage>();
+  const turnUsage = new Map<string, { usage: TurnUsage; model: string }>();
   let openTurn: string | undefined;
 
   const out = (found: HarnessEvent[]): HarnessEvent[] => {
@@ -151,9 +150,11 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     if (openTurn === undefined) return [];
     openTurn = undefined;
     turns = turnUsage.size;
-    const closed = [...turnUsage.values()].reduce<Tokens>((sum, usage) => add(sum, tokensOf(usage)), ZERO);
-    spent = usageOf(closed, 0);
-    return [{ type: 'usage:update', turn: turns, tokens: closed, costUsdSoFar: 0 }];
+    const all = [...turnUsage.values()];
+    const closed = all.reduce<Tokens>((sum, turn) => add(sum, tokensOf(turn.usage)), ZERO);
+    const cost = Math.round(all.reduce((sum, turn) => sum + turnCost(turn.model, turn.usage), 0) * 1e7) / 1e7;
+    spent = usageOf(closed, cost);
+    return [{ type: 'usage:update', turn: turns, tokens: closed, costUsdSoFar: cost }];
   };
 
   /** The held denial of `callId`, as its event, once. */
@@ -185,7 +186,10 @@ export function createSessionReader(options: SessionReaderOptions): SessionReade
     if (message.parent_tool_use_id === null) {
       if (openTurn !== undefined && openTurn !== message.message.id) found.push(...closeTurn());
       openTurn = message.message.id;
-      turnUsage.set(openTurn, message.message.usage);
+      turnUsage.set(openTurn, {
+        usage: message.message.usage,
+        model: message.message.model || model || options.model,
+      });
     }
     if (message.error !== undefined) failures.push(textOf(message) || message.error);
     if (message.error === 'rate_limit') limited ??= {};

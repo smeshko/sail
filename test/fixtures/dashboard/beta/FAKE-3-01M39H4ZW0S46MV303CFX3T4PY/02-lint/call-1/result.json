@@ -12,7 +12,7 @@
   },
   "files": {
     "lint.txt": {
-      "path": "02-lint/call-1/lint.txt",
+      "path": "02-lint/call-1/out/lint.txt",
       "bytes": 29,
       "sha256": "41d094b4258c52b3712e89e979cfbc07b8bab3e836f584189f2ae7c2a5f07408"
     }

@@ -1,6 +1,6 @@
 // The queue view: one watched workflow's queue, opened from its row in the rail and drawn in the centre in place of the
 // run, with its polling, a box of items for each state that has any, running first, each folding from its heading, and
-// its recent events from the queue's own stream, folded until the person opens them. A failed or parked item shows the
+// its recent events from the queue's own stream, folded until the person opens them, and the error that stream sent. A failed or parked item shows the
 // commands that requeue or drop it, to copy, and an item whose run the rail lists opens it. A waiting item shows its
 // priority and has ▲ and ▼ buttons to move it before or after its waiting neighbour: the dashboard's first control,
 // which asks the watcher and changes nothing itself. A refused move shows its reason beside the header.
@@ -16,6 +16,8 @@ import type { UiState } from './ui-state';
 export interface QueueStream {
   recent: readonly QueueEvent[];
   watch: WatchState;
+  /** The error its stream sent, which stops its reconnects. */
+  error?: string;
 }
 
 /** The key a queue's stream is kept under: `<repo>/<workflow>`. */
@@ -130,6 +132,7 @@ function panelView(panel: QueuePanel, stream: QueueStream | undefined, ui: UiSta
     held === undefined ? '' : html`<span class="warnchip">held until ${clock(held.until, ui.tz)}: ${held.reason}</span>`
   }${ui.queueNotice === undefined ? '' : html`<span class="warnchip">${ui.queueNotice}</span>`}</div>
 ${panel.problem === undefined ? '' : html`<div class="code bad">${panel.problem}</div>`}
+${stream?.error === undefined ? '' : html`<div class="code bad">${stream.error}</div>`}
 <div class="statebar">${QUEUE_STATES.map((state) => html`<span class="sf"><i class="d ${state}"></i>${LABELS[state]} <span class="n">${panel.counts[state]}</span></span>`)}</div>
 ${
   panel.items.length === 0

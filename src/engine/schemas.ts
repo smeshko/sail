@@ -178,7 +178,9 @@ const asJournaled = (result: Doc): Doc => ({
 
 // Call directories are `NN-<stage>/call-N/`, with a multi-step call's steps below them. Nothing else in a run
 // directory is walked: the workspace in particular is the repository's checkout and may hold any result.json.
+// Only the engine's own records count: a file a step produced under an `out/` is no result, whatever its name.
 const RESULT_FILES = new Bun.Glob('[0-9][0-9]*-*/**/result.json');
+const ENGINE_RESULT = /^\d{2,}-[^/]+\/call-\d+(\/try-\d+)?(\/steps\/\d+-[^/]+(\/try-\d+)?)?\/result\.json$/;
 
 /**
  * Validates run.json, every journal and event line, summary.json and every call's result.json in `dir`. Checks that
@@ -230,7 +232,7 @@ export function validateRunDir(dir: string): RunDirReport {
     summaryText === undefined ? undefined : checkText(report, 'sail.summary.v1', 'summary.json', summaryText);
 
   const results = new Map<string, Checked>();
-  for (const file of [...RESULT_FILES.scanSync({ cwd: dir })].sort()) {
+  for (const file of [...RESULT_FILES.scanSync({ cwd: dir })].filter((path) => ENGINE_RESULT.test(path)).sort()) {
     const checked = checkText(report, 'sail.result.v1', file, readFileSync(join(dir, file), 'utf8'));
     if (checked) results.set(file, checked);
   }

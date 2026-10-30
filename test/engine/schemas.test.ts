@@ -205,6 +205,12 @@ test('run: an unknown key is not allowed and a missing source is required', () =
   ]);
 });
 
+test('run: layout 2 validates, layout 3 breaks the schema, and a header without it still validates', () => {
+  expect(validateDocument('sail.run.v1', { ...run, layout: 2 })).toEqual([]);
+  expect(validateDocument('sail.run.v1', { ...run, layout: 3 })).toHaveLength(1);
+  expect(validateDocument('sail.run.v1', run)).toEqual([]);
+});
+
 test('a roster entry lists its tools by name, in run.json and in run:start, each a non-empty string', () => {
   const tools = ['WebFetch', 'linear:get_issue', 'github:*'];
   const entry = (permissions: unknown) => ({ spec: { kind: 'agent', origin: 'repo:.sail/stages/spec', permissions } });
@@ -326,7 +332,7 @@ const CLOSED: NewEvent[] = [
     type: 'file:produced',
     key: KEY,
     name: 'junit.xml',
-    path: '03-tests/call-1/junit.xml',
+    path: '03-tests/call-1/out/junit.xml',
     bytes: 14,
     sha256: 'c98a97ba5504e953e5ddd12d9b65f5f176325398331606b16512f617d3a3358f',
   },
@@ -984,6 +990,17 @@ test('validateRunDir reports an unparseable line or file by file and line', () =
   expect(issues[1]).toStartWith('summary.json  [sail.summary.v1]  / is not valid JSON: ');
 });
 
+test("validateRunDir validates only the engine's results: a result.json a step produced under out/ is no run record", () => {
+  const dir = tempDir({
+    ...validRunDir(),
+    '01-spec/call-1/out/result.json': '{ "not": "a result" }',
+    '05-publish/call-1/out/steps/2-open/result.json': '{ "not": "a result" }',
+    '05-publish/call-1/steps/2-open/out/result.json': '{ "not": "a result" }',
+  });
+  const { counts, issues } = validateRunDir(dir);
+  expect([counts['sail.result.v1'], issues]).toEqual([1, []]);
+});
+
 test('validateRunDir reports a nested result.json by its path in the run directory', () => {
   const dir = tempDir({
     ...validRunDir(),
@@ -1046,7 +1063,7 @@ test('validateRunDir checks that every journal line points at a result that agre
 });
 
 test('validateRunDir checks that a journal line replays the output and files its result recorded', () => {
-  const brief = { path: '00-intake/call-1/brief.md', bytes: 1, sha256: 'a'.repeat(64) };
+  const brief = { path: '00-intake/call-1/out/brief.md', bytes: 1, sha256: 'a'.repeat(64) };
   const dir = tempDir({
     ...validRunDir(),
     'journal.ndjson': ndjson({ ...journal, output: { ticketKey: 'FAKE-1' }, files: { 'brief.md': brief.path } }),
@@ -1436,6 +1453,13 @@ test('run: a seeded header names its fromRun; an empty fromRun is refused', () =
   const seeded = { ...omit(run, 'claim'), fromRun: RUN_ID };
   expect(validateDocument('sail.run.v1', seeded)).toEqual([]);
   expect(paths('sail.run.v1', { ...seeded, fromRun: '' })).toEqual(['/fromRun']);
+});
+
+test('run: a seeded header records how many journal lines it reused, which needs a fromRun and at least one', () => {
+  const seeded = { ...omit(run, 'claim'), fromRun: RUN_ID };
+  expect(validateDocument('sail.run.v1', { ...seeded, reused: 2 })).toEqual([]);
+  expect(paths('sail.run.v1', { ...omit(run, 'claim'), reused: 2 })).toEqual(['/']);
+  expect(paths('sail.run.v1', { ...seeded, reused: 0 })).toEqual(['/reused']);
 });
 
 test('event: run:start and journal:append take a fromRun naming a run, and refuse an empty one', () => {

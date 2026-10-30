@@ -132,7 +132,8 @@ test('a tests stage ends passed on exit 0 and failed on exit 1, with its typed r
         exit: { code, mapped: outcome },
       });
       expect(Object.keys(result.files as object)).toEqual(['junit.xml']);
-      expect(readdirSync(paths.dir).sort()).toEqual(['in', 'junit.xml', 'result.json', 'stderr.log', 'stdout.log']);
+      expect(readdirSync(paths.dir).sort()).toEqual(['in', 'out', 'result.json', 'stderr.log', 'stdout.log']);
+      expect(readdirSync(paths.out)).toEqual(['junit.xml']);
       expect(readdirSync(paths.stageIn)).toEqual(['exit.json']);
     }
   });
@@ -216,11 +217,11 @@ test('a later try writes into call-N/try-M/, and its script sees TRY as M', asyn
     expect(readBack(paths.result)).toMatchObject({
       key: 'tests#1',
       outcome: 'passed',
-      files: { 'junit.xml': { path: '00-tests/call-1/try-2/junit.xml' } },
+      files: { 'junit.xml': { path: '00-tests/call-1/try-2/out/junit.xml' } },
       env: {
         TRY: '2',
         STAGE_IN: `.sail-runs/${RUN_ID}/00-tests/call-1/try-2/in`,
-        STAGE_OUT: `.sail-runs/${RUN_ID}/00-tests/call-1/try-2`,
+        STAGE_OUT: `.sail-runs/${RUN_ID}/00-tests/call-1/try-2/out`,
       },
     });
   });
@@ -243,13 +244,13 @@ test('an agent call with no harness and model resolved is refused, and gets no c
     const reading = agent('spec', {
       prompt: './prompt.md',
       consumes: { brief: file('brief.md') },
-      produces: { 'result.json': 'file' },
+      produces: { 'a/b.md': 'file' },
       output: z.object({}),
       permissions,
       budget,
     });
     expect(callProblems(reading, {}, on)).toEqual([
-      "'result.json' can't be produced: the engine writes it in $STAGE_OUT",
+      "'a/b.md' can't be produced: it is not a plain file name",
       "'brief' is required",
     ]);
   });
@@ -319,7 +320,7 @@ test('a passing call reports its events in order, each keyed by its call', async
       { command: '.sail/stages/tests/run.sh', cwd: '.', envKeys: expect.arrayContaining(ENV_KEYS) },
       { code: 0, outcome: 'passed', durationMs: expect.any(Number), stdoutBytes: statSync(paths.stdout).size },
       {},
-      { name: 'junit.xml', path: '00-tests/call-1/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
+      { name: 'junit.xml', path: '00-tests/call-1/out/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
       {
         stage: 'tests',
         call: 1,
@@ -348,7 +349,7 @@ test('each bound binding reports where it came from, in the order the stage decl
     });
     const supplied: Record<string, Supplied> = {
       exit: { kind: 'value', value: 0, from: '--bind' },
-      spec: { kind: 'file', path: spec, from: '01-spec/call-1/spec.md' },
+      spec: { kind: 'file', path: spec, from: '01-spec/call-1/out/spec.md' },
     };
     const { events, emit } = collect();
     await runCall({ ...s.request(step, supplied), emit });
@@ -360,12 +361,12 @@ test('each bound binding reports where it came from, in the order the stage decl
       'script:exec',
     ]);
     expect(events.slice(1, 3)).toEqual([
-      { type: 'input:materialised', key: 'tests#1', binding: 'spec', from: '01-spec/call-1/spec.md' },
+      { type: 'input:materialised', key: 'tests#1', binding: 'spec', from: '01-spec/call-1/out/spec.md' },
       { type: 'input:materialised', key: 'tests#1', binding: 'exit', from: '--bind' },
     ]);
     const [start] = events;
     if (start?.type !== 'stage:start') throw new Error('stage:start first');
-    expect(start.consumed).toEqual({ spec: '01-spec/call-1/spec.md', exit: '--bind' });
+    expect(start.consumed).toEqual({ spec: '01-spec/call-1/out/spec.md', exit: '--bind' });
     expect(start.consumed).not.toHaveProperty('note');
     checkStamped(events);
   });
@@ -587,8 +588,8 @@ test('invalid output is corrected once: a second try in try-2/, with bindings of
 
     const sent = harness.requests.map(({ try: n, env }) => [n, env.TRY, env.STAGE_OUT, env.STAGE_IN, env.INPUT_BRIEF]);
     expect(sent).toEqual([
-      [1, '1', s.dir(1), join(s.dir(1), 'in'), join(s.dir(1), 'in', 'brief.md')],
-      [2, '2', s.dir(2), join(s.dir(2), 'in'), join(s.dir(2), 'in', 'brief.md')],
+      [1, '1', join(s.dir(1), 'out'), join(s.dir(1), 'in'), join(s.dir(1), 'in', 'brief.md')],
+      [2, '2', join(s.dir(2), 'out'), join(s.dir(2), 'in'), join(s.dir(2), 'in', 'brief.md')],
     ]);
     expect(paths).toEqual(callPaths(s.runDir, 1, 'spec', 1, 2));
     const first = readBack(join(s.dir(1), 'result.json'));
@@ -605,7 +606,7 @@ test('invalid output is corrected once: a second try in try-2/, with bindings of
       usage: [{ costUsd: 0.125 }, { costUsd: 0.25 }],
     });
     expect(written(result)).toEqual(second);
-    expect(second.files).toMatchObject({ 'spec.md': { path: '01-spec/call-1/try-2/spec.md' } });
+    expect(second.files).toMatchObject({ 'spec.md': { path: '01-spec/call-1/try-2/out/spec.md' } });
 
     // Each try keeps the prompt its session was sent, and only the second holds the first's messages.
     const [one = '', two = ''] = harness.requests.map((request) => request.prompt);
@@ -621,7 +622,10 @@ test('invalid output is corrected once: a second try in try-2/, with bindings of
     expect(rendered).toHaveLength(2);
     expect(rendered[1]).toBe((rendered[0] ?? 0) + 1);
     // What the first try left stays as it left it.
-    expect([textAt(join(s.dir(1), 'spec.md')), textAt(join(s.dir(2), 'spec.md'))]).toEqual(['# Draft\n', '# Spec\n']);
+    expect([textAt(join(s.dir(1), 'out', 'spec.md')), textAt(join(s.dir(2), 'out', 'spec.md'))]).toEqual([
+      '# Draft\n',
+      '# Spec\n',
+    ]);
     expect(stageEvents(events)).toEqual(['start 1', 'end 1 error', 'start 2', 'end 2 done']);
     const session = ['prompt:rendered', 'harness:session_start', 'usage:update', 'harness:session_end'];
     expect(types(events)).toEqual([
@@ -1218,53 +1222,37 @@ async function forgedTry(s: SpecStage): Promise<string> {
   return `${JSON.stringify(forged, null, 2)}\n`;
 }
 
-test("a directory a session left where its call's next try goes does not stop the correction, which takes the try after it", async () => {
+test("a session that plants try-2/result.json and an unreadable try-3/result.json in its $STAGE_OUT leaves its call's tries alone: a resume reads one try, runs the next as 2, and counts no planted usage", async () => {
   await withTempRepo(async (repo) => {
     const s = specStage(repo);
     const forged = await forgedTry(s);
-    const planting = submits({ summary: 3 }, 0.125, { files: { 'spec.md': '# Draft\n', 'try-2/result.json': forged } });
-    const harness = fake([planting, submits({ summary: null }, 0.5), submits(SPEC, 0.25)]);
-    const { result, paths } = await runCall(s.request(specStep(), harness));
-
-    expect(harness.requests.map((request) => request.try)).toEqual([1, 3]);
-    expect(paths.dir).toBe(s.dir(3));
-    expect(placeOf(readBack(paths.result))).toEqual({
-      outcome: 'done',
-      try: 3,
-      validationTry: 2,
-      validationFailed: false,
+    const planting = submits({ summary: 3 }, 0.125, {
+      files: { 'spec.md': '# Draft\n', 'try-2/result.json': forged, 'try-3/result.json': 'not json' },
     });
-    expect(result.output).toEqual(SPEC);
-    // What the session wrote there is as it left it: the engine made no try of it.
-    expect(readdirSync(s.dir(2))).toEqual(['result.json']);
-    expect(textAt(join(s.dir(2), 'result.json'))).toBe(forged);
-  });
-});
-
-test('a resumed call does not take a record its session planted as its last word: it is corrected, and what it submits is checked', async () => {
-  await withTempRepo(async (repo) => {
-    const s = specStage(repo);
-    const forged = await forgedTry(s);
-    const planting = submits({ summary: 3 }, 0.125, { files: { 'spec.md': '# Draft\n', 'try-2/result.json': forged } });
-    const answers = [planting, submits({ summary: null }, 0.5), submits(SPEC, 0.25)];
+    const answers = [planting, submits(SPEC, 0.25)];
     const stopped = new AbortController();
+    const emit = stream(s.runDir);
+    emit(runStart());
     const first = fake(answers, { after: () => stopped.abort() });
-    await runCall(s.request(specStep(), first, { signal: stopped.signal }));
+    await runCall(s.request(specStep(), first, { signal: stopped.signal, emit }));
     expect(first.requests).toHaveLength(1);
-    expect(readBack(join(s.dir(2), 'result.json'))).toMatchObject({ outcome: 'done', output: { summary: 12345 } });
+    expect(existsSync(s.dir(2))).toBe(false);
+    expect(textAt(join(s.dir(1), 'out', 'try-2', 'result.json'))).toBe(forged);
+    expect(textAt(join(s.dir(1), 'out', 'try-3', 'result.json'))).toBe('not json');
 
     const resumed = fake(answers);
-    const { result, paths } = await runCall(s.request(specStep(), resumed));
-    expect(resumed.requests.map((request) => request.try)).toEqual([3]);
+    const { result, paths } = await runCall(s.request(specStep(), resumed, { emit: stream(s.runDir) }));
+    expect(resumed.requests.map((request) => request.try)).toEqual([2]);
     expect(resumed.requests[0]?.prompt).toContain(NOT_A_STRING);
-    expect(paths.dir).toBe(s.dir(3));
+    expect(paths.dir).toBe(s.dir(2));
     expect([result.outcome, result.output]).toEqual(['done', SPEC]);
     expect(placeOf(readBack(paths.result))).toEqual({
       outcome: 'done',
-      try: 3,
+      try: 2,
       validationTry: 2,
       validationFailed: false,
     });
+    expect(summarize(readEvents(s.runDir))?.totals.usage).toMatchObject({ costUsd: 0.375 });
   });
 });
 
@@ -1442,7 +1430,7 @@ test('a document left as its template is corrected once: try-2 starts from the t
       { tasks: 2 },
       {
         'spec.md': {
-          path: '01-spec/call-1/try-2/spec.md',
+          path: '01-spec/call-1/try-2/out/spec.md',
           bytes: VALID_SPEC.length,
           sha256: new Bun.CryptoHasher('sha256').update(VALID_SPEC).digest('hex'),
           validation: {

@@ -6,7 +6,7 @@
 // In order, every refusal before anything is written:
 //   1. `.sail/` and its config, then the claim of `.sail/` for the process;
 //   2. the source run: a plain name, a directory and no link, with a `run.json` that reads, from a run that had a
-//      workspace. Any STATUS is accepted, a crashed `running` one included, since only its journal's complete lines
+//      workspace and the layout mark. Any STATUS is accepted, a crashed `running` one included, since only its journal's complete lines
 //      are read;
 //   3. the workflow as it reads now, its model aliases, and no stage named `intake`;
 //   4. the stage, which must be a stage of that workflow;
@@ -15,7 +15,8 @@
 //      included: a seed never splits a group, so the seeded run runs the whole group again. A stage with only step lines
 //      and no recorded group is refused if another call is incomplete too: they may be grouped. Each entry must point inside its own
 //      call directory, at regular files, since that is what a run writes and all the copy takes.
-// Then the run id is minted and the header built and checked, with `fromRun` and no claim: a seeded run reads no
+// Then the run id is minted and the header built and checked, with `fromRun`, `reused` (the seed's length, the boundary a
+// resume restores the reused calls' reports by) and no claim: a seeded run reads no
 // ticket and claims nothing: the source's ticket, as its events name it, is carried for the summary. An abort seen by
 // then refuses. Then, as a start does, the branch is leased and the run directory and the workspace made, each undone
 // on a refusal. The branch is the source's, suffixed `-seeded-<the run id's last 8 characters>`, so a seeded run
@@ -32,7 +33,7 @@
 import { cpSync, existsSync, lstatSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createEventsFile, readEvents } from '../events/consumers/ndjson';
-import { summarize } from '../events/summary';
+import { type Summary, summarize } from '../events/summary';
 import type { ProviderEvent } from '../events/types';
 import type { RunRef } from '../ports/workspace';
 import type { ResolvedAdapters } from './adapters';
@@ -53,7 +54,7 @@ import {
 } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { harnessesReached, modelProblems } from './roster';
-import { copyStageFolders, runsDir, type Source, writeStatus } from './run-dir';
+import { copyStageFolders, runsDir, type Source, unmarkedRefusal, writeStatus } from './run-dir';
 import {
   assertRunHeader,
   buildRunHeader,
@@ -83,6 +84,12 @@ export interface SeededRunOptions {
   random?: (bytes: Uint8Array) => Uint8Array;
   /** Refuses the run when it has aborted by the time the run would be opened. */
   signal?: AbortSignal;
+}
+
+/** The ticket a run's events name, when they give its url: what a seeded run carries for the summary. */
+export function sourceTicket(sourceDir: string): Required<NonNullable<Summary['ticket']>> | undefined {
+  const named = summarize(readEvents(sourceDir))?.ticket;
+  return named?.url === undefined ? undefined : { ...named, url: named.url };
 }
 
 /** Why `error`, thrown by a reader of the source run, happened: its message. */
@@ -216,6 +223,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if (sourceBranch === undefined || repository === undefined) {
     return { refused: `run ${fromRun} started before runs had workspaces: it can't seed a run` };
   }
+  const unmarked = unmarkedRefusal(fromRun, source.header, 'seed a run');
+  if (unmarked !== undefined) return { refused: unmarked };
   const loaded = await loadWorkflow(found.dir, source.header.workflow.name);
   if ('refused' in loaded) return loaded;
   const models = modelProblems(loaded, config);
@@ -251,8 +260,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   const seed = entries.slice(0, at);
   const copied = callDirs(source.dir, fromRun, seed);
   if ('refused' in copied) return copied;
-  const named = summarize(readEvents(source.dir))?.ticket;
-  const ticket = named?.url === undefined ? undefined : { ...named, url: named.url };
+  const ticket = sourceTicket(source.dir);
 
   const runId = newRunId(ticketKey, now.getTime(), options.random);
   const branch = `${sourceBranch}-seeded-${runId.slice(-8).toLowerCase()}`;
@@ -261,6 +269,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     runId,
     source: runSource,
     fromRun,
+    reused: seed.length,
     sailDir: found.dir,
     loaded,
     config,

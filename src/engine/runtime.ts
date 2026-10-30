@@ -11,6 +11,10 @@
 // and only the call's line is journaled: its steps' results are in the call directory, and a call interrupted before
 // it ended runs again from its first step.
 //
+// A call's line and its steps' lines carry the fingerprints of the bindings the workflow supplied, which the determinism
+// guard compares on replay, so a resume can't hand a call steps that ran with other bindings. The intake's line carries
+// none.
+//
 // A group, `run.all()`, ends the replay with its unjournaled calls, which run at once, each in its own call directory.
 // Each is journaled as it completes, carrying the group's keys, so the journal holds them in completion order, and
 // `all:start` and `all:end` bracket them. An `error` doesn't stop its siblings. A call that throws, a bug in sail, stops
@@ -45,6 +49,10 @@
 // step is journaled and only the call line is missing. A call's step lines must be its stage's first steps in order,
 // and every step line must belong to a call the journal holds or the workflow asks for now: anything else fails the
 // run with `determinism_violation`, before anything runs.
+//
+// A resume restores what a power cut took from the stream (`restore-events.ts`): the run's `run:start` when the events
+// hold none, where a fresh run emits its own, and the `journal:append` of each journal line they never reported, after
+// the renewed lease. Nothing runs again, and a stream that lost nothing gains nothing.
 //
 // A run with a budget is driven under its tracker (`budget.ts`). Each agent request is handed the run's share of what it
 // has left, and the harness ends a session that reaches it. A call that ran out of the run's budget, an `error` with
@@ -96,9 +104,11 @@
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
 // `run:end` ends the stream: a replay abandoned by an interrupt or budget may move on once its workflow stops waiting,
 // but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
+// The events file is synced before each journal line, so a journaled call's events are on disk whenever its line is,
+// and before STATUS and after `run:end`, so an ended run, which no resume restores, keeps its last `journal:append`.
 import { join, relative } from 'node:path';
 import { createBus } from '../events/bus';
-import { ndjsonConsumer, readEvents } from '../events/consumers/ndjson';
+import { ndjsonConsumer, readEvents, syncEvents } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
@@ -113,6 +123,7 @@ import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import type { ContractError } from './contract';
 import { stopNowRequested, takeControl } from './control';
+import { bindingChanges } from './fingerprint';
 import {
   INTAKE_INDEX,
   INTAKE_KEY,
@@ -142,6 +153,7 @@ import {
   rootRelative,
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
+import { type LostEvents, lostEvents, runStartOf } from './restore-events';
 import type { RosterEntry } from './roster';
 import { copiedIntakeFile, copiedStageFile, type StopReason, writeStatus } from './run-dir';
 import { openSeededRun, type SeededRunOptions } from './seed-run';
@@ -239,6 +251,7 @@ function entryFrom(
   result: Record<string, unknown>,
   paths: CallPaths,
   group?: string[],
+  bindings?: Record<string, string>,
 ): NewJournalEntry {
   const files = result.files as Record<string, { path: string }>;
   return {
@@ -261,6 +274,7 @@ function entryFrom(
           ...(result.outcome === 'error' ? { errors: result.errors as ContractError[] } : {}),
         }
       : {}),
+    ...(bindings === undefined ? {} : { bindings }),
   };
 }
 
@@ -325,11 +339,12 @@ const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
 
 /**
  * The step lines of `call` the journal holds, which must be its stage's first steps in order, none after one that
- * stopped the stage, or why they aren't. A one-step definition has none, and any line of one is a change. A call the
- * journal holds is checked as one still to run is: its stage may have changed since.
+ * stopped the stage, each with the call's binding fingerprints where both have them, or why they aren't. A one-step
+ * definition has none, and any line of one is a change. A call the journal holds is checked as one still to run is: its
+ * stage may have changed since.
  */
 function finishedSteps(
-  call: Pick<PendingCall, 'key' | 'stage' | 'definition'>,
+  call: Pick<PendingCall, 'key' | 'stage' | 'definition'> & { fingerprints?: Record<string, string> },
   entries: readonly JournalEntry[],
 ): JournalEntry[] | { failed: string } {
   const lines = entries.filter((entry) => entry.step !== undefined && callKeyOf(entry.key) === call.key);
@@ -347,6 +362,14 @@ function finishedSteps(
       return {
         failed: `the journal has '${line.key}' after '${before.key}', which ended ${call.stage} ${before.outcome}`,
       };
+    }
+    // A step line without fingerprints is an older run's: it keeps the step-name check alone.
+    const changes =
+      line.bindings === undefined || call.fingerprints === undefined
+        ? undefined
+        : bindingChanges(line.bindings, call.fingerprints);
+    if (changes !== undefined) {
+      return { failed: `the journal has '${line.key}' with other bindings than the workflow asks for: ${changes}` };
     }
   }
   return lines;
@@ -467,7 +490,7 @@ async function awake<T>(options: EventOptions, body: (hold: KeepAwakeHold) => Pr
 async function drive(
   opened: OpenedRun,
   options: DriveOptions,
-  { start, hold }: { start: boolean; hold: KeepAwakeHold },
+  { start, hold, restored }: { start: boolean; hold: KeepAwakeHold; restored?: LostEvents },
 ): Promise<RunEnd> {
   const { runId, dir, sailDir, root, loaded, header } = opened;
   const { signal, clock = systemClock } = options;
@@ -516,9 +539,11 @@ async function drive(
 
   /**
    * Records how the run ended in STATUS, releases the workspace and the lease of a run that has ended for good, then
-   * reports it. A suspend marks its kept lease as held by no process as its last act, after run:end.
+   * reports it. A suspend marks its kept lease as held by no process as its last act, after run:end. The events are
+   * synced before STATUS and after run:end, since no resume restores the stream of a run that has ended.
    */
   const finish = async (end: RunEnd): Promise<RunEnd> => {
+    syncEvents(dir);
     writeStatus(dir, end.status, end.stopReason);
     const { status, stopReason } = end;
     let { message } = end;
@@ -550,6 +575,7 @@ async function drive(
       ...(status === 'completed' ? resultOf(end.result) : {}),
       replays,
     });
+    syncEvents(dir);
     if (status === 'suspended') {
       const { workspace } = opened;
       try {
@@ -720,7 +746,7 @@ async function drive(
               unavailableOf(result, call) !== undefined
             )
               return false;
-            journal(result, paths);
+            journal(result, paths, undefined, call.fingerprints);
             if (callSignal?.aborted) return false;
             return !(
               PASSED.has(String(result.outcome)) &&
@@ -735,10 +761,16 @@ async function drive(
       clear();
     }
   };
-  /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
-  const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
+  /** Journals a call that ran, with its group's keys when it has a group and its bindings' fingerprints, and reports it. */
+  const journal = (
+    result: Record<string, unknown>,
+    paths: CallPaths,
+    group?: string[],
+    bindings?: Record<string, string>,
+  ): JournalEntry => {
     tracker?.assertRecorded();
-    const journaled = appendJournal(dir, opened.redact.value(entryFrom(dir, result, paths, group)), clock());
+    syncEvents(dir);
+    const journaled = appendJournal(dir, opened.redact.value(entryFrom(dir, result, paths, group, bindings)), clock());
     bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
     reached ||= journaled.key === last;
     return journaled;
@@ -795,18 +827,10 @@ async function drive(
   let seededFor = opened.seeded;
 
   try {
-    if (start) {
-      // From the header, never derived again: the roster in the stream is the one frozen in run.json.
-      bus.emit({
-        type: 'run:start',
-        source: header.source,
-        workflow: header.workflow,
-        roster: { intake: header.intake, stages: header.stages },
-        adapters: header.adapters,
-        ...(header.budget === undefined ? {} : { budget: header.budget }),
-        ...(header.fromRun === undefined ? {} : { fromRun: header.fromRun }),
-      });
-    }
+    // From the header, never derived again: the roster in the stream is the one frozen in run.json. A resume restores
+    // the one its events lost, in the same place.
+    if (start) bus.emit(runStartOf(header));
+    else if (restored?.start !== undefined) bus.emit(restored.start);
     // What opening the run did, before this stream existed to hear it: the lease and the workspace. No call was
     // running, so no key.
     for (const event of opened.started) bus.emit(event);
@@ -819,6 +843,8 @@ async function drive(
         bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun, ...named });
       }
     }
+    // What a power cut took from a resumed run's stream: the journal lines it never reported, each once.
+    for (const event of restored?.appends ?? []) bus.emit(event);
     // After the opening's events, so a resume's budget segment still starts at its renewed lease.
     bus.emit(
       hold.held
@@ -913,7 +939,13 @@ async function drive(
       // replays against lines its stage no longer has.
       for (const entry of entries) {
         const definition = loaded.stages.find((each) => each.definition.name === entry.stage)?.definition;
-        const checked = definition === undefined ? [] : finishedSteps({ ...entry, definition }, lines);
+        const checked =
+          definition === undefined
+            ? []
+            : finishedSteps(
+                { ...entry, definition, ...(entry.bindings === undefined ? {} : { fingerprints: entry.bindings }) },
+                lines,
+              );
         if ('failed' in checked) return await failed('determinism_violation', checked.failed);
       }
       // A seeded run's first call of its own is the stage it was seeded for: an edited workflow that asks for another
@@ -979,7 +1011,7 @@ async function drive(
           running = undefined;
           continue;
         }
-        const journaled = journal(result, paths);
+        const journaled = journal(result, paths, undefined, one.call.fingerprints);
         running = undefined;
         options.onCall?.(journaled);
         continue;
@@ -1021,7 +1053,7 @@ async function drive(
               return;
             }
             if (stopped === true || ranOut(result)) return;
-            const journaled = journal(result, paths, keys);
+            const journaled = journal(result, paths, keys, each.call.fingerprints);
             journaledNow++;
             settle(each);
             options.onCall?.(journaled);
@@ -1078,6 +1110,6 @@ export async function resumeWorkflow(options: ResumeWorkflowOptions): Promise<Ru
   return awake(options, async (hold) => {
     const opened = await reopenRun(options);
     if ('refused' in opened) return opened;
-    return drive(opened, options, { start: false, hold });
+    return drive(opened, options, { start: false, hold, restored: lostEvents(opened) });
   });
 }

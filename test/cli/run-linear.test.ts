@@ -91,7 +91,7 @@ async function linearRun(argv: string[], options: LinearOptions = {}) {
       const [runId = ''] = runIds;
       const dir = join(runs, runId);
       const ran = runId !== '';
-      const call = join(dir, '00-intake', 'call-1');
+      const call = join(dir, '00-intake', 'call-1', 'out');
       const read = (name: string) =>
         ran && existsSync(join(call, name)) ? readFileSync(join(call, name), 'utf8') : '';
       return {

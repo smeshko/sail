@@ -3,7 +3,7 @@
 import { closeSync, lstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { isPlainName, isTryName, RESERVED_NAMES, runRelative } from './call-dir';
+import { isPlainName, runRelative } from './call-dir';
 
 /** Why an outcome is `error`, as `sail.result.v1` names the reasons. */
 export const ERROR_REASONS = [
@@ -64,9 +64,8 @@ function sha256(path: string): string {
 
 /**
  * What is wrong with a step's `produces`, found before it runs. Later calls consume a file by its name, so each name is
- * a plain file name in `$STAGE_OUT`, and none is one the engine writes there, or a later try's directory. The
- * comparison ignores case: macOS's default file system takes `Prompt.md` for `prompt.md`, so the engine's file would
- * overwrite the produced one. Two produced names that fold to one are refused too.
+ * a plain file name in `$STAGE_OUT`, which holds no file of the engine's. Two produced names that a file system that
+ * ignores case takes for one are refused.
  */
 export function producesProblems(produces: Readonly<Record<string, unknown>>): string[] {
   const found: string[] = [];
@@ -75,18 +74,6 @@ export function producesProblems(produces: Readonly<Record<string, unknown>>): s
   for (const name of Object.keys(produces)) {
     const folded = name.toLowerCase();
     if (!isPlainName(name)) found.push(`'${name}' can't be produced: it is not a plain file name`);
-    else if (RESERVED_NAMES.has(folded))
-      found.push(
-        folded === name
-          ? `'${name}' can't be produced: the engine writes it in $STAGE_OUT`
-          : `'${name}' can't be produced: the engine writes '${folded}' in $STAGE_OUT, ${tail}`,
-      );
-    else if (isTryName(folded))
-      found.push(
-        folded === name
-          ? `'${name}' can't be produced: the engine uses it for a later try`
-          : `'${name}' can't be produced: the engine uses '${folded}' for a later try, ${tail}`,
-      );
     else {
       const earlier = first.get(folded);
       if (earlier !== undefined) found.push(`'${name}' can't be produced: '${earlier}' is produced too, ${tail}`);

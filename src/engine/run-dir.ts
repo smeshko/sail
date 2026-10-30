@@ -19,6 +19,23 @@ import type { Roster } from './roster';
 
 export const RUNS_DIR = '.sail-runs';
 
+/** The run directory layout a run's header marks: each call's records sit beside its `$STAGE_OUT`, `out/`. */
+export const RUN_LAYOUT = 2;
+
+/**
+ * Why a run whose header is `header` can't be resumed or seed a run, or undefined when it is marked with the layout.
+ * A run without the mark kept each call's records inside its `$STAGE_OUT`.
+ */
+export function unmarkedRefusal(
+  runId: string,
+  header: { layout?: number },
+  what: 'be resumed' | 'seed a run',
+): string | undefined {
+  if (header.layout === RUN_LAYOUT) return undefined;
+  const stop = what === 'be resumed' ? `. sail stop ${runId} ends it` : '';
+  return `run ${runId} keeps its calls' records inside their $STAGE_OUT, as runs did before sail moved them to out/: it can't ${what}${stop}`;
+}
+
 /** Where runs live: beside `sailDir`, in the directory that holds it. `sail stage run` writes there too. */
 export function runsDir(sailDir: string): string {
   return join(dirname(sailDir), RUNS_DIR);

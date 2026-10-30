@@ -282,7 +282,7 @@ test("a file's validation joins its card's file, and a denied tool call with no 
   const model = foldRun([
     events[0],
     events.find((event) => event.type === 'stage:start' && event.key === 'spec#1'),
-    { ...at, type: 'file:produced', name: 'spec.md', path: '01-spec/call-1/spec.md', bytes: 427, sha256: 'ab' },
+    { ...at, type: 'file:produced', name: 'spec.md', path: '01-spec/call-1/out/spec.md', bytes: 427, sha256: 'ab' },
     { ...at, type: 'file:validated', name: 'spec.md', ok: false, checks: ['has a title'] },
     { ...at, type: 'tool:start', callId: 't-1', tool: 'Write', input: { path: '/etc/passwd', text: 'x'.repeat(300) } },
     { ...at, type: 'tool:start', callId: 't-2', tool: 'Bash', input: { command: 'ls' } },
@@ -298,7 +298,14 @@ test("a file's validation joins its card's file, and a denied tool call with no 
   ]);
   const [card] = model.cards;
   expect(card?.files).toEqual([
-    { name: 'spec.md', path: '01-spec/call-1/spec.md', bytes: 427, sha256: 'ab', ok: false, checks: ['has a title'] },
+    {
+      name: 'spec.md',
+      path: '01-spec/call-1/out/spec.md',
+      bytes: 427,
+      sha256: 'ab',
+      ok: false,
+      checks: ['has a title'],
+    },
   ]);
   const command = card?.denials[0]?.command ?? '';
   expect([command.length, command.startsWith('{"path":"/etc/passwd","text":"xxx'), command.endsWith('…')]).toEqual([

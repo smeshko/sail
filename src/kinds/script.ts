@@ -156,11 +156,11 @@ function readOutput(
   try {
     line = lastLine(stdout);
   } catch (error) {
-    // The log is in $STAGE_OUT, so a script that clears it before writing its files removes the log too.
+    // A script may write anywhere in the run directory, the log's included.
     const code = (error as NodeJS.ErrnoException).code ?? (error as Error).message;
     const message =
       code === 'ENOENT'
-        ? "stdout.log was removed from $STAGE_OUT, so the output can't be read"
+        ? "stdout.log was removed, so the output can't be read"
         : `stdout.log can't be read (${code}), so the output can't be either`;
     return { ok: false, error: { reason: 'invalid_output', message } };
   }

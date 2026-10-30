@@ -2,7 +2,7 @@
 // run interrupted or stopped by `until`, then resumed. Each case has a temp repository of its own: one run per .sail/
 // in a process, and Bun caches the workflow's modules by path. So a run resumes in a copy of the repository it was
 // interrupted in. Every run starts from the stub's `FAKE-1`, so its journal starts with `intake#1`.
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import {
   appendFileSync,
   cpSync,
@@ -14,12 +14,16 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { BUILTINS } from '../../src/adapters/index';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestStopNow, requestUnwatch } from '../../src/engine/control';
+import * as durable from '../../src/engine/durable';
+import { fingerprintBindings } from '../../src/engine/fingerprint';
+import * as journalModule from '../../src/engine/journal';
 import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
+import * as runDirModule from '../../src/engine/run-dir';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
 import { type RunEnd, type RunWorkflowOptions, resumeWorkflow, runWorkflow } from '../../src/engine/runtime';
@@ -266,7 +270,7 @@ test('the stub runs to completion through its fix loop, and every call ran once'
   expect(validateRunDir(end.dir).issues).toEqual([]);
   const implement = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
   expect(implement.consumed).toEqual({
-    spec: '01-spec/call-1/spec.md',
+    spec: '01-spec/call-1/out/spec.md',
     feedback: '03-tests/call-1/result.json#/output',
   });
   expect(implement.output).toEqual({ notes: 'a stub change', sawFeedback: true });
@@ -394,7 +398,7 @@ test("the fixture's ticket-to-pr, with its harness script gone, gets as far as i
     });
     expect(keys(end.dir)).toEqual(['intake#1', 'spec#1']);
     const spec = JSON.parse(readFileSync(join(end.dir, '01-spec', 'call-1', 'result.json'), 'utf8'));
-    expect(spec.consumed).toEqual({ brief: '00-intake/call-1/brief.md' });
+    expect(spec.consumed).toEqual({ brief: '00-intake/call-1/out/brief.md' });
   });
 });
 
@@ -1009,7 +1013,7 @@ test('an exception inside sail propagates, leaves error:crash as the last event,
       sail,
       'workflows/ticket-to-pr/stages/spec/run.sh',
       "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+      'echo not-json >>"$STAGE_OUT/../../../journal.ndjson"\nprintf \'# Spec',
     );
     const adapters = await fakeAdapters(repo.dir);
     const error = await ran(repo.dir, { adapters }).catch((thrown: unknown) => thrown);
@@ -1686,7 +1690,7 @@ test('an agent call is journaled once, with the output, the files and the result
       call: 1,
       output: SPEC,
       reason: null,
-      files: { 'spec.md': '02-spec/call-1/try-2/spec.md' },
+      files: { 'spec.md': '02-spec/call-1/try-2/out/spec.md' },
       resultPath: '02-spec/call-1/try-2/result.json',
     });
     expect(specResult(end.dir, 2)).toMatchObject({
@@ -1706,7 +1710,7 @@ test('an agent call is journaled once, with the output, the files and the result
     expect([prompt.includes('Indent with tabs.'), prompt.includes(NO_TASKS_MESSAGE)]).toEqual([true, true]);
     // publish read the file the journal holds: the second try's.
     const publish = JSON.parse(readFileSync(join(end.dir, '03-publish', 'call-1', 'result.json'), 'utf8'));
-    expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/spec.md' });
+    expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/out/spec.md' });
     expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 20_000);
@@ -2869,6 +2873,28 @@ test.each<[string, (sail: string) => void, string]>([
   60_000,
 );
 
+test('a resume that asks for a call with other bindings than its journaled steps ran with fails with determinism_violation and runs nothing (review R2)', async () => {
+  await withTempRepo(async (repo) => {
+    const stopped = await stoppedTwoStep(repo.dir, afterDescribe);
+    edit(
+      join(repo.dir, '.sail'),
+      WORKFLOW_FILE,
+      "run.stage(publish, { spec: s.files['spec.md'] })",
+      "run.stage(publish, { spec: b.files['brief.md'] })",
+    );
+    const before = readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8');
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: stopped.runId });
+    expect(end).toMatchObject({
+      status: 'failed',
+      stopReason: 'determinism_violation',
+      message: "the journal has 'publish#1/describe' with other bindings than the workflow asks for: 'spec' changed",
+    });
+    expect(readFileSync(join(stopped.dir, 'journal.ndjson'), 'utf8')).toBe(before);
+    expect(stubExecutions(repo.dir)).toEqual(['brief#1']);
+    expect(sessionsOf(events(stopped.dir), 'publish#1/describe')).toBe(1);
+  });
+}, 60_000);
+
 test("a resume with publish's first step renamed after publish#1 is journaled whole fails with determinism_violation and runs nothing (review R1-2)", async () => {
   await withTempRepo(async (repo) => {
     const stopped = await stoppedTwoStep(repo.dir, (_, controller) => ({
@@ -2946,12 +2972,29 @@ test('a call whose every step is journaled, but not itself, is journaled on resu
 
 test("a two-step stage in a group: its step lines interleave with its sibling's call line, its call line carries the group, and a resume after an abort runs only what isn't journaled; a reordered group is still a change", async () => {
   await withTempRepo(async (repo) => {
-    const slow: ScriptedAnswer = { ...DESCRIBED, delayMs: 1500 } as ScriptedAnswer;
     const stopped = await withTempRepo(async (from) => {
-      writeTwoStep(from.dir, { grouped: true, describe: [slow] });
+      writeTwoStep(from.dir, { grouped: true });
       setSleepAt(from.dir, 'publish#1');
+      // describe starts only once notify#1 is journaled, so its step line follows notify's however slow notify's script.
+      const { promise: notified, resolve: notify } = Promise.withResolvers<void>();
+      const adapters = await fakeAdapters(from.dir);
+      const fake = adapters.ports.harness;
+      adapters.ports.harness = {
+        name: fake.name,
+        capabilities: () => fake.capabilities(),
+        run: async (request) => {
+          if (request.key === 'publish#1/describe') await notified;
+          return fake.run(request);
+        },
+      };
+      const journaledNotify: Consumer = {
+        name: 'notified',
+        onEvent: (event) => {
+          if (event.type === 'journal:append' && event.key === 'notify#1') notify();
+        },
+      };
       const controller = new AbortController();
-      const running = ranAgent(from.dir, { signal: controller.signal });
+      const running = ranAgent(from.dir, { adapters, consumers: [journaledNotify], signal: controller.signal });
       const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort(), 30_000);
       copyRun(from.dir, repo.dir);
       return end;
@@ -2999,3 +3042,316 @@ test("a two-step stage in a group: its step lines interleave with its sibling's 
     expect(sessionsOf(events(dir), 'publish#1/describe')).toBe(1);
   });
 }, 90_000);
+
+test("events.ndjson is synced before each journal line, holding the call's end", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const order: string[] = [];
+    const ended: Record<string, boolean> = {};
+    let runDir = '';
+    const realSync = durable.syncFile;
+    const syncSpy = spyOn(durable, 'syncFile').mockImplementation((path: string) => {
+      if (path.endsWith('events.ndjson')) order.push('sync');
+      realSync(path);
+    });
+    const realAppend = journalModule.appendJournal;
+    const appendSpy = spyOn(journalModule, 'appendJournal').mockImplementation(((dir, entry, now) => {
+      runDir = dir;
+      order.push('append');
+      const end = events(dir).filter(
+        (event) => event.type.endsWith(':end') && 'key' in event && event.key === entry.key,
+      );
+      ended[entry.key] = end.length > 0;
+      return realAppend(dir, entry, now);
+    }) as typeof journalModule.appendJournal);
+    try {
+      expect((await ran(repo.dir)).status).toBe('completed');
+    } finally {
+      syncSpy.mockRestore();
+      appendSpy.mockRestore();
+    }
+    const appends = order.filter((step) => step === 'append').length;
+    expect(appends).toBe(keys(runDir).length);
+    expect(order.filter((step, at) => step === 'append' && order[at - 1] === 'sync')).toHaveLength(appends);
+    expect(Object.values(ended).every(Boolean)).toBe(true);
+    expect(Object.keys(ended)).toEqual(keys(runDir));
+  });
+}, 30_000);
+
+test('a run that ends syncs its last journal:append before STATUS, and its run:end after', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const order: string[] = [];
+    let runDir = '';
+    const realSync = durable.syncFile;
+    const syncSpy = spyOn(durable, 'syncFile').mockImplementation((path: string) => {
+      if (basename(path) === 'events.ndjson') {
+        runDir = join(path, '..');
+        const list = events(runDir);
+        order.push(`sync:${countOf(list, 'journal:append')}:${countOf(list, 'run:end')}`);
+      }
+      realSync(path);
+    });
+    const realStatus = runDirModule.writeStatus;
+    const statusSpy = spyOn(runDirModule, 'writeStatus').mockImplementation(((dir, status, stopReason) => {
+      order.push(`status:${status}`);
+      realStatus(dir, status, stopReason);
+    }) as typeof runDirModule.writeStatus);
+    try {
+      expect((await ran(repo.dir)).status).toBe('completed');
+    } finally {
+      syncSpy.mockRestore();
+      statusSpy.mockRestore();
+    }
+    const lines = keys(runDir).length;
+    const at = order.indexOf('status:completed');
+    expect(order[at - 1]).toBe(`sync:${lines}:0`);
+    expect(order.slice(at + 1)).toContain(`sync:${lines}:1`);
+  });
+}, 60_000);
+
+/** `events.ndjson` of `dir` cut back to the lines before the last `journal:append`, as a power loss after the last sync. */
+function cutBeforeLastAppend(dir: string): { lost: SailEvent } {
+  const list = events(dir);
+  const at = list.findLastIndex((event) => event.type === 'journal:append');
+  const lost = list[at] as SailEvent;
+  writeFileSync(
+    join(dir, 'events.ndjson'),
+    list
+      .slice(0, at)
+      .map((event) => `${JSON.stringify(event)}\n`)
+      .join(''),
+  );
+  return { lost };
+}
+
+const countOf = (list: readonly SailEvent[], type: string, key?: string) =>
+  list.filter((event) => event.type === type && (key === undefined || ('key' in event && event.key === key))).length;
+
+test('a resume restores the journal:append a power loss took, once, and the summary lists the call', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const { lost } = cutBeforeLastAppend(dir);
+    if (lost.type !== 'journal:append') throw new Error('no journal:append to cut');
+    const line = readJournal(dir).entries.find((entry) => entry.key === lost.key);
+    expect(countOf(events(dir), 'journal:append', lost.key)).toBe(0);
+
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
+    const list = events(dir);
+    for (const key of keys(dir)) expect(countOf(list, 'journal:append', key)).toBe(1);
+    expect(list.find((event) => event.type === 'journal:append' && event.key === lost.key)).toMatchObject({
+      key: lost.key,
+      line: line?.seq,
+      outcome: line?.outcome,
+    });
+    expect(seqs(list)).toEqual(gapless(list));
+    expect(validateRunDir(dir).issues).toEqual([]);
+    const summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8')) as Summary;
+    expect(summary.calls.map((call) => call.key)).toContain(lost.key);
+  });
+}, 30_000);
+
+test('a resume of a run whose events hold no run:start builds one from run.json, and writes a summary', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    writeFileSync(join(dir, 'events.ndjson'), '');
+    rmSync(join(dir, 'summary.json'), { force: true });
+
+    expect(await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId })).toMatchObject({
+      status: 'completed',
+    });
+    const header = JSON.parse(readFileSync(join(dir, RUN_HEADER_FILE), 'utf8'));
+    const starts = events(dir).filter((event) => event.type === 'run:start');
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toMatchObject({ source: header.source, workflow: header.workflow });
+    expect(existsSync(join(dir, 'summary.json'))).toBe(true);
+    expect(validateRunDir(dir).issues).toEqual([]);
+  });
+}, 30_000);
+
+test('a second resume restores nothing more', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    writeFileSync(join(dir, 'events.ndjson'), '');
+    const stop = new AbortController();
+    const interruptedAgain = await resumeWorkflow({
+      cwd: repo.dir,
+      adapters: await fakeAdapters(repo.dir),
+      runId,
+      signal: stop.signal,
+      onCall: () => stop.abort(),
+    });
+    expect(interruptedAgain).toMatchObject({ status: 'suspended', stopReason: 'interrupted' });
+    const first = events(dir);
+    expect(countOf(first, 'run:start')).toBe(1);
+
+    await withTempRepo(async (again) => {
+      copyRun(repo.dir, again.dir);
+      const copy = join(again.dir, '.sail-runs', runId);
+      expect(await resumeWorkflow({ cwd: again.dir, adapters: await fakeAdapters(again.dir), runId })).toMatchObject({
+        status: 'completed',
+      });
+      const second = events(copy);
+      expect(countOf(second, 'run:start')).toBe(1);
+      for (const key of keys(copy)) expect(countOf(second, 'journal:append', key)).toBe(1);
+      expect(second.slice(0, first.length)).toEqual(first);
+      expect(validateRunDir(copy).issues).toEqual([]);
+    });
+  });
+}, 30_000);
+
+test('a resume with intact events restores nothing', async () => {
+  const { dir, interrupted } = await resumed();
+  const added = events(dir).slice(interrupted.length);
+  const reported = interrupted.flatMap((event) => (event.type === 'journal:append' ? [event.key] : []));
+  expect(added.filter((event) => event.type === 'run:start')).toEqual([]);
+  expect(added.flatMap((event) => (event.type === 'journal:append' ? [event.key] : []))).not.toEqual(
+    expect.arrayContaining(reported.slice(0, 1)),
+  );
+  for (const event of added) {
+    if (event.type === 'journal:append') expect(reported).not.toContain(event.key);
+  }
+  expect(added[0]).toMatchObject({ type: 'workspace:leased' });
+}, 30_000);
+
+/** The hash of one file binding, as a call line journals it. */
+const fileHash = (name: string, path: string) =>
+  fingerprintBindings({ [name]: { kind: 'file', path: `/run/${path}`, from: path } })[name] ?? '';
+
+test('a run journals each call line with its bindings fingerprints, {} for a call with none, and the intake line none', async () => {
+  const { end } = await completed();
+  const { entries } = readJournal(end.dir);
+  const by = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
+  expect(by['intake#1']?.bindings).toBeUndefined();
+  expect(by['spec#1']?.bindings).toEqual({ brief: fileHash('brief', '00-intake/call-1/out/brief.md') });
+  expect(by['implement#1']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/out/spec.md') });
+  expect(by['tests#1']?.bindings).toEqual({});
+  const feedback = fingerprintBindings({ feedback: { kind: 'value', value: by['tests#1']?.output, from: '' } });
+  expect(by['implement#2']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/out/spec.md'), ...feedback });
+  expect(feedback.feedback).toMatch(/^[0-9a-f]{16}$/);
+  const lines = readFileSync(join(end.dir, JOURNAL_FILE), 'utf8').trim().split('\n');
+  expect(lines.flatMap((line) => validateDocument('sail.journal.v1', JSON.parse(line))).map(formatIssue)).toEqual([]);
+});
+
+test("a multi-step call's line and its step lines carry its bindings", async () => {
+  await withTempRepo(async (repo) => {
+    writeTwoStep(repo.dir);
+    const end = await ranAgent(repo.dir);
+    const call = entryOf(end.dir, 'publish#1')?.bindings ?? {};
+    expect(Object.keys(call)).toEqual(['spec']);
+    expect(call.spec).toMatch(/^[0-9a-f]{16}$/);
+    expect(entryOf(end.dir, 'publish#1/describe')?.bindings).toEqual(call);
+    expect(entryOf(end.dir, 'publish#1/open')?.bindings).toEqual(call);
+  });
+}, 60_000);
+
+test("a group's call lines each carry their own call's bindings, beside the group's keys", async () => {
+  await withTempRepo(async (repo) => {
+    writeTrio(repo.dir, { a: 0, b: 0, c: 0 });
+    const end = await ranTrio(repo.dir);
+    const calls = readJournal(end.dir).entries.filter((entry) => entry.group !== undefined);
+    const brief = { brief: fileHash('brief', '00-intake/call-1/out/brief.md') };
+    expect(calls.map((entry) => entry.key).sort()).toEqual(TRIO_KEYS);
+    expect(calls.map((entry) => [entry.group, entry.bindings])).toEqual(calls.map(() => [TRIO_KEYS, brief]));
+  });
+}, 30_000);
+
+/** A workflow of two `implement` calls whose feedback differs by `total`, in `order`, sequential or as a group. */
+function twoImplements(sail: string, mode: 'sequence' | 'group', order: [number, number]): void {
+  const body =
+    mode === 'sequence'
+      ? `  await run.stage(implement, { spec: s.files['spec.md'], feedback: report(${order[0]}) });
+  await run.stage(implement, { spec: s.files['spec.md'], feedback: report(${order[1]}) });`
+      : `  await run.all([
+    [implement, { spec: s.files['spec.md'], feedback: report(${order[0]}) }],
+    [implement, { spec: s.files['spec.md'], feedback: report(${order[1]}) }],
+  ]);`;
+  write(
+    sail,
+    WORKFLOW,
+    `import { workflow } from 'sail';
+import { ticket } from 'sail/intakes';
+import { implement } from '../../stages/implement/stage';
+import { tests } from '../../stages/tests/stage';
+import { spec } from './stages/spec/stage';
+
+const report = (total: number) => ({ ok: true, total, failed: 0, durationMs: 0, failures: [] });
+
+export default workflow('ticket-to-pr', { intake: ticket, version: 1 }, async (run) => {
+  const s = await run.stage(spec, { brief: run.intake.files['brief.md'] });
+${body}
+  await run.stage(tests);
+  return 'ok';
+});
+`,
+  );
+}
+
+test('a workflow that binds a value built from a counter fails with determinism_violation on its next replay, naming the binding', async () => {
+  await stubRun(
+    {},
+    (sail) => {
+      edit(sail, WORKFLOW, 'export default workflow(', 'let replays = 0;\n\nexport default workflow(');
+      edit(
+        sail,
+        WORKFLOW,
+        'feedback: iteration.previous }',
+        'feedback: { ok: true, total: replays++, failed: 0, durationMs: 0, failures: [] } }',
+      );
+    },
+    (end) => {
+      expect(end).toMatchObject({
+        status: 'failed',
+        stopReason: 'determinism_violation',
+        message: "the workflow asked for 'implement#1' with other bindings than the journal's: 'feedback' changed",
+      });
+      expect(keys(end.dir)).toEqual(['intake#1', 'spec#1', 'implement#1']);
+    },
+  );
+});
+
+test.each(['sequence', 'group'] as const)(
+  'a resume whose workflow swapped two %s calls of one stage fails with determinism_violation',
+  async (mode) => {
+    await withTempRepo(async (repo) => {
+      const sail = writeStub(repo.dir);
+      twoImplements(sail, mode, [1, 2]);
+      const first = await ran(repo.dir, { until: 'implement' });
+      expect(first.status).toBe('suspended');
+      const runId = await withTempRepo(async (copy) => {
+        copyRun(repo.dir, copy.dir);
+        twoImplements(join(copy.dir, '.sail'), mode, [2, 1]);
+        const end = await resumeWorkflow({ cwd: copy.dir, adapters: await fakeAdapters(copy.dir), runId: first.runId });
+        expect(end).toMatchObject({ status: 'failed', stopReason: 'determinism_violation' });
+        expect((end as { message?: string }).message).toMatch(
+          /^the workflow asked for 'implement#[12]' with other bindings than the journal's: 'feedback' changed$/,
+        );
+        return first.runId;
+      });
+      expect(runId).toBe(first.runId);
+    });
+  },
+);
+
+test('a resume of a run whose journal lines lack bindings completes, since an older run keeps the key-only check', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await stoppedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const path = join(dir, JOURNAL_FILE);
+    const lines = readFileSync(path, 'utf8').trim().split('\n');
+    expect(lines.some((line) => 'bindings' in JSON.parse(line))).toBe(true);
+    const stripped = lines.map((line) => {
+      const { bindings: _, ...rest } = JSON.parse(line);
+      return JSON.stringify(rest);
+    });
+    writeFileSync(path, `${stripped.join('\n')}\n`);
+    const end = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId });
+    expect(end).toMatchObject({ runId, status: 'completed' });
+    expect(keys(dir)).toEqual(ALL_KEYS);
+  });
+});

@@ -60,7 +60,7 @@ test('sail FAKE-1 --workflow groom runs the repository intake as intake#1 and co
       expect.stringContaining('shape'),
     ]);
     expect(existsSync(join(dir, '00-intake', 'call-1', 'result.json'))).toBe(true);
-    expect(entries[0]?.files['brief.md']).toMatch(/^00-intake\/call-1\/brief\.md$/);
+    expect(entries[0]?.files['brief.md']).toMatch(/^00-intake\/call-1\/out\/brief\.md$/);
     expect(existsSync(join(dir, entries[0]?.files['brief.md'] ?? ''))).toBe(true);
 
     const events = readEvents(dir);

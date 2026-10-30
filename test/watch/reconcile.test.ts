@@ -18,6 +18,7 @@ afterEach(() => {
 const REMOTE = 'fake://origin';
 const NOW = '2026-10-28T10:00:00.000Z';
 const BACKOFF = 15 * 60_000;
+const PORT_BACKOFF = [1, 2, 5, 10, 30].map((minutes) => minutes * 60_000);
 /** The pid of the run's process when it is alive: no real process has it. */
 const LIVE = 900_100;
 const DEAD = 900_101;
@@ -36,6 +37,7 @@ function world() {
     workspace: { holder: async (remote, branch) => heldLease(leases, remote, branch) },
     now: new Date(NOW),
     backoffMs: BACKOFF,
+    portBackoffMs: PORT_BACKOFF,
     first: false,
     resumed: false,
     ...fields,
@@ -277,4 +279,144 @@ test('a suspended usage_limit run this dispatcher resumed, and which hit no limi
     { kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' },
     { kind: 'held', until: '2026-10-28T14:20:00.000Z', reason: 'spec#1 hit the usage limit' },
   ]);
+});
+
+/** Writes run `n`'s events: a `run:suspended` on an unavailable port at each time, or a `journal:append`. */
+function portEvents(runsDir: string, n: number, steps: ('journal' | string)[]): void {
+  const lines = steps.map((step, index) => {
+    const base = { seq: index + 2, ts: step === 'journal' ? NOW : step, runId: runIdOf(n) };
+    if (step === 'journal') return { ...base, type: 'journal:append', key: 'publish#1', line: 1, outcome: 'passed' };
+    return { ...base, type: 'run:suspended', stopReason: 'port_unavailable', key: 'publish#1' };
+  });
+  const error = {
+    seq: 1,
+    ts: NOW,
+    runId: runIdOf(n),
+    type: 'error:port',
+    key: 'publish#1',
+    port: 'codeHost',
+    op: 'push',
+    code: 'unavailable',
+    message: 'the fake code host is unreachable',
+  };
+  writeFileSync(
+    join(runsDir, runIdOf(n), 'events.ndjson'),
+    `${[error, ...lines].map((line) => JSON.stringify(line)).join('\n')}\n`,
+  );
+}
+
+const PORT_RESUME: Reconciled = { kind: 'resume', from: { status: 'suspended', stopReason: 'port_unavailable' } };
+
+test('a suspended port_unavailable run is held for the first back-off after its suspension, then resumed', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'port_unavailable');
+  portEvents(w.runsDir, 1, ['2026-10-28T09:59:30.000Z']);
+  const later = (seconds: number) => w.context({ now: new Date(Date.parse(NOW) + seconds * 1000) });
+  expect([
+    await reconcileItem(item(1, DEAD), w.context()),
+    await reconcileItem(item(1, DEAD), later(29)),
+    await reconcileItem(item(1, DEAD), later(30)),
+  ]).toEqual([
+    {
+      kind: 'held',
+      until: '2026-10-28T10:00:30.000Z',
+      reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
+    },
+    {
+      kind: 'held',
+      until: '2026-10-28T10:00:30.000Z',
+      reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
+    },
+    PORT_RESUME,
+  ]);
+});
+
+test('consecutive port_unavailable suspensions wait for each back-off in turn, and one past the schedule parks with the call, the count and the last port error', async () => {
+  const w = world();
+  const times = ['08:00', '08:02', '08:05', '08:11', '08:25', '09:00'].map((time) => `2026-10-28T${time}:00.000Z`);
+  const answers: Reconciled[] = [];
+  for (const [index, n] of [1, 2, 3, 4, 5, 6].entries()) {
+    runDir(w.runsDir, n, 'suspended', 'port_unavailable');
+    portEvents(w.runsDir, n, times.slice(0, index + 1));
+    answers.push(await reconcileItem(item(n, DEAD), w.context({ now: new Date(times[index] as string) })));
+  }
+  expect(answers.map((answer) => (answer.kind === 'held' ? answer.until : answer))).toEqual([
+    '2026-10-28T08:01:00.000Z',
+    '2026-10-28T08:04:00.000Z',
+    '2026-10-28T08:10:00.000Z',
+    '2026-10-28T08:21:00.000Z',
+    '2026-10-28T08:55:00.000Z',
+    {
+      kind: 'park',
+      reason:
+        'publish#1 could not reach a provider on 6 suspensions in a row: codeHost.push: the fake code host is unreachable',
+    },
+  ]);
+});
+
+test('the port error a held port_unavailable run quotes is the suspended call’s, not one another call of its group took after it', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'port_unavailable');
+  portEvents(w.runsDir, 1, ['2026-10-28T09:59:30.000Z']);
+  const other = {
+    seq: 3,
+    ts: NOW,
+    runId: runIdOf(1),
+    type: 'error:port',
+    key: 'link#1/comment',
+    port: 'ticketSource',
+    op: 'comment',
+    code: 'unavailable',
+    message: 'the fake ticket source is unreachable',
+  };
+  appendFileSync(join(w.runsDir, runIdOf(1), 'events.ndjson'), `${JSON.stringify(other)}\n`);
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({
+    kind: 'held',
+    until: '2026-10-28T10:00:30.000Z',
+    reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
+  });
+});
+
+test('a suspended port_unavailable run whose lease a live process holds is adopted, not held or resumed', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'port_unavailable');
+  portEvents(w.runsDir, 1, ['2026-10-28T09:59:30.000Z']);
+  takeLease(w.leases, REMOTE, branchOf(1), {
+    runId: runIdOf(1),
+    runDir: join(w.runsDir, runIdOf(1)),
+    pid: process.pid,
+  });
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({ kind: 'adopt', pid: process.pid });
+});
+
+test('a journal:append after a port_unavailable suspension resets the count: the next suspension is held for the first back-off', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'port_unavailable');
+  portEvents(w.runsDir, 1, [
+    '2026-10-28T08:00:00.000Z',
+    '2026-10-28T08:01:00.000Z',
+    'journal',
+    '2026-10-28T09:59:30.000Z',
+  ]);
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({
+    kind: 'held',
+    until: '2026-10-28T10:00:30.000Z',
+    reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
+  });
+});
+
+test('a port_unavailable run this dispatcher resumed that was not suspended again is parked with why its resume failed; one suspended again after the resume is held', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'port_unavailable');
+  portEvents(w.runsDir, 1, ['2026-10-28T09:00:00.000Z']);
+  logLine(w.runsDir, 1, 'sail resume: LINEAR_API_KEY is not set');
+  runDir(w.runsDir, 2, 'suspended', 'port_unavailable');
+  portEvents(w.runsDir, 2, ['2026-10-28T09:00:00.000Z', '2026-10-28T09:59:30.000Z']);
+  const resumedAt = new Date('2026-10-28T09:40:00.000Z');
+  const [first, second] = [
+    await reconcileItem(item(1, DEAD), w.context({ resumed: true, resumedAt, exited: 3 })),
+    await reconcileItem(item(2, DEAD), w.context({ resumed: true, resumedAt })),
+  ];
+  expect(first).toEqual({ kind: 'park', reason: 'its resume failed: sail resume: LINEAR_API_KEY is not set' });
+  expect(second).toMatchObject({ kind: 'held', until: '2026-10-28T10:01:30.000Z' });
 });

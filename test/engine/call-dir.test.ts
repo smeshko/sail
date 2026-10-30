@@ -10,7 +10,6 @@ import {
   isPlainName,
   nextStepTry,
   nextTry,
-  RESERVED_NAMES,
   runRelative,
   stageDirName,
   stepPaths,
@@ -41,6 +40,7 @@ test.each([[-1], [1.5], [Number.NaN]])('a stage index of %p is refused', (index)
 test("a call's paths sit in NN-<stage>/call-N/, with $STAGE_IN as in/ inside it", () => {
   expect(callPaths('/r', 3, 'tests', 2)).toEqual({
     dir: '/r/03-tests/call-2',
+    out: '/r/03-tests/call-2/out',
     stageIn: '/r/03-tests/call-2/in',
     stdout: '/r/03-tests/call-2/stdout.log',
     stderr: '/r/03-tests/call-2/stderr.log',
@@ -56,6 +56,7 @@ test("a later try's paths sit in call-N/try-M/, and try 1 is call-N/ itself", ()
   expect(callPaths('/r', 3, 'tests', 2, 1).dir).toBe('/r/03-tests/call-2');
   expect(callPaths('/r', 3, 'tests', 2, 3)).toEqual({
     dir: '/r/03-tests/call-2/try-3',
+    out: '/r/03-tests/call-2/try-3/out',
     stageIn: '/r/03-tests/call-2/try-3/in',
     stdout: '/r/03-tests/call-2/try-3/stdout.log',
     stderr: '/r/03-tests/call-2/try-3/stderr.log',
@@ -104,19 +105,6 @@ test('createCallDir creates the call directory and in/, and refuses to reuse one
   expect(() => createCallDir(paths)).toThrow('EEXIST');
 });
 
-test('no produced file may take the name of what the engine writes beside it, the prompt and transcript of an agent included', () => {
-  expect([...RESERVED_NAMES].sort()).toEqual([
-    'in',
-    'port-events.ndjson',
-    'prompt.md',
-    'result.json',
-    'session.log',
-    'stderr.log',
-    'stdout.log',
-    'steps',
-  ]);
-});
-
 test('isPlainName takes a name that stays directly inside a directory', () => {
   for (const name of ['junit.xml', '.hidden', '..x', 'a b']) expect(isPlainName(name)).toBe(true);
   for (const name of ['', '.', '..', '../x', 'a/b', 'a\\b', '/abs']) expect(isPlainName(name)).toBe(false);
@@ -124,8 +112,8 @@ test('isPlainName takes a name that stays directly inside a directory', () => {
 
 test('runRelative gives a run-relative POSIX path, as result.json records files', () => {
   const runDir = '/x/.sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
-  expect(runRelative(runDir, join(callPaths(runDir, 3, 'tests', 1).dir, 'junit.xml'))).toBe(
-    '03-tests/call-1/junit.xml',
+  expect(runRelative(runDir, join(callPaths(runDir, 3, 'tests', 1).out, 'junit.xml'))).toBe(
+    '03-tests/call-1/out/junit.xml',
   );
 });
 
@@ -133,23 +121,23 @@ test('createCallDir leaves in/ out when told to, for a first try and a durable l
   const dir = tempDir();
   const first = callPaths(dir, 0, 'intake', 1);
   createCallDir(first, { stageIn: false });
-  expect(readdirSync(first.dir)).toEqual([]);
+  expect(readdirSync(first.dir)).toEqual(['out']);
   expect(() => createCallDir(first, { stageIn: false })).toThrow();
 
   const second = callPaths(dir, 0, 'intake', 1, 2);
   createCallDir(second, { durable: true, stageIn: false });
-  expect(readdirSync(second.dir)).toEqual([]);
-  expect(readdirSync(first.dir)).toEqual(['try-2']);
+  expect(readdirSync(second.dir)).toEqual(['out']);
+  expect(readdirSync(first.dir).sort()).toEqual(['out', 'try-2']);
   // Left out, the option keeps in/: a step's call still gets its $STAGE_IN.
   const step = callPaths(dir, 1, 'spec', 1);
   createCallDir(step);
-  expect(readdirSync(step.dir)).toEqual(['in']);
+  expect(readdirSync(step.dir).sort()).toEqual(['in', 'out']);
 });
 
-test("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ below them, and its $STAGE_OUT is call-N/", () => {
+test("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ below them, and its $STAGE_OUT is call-N/out/", () => {
   expect(stepPaths('/r', 5, 'publish', 1, 1, 'describe')).toEqual({
     dir: '/r/05-publish/call-1/steps/1-describe',
-    out: '/r/05-publish/call-1',
+    out: '/r/05-publish/call-1/out',
     stageIn: '/r/05-publish/call-1/steps/1-describe/in',
     stdout: '/r/05-publish/call-1/steps/1-describe/stdout.log',
     stderr: '/r/05-publish/call-1/steps/1-describe/stderr.log',
@@ -157,7 +145,7 @@ test("a step's paths sit in call-N/steps/<i>-<step>/, a later try's in try-M/ be
   });
   expect(stepPaths('/r', 5, 'publish', 2, 2, 'open', 3)).toEqual({
     dir: '/r/05-publish/call-2/steps/2-open/try-3',
-    out: '/r/05-publish/call-2',
+    out: '/r/05-publish/call-2/out',
     stageIn: '/r/05-publish/call-2/steps/2-open/try-3/in',
     stdout: '/r/05-publish/call-2/steps/2-open/try-3/stdout.log',
     stderr: '/r/05-publish/call-2/steps/2-open/try-3/stderr.log',
@@ -186,7 +174,7 @@ test("createCallDir makes a step's directory and in/ inside its call's $STAGE_OU
   const runDir = tempDir();
   const describe = stepPaths(runDir, 5, 'publish', 1, 1, 'describe');
   createCallDir(describe);
-  expect(readdirSync(join(runDir, '05-publish', 'call-1'))).toEqual(['steps']);
+  expect(readdirSync(join(runDir, '05-publish', 'call-1')).sort()).toEqual(['out', 'steps']);
   expect(readdirSync(describe.dir)).toEqual(['in']);
   const open = stepPaths(runDir, 5, 'publish', 1, 2, 'open');
   createCallDir(open);
@@ -205,6 +193,7 @@ test("a durable step directory is synced into each directory it was made in, fro
     call,
     join(call, 'steps'),
     describe.dir,
+    call,
   ]);
   const retry = stepPaths(runDir, 5, 'publish', 1, 1, 'describe', 2);
   expect(syncedDirs(() => createCallDir(retry, { durable: true }))).toEqual([describe.dir, retry.dir]);

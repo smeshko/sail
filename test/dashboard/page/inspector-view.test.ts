@@ -50,7 +50,7 @@ test("the permissions tab explains FAKE-2's denial from its events, roster and r
 
 test("the files tab lists the golden implement#2's diff.patch with its bytes and a sha256 prefix, the whole hash in its title", () => {
   expect(inspect(GOLDEN_RUN, 'implement#2', 'files')).toContain(
-    '<div class="grp-t">files · 1</div><div class="art"><span class="ic">▤</span><span><button class="art-open" data-action="open-file" data-name="diff.patch" data-path="02-implement/call-2/diff.patch" title="read diff.patch"><b>diff.patch</b></button><span class="d">02-implement/call-2/diff.patch · 613 bytes · <span class="sha" title="2a10783a63a95398d9ab4bace6f0919d15d15ab03637579579b192693547ea25">2a10783a63a9</span></span></span></div>',
+    '<div class="grp-t">files · 1</div><div class="art"><span class="ic">▤</span><span><button class="art-open" data-action="open-file" data-name="diff.patch" data-path="02-implement/call-2/out/diff.patch" title="read diff.patch"><b>diff.patch</b></button><span class="d">02-implement/call-2/out/diff.patch · 613 bytes · <span class="sha" title="2a10783a63a95398d9ab4bace6f0919d15d15ab03637579579b192693547ea25">2a10783a63a9</span></span></span></div>',
   );
   const events = readEvents(GOLDEN_RUN);
   const end = events.findIndex((event) => event.type === 'stage:end' && event.key === 'implement#2');
@@ -100,7 +100,7 @@ test("the overview shows the call's facts, output, consumed bindings, errors and
   expect(markup).toContain('<dt>model</dt><dd>claude-sonnet-5</dd><dt>cost</dt><dd>$0.24</dd><dt>turns</dt><dd>4</dd>');
   expect(markup).toContain('<pre class="code">{\n  &quot;commits&quot;: [');
   expect(markup).toContain(
-    '<dt>spec</dt><dd>01-spec/call-1/spec.md</dd><dt>feedback</dt><dd>03-tests/call-1/result.json#/output</dd>',
+    '<dt>spec</dt><dd>01-spec/call-1/out/spec.md</dd><dt>feedback</dt><dd>03-tests/call-1/result.json#/output</dd>',
   );
   expect(markup).not.toContain('<div class="hint">');
   const fake2 = foldRun(readEvents(FAKE_2));

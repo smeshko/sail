@@ -452,6 +452,34 @@ test('a run socket closed without end reconnects after 2 s into a fresh model, o
   expect(host.regions.main).toContain('<span class="pill p-skip">unknown</span>');
 });
 
+test('a run stream that sends an error and closes is not reopened, keeps its cards and its error, and clicking the run opens it again from empty (ADW-209)', () => {
+  const runSockets = () => host.sockets.filter((socket) => socket.query.startsWith('run='));
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('run=')[0];
+  const before = [...readEvents(GOLDEN())].slice(0, 12);
+  for (const event of before) host.push(socket, { kind: 'event', event });
+  host.advance(100);
+  const drawn = cards(host.regions.main);
+  expect(drawn.length).toBeGreaterThan(0);
+  host.push(socket, { kind: 'error', message: "events.ndjson:9 can't be read" });
+  host.drop(socket);
+  host.advance(10_000);
+  expect(runSockets()).toHaveLength(1);
+  expect(host.regions.main).toContain('<div class="code bad">events.ndjson:9 can&#39;t be read</div>');
+  expect(cards(host.regions.main)).toEqual(drawn);
+  host.click({ action: 'select-card', key: drawn[0] ?? '' });
+  expect(page.ui.key).toBe(drawn[0]);
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  host.advance(100);
+  expect(runSockets()).toHaveLength(2);
+  expect(cards(host.regions.main)).toEqual([]);
+  expect(host.regions.main).not.toContain('code bad');
+  expect(page.ui.key).toBeUndefined();
+  host.click({ action: 'select-run', repo: 'alpha', run: GOLDEN_RUN_ID });
+  expect(runSockets()).toHaveLength(2);
+});
+
 test("a run stream's error is shown in the main region, and a message or a result that is no JSON changes nothing", async () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
@@ -569,6 +597,46 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   expect([sockets[0]?.closed, host.open('queue=')]).toEqual([true, []]);
   host.advance(100);
   expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
+});
+
+test('a queue stream that sends an error and closes is not reopened and shows its error, and clicking its row opens it again from empty (ADW-209)', () => {
+  const queueSockets = () => host.sockets.filter((socket) => socket.query.startsWith('queue='));
+  const queue = `beta/${QUEUE_WORKFLOW}`;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('queue=')[0];
+  host.click({ action: 'select-queue', queue });
+  expect(queueSockets()).toHaveLength(1);
+  host.push(socket, {
+    kind: 'queue-event',
+    event: { seq: 1, ts: '2026-09-24T10:54:59.000Z', type: 'watch:added', workflow: QUEUE_WORKFLOW },
+  });
+  host.push(socket, { kind: 'error', message: "events.ndjson:2 can't be read" });
+  host.drop(socket);
+  host.advance(10_000);
+  expect(queueSockets()).toHaveLength(1);
+  expect(host.regions.main).toContain('<div class="code bad">events.ndjson:2 can&#39;t be read</div>');
+  host.click({ action: 'select-queue', queue });
+  host.advance(100);
+  expect(queueSockets()).toHaveLength(2);
+  expect(host.regions.main).not.toContain('code bad');
+  expect(host.regions.main).toContain('<span class="pill p-skip">unknown</span>');
+  host.click({ action: 'select-queue', queue });
+  expect(queueSockets()).toHaveLength(2);
+});
+
+test('a failed queue reopened before its old socket closes keeps one open socket when the old one closes (review R1) (ADW-209)', () => {
+  const queue = `beta/${QUEUE_WORKFLOW}`;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const old = host.open('queue=')[0];
+  host.click({ action: 'select-queue', queue });
+  host.push(old, { kind: 'error', message: "events.ndjson:2 can't be read" });
+  host.click({ action: 'select-queue', queue });
+  host.drop(old);
+  host.advance(10_000);
+  expect(host.sockets.filter((socket) => socket.query.startsWith('queue='))).toHaveLength(2);
+  expect(host.open('queue=')).toHaveLength(1);
 });
 
 test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
@@ -719,26 +787,26 @@ test('the timeline filter loads what was saved, toggles a kind in the order of t
 
 test("a file name opens the drawer with the file's markdown as HTML, another file as text, Esc closes it before the timeline, and another run closes it", async () => {
   const file = (path: string) => `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/file?path=${encodeURIComponent(path)}`;
-  host.bodies.set(`${file('01-spec/call-1/spec.md')}&as=html`, { status: 200, body: '<h1>Spec</h1>' });
-  host.bodies.set(file('00-intake/call-1/ticket.json'), { status: 200, body: '{}' });
+  host.bodies.set(`${file('01-spec/call-1/out/spec.md')}&as=html`, { status: 200, body: '<h1>Spec</h1>' });
+  host.bodies.set(file('00-intake/call-1/out/ticket.json'), { status: 200, body: '{}' });
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN(), false);
   host.click({ action: 'select-card', key: 'spec#1' });
-  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
-  expect(page.ui.file).toEqual({ name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
+  expect(page.ui.file).toEqual({ name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
   host.advance(100);
   expect(host.regions.drawer).toContain('<div class="code">loading…</div>');
   await settle();
   host.advance(100);
   expect(host.regions.drawer).toContain('<div class="md"><h1>Spec</h1></div>');
-  host.click({ action: 'open-file', name: 'ticket.json', path: '00-intake/call-1/ticket.json' });
+  host.click({ action: 'open-file', name: 'ticket.json', path: '00-intake/call-1/out/ticket.json' });
   host.click({ action: 'open-file', name: 'gone.txt', path: '00-intake/call-1/gone.txt' });
   await settle();
   host.advance(100);
   expect(host.reads.map((read) => read.path).filter((path) => path.includes('/file?'))).toEqual([
-    `${file('01-spec/call-1/spec.md')}&as=html`,
-    file('00-intake/call-1/ticket.json'),
+    `${file('01-spec/call-1/out/spec.md')}&as=html`,
+    file('00-intake/call-1/out/ticket.json'),
     file('00-intake/call-1/gone.txt'),
   ]);
   // Only the latest file's read is shown.
@@ -748,12 +816,12 @@ test("a file name opens the drawer with the file's markdown as HTML, another fil
   expect([page.ui.file, page.ui.timeline]).toEqual([undefined, true]);
   host.advance(100);
   expect(host.regions.drawer).toBe('');
-  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
   host.click({ action: 'close-file' });
   expect(page.ui.file).toBeUndefined();
   host.click({ action: 'open-file', name: 'spec.md' });
   expect(page.ui.file).toBeUndefined();
-  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
   host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
   expect(page.ui.file).toBeUndefined();
 });

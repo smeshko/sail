@@ -23,12 +23,12 @@
   },
   "files": {
     "ticket.json": {
-      "path": "00-intake/call-1/ticket.json",
+      "path": "00-intake/call-1/out/ticket.json",
       "bytes": 1564,
       "sha256": "516dcbc222f4e724aa587fadfe3a08e92525269e89a7655fe00f6b216e9d6613"
     },
     "brief.md": {
-      "path": "00-intake/call-1/brief.md",
+      "path": "00-intake/call-1/out/brief.md",
       "bytes": 1154,
       "sha256": "36e1af9ff634e3189776e58aeabf736a0ec3cb626add3813dc32a385261c4ede"
     }

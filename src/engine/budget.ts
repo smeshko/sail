@@ -21,11 +21,9 @@
 //   runtime crashes the run with it before anything else is journaled.
 // - `budget:warning` fires once per budget and limit at 80% of it, and `budget:exceeded` once at the limit. Both are the
 //   run's, with no key: a step's own carry their call's.
-import { join } from 'node:path';
-import { EVENTS_FILE, holdsSeq, lastSeq } from '../events/consumers/ndjson';
+import { EVENTS_FILE, holdsSeq, lastSeq, syncEvents } from '../events/consumers/ndjson';
 import type { NewEvent, SailEvent } from '../events/types';
 import type { Harness } from '../ports/harness';
-import { syncFile } from './durable';
 import type { RunHeader } from './run-header';
 
 /** The most one run may use: dollars, minutes, or both. */
@@ -394,6 +392,6 @@ export function recordIn(runDir: string): (event: SailEvent) => void {
       const why = last === undefined ? 'ends with no event' : `ends with event ${last}`;
       throw new Error(`${EVENTS_FILE} ${why}, not ${event.type} ${event.seq}: it is not on disk`);
     }
-    syncFile(join(runDir, EVENTS_FILE));
+    syncEvents(runDir);
   };
 }

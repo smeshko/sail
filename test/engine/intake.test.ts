@@ -148,7 +148,8 @@ test('a passing try of the ticket intake leaves ticket.json, brief.md and result
   expect(result.outcome).toBe('passed');
   expect(paths.dir).toBe(join(runDir, '00-intake', 'call-1'));
   expect(paths.result).toBe(join(runDir, '00-intake', 'call-1', 'result.json'));
-  expect(readdirSync(paths.dir).sort()).toEqual(['brief.md', 'result.json', 'ticket.json']);
+  expect(readdirSync(paths.dir).sort()).toEqual(['out', 'result.json']);
+  expect(readdirSync(paths.out).sort()).toEqual(['brief.md', 'ticket.json']);
   expect(readdirSync(runDir)).toEqual(['00-intake']);
 });
 
@@ -175,8 +176,8 @@ test('its result.json is a valid builtin result: the call, the output as TicketI
     output: GOLDEN_OUTPUT,
     claim: { claimed: true, state: { type: 'started', name: 'In Progress' } },
     files: {
-      'ticket.json': recorded(runDir, '00-intake/call-1/ticket.json'),
-      'brief.md': recorded(runDir, '00-intake/call-1/brief.md'),
+      'ticket.json': recorded(runDir, '00-intake/call-1/out/ticket.json'),
+      'brief.md': recorded(runDir, '00-intake/call-1/out/brief.md'),
     },
     consumed: CONSUMED,
   });
@@ -225,8 +226,8 @@ test('it emits intake:start before the call directory exists, then output:valida
   expect(events).toEqual([
     { type: 'intake:start', key, intake: 'ticket', kind: 'builtin', origin: 'builtin', consumed: CONSUMED },
     { type: 'output:validated', key },
-    { type: 'file:produced', key, name: 'ticket.json', ...recorded(runDir, '00-intake/call-1/ticket.json') },
-    { type: 'file:produced', key, name: 'brief.md', ...recorded(runDir, '00-intake/call-1/brief.md') },
+    { type: 'file:produced', key, name: 'ticket.json', ...recorded(runDir, '00-intake/call-1/out/ticket.json') },
+    { type: 'file:produced', key, name: 'brief.md', ...recorded(runDir, '00-intake/call-1/out/brief.md') },
     { type: 'intake:end', key, outcome: 'passed', resultPath: '00-intake/call-1/result.json' },
   ]);
   expect(eventIssues(events)).toEqual([]);
@@ -305,8 +306,8 @@ test("an output the intake's schema refuses is invalid_output with Zod's message
     outcome: 'error',
     output: null,
     files: {
-      'ticket.json': recorded(runDir, '00-intake/call-1/ticket.json'),
-      'brief.md': recorded(runDir, '00-intake/call-1/brief.md'),
+      'ticket.json': recorded(runDir, '00-intake/call-1/out/ticket.json'),
+      'brief.md': recorded(runDir, '00-intake/call-1/out/brief.md'),
     },
   });
   const errors = result.errors as { reason: string; message: string }[];
@@ -460,16 +461,11 @@ test('a later try writes into try-N, its result and events say so, and a try who
   expect(second.result.outcome).toBe('passed');
   expect(runRelative(runDir, second.paths.result)).toBe('00-intake/call-1/try-2/result.json');
   expect(second.result.files).toEqual({
-    'ticket.json': recorded(runDir, '00-intake/call-1/try-2/ticket.json'),
-    'brief.md': recorded(runDir, '00-intake/call-1/try-2/brief.md'),
+    'ticket.json': recorded(runDir, '00-intake/call-1/try-2/out/ticket.json'),
+    'brief.md': recorded(runDir, '00-intake/call-1/try-2/out/brief.md'),
   });
   expect(events.at(-1)).toMatchObject({ type: 'intake:end', resultPath: '00-intake/call-1/try-2/result.json' });
-  expect(readdirSync(join(runDir, '00-intake', 'call-1')).sort()).toEqual([
-    'brief.md',
-    'result.json',
-    'ticket.json',
-    'try-2',
-  ]);
+  expect(readdirSync(join(runDir, '00-intake', 'call-1')).sort()).toEqual(['out', 'result.json', 'try-2']);
 
   expect(await rejection(runIntake({ ...request, try: 2 }))).toMatchObject({ code: 'EEXIST' });
 });
@@ -504,7 +500,7 @@ test("the body is given the request's source, ticket source and signal, and the 
     runId: RUN_ID,
     claimedEarlier: false,
     record: expect.any(Function),
-    out: join(runDir, '00-intake', 'call-1'),
+    out: join(runDir, '00-intake', 'call-1', 'out'),
     signal,
   });
   expect(given?.ticketSource).toBe(ticketSource);
@@ -778,7 +774,7 @@ test('a run journals intake#1 as its first line before the workflow function is 
         title: 'Add a greeting',
         acceptanceCriteria: ['`greet Ada` prints `Hello, Ada!`', '`greet` prints the usage'],
       },
-      files: { 'ticket.json': '00-intake/call-1/ticket.json', 'brief.md': '00-intake/call-1/brief.md' },
+      files: { 'ticket.json': '00-intake/call-1/out/ticket.json', 'brief.md': '00-intake/call-1/out/brief.md' },
       resultPath: '00-intake/call-1/result.json',
     });
     expect(enteredAt['intake#1']).toBe(0);
@@ -834,8 +830,8 @@ test('spec#1 consumes the brief the intake left, byte for byte, and the workflow
     const [intakeEntry] = readJournal(end.dir).entries;
     expect(end).toMatchObject({ status: 'completed', result: { ticketKey: 'FAKE-1', labels: ['sail'] } });
     expect(end.result).toEqual(intakeEntry?.output);
-    expect(resultOf(end.dir, '01-spec/call-1').consumed).toEqual({ brief: '00-intake/call-1/brief.md' });
-    const brief = readFileSync(join(end.dir, '00-intake', 'call-1', 'brief.md'), 'utf8');
+    expect(resultOf(end.dir, '01-spec/call-1').consumed).toEqual({ brief: '00-intake/call-1/out/brief.md' });
+    const brief = readFileSync(join(end.dir, '00-intake', 'call-1', 'out', 'brief.md'), 'utf8');
     expect(readFileSync(join(end.dir, '01-spec', 'call-1', 'in', 'brief.md'), 'utf8')).toBe(brief);
     expect(brief).toStartWith('# Brief: FAKE-1\n');
   });
@@ -913,7 +909,7 @@ test("a resume replays intake#1 from the journal: it fetches nothing, the stream
       key: 'spec#1',
       resultPath: '01-spec/call-1/try-2/result.json',
     });
-    expect(resultOf(dir, '01-spec/call-1/try-2').consumed).toEqual({ brief: '00-intake/call-1/brief.md' });
+    expect(resultOf(dir, '01-spec/call-1/try-2').consumed).toEqual({ brief: '00-intake/call-1/out/brief.md' });
     expect(existsSync(join(dir, '00-intake', 'call-1', 'try-2'))).toBe(false);
     expect(validateRunDir(dir).issues.map(formatIssue)).toEqual([]);
   });
@@ -952,11 +948,11 @@ test('an interrupted pending intake fetch ends as port error, ignores late files
       const before = readFileSync(join(end.dir, 'events.ndjson'), 'utf8');
       expect(events(end.dir).at(-1)?.type).toBe('run:end');
       expect(events(end.dir).filter((event) => event.type === 'ticket:fetched')).toEqual([]);
-      expect(readdirSync(join(end.dir, '00-intake/call-1'))).toEqual(['result.json']);
+      expect(readdirSync(join(end.dir, '00-intake/call-1')).sort()).toEqual(['out', 'result.json']);
       release();
       await Bun.sleep(10);
       expect(readFileSync(join(end.dir, 'events.ndjson'), 'utf8')).toBe(before);
-      expect(readdirSync(join(end.dir, '00-intake/call-1'))).toEqual(['result.json']);
+      expect(readdirSync(join(end.dir, '00-intake/call-1')).sort()).toEqual(['out', 'result.json']);
       copyRun(from.dir, repo.dir);
       return end;
     });
@@ -991,7 +987,7 @@ test('an abort on ticket:claimed completes the claim but cuts the following fetc
       outcome: 'error',
       errors: [{ reason: 'port', message: 'ticketSource.get: the fetch of FAKE-1 was interrupted (unavailable)' }],
     });
-    expect(readdirSync(join(end.dir, '00-intake/call-1'))).toEqual(['result.json']);
+    expect(readdirSync(join(end.dir, '00-intake/call-1')).sort()).toEqual(['out', 'result.json']);
     expect(journalText(end.dir)).toBe('');
   });
 });
@@ -1052,12 +1048,16 @@ test("an abort seen once the intake has returned leaves it unjournaled, and the 
       const left = existsSync(join(ended.dir, '00-intake'))
         ? readdirSync(join(ended.dir, '00-intake', 'call-1')).sort()
         : [];
+      const out = existsSync(join(ended.dir, '00-intake', 'call-1', 'out'))
+        ? readdirSync(join(ended.dir, '00-intake', 'call-1', 'out')).sort()
+        : [];
       copyRun(from.dir, repo.dir);
-      return { ...ended, left, journal: journalText(ended.dir) };
+      return { ...ended, left, out, journal: journalText(ended.dir) };
     });
     expect(end).toMatchObject({ status: 'suspended', stopReason: 'interrupted', message: 'stopped during intake#1' });
     expect(end.journal).toBe('');
-    expect(end.left).toEqual(['brief.md', 'result.json', 'ticket.json']);
+    expect(end.left).toEqual(['out', 'result.json']);
+    expect(end.out).toEqual(['brief.md', 'ticket.json']);
 
     const dir = join(repo.dir, '.sail-runs', end.runId);
     const resumed = await resumeWorkflow({ cwd: repo.dir, adapters: await fakeAdapters(repo.dir), runId: end.runId });
@@ -1065,10 +1065,13 @@ test("an abort seen once the intake has returned leaves it unjournaled, and the 
     expect(readJournal(dir).entries[0]).toMatchObject({
       key: 'intake#1',
       outcome: 'passed',
-      files: { 'ticket.json': '00-intake/call-1/try-2/ticket.json', 'brief.md': '00-intake/call-1/try-2/brief.md' },
+      files: {
+        'ticket.json': '00-intake/call-1/try-2/out/ticket.json',
+        'brief.md': '00-intake/call-1/try-2/out/brief.md',
+      },
       resultPath: '00-intake/call-1/try-2/result.json',
     });
-    expect(resultOf(dir, '01-spec/call-1').consumed).toEqual({ brief: '00-intake/call-1/try-2/brief.md' });
+    expect(resultOf(dir, '01-spec/call-1').consumed).toEqual({ brief: '00-intake/call-1/try-2/out/brief.md' });
     const fetched = events(dir).filter((event) => event.type === 'ticket:fetched');
     // Try 2 finds the ticket claimed by this run, which reads it once, then fetches it for the brief.
     expect(fetched.map((event) => ('key' in event ? event.key : undefined))).toEqual([
@@ -1130,7 +1133,7 @@ test('a run whose journal starts with another key fails with determinism_violati
         outcome: 'passed',
         output: { summary: 'Add a greeting.', tasks: [{ title: 'Add greet()', files: ['src/greet.ts'] }] },
         reason: null,
-        files: { 'spec.md': '01-spec/call-1/spec.md' },
+        files: { 'spec.md': '01-spec/call-1/out/spec.md' },
         resultPath: '01-spec/call-1/result.json',
       });
       writeStatus(run.dir, 'suspended', 'interrupted');
@@ -1200,7 +1203,7 @@ test("the brief lists the claim's comment after the ticket's own, wrapped under 
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
     const end = await ticketRun(repo.dir);
-    const brief = readFileSync(join(end.dir, '00-intake', 'call-1', 'brief.md'), 'utf8');
+    const brief = readFileSync(join(end.dir, '00-intake', 'call-1', 'out', 'brief.md'), 'utf8');
     const comment = (index: number, text: string) =>
       `<untrusted-input source="ticket FAKE-1, comment ${index}">\n${text}\n</untrusted-input>\n`;
     const [own, claim] = [comment(1, 'Keep the exclamation mark.'), comment(2, `sail run ${end.runId} started`)];
@@ -1250,8 +1253,9 @@ test("sail FAKE-1 in a process of its own exits 0: its terminal view shows the i
     expect(stdout).toContain('\n  calls    6 · 6 passed\n');
     expect(runId).toStartWith('FAKE-1-');
 
-    expect(readdirSync(join(dir, '00-intake', 'call-1')).sort()).toEqual(['brief.md', 'result.json', 'ticket.json']);
-    const brief = readFileSync(join(dir, '00-intake', 'call-1', 'brief.md'), 'utf8');
+    expect(readdirSync(join(dir, '00-intake', 'call-1')).sort()).toEqual(['out', 'result.json']);
+    expect(readdirSync(join(dir, '00-intake', 'call-1', 'out')).sort()).toEqual(['brief.md', 'ticket.json']);
+    const brief = readFileSync(join(dir, '00-intake', 'call-1', 'out', 'brief.md'), 'utf8');
     const block = (what: string, text: string) =>
       `<untrusted-input source="ticket FAKE-1, ${what}">\n${text}\n</untrusted-input>\n`;
     const item = (index: number, text: string) =>
@@ -1284,7 +1288,7 @@ test('sail FAKE-2, a ticket whose text plants closing delimiters, completes, and
     const { code, stderr, dir } = spawnTicketRun(repo, 'FAKE-2');
     expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
     const consumed = readFileSync(join(dir, '01-spec', 'call-1', 'in', 'brief.md'), 'utf8');
-    expect(consumed).toBe(readFileSync(join(dir, '00-intake', 'call-1', 'brief.md'), 'utf8'));
+    expect(consumed).toBe(readFileSync(join(dir, '00-intake', 'call-1', 'out', 'brief.md'), 'utf8'));
     // The title, the description, one criterion, the URL, one label, and the author and body of each of the ticket's
     // own comment and the claim's.
     expect(consumed.match(/<untrusted-input source="[^"]*">/g)).toHaveLength(9);

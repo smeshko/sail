@@ -285,14 +285,14 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
       });
     };
     if (!prompt.ok) return unstarted(prompt.message);
-    // Each document starts the session as its template, rendered fresh into `$STAGE_OUT`: this try's own directory, or
+    // Each document starts the session as its template, rendered fresh into `$STAGE_OUT`: this try's own `out/`, or
     // the one a multi-step call's steps share, where an earlier try of the step may have left it.
     const templates = renderDocuments({
       produces: step.produces,
       stageDir: context.stageDir,
       values: bindingValues(agent.bindings, context.inputs),
       outDir: stageOut(context.paths),
-      replace: context.paths.out !== undefined,
+      replace: true,
     });
     if (!templates.ok) return unstarted(templates.message);
     const promptPath = join(context.paths.dir, 'prompt.md');

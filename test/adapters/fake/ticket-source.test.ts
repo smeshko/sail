@@ -10,7 +10,15 @@ import { ticketSourceSuite } from '../../ports/ticket-source.suite';
 
 const FIXTURES = join(import.meta.dir, '..', '..', 'fixtures');
 const SEED = join(FIXTURES, 'repo', '.sail', 'fake', 'tickets.json');
-const GOLDEN_TICKET = join(FIXTURES, 'runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N', '00-intake', 'call-1', 'ticket.json');
+const GOLDEN_TICKET = join(
+  FIXTURES,
+  'runs',
+  'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N',
+  '00-intake',
+  'call-1',
+  'out',
+  'ticket.json',
+);
 
 const dirs: string[] = [];
 afterEach(() => {

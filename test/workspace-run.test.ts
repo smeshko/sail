@@ -158,7 +158,7 @@ test("validation 4: a stage consuming gitDiff('origin/main...HEAD') finds the ru
     const run = await sail(repo, 'FAKE-1');
     const [runId = ''] = runIds(repo);
     const patch = (call: number) => {
-      const file = join(repo.dir, '.sail-runs', runId, '03-tests', `call-${call}`, 'diff.patch');
+      const file = join(repo.dir, '.sail-runs', runId, '03-tests', `call-${call}`, 'out', 'diff.patch');
       return existsSync(file) ? readFileSync(file, 'utf8') : null;
     };
     expect({ code: run.code, first: patch(1), second: patch(2)?.includes('+++ b/made.txt') }).toEqual({

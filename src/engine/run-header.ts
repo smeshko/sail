@@ -10,7 +10,7 @@ import type { ProjectConfig, RunPort } from './config';
 import { createFileOnce } from './durable';
 import type { LoadedWorkflow } from './load-workflow';
 import { buildRoster, type IntakeEntry, origin, type RosterEntry } from './roster';
-import type { Source } from './run-dir';
+import { RUN_LAYOUT, type Source } from './run-dir';
 import { formatIssue, type SchemaIssue, validateDocument } from './schemas';
 
 export const RUN_HEADER_FILE = 'run.json';
@@ -32,9 +32,13 @@ export interface ClaimRecord {
 export interface RunHeader {
   schema: 'sail.run.v1';
   runId: string;
+  /** The run directory's layout. A run without it kept its calls' records inside their `$STAGE_OUT`. */
+  layout?: typeof RUN_LAYOUT;
   source: Source;
   /** The run a seeded run reused calls from. */
   fromRun?: string;
+  /** How many of the journal's first lines a seeded run reused from `fromRun`. */
+  reused?: number;
   /** What the start did to the ticket. Only runs from before the claim moved into `intake#1` have it: they recorded it here. */
   claim?: ClaimRecord;
   workflow: { name: string; version: number; origin: string; sha256: string };
@@ -98,6 +102,8 @@ export interface HeaderFields {
   source: Source;
   /** The run a seeded run reused calls from. */
   fromRun?: string;
+  /** How many journal lines a seeded run reused. */
+  reused?: number;
   sailDir: string;
   loaded: LoadedWorkflow;
   config: ProjectConfig;
@@ -125,15 +131,17 @@ export function workspaceFields(
 
 /** The header of a run of `loaded` starting at `now`. A workflow without a `version` is version 1. */
 export function buildRunHeader(fields: HeaderFields): RunHeader {
-  const { runId, source, fromRun, sailDir, loaded, config, adapters, harnesses: named, now } = fields;
+  const { runId, source, fromRun, reused, sailDir, loaded, config, adapters, harnesses: named, now } = fields;
   const base = dirname(sailDir);
   const { intake, stages } = buildRoster(loaded, config, base);
   const budget = runBudgetOf(config.budgets.run, loaded.workflow.budget);
   return {
     schema: 'sail.run.v1',
     runId,
+    layout: RUN_LAYOUT,
     source: { ...source, forced: [...source.forced] },
     ...(fromRun === undefined ? {} : { fromRun }),
+    ...(reused === undefined ? {} : { reused }),
     workflow: {
       name: loaded.name,
       version: loaded.workflow.version ?? 1,

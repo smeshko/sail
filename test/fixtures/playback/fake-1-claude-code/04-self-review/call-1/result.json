@@ -37,13 +37,13 @@
   },
   "files": {
     "review.md": {
-      "path": "04-self-review/call-1/review.md",
+      "path": "04-self-review/call-1/out/review.md",
       "bytes": 2626,
       "sha256": "34e2cc07e080ce2ef1c9bb5ba99fdd7b63f6f9c0f2269859eabccf0a11ef58f5"
     }
   },
   "consumed": {
-    "spec": "01-spec/call-1/spec.md"
+    "spec": "01-spec/call-1/out/spec.md"
   },
   "startedAt": "2026-09-25T09:00:53.800Z",
   "finishedAt": "2026-09-25T09:00:57.000Z",

@@ -122,7 +122,7 @@ async function environmentRun(declared: readonly string[] = [], inClone = false,
   );
   expect(result.outcome).toBe('passed');
   const environment = Object.fromEntries(
-    readFileSync(join(s.context.paths.dir, 'environment'), 'utf8')
+    readFileSync(join(s.context.paths.out, 'environment'), 'utf8')
       .trim()
       .split('\n')
       .map((line) => {
@@ -207,7 +207,7 @@ for (const resolver of [undefined, async () => ({ problem: 'jev is not configure
       },
     ]);
     expect(events).toEqual([]);
-    expect(existsSync(join(s.context.paths.dir, 'ran'))).toBe(false);
+    expect(existsSync(join(s.context.paths.out, 'ran'))).toBe(false);
   });
 }
 
@@ -268,7 +268,7 @@ test('exit 0 is passed, with the parsed report and junit.xml recorded', async ()
     outcome: 'passed',
     output: JSON.parse(PASSING),
     files: {
-      'junit.xml': { path: '00-tests/call-1/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
+      'junit.xml': { path: '00-tests/call-1/out/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
     },
     errors: [],
     record: {
@@ -280,7 +280,7 @@ test('exit 0 is passed, with the parsed report and junit.xml recorded', async ()
         CALL: '1',
         TRY: '1',
         STAGE_IN: `.sail-runs/${RUN_ID}/00-tests/call-1/in`,
-        STAGE_OUT: `.sail-runs/${RUN_ID}/00-tests/call-1`,
+        STAGE_OUT: `.sail-runs/${RUN_ID}/00-tests/call-1/out`,
         WORKSPACE: '.',
         BRANCH: 'sail/FAKE-1',
         SAIL_CONFIG: '.sail/project.yaml',
@@ -405,7 +405,7 @@ test('an interrupted script is error, even when it handles SIGTERM, leaves its r
   const controller = new AbortController();
   const running = scriptKind.run(tests(), { ...s.context, signal: controller.signal });
   // Aborted once the trap is set, not after a fixed delay: a script's first exec can be slow.
-  while (!existsSync(join(s.context.paths.dir, 'ready'))) await Bun.sleep(20);
+  while (!existsSync(join(s.context.paths.out, 'ready'))) await Bun.sleep(20);
   controller.abort();
   const run = await running;
   expect(run).toMatchObject({
@@ -418,23 +418,21 @@ test('an interrupted script is error, even when it handles SIGTERM, leaves its r
   expect(readFileSync(s.context.paths.stdout, 'utf8')).toBe(`${PASSING}\n`);
 });
 
-test('a script that clears $STAGE_OUT removes its log, and ends invalid_output', async () => {
+test('a script that removes its log ends invalid_output', async () => {
   const s = setup();
-  s.run(`rm -rf "$STAGE_OUT"/*\n${JUNIT}\necho '${PASSING}'`);
+  s.run(`${JUNIT}\necho '${PASSING}'\nrm "$STAGE_OUT/../stdout.log"`);
   const run = await scriptKind.run(tests(), s.context);
   expect(run).toMatchObject({
     outcome: 'error',
     output: null,
-    errors: [
-      { reason: 'invalid_output', message: "stdout.log was removed from $STAGE_OUT, so the output can't be read" },
-    ],
+    errors: [{ reason: 'invalid_output', message: "stdout.log was removed, so the output can't be read" }],
   });
   expect(Object.keys(run.files)).toEqual(['junit.xml']);
 });
 
 test.skipIf(process.getuid?.() === 0)('a log the script leaves unreadable is invalid_output, naming why', async () => {
   const s = setup();
-  s.run(`${JUNIT}\necho '${PASSING}'\nchmod 000 "$STAGE_OUT/stdout.log"`);
+  s.run(`${JUNIT}\necho '${PASSING}'\nchmod 000 "$STAGE_OUT/../stdout.log"`);
   expect(await scriptKind.run(tests(), s.context)).toMatchObject({
     outcome: 'error',
     errors: [{ reason: 'invalid_output', message: "stdout.log can't be read (EACCES), so the output can't be either" }],
@@ -443,7 +441,7 @@ test.skipIf(process.getuid?.() === 0)('a log the script leaves unreadable is inv
 
 test('a log the script leaves a symlink loop is invalid_output, and script:exit counts no bytes', async () => {
   const s = setup();
-  s.run(`${JUNIT}\necho '${PASSING}'\nrm "$STAGE_OUT/stdout.log"\nln -s stdout.log "$STAGE_OUT/stdout.log"`);
+  s.run(`${JUNIT}\necho '${PASSING}'\nrm "$STAGE_OUT/../stdout.log"\nln -s stdout.log "$STAGE_OUT/../stdout.log"`);
   const { context, events } = collecting(s);
   expect(await scriptKind.run(tests(), context)).toMatchObject({
     outcome: 'error',
@@ -496,7 +494,7 @@ test('the script sees the whole preamble, inherits the environment, and runs fro
     CALL: '1',
     TRY: '1',
     STAGE_IN: context.paths.stageIn,
-    STAGE_OUT: context.paths.dir,
+    STAGE_OUT: context.paths.out,
     WORKSPACE: s.workspace,
     BRANCH: 'sail/FAKE-1',
     SAIL_CONFIG: context.config,
@@ -572,33 +570,6 @@ test('a script on a later try sees TRY as that try', async () => {
   expect((run.record.env as Record<string, string>).TRY).toBe('3');
 });
 
-test("problems() refuses a produced name that differs from an engine file's or a try's only by case: a case-insensitive file system would clobber it", () => {
-  const tail = 'and a file system that ignores case takes them for one';
-  const variants = script('tests', {
-    run: './run.sh',
-    produces: {
-      'Prompt.md': 'file',
-      'RESULT.JSON': 'file',
-      In: 'file',
-      Steps: 'file',
-      'Session.Log': 'file',
-      'Port-Events.NDJSON': 'file',
-      'Try-2': 'file',
-      'Notes.md': 'file',
-    },
-    output: TestReport,
-  });
-  expect(scriptKind.problems(variants)).toEqual([
-    `'Prompt.md' can't be produced: the engine writes 'prompt.md' in $STAGE_OUT, ${tail}`,
-    `'RESULT.JSON' can't be produced: the engine writes 'result.json' in $STAGE_OUT, ${tail}`,
-    `'In' can't be produced: the engine writes 'in' in $STAGE_OUT, ${tail}`,
-    `'Steps' can't be produced: the engine writes 'steps' in $STAGE_OUT, ${tail}`,
-    `'Session.Log' can't be produced: the engine writes 'session.log' in $STAGE_OUT, ${tail}`,
-    `'Port-Events.NDJSON' can't be produced: the engine writes 'port-events.ndjson' in $STAGE_OUT, ${tail}`,
-    `'Try-2' can't be produced: the engine uses 'try-2' for a later try, ${tail}`,
-  ]);
-});
-
 test('problems() refuses two produced names that differ only by case', () => {
   const pair = script('tests', {
     run: './run.sh',
@@ -610,7 +581,7 @@ test('problems() refuses two produced names that differ only by case', () => {
   ]);
 });
 
-test('problems() reports overlapping exit codes, a produced name that is reserved or not plain, and a timeout that is not positive', () => {
+test('problems() reports overlapping exit codes, a produced name that is not plain, and a timeout that is not positive', () => {
   expect(scriptKind.problems(tests())).toEqual([]);
   expect(scriptKind.problems(tests({ exitCodes: { passed: [0], failed: [0, 1], error: [1] } }))).toEqual([
     'exit code 0 is listed under both passed and failed',
@@ -618,15 +589,6 @@ test('problems() reports overlapping exit codes, a produced name that is reserve
   ]);
   expect(scriptKind.problems(tests({ exitCodes: { failed: [0] } }))).toEqual([
     'exit code 0 is listed under both passed and failed',
-  ]);
-  const reserved = script('tests', {
-    run: './run.sh',
-    produces: { 'stdout.log': 'file', in: 'file' },
-    output: TestReport,
-  });
-  expect(scriptKind.problems(reserved)).toEqual([
-    "'stdout.log' can't be produced: the engine writes it in $STAGE_OUT",
-    "'in' can't be produced: the engine writes it in $STAGE_OUT",
   ]);
   const escaping = script('tests', { run: './run.sh', produces: { '../junit.xml': 'file' }, output: TestReport });
   expect(scriptKind.problems(escaping)).toEqual(["'../junit.xml' can't be produced: it is not a plain file name"]);
@@ -700,18 +662,6 @@ test('a declared file that is missing reports no file:produced, while the output
   expect(events[1]).toMatchObject({ code: 0, outcome: 'passed', stdoutBytes: PASSING.length + 1 });
 });
 
-test('problems() refuses a script that would produce prompt.md or session.log: the engine writes both, whatever the kind', () => {
-  const reserved = script('tests', {
-    run: './run.sh',
-    produces: { 'prompt.md': 'file', 'session.log': 'file', 'notes.md': 'file' },
-    output: TestReport,
-  });
-  expect(scriptKind.problems(reserved)).toEqual([
-    "'prompt.md' can't be produced: the engine writes it in $STAGE_OUT",
-    "'session.log' can't be produced: the engine writes it in $STAGE_OUT",
-  ]);
-});
-
 test('problems() refuses a document in produces, which a script step can declare only by getting past the types: only an agent step completes one', () => {
   const documented = script('tests', {
     run: './run.sh',
@@ -750,7 +700,7 @@ test('a clock that jumps an hour at every reading stretches no grace period', as
   const { context, events } = collecting(s);
   const controller = new AbortController();
   const running = scriptKind.run(tests(), { ...context, signal: controller.signal, clock: jumping() });
-  while (!existsSync(join(s.context.paths.dir, 'ready'))) await Bun.sleep(20);
+  while (!existsSync(join(s.context.paths.out, 'ready'))) await Bun.sleep(20);
   const aborted = performance.now();
   controller.abort();
   const run = await running;
@@ -860,7 +810,7 @@ test('SAIL_EVENTS names port-events.ndjson in the call directory: it is recorded
   const { context, events } = collecting(s);
   const run = await scriptKind.run(tests(), context);
   const file = join(s.context.paths.dir, PORT_EVENTS);
-  expect(readFileSync(join(s.context.paths.dir, 'named'), 'utf8')).toBe(file);
+  expect(readFileSync(join(s.context.paths.out, 'named'), 'utf8')).toBe(file);
   const env = run.record.env as Record<string, string>;
   expect([env.SAIL_EVENTS, Object.keys(env).at(-1)]).toEqual([
     `.sail-runs/${RUN_ID}/00-tests/call-1/${PORT_EVENTS}`,
@@ -977,7 +927,7 @@ test("a script that runs sail port jev ask has jev:asked emitted before script:e
         ...event,
       }),
     ),
-    answers: Object.keys(JSON.parse(readFileSync(join(s.context.paths.dir, 'answers.json'), 'utf8')).answers),
+    answers: Object.keys(JSON.parse(readFileSync(join(s.context.paths.out, 'answers.json'), 'utf8')).answers),
     outcome: [run.outcome, run.errors],
   }).toEqual({
     order: ['script:exec', 'jev:asked', 'script:exit'],
@@ -1048,7 +998,7 @@ test.each<[string, string, number | undefined, string, string[]]>([
     const step = tests(timeoutSeconds === undefined ? {} : { timeoutSeconds });
     const running = scriptKind.run(step, { ...context, signal: controller.signal });
     if (how === 'is interrupted') {
-      while (!existsSync(join(s.context.paths.dir, 'ready'))) await Bun.sleep(20);
+      while (!existsSync(join(s.context.paths.out, 'ready'))) await Bun.sleep(20);
       controller.abort();
     }
     const run = await running;
@@ -1149,14 +1099,14 @@ test("a step of a multi-step call leaves its produced files in its call's $STAGE
   const run = await scriptKind.run(tests(), { ...s.context, stage: 'publish', key: 'publish#1/open', paths });
 
   const call = join('.sail-runs', RUN_ID, '05-publish', 'call-1');
-  expect([run.outcome, run.files['junit.xml']?.path]).toEqual(['passed', '05-publish/call-1/junit.xml']);
+  expect([run.outcome, run.files['junit.xml']?.path]).toEqual(['passed', '05-publish/call-1/out/junit.xml']);
   expect(run.record.env).toMatchObject({
     STAGE_IN: join(call, 'steps', '2-open', 'in'),
-    STAGE_OUT: call,
+    STAGE_OUT: join(call, 'out'),
     SAIL_EVENTS: join(call, 'steps', '2-open', PORT_EVENTS),
   });
-  expect([readdirSync(paths.out ?? '').sort(), readdirSync(paths.dir).sort()]).toEqual([
-    ['junit.xml', 'steps'],
+  expect([readdirSync(paths.out).sort(), readdirSync(paths.dir).sort()]).toEqual([
+    ['junit.xml'],
     ['in', 'stderr.log', 'stdout.log'],
   ]);
 });
