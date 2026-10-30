@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { bindingValues, prepareAgentPrompt } from '../engine/agent-prompt';
 import { runRelative, stageOut, writeOwnFile } from '../engine/call-dir';
+import { systemClock } from '../engine/clock';
 import { type ContractError, type FileEntry, producesProblems, recordFiles, validateOutput } from '../engine/contract';
 import { documentProblems, renderDocuments, validateDocuments } from '../engine/documents';
 import { preamble } from '../engine/preamble';
@@ -226,7 +227,7 @@ async function run(step: AgentStep, context: StepContext): Promise<StepRun> {
     if (event.type === 'prompt:rendered') armed = true;
     if (!armed) return;
     clearTimeout(timer);
-    const since = new Date().toISOString();
+    const since = (context.clock ?? systemClock)().toISOString();
     const wait = (ms: number): void => {
       const step = Math.min(ms, LONGEST_MS);
       timer = setTimeout(() => {

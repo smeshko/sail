@@ -186,6 +186,23 @@ test('a silent session stalls once and leaves no timer after returning', async (
   expect(s.events.length).toBe(count);
 });
 
+test("a stall's since is the run's clock, as every event's ts is (review R3)", async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 0.001 } };
+  const s = setup(step);
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(120);
+      return done(null);
+    },
+  };
+  const clock = () => new Date('2026-09-27T09:00:00.000Z');
+  await agentKind.run(step, { ...s.context(harness), clock });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 60, since: '2026-09-27T09:00:00.000Z' },
+  ]);
+});
+
 test('an idle limit longer than a timer can wait does not stall a session at once (review R6)', async () => {
   const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 1_000_000 } };
   const { s } = await tried(step, {
