@@ -23,7 +23,11 @@ beforeEach(() => {
 afterEach(() => m.remove());
 
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
+const ALL = ['alpha', 'alpha/ticket-to-pr', 'beta', 'beta/review', 'beta/ticket-to-pr'];
+/** The rail with every repository and workflow expanded, unless a field says otherwise. */
 const rail = (fields = {}) =>
+  renderRail(railRepos(index(m.registryDir), NOW), { ...initialUi(0), expanded: ALL, ...fields }, NOW).value;
+const folded = (fields = {}) =>
   renderRail(railRepos(index(m.registryDir), NOW), { ...initialUi(0), ...fields }, NOW).value;
 /** The finished runs the rail shows as history rows, in order, each marked when selected. */
 const shown = (markup: string) =>
@@ -42,7 +46,7 @@ test('repository headers are one line with the remote as the tooltip and counts 
     '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta"><span class="caret">›</span><span class="nm">beta</span><span class="counts"><span class="r">▶ 1</span><span>2</span></span></button>',
   );
   for (const gone of ['lgrp-r', '◆', 'class="live"', 'class="ic"']) expect(markup).not.toContain(gone);
-  const bare = renderRail(handMade([]), initialUi(0), NOW).value;
+  const bare = renderRail(handMade([]), { ...initialUi(0), expanded: ['gamma'] }, NOW).value;
   expect(bare).toContain(
     '<button class="lgrp-h open" data-action="toggle-group" data-group="gamma"><span class="caret">›</span><span class="nm">gamma</span><span class="counts"></span></button>',
   );
@@ -59,7 +63,7 @@ test('each repository lists its workflows by name, the watched one with a warn q
     '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="alpha/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><span class="counts"><span class="f">✗ 1</span><span>2</span></span></div>',
   );
   expect(markup.match(/class="qbadge/g)).toHaveLength(1);
-  const idle = renderRail(handMade([{}], 0), initialUi(0), NOW).value;
+  const idle = renderRail(handMade([{}], 0), { ...initialUi(0), expanded: ['gamma', 'gamma/flow'] }, NOW).value;
   expect(idle).toContain(
     '<button class="qbadge idle" data-action="select-queue" data-queue="gamma/flow">queue</button>',
   );
@@ -118,20 +122,32 @@ test('the run states map to the pill colours the rail draws', () => {
   ]);
 });
 
-test("a closed repository or workflow folds, keeping only the open finished run's row or the open queue's workflow header in sight", () => {
-  const closed = rail({ closed: ['alpha', 'beta/ticket-to-pr'] });
-  expect(closed).toContain(
-    '<button class="lgrp-h" title="https://example.com/alpha.git" data-action="toggle-group" data-group="alpha">',
-  );
-  expect(closed).not.toContain('data-group="alpha/ticket-to-pr"');
-  expect(closed).toContain('<button class="wf-t" data-action="toggle-group" data-group="beta/ticket-to-pr">');
-  expect(shown(closed)).toEqual([]);
-  const holding = rail({ closed: ['alpha', 'alpha/ticket-to-pr'], repo: 'alpha', runId: GOLDEN_RUN_ID });
-  expect(shown(holding)).toEqual([`alpha ${GOLDEN_RUN_ID} *`]);
-  const queued = rail({ closed: ['beta'], repo: 'beta', runId: FAKE_3_ID, queue: 'beta/ticket-to-pr' });
+test('the tree starts folded: repository headers only, with no workflow header and no history row', () => {
+  const markup = folded();
+  expect(markup).toContain('<button class="lgrp-h" title="https://example.com/alpha.git"');
+  expect(markup).toContain('<button class="lgrp-h" title="https://example.com/beta.git"');
+  for (const absent of ['wf-t', 'class="hist', 'hist-run']) expect(markup).not.toContain(absent);
+  const groups = [...markup.matchAll(/data-action="toggle-group" data-group="([^"]+)"/g)].map(([, group]) => group);
+  expect(groups).toEqual(['alpha', 'beta']);
+});
+
+test('only the expanded repositories and workflows open, and the others stay folded', () => {
+  const markup = folded({ expanded: ['alpha'] });
+  expect(markup).toContain('<button class="wf-t" data-action="toggle-group" data-group="alpha/ticket-to-pr">');
+  expect(markup).not.toContain('class="hist"');
+  expect(markup).not.toContain('data-group="beta/');
+  expect(folded({ expanded: ['alpha', 'alpha/ticket-to-pr'] })).toContain('class="hist"');
+});
+
+test('the selected run and the selected queue stay visible while folded', () => {
+  const golden = { repo: 'alpha', runId: GOLDEN_RUN_ID };
+  expect(shown(folded(golden))).toEqual([`alpha ${GOLDEN_RUN_ID} *`]);
+  expect(shown(folded({ ...golden, expanded: ['alpha'] }))).toEqual([`alpha ${GOLDEN_RUN_ID} *`]);
+  const queued = folded({ repo: 'beta', runId: FAKE_3_ID, queue: 'beta/ticket-to-pr' });
+  expect(queued).toContain('<button class="wf-t" data-action="toggle-group" data-group="beta/ticket-to-pr">');
   expect(queued).toContain('<button class="qbadge warn sel" title="polled 7d ago"');
   expect(queued).not.toContain('data-group="beta/review"');
-  const live = rail({ closed: ['beta'], repo: 'beta', runId: FAKE_3_ID });
+  const live = folded({ repo: 'beta', runId: FAKE_3_ID });
   expect(live).not.toContain('data-group="beta/ticket-to-pr"');
   expect(live).toContain('class="run live-run sel"');
 });

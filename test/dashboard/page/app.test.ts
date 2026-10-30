@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { callFile, findRepo, findRunDir, index } from '../../../src/dashboard/files';
-import { boot, FILTER_KEY, type Page, THEME_KEY } from '../../../src/dashboard/page/app';
+import { boot, FILTER_KEY, type Page, RAIL_KEY, THEME_KEY } from '../../../src/dashboard/page/app';
 import type { ConnectHandlers, PageHost, Region } from '../../../src/dashboard/page/host';
 import { readEvents } from '../../../src/events/consumers/ndjson';
 import {
@@ -1118,24 +1118,28 @@ test('the needs attention button opens its pane, a and Escape toggle and close i
   expect(host.regions.attention).not.toContain('att-pane');
 });
 
-test('a repository or workflow closes and opens again from its header, and opening the open run from the rail gives the centre back from a queue', () => {
+test('a repository or workflow opens and folds again from its header, remembered across a boot, and opening the open run from the rail gives the centre back from a queue', () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN());
   host.advance(100);
+  expect(page.ui.expanded).toEqual([]);
+  expect(host.regions.rail).not.toContain('data-group="beta/');
   host.click({ action: 'toggle-group', group: 'beta' });
   host.click({ action: 'toggle-group', group: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
-  expect(page.ui.closed).toEqual(['beta', `beta/${QUEUE_WORKFLOW}`]);
+  expect(page.ui.expanded).toEqual(['beta', `beta/${QUEUE_WORKFLOW}`]);
+  expect(host.storage.get(RAIL_KEY)).toBe(JSON.stringify(['beta', `beta/${QUEUE_WORKFLOW}`]));
   expect(host.regions.rail).toContain(
-    '<button class="lgrp-h" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta">',
+    '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta">',
+  );
+  expect(host.regions.rail).toContain(
+    `<button class="wf-t open" data-action="toggle-group" data-group="beta/${QUEUE_WORKFLOW}">`,
   );
   host.click({ action: 'toggle-group', group: 'beta' });
   host.advance(100);
-  expect(page.ui.closed).toEqual([`beta/${QUEUE_WORKFLOW}`]);
-  expect(host.regions.rail).toContain(
-    `<button class="wf-t" data-action="toggle-group" data-group="beta/${QUEUE_WORKFLOW}">`,
-  );
+  expect(page.ui.expanded).toEqual([`beta/${QUEUE_WORKFLOW}`]);
+  expect(host.storage.get(RAIL_KEY)).toBe(JSON.stringify([`beta/${QUEUE_WORKFLOW}`]));
   host.click({ action: 'select-queue', queue: `beta/${QUEUE_WORKFLOW}` });
   host.advance(100);
   expect(cards(host.regions.main)).toEqual([]);
@@ -1143,6 +1147,26 @@ test('a repository or workflow closes and opens again from its header, and openi
   host.advance(100);
   expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
   expect(host.sockets.filter((socket) => socket.query.startsWith('run='))).toHaveLength(1);
+});
+
+test('the rail restores the opens it saved and ignores a stored value that is not a list of names', () => {
+  host.storage.set(RAIL_KEY, JSON.stringify(['alpha', 'alpha/ticket-to-pr']));
+  const restored = boot(host);
+  expect(restored.ui.expanded).toEqual(['alpha', 'alpha/ticket-to-pr']);
+  restored.stop();
+  for (const bad of ['nope', '{"a":1}', '[1,"a"]']) {
+    host.storage.set(RAIL_KEY, bad);
+    const malformed = boot(host);
+    expect(malformed.ui.expanded).toEqual([]);
+    malformed.stop();
+  }
+  host.storage.delete(RAIL_KEY);
+  page = boot(host);
+  host.click({ action: 'toggle-group', group: 'alpha' });
+  page.stop();
+  const again = boot(host);
+  expect(again.ui.expanded).toEqual(['alpha']);
+  again.stop();
 });
 
 test("a click on a waiting row's down button posts the move to the queue's move route, a 409 shows its error as the notice, and a 202 clears it", async () => {

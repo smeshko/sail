@@ -128,7 +128,7 @@ function workflowHeader(workflow: RailWorkflow, group: string, open: boolean, ui
 
 function workflowGroup(repo: string, workflow: RailWorkflow, ui: UiState, now: number): SafeHtml {
   const group = queueId(repo, workflow.name);
-  const open = !ui.closed.includes(group);
+  const open = ui.expanded.includes(group);
   return html`<div class="wf">${workflowHeader(workflow, group, open, ui, now)}
 ${open ? historyLine(repo, group, workflow.runs, ui) : openRun(repo, workflow, ui)}</div>`;
 }
@@ -146,7 +146,7 @@ function repoSelection(repo: RailRepo, ui: UiState, now: number): SafeHtml {
 }
 
 function repoGroup(repo: RailRepo, ui: UiState, now: number): SafeHtml {
-  const open = !ui.closed.includes(repo.name);
+  const open = ui.expanded.includes(repo.name);
   return html`<div class="lgrp">
 <button class="lgrp-h${open ? ' open' : ''}"${
     repo.remote === null ? '' : html` title="${repo.remote}"`
