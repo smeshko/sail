@@ -1,6 +1,7 @@
 // The typesafe Jev: TypeSafe's System One API over plain `fetch`. One POST per ask carries the state and the questions;
 // the answer holds one typed answer per question. Every failure becomes a PortError that keeps TypeSafe's own detail,
-// and the API key, which goes in the request's header alone, is masked wherever a message or a `raw` could hold it.
+// and the API key, which goes in the request's header alone, is masked wherever a message or a `raw` could hold it. The
+// key is sent only to https://api.typesafe.ai or a loopback host, whatever SAIL_TYPESAFE_API_URL says.
 import { z } from 'zod';
 import { redactor } from '../../engine/redact';
 import type { ProviderEmit } from '../../events/types';
@@ -51,8 +52,38 @@ function detailOf(body: unknown, text: string): string {
   return text === '' ? 'no detail' : text;
 }
 
+/** Whether a WHATWG hostname is `localhost`, an address in 127.0.0.0/8 or `[::1]`. */
+function isLoopback(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '[::1]' || /^127(\.\d{1,3}){3}$/.test(hostname);
+}
+
+/**
+ * The base URL for `value`, without a trailing `/`, once it is `https://api.typesafe.ai` or an http(s) URL on a loopback
+ * host: the only places the TypeSafe key may go. Anything else throws, naming SAIL_TYPESAFE_API_URL.
+ */
+export function typesafeEndpoint(value: string): string {
+  let url: URL | undefined;
+  try {
+    url = new URL(value);
+  } catch {
+    url = undefined;
+  }
+  const shown = url === undefined ? value : `${url.protocol}//${url.host}${url.pathname === '/' ? '' : url.pathname}`;
+  const refuse = () =>
+    new Error(
+      `SAIL_TYPESAFE_API_URL is ${shown}: the TypeSafe key goes only to ${TYPESAFE_API_URL} or to http(s) on a loopback host (localhost, 127.0.0.0/8, ::1)`,
+    );
+  if (url === undefined || url.username !== '' || url.password !== '') throw refuse();
+  if (url.origin === TYPESAFE_API_URL) {
+    if (url.pathname !== '/' || url.search !== '' || url.hash !== '') throw refuse();
+    return TYPESAFE_API_URL;
+  }
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !isLoopback(url.hostname)) throw refuse();
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
+}
+
 export function createTypesafeJev(options: TypesafeJevOptions): Jev {
-  const base = (options.apiUrl ?? TYPESAFE_API_URL).replace(/\/+$/, '');
+  const base = typesafeEndpoint(options.apiUrl ?? TYPESAFE_API_URL);
   const host = new URL(base).host;
   const timeoutMs = options.timeoutMs ?? 30_000;
   const now = options.now ?? (() => new Date());
@@ -155,12 +186,14 @@ export function createTypesafeJev(options: TypesafeJevOptions): Jev {
 const TypesafeOptions = z
   .object({
     model: z.string().min(1).optional(),
-    apiUrl: z.string().url().optional(),
     timeoutMs: z.number().int().positive().optional(),
   })
   .strict();
 
-/** The `typesafe` adapter for the jev port. Its API key is read from the operator's `TYPESAFE_API_KEY`. */
+/**
+ * The `typesafe` adapter for the jev port. Its API key is read from the operator's `TYPESAFE_API_KEY`, its endpoint from
+ * `SAIL_TYPESAFE_API_URL` (never the config), which may name only https://api.typesafe.ai or a loopback host.
+ */
 export const typesafeJev: AdapterDefinition<Jev> = {
   requires: () => ['TYPESAFE_API_KEY'],
   create(options, context) {
@@ -168,12 +201,16 @@ export const typesafeJev: AdapterDefinition<Jev> = {
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const option = issue?.code === 'unrecognized_keys' ? issue.keys.join(', ') : issue?.path.join('.');
-      throw new Error(`typesafe jev: option ${option}: ${issue?.message}`);
+      const hint =
+        issue?.code === 'unrecognized_keys' && issue.keys.includes('apiUrl')
+          ? ': the endpoint comes from SAIL_TYPESAFE_API_URL'
+          : '';
+      throw new Error(`typesafe jev: option ${option}: ${issue?.message}${hint}`);
     }
     return createTypesafeJev({
       apiKey: context.env.TYPESAFE_API_KEY ?? '',
       ...(parsed.data.model === undefined ? {} : { model: parsed.data.model }),
-      ...(parsed.data.apiUrl === undefined ? {} : { apiUrl: parsed.data.apiUrl }),
+      apiUrl: context.env.SAIL_TYPESAFE_API_URL || TYPESAFE_API_URL,
       ...(parsed.data.timeoutMs === undefined ? {} : { timeoutMs: parsed.data.timeoutMs }),
       ...(context.emit === undefined ? {} : { emit: context.emit }),
       ...(context.now === undefined ? {} : { now: context.now }),
