@@ -480,10 +480,18 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
     );
     for (const error of recorded.errors)
       missing.push({ ...error, message: `step '${each.step.name}': ${error.message}` });
+    // A fresh step's entry keeps what the step recorded beside the hash, such as a document's validation.
+    const before = (each.result.files ?? {}) as Record<string, object>;
+    const files = Object.fromEntries(
+      Object.entries(recorded.files).map(([file, entry]) => [
+        file,
+        Object.hasOwn(before, file) ? { ...before[file], ...entry } : entry,
+      ]),
+    );
     return {
       step: each.step.name,
       kind: each.step.kind,
-      result: { ...each.result, files: recorded.files },
+      result: { ...each.result, files },
       resultPath: each.resultPath,
     };
   });

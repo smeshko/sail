@@ -871,3 +871,20 @@ test("a journaled step's file changed after it was journaled is hashed again: th
     });
   });
 });
+
+test("a fresh agent step's document keeps its validation in the call's result.json once the stage's end hashes it again (review R4)", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    writeFileSync(join(repo.dir, '.sail', 'workflows', 'ticket-to-pr', 'stages', 'publish', 'body.md'), 'Body.\n');
+    const always = { check: 'always', derives: [], validate: () => ({ problems: [] }) };
+    const documented = stage('publish', {
+      consumes: { ticketKey: value(TicketKey) },
+      output: PrInfo,
+      steps: [agent('describe', { ...describe, produces: { 'pr-body.md': doc('./body.md', [always]) } }), open],
+    });
+    const { result } = await runStageCall(s.request(documented), documented);
+    expect(result).toMatchObject({ outcome: 'passed' });
+    const files = (json(s, `${CALL}/result.json`).files ?? {}) as Record<string, Record<string, unknown>>;
+    expect(files['pr-body.md']).toMatchObject({ validation: { ok: true } });
+  });
+});
