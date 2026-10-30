@@ -1,6 +1,7 @@
 // The fake CodeHost: pull requests in a committed seed file, with changes kept in a separate state file (D1). Checks
 // and merges can be scripted per pull request, and how many times each was read is kept in the state file, so a
-// scripted sequence carries on in the next process.
+// scripted sequence carries on in the next process. A push records the branch as a ref in the repository, which stands
+// in for the remote, and refuses a push that isn't a fast-forward of it as `conflict`.
 import { z } from 'zod';
 import type { ProviderEvent } from '../../events/types';
 import type { CodeHost } from '../../ports/code-host';
@@ -171,6 +172,16 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
         throw new PortError('codeHost', 'push', 'invalid', `${cwd} is not a git checkout: ${git.stderr}`);
       }
       const headSha = git.stdout.trim();
+      // The repository stands in for the remote: a branch already there moves only fast-forward, as on GitHub.
+      const ref = `refs/heads/${branch}`;
+      const existing = gitSync(cwd, ['rev-parse', '--verify', '--quiet', ref], options.env);
+      if (existing.code === 0 && gitSync(cwd, ['merge-base', '--is-ancestor', ref, 'HEAD'], options.env).code !== 0) {
+        throw new PortError('codeHost', 'push', 'conflict', `${branch}: [rejected] non-fast-forward`);
+      }
+      const updated = gitSync(cwd, ['update-ref', ref, 'HEAD'], options.env);
+      if (updated.code !== 0) {
+        throw new PortError('codeHost', 'push', 'invalid', `${branch}: cannot record the branch: ${updated.stderr}`);
+      }
       store.change((world) => {
         world.branches[branch] = headSha;
         // An open pull request from the branch moves to the new head, whose checks start again.

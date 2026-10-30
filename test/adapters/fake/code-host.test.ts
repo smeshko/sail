@@ -282,6 +282,52 @@ test("a push records the workspace's own HEAD, even under a git hook's GIT_DIR n
   });
 });
 
+/** Commits one file in `dir` and returns the new HEAD. */
+function commitFile(r: { git(...args: string[]): string; dir: string }, name: string): string {
+  writeFileSync(join(r.dir, name), name);
+  r.git('add', name);
+  r.git('commit', '-m', name);
+  return r.git('rev-parse', 'HEAD');
+}
+
+test('a push writes refs/heads/<branch> in the repository', async () => {
+  await withTempRepo(async (r) => {
+    const host = createFakeCodeHost({ ...files(), env: r.env });
+    const head = commitFile(r, 'one');
+    await host.push(r.dir, 'sail/FAKE-20');
+    expect(r.git('rev-parse', 'refs/heads/sail/FAKE-20')).toBe(head);
+  });
+});
+
+test("a second push from a commit that doesn't descend from the branch is refused as conflict, leaving the state file as it was", async () => {
+  await withTempRepo(async (r) => {
+    const world = files();
+    const host = createFakeCodeHost({ ...world, env: r.env });
+    const first = commitFile(r, 'one');
+    await host.push(r.dir, 'sail/FAKE-21');
+    const before = readFileSync(world.state, 'utf8');
+    r.git('reset', '--hard', 'HEAD~1');
+    commitFile(r, 'other');
+    const error = await rejection(host.push(r.dir, 'sail/FAKE-21'));
+    expect([
+      portFailure(error),
+      readFileSync(world.state, 'utf8'),
+      r.git('rev-parse', 'refs/heads/sail/FAKE-21'),
+    ]).toEqual([{ port: 'codeHost', op: 'push', code: 'conflict' }, before, first]);
+  });
+});
+
+test('a push that descends from the branch moves it', async () => {
+  await withTempRepo(async (r) => {
+    const host = createFakeCodeHost({ ...files(), env: r.env });
+    commitFile(r, 'one');
+    await host.push(r.dir, 'sail/FAKE-22');
+    const second = commitFile(r, 'two');
+    const pushed = await host.push(r.dir, 'sail/FAKE-22');
+    expect([pushed.headSha, r.git('rev-parse', 'refs/heads/sail/FAKE-22')]).toEqual([second, second]);
+  });
+});
+
 test('opening from a head never pushed, or pushing from outside a git checkout, is invalid', async () => {
   const host = createFakeCodeHost({ ...files(), env: repo().env });
   const errors = [
