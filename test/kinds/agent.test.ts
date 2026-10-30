@@ -228,6 +228,21 @@ test('the default idle limit is a quarter of the own minute budget', async () =>
   expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
 });
 
+test('a silence past a quarter of the own minute budget, short of half, stalls once at that quarter (review R8)', async () => {
+  // 1.2 s of minutes: a quarter is 300 ms, half 600 ms.
+  const step = { ...bare(z.any()), budget: { ...budget, maxMinutes: 0.02 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(450);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 300, since: expect.any(String) },
+  ]);
+});
+
 test('every event resets silence and a speaking stalled session can stall again', async () => {
   const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 0.002 } };
   const s = setup(step);
