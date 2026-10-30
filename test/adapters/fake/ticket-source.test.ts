@@ -313,3 +313,71 @@ test('a seeded priority comes back from get and listDesignated, and a seed witho
     ['FAKE-2', undefined],
   ]);
 });
+
+/** A seed holding FAKE-1 alone, with `extra` fields (scripted answers) on it. */
+function scriptedSeed(extra: object): { seed: string; state: string } {
+  const seed = join(tempDir(), 'tickets.json');
+  const ticket = {
+    ticketKey: 'FAKE-1',
+    title: 'Scripted',
+    description: '',
+    state: { type: 'started', name: 'In Progress' },
+    labels: ['sail'],
+    comments: [],
+    links: [],
+    attachments: [],
+    ...extra,
+  };
+  writeFileSync(seed, JSON.stringify({ tickets: [ticket] }));
+  return { seed, state: join(tempDir(), 'state.json') };
+}
+
+test("a ticket's scripted comment answers are read per call, the last repeating: ok then unavailable posts the first comment and refuses every later one, changing nothing", async () => {
+  const { events, emit } = captureEvents();
+  const source = createFakeTicketSource({ ...scriptedSeed({ answers: { comment: ['ok', 'unavailable'] } }), emit });
+  await source.comment('FAKE-1', 'first');
+  for (const body of ['second', 'third']) {
+    expect(portFailure(await rejection(source.comment('FAKE-1', body)))).toEqual({
+      port: 'ticketSource',
+      op: 'comment',
+      code: 'unavailable',
+    });
+  }
+  expect((await source.get('FAKE-1')).comments.map((each) => each.body)).toEqual(['first']);
+  expect(events.filter((event) => event.type === 'ticket:commented')).toHaveLength(1);
+});
+
+test("a scripted update answer of unavailable refuses the move and leaves the ticket's state", async () => {
+  const { events, emit } = captureEvents();
+  const source = createFakeTicketSource({ ...scriptedSeed({ answers: { update: ['unavailable'] } }), emit });
+  expect(portFailure(await rejection(source.update('FAKE-1', { state: 'in-review' })))).toEqual({
+    port: 'ticketSource',
+    op: 'update',
+    code: 'unavailable',
+  });
+  expect((await source.get('FAKE-1')).state).toEqual({ type: 'started', name: 'In Progress' });
+  expect(events.filter((event) => event.type === 'ticket:updated')).toHaveLength(0);
+});
+
+test('the scripted count carries to a new instance on the same state file', async () => {
+  const world = scriptedSeed({ answers: { comment: ['ok', 'unavailable'] } });
+  await createFakeTicketSource(world).comment('FAKE-1', 'first');
+  const next = createFakeTicketSource(world);
+  expect(portFailure(await rejection(next.comment('FAKE-1', 'second')))).toEqual({
+    port: 'ticketSource',
+    op: 'comment',
+    code: 'unavailable',
+  });
+});
+
+test("a ticket's raw leaves out its answers and reads", async () => {
+  const source = createFakeTicketSource(scriptedSeed({ answers: { comment: ['ok'] } }));
+  await source.comment('FAKE-1', 'first');
+  const ticket = await source.get('FAKE-1');
+  expect(Object.keys(ticket.raw as object)).not.toContain('answers');
+  expect(Object.keys(ticket.raw as object)).not.toContain('reads');
+  expect('answers' in ticket).toBe(false);
+  expect('reads' in ticket).toBe(false);
+  const listed = (await source.list({ label: 'sail' }))[0];
+  expect(Object.keys(listed?.raw as object)).not.toContain('answers');
+});
