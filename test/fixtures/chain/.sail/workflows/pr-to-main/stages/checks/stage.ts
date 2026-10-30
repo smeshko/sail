@@ -15,6 +15,7 @@ export const ChecksFeedback = z.object({ checks: z.array(CheckRead) });
 
 export const checks = script('checks', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: {
     pr: value(z.number().int()),
     headSha: value(z.string()),

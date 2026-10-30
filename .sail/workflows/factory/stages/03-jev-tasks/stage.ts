@@ -6,6 +6,7 @@ import { TasksAsked } from '../../schemas';
 
 export const jevTasks = script('jev-tasks', {
   run: './run.sh',
+  ports: ['jev'],
   consumes: { plan: file('plan.md') },
   output: TasksAsked,
   exitCodes: { passed: [0], failed: [] },

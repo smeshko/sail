@@ -5,6 +5,7 @@ export const Published = z.object({ number: z.number().int(), url: z.string(), h
 
 export const publish = script('publish', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { ticketKey: value(z.string()) },
   output: Published,
   // A port call that failed is an error, never a verdict: no exit code means failed.
