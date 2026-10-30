@@ -92,7 +92,6 @@
 // `run:end` ends the stream: a replay abandoned by an interrupt or budget may move on once its workflow stops waiting,
 // but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
 import { dirname, join, relative } from 'node:path';
-import { BUILTINS } from '../adapters/index';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer, readEvents } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
@@ -100,7 +99,6 @@ import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../even
 import { PortError } from '../ports/errors';
 import type { Harness } from '../ports/harness';
 import type { StageDefinition } from '../sdk/steps';
-import { portVariableResolver } from './adapters';
 import type { Supplied } from './bindings';
 import { DEFAULT_BRANCH_PREFIX } from './branch';
 import { type BudgetTracker, recordIn, suspension, trackBudget } from './budget';
@@ -448,7 +446,6 @@ async function drive(
   { start, hold }: { start: boolean; hold: KeepAwakeHold },
 ): Promise<RunEnd> {
   const { runId, dir, sailDir, loaded, header } = opened;
-  const portVariables = portVariableResolver({ sailDir, config: opened.config, builtins: BUILTINS, env: process.env });
   const { signal, clock = systemClock } = options;
   const bus = createBus({
     runId,
@@ -618,7 +615,7 @@ async function drive(
         branch: opened.workspace.branch,
         config: join(sailDir, 'project.yaml'),
         supplied,
-        portVariables,
+        portVariables: opened.portVariables,
         ...(callSignal === undefined ? {} : { signal: callSignal }),
         ...(agent === undefined ? {} : { agent }),
         emit: tapped,
@@ -680,7 +677,7 @@ async function drive(
         branch: opened.workspace.branch,
         config: join(sailDir, 'project.yaml'),
         supplied,
-        portVariables,
+        portVariables: opened.portVariables,
         ...(signal === undefined ? {} : { signal }),
         ...(agent === undefined ? {} : { agent }),
         emit: intakeEmit(tapped, definition, header.intake.origin),

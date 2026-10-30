@@ -319,6 +319,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    portVariables: options.adapters.portVariables,
     harnesses: harnesses.ports,
     relay,
     config,

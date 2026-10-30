@@ -105,6 +105,8 @@ export interface OpenedRun {
   harnesses: Record<string, Harness>;
   /** Where those adapters emit: the runtime attaches the run's stream to it. */
   relay: ProviderRelay;
+  /** The environment names each port's adapter requires: what a script step that declares the port is given. */
+  portVariables: ResolvedAdapters['portVariables'];
   /** `project.yaml` as it reads now. What the run froze of it, such as each stage's model, is in `header`. */
   config: ProjectConfig;
   /** The workflow, with the stages it reaches: what the run replays. */
@@ -563,6 +565,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    portVariables: options.adapters.portVariables,
     harnesses,
     relay,
     config,
@@ -727,6 +730,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     header: run.header,
     sailDir: found.dir,
     adapters: options.adapters.ports,
+    portVariables: options.adapters.portVariables,
     harnesses: named.ports,
     relay,
     config: found.config,

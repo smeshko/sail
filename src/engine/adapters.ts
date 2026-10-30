@@ -49,6 +49,8 @@ export interface ResolvedAdapters<P extends Port = RunPort> {
   relay: ProviderRelay;
   /** Resolves, preflights and creates the named harnesses `names` name, emitting into the same relay. */
   harnesses(names: readonly string[]): Promise<NamedHarnesses | { issues: SchemaIssue[] }>;
+  /** The environment names the adapter `port` names requires, resolved once from the same options, or why not. */
+  portVariables(port: Port): ReturnType<typeof portVariables>;
 }
 
 /** The named harnesses a run reached, each created, with its entry for the run header. */
@@ -345,7 +347,13 @@ export async function resolveAdapters<P extends Port = RunPort>(
   }
   if (issues.length > 0) return { issues };
   const harnesses = (names: readonly string[]) => resolveHarnesses(options, names, emit);
-  return { ports: ports as unknown as Pick<PortAdapters, P>, entries, relay, harnesses };
+  return {
+    ports: ports as unknown as Pick<PortAdapters, P>,
+    entries,
+    relay,
+    harnesses,
+    portVariables: portVariableResolver(options),
+  };
 }
 
 /**
