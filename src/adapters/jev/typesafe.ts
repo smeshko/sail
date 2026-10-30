@@ -71,7 +71,7 @@ export function typesafeEndpoint(value: string): string {
   const shown = url === undefined ? value : `${url.protocol}//${url.host}${url.pathname === '/' ? '' : url.pathname}`;
   const refuse = () =>
     new Error(
-      `SAIL_TYPESAFE_API_URL is ${shown}: the TypeSafe key goes only to ${TYPESAFE_API_URL} or to http on a loopback host (localhost, 127.0.0.0/8, ::1)`,
+      `SAIL_TYPESAFE_API_URL is ${shown}: the TypeSafe key goes only to ${TYPESAFE_API_URL} or to http(s) on a loopback host (localhost, 127.0.0.0/8, ::1)`,
     );
   if (url === undefined || url.username !== '' || url.password !== '') throw refuse();
   if (url.origin === TYPESAFE_API_URL) {
