@@ -116,15 +116,22 @@ test('a comment refused three times leaves the step passing, commented false, an
   });
 }, 60_000);
 
-test('a move refused three times leaves the step passing, moved false, with the update command as its backfill', async () => {
+test('a move refused three times leaves the step passing, moved false, and an update backfill that moves it when run', async () => {
   await withTempRepo(async (repo) => {
-    prepare(repo, { update: ['unavailable'] });
+    prepare(repo, { update: ['unavailable', 'unavailable', 'unavailable', 'ok'] });
     const { code, output, stderr } = runOpen(repo);
     expect(code).toBe(0);
     const command = 'sail port ticket-source update FAKE-1 --state in-review';
     expect(output.ticket).toEqual({ commented: true, moved: false, backfill: [command] });
     expect(stderr).toContain(`the move to in review failed; backfill it with: ${command}`);
     expect(ticket(repo).state.name).toBe('In Progress');
+
+    const backfill = Bun.spawnSync(['bash', '-c', command.replace('sail port', `${join(ROOT, 'bin', 'sail')} port`)], {
+      cwd: repo.dir,
+      env: env(repo),
+    });
+    expect(backfill.exitCode).toBe(0);
+    expect(ticket(repo).state.name).toBe('In Review');
   });
 }, 60_000);
 
