@@ -326,8 +326,8 @@ export interface Made {
 }
 
 /**
- * Leases `branch`, makes the run directory and the workspace at `base`, the default branch's tip when left out, and
- * checks for an abort, in that order. A refusal at any step undoes the ones before it, in reverse.
+ * Leases `branch`, makes the run directory and the workspace at `base`, and checks for an abort, in that order. Left out,
+ * `base` is the branch's tip on the remote when the remote has it, else the default branch's tip. A refusal at any step undoes the ones before it, in reverse.
  */
 export async function startWorkspace(options: {
   port: WorkspacePort;
