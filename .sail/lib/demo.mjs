@@ -155,14 +155,18 @@ function create(dir, from, own, runs) {
 
 const quote = (arg) => (/^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);
 
-async function runIn(dir, argv) {
-  // Checked again on every run: the seeds may have changed project.yaml since `new`.
-  checkFake(join(dir, 'repo', '.sail'), `${dir} holds no demo repository: run \`demo.sh new ${dir}\` first`);
-  // The fake workspace copies only committed files, so seeds edited since `new` are committed first.
+/** The fake workspace copies only committed files, so seeds edited since `new` are committed first. */
+function commitSeeds(dir) {
   if (git(dir, 'status', '--porcelain') !== '') {
     git(dir, 'add', '-A');
     git(dir, 'commit', '--quiet', '-m', 'demo seeds');
   }
+}
+
+async function runIn(dir, argv) {
+  // Checked again on every run: the seeds may have changed project.yaml since `new`.
+  checkFake(join(dir, 'repo', '.sail'), `${dir} holds no demo repository: run \`demo.sh new ${dir}\` first`);
+  commitSeeds(dir);
   const log = join(dir, `.run-${Date.now()}.log`);
   const fd = openSync(log, 'w');
   // Its own process group, so a timeout stops whatever it started too.
@@ -411,12 +415,65 @@ async function runSteps(session, steps, dir, name, out) {
   }
 }
 
-async function capture(dir, name, query, stepsFile, steps) {
+/** The run directories of `key` under `dir`'s .sail-runs/. */
+function runsOf(dir, key) {
+  const runs = join(dir, 'repo', '.sail-runs');
+  return existsSync(runs) ? readdirSync(runs).filter((entry) => entry.startsWith(`${key}-`)) : [];
+}
+
+/** Starts `sail <key>` in `dir`'s repository; answers the new run's id, once its run.json is there, with a stop. */
+async function startLive(dir, key) {
+  commitSeeds(dir);
+  const before = new Set(runsOf(dir, key));
+  const log = join(dir, `.live-${Date.now()}.log`);
+  const fd = openSync(log, 'w');
+  const child = spawn(join(root, 'bin', 'sail'), [key], {
+    cwd: join(dir, 'repo'),
+    env: envOf(dir),
+    stdio: ['ignore', fd, fd],
+    detached: true,
+  });
+  const ended = new Promise((done) => child.on('exit', done));
+  let over = false;
+  ended.then(() => {
+    over = true;
+  });
+  // Interrupted, the run suspends; one that doesn't leave within 15s is killed.
+  const stop = async () => {
+    if (over) return;
+    signalGroup(child, 'SIGINT');
+    const killer = setTimeout(() => signalGroup(child, 'SIGKILL'), 15000);
+    await ended;
+    clearTimeout(killer);
+  };
+  process.on('exit', () => signalGroup(child, 'SIGKILL'));
+  const until = Date.now() + 30000;
+  for (;;) {
+    const id = runsOf(dir, key).find(
+      (each) => !before.has(each) && existsSync(join(dir, 'repo', '.sail-runs', each, 'run.json')),
+    );
+    if (id !== undefined) return { id, log, stop };
+    if (over || Date.now() > until) {
+      await stop();
+      refuse(`sail ${key} started no run:\n${readFileSync(log, 'utf8').slice(-2000)}`);
+    }
+    await Bun.sleep(100);
+  }
+}
+
+async function capture(dir, name, query, stepsFile, steps, live) {
   checkFake(join(dir, 'repo', '.sail'), `${dir} holds no demo repository: run \`demo.sh new ${dir}\` first`);
   if (!/^[\w-]+$/.test(name)) refuse(`a capture's name is letters, digits, - and _, not ${name}`);
   const browser = findChrome();
   if (browser === undefined)
     refuse('no Chrome to capture the dashboard with: install Chrome, or name it in SAIL_DEMO_CHROME');
+  let run;
+  if (live !== undefined) {
+    run = await startLive(dir, live);
+    if (!query.has('run')) query.set('run', run.id);
+    if (!query.has('repo'))
+      query.set('repo', Bun.YAML.parse(readFileSync(join(dir, 'repo', '.sail', 'project.yaml'), 'utf8')).name);
+  }
   const server = spawn(join(root, 'bin', 'sail'), ['dashboard', '--port', '0'], {
     cwd: join(dir, 'repo'),
     env: envOf(dir),
@@ -444,9 +501,7 @@ async function capture(dir, name, query, stepsFile, steps) {
       stopped.then(() => done(undefined));
     });
     if (url === undefined) refuse(`sail dashboard didn't start:\n${printed}`);
-    const page = `${url}/${query === '' ? '' : `?${query}`}`;
-    const png = join(dir, `${name}.png`);
-    const html = join(dir, `${name}.html`);
+    const page = `${url}/${query.size === 0 ? '' : `?${query}`}`;
     const lines = [];
     let work;
     try {
@@ -475,12 +530,18 @@ async function capture(dir, name, query, stepsFile, steps) {
     } finally {
       work?.close();
     }
+    if (run !== undefined) {
+      await run.stop();
+      const status = readFileSync(join(dir, 'repo', '.sail-runs', run.id, 'STATUS'), 'utf8').split('\n')[0];
+      lines.push(`live ${run.id}: ${status}`, `log ${run.log}`);
+    }
     const ending = lines.join('\n');
     const entry = `$ dashboard ${page}${stepsFile === undefined ? '' : ` steps=${stepsFile}`}\n${ending}\n`;
     appendFileSync(join(dir, 'transcript.txt'), `${entry}\n`);
     process.stdout.write(entry);
     return lines.some((line) => line.startsWith('no capture')) ? 1 : 0;
   } finally {
+    await run?.stop();
     stop();
     const killer = setTimeout(() => signalGroup(server, 'SIGKILL'), 5000);
     await stopped;
@@ -515,14 +576,18 @@ if (command === 'new') {
   if (name === undefined) refuse('usage: demo.sh dashboard <dir> <name> [repo=… run=… key=… tab=… steps=…]');
   const query = new URLSearchParams();
   let stepsFile;
+  let live;
   for (const pick of picks) {
-    const [, field, value] = /^(repo|run|key|tab|steps)=(.+)$/.exec(pick) ?? [];
-    if (field === undefined) refuse(`${pick} picks nothing: repo=, run=, key=, tab= or steps=`);
+    const [, field, value] = /^(repo|run|key|tab|steps|live)=(.+)$/.exec(pick) ?? [];
+    if (field === undefined) refuse(`${pick} picks nothing: repo=, run=, key=, tab=, steps= or live=`);
     if (field === 'steps') stepsFile = resolve(value);
-    else query.set(field, value);
+    else if (field === 'live') {
+      if (!/^[A-Z][A-Z0-9]*-\d+$/.test(value)) refuse(`live= takes a ticket key such as FAKE-1, not ${value}`);
+      live = value;
+    } else query.set(field, value);
   }
   const steps = stepsFile === undefined ? undefined : readSteps(stepsFile);
-  process.exit(await capture(dir, name, query.toString(), stepsFile, steps));
+  process.exit(await capture(dir, name, query, stepsFile, steps, live));
 } else {
   refuse(`no command ${command}: new, run or dashboard`);
 }

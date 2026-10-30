@@ -243,3 +243,45 @@ test.skipIf(chrome === undefined)(
   },
   120_000,
 );
+
+test('dashboard refuses live= with no ticket key', async () => {
+  const { code, stderr } = await withTempRepo(async (repo) =>
+    demo(repo.env, 'dashboard', join(repo.dir, 'd'), 'x', 'live=fake-1'),
+  );
+  expect({ code, named: stderr.includes('ticket key') }).toEqual({ code: 2, named: true });
+});
+
+test.skipIf(chrome === undefined)(
+  'dashboard live= starts the run, shows it, and leaves it suspended',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = join(repo.dir, 'demo');
+      expect((await demo(repo.env, 'new', dir)).code).toBe(0);
+      const answers = join(dir, 'repo', '.sail', 'fake', 'harness.json');
+      const paced = JSON.parse(readFileSync(answers, 'utf8')) as Record<
+        string,
+        { outcome: string; delayMs?: number }[]
+      >;
+      for (const list of Object.values(paced))
+        for (const answer of list) if (answer.outcome === 'done') answer.delayMs = 5000;
+      await Bun.write(answers, JSON.stringify(paced));
+      const file = join(repo.dir, 'steps.json');
+      await Bun.write(file, JSON.stringify([{ wait: 1000 }, { shot: 'running' }]));
+      const { code, stdout } = await demo(repo.env, 'dashboard', dir, 'live', `steps=${file}`, 'live=FAKE-1');
+      const id = /live (FAKE-1-\w+): suspended/.exec(stdout)?.[1];
+      const status =
+        id === undefined
+          ? ''
+          : (readFileSync(join(dir, 'repo', '.sail-runs', id, 'STATUS'), 'utf8').split('\n')[0] ?? '');
+      expect({
+        code,
+        id: id !== undefined,
+        url: id !== undefined && stdout.includes(`run=${id}`),
+        status: status.split(' ')[0],
+        reason: status.split(' ')[1],
+        shot: existsSync(join(dir, 'live-running.png')),
+      }).toEqual({ code: 0, id: true, url: true, status: 'suspended', reason: 'interrupted', shot: true });
+    });
+  },
+  120_000,
+);
