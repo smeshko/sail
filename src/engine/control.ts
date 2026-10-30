@@ -119,8 +119,13 @@ function ask(runsDir: string, runId: string, request: 'stop' | 'suspend'): boole
     return requestUnwatch(runDir);
   };
   if (existsSync(runDir)) {
-    takeHandOff(runsDir, runId);
-    return write();
+    try {
+      takeHandOff(runsDir, runId);
+      return write();
+    } catch (error) {
+      // The directory went, as a refused start removes it: the request waits in the hand-off instead.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
   }
   const file = handOffFile(runsDir, runId);
   let wrote = true;
