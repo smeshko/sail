@@ -1146,6 +1146,30 @@ test("a dispatched start ignores an uncommitted edit of the clone's .sail/, and 
   });
 });
 
+test('a dispatched start interrupted after its type-check, before the run opens, is refused with no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    committed(repo);
+    // The first handler is the dispatch's own, registered before the commit is read; it fires as the run's is
+    // registered, as a signal that arrived during the type-check would have.
+    const handlers: (() => void)[] = [];
+    const interrupted: CaptureOptions = {
+      onInterrupt: (handler) => {
+        handlers.push(handler);
+        if (handlers.length === 2) handlers[0]?.();
+        return () => undefined;
+      },
+    };
+    const run = await runCaptured(
+      ['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', DISPATCHED],
+      repo.dir,
+      interrupted,
+    );
+    expect({ code: run.code, runs: runIds(repo.dir) }).toEqual({ code: EXIT_REFUSED, runs: [] });
+    expect(run.stderr).toContain('stopped before the run was opened');
+  });
+});
+
 test('a dispatched start whose commit lacks the workflow exits 3 naming the commit, with no run directory and no lease', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);

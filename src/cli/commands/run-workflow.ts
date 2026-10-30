@@ -330,7 +330,7 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
     const committed = await committedProject(io, command, clone, signal);
     if (typeof committed === 'number') return committed;
     try {
-      return await startRun(args, io, command, verbosity, clone, committed);
+      return await startRun(args, io, command, verbosity, clone, committed, signal);
     } finally {
       committed.dispose();
     }
@@ -339,7 +339,10 @@ export async function runWorkflowCommand(args: Parsed, io: Io): Promise<ExitCode
 
 type Clone = { sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters };
 
-/** Starts the run from `args`: on the clone's `.sail/`, or on `committed`, which a dispatch reads from the default branch. */
+/**
+ * Starts the run from `args`: on the clone's `.sail/`, or on `committed`, which a dispatch reads from the default branch.
+ * `interrupted` is the dispatch's own signal, which the run's joins, so one that aborted during the type-check refuses it.
+ */
 async function startRun(
   args: Parsed,
   io: Io,
@@ -347,6 +350,7 @@ async function startRun(
   verbosity: Verbosity,
   clone: Clone,
   committed?: CommittedProject,
+  interrupted?: AbortSignal,
 ): Promise<ExitCode> {
   const [ticket = ''] = args.positionals;
   const refuse = (message: string) =>
@@ -390,7 +394,7 @@ async function startRun(
       ...(typeof headSha === 'string' ? { headSha } : {}),
       ...(committed === undefined ? {} : { definitions: committed.definitions }),
       adapters: recording?.adapters ?? project.adapters,
-      signal,
+      signal: interrupted === undefined ? signal : AbortSignal.any([interrupted, signal]),
       keepAwake: io.keepAwake ?? systemKeepAwake(io.env ?? process.env),
       consumers: [terminal],
     }).finally(() => terminal.close()),
