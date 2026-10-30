@@ -85,7 +85,7 @@ export const jevLess = script('jev-less', { run: './run.sh', output: z.object({}
     expect(code).toBe(EXIT_OK);
     const callDir = callDirOf(stdout, repo.dir);
     expect(readResult(callDir)).toMatchObject({ outcome: 'passed' });
-    expect(existsSync(join(callDir, 'ran'))).toBe(true);
+    expect(existsSync(join(callDir, 'out', 'ran'))).toBe(true);
   });
 });
 

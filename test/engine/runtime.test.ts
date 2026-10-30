@@ -2919,12 +2919,29 @@ test('a call whose every step is journaled, but not itself, is journaled on resu
 
 test("a two-step stage in a group: its step lines interleave with its sibling's call line, its call line carries the group, and a resume after an abort runs only what isn't journaled; a reordered group is still a change", async () => {
   await withTempRepo(async (repo) => {
-    const slow: ScriptedAnswer = { ...DESCRIBED, delayMs: 1500 } as ScriptedAnswer;
     const stopped = await withTempRepo(async (from) => {
-      writeTwoStep(from.dir, { grouped: true, describe: [slow] });
+      writeTwoStep(from.dir, { grouped: true });
       setSleepAt(from.dir, 'publish#1');
+      // describe starts only once notify#1 is journaled, so its step line follows notify's however slow notify's script.
+      const { promise: notified, resolve: notify } = Promise.withResolvers<void>();
+      const adapters = await fakeAdapters(from.dir);
+      const fake = adapters.ports.harness;
+      adapters.ports.harness = {
+        name: fake.name,
+        capabilities: () => fake.capabilities(),
+        run: async (request) => {
+          if (request.key === 'publish#1/describe') await notified;
+          return fake.run(request);
+        },
+      };
+      const journaledNotify: Consumer = {
+        name: 'notified',
+        onEvent: (event) => {
+          if (event.type === 'journal:append' && event.key === 'notify#1') notify();
+        },
+      };
       const controller = new AbortController();
-      const running = ranAgent(from.dir, { signal: controller.signal });
+      const running = ranAgent(from.dir, { adapters, consumers: [journaledNotify], signal: controller.signal });
       const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort(), 30_000);
       copyRun(from.dir, repo.dir);
       return end;

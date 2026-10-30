@@ -122,7 +122,7 @@ async function environmentRun(declared: readonly string[] = [], inClone = false,
   );
   expect(result.outcome).toBe('passed');
   const environment = Object.fromEntries(
-    readFileSync(join(s.context.paths.dir, 'environment'), 'utf8')
+    readFileSync(join(s.context.paths.out, 'environment'), 'utf8')
       .trim()
       .split('\n')
       .map((line) => {
@@ -207,7 +207,7 @@ for (const resolver of [undefined, async () => ({ problem: 'jev is not configure
       },
     ]);
     expect(events).toEqual([]);
-    expect(existsSync(join(s.context.paths.dir, 'ran'))).toBe(false);
+    expect(existsSync(join(s.context.paths.out, 'ran'))).toBe(false);
   });
 }
 

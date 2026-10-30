@@ -297,7 +297,7 @@ export interface Observed {
   readonly end: { status?: string; stopReason?: string; message?: string; result?: unknown };
   /** Each call's result, by key (`checks#1`). */
   readonly results: Record<string, CallResult>;
-  /** The files `capture` named that calls left, by `<call key>/<name>`. */
+  /** The files `capture` named that calls left in their `$STAGE_OUT`, by `<call key>/<name>`. */
   readonly captured: Record<string, string>;
   /** The feedback each `fix` call was given, by key (`fix#1`). */
   readonly feedback: Record<string, unknown>;
@@ -349,7 +349,8 @@ export async function observe(
       results[key] = JSON.parse(readFileSync(join(where, 'result.json'), 'utf8'));
       const given = join(where, 'in', 'feedback.json');
       for (const name of options.capture ?? []) {
-        if (existsSync(join(where, name))) captured[`${key}/${name}`] = readFileSync(join(where, name), 'utf8');
+        const file = join(where, 'out', name);
+        if (existsSync(file)) captured[`${key}/${name}`] = readFileSync(file, 'utf8');
       }
       if (stage === 'fix' && existsSync(given)) feedback[key] = JSON.parse(readFileSync(given, 'utf8'));
     }
