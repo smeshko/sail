@@ -37,6 +37,17 @@ test("FAKE-2's failure and denial and FAKE-3's suspension are buttons in one lis
   expect(markup.match(/data-action="open"/g)?.length).toBe(5);
 });
 
+test('a stalled session opens the call overview from its warning row', () => {
+  const repos = index(m.registryDir);
+  const run = repos[0]?.runs[0];
+  if (!run?.summary) throw new Error('missing fixture summary');
+  run.status = { status: 'running' };
+  run.summary.stalled = [{ key: 'publish#1/describe', since: '2026-10-01T12:00:00.000Z' }];
+  expect(renderAttention(attention(repos), true).value).toContain(
+    `<button class="sig sig-stalled" data-action="open" data-repo="alpha" data-run="${run.runId}" data-key="publish#1" data-tab="overview"><b>stalled</b>`,
+  );
+});
+
 test('an empty list has no count on the button, and the open pane says nothing needs attention', () => {
   expect(renderAttention([], false).value).toBe(
     '<button class="btn att-btn" type="button" data-action="toggle-attention" title="needs attention (a)">⚑ needs attention</button>',

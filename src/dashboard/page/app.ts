@@ -54,6 +54,8 @@ import {
 } from './ui-state';
 
 export const THEME_KEY = 'sail-dashboard-theme';
+/** The `localStorage` key the rail's opened repositories and workflows are kept under, as a JSON list. */
+export const RAIL_KEY = 'sail-dashboard-rail-expanded';
 /** Where the kinds of entry the timeline hides are saved, comma-separated. */
 export const FILTER_KEY = 'sail-dashboard-timeline-hidden';
 export const RECONNECT_MS = 2000;
@@ -120,6 +122,15 @@ export function boot(host: PageHost): Page {
   if ((THEMES as readonly string[]).includes(saved ?? '')) ui.theme = saved as Theme;
   host.setTheme(ui.theme);
   ui.hidden = FILTERS.filter((kind) => (host.load(FILTER_KEY) ?? '').split(',').includes(kind));
+  const names = (() => {
+    try {
+      const stored: unknown = JSON.parse(host.load(RAIL_KEY) ?? '[]');
+      return Array.isArray(stored) && stored.every((name) => typeof name === 'string') ? (stored as string[]) : [];
+    } catch {
+      return [];
+    }
+  })();
+  ui.expanded = names;
   host.setInspector(ui.inspector);
 
   let index: IndexRepo[] | undefined;
@@ -687,7 +698,10 @@ export function boot(host: PageHost): Page {
     },
     'toggle-group': (data) => {
       const group = data.group ?? '';
-      ui.closed = ui.closed.includes(group) ? ui.closed.filter((closed) => closed !== group) : [...ui.closed, group];
+      ui.expanded = ui.expanded.includes(group)
+        ? ui.expanded.filter((each) => each !== group)
+        : [...ui.expanded, group];
+      host.save(RAIL_KEY, JSON.stringify(ui.expanded));
       mark('rail');
     },
     'move-item': (data) => {

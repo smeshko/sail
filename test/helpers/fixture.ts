@@ -2,6 +2,7 @@
 // definition and imports it needs a copy of its own.
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { TempRepo } from './temp-repo';
 
 export const FIXTURE_SAIL = join(import.meta.dir, '..', 'fixtures', 'repo', '.sail');
 
@@ -59,6 +60,7 @@ export function holdAfterOpen(sail: string): string {
     file,
     text.replace(OPENED, () => `${OPENED}${hold}`),
   );
+  passToOpen(sail, 'HOLD_AFTER_OPEN');
   return file;
 }
 
@@ -81,7 +83,20 @@ export function holdBeforeOpen(sail: string): string {
     file,
     text.replace(STRICT, () => `${STRICT}${hold}`),
   );
+  passToOpen(sail, 'HOLD_BEFORE_OPEN');
   return file;
+}
+
+const PUBLISH_STAGE = 'workflows/ticket-to-pr/stages/publish/stage.ts';
+const OPEN_RUN = "run: './open.sh',\n";
+
+/** Declares `name` in the `env` of a copy's `open` step, which gets no variable of the run's it doesn't declare. */
+function passToOpen(sail: string, name: string): void {
+  const file = join(sail, PUBLISH_STAGE);
+  const text = readFileSync(file, 'utf8');
+  const declared = /\n {2}env: \[([^\]]*)\],\n/.exec(text);
+  if (declared) writeFileSync(file, text.replace(declared[0], `\n  env: [${declared[1]}, '${name}'],\n`));
+  else edit(sail, PUBLISH_STAGE, OPEN_RUN, `${OPEN_RUN}  env: ['${name}'],\n`);
 }
 
 /**
@@ -206,4 +221,21 @@ export function seedHarness(sail: string, key: string, answers: unknown[]): void
   const seeds = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
   seeds[key] = answers;
   writeFileSync(path, `${JSON.stringify(seeds, null, 2)}\n`);
+}
+
+const GREET = `#!/usr/bin/env bun
+const [arg] = process.argv.slice(2);
+if (arg === '--help') console.log('usage: greet <name>');
+else console.log(\`Hello, \${arg ?? 'world'}!\`);
+`;
+
+/**
+ * Commits a `greet` source on `main` of `repo`. FAKE-1 asks for a flag on `greet`, and a real spec session blocks on a
+ * workspace that holds only README.md (ADW-221); a workspace starts from `main`, so the source must be committed.
+ */
+export function commitGreet(repo: TempRepo): void {
+  mkdirSync(join(repo.dir, 'src'), { recursive: true });
+  writeFileSync(join(repo.dir, 'src', 'greet.ts'), GREET);
+  repo.git('add', 'src/greet.ts');
+  repo.git('commit', '-q', '-m', 'add greet');
 }

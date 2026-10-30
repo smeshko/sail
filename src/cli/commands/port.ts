@@ -38,14 +38,16 @@
 // message, so the run's stream shows it under the step's key (DECISIONS D3). Without it nothing is emitted.
 //
 // `.sail/` is the directory of `SAIL_CONFIG` when the environment sets it, as the preamble does for every script step,
-// and is found from the working directory otherwise. Only the port asked for is resolved, so no other adapter is
-// loaded or asked for its credentials. `render` is a helper beside the ports: it needs no `.sail/`.
+// and is found from the working directory otherwise. A `.sail/` in a run's `definition/`, the copy a run started from
+// committed definitions works on, works on the clone that holds the run, as the run's own adapters do. Only the port
+// asked for is resolved, so no other adapter is loaded or asked for its credentials. `render` is a helper beside the ports: it needs no `.sail/`.
 import { readFileSync, statSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import type { Port } from '../../engine/config';
 import { appendPortEvent } from '../../engine/port-events';
 import { wrapUntrusted } from '../../engine/render';
+import { DEFINITION_DIR, RUNS_DIR } from '../../engine/run-dir';
 import { findSailDir } from '../../engine/sail-dir';
 import { claimComment, claimedBy, notATicket } from '../../engine/source';
 import type { PortErrorEvent, ProviderEmit } from '../../events/types';
@@ -477,6 +479,17 @@ function findSail(io: Io): { dir: string } | { refused: string } {
 }
 
 /**
+ * The repository a `.sail/` in a run's `definition/` belongs to: the directory holding `.sail-runs/`, which holds the
+ * run. Undefined for any other `.sail/`, whose repository is the directory holding it.
+ */
+function runRoot(sailDir: string): string | undefined {
+  const definition = dirname(sailDir);
+  const runs = dirname(dirname(definition));
+  if (basename(definition) !== DEFINITION_DIR || basename(runs) !== RUNS_DIR) return undefined;
+  return dirname(runs);
+}
+
+/**
  * Where the adapters' provider events go: appended to the file `SAIL_EVENTS` names, or nowhere when it is unset. A
  * file whose directory doesn't exist is refused, before any port is called: nothing could be appended to it.
  */
@@ -592,7 +605,14 @@ export async function port(args: Parsed, io: Io): Promise<ExitCode> {
   if ('refused' in events) return refuse(events.refused);
   const { file: eventsFile, ...emitting } = events;
 
-  const project = await findProject(io, COMMAND, { found: findSail(io), ports: [table.port], ...emitting });
+  const found = findSail(io);
+  const root = 'dir' in found ? runRoot(found.dir) : undefined;
+  const project = await findProject(io, COMMAND, {
+    found,
+    ...(root === undefined ? {} : { root }),
+    ports: [table.port],
+    ...emitting,
+  });
   if (typeof project === 'number') return project;
   const adapter = project.adapters.ports[table.port];
   // The body is read when the operation asks for it, once it has refused what only its adapter can read. An empty one

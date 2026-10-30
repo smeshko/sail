@@ -6,6 +6,7 @@ import { GroomInput } from './schemas';
 
 const read = script('read', {
   run: './read.sh',
+  ports: ['ticket-source'],
   consumes: { source: value(z.object({ ticketKey: z.string() }).passthrough()) },
   produces: { 'brief.md': 'file', 'others.md': 'file', 'ticket.json': 'file' },
   output: GroomInput,

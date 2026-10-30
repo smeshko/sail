@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import type { Port } from '../../src/engine/config';
 import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engine/journal';
-import { findRun, type OpenedRun, openRun, reopenRun } from '../../src/engine/open-run';
+import { findRun, type OpenedRun, type OpenRunOptions, openRun, reopenRun } from '../../src/engine/open-run';
 import { type Forced, readStatus, writeStatus } from '../../src/engine/run-dir';
 import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
 import { validateRunDir } from '../../src/engine/schemas';
@@ -28,7 +28,7 @@ import { GOLDEN_START, GOLDEN_STEP_MS, goldenRandom, steppingClock } from '../he
 import { copyFixture, edit, write } from '../helpers/fixture';
 import { rejection } from '../helpers/ports';
 import { copyRun, writePrOnly, writeStub } from '../helpers/stub-workflow';
-import { withTempRepo } from '../helpers/temp-repo';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const GOLDEN = join(import.meta.dir, '..', 'fixtures', 'runs', 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N');
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
@@ -1191,6 +1191,163 @@ test('reopenRun refuses a run whose named harness the config no longer defines',
     const refused = await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) });
     expect(refused).toEqual({
       refused: `run ${run.runId} can't resume on different adapters:\nharnesses.second: the run started with fake (builtin), and .sail/project.yaml no longer defines it`,
+    });
+  });
+});
+
+/** Commits `.sail/` and an `AGENTS.md` holding `conventions` in `repo`, and returns the new commit's sha. */
+function commitDefinitions(repo: TempRepo, conventions: string): string {
+  writeFileSync(join(repo.dir, 'AGENTS.md'), conventions);
+  repo.git('add', '.sail', 'AGENTS.md');
+  repo.git('commit', '-q', '-m', 'definitions');
+  return repo.git('rev-parse', 'HEAD');
+}
+
+/** The committed `.sail/` and conventions of `repo` read into a scratch directory, as a dispatched start reads them. */
+async function committedDefinitions(adapters: ResolvedAdapters): Promise<NonNullable<OpenRunOptions['definitions']>> {
+  const scratch = mkdtempSync(join(tmpdir(), 'sail-definitions-test-'));
+  dirs.push(scratch);
+  const port = adapters.ports.workspace;
+  const { sha } = await port.readTree(scratch, { paths: ['.sail'] });
+  return { sailDir: join(scratch, '.sail'), sha, port };
+}
+
+/** Opens a run of ticket-to-pr on `FAKE-1` from `definitions`, which must not be refused. */
+async function openedFrom(
+  repo: TempRepo,
+  definitions: NonNullable<OpenRunOptions['definitions']>,
+  adapters: ResolvedAdapters,
+) {
+  const run = await openRun({ cwd: repo.dir, workflow: 'ticket-to-pr', ticket: 'FAKE-1', adapters, definitions });
+  if ('refused' in run) throw new Error(`refused: ${run.refused}`);
+  return run;
+}
+
+test("a run opened with definitions runs the committed workflow while the clone's working tree lacks it, records the commit, copies .sail/ and the conventions whole into definition/, and keeps its run directory in the clone", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const sha = commitDefinitions(repo, 'committed conventions\n');
+    rmSync(join(sail, 'workflows', 'ticket-to-pr'), { recursive: true });
+    writeFileSync(join(repo.dir, 'AGENTS.md'), 'an uncommitted edit\n');
+    const adapters = await fakeAdapters(repo.dir);
+    const definitions = await committedDefinitions(adapters);
+    const run = await openedFrom(repo, definitions, adapters);
+    const copy = join(run.dir, 'definition');
+    expect({
+      sha: definitions.sha,
+      recorded: run.header.definitionsSha,
+      workflow: run.loaded.workflow.name,
+      dir: run.dir,
+      root: run.root,
+      sailDir: run.sailDir,
+      project: existsSync(join(copy, '.sail', 'project.yaml')),
+      workflowCopy: existsSync(join(copy, '.sail', 'workflows', 'ticket-to-pr', 'workflow.ts')),
+      conventions: readFileSync(join(copy, 'AGENTS.md'), 'utf8'),
+      workspace: run.workspace.path,
+      runs: runIds(repo.dir),
+      valid: validateRunDir(run.dir).issues,
+    }).toEqual({
+      sha,
+      recorded: sha,
+      workflow: 'ticket-to-pr',
+      dir: join(repo.dir, '.sail-runs', run.runId),
+      root: repo.dir,
+      sailDir: join(copy, '.sail'),
+      project: true,
+      workflowCopy: true,
+      conventions: 'committed conventions\n',
+      workspace: join(repo.dir, '.sail-runs', run.runId, 'workspace'),
+      runs: [run.runId],
+      valid: [],
+    });
+  });
+});
+
+test('a run opened with definitions bases its workspace on their commit, though the default branch has moved on since they were read', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const sha = commitDefinitions(repo, 'committed conventions\n');
+    const adapters = await fakeAdapters(repo.dir);
+    const definitions = await committedDefinitions(adapters);
+    writeFileSync(join(repo.dir, 'pushed.txt'), 'a push after the read\n');
+    repo.git('add', 'pushed.txt');
+    repo.git('commit', '-q', '-m', 'pushed');
+    const run = await openedFrom(repo, definitions, adapters);
+    expect({ baseSha: run.header.repository?.baseSha, definitionsSha: run.header.definitionsSha }).toEqual({
+      baseSha: sha,
+      definitionsSha: sha,
+    });
+  });
+});
+
+test('a run opened without definitions has no definitionsSha and its root is the clone', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const run = await opened(repo.dir);
+    expect([
+      run.header.definitionsSha,
+      run.root,
+      existsSync(join(run.dir, 'definition', '.sail', 'project.yaml')),
+    ]).toEqual([undefined, repo.dir, false]);
+  });
+});
+
+test('a workflow missing at the commit is refused though the working tree has it, and writes no run directory, workspace or lease', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const held = join(sail, 'workflows', 'ticket-to-pr');
+    cpSync(held, join(repo.dir, 'kept-workflow'), { recursive: true });
+    rmSync(held, { recursive: true });
+    commitDefinitions(repo, 'conventions\n');
+    cpSync(join(repo.dir, 'kept-workflow'), held, { recursive: true });
+    const adapters = await fakeAdapters(repo.dir);
+    const definitions = await committedDefinitions(adapters);
+    const refused = await openRun({
+      cwd: repo.dir,
+      workflow: 'ticket-to-pr',
+      ticket: 'FAKE-1',
+      adapters,
+      definitions,
+    });
+    expect(refused).toEqual({ refused: expect.stringContaining("no workflow 'ticket-to-pr'") });
+    expect(runIds(repo.dir)).toEqual([]);
+    const { url } = await adapters.ports.workspace.repository();
+    expect(
+      await adapters.ports.workspace.holder(url, 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command'),
+    ).toBeUndefined();
+  });
+});
+
+test("reopenRun of a run started from definitions loads its own copy, so it resumes after the clone's .sail/ lost the workflow", async () => {
+  await withTempRepo(async (to) => {
+    const source = await withTempRepo(async (from) => {
+      copyFixture(from.dir);
+      const sha = commitDefinitions(from, 'committed conventions\n');
+      const adapters = await fakeAdapters(from.dir);
+      const run = await openedFrom(from, await committedDefinitions(adapters), adapters);
+      writeStatus(run.dir, 'suspended', 'until');
+      copyRun(from.dir, to.dir);
+      return { run, sha };
+    });
+    rmSync(join(to.dir, '.sail', 'workflows', 'ticket-to-pr'), { recursive: true });
+    const reopened = await reopenRun({
+      cwd: to.dir,
+      runId: source.run.runId,
+      adapters: await fakeAdapters(to.dir),
+    });
+    if ('refused' in reopened) throw new Error(`refused: ${reopened.refused}`);
+    expect({
+      workflow: reopened.loaded.workflow.name,
+      sailDir: reopened.sailDir,
+      root: reopened.root,
+      sha: reopened.header.definitionsSha,
+      status: readStatus(reopened.dir),
+    }).toEqual({
+      workflow: 'ticket-to-pr',
+      sailDir: join(to.dir, '.sail-runs', source.run.runId, 'definition', '.sail'),
+      root: to.dir,
+      sha: source.sha,
+      status: { status: 'running' },
     });
   });
 });

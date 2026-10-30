@@ -575,3 +575,14 @@ test("once a step uses up the run's budget no further step of its call starts: t
     });
   });
 });
+
+test("a step's idle limit of 0 opens the run and fails it with the agent kind's own message, never an internal error (review D1)", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const budget = 'budget: { maxTurns: 40, maxUsd: 2, maxMinutes: 10 }';
+    edit(sail, 'workflows/ticket-to-pr/stages/spec/stage.ts', budget, budget.replace(' }', ', maxIdleMinutes: 0 }'));
+    const end = await ran(repo.dir);
+    expect(end.status).toBe('failed');
+    expect(JSON.stringify(readEvents(end.dir))).toContain('budget.maxIdleMinutes must be a positive number: 0');
+  });
+});

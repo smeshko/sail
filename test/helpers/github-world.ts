@@ -152,6 +152,7 @@ export interface WorldRequest {
 }
 
 export interface GitHubWorld {
+  // POST /pulls answers GitHub's 422 "No commits between <base> and <head>" for a head with no commit its base lacks.
   /** Answers one request as GitHub would: inject it as the adapter's `fetch`. */
   readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
   /** Serves the world on 127.0.0.1 at a free port, and gives its URL: what `SAIL_GITHUB_API_URL` is set to. */
@@ -203,6 +204,16 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
   const known = seed.repositoryLabels ?? [];
   /** Whether two label names are one label, as GitHub matches them: without regard to case. */
   const sameLabel = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+
+  /** How many commits `head` has that `base` lacks in the bare repository, or undefined when either has no ref. */
+  const commitsBeyond = (base: string, head: string): number | undefined => {
+    const counted = Bun.spawnSync(['git', 'rev-list', '--count', `refs/heads/${base}..refs/heads/${head}`], {
+      cwd: seed.bare,
+      env: seed.env,
+      stdin: 'ignore',
+    });
+    return counted.exitCode === 0 ? Number(counted.stdout.toString().trim()) : undefined;
+  };
 
   /** The head sha of `branch` in the bare repository, or undefined when it has no such branch. */
   const headOf = (branch: string): string | undefined => {
@@ -335,6 +346,19 @@ export function createGitHubWorld(seed: GitHubWorldSeed): GitHubWorld {
         return json(422, {
           message: 'Validation Failed',
           errors: [{ resource: 'PullRequest', field: 'head', code: 'invalid' }],
+        });
+      }
+      if (commitsBeyond(String(asked.base), String(asked.head)) === 0) {
+        return json(422, {
+          message: 'Validation Failed',
+          errors: [
+            {
+              resource: 'PullRequest',
+              code: 'custom',
+              message: `No commits between ${asked.base} and ${asked.head}`,
+            },
+          ],
+          documentation_url: 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request',
         });
       }
       const open = pullRequests.find((pr) => pr.state === 'open' && pr.head === asked.head && pr.base === asked.base);

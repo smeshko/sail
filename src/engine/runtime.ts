@@ -69,6 +69,11 @@
 // naming the call and the reset time when the provider gave one. The call is left unjournaled, like an interrupted one,
 // and the workspace and lease are kept; in a group the members that passed are journaled first.
 //
+// A call (or a step of one) that ended in an `error` with the port error code `unavailable` (a provider that could not be
+// reached) suspends the run with `port_unavailable`, `run:suspended` naming the call. It is left unjournaled in the same
+// way, and `sail resume` runs it again; a usage limit in the same group takes precedence. A call that passed
+// `{ onError: 'return' }` is the exception: its workflow takes the error, as it takes any other.
+//
 // A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
 // and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
 // reported once, right after what opening the run did, as a `journal:append` with `fromRun`; the intake's also carries
@@ -97,7 +102,7 @@
 // but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
 // The events file is synced before each journal line, so a journaled call's events are on disk whenever its line is,
 // and before STATUS and after `run:end`, so an ended run, which no resume restores, keeps its last `journal:append`.
-import { dirname, join, relative } from 'node:path';
+import { join, relative } from 'node:path';
 import { createBus } from '../events/bus';
 import { ndjsonConsumer, readEvents, syncEvents } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
@@ -111,7 +116,7 @@ import { type BudgetTracker, recordIn, suspension, trackBudget } from './budget'
 import { type AgentExecution, asStep, callProblems, type Ran, runCall } from './call';
 import { type CallPaths, nextTry, runRelative } from './call-dir';
 import { type Clock, systemClock } from './clock';
-import { takeControl } from './control';
+import { stopNowRequested, takeControl } from './control';
 import {
   INTAKE_INDEX,
   INTAKE_KEY,
@@ -170,6 +175,11 @@ export interface RunEnd {
   budget?: 'usd' | 'minutes';
   /** When the usage limit a run suspended with `usage_limit` hit resets, when the provider said. */
   resetsAt?: string;
+}
+
+/** A call whose step ended on a provider that was unavailable: its call's key. */
+interface Unavailable {
+  key: string;
 }
 
 /** A call that hit the provider's usage limit. */
@@ -452,7 +462,7 @@ async function drive(
   options: DriveOptions,
   { start, hold, restored }: { start: boolean; hold: KeepAwakeHold; restored?: LostEvents },
 ): Promise<RunEnd> {
-  const { runId, dir, sailDir, loaded, header } = opened;
+  const { runId, dir, sailDir, root, loaded, header } = opened;
   const { signal, clock = systemClock } = options;
   const bus = createBus({
     runId,
@@ -483,7 +493,6 @@ async function drive(
     const stamped = bus.emit(event);
     tracker?.observe(stamped);
   };
-  const root = dirname(sailDir);
   /**
    * Emits what an adapter emitted, under the running call's key. A workspace event has none, nor one between calls, and
    * its path is relative to the repository root.
@@ -598,14 +607,57 @@ async function drive(
       ...(resetsAt === undefined ? {} : { resetsAt }),
     });
   };
+  /** A call (or a step of one) that ended in `error` on an unavailable port, and doesn't return its errors: its key. */
+  const unavailableOf = (result: Record<string, unknown>, call: PendingCall): Unavailable | undefined => {
+    if (result.outcome !== 'error' || call.onError === 'return') return undefined;
+    const hit = ((result.errors ?? []) as { reason: string; code?: string }[]).some(
+      (error) => error.reason === 'port' && error.code === 'unavailable',
+    );
+    return hit ? { key: callKeyOf(String(result.key)) } : undefined;
+  };
+  /** Suspends the run on a port that was unavailable: the call is left unjournaled, and the workspace kept. */
+  const portUnavailable = (hit: Unavailable): Promise<RunEnd> => {
+    bus.emit({ type: 'run:suspended', stopReason: 'port_unavailable', key: hit.key });
+    return finish({
+      runId,
+      dir,
+      status: 'suspended',
+      stopReason: 'port_unavailable',
+      message: `${hit.key} could not reach a provider: a resume runs it again`,
+    });
+  };
   const interrupted = (message: string): Promise<RunEnd> => suspended('interrupted', message);
+  const stopNow = new AbortController();
+  let stoppedDuring: string | undefined;
+  /** Poll only while a call runs; leave the request for the boundary to take. */
+  const watchStop = (key: string) => {
+    const poll = () => {
+      if (stopNowRequested(dir) && !stopNow.signal.aborted) {
+        stoppedDuring = key;
+        stopNow.abort();
+      }
+    };
+    const timer = setInterval(poll, 500);
+    timer.unref();
+    poll();
+    return () => clearInterval(timer);
+  };
   /** How the run ends at the boundary before `key`, when its control file asks it to, or undefined to go on. */
   const controlled = (key: string): Promise<RunEnd> | undefined => {
     const request = takeControl(dir);
     if (request === 'unwatched') return suspended('unwatched', `its workflow was unwatched: stopped before ${key}`);
-    if (request === 'stopped') return failed('stopped', `stopped by sail stop before ${key}`);
+    if (request === 'stopped')
+      return failed(
+        'stopped',
+        stopNow.signal.aborted
+          ? `stopped by sail stop --now during ${stoppedDuring ?? key}`
+          : `stopped by sail stop before ${key}`,
+      );
     return undefined;
   };
+  /** How the run ends once `sail stop --now` aborted `key`: stopped, even with its control file gone by now. */
+  const stoppedNow = (key: string): Promise<RunEnd> =>
+    controlled(key) ?? failed('stopped', `stopped by sail stop --now during ${stoppedDuring ?? key}`);
   /** A call whose preconditions hold: what it is supplied with, what an agent runs on, and its steps journaled. */
   interface Ready {
     call: PendingCall;
@@ -625,46 +677,60 @@ async function drive(
     return problems.length > 0 ? { failed: problems.join('; ') } : { call, supplied, agent, finished };
   };
   /** Runs the call's next try: a multi-step call from the first step not journaled, journaling each as it ends. */
-  const launch = ({ call, supplied, agent, finished }: Ready, callSignal: AbortSignal | undefined) =>
-    runCall(
-      {
-        runDir: dir,
-        runId,
-        redact: opened.redact,
-        stageIndex: call.stageIndex,
-        call: call.call,
-        try: nextTry(dir, call.stageIndex, call.stage, call.call),
-        definition: call.definition,
-        stageFile: copiedStageFile(dir, header.stages[call.stage]?.origin, call.stageFile),
-        workspace: opened.workspace.path,
-        root,
-        branch: opened.workspace.branch,
-        config: join(sailDir, 'project.yaml'),
-        supplied,
-        ...(callSignal === undefined ? {} : { signal: callSignal }),
-        ...(agent === undefined ? {} : { agent }),
-        emit: tapped,
-        clock,
-      },
-      {
-        finished,
-        // A step that ends once the run is stopping isn't journaled: a resume runs it again. Nor is one that ran out of
-        // the run's budget, which stops its call as a call is left: the next replay asks for the call again, and it runs
-        // from that step. The budget is checked before each further step as before each call: once a step that passed
-        // has used it up, the next doesn't start, and the boundary before the call suspends the run.
-        onStep: (result, paths) => {
-          if (callSignal?.aborted || ranOut(result) || limitedOf(result) !== undefined) return false;
-          journal(result, paths);
-          if (callSignal?.aborted) return false;
-          return !(
-            PASSED.has(String(result.outcome)) &&
-            stepFollows(call, result.step) &&
-            tracker?.over() !== undefined
-          );
+  const launch = async ({ call, supplied, agent, finished }: Ready, callSignal: AbortSignal | undefined) => {
+    callSignal = AbortSignal.any([stopNow.signal, ...(callSignal === undefined ? [] : [callSignal])]);
+    const clear = watchStop(call.key);
+    try {
+      return await runCall(
+        {
+          runDir: dir,
+          runId,
+          redact: opened.redact,
+          stageIndex: call.stageIndex,
+          call: call.call,
+          try: nextTry(dir, call.stageIndex, call.stage, call.call),
+          definition: call.definition,
+          stageFile: copiedStageFile(dir, header.stages[call.stage]?.origin, call.stageFile),
+          workspace: opened.workspace.path,
+          root,
+          branch: opened.workspace.branch,
+          config: join(sailDir, 'project.yaml'),
+          supplied,
+          portVariables: opened.portVariables,
+          ...(callSignal === undefined ? {} : { signal: callSignal }),
+          ...(agent === undefined ? {} : { agent }),
+          emit: tapped,
+          clock,
         },
-        diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch,
-      },
-    );
+        {
+          finished,
+          // A step that ends once the run is stopping isn't journaled: a resume runs it again. Nor is one that ran out of
+          // the run's budget, which stops its call as a call is left: the next replay asks for the call again, and it runs
+          // from that step. The budget is checked before each further step as before each call: once a step that passed
+          // has used it up, the next doesn't start, and the boundary before the call suspends the run.
+          onStep: (result, paths) => {
+            if (
+              callSignal?.aborted ||
+              ranOut(result) ||
+              limitedOf(result) !== undefined ||
+              unavailableOf(result, call) !== undefined
+            )
+              return false;
+            journal(result, paths);
+            if (callSignal?.aborted) return false;
+            return !(
+              PASSED.has(String(result.outcome)) &&
+              stepFollows(call, result.step) &&
+              tracker?.over() !== undefined
+            );
+          },
+          diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch,
+        },
+      );
+    } finally {
+      clear();
+    }
+  };
   /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
   const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
     tracker?.assertRecorded();
@@ -689,28 +755,35 @@ async function drive(
     const problems = callProblems(stage, supplied, agent);
     if (problems.length > 0) return { failed: `the intake '${definition.name}' can't run: ${problems.join('; ')}` };
     const live = path === undefined || path.endsWith('.ts') ? (path ?? '') : join(path, 'intake.ts');
-    return await runCall(
-      {
-        runDir: dir,
-        runId,
-        redact: opened.redact,
-        stageIndex: INTAKE_INDEX,
-        call: 1,
-        try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
-        definition: stage,
-        stageFile: copiedIntakeFile(dir, header.intake.origin, live),
-        workspace: opened.workspace.path,
-        root,
-        branch: opened.workspace.branch,
-        config: join(sailDir, 'project.yaml'),
-        supplied,
-        ...(signal === undefined ? {} : { signal }),
-        ...(agent === undefined ? {} : { agent }),
-        emit: intakeEmit(tapped, definition, header.intake.origin),
-        clock,
-      },
-      { diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch },
-    );
+    const callSignal = AbortSignal.any([stopNow.signal, ...(signal === undefined ? [] : [signal])]);
+    const clear = watchStop(INTAKE_KEY);
+    try {
+      return await runCall(
+        {
+          runDir: dir,
+          runId,
+          redact: opened.redact,
+          stageIndex: INTAKE_INDEX,
+          call: 1,
+          try: nextTry(dir, INTAKE_INDEX, INTAKE_STAGE, 1),
+          definition: stage,
+          stageFile: copiedIntakeFile(dir, header.intake.origin, live),
+          workspace: opened.workspace.path,
+          root,
+          branch: opened.workspace.branch,
+          config: join(sailDir, 'project.yaml'),
+          supplied,
+          portVariables: opened.portVariables,
+          signal: callSignal,
+          ...(agent === undefined ? {} : { agent }),
+          emit: intakeEmit(tapped, definition, header.intake.origin),
+          clock,
+        },
+        { diff: async (range) => (await opened.adapters.workspace.diff(opened.workspace.path, range)).patch },
+      );
+    } finally {
+      clear();
+    }
   };
   /** The key whose journaling stops the run at the next call it asks for: the first call of the stage `until` names. */
   const last = opened.until === undefined ? undefined : `${opened.until}#1`;
@@ -772,6 +845,7 @@ async function drive(
               clock,
             });
       if ('failed' in ran) return await failed('stage_error', ran.failed);
+      if (stopNow.signal.aborted) return await stoppedNow(INTAKE_KEY);
       if (signal?.aborted || ('stopped' in ran && ran.stopped))
         return await interrupted(`stopped during ${INTAKE_KEY}`);
       intake = journal(ran.result, ran.paths);
@@ -882,6 +956,15 @@ async function drive(
           running = undefined;
           return await limitReached(limit);
         }
+        if (stopNow.signal.aborted) {
+          running = undefined;
+          return await stoppedNow(first);
+        }
+        const unavailable = unavailableOf(result, one.call);
+        if (unavailable !== undefined) {
+          running = undefined;
+          return await portUnavailable(unavailable);
+        }
         // Stopped short of its last step, the call is left for the next replay to ask for again.
         if (stopped === true || ranOut(result)) {
           running = undefined;
@@ -897,12 +980,14 @@ async function drive(
       const startedAt = clock().getTime();
       // A call that throws, a bug in sail, stops its siblings: the error goes on once every one of them has settled.
       const crash = new AbortController();
-      const groupSignal = signal === undefined ? crash.signal : AbortSignal.any([signal, crash.signal]);
+      const groupSignal = AbortSignal.any([stopNow.signal, crash.signal, ...(signal === undefined ? [] : [signal])]);
       const live = new Set(calls.map((call) => call.key));
       /** The calls this process journaled: once it holds them all, the journal holds the group whole. */
       let journaledNow = 0;
       /** The first call of the group that hit the usage limit. */
       let usageLimited: Limited | undefined;
+      /** The first call of the group that ended on an unavailable port. */
+      let unavailable: Unavailable | undefined;
       // A resume may run one call of a group, and it isn't the group's first.
       running = live.size === 1 ? [...live][0] : undefined;
       /** The relay's key is the running call's while exactly one of the group's runs, and none otherwise. */
@@ -919,6 +1004,11 @@ async function drive(
             const limit = limitedOf(result);
             if (limit !== undefined) {
               usageLimited ??= limit;
+              return;
+            }
+            const down = unavailableOf(result, each.call);
+            if (down !== undefined) {
+              unavailable ??= down;
               return;
             }
             if (stopped === true || ranOut(result)) return;
@@ -950,7 +1040,9 @@ async function drive(
       }
       if (rejected !== undefined) throw rejected.reason;
       if (signal?.aborted) return await interrupted(`stopped during ${what}`);
+      if (stopNow.signal.aborted) return await stoppedNow(first);
       if (usageLimited !== undefined) return await limitReached(usageLimited);
+      if (unavailable !== undefined) return await portUnavailable(unavailable);
     }
   } catch (error) {
     bus.emit({ type: 'error:crash', message: messageOf(error), ...(running === undefined ? {} : { key: running }) });

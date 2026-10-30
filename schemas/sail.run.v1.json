@@ -98,6 +98,11 @@
     },
     "budget": { "$ref": "#/$defs/runBudget" },
     "startedAt": { "$ref": "#/$defs/ts" },
+    "definitionsSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "the commit whose .sail/ the run's definitions were read from; absent for a run on the clone's .sail/"
+    },
     "note": { "type": "string" }
   },
   "required": ["schema", "runId", "source", "workflow", "sail", "adapters", "intake", "stages", "startedAt"],
@@ -174,6 +179,7 @@
       "type": "object",
       "properties": {
         "maxTurns": { "type": "integer", "minimum": 1 },
+        "maxIdleMinutes": { "type": "number", "minimum": 0 },
         "maxUsd": { "type": "number", "minimum": 0 },
         "maxMinutes": { "type": "number", "minimum": 0 }
       },

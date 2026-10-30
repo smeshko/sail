@@ -52,6 +52,7 @@ function world(): WorkspaceWorld & { leasesDir: string } {
     base: 'main',
     defaultBranch: 'main',
     baseSha: git('rev-parse', 'main'),
+    repoDir: repo().dir,
     tracked: 'README.md',
     runsDir,
     leasesDir: tempDir(),
@@ -66,6 +67,11 @@ function world(): WorkspaceWorld & { leasesDir: string } {
     git: (cwd, ...args) => {
       const result = Bun.spawnSync(['git', ...args], { cwd, env });
       return { code: result.exitCode, stdout: result.stdout.toString().trim() };
+    },
+    publishBranch: (branch) => {
+      const sha = git('commit-tree', 'main^{tree}', '-p', 'main', '-m', `work on ${branch}`);
+      git('update-ref', `refs/heads/${branch}`, sha);
+      return sha;
     },
   };
 }

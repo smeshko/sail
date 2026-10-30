@@ -13,6 +13,7 @@ export const Shared = z.object({
 
 export const attachDemonstration = script('attach-demonstration', {
   run: './run.sh',
+  ports: ['ticket-source'],
   consumes: { demonstration: value(Demonstrated), ticketKey: value(z.string()), pr: value(PullRequestRef) },
   output: Shared,
   exitCodes: { passed: [0], failed: [] },

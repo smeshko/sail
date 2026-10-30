@@ -20,6 +20,7 @@ export const Leaks = z.object({
 
 export const leakCheck = script('leak-check', {
   run: './run.sh',
+  ports: ['jev'],
   consumes: { diff: file('diff.patch'), base: value(z.string()) },
   output: Leaks,
   exitCodes: { passed: [0], failed: [] },

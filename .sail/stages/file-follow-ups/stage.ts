@@ -33,6 +33,7 @@ export const Filed = z.object({
 
 export const fileFollowUps = script('file-follow-ups', {
   run: './run.sh',
+  ports: ['ticket-source', 'jev', 'codehost'],
   // `origin` ends each ticket's description: "From <origin>: <pull request url>".
   consumes: { followUps: value(FollowUps), pr: value(PullRequestRef), origin: value(z.string()) },
   output: Filed,

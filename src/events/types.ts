@@ -28,6 +28,7 @@ export const EVENT_TYPES = [
   'step:start',
   'step:end',
   'step:queued',
+  'step:stalled',
   'loop:iteration',
   'loop:exit',
   'all:start',
@@ -120,11 +121,13 @@ interface Payloads {
   };
   /**
    * A run suspended right before its `run:end`: on its budget (which budget, its limit and what was used), or on the
-   * provider's usage limit (the call that hit it, and when it resets if the provider said).
+   * provider's usage limit (the call that hit it, and when it resets if the provider said), or on a provider that was
+   * unavailable (the call whose step it ended).
    */
   'run:suspended':
     | { stopReason: 'budget_exceeded'; budget: 'usd' | 'minutes'; limit: number; used: number }
-    | { stopReason: 'usage_limit'; key: string; resetsAt?: string };
+    | { stopReason: 'usage_limit'; key: string; resetsAt?: string }
+    | { stopReason: 'port_unavailable'; key: string };
   /** Whether the process driving the run holds a keep-awake: once per process, with no key. */
   'run:keep_awake': { held: true; by: string } | { held: false; reason: string };
   'stage:start': {
@@ -190,6 +193,7 @@ interface Payloads {
     /** Exactly when the outcome is `error`. */
     errors?: ContractError[];
   };
+  'step:stalled': { key: string; idleMs: number; since: string };
   'step:queued': {
     key: string;
     /** The exclusive slot the step waits for. */
