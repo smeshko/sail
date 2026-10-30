@@ -444,7 +444,7 @@ An agent step's `budget.maxIdleMinutes`, by default a quarter of `maxMinutes`: h
 _Avoid_: inactivity timeout, heartbeat
 
 **Stalled**:
-A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit.
+A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit: the dashboard marks its run in the run list and lists it in needs attention until the step speaks again.
 _Avoid_: hung, stuck, frozen
 
 **Budget**:
@@ -622,5 +622,5 @@ The dashboard's panel for one call, with its overview, files, permissions and lo
 _Avoid_: details pane, drawer
 
 **Needs attention**:
-The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items.
+The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, running runs with a stalled step, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items.
 _Avoid_: alerts, signals, triage
