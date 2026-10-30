@@ -255,6 +255,24 @@ test('an id that names no run is refused with exit 3, and nothing is created', a
   });
 });
 
+test('resume refuses a run without a layout and changes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    const runId = await interruptedInto(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const header = join(dir, 'run.json');
+    const { layout: _, ...unmarked } = JSON.parse(readFileSync(header, 'utf8'));
+    chmodSync(header, 0o644);
+    writeFileSync(header, `${JSON.stringify(unmarked, null, 2)}\n`);
+    const before = [readStatus(dir), leasesIn(repo), readFileSync(join(dir, 'events.ndjson'), 'utf8')];
+    expect(await runCaptured(['resume', runId], repo.dir)).toEqual({
+      code: EXIT_REFUSED,
+      stdout: '',
+      stderr: `sail resume: run ${runId} keeps its calls' records inside their $STAGE_OUT, as runs did before sail moved them to out/: it can't be resumed. sail stop ${runId} ends it\n`,
+    });
+    expect([readStatus(dir), leasesIn(repo), readFileSync(join(dir, 'events.ndjson'), 'utf8')]).toEqual(before);
+  });
+}, 30_000);
+
 test('a workflow whose keys no longer fit the journal fails the resume with determinism_violation, and exits 1', async () => {
   await withTempRepo(async (repo) => {
     const runId = await interruptedInto(repo.dir);

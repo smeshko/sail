@@ -304,6 +304,14 @@ function dropWorkspace(dir: string): void {
   writeFileSync(path, `${JSON.stringify(header, null, 2)}\n`);
 }
 
+/** Rewrites the header of the run in `dir` as a run from before the move to out/ has it: no layout. */
+function dropLayout(dir: string): void {
+  const path = join(dir, 'run.json');
+  const { layout: _, ...header } = JSON.parse(readFileSync(path, 'utf8'));
+  chmodSync(path, 0o644);
+  writeFileSync(path, `${JSON.stringify(header, null, 2)}\n`);
+}
+
 const aborted = () => {
   const controller = new AbortController();
   controller.abort();
@@ -336,6 +344,13 @@ test.each<[string, (dir: string) => void, (runId: string) => Partial<SeededRunOp
     dropWorkspace,
     () => ({}),
     (runId) => `run ${runId} started before runs had workspaces: it can't seed a run`,
+  ],
+  [
+    'a run without a layout',
+    dropLayout,
+    () => ({}),
+    (runId) =>
+      `run ${runId} keeps its calls' records inside their $STAGE_OUT, as runs did before sail moved them to out/: it can't seed a run`,
   ],
   ['a start that has aborted', () => {}, () => ({ signal: aborted() }), () => 'stopped before the run was opened'],
 ])(

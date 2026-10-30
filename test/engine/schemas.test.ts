@@ -205,6 +205,12 @@ test('run: an unknown key is not allowed and a missing source is required', () =
   ]);
 });
 
+test('run: layout 2 validates, layout 3 breaks the schema, and a header without it still validates', () => {
+  expect(validateDocument('sail.run.v1', { ...run, layout: 2 })).toEqual([]);
+  expect(validateDocument('sail.run.v1', { ...run, layout: 3 })).toHaveLength(1);
+  expect(validateDocument('sail.run.v1', run)).toEqual([]);
+});
+
 test('a roster entry lists its tools by name, in run.json and in run:start, each a non-empty string', () => {
   const tools = ['WebFetch', 'linear:get_issue', 'github:*'];
   const entry = (permissions: unknown) => ({ spec: { kind: 'agent', origin: 'repo:.sail/stages/spec', permissions } });

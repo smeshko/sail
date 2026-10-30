@@ -27,7 +27,8 @@
 // over. It then reopens the workspace, which must still be there and still descend from its base. A raise of the run's
 // budget is checked with the refusals, right after the run is found: one of a budget the run doesn't have is refused,
 // and so is a resume, raised or not, of a run still at or over its budget. A run from before workspaces existed has no
-// workspace to resume in, and is refused.
+// workspace to resume in, and is refused. So is a run without the layout mark, which kept its calls' records inside their
+// `$STAGE_OUT`: a resume would read them as the session left them.
 //
 // A dispatched start (`dispatch`) is the run the watcher started: it runs under the run id the watcher minted and named
 // in its queue, and records `via: 'watch'`. It takes every step above in this order: the watcher only reads before it
@@ -72,6 +73,7 @@ import {
   removeRunDir,
   runsDir,
   type Source,
+  unmarkedRefusal,
   writeStatus,
 } from './run-dir';
 import {
@@ -594,8 +596,8 @@ export interface ReopenRunOptions {
 }
 
 /**
- * Finds run `runId` beside `sailDir`, with its header and STATUS. A run that has completed or failed is refused, and so
- * is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
+ * Finds run `runId` beside `sailDir`, with its header and STATUS. A run that has completed or failed is refused, then one
+ * whose header has no layout mark, and so is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
  */
 export function findRun(
   sailDir: string,
@@ -610,7 +612,10 @@ export function findRun(
   const status = readStatus(dir);
   const ended = endedRefusal(runId, status);
   if (ended !== undefined) return { refused: ended };
-  return { dir, header: readRunHeader(dir), status };
+  const header = readRunHeader(dir);
+  const unmarked = unmarkedRefusal(runId, header, 'be resumed');
+  if (unmarked !== undefined) return { refused: unmarked };
+  return { dir, header, status };
 }
 
 /** Why run `runId` can't be resumed because it has ended, or undefined while it hasn't. */
