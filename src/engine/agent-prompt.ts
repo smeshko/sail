@@ -1,15 +1,18 @@
 // prepareAgentPrompt(): an agent step's prompt as its harness receives it. The step's `prompt.md` and the shared fragments
 // are rendered with the call's bindings, then the repository's convention files and a corrective try's feedback are
-// appended as they are: neither is read as a template.
+// appended: neither is read as a template, and the feedback goes inside an untrusted-input block.
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { inputVar, type PreparedBindings } from './bindings';
 import { type FragmentName, renderPrompt } from './prompt';
-import type { RenderValues } from './render';
+import { type RenderValues, wrapUntrusted } from './render';
 import { markUntrusted } from './untrusted';
 
 /** The convention files appended when `project.yaml` names none, in order. One that doesn't exist is skipped. */
 export const DEFAULT_CONVENTIONS = ['AGENTS.md', 'CLAUDE.md'] as const;
+
+/** The `source` of the untrusted-input block that holds a corrective try's problems. */
+export const FEEDBACK_SOURCE = 'the problems found in your last output';
 
 export interface AgentPromptOptions {
   /** The repository's `.sail/`. The workspace is the directory that holds it. */
@@ -21,7 +24,7 @@ export interface AgentPromptOptions {
   inputs: Readonly<Record<string, string>>;
   /** `project.yaml`'s `conventions`, each relative to the workspace. Left out, the defaults are appended. */
   conventions?: readonly string[];
-  /** The messages of the validation failure this try corrects, appended last. */
+  /** The messages of the validation failure this try corrects, appended last inside one untrusted-input block. */
   feedback?: readonly string[];
 }
 
@@ -114,12 +117,13 @@ export function prepareAgentPrompt(options: AgentPromptOptions): AgentPrompt {
   }
   if (feedback.length > 0) {
     const intro = 'Your last output was rejected. Fix each problem below, then submit again.';
-    parts.push(`## Fix your last output\n\n${intro}\n\n${feedback.map((message) => message.trimEnd()).join('\n\n')}`);
+    const problems = wrapUntrusted(feedback.map((message) => message.trimEnd()).join('\n\n'), FEEDBACK_SOURCE);
+    parts.push(`## Fix your last output\n\n${intro}\n\n${problems}`);
   }
   return {
     ok: true,
     text: `${parts.join('\n\n')}\n`,
-    untrusted: rendered.untrusted,
+    untrusted: rendered.untrusted + (feedback.length > 0 ? 1 : 0),
     fragments: rendered.fragments,
     conventions: conventions.files.map(({ path }) => path),
   };

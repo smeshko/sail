@@ -3,7 +3,7 @@
 // while `.sail/` and every recorded path stay the repository's. A run that ends for good releases its workspace and its
 // lease before run:end, and a stage consuming gitDiff() finds the run's patch in $STAGE_IN. All on the fakes, whose
 // leases live in the repository's `.sail-runs/fake/leases/`.
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
@@ -18,6 +18,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { leaseFile, readLease, takeLease } from '../../src/adapters/leases';
+import { EXIT_OK } from '../../src/cli/exit-codes';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import { openRun } from '../../src/engine/open-run';
 import { writeStatus } from '../../src/engine/run-dir';
@@ -31,6 +32,8 @@ import type { HarnessRequest } from '../../src/ports/harness';
 import { fakeAdapters } from '../helpers/adapters';
 import { AGENT_WORKFLOW, SPEC, submits, writeAgentFixture } from '../helpers/agent-fixture';
 import { edit } from '../helpers/fixture';
+import { runCaptured } from '../helpers/run-captured';
+import { sharedSource } from '../helpers/seeded';
 import { copyRun, writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
@@ -746,3 +749,76 @@ test('a resumed run takes the diff afresh for its first call that is not journal
     }).toEqual({ status: 'completed', files: ['README.md', 'after.txt', 'src/made.ts'] });
   });
 });
+
+/** A run's `workspace:created` base and `codehost:pushed` head and branch, and how many `error:*` events it holds. */
+function startAndPush(runDir: string) {
+  const events = readEvents(runDir);
+  return {
+    base: (events.find((event) => event.type === 'workspace:created') as { baseSha: string } | undefined)?.baseSha,
+    pushed: events.find((event) => event.type === 'codehost:pushed') as { headSha: string; branch: string } | undefined,
+    errors: events.filter((event) => event.type.startsWith('error:')).length,
+  };
+}
+
+/** Moves `refs/heads/<branch>` in `repo`, which stands in for the remote, to a commit past main: what an earlier run's push left. */
+function pushedAhead(repo: TempRepo, branch: string): string {
+  const sha = repo.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'work an earlier run pushed');
+  repo.git('update-ref', `refs/heads/${branch}`, sha);
+  return sha;
+}
+
+const rerunSource = sharedSource();
+afterAll(() => rerunSource.release());
+
+test('a second run of a ticket whose first run pushed its branch starts from that branch and completes, its push fast-forward', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await rerunSource.copyInto(repo.dir);
+    const first = startAndPush(from.dir);
+    const tip = pushedAhead(repo, first.pushed?.branch ?? '');
+    const second = await runCaptured(['FAKE-1', '--force'], repo.dir, { env: repo.env });
+    const [, rerunId = ''] = runIds(repo.dir).sort();
+    const rerun = startAndPush(join(repo.dir, '.sail-runs', rerunId));
+    expect(second.code).toBe(EXIT_OK);
+    expect(tip).not.toBe(repo.git('rev-parse', 'main'));
+    expect({
+      base: rerun.base,
+      branch: rerun.pushed?.branch,
+      head: rerun.pushed?.headSha,
+      errors: rerun.errors,
+    }).toEqual({
+      base: tip,
+      branch: first.pushed?.branch,
+      head: tip,
+      errors: 0,
+    });
+  });
+}, 60_000);
+
+test('a resume of a rerun reopens at the baseSha run.json recorded', async () => {
+  let rerunId = '';
+  await withTempRepo(async (to) => {
+    await withTempRepo(async (from) => {
+      const source = await rerunSource.copyInto(from.dir);
+      const pushed = pushedAhead(from, startAndPush(source.dir).pushed?.branch ?? '');
+      const stop = new AbortController();
+      const interrupted = await runWorkflow({
+        cwd: from.dir,
+        adapters: await fakeAdapters(from.dir),
+        workflow: 'ticket-to-pr',
+        ticket: 'FAKE-1',
+        force: true,
+        signal: stop.signal,
+        onCall: () => stop.abort(),
+      });
+      if ('refused' in interrupted) throw new Error(`refused: ${interrupted.refused}`);
+      rerunId = interrupted.runId;
+      const recorded = JSON.parse(readFileSync(join(interrupted.dir, 'run.json'), 'utf8')).repository.baseSha;
+      expect({ status: interrupted.status, recorded }).toEqual({ status: 'suspended', recorded: pushed });
+      copyRun(from.dir, to.dir);
+    });
+    const resumed = await resumeWorkflow({ cwd: to.dir, adapters: await fakeAdapters(to.dir), runId: rerunId });
+    if ('refused' in resumed) throw new Error(`refused: ${resumed.refused}`);
+    const created = readEvents(resumed.dir).filter((event) => event.type === 'workspace:created');
+    expect({ status: resumed.status, created: created.length }).toEqual({ status: 'completed', created: 1 });
+  });
+}, 90_000);

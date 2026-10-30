@@ -1,14 +1,15 @@
 // One workflow's dispatch (DECISIONS D6-D9): settle the items whose run has ended, then start due items within the
 // cap, skipping a leased branch without a slot or an attempt, and dropping an item no longer eligible. On the stub's
 // file-backed fakes in a temp repository, a hand-moved clock and a fake spawner.
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createFakeTicketSource } from '../../src/adapters/fake/ticket-source';
 import { branchFor } from '../../src/engine/branch';
-import { requestStop, requestUnwatch } from '../../src/engine/control';
+import { handOffFile, requestStop, requestUnwatch } from '../../src/engine/control';
 import { writeStatus } from '../../src/engine/run-dir';
 import { claimComment } from '../../src/engine/source';
+import { readEvents } from '../../src/events/consumers/ndjson';
 import type { CodeHost } from '../../src/ports/code-host';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -16,10 +17,11 @@ import type { PullRequestDetails } from '../../src/ports/types';
 import type { WorkspacePort } from '../../src/ports/workspace';
 import { createDispatcher, type Settled } from '../../src/watch/dispatch';
 import { openQueue, type QueueStore, queueDir } from '../../src/watch/queue-store';
-import { dispatchLog } from '../../src/watch/spawn';
+import { dispatchLog, spawnRun } from '../../src/watch/spawn';
 import { fakeAdapters } from '../helpers/adapters';
 import { commitBranch, seedPullRequests } from '../helpers/pr-workflow';
 import { manualClock, queueEventIssues, queueEvents, sourceKey, ticket } from '../helpers/queue';
+import { sharedSource } from '../helpers/seeded';
 import { writeStub } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 import { FAKE_PID, type FakeSpawner, fakeSpawner, writeTickets } from '../helpers/watched';
@@ -813,6 +815,69 @@ test('a stopped run parks its item at once with the run named, and it is never r
   });
 });
 
+test('settling an item deletes the hand-off its run never took: a refused start, a completed run and a stopped run, each with its own run id', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 3, 3, { claiming: false });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const ids = ['FAKE-1', 'FAKE-2', 'FAKE-3'].map((key) => w.spawner.run(key).runId);
+    const handOffs = () => ids.map((id) => existsSync(handOffFile(w.runs, id)));
+    for (const [index, id] of ids.entries())
+      writeFileSync(handOffFile(w.runs, id), index === 0 ? 'unwatched\n' : 'stopped\n');
+    const before = handOffs();
+    await w.spawner.end('FAKE-1', { refused: 'sail FAKE-1: refused' });
+    await w.spawner.end('FAKE-2');
+    await w.spawner.end('FAKE-3', { status: 'failed', stopReason: 'stopped' });
+    await dispatcher.tick();
+    expect({ before, after: handOffs(), items: states(w.store) }).toEqual({
+      before: [true, true, true],
+      after: [false, false, false],
+      items: ['FAKE-1 failed 1', 'FAKE-2 done 1', 'FAKE-3 parked 1'],
+    });
+  });
+});
+
+test('a start refused with a stop waiting in its hand-off parks its item as stopped, never retried, and deletes the hand-off (review R1)', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1, { claiming: false });
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const { runId } = w.spawner.run('FAKE-1');
+    writeFileSync(handOffFile(w.runs, runId), 'stopped\n');
+    await w.spawner.end('FAKE-1', { refused: 'sail FAKE-1: the workspace could not be made' });
+    await dispatcher.tick();
+    w.clock.advance(60 * 60_000);
+    await dispatcher.tick();
+    expect({
+      items: states(w.store),
+      reason: w.store.snapshot().items[0]?.reason,
+      spawned: spawnedKeys(w.spawner),
+      handOff: existsSync(handOffFile(w.runs, runId)),
+    }).toEqual({
+      items: ['FAKE-1 parked 1'],
+      reason: `run ${runId} was stopped: its start was refused: sail FAKE-1: the workspace could not be made`,
+      spawned: ['FAKE-1'],
+      handOff: false,
+    });
+  });
+});
+
+test('a run left to resume keeps its hand-off: only a settled item has it deleted', async () => {
+  await withTempRepo(async (repo) => {
+    const w = await world(repo, 1, 1);
+    const dispatcher = w.dispatcher();
+    await dispatcher.tick();
+    const { runId } = w.spawner.run('FAKE-1');
+    writeFileSync(handOffFile(w.runs, runId), 'unwatched\n');
+    await w.spawner.end('FAKE-1', { status: 'suspended', stopReason: 'interrupted' });
+    await dispatcher.tick();
+    expect({
+      resumes: w.spawner.resumes.map((resume) => resume.runId),
+      handOff: readFileSync(handOffFile(w.runs, runId), 'utf8'),
+    }).toEqual({ resumes: [runId], handOff: 'unwatched\n' });
+  });
+});
+
 test('a dead run that never took the unwatched it was sent is resumed with the request taken back, and one sent a stop keeps it (review R1-3)', async () => {
   await withTempRepo(async (repo) => {
     const w = await world(repo, 2, 2);
@@ -1192,3 +1257,39 @@ test('with one slot, a ticket whose priority was raised after it was queued is d
     expect(states(w.store)).toEqual(['FAKE-3 dispatched 1', 'FAKE-1 queued 0', 'FAKE-2 queued 0']);
   });
 });
+
+// A dispatched start is an ordinary `sail <ticket> --workflow <name> --dispatch <run id>` process, so a rerun of a ticket
+// whose branch an earlier run pushed continues that branch, as a start by hand does.
+
+const dispatchSource = sharedSource();
+afterAll(() => dispatchSource.release());
+
+test('a dispatched rerun of a ticket whose branch is pushed starts from it, and its push is a fast-forward', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await dispatchSource.copyInto(repo.dir);
+    const branch = (
+      readEvents(from.dir).find((event) => event.type === 'codehost:pushed') as { branch: string } | undefined
+    )?.branch;
+    // A dispatched run reads the `.sail/` committed on the default branch.
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const tip = repo.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'work an earlier run pushed');
+    repo.git('update-ref', `refs/heads/${branch}`, tip);
+    const runId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P';
+    const runs = join(repo.dir, '.sail-runs');
+    const spawned = spawnRun({
+      root: repo.dir,
+      runsDir: runs,
+      workflow: 'ticket-to-pr',
+      ticketKey: 'FAKE-1',
+      runId,
+      env: repo.env,
+      force: true,
+    });
+    const code = await spawned.exited;
+    const events = readEvents(join(runs, runId));
+    const created = events.find((event) => event.type === 'workspace:created') as { baseSha: string } | undefined;
+    const pushed = events.find((event) => event.type === 'codehost:pushed') as { headSha: string } | undefined;
+    expect({ code, base: created?.baseSha, pushed: pushed?.headSha }).toEqual({ code: 0, base: tip, pushed: tip });
+  });
+}, 90_000);

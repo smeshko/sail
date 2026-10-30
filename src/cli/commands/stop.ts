@@ -3,15 +3,21 @@
 //
 // - A run that is running, alive in another process, gets a stop request in its control file, and the command exits 0
 //   at once, saying it stops at its next call boundary: a run may be inside a long agent call, and `sail show <run>
-//   --follow` follows it to its end.
+//   --follow` follows it to its end. With --now its running call is ended instead.
 // - A run that nothing runs, suspended or running with its process gone, ends `failed stopped` now: its workspace and
 //   lease are released, and `run:end` closes its stream.
+// - A dispatched run that is still starting, which a dispatched queue item names but has no run directory yet, gets a
+//   `stopped` hand-off file, and the command exits 0 saying it stops before its intake. A dead pid on that item is a
+//   refused start, which the watcher fails, so it is refused here as any unknown run.
 // - A run that has ended, and a run id that names no run, are refused with exit 3.
 //
 // It resolves only the Workspace port, so no ticket source is asked for its credentials, and loads no workflow.
 
+import { isAlive } from '../../adapters/leases';
 import { credentialValues } from '../../engine/redact';
+import { runsDir } from '../../engine/run-dir';
 import { stopRun } from '../../engine/stop';
+import { dispatchedItem } from '../../watch/queue-store';
 import { EXIT_OK, type ExitCode } from '../exit-codes';
 import type { Io, Parsed } from '../index';
 import { findProject, refuseAs } from './run-workflow';
@@ -21,18 +27,27 @@ const COMMAND = 'sail stop';
 export async function stop(args: Parsed, io: Io): Promise<ExitCode> {
   const refuse = refuseAs(io, COMMAND);
   const [runId] = args.positionals;
-  if (runId === undefined) return refuse('usage: sail stop <run>');
+  if (runId === undefined) return refuse('usage: sail stop <run> [--now]');
   const project = await findProject(io, COMMAND, { ports: ['workspace'] });
   if (typeof project === 'number') return project;
   const stopped = await stopRun({
     sailDir: project.sailDir,
     runId,
     adapters: project.adapters,
+    now: args.values.now === true,
     secrets: credentialValues(io.env ?? process.env),
+    starting: (id) => {
+      const item = dispatchedItem(runsDir(project.sailDir), id);
+      return item !== undefined && (item.pid === undefined || isAlive(item.pid));
+    },
   });
   if ('refused' in stopped) return refuse(stopped.refused);
-  if ('requested' in stopped) {
-    io.stdout(`${COMMAND}: run ${runId} stops at its next call boundary (pid ${stopped.requested.pid})\n`);
+  if ('starting' in stopped) {
+    io.stdout(`${COMMAND}: run ${runId} is still starting: it stops before its intake\n`);
+  } else if ('requested' in stopped) {
+    io.stdout(
+      `${COMMAND}: run ${runId} ${stopped.requested.now ? 'ends its running call now' : 'stops at its next call boundary'} (pid ${stopped.requested.pid})\n`,
+    );
   } else {
     io.stdout(`${COMMAND}: run ${runId} stopped\n`);
   }

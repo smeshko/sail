@@ -175,6 +175,13 @@ test("the fixture's header validates, with the workflow's folder, the adapters a
   expect(header.intake.name).toBe('ticket');
 });
 
+test("a step's idle limit of 0 still validates, as its minute budget of 0 does, so the agent kind refuses it with its own message (review D1)", async () => {
+  const header = await fixtureHeader();
+  const spec = header.stages.spec as unknown as { budget: Record<string, number> };
+  spec.budget = { ...spec.budget, maxIdleMinutes: 0 };
+  expect(validateRunHeader(header)).toEqual([]);
+});
+
 test("a workflow's budget overrides project.yaml's field by field, and stands alone without one: the header validates and holds the merged budget a dry run prints", async () => {
   const headerOf = (change: (sail: string) => void) =>
     withTempRepo(async (repo) => {
@@ -336,6 +343,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
       runId: RUN_ID,
       source: FAKE_1,
       fromRun,
+      reused: 2,
       sailDir: sail,
       loaded,
       config,
@@ -354,6 +362,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
       'runId',
       'source',
       'fromRun',
+      'reused',
       'workflow',
       'sail',
       'adapters',
@@ -368,6 +377,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
     fromRun,
     [],
   ]);
+  expect(header.reused).toBe(2);
 });
 
 test('a header built with definitionsSha records it after startedAt, round-trips through run.json and validates; one built without it has no such key; a value that is not 40 hex is refused', async () => {

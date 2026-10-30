@@ -34,7 +34,7 @@ import { dirname, join } from 'node:path';
 import { isAlive as processIsAlive, releaseLease, takeLease } from '../adapters/leases';
 import { DEFAULT_BRANCH_PREFIX } from '../engine/branch';
 import type { ProjectConfig } from '../engine/config';
-import { requestUnwatch } from '../engine/control';
+import { askToSuspend } from '../engine/control';
 import { readStatus, runsDir as runsDirOf } from '../engine/run-dir';
 import { resolveSource } from '../engine/source';
 import type { QueueEvent } from '../events/types';
@@ -352,8 +352,8 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
 
   /**
    * Asks each live run of `workflow` to suspend at its next call boundary, saying so for each request written. A run
-   * still starting has no directory to take a request from, and nothing asks it again once the workflow leaves the set:
-   * that is said as an alert naming `sail stop`, so the person knows it runs on.
+   * still starting has no directory yet, so its request waits in its hand-off file, which the run moves in as `CONTROL`
+   * as soon as its directory exists.
    */
   const suspendRuns = async (workflow: string) => {
     const watched = set.get(workflow);
@@ -366,16 +366,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
         (item.pid !== undefined && isAlive(item.pid)) ||
         (await liveHolder(join(runs, item.runId), item.runId, { workspace, isAlive })) !== undefined;
       if (!alive) continue;
-      let written: boolean;
-      try {
-        written = requestUnwatch(join(runs, item.runId));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        const why = `run ${item.runId} is still starting and was not asked to suspend: sail stop ${item.runId} stops it`;
-        print(errorLine(workflow, why, now()));
-        continue;
-      }
-      if (written) print(suspendLine(workflow, item.dedupKey, item.runId, now()));
+      if (askToSuspend(runs, item.runId)) print(suspendLine(workflow, item.dedupKey, item.runId, now()));
     }
   };
 

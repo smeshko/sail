@@ -15,7 +15,7 @@ import { readStatus } from '../../../src/engine/run-dir';
 import type { HarnessEvent, HarnessRequest } from '../../../src/ports/harness';
 import type { HarnessResult } from '../../../src/ports/types';
 import { runDirIn } from '../../helpers/agent-fixture';
-import { copyFixture, edit } from '../../helpers/fixture';
+import { commitGreet, copyFixture, edit } from '../../helpers/fixture';
 import { runCaptured } from '../../helpers/run-captured';
 import { withTempRepo } from '../../helpers/temp-repo';
 import { harnessSuite } from '../../ports/harness.suite';
@@ -141,6 +141,7 @@ describe.skipIf(!LIVE)('pi live', () => {
   test('the fixture repository’s ticket-to-pr runs to completed on use: pi', async () => {
     await withTempRepo(async (repo) => {
       const sail = copyFixture(repo.dir);
+      commitGreet(repo);
       edit(sail, 'project.yaml', 'harness: { use: fake }', `harness: { use: pi, provider: ${PROVIDER} }`);
       edit(sail, 'project.yaml', 'default: claude-sonnet-5', `default: ${MODEL}`);
       edit(sail, 'project.yaml', 'deep: claude-opus-5-5', `deep: ${MODEL}`);

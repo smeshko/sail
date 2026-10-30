@@ -146,7 +146,8 @@
             ]
           },
           "message": { "type": "string", "minLength": 1 },
-          "resetsAt": { "$ref": "#/$defs/ts" }
+          "resetsAt": { "$ref": "#/$defs/ts" },
+          "code": { "const": "unavailable" }
         },
         "required": ["reason", "message"],
         "additionalProperties": false

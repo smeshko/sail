@@ -46,6 +46,16 @@ function summaryIn(dir: string): Summary | undefined {
 const stamped = (seq: number, ms: number, event: Parameters<typeof stamp>[0][1]): SailEvent =>
   ({ seq, ts: at(ms), runId: RUN_ID, ...event }) as SailEvent;
 
+test('a stall and its clearing are written immediately without a journal append', () => {
+  const dir = runDir();
+  const consumer = summaryConsumer(dir);
+  consumer.onEvent(stamped(1, 0, runStart()));
+  consumer.onEvent(stamped(2, 10, { type: 'step:stalled', key: 'spec#1', idleMs: 10, since: at(0) }));
+  expect(summaryIn(dir)?.stalled).toEqual([{ key: 'spec#1', since: at(0) }]);
+  consumer.onEvent(stamped(3, 20, { type: 'agent:message', key: 'spec#1', text: 'back' }));
+  expect(summaryIn(dir)?.stalled).toBeUndefined();
+});
+
 test('the consumer writes summary.json at run:start, each journal:append, run:end and error:crash, and at nothing else', () => {
   const dir = runDir();
   const consumer = summaryConsumer(dir);

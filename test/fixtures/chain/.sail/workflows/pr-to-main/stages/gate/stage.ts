@@ -6,6 +6,7 @@ export const Gate = z.object({ open: z.boolean(), base: z.string(), headSha: z.s
 
 export const gate = script('gate', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { pr: value(z.number().int()) },
   output: Gate,
   // A port call that failed is an error, never a verdict: no exit code means failed.

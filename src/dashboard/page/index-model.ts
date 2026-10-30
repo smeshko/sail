@@ -15,6 +15,7 @@ export interface RailRun {
   pr?: number;
   title?: string;
   status: string;
+  stalled?: string;
   stopReason?: string;
   startedAt?: string;
   durationMs?: number;
@@ -95,6 +96,7 @@ function railRun(run: RunItem, now: number): RailRun {
     durationMs,
     costUsd: summary?.totals.usage.costUsd,
     problem: run.problem,
+    stalled: status === 'running' ? summary?.stalled?.[0]?.key : undefined,
   };
   for (const [field, value] of Object.entries(facts)) {
     if (value !== undefined) (row as unknown as Record<string, unknown>)[field] = value;

@@ -56,7 +56,8 @@
         "unwatched",
         "stopped",
         "interrupted",
-        "usage_limit"
+        "usage_limit",
+        "port_unavailable"
       ]
     },
     "message": {
@@ -68,6 +69,15 @@
     "durationMs": { "type": "number", "minimum": 0 },
     "result": true,
     "calls": { "type": "array", "items": { "$ref": "#/$defs/callEntry" } },
+    "stalled": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": { "key": { "type": "string" }, "since": { "$ref": "#/$defs/ts" } },
+        "required": ["key", "since"],
+        "additionalProperties": false
+      }
+    },
     "loops": {
       "type": "object",
       "patternProperties": {

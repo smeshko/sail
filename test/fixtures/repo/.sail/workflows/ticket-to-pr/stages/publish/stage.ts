@@ -22,6 +22,7 @@ const describe = agent('describe', {
 
 const open = script('open', {
   run: './open.sh',
+  ports: ['ticket-source', 'codehost'],
   // The title as plain text, and the body describe wrote, both from describe.
   consumes: {
     title: fromStep('describe').output('title'),

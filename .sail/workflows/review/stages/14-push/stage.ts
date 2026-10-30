@@ -6,6 +6,7 @@ export const PushedHead = z.object({ pushed: z.boolean(), headSha: z.string() })
 
 export const push = script('push', {
   run: './run.sh',
+  ports: ['codehost'],
   // The head the review began at, as plain text.
   consumes: { since: value(z.string()) },
   output: PushedHead,

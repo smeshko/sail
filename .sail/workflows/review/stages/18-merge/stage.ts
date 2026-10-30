@@ -24,6 +24,7 @@ export const Merged = z.object({
 
 export const merge = script('merge', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: {
     pr: value(PullRequestRef),
     headSha: value(z.string()),

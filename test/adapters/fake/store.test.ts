@@ -54,6 +54,9 @@ test('claims and comments made by several processes at once: exactly one claim t
   const dir = tempDir();
   const world = { seed: join(dir, 'tickets.json'), state: join(dir, 'state', 'tickets.json') };
   copyFileSync(SEED, world.seed);
+  // Twelve changes queue on one lock, which a loaded runner can take past the default wait (ADW-446): what's tested is
+  // that none is lost, so the racers wait as long as the test may run.
+  const racerWorld = { ...world, lockWaitMs: 30_000 };
   // Every racer waits for the same instant, then claims FAKE-1 and comments on FAKE-3.
   const at = Date.now() + 500;
   const racer = (n: number) =>
@@ -62,7 +65,7 @@ test('claims and comments made by several processes at once: exactly one claim t
         process.execPath,
         '-e',
         `const { createFakeTicketSource } = await import(${JSON.stringify(TICKET_SOURCE)});
-         const source = createFakeTicketSource(${JSON.stringify(world)});
+         const source = createFakeTicketSource(${JSON.stringify(racerWorld)});
          while (Date.now() < ${at});
          const { claimed } = await source.claim('FAKE-1');
          await source.comment('FAKE-3', 'racer ${n}');

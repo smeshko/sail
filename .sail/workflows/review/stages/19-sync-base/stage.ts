@@ -13,6 +13,7 @@ export const Synced = z.object({
 
 export const syncBase = script('sync-base', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { pr: value(PullRequestRef), ticketKey: value(z.string()).optional() },
   output: Synced,
   exitCodes: { passed: [0], failed: [] },

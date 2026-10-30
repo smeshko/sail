@@ -37,6 +37,36 @@ function ending(summary: Summary | undefined): Record<string, unknown> {
   );
 }
 
+test('stalls survive other keys, clear on their next event, and disappear when the run ends', () => {
+  const events = stamp(
+    [0, runStart()],
+    [10, { type: 'step:stalled', key: 'spec#1', idleMs: 10, since: at(0) }],
+    [20, { type: 'step:stalled', key: 'implement#1/edit', idleMs: 10, since: at(10) }],
+    [30, { type: 'agent:message', key: 'other#1', text: 'hello' }],
+    [40, { type: 'agent:message', key: 'spec#1', text: 'back' }],
+    [50, runEnd('completed', 1)],
+  );
+  expect(folded(events.slice(0, 4))?.stalled).toEqual([
+    { key: 'spec#1', since: at(0) },
+    { key: 'implement#1/edit', since: at(10) },
+  ]);
+  expect(folded(events.slice(0, 5))?.stalled).toEqual([{ key: 'implement#1/edit', since: at(10) }]);
+  expect(folded(events)?.stalled).toBeUndefined();
+  expect(folded(stamp([0, runStart()]))?.stalled).toBeUndefined();
+});
+
+test('suspension clears every stalled key', () => {
+  expect(
+    folded(
+      stamp(
+        [0, runStart()],
+        [10, { type: 'step:stalled', key: 'spec#1', idleMs: 10, since: at(0) }],
+        [20, { type: 'run:suspended', stopReason: 'usage_limit', key: 'other#1' }],
+      ),
+    )?.stalled,
+  ).toBeUndefined();
+});
+
 const loopIteration = (loop: string, iteration: number, max: number, from?: string): NewEvent => ({
   type: 'loop:iteration',
   loop,

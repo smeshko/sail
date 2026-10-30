@@ -125,9 +125,9 @@ test("the golden run's STATUS reads completed", () => {
   expect(readStatus(GOLDEN)).toEqual({ status: 'completed' });
 });
 
-test('usage_limit is the last stop reason, so STATUS can say a suspended run hit the usage limit', () => {
+test('port_unavailable is the last stop reason, so STATUS can say a suspended run ended on an unavailable port', () => {
   expect(STOP_REASONS.join(' ')).toBe(
-    'workflow_failed stage_error budget_exceeded determinism_violation until unwatched stopped interrupted usage_limit',
+    'workflow_failed stage_error budget_exceeded determinism_violation until unwatched stopped interrupted usage_limit port_unavailable',
   );
 });
 
