@@ -3,7 +3,8 @@
 // test/adapters/workspace/git-worktree.test.ts, over a clone of a local bare origin. Each case starts from a fresh
 // make(), and every event it captures must validate against sail.event.v1 with no key.
 import { expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Status } from '../../src/engine/run-dir';
 import type { ProviderEmit, ProviderEvent } from '../../src/events/types';
@@ -38,6 +39,8 @@ export interface WorkspaceWorld {
   readonly defaultBranch: string;
   /** The commit `base` names. */
   readonly baseSha: string;
+  /** The repository whose working tree `readTree()` must not read. */
+  readonly repoDir: string;
   /** A file tracked at `base`. */
   readonly tracked: string;
   /** Where run directories are made. */
@@ -208,6 +211,53 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect(readFileSync(join(fresh.path, 'src', 'new dir', 'created.ts'), 'utf8')).toBe(
       'export const created = true;\n',
     );
+  });
+
+  test(`${label}: readTree copies the named paths as committed at the default branch's tip, ignores the working tree's edits, and returns the tip's sha`, async () => {
+    const { adapter, world, capture } = await start();
+    const into = mkdtempSync(join(tmpdir(), 'sail-read-tree-'));
+    const file = join(world.repoDir, world.tracked);
+    const committed = readFileSync(file, 'utf8');
+    writeFileSync(file, 'an uncommitted edit\n');
+    try {
+      const read = await adapter.readTree(into, { paths: [world.tracked] });
+      expect(read).toEqual({ sha: world.baseSha });
+      expect(readFileSync(join(into, world.tracked), 'utf8')).toBe(committed);
+      expect(capture.events).toEqual([]);
+    } finally {
+      writeFileSync(file, committed);
+      rmSync(into, { recursive: true, force: true });
+    }
+  });
+
+  test(`${label}: readTree skips a path the commit lacks and copies the others`, async () => {
+    const { adapter, world } = await start();
+    const into = mkdtempSync(join(tmpdir(), 'sail-read-tree-'));
+    try {
+      const read = await adapter.readTree(into, { paths: ['no-such-path', world.tracked] });
+      expect([read.sha, existsSync(join(into, 'no-such-path')), existsSync(join(into, world.tracked))]).toEqual([
+        world.baseSha,
+        false,
+        true,
+      ]);
+    } finally {
+      rmSync(into, { recursive: true, force: true });
+    }
+  });
+
+  test(`${label}: readTree reads at the base it is given, and refuses as invalid a base that names no commit`, async () => {
+    const { adapter, world } = await start();
+    const into = mkdtempSync(join(tmpdir(), 'sail-read-tree-'));
+    try {
+      const given = await adapter.readTree(into, { paths: [world.tracked], base: world.baseSha });
+      const refused = await settle(adapter.readTree(into, { paths: [world.tracked], base: 'no-such-ref' }));
+      expect({ given, refused }).toEqual({
+        given: { sha: world.baseSha },
+        refused: { rejected: { port: 'workspace', op: 'readTree', code: 'invalid' } },
+      });
+    } finally {
+      rmSync(into, { recursive: true, force: true });
+    }
   });
 
   test(`${label}: release removes a workspace unless it is kept, and emits workspace:released either way`, async () => {

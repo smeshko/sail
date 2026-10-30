@@ -8,15 +8,18 @@
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { withoutRepositoryVariables } from '../../engine/git-env';
 import { runProcess } from '../../engine/process';
 import { readStatus } from '../../engine/run-dir';
@@ -294,6 +297,44 @@ export function diffWorkingTree(path: string, range: string, env?: Readonly<Reco
   }
   const patch = tracked.stdout + created.map((result) => result.stdout).join('');
   return { patch, raw: { from, tracked, created } };
+}
+
+/**
+ * Copies the files of commit `sha` under `paths` into `into`, at the same relative paths, and leaves the working tree
+ * alone. A path the commit lacks is skipped. A blob keeps its executable bit, a symbolic link stays one, and a
+ * submodule is skipped. A `sha` that names no commit is `invalid`.
+ */
+export function copyTree(
+  repo: string,
+  sha: string,
+  paths: readonly string[],
+  into: string,
+  env?: Readonly<Record<string, string>>,
+): void {
+  const invalid = (why: string) => new PortError('workspace', 'readTree', 'invalid', why);
+  if (resolveCommit(repo, sha, env) === undefined) throw invalid(`${sha} names no commit`);
+  if (paths.length === 0) return;
+  const listed = gitSync(repo, ['ls-tree', '-r', '-z', '--full-tree', sha, '--', ...paths], env);
+  if (listed.code !== 0) throw new PortError('workspace', 'readTree', 'unavailable', listed.stderr);
+  for (const entry of listed.stdout.split('\0').filter((each) => each !== '')) {
+    const tab = entry.indexOf('\t');
+    const [mode, type, oid] = entry.slice(0, tab).split(' ');
+    const file = entry.slice(tab + 1);
+    if (type !== 'blob' || oid === undefined) continue;
+    const blob = Bun.spawnSync(['git', 'cat-file', 'blob', oid], {
+      cwd: repo,
+      env: nonInteractive(env ?? inherited()),
+      stdin: 'ignore',
+      timeout: LOCAL_TIMEOUT_MS,
+    });
+    if (blob.exitCode !== 0) {
+      throw new PortError('workspace', 'readTree', 'unavailable', `${file}: ${blob.stderr.toString().trim()}`);
+    }
+    const target = join(into, file);
+    mkdirSync(dirname(target), { recursive: true });
+    if (mode === '120000') symlinkSync(blob.stdout.toString(), target);
+    else writeFileSync(target, blob.stdout, { mode: mode === '100755' ? 0o755 : 0o644 });
+  }
 }
 
 /**

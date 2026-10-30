@@ -312,6 +312,23 @@ test("a claim made through the fake elsewhere shows in get's state, and the get 
   });
 });
 
+test("a SAIL_CONFIG in a run's definitions copy works on the clone: a claim lands in the clone's fake state, as the run's own adapters keep it", async () => {
+  await withTempRepo(async (repo) => {
+    fixtureWithLinked(repo.dir);
+    const runDir = join(repo.dir, '.sail-runs', 'FAKE-5-01');
+    mkdirSync(join(runDir, 'definition'), { recursive: true });
+    const copy = fixtureWithLinked(join(runDir, 'definition'));
+    const { code } = await runCaptured(['port', 'ticket-source', 'claim', 'FAKE-5'], outside(), {
+      env: { SAIL_CONFIG: join(copy, 'project.yaml') },
+    });
+    expect(code).toBe(EXIT_OK);
+    expect(existsSync(join(runDir, 'definition', '.sail-runs'))).toBe(false);
+    const state = join(repo.dir, '.sail-runs', 'fake', 'tickets.json');
+    const ticket = await createFakeTicketSource({ seed: join(copy, 'fake', 'tickets.json'), state }).get('FAKE-5');
+    expect(ticket.state).toEqual({ type: 'started', name: 'In Progress' });
+  });
+});
+
 test("an answer that is no Ticket, from a repository's own adapter, exits 1 naming the port and the operation", async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureWithLinked(repo.dir);

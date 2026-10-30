@@ -369,3 +369,29 @@ test("the usage lists sail '#<pr>' after sail <ticket>, and says what --force ov
       ),
   }).toEqual({ second: true, force: true });
 });
+
+test("a dispatched pull-request start runs the .sail/ committed at main, not the one at the pull request's head, and records main's sha", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writePrWorkflow(sail, 'review-pr', { delayMs: 0 });
+    const headSha = commitBranch(repo, BRANCH, '.sail/head-marker.txt');
+    seedPullRequests(sail, repo, [{ number: 1, head: BRANCH, title: 'Add a greeting', ticketKey: 'FAKE-1' }]);
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const runId = 'pr-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+    const { code, stderr } = await runCaptured(
+      ['#1', '--workflow', 'review-pr', '--dispatch', runId, '--head-sha', headSha],
+      repo.dir,
+    );
+    const dir = join(repo.dir, '.sail-runs', runId);
+    const header = existsSync(join(dir, 'run.json')) ? JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')) : {};
+    expect({ code, stderr, sha: header.definitionsSha, kind: header.source?.kind }).toEqual({
+      code: EXIT_OK,
+      stderr: '',
+      sha: repo.git('rev-parse', 'main'),
+      kind: 'pr',
+    });
+    expect(existsSync(join(dir, 'definition', '.sail', 'workflows', 'review-pr', 'workflow.ts'))).toBe(true);
+    expect(existsSync(join(dir, 'definition', '.sail', 'head-marker.txt'))).toBe(false);
+  });
+});
