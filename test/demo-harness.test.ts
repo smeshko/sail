@@ -273,6 +273,43 @@ test.skipIf(chrome === undefined)(
 );
 
 test.skipIf(chrome === undefined)(
+  'dashboard exits 1 naming a missed scroll and a wait whose selector never came, and waits a time',
+  async () => {
+    await withTempRepo(async (repo) => {
+      const dir = await seededDemo(repo);
+      const capture = async (name: string, steps: unknown[]) => {
+        const file = join(repo.dir, `${name}.json`);
+        await Bun.write(file, JSON.stringify(steps));
+        return await demo(repo.env, 'dashboard', dir, name, `steps=${file}`);
+      };
+      const scroll = await capture('scroll', [{ scroll: '#no-such-box', top: 10 }, { shot: 'after' }]);
+      const wait = await capture('wait', [{ wait: '#never' }, { shot: 'after' }]);
+      const timed = await capture('timed', [{ wait: 300 }, { shot: 'after' }]);
+      expect({
+        scroll: scroll.code,
+        scrollNamed: /step 1 .*#no-such-box.* matched nothing/.test(scroll.stdout),
+        wait: wait.code,
+        waitNamed: /step 1 .*#never.* matched nothing within 20s/.test(wait.stdout),
+        missedShots: existsSync(join(dir, 'scroll-after.png')) || existsSync(join(dir, 'wait-after.png')),
+        timed: timed.code,
+        waited: /step 1 \{"wait":300\}: waited \d+ms/.test(timed.stdout),
+        timedShot: existsSync(join(dir, 'timed-after.png')),
+      }).toEqual({
+        scroll: 1,
+        scrollNamed: true,
+        wait: 1,
+        waitNamed: true,
+        missedShots: false,
+        timed: 0,
+        waited: true,
+        timedShot: true,
+      });
+    });
+  },
+  180_000,
+);
+
+test.skipIf(chrome === undefined)(
   'dashboard shoots what a click redrew, with no wait between them',
   async () => {
     await withTempRepo(async (repo) => {
