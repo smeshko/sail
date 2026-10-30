@@ -6,6 +6,7 @@ export const Requirements = z.object({ ticketKey: z.string().nullable() });
 
 export const requirements = script('requirements', {
   run: './run.sh',
+  ports: ['ticket-source'],
   // The ticket key as plain text, empty for a pull request that names none.
   consumes: { ticketKey: value(z.string()) },
   produces: { 'requirements.md': 'file' },

@@ -21,6 +21,15 @@ const REPOSITORY_VARIABLES: ReadonlySet<string> = new Set([
   'GIT_COMMON_DIR',
 ]);
 
+/** The set variables that tie git to one repository: a script step in the clone keeps them. */
+export function repositoryVariables(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined && REPOSITORY_VARIABLES.has(entry[0]),
+    ),
+  );
+}
+
 /** `env` without the variables that tie git to one repository, and without the unset ones. */
 export function withoutRepositoryVariables(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
   return Object.fromEntries(

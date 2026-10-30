@@ -9,6 +9,7 @@ export const NEEDS_HUMAN = 'needs-human';
 
 export const handOver = script('hand-over', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { pr: value(PullRequestRef), label: value(z.string()), reason: value(z.string()) },
   output: z.object({ handedOver: z.boolean() }),
   exitCodes: { passed: [0], failed: [] },

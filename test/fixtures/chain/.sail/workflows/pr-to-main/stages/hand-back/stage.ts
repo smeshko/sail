@@ -8,6 +8,7 @@ export const HandedBack = z.object({ number: z.number().int(), labels: z.array(z
 
 export const handBack = script('hand-back', {
   run: './run.sh',
+  ports: ['ticket-source', 'codehost'],
   consumes: {
     pr: value(z.number().int()),
     ticketKey: value(z.string()).optional(),

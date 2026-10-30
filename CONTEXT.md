@@ -103,7 +103,7 @@ A step a harness runs. It has a prompt, the workspace, permissions, a budget, an
 _Avoid_: LLM step, AI step, prompt step, non-deterministic stage
 
 **Script step**:
-A step that runs a command: bindings in, files and an output out, exit code as outcome. No model is involved.
+A step that runs a command: bindings in, files and an output out, exit code as outcome. No model is involved. Its script environment includes the variables its `env` names and the credentials of the ports its `ports` names.
 _Avoid_: shell step, deterministic stage, hook, tool step
 
 **Contract**:
@@ -419,6 +419,10 @@ _Avoid_: protected file, CI file
 Masking credential-named values of at least eight characters from the run's environment, their parts and URL userinfo, raw, URL-encoded and in base64, as `[redacted]` in the run header, events, summary, journal, results, completed script logs, port events and transcripts, and the terminal view. Produced files, prompts and bindings are not masked, nor are live script logs before the process ends.
 _Avoid_: scrubbing, censoring, sanitising
 
+**Script environment**:
+The environment a script step runs with: the allowlist's names that are no credential, `SSH_AUTH_SOCK`, sail's own `SAIL_*` settings, git's identity and the preamble, plus the variables its `env` names and those the adapters of the ports its `ports` names require. Its `script:exec` lists the names it was given, never their values. A step in the clone keeps git's repository variables too.
+_Avoid_: inherited environment, env passthrough
+
 **Guardrail**:
 Any limit the engine enforces on a run: permissions, budgets, untrusted-input wrapping, the designation label. Guardrails are enforced by code, never requested in a prompt.
 _Avoid_: policy, safety prompt, rule
@@ -498,7 +502,7 @@ One implementation of a port for one provider, selected in the config: by name f
 _Avoid_: plugin, driver, connector, integration, backend
 
 **Port command**:
-`sail port <port> <operation>`: how a script step reaches the configured adapter of a port (`ticket-source`, `codehost` or `jev`), with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
+`sail port <port> <operation>`: how a script step reaches the configured adapter of a port (`ticket-source`, `codehost` or `jev`), with arguments in and one line of JSON out. A script step names the ports it calls in `ports`. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
 _Avoid_: port helper, port CLI, bridge
 
 **Adapter registry**:

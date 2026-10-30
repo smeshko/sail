@@ -7,6 +7,7 @@ import { ReviewRecord } from '../../schemas';
 
 export const report = script('report', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { record: value(ReviewRecord), pr: value(PullRequestRef), label: value(z.string()) },
   produces: { 'REVIEW.md': 'file' },
   output: z.object({ unlabelled: z.boolean() }),
