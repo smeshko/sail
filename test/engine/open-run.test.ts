@@ -1307,7 +1307,7 @@ test("reopenRun of a run started from definitions loads its own copy, so it resu
       copyFixture(from.dir);
       const sha = commitDefinitions(from, 'committed conventions\n');
       const adapters = await fakeAdapters(from.dir);
-      const run = await openedFrom(from, await committedDefinitions(from, adapters), adapters);
+      const run = await openedFrom(from, await committedDefinitions(adapters), adapters);
       writeStatus(run.dir, 'suspended', 'until');
       copyRun(from.dir, to.dir);
       return { run, sha };
