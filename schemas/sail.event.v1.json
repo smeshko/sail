@@ -679,7 +679,8 @@
             "unwatched",
             "stopped",
             "interrupted",
-            "usage_limit"
+            "usage_limit",
+            "port_unavailable"
           ]
         },
         "message": { "type": "string" },
@@ -697,11 +698,11 @@
       "unevaluatedProperties": false
     },
     "runSuspended": {
-      "description": "a run suspended right before its run:end: on its budget (which budget it used up, its limit and what was used), or on the provider's usage limit (the call that hit it, and when it resets if the provider said)",
+      "description": "a run suspended right before its run:end: on its budget (which budget it used up, its limit and what was used), on the provider's usage limit (the call that hit it, and when it resets if the provider said), or on a provider that was unavailable (the call whose step it ended)",
       "type": "object",
       "$ref": "#/$defs/envelope",
       "properties": {
-        "stopReason": { "enum": ["budget_exceeded", "usage_limit"] },
+        "stopReason": { "enum": ["budget_exceeded", "usage_limit", "port_unavailable"] },
         "budget": { "enum": ["usd", "minutes"] },
         "limit": { "type": "number", "minimum": 0 },
         "used": { "type": "number", "minimum": 0 },
@@ -714,14 +715,21 @@
       "required": ["stopReason"],
       "allOf": [
         {
-          "if": { "properties": { "stopReason": { "const": "usage_limit" } }, "required": ["stopReason"] },
+          "if": { "properties": { "stopReason": { "const": "port_unavailable" } }, "required": ["stopReason"] },
           "then": {
             "required": ["key"],
-            "properties": { "key": true, "resetsAt": true, "budget": false, "limit": false, "used": false }
+            "properties": { "key": true, "resetsAt": false, "budget": false, "limit": false, "used": false }
           },
           "else": {
-            "required": ["budget", "limit", "used"],
-            "properties": { "budget": true, "limit": true, "used": true, "key": false, "resetsAt": false }
+            "if": { "properties": { "stopReason": { "const": "usage_limit" } }, "required": ["stopReason"] },
+            "then": {
+              "required": ["key"],
+              "properties": { "key": true, "resetsAt": true, "budget": false, "limit": false, "used": false }
+            },
+            "else": {
+              "required": ["budget", "limit", "used"],
+              "properties": { "budget": true, "limit": true, "used": true, "key": false, "resetsAt": false }
+            }
           }
         }
       ],

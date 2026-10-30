@@ -144,6 +144,7 @@ export const STOP_REASONS = [
   'stopped',
   'interrupted',
   'usage_limit',
+  'port_unavailable',
 ] as const;
 export type StopReason = (typeof STOP_REASONS)[number];
 

@@ -151,7 +151,7 @@ The agent outcome for "I cannot complete this", submitted with a reason. It hono
 _Avoid_: failed, stuck, gave up, incomplete
 
 **Error**:
-The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `usage_limit`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event.
+The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `usage_limit`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event. A `port` error carries the code `unavailable` when the provider could not be reached: a step it ends is an error, whatever its exit code, and suspends the run.
 _Avoid_: crash, exception, failed
 
 **Output**:
@@ -271,7 +271,7 @@ Where a run is in its life: `running`, `suspended`, `completed` or `failed`. It 
 _Avoid_: outcome, state, phase
 
 **Stop reason**:
-The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted` or `usage_limit`. Every failed or suspended run carries exactly one.
+The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted`, `usage_limit` or `port_unavailable`. Every failed or suspended run carries exactly one.
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
@@ -287,7 +287,7 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
