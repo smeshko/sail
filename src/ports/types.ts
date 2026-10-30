@@ -204,7 +204,13 @@ export type MergeResult = z.infer<typeof MergeResult>;
 // Leases
 
 /** The run taking a lease. `pid` names a process: 0 and below would signal a process group, which always reads alive. */
-export const LeaseHolder = z.object({ runId: z.string().min(1), runDir: z.string(), pid: z.number().int().positive() });
+export const LeaseHolder = z.object({
+  runId: z.string().min(1),
+  runDir: z.string(),
+  pid: z.number().int().positive(),
+  /** Written by a run as it suspends: no process holds the lease, whatever its pid. */
+  suspended: z.literal(true).optional(),
+});
 export type LeaseHolder = z.infer<typeof LeaseHolder>;
 
 export const Lease = LeaseHolder.extend({ remote: z.string(), branch: z.string(), takenAt: z.string() });
@@ -213,7 +219,7 @@ export type Lease = z.infer<typeof Lease>;
 /** A lease taken, `took` naming the stale run it replaced, or refused, naming who holds it. */
 export const LeaseResult = z.discriminatedUnion('leased', [
   z.object({ leased: z.literal(true), lease: Lease, took: z.string().optional(), raw: Raw }),
-  z.object({ leased: z.literal(false), holder: Lease, raw: Raw }),
+  z.object({ leased: z.literal(false), holder: Lease, file: z.string().optional(), raw: Raw }),
 ]);
 export type LeaseResult = z.infer<typeof LeaseResult>;
 
@@ -242,7 +248,11 @@ export const WorkspaceReleased = z.object({
 });
 export type WorkspaceReleased = z.infer<typeof WorkspaceReleased>;
 
-export const Swept = z.object({ paths: z.array(z.string()), raw: Raw });
+export const Swept = z.object({
+  paths: z.array(z.string()),
+  failed: z.array(z.object({ path: z.string(), reason: z.string() })),
+  raw: Raw,
+});
 export type Swept = z.infer<typeof Swept>;
 
 // Harness

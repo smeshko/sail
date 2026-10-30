@@ -78,6 +78,25 @@ workspaceSuite('fake', async (emit) => {
   };
 });
 
+test('the fake adapter emits nothing for a mark', async () => {
+  const w = world();
+  const events: unknown[] = [];
+  const workspace = createFakeWorkspace({
+    repo: repo().dir,
+    leasesDir: w.leasesDir,
+    env: repo().env,
+    emit: (event) => {
+      events.push(event);
+    },
+  });
+  const holder = await w.run('r1', 'suspended');
+  await workspace.lease(REMOTE, 'sail/mark', holder);
+  events.length = 0;
+  await workspace.lease(REMOTE, 'sail/mark', { ...holder, suspended: true });
+  expect(events).toEqual([]);
+  expect(readLease(w.leasesDir, REMOTE, 'sail/mark')?.suspended).toBe(true);
+});
+
 test("create from a base that doesn't resolve is invalid, and makes no workspace", async () => {
   const w = world();
   const workspace = createFakeWorkspace({ repo: repo().dir, leasesDir: w.leasesDir, env: repo().env });

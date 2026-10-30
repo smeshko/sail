@@ -24,7 +24,9 @@ export interface WorkspacePort {
   readonly name: string;
   /** The repository's remote, which keys its leases, and the default branch a run starts from. */
   repository(): Promise<Repository>;
-  /** Emits `workspace:leased` when leased, with `took` when a stale lease was taken over. */
+  /** Emits `workspace:leased` when leased, with `took` when a stale lease was taken over.
+   * A `suspended` holder marks only its own lease and emits nothing. A refusal may name its `file`.
+   */
   lease(remote: string, branch: string, holder: LeaseHolder): Promise<LeaseResult>;
   /** Emits `workspace:lease_released` when released. */
   releaseLease(remote: string, branch: string, runId: string): Promise<Released>;
@@ -54,7 +56,10 @@ export interface WorkspacePort {
   diff(path: string, range: string): Promise<Diff>;
   /** Removes the run's workspace unless `keep`. Emits `workspace:released`. */
   release(run: RunRef, keep: boolean): Promise<WorkspaceReleased>;
-  /** Removes the workspaces of the ended runs under `runsDir`. */
+  /**
+   * Removes the workspaces of ended runs under `runsDir`. A workspace it can't remove is left in `failed` with why;
+   * every other ended run's is still removed. Resolves with both removed paths and failures, each sorted by path.
+   */
   sweep(runsDir: string): Promise<Swept>;
   capabilities(): WorkspaceCapabilities;
 }

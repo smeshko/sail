@@ -32,7 +32,7 @@
 // A run that completes or fails releases its workspace, then its lease, once STATUS says how it ended and before
 // `run:end`. A workspace that can't be removed doesn't keep the lease: it is left for a sweep, and `run:end` says so. A
 // lease that can't be released doesn't keep `run:end` from the stream either, which says so too. A suspended run keeps
-// both, and so does a crashed one, whose lease goes stale with its pid.
+// both, marking its lease as held by no process after `run:end`. A crashed run keeps both without the mark.
 //
 // A request from outside the run's process comes through its control file (`control.ts`), taken before the intake and
 // before each call, right after the abort check: `unwatched` suspends the run with that stop reason, keeping its
@@ -493,7 +493,7 @@ async function drive(
 
   /**
    * Records how the run ended in STATUS, releases the workspace and the lease of a run that has ended for good, then
-   * reports it.
+   * reports it. A suspend marks its kept lease as held by no process as its last act, after run:end.
    */
   const finish = async (end: RunEnd): Promise<RunEnd> => {
     writeStatus(dir, end.status, end.stopReason);
@@ -527,6 +527,20 @@ async function drive(
       ...(status === 'completed' ? resultOf(end.result) : {}),
       replays,
     });
+    if (status === 'suspended') {
+      const { workspace } = opened;
+      try {
+        await opened.adapters.workspace.lease(workspace.remote, workspace.branch, {
+          runId,
+          runDir: dir,
+          pid: process.pid,
+          suspended: true,
+        });
+      } catch (error) {
+        if (!(error instanceof PortError)) throw error;
+        // run:end is already out; a failed mark leaves the lease as it was.
+      }
+    }
     return end;
   };
   const failed = (stopReason: StopReason, message: string): Promise<RunEnd> =>
