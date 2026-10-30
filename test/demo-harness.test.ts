@@ -102,6 +102,32 @@ test('new --runs leaves what a link in a seeded folder points to as it was', asy
   });
 });
 
+test('new --runs refuses a runId of dots, and one two folders share', async () => {
+  await withTempRepo(async (repo) => {
+    const seed = (name: string, runId: string) => {
+      mkdirSync(join(repo.dir, name));
+      writeFileSync(join(repo.dir, name, 'run.json'), JSON.stringify({ runId }));
+      return join(repo.dir, name);
+    };
+    const dots = await demo(repo.env, 'new', join(repo.dir, 'a'), '--runs', seed('up', '..'));
+    const twice = await demo(
+      repo.env,
+      'new',
+      join(repo.dir, 'b'),
+      '--runs',
+      seed('one', 'FAKE-1-x'),
+      '--runs',
+      seed('two', 'FAKE-1-x'),
+    );
+    expect({
+      dots: dots.code,
+      twice: twice.code,
+      named: twice.stderr.includes('FAKE-1-x'),
+      made: existsSync(join(repo.dir, 'a', 'repo')) || existsSync(join(repo.dir, 'b', 'repo')),
+    }).toEqual({ dots: 2, twice: 2, named: true, made: false });
+  });
+});
+
 test("new --runs refuses a folder that doesn't exist", async () => {
   await withTempRepo(async (repo) => {
     const dir = join(repo.dir, 'demo');

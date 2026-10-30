@@ -118,12 +118,16 @@ function fakeAll(sailDir) {
 
 /** Where each runs folder goes under `.sail-runs/`: `to` is the run's own directory, or '' for a folder of runs. */
 function planRuns(folders) {
+  const seen = new Set();
   return folders.map((folder) => {
     if (!existsSync(folder) || !statSync(folder).isDirectory()) refuse(`--runs ${folder} is no folder`);
     const header = join(folder, 'run.json');
     if (!existsSync(header)) return { folder, to: '' };
     const runId = JSON.parse(readFileSync(header, 'utf8')).runId;
-    if (typeof runId !== 'string' || !/^[\w.-]+$/.test(runId)) refuse(`${header} holds no runId`);
+    // A runId of dots would name .sail-runs/ itself or the repository around it.
+    if (typeof runId !== 'string' || !/^[\w-][\w.-]*$/.test(runId)) refuse(`${header} holds no runId`);
+    if (seen.has(runId)) refuse(`--runs ${folder} holds ${runId}, which another --runs folder holds too`);
+    seen.add(runId);
     return { folder, to: runId };
   });
 }
