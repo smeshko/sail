@@ -602,6 +602,9 @@ async function drive(
       );
     return undefined;
   };
+  /** How the run ends once `sail stop --now` aborted `key`: stopped, even with its control file gone by now. */
+  const stoppedNow = (key: string): Promise<RunEnd> =>
+    controlled(key) ?? failed('stopped', `stopped by sail stop --now during ${stoppedDuring ?? key}`);
   /** A call whose preconditions hold: what it is supplied with, what an agent runs on, and its steps journaled. */
   interface Ready {
     call: PendingCall;
@@ -783,11 +786,7 @@ async function drive(
               clock,
             });
       if ('failed' in ran) return await failed('stage_error', ran.failed);
-      if (stopNow.signal.aborted) {
-        const stopped = controlled(INTAKE_KEY);
-        if (stopped !== undefined) return await stopped;
-        return await failed('stopped', `stopped by sail stop --now during ${INTAKE_KEY}`);
-      }
+      if (stopNow.signal.aborted) return await stoppedNow(INTAKE_KEY);
       if (signal?.aborted || ('stopped' in ran && ran.stopped))
         return await interrupted(`stopped during ${INTAKE_KEY}`);
       intake = journal(ran.result, ran.paths);
@@ -898,8 +897,12 @@ async function drive(
           running = undefined;
           return await limitReached(limit);
         }
+        if (stopNow.signal.aborted) {
+          running = undefined;
+          return await stoppedNow(first);
+        }
         // Stopped short of its last step, the call is left for the next replay to ask for again.
-        if (stopNow.signal.aborted || stopped === true || ranOut(result)) {
+        if (stopped === true || ranOut(result)) {
           running = undefined;
           continue;
         }
@@ -966,6 +969,7 @@ async function drive(
       }
       if (rejected !== undefined) throw rejected.reason;
       if (signal?.aborted) return await interrupted(`stopped during ${what}`);
+      if (stopNow.signal.aborted) return await stoppedNow(first);
       if (usageLimited !== undefined) return await limitReached(usageLimited);
     }
   } catch (error) {

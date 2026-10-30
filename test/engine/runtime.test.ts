@@ -1478,6 +1478,28 @@ test.each([false, true])(
   20_000,
 );
 
+test('an immediate stop whose control file is gone by the call boundary still fails the run stopped, with no new try (review R4)', async () => {
+  await withTempRepo(async (repo) => {
+    writeAgentFixture(repo.dir, [submits(SPEC, 0.125, { delayMs: 4000 }), submits(SPEC, 0.125)]);
+    const control: Consumer = {
+      name: 'stop',
+      onEvent(event) {
+        if (event.type === 'harness:session_start' && event.key === 'spec#1') requestStopNow(onlyRun(repo.dir));
+        if (event.type === 'harness:session_end' && event.key === 'spec#1')
+          rmSync(join(onlyRun(repo.dir), CONTROL_FILE), { force: true });
+      },
+    };
+    const end = await ranAgent(repo.dir, { consumers: [control] });
+    expect([end.status, end.stopReason, end.message]).toEqual([
+      'failed',
+      'stopped',
+      'stopped by sail stop --now during spec#1',
+    ]);
+    expect(journaled(end.dir)).toEqual(['intake#1 passed', 'brief#1 passed']);
+    expect(ofType(events(end.dir), 'harness:session_start').filter((event) => event.key === 'spec#1')).toHaveLength(1);
+  });
+}, 20_000);
+
 test('an immediate stop during a repository intake fails stopped with no intake journal line', async () => {
   await withTempRepo(async (repo) => {
     const sail = writeAgentFixture(repo.dir, []);
