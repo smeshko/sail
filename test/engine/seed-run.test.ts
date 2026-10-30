@@ -241,6 +241,19 @@ test('a seeded run masks its secrets in run.json and hands on a redactor of them
   });
 }, 60_000);
 
+test('a seeded run whose masked header breaks its schema throws, leaving no run directory, workspace or lease', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const baseSha = readRunHeader(from.dir).repository?.baseSha ?? '';
+    const before = runIds(repo.dir);
+    const leases = join(repo.dir, '.sail-runs', 'fake', 'leases');
+    const leased = () => (existsSync(leases) ? readdirSync(leases).filter((name) => name.endsWith('.json')) : []);
+    const held = leased();
+    await expect(seed(repo, { fromRun: from.runId, secrets: [baseSha.slice(0, 12)] })).rejects.toThrow();
+    expect({ runs: runIds(repo.dir), leases: leased() }).toEqual({ runs: before, leases: held });
+  });
+}, 60_000);
+
 /** Makes `deep` name the harness `harness` in `repo`'s config, which defines `second` and the credentialed `echo`. */
 function nameHarness(repo: TempRepo, harness: string, model = 'claude-opus-5-5'): void {
   const sail = join(repo.dir, '.sail');

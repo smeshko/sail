@@ -294,10 +294,10 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     ...unopened,
     ...workspaceFields({ branch, repository: made.repository, baseSha: made.workspace.baseSha }),
   });
-  assertRunHeader(header);
   const dir = run.runDir;
   let journaled: JournalEntry[];
   try {
+    assertRunHeader(header);
     for (const path of copied) {
       cpSync(join(source.dir, path), join(dir, path), {
         recursive: true,
