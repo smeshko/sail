@@ -328,6 +328,16 @@ test('a push that descends from the branch moves it', async () => {
   });
 });
 
+test('a push to a branch git has no ref name for, as `sail stage run` gives, is recorded with no ref (review V2)', async () => {
+  await withTempRepo(async (r) => {
+    const world = files();
+    const host = createFakeCodeHost({ ...world, env: r.env });
+    const head = commitFile(r, 'one');
+    const pushed = await host.push(r.dir, '');
+    expect([pushed.headSha, JSON.parse(readFileSync(world.state, 'utf8')).branches['']]).toEqual([head, head]);
+  });
+});
+
 test('opening from a head never pushed, or pushing from outside a git checkout, is invalid', async () => {
   const host = createFakeCodeHost({ ...files(), env: repo().env });
   const errors = [

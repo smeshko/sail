@@ -180,15 +180,18 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
         throw new PortError('codeHost', 'push', 'invalid', `${cwd} is not a git checkout: ${git.stderr}`);
       }
       const headSha = git.stdout.trim();
-      // The repository stands in for the remote: a branch already there moves only fast-forward, as on GitHub.
+      // The repository stands in for the remote: a branch already there moves only fast-forward, as on GitHub. A name
+      // git can't hold as a ref, such as the empty branch `sail stage run` gives, is recorded in the state file alone.
       const ref = `refs/heads/${branch}`;
-      const existing = gitSync(cwd, ['rev-parse', '--verify', '--quiet', ref], options.env);
-      if (existing.code === 0 && gitSync(cwd, ['merge-base', '--is-ancestor', ref, 'HEAD'], options.env).code !== 0) {
-        throw new PortError('codeHost', 'push', 'conflict', `${branch}: [rejected] non-fast-forward`);
-      }
-      const updated = gitSync(cwd, ['update-ref', ref, 'HEAD'], options.env);
-      if (updated.code !== 0) {
-        throw new PortError('codeHost', 'push', 'invalid', `${branch}: cannot record the branch: ${updated.stderr}`);
+      if (gitSync(cwd, ['check-ref-format', ref], options.env).code === 0) {
+        const existing = gitSync(cwd, ['rev-parse', '--verify', '--quiet', ref], options.env);
+        if (existing.code === 0 && gitSync(cwd, ['merge-base', '--is-ancestor', ref, 'HEAD'], options.env).code !== 0) {
+          throw new PortError('codeHost', 'push', 'conflict', `${branch}: [rejected] non-fast-forward`);
+        }
+        const updated = gitSync(cwd, ['update-ref', ref, 'HEAD'], options.env);
+        if (updated.code !== 0) {
+          throw new PortError('codeHost', 'push', 'invalid', `${branch}: cannot record the branch: ${updated.stderr}`);
+        }
       }
       store.change((world) => {
         world.branches[branch] = headSha;
