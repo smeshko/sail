@@ -1,5 +1,6 @@
 // Shared Jev requests, answer readers and state builders for leak-check, banned-words, jev-tasks, jev-triage and jev-fix.
-// The task and fix checks hand the agent's job to Jev only when every item is a clear yes; otherwise the agent checks.
+// The task check hands the agent's job to Jev only when every item is a clear yes; otherwise the agent checks.
+// The fix check never skips its agent: check-fix always runs, with Jev's answers as its hint.
 // Leak-check instead asks whether added lines name other projects and forwards individual LEAK_YES hits to the judge,
 // with no agent fallback. The agreement script uses these same state builders.
 import { spawnSync } from 'node:child_process';
