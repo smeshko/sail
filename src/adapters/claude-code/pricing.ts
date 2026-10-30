@@ -67,12 +67,16 @@ export const DEAREST: Prices = (() => {
 
 const KEYS = Object.keys(PRICES).sort((a, b) => b.length - a.length);
 
-/** The entry for the longest table key `model` contains, where no digit follows the key, else the dearest rates. */
+/**
+ * The entry for the longest table key `model` contains, where neither a digit nor a point release (`-5`, `-12`) follows
+ * the key, a date (`-20251001`) being no point release, else the dearest rates.
+ */
 export function priceOf(model: string): PriceEntry {
   for (const key of KEYS) {
     let at = model.indexOf(key);
     while (at !== -1) {
-      if (!/\d/.test(model.charAt(at + key.length))) return PRICES[key] as PriceEntry;
+      const rest = model.slice(at + key.length);
+      if (!/^-?\d/.test(rest) || /^-\d{8}(?!\d)/.test(rest)) return PRICES[key] as PriceEntry;
       at = model.indexOf(key, at + 1);
     }
   }

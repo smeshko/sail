@@ -105,3 +105,19 @@ test('cache writes are priced at the 5m rate for the 5m part and at the 1h rate 
   } as TurnUsage;
   expect(turnCost('claude-sonnet-5', usage)).toBe(10.5);
 });
+
+test('a point release of a listed model is no match: it reads at the dearest rates, a dated id still matching', () => {
+  expect({
+    sonnet: priceOf('claude-sonnet-5-1'),
+    opus: priceOf('claude-opus-5-6'),
+    fable: priceOf('claude-fable-5-2'),
+    pointDated: priceOf('claude-opus-5-6-20260101'),
+    dated: priceOf('claude-opus-5-20260101'),
+  }).toEqual({
+    sonnet: DEAREST,
+    opus: DEAREST,
+    fable: DEAREST,
+    pointDated: DEAREST,
+    dated: entry('claude-opus-5'),
+  });
+});
