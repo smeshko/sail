@@ -114,8 +114,8 @@ test('implement#2 consumed the failing report as its feedback, and implement#1 c
   const { dir } = await completed();
   const [first, second] = [1, 2].map((call) => json(dir, '02-implement', `call-${call}`, 'result.json'));
   expect([first.consumed, second.consumed]).toEqual([
-    { spec: '01-spec/call-1/spec.md', feedback: null },
-    { spec: '01-spec/call-1/spec.md', feedback: '03-tests/call-1/result.json#/output' },
+    { spec: '01-spec/call-1/out/spec.md', feedback: null },
+    { spec: '01-spec/call-1/out/spec.md', feedback: '03-tests/call-1/result.json#/output' },
   ]);
   const report = json(dir, '03-tests', 'call-1', 'result.json').output;
   expect(report).toMatchObject({ ok: false, total: 6, failed: 1 });
@@ -137,7 +137,7 @@ test("the run leaves pull request 5 on the fake code host: open, no draft, from 
   expect(pullRequests[4]).toMatchObject({
     number: 5,
     title: described.title,
-    body: readFileSync(join(dir, '05-publish', 'call-1', 'pr-body.md'), 'utf8'),
+    body: readFileSync(join(dir, '05-publish', 'call-1', 'out', 'pr-body.md'), 'utf8'),
     base: 'main',
     head: 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command',
     headSha,
@@ -185,7 +185,7 @@ test("publish#1/open's output is the pull request's number, URL and draft flag, 
   expect(events.at(-1)).toMatchObject({ type: 'run:end', status: 'completed', result: { pr: PR } });
   expect(result.consumed).toEqual({
     title: '05-publish/call-1/steps/1-describe/result.json#/output/title',
-    body: '05-publish/call-1/pr-body.md',
+    body: '05-publish/call-1/out/pr-body.md',
     ticketKey: 'workflow',
   });
 });
@@ -438,7 +438,9 @@ test('a first spec try that leaves the template as it is gets one correction: tr
       "spec.md: countItems(Tasks, min 1): 'Tasks' has 0 items, fewer than 1",
     ];
     const prompt = readFileSync(join(dir, '01-spec', 'call-1', 'try-2', 'prompt.md'), 'utf8');
-    expect(prompt.trimEnd()).toEndWith(messages.join('\n\n'));
+    expect(prompt.trimEnd()).toEndWith(
+      `<untrusted-input source="the problems found in your last output">\n${messages.join('\n\n')}\n</untrusted-input>`,
+    );
     expect(json(dir, '01-spec', 'call-1', 'try-2', 'result.json')).toMatchObject({
       outcome: 'done',
       try: 2,
@@ -494,7 +496,7 @@ test("sail FAKE-1 runs publish as describe, then open, each journaled as it fini
   expect(readFileSync(join(ran.dir, PUBLISH, 'steps', '2-open', 'in', 'title.txt'), 'utf8')).toBe(DESCRIBED_TITLE);
   expect(json(ran.dir, PUBLISH, 'steps', '2-open', 'result.json').consumed).toEqual({
     title: `${PUBLISH}/steps/1-describe/result.json#/output/title`,
-    body: `${PUBLISH}/pr-body.md`,
+    body: `${PUBLISH}/out/pr-body.md`,
     ticketKey: 'workflow',
   });
   expect(json(ran.dir, PUBLISH, 'result.json')).toMatchObject({

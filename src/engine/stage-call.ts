@@ -4,7 +4,7 @@
 // Each step gets a `$STAGE_IN` of its own, holding only its own bindings (D6). A binding the workflow supplies comes
 // from the stage's, under the same name. A `fromStep()` binding is what an earlier step left: its output, a field of
 // it, or a file it produced. Those values come from the earlier step's result in memory, or from its journal line on a
-// resume, and never from its `result.json`: that sits in `$STAGE_OUT`, where any later session may write. A `gitDiff()`
+// resume, and never from its `result.json`: the journal is the record a resume trusts, and a file is not. A `gitDiff()`
 // is taken just before its step starts, so it sees what the steps before it committed.
 //
 // A step that doesn't pass ends the stage with its outcome, and no later step starts (D2): `steps[]` lists the steps

@@ -6,7 +6,12 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import { createClaudeCodeHarness, type QueryFunction, sessionOptions } from '../../../src/adapters/claude-code/harness';
+import {
+  createClaudeCodeHarness,
+  INTERRUPT_GRACE_MS,
+  type QueryFunction,
+  sessionOptions,
+} from '../../../src/adapters/claude-code/harness';
 import { SUBMIT_CONTRACT, submissionEnvelope } from '../../../src/adapters/claude-code/submission';
 import { BUILTIN_TOOLS } from '../../../src/adapters/claude-code/tool-call';
 import { decide } from '../../../src/engine/permissions';
@@ -564,10 +569,10 @@ test("the transcript renders the session's events and how it ended", async () =>
     [
       `session ${SESSION_ID} on claude-sonnet-5`,
       'tool Read {"file_path":"brief.md"} [t1]',
-      'usage: turn 1, in 10, cache read 300, cache write 0, out 20, $0',
+      'usage: turn 1, in 10, cache read 300, cache write 0, out 20, $0.00028',
       'tool t1 completed in 5 ms',
       'assistant: Spec written.',
-      'usage: turn 2, in 15, cache read 300, cache write 60, out 60, $0',
+      'usage: turn 2, in 15, cache read 300, cache write 60, out 60, $0.00093',
       `usage: turn 2, in 120, cache read 5000, cache write 800, out 340, $${COST}`,
       'ended: done',
     ].join('\n'),
@@ -802,7 +807,10 @@ test("a session's last turn, closed only as it ends, still counts toward the tur
  * Runs `stream` on fake timers, with maxMinutes 1: once the session starts, `whileRunning` moves the clock; a run that
  * hasn't ended a second after is aborted, so a harness without the minute budget fails its assertions, not its timeout.
  */
-async function onTheClock(stream: Stream, whileRunning: (timers: ReturnType<typeof fakeTimers>) => Promise<void>) {
+async function onTheClock(
+  stream: Stream,
+  whileRunning: (timers: ReturnType<typeof fakeTimers>, query: ReturnType<typeof scriptedQuery>) => Promise<void>,
+) {
   const timers = fakeTimers('2026-10-15T09:00:00.000Z');
   const query = scriptedQuery([stream]);
   const harness = createClaudeCodeHarness({ env: {}, query, timers, now: () => timers.now().getTime() });
@@ -826,7 +834,7 @@ async function onTheClock(stream: Stream, whileRunning: (timers: ReturnType<type
     },
   });
   await Promise.race([start, running]);
-  await whileRunning(timers);
+  await whileRunning(timers, query);
   const late = setTimeout(() => controller.abort(), 1_000);
   const result = await running;
   clearTimeout(late);
@@ -851,6 +859,107 @@ test('maxMinutes 1 on the clock: the warning at 48 s, the overrun at 60 s aborts
     'harness:session_end max_minutes',
   ]);
   expect(eventIssues(capture.stamped('spec#1'))).toEqual([]);
+});
+
+const WORKED = assistantText('m1', 'Working.', { usage: { input: 1000, output: 1000 } });
+
+const endUsage = (events: readonly HarnessEvent[]) =>
+  events.find((event) => event.type === 'harness:session_end')?.usage?.costUsd;
+
+test("a minute overrun interrupts the session, and the result that follows gives the session's cost, not the abort", async () => {
+  const stream = [init(), WORKED, { act: 'waitForInterrupt' }, resultError('error_during_execution', { cost: 0.0731 })];
+  const seen: { interrupts: number; aborted: boolean | undefined }[] = [];
+  const { result, capture, timers } = await onTheClock(stream as Stream, async (clock, query) => {
+    await clock.advance(60_000);
+    seen.push({ interrupts: query.interrupts, aborted: query.calls[0]?.options.abortController?.signal.aborted });
+  });
+  expect({
+    seen,
+    result: summary(result),
+    cost: result.usage.costUsd,
+    ended: endUsage(capture.events),
+    pending: timers.pending(),
+  }).toEqual({
+    seen: [{ interrupts: 1, aborted: false }],
+    result: 'error: budget exceeded: maxMinutes 1',
+    cost: 0.0731,
+    ended: 0.0731,
+    pending: [],
+  });
+});
+
+test("an aborted request signal interrupts the session, and the result that follows gives the session's cost", async () => {
+  const query = scriptedQuery([
+    [init(), WORKED, { act: 'waitForInterrupt' }, resultError('error_during_execution', { cost: 0.0731 })],
+  ]);
+  const controller = new AbortController();
+  const result = await createClaudeCodeHarness({ env: {}, query }).run({
+    ...request(),
+    signal: controller.signal,
+    onEvent: (event) => {
+      if (event.type === 'harness:session_start') controller.abort();
+    },
+  });
+  expect({
+    interrupts: query.interrupts,
+    aborted: query.calls[0]?.options.abortController?.signal.aborted,
+    result: summary(result),
+    cost: result.usage.costUsd,
+  }).toEqual({ interrupts: 1, aborted: false, result: 'error: aborted', cost: 0.0731 });
+});
+
+test('a cut session that sends no result within INTERRUPT_GRACE_MS is aborted, and ends with the estimate of its turns', async () => {
+  const seen: (boolean | undefined)[] = [];
+  const { result, query, timers } = await onTheClock(
+    [init(), WORKED, { act: 'waitForInterrupt' }, { act: 'waitForAbort' }],
+    async (clock, query) => {
+      const aborted = () => query.calls[0]?.options.abortController?.signal.aborted;
+      await clock.advance(60_000);
+      seen.push(aborted());
+      await clock.advance(INTERRUPT_GRACE_MS - 1);
+      seen.push(aborted());
+      await clock.advance(1);
+      seen.push(aborted());
+    },
+  );
+  expect({
+    seen,
+    interrupts: query.interrupts,
+    result: summary(result),
+    cost: result.usage.costUsd,
+    pending: timers.pending(),
+  }).toEqual({
+    seen: [false, false, true],
+    interrupts: 1,
+    result: 'error: budget exceeded: maxMinutes 1',
+    cost: 0.012,
+    pending: [],
+  });
+});
+
+test('a request signal aborted once the message loop has ended interrupts nothing and leaves no timer', async () => {
+  const timers = fakeTimers('2026-10-15T09:00:00.000Z');
+  const scripted = scriptedQuery([SUITE.done ?? []]);
+  let interrupts = 0;
+  const query = ((params: Parameters<QueryFunction>[0]) =>
+    Object.assign(scripted(params), {
+      interrupt: async () => {
+        interrupts++;
+      },
+    })) as unknown as QueryFunction;
+  const controller = new AbortController();
+  const result = await createClaudeCodeHarness({ env: {}, query, timers }).run({
+    ...request(),
+    signal: controller.signal,
+    onEvent: (event) => {
+      if (event.type === 'harness:session_end') controller.abort();
+    },
+  });
+  expect({ outcome: result.outcome, interrupts, pending: timers.pending() }).toEqual({
+    outcome: 'done',
+    interrupts: 0,
+    pending: [],
+  });
 });
 
 test('a session that ends inside its minutes set both timers at its start, leaves none, and says nothing of minutes', async () => {

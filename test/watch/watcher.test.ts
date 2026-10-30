@@ -762,7 +762,7 @@ test("unwatching b asks each live run of b, and none of a's, to suspend through 
   });
 });
 
-test('unwatching b while a run of b is still starting, with no run directory yet, says it was not asked and names sail stop, and still asks the run that has one (review R1-5)', async () => {
+test('unwatching b while a run of b is still starting, with no run directory yet, writes unwatched to its hand-off file and says it suspends, as it does for the run that has a directory', async () => {
   await withTempRepo(async (repo) => {
     const w = await watched(
       repo,
@@ -782,12 +782,14 @@ test('unwatching b while a run of b is still starting, with no run directory yet
     await watcher.stop();
     expect({
       control: readFileSync(join(w.runs, started ?? '', 'CONTROL'), 'utf8'),
+      handOff: readFileSync(join(w.runs, `${starting}.control`), 'utf8'),
       lines: w.out.filter((line) => line.includes('suspend')),
     }).toEqual({
       control: 'unwatched\n',
+      handOff: 'unwatched\n',
       lines: [
         `09:00:02 b  FAKE-2 suspends at its next call boundary: run ${started}\n`,
-        `09:00:02 b  error: run ${starting} is still starting and was not asked to suspend: sail stop ${starting} stops it\n`,
+        `09:00:02 b  FAKE-3 suspends at its next call boundary: run ${starting}\n`,
       ],
     });
   });

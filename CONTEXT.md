@@ -91,7 +91,7 @@ A stage in `.sail/stages/<stage>/`, which any workflow may import. A private sta
 _Avoid_: global stage, common stage, public stage
 
 **Step**:
-One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step. The steps of a stage share its `$STAGE_OUT`, and each step of a multi-step stage is journaled under `stage#call/step` as it finishes, so a resume runs only the steps after it.
+One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step. The steps of a stage share its `$STAGE_OUT`, the `out/` of the call's directory, and each step of a multi-step stage is journaled under `stage#call/step` as it finishes, so a resume runs only the steps after it.
 _Avoid_: sub-stage, action, unit
 
 **Kind**:
@@ -103,7 +103,7 @@ A step a harness runs. It has a prompt, the workspace, permissions, a budget, an
 _Avoid_: LLM step, AI step, prompt step, non-deterministic stage
 
 **Script step**:
-A step that runs a command: bindings in, files and an output out, exit code as outcome. No model is involved.
+A step that runs a command: bindings in, files and an output out, exit code as outcome. No model is involved. Its script environment includes the variables its `env` names and the credentials of the ports its `ports` names.
 _Avoid_: shell step, deterministic stage, hook, tool step
 
 **Contract**:
@@ -119,7 +119,7 @@ The calls one `run.all()` makes at once. Their keys are assigned in the order gi
 _Avoid_: batch, fan-out, parallel block
 
 **Try**:
-One execution of a call's body, in a directory of its own. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `$STAGE_OUT`.
+One execution of a call's body, in a directory of its own, whose `out/` is its `$STAGE_OUT` and holds only what the body produced: the engine's records of the try (its `result.json`, logs, prompt and session transcript) and a later try's `try-M/` sit beside `out/`, out of a session's reach. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `out/`.
 _Avoid_: attempt, retry (as a noun)
 
 **Key**:
@@ -151,7 +151,7 @@ The agent outcome for "I cannot complete this", submitted with a reason. It hono
 _Avoid_: failed, stuck, gave up, incomplete
 
 **Error**:
-The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `usage_limit`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event.
+The outcome when a contract was not honoured: invalid output, a missing declared file, a timeout, a script that could not start, a budget exceeded, a model or harness failure, a port call that failed, or an unmapped exit code. It is never a verdict on the work. A result lists each problem with its reason: `invalid_output`, `missing_file`, `timeout`, `not_started`, `budget_exceeded`, `harness`, `usage_limit`, `port` or `exit_code`. The `port` reason covers a port call that failed and a port events file that holds something that is no provider event. A `port` error carries the code `unavailable` when the provider could not be reached: a step that doesn't pass on it is an error, whatever its exit code, and suspends the run, unless its call passed `{ onError: 'return' }`, whose workflow takes the error.
 _Avoid_: crash, exception, failed
 
 **Output**:
@@ -271,7 +271,7 @@ Where a run is in its life: `running`, `suspended`, `completed` or `failed`. It 
 _Avoid_: outcome, state, phase
 
 **Stop reason**:
-The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted` or `usage_limit`. Every failed or suspended run carries exactly one.
+The named reason a run ended without completing, such as `workflow_failed`, `stage_error`, `budget_exceeded`, `determinism_violation`, `until`, `unwatched`, `stopped`, `interrupted`, `usage_limit` or `port_unavailable`. Every failed or suspended run carries exactly one.
 _Avoid_: error message, cause, exit reason
 
 **Refusal**:
@@ -287,12 +287,16 @@ The hold a run's process takes against the machine's sleep, from its start or re
 _Avoid_: wake lock, caffeinate, sleep assertion
 
 **Suspended**:
-The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
+The status of a run that has exited with nothing running and a resume expected, for example because the run budget was exceeded, its workflow was unwatched, it hit the provider's usage limit, a step of it ended on a provider that was unavailable, or it was interrupted by Ctrl-C or SIGTERM. It keeps its workspace and its branch lease.
 _Avoid_: paused, waiting, blocked, pending
 
 **Control file**:
-A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. The run takes it before its intake and before each call.
+A run's `CONTROL` file in its run directory, a request to stop at its next call boundary: `unwatched`, which the watcher writes when the run's workflow is unwatched and which suspends the run, or `stopped`, which `sail stop` writes and which fails it. `sail stop --now` writes `stopped now`, ending the running call through its abort signal rather than waiting for the boundary. The run takes the request before its intake and before each call. A dispatched run with no run directory yet gets its request as a hand-off file, which it moves in as `CONTROL` once its run directory exists.
 _Avoid_: signal file, kill file, flag
+
+**Hand-off file**:
+`.sail-runs/<run id>.control`, a control file's request for a dispatched run that has no run directory yet. The run moves it in as `CONTROL` once its run directory exists, and the watcher deletes one the run never took when it settles the item.
+_Avoid_: pending control, mailbox
 
 **Resume**:
 Continuing a suspended or interrupted run from its journal. Every journaled call is replayed, and the first one that is not journaled runs.
@@ -303,7 +307,7 @@ What is added to a suspended run's budget, in dollars or minutes, given to `sail
 _Avoid_: top-up, extension, bump
 
 **Seeded run**:
-A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun`. It claims nothing, and works on a branch of its own.
+A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own.
 _Avoid_: rerun, fork, clone, replay
 
 **Reused call**:
@@ -319,7 +323,7 @@ The shell command the `git-worktree` adapter runs in each workspace it makes, be
 _Avoid_: bootstrap, install step, setup stage
 
 **Base**:
-The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, recorded as `baseSha`. For a pull-request source it is the pull request's head.
+The commit a run's workspace starts from: the default branch's tip on the remote after a fetch, or, when the run's branch is already on the remote, that branch's tip, recorded as `baseSha`. For a pull-request source it is the pull request's head.
 _Avoid_: start point, fork point
 
 **Run ref**:
@@ -331,7 +335,7 @@ Always the git branch, such as the one a run's workspace sits on. A workflow's r
 _Avoid_: using "branch" for a route or a fork in the workflow
 
 **Run directory**:
-Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from (for a run started from the `.sail/` committed at the default branch, as a dispatched one is, the whole of that `.sail/` and its conventions), and one directory per call holding its result and files.
+Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from (for a run started from the `.sail/` committed at the default branch, as a dispatched one is, the whole of that `.sail/` and its conventions), and one directory per call holding the engine's records of it (result, logs, prompt, transcript, later tries) beside an `out/` with the files it produced.
 _Avoid_: run folder, output directory, artifacts
 
 **Run header**:
@@ -339,7 +343,7 @@ What was asked, written once at start and never changed: the source, the workflo
 _Avoid_: manifest, metadata, config snapshot
 
 **Journal**:
-The append-only record of completed calls and steps (key, outcome, output, files). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
+The append-only record of completed calls and steps (key, outcome, output, files, and on a call its binding fingerprints). A resume replays completed calls from it. To recover an unjournaled claim before its comment was posted, a later try of the built-in `ticket` intake also reads `ticket:claimed` from the run's event stream; without that event, a missing comment cannot establish ownership.
 _Avoid_: log, history, state file, checkpoint
 
 **Replay**:
@@ -347,8 +351,12 @@ Re-executing the workflow function after every completed call, so journaled call
 _Avoid_: rerun, recovery, fast-forward
 
 **Determinism guard**:
-The check that fails a run when the workflow asks for a key sequence that diverges from the journal, and, for a group, its whole key sequence. That is the sign of non-deterministic workflow code or a mid-run change.
+The check that fails a run when the workflow asks for a key sequence that diverges from the journal, and, for a group, its whole key sequence. It also compares each journaled call's binding fingerprints with the bindings the workflow asks with now, naming each that changed, appeared or went; a journal line without them keeps the key check alone. That is the sign of non-deterministic workflow code or a mid-run change.
 _Avoid_: replay check, drift detection
+
+**Binding fingerprint**:
+A short hash of one value or file binding a workflow supplied to a call, journaled on the call's line by binding name. A value is hashed by its canonical JSON, a file by the run-relative path it names. A `gitDiff` or `fromStep` binding has none, since the engine supplies it.
+_Avoid_: bindings hash, checksum
 
 **Result**:
 What a call or step left behind, as the engine recorded it: outcome, output, derived facts, files and usage. "The run's result" is what the workflow returned, for example the pull request.
@@ -406,7 +414,7 @@ The rolled-up view of a run derived from its events: calls, loops, totals, and c
 _Avoid_: report, status file, digest
 
 **Usage**:
-The tokens and cost an agent step consumed, reported per turn by the harness. A harness that cannot report usage does not qualify. A Jev call reports its tokens too, on its `jev:asked`, when its adapter has them.
+The tokens and cost an agent step consumed, reported per turn by the harness. A harness that prices turns itself reports that estimate as the running cost, until the provider's own total replaces it. A harness that cannot report usage does not qualify. A Jev call reports its tokens too, on its `jev:asked`, when its adapter has them.
 _Avoid_: consumption, spend, billing, metering
 
 ### Guardrails
@@ -418,6 +426,10 @@ _Avoid_: protected file, CI file
 **Redaction**:
 Masking credential-named values of at least eight characters from the run's environment, their parts and URL userinfo, raw, URL-encoded and in base64, as `[redacted]` in the run header, events, summary, journal, results, completed script logs, port events and transcripts, and the terminal view. Produced files, prompts and bindings are not masked, nor are live script logs before the process ends.
 _Avoid_: scrubbing, censoring, sanitising
+
+**Script environment**:
+The environment a script step runs with: the allowlist's names that are no credential, `SSH_AUTH_SOCK`, sail's own `SAIL_*` settings, git's identity and the preamble, plus the variables its `env` names and those the adapters of the ports its `ports` names require. Its `script:exec` lists the names it was given, never their values. A step in the clone keeps git's repository variables too.
+_Avoid_: inherited environment, env passthrough
 
 **Guardrail**:
 Any limit the engine enforces on a run: permissions, budgets, untrusted-input wrapping, the designation label. Guardrails are enforced by code, never requested in a prompt.
@@ -447,8 +459,16 @@ _Avoid_: lock, mutex
 A script step's hold on a named slot within the selected machine directory, declared as `exclusive: '<name>'`, kept in `~/.sail/slots/` (`$SAIL_HOME/slots/` when set). One step sharing that directory holds a name at a time; different machine directories have independent slots. A step that finds it held waits and emits `step:queued` naming the holder. The slot is stale only once its holder's pid is dead.
 _Avoid_: lock, mutex, semaphore
 
+**Idle limit**:
+An agent step's `budget.maxIdleMinutes`, by default a quarter of `maxMinutes`: how long it may emit no event before it is marked stalled. Agent steps only.
+_Avoid_: inactivity timeout, heartbeat
+
+**Stalled**:
+A running agent step that has emitted no event for its idle limit. It is marked, never ended by the idle limit: the dashboard marks its run in the run list and lists it in needs attention until the step speaks again.
+_Avoid_: hung, stuck, frozen
+
 **Budget**:
-The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
+An agent step's budget also names its idle limit, which warns rather than ends it. The most a step may spend (turns, dollars, minutes) and the most a run may spend overall. A step over budget ends in `error`; a run over budget is suspended, and a raise lets it resume.
 _Avoid_: limit, quota, cap, allowance
 
 **Usage limit**:
@@ -498,7 +518,7 @@ One implementation of a port for one provider, selected in the config: by name f
 _Avoid_: plugin, driver, connector, integration, backend
 
 **Port command**:
-`sail port <port> <operation>`: how a script step reaches the configured adapter of a port (`ticket-source`, `codehost` or `jev`), with arguments in and one line of JSON out. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
+`sail port <port> <operation>`: how a script step reaches the configured adapter of a port (`ticket-source`, `codehost` or `jev`), with arguments in and one line of JSON out. A script step names the ports it calls in `ports`. Under a script step it leaves its provider events in the step's port events file, `port-events.ndjson` in the call directory, and they join the run's event stream when the step ends, with the step's key. A call that fails leaves an `error:port` event there, with the port's message.
 _Avoid_: port helper, port CLI, bridge
 
 **Adapter registry**:
@@ -622,5 +642,5 @@ The dashboard's panel for one call, with its overview, files, permissions and lo
 _Avoid_: details pane, drawer
 
 **Needs attention**:
-The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items.
+The dashboard's one list, across every repository, of what a person should look at: failed and suspended runs, running runs with a stalled step, calls whose outcome is `error`, denials, parked items and problems. Each item opens its run and call. It opens as a pane from a button in the top bar, which counts its items.
 _Avoid_: alerts, signals, triage

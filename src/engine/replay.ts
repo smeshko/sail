@@ -14,7 +14,10 @@
 // `run.input` and `run.intake.files` come from.
 //
 // Replay goes by position: request n must be journal entry n. That is how a request finds its result, and it catches a
-// workflow whose calls changed between replays, which a lookup by key would silently accept.
+// workflow whose calls changed between replays, which a lookup by key would silently accept. The key is not the whole
+// of a call: the determinism guard also compares the fingerprints of the bindings the workflow asks with against the
+// ones the journaled line carries, so two calls of one stage swapped, or a binding built from the clock, are caught. A
+// line without fingerprints (an older run's) keeps the key check alone.
 //
 // A group, `run.all()`, keys its calls in the order given before it looks at the journal, so the same stage twice gets
 // two consecutive calls. Its calls are journaled as they complete, so its lines are one run of entries in completion
@@ -34,6 +37,7 @@ import type { ProducedFile } from '../sdk/bindings';
 import type { StageDefinition } from '../sdk/steps';
 import type { CallOptions, Iteration, Run, Workflow } from '../sdk/workflow';
 import type { Supplied } from './bindings';
+import { bindingChanges, fingerprintBindings } from './fingerprint';
 import type { JournalEntry } from './journal';
 import type { ReachedStage } from './load-workflow';
 import type { StopReason } from './run-dir';
@@ -49,8 +53,12 @@ export interface PendingCall {
   definition: StageDefinition;
   stageFile: string;
   supplied: Record<string, Supplied>;
+  /** One short hash per value and file binding the workflow supplied, by name: journaled on the call's line. */
+  fingerprints: Record<string, string>;
   /** The keys of the group the call belongs to, in declaration order, when it belongs to one. */
   group?: string[];
+  /** Set when the call passed `{ onError: 'return' }`: the workflow takes any `error`, an unavailable port's too. */
+  onError?: 'return';
 }
 
 export type ReplayEnd =
@@ -218,7 +226,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
     function resolveBindings(
       definition: StageDefinition,
       bindings: unknown,
-    ): { supplied: Record<string, Supplied> } | { problems: string[] } {
+    ): { supplied: Record<string, Supplied>; fingerprints: Record<string, string> } | { problems: string[] } {
       if (!isObject(bindings)) return { problems: ['its bindings must be an object'] };
       // A Map, not assignment: `supplied['__proto__'] = …` would set the prototype, and the binding would go unchecked.
       const supplied = new Map<string, Supplied>();
@@ -234,7 +242,19 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         if (path === undefined) problems.push(`'${key}' needs a file a call produced`);
         else supplied.set(key, { kind: 'file', path: join(runDir, path), from: path });
       }
-      return problems.length > 0 ? { problems } : { supplied: Object.fromEntries(supplied) };
+      if (problems.length > 0) return { problems };
+      const all = Object.fromEntries(supplied);
+      // One binding at a time, so the problem names the one canonical JSON can't encode.
+      const fingerprints = new Map<string, string>();
+      for (const [key, each] of supplied) {
+        try {
+          for (const [name, hash] of Object.entries(fingerprintBindings({ [key]: each }))) fingerprints.set(name, hash);
+        } catch (error) {
+          problems.push(`'${key}' can't be fingerprinted: ${messageOf(error)}`);
+        }
+      }
+      if (problems.length > 0) return { problems };
+      return { supplied: all, fingerprints: Object.fromEntries(fingerprints) };
     }
 
     /** The next call of `definition`'s stage: its number, its stage directory's number and its key. */
@@ -255,6 +275,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       keyed: ReturnType<typeof keyOf>,
       definition: StageDefinition,
       bindings: unknown,
+      callOptions: CallOptions | undefined,
     ): Omit<PendingCall, 'group'> | undefined {
       const { key, stage } = keyed;
       const reached = stages.find((each) => each.definition === definition);
@@ -267,10 +288,29 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         failRun('workflow_failed', `${key} can't run: ${resolved.problems.join('; ')}`);
         return undefined;
       }
-      return { ...keyed, definition, stageFile: join(reached.dir, 'stage.ts'), ...resolved };
+      return {
+        ...keyed,
+        definition,
+        stageFile: join(reached.dir, 'stage.ts'),
+        ...resolved,
+        ...(callOptions?.onError === 'return' ? { onError: 'return' as const } : {}),
+      };
     }
 
     const listed = (keys: readonly string[]) => `[${keys.join(', ')}]`;
+
+    /** Why the bindings the workflow asks `journaled` with aren't the ones it was journaled with, or undefined. */
+    function diverged(key: string, definition: StageDefinition, bindings: unknown, journaled: JournalEntry) {
+      if (journaled.bindings === undefined) return undefined;
+      const resolved = resolveBindings(definition, bindings);
+      if ('problems' in resolved) {
+        return `the workflow asked for '${key}' with bindings the journal can't match: ${resolved.problems.join('; ')}`;
+      }
+      const changes = bindingChanges(journaled.bindings, resolved.fingerprints);
+      return changes === undefined
+        ? undefined
+        : `the workflow asked for '${key}' with other bindings than the journal's: ${changes}`;
+    }
 
     function request(definition: StageDefinition, bindings: unknown, callOptions?: CallOptions): Promise<unknown> {
       if (ended) return never();
@@ -292,11 +332,16 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
           failRun('determinism_violation', `the workflow asked for '${key}' where the journal has '${journaled.key}'`);
           return never();
         }
+        const other = diverged(key, definition, bindings, journaled);
+        if (other !== undefined) {
+          failRun('determinism_violation', other);
+          return never();
+        }
         position++;
         return rebuild(journaled, key, callOptions);
       }
 
-      const call = pending(keyed, definition, bindings);
+      const call = pending(keyed, definition, bindings, callOptions);
       if (call === undefined) return never();
       move(key);
       record({ kind: 'call', call });
@@ -360,6 +405,14 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
           );
           return never();
         }
+        for (const { keyed, definition, bindings } of members) {
+          const journaled = done.get(keyed.key);
+          const other = journaled && diverged(keyed.key, definition, bindings, journaled);
+          if (other) {
+            failRun('determinism_violation', other);
+            return never();
+          }
+        }
         if (done.size === keys.length) {
           return Promise.all(
             members.map(({ keyed, options }) => rebuild(done.get(keyed.key) as JournalEntry, keyed.key, options)),
@@ -368,9 +421,9 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       }
 
       const calls: PendingCall[] = [];
-      for (const { keyed, definition, bindings } of members) {
+      for (const { keyed, definition, bindings, options } of members) {
         if (done.has(keyed.key)) continue;
-        const call = pending(keyed, definition, bindings);
+        const call = pending(keyed, definition, bindings, options);
         if (call === undefined) return never();
         calls.push({ ...call, group: keys });
       }

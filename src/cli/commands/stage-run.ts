@@ -14,7 +14,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { BUILTINS } from '../../adapters/index';
-import { resolveAdapters } from '../../engine/adapters';
+import { portVariableResolver, resolveAdapters } from '../../engine/adapters';
 import type { Supplied } from '../../engine/bindings';
 import { type AgentExecution, callProblems, runCall } from '../../engine/call';
 import { aliasOf, type ProjectConfig, readConfig } from '../../engine/config';
@@ -213,6 +213,13 @@ export async function stageRun(args: Parsed, io: Io): Promise<ExitCode> {
       // workspace or branch of its own. Keep a hook's GIT_INDEX_FILE: it names the index being committed here.
       workspace,
       inClone: true,
+      env: io.env ?? process.env,
+      portVariables: portVariableResolver({
+        sailDir: found.dir,
+        config,
+        builtins: BUILTINS,
+        env: io.env ?? process.env,
+      }),
       root: workspace,
       branch: '',
       config: join(found.dir, 'project.yaml'),

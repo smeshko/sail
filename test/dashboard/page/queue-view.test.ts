@@ -240,3 +240,16 @@ test("the panel's notice is drawn as a warn chip beside its header, and not when
   expect(plain).not.toContain('no watcher is running');
   expect(noticed).toContain('<span class="warnchip">no watcher is running &lt;now&gt;</span>');
 });
+
+test("the stream's error is drawn as an escaped code bad div, and none is drawn without one (ADW-209)", () => {
+  const panel = waiting();
+  const failed = renderQueue(
+    panel,
+    { recent: [], watch: 'unknown', error: "events.ndjson:2 can't be read: <b>x</b>" },
+    initialUi(0),
+    NOW,
+  ).value;
+  const healthy = renderQueue(panel, { recent: [], watch: 'unknown' }, initialUi(0), NOW).value;
+  expect(failed).toContain('<div class="code bad">events.ndjson:2 can&#39;t be read: &lt;b&gt;x&lt;/b&gt;</div>');
+  expect(healthy).not.toContain('code bad');
+});

@@ -139,17 +139,17 @@ test("a call's result and logs: the stream asked for, else the session for an ag
 test("a run's file by its path in the run: as text, or with as=html as its markdown's HTML; a bad path or as is 400", async () => {
   const server = start();
   const before = treeHash(m.root);
-  const text = await get(server, `${RUN}/file?path=${encodeURIComponent('01-spec/call-1/spec.md')}`);
+  const text = await get(server, `${RUN}/file?path=${encodeURIComponent('01-spec/call-1/out/spec.md')}`);
   expect([text.status, text.type, text.body]).toEqual([
     200,
     'text/plain; charset=utf-8',
-    golden('01-spec/call-1/spec.md'),
+    golden('01-spec/call-1/out/spec.md'),
   ]);
-  const rendered = await get(server, `${RUN}/file?path=01-spec/call-1/spec.md&as=html`);
+  const rendered = await get(server, `${RUN}/file?path=01-spec/call-1/out/spec.md&as=html`);
   expect([rendered.status, rendered.type]).toEqual([200, 'text/html; charset=utf-8']);
   expect(rendered.body).toStartWith('<h1>');
   expect((await get(server, `${RUN}/file`)).status).toBe(400);
-  expect((await get(server, `${RUN}/file?path=01-spec/call-1/spec.md&as=pdf`)).status).toBe(400);
+  expect((await get(server, `${RUN}/file?path=01-spec/call-1/out/spec.md&as=pdf`)).status).toBe(400);
   expect((await get(server, `${RUN}/file?path=01-spec/call-1/none.md`)).status).toBe(404);
   expect((await get(server, `${RUN}/file?path=01-spec/call-1/none.md&as=html`)).status).toBe(404);
   expect(treeHash(m.root)).toBe(before);
@@ -245,9 +245,9 @@ test.each([
   ],
   [
     'a run file that links out of the run, as html',
-    `${RUN}/file?path=01-spec/call-1/spec.md&as=html`,
+    `${RUN}/file?path=01-spec/call-1/out/spec.md&as=html`,
     (m: Machine) => {
-      const spec = join(m.alpha.runDir, '01-spec/call-1/spec.md');
+      const spec = join(m.alpha.runDir, '01-spec/call-1/out/spec.md');
       rmSync(spec);
       symlinkSync(join(m.outside, 'secret.txt'), spec);
     },

@@ -4,10 +4,12 @@
 //   the newest running run, else the newest run, unless the URL names a run it lists, and a selection is kept while its
 //   run is still listed.
 // - One run socket is open at a time, for the open run, and its events are folded into the run model. A socket that
-//   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything.
-// - One queue socket per watched workflow in the index feeds its recent events and its watch state. A workflow's queue
-//   row in the rail opens its queue in the centre, in place of the run, until a run is opened again. A queue that leaves
-//   the index gives the centre back to the run.
+//   closes without `end` reconnects after 2 s and starts the model again, since the replay sends everything, unless its
+//   stream sent `error`: then the error and the cards stay, with no reconnect, until the run is clicked again.
+// - One queue socket per watched workflow in the index feeds its recent events and its watch state, and reconnects by
+//   the same rule: a queue whose stream sent `error` shows it until its row is clicked again. A workflow's queue row in
+//   the rail opens its queue in the centre, in place of the run, until a run is opened again. A queue that leaves the
+//   index gives the centre back to the run.
 // - Needs attention is a button in the top bar with its count. It opens a pane over the page, and `a` toggles it; Esc,
 //   a click outside it, and opening one of its items close it.
 // - Opening a stage card shows its timeline in the centre, drawn from the same run model, so it grows with the run
@@ -423,21 +425,32 @@ export function boot(host: PageHost): Page {
     }
   };
 
+  /** A close handler that, unless the stream failed or is no longer live, runs `again` after the reconnect delay. */
+  const retryOnClose =
+    (holder: { retry?: number }, failed: () => boolean, live: () => boolean, again: () => void) => () => {
+      if (stopped || failed() || !live()) return;
+      holder.retry = host.later(() => {
+        delete holder.retry;
+        if (live()) again();
+      }, RECONNECT_MS);
+    };
+
   const openRunSocket = (open: OpenRun) => {
     const connection = host.connect(`run=${enc(`${open.repo}/${open.runId}`)}`, {
       message: (text) => onRunMessage(open, text),
-      close: () => {
-        // A socket the run has since replaced closes without a retry.
-        if (stopped || open !== run || open.ended || open.connection !== connection) return;
-        open.retry = host.later(() => {
-          delete open.retry;
-          if (open !== run) return;
+      // A socket the run has since replaced, or that ended, closes without a retry, and so does one whose stream sent
+      // `error`: the error stays until the run is clicked again.
+      close: retryOnClose(
+        open,
+        () => open.error !== undefined,
+        () => !(open !== run || open.ended || open.connection !== connection),
+        () => {
           open.model = emptyRun();
           delete open.error;
           openRunSocket(open);
           mark('main', 'status', 'inspector');
-        }, RECONNECT_MS);
-      },
+        },
+      ),
     });
     open.connection = connection;
   };
@@ -504,7 +517,7 @@ export function boot(host: PageHost): Page {
   };
 
   const selectRun = (repo: string, runId: string) => {
-    if (run?.repo === repo && run.runId === runId) return;
+    if (run?.repo === repo && run.runId === runId && run.error === undefined) return;
     closeRun();
     clearCall();
     ui.repo = repo;
@@ -521,6 +534,11 @@ export function boot(host: PageHost): Page {
 
   const onQueueMessage = (id: string, open: OpenQueue, text: string) => {
     const message = parse(text);
+    if (message?.kind === 'error') {
+      open.stream = { ...open.stream, error: message.message };
+      if (ui.queue === id) mark('main');
+      return;
+    }
     if (message?.kind !== 'queue-event') return;
     const event = message.event as QueueEvent;
     const recent = [...open.stream.recent, event].slice(-RECENT_EVENTS);
@@ -530,25 +548,28 @@ export function boot(host: PageHost): Page {
     if (ui.queue === id) mark('main');
   };
 
+  const connectQueue = (id: string, open: OpenQueue) => {
+    const connection = host.connect(`queue=${enc(id)}`, {
+      message: (text) => onQueueMessage(id, open, text),
+      // A socket the queue has since replaced closes without a retry, like the run's.
+      close: retryOnClose(
+        open,
+        () => open.stream.error !== undefined,
+        () => queues.get(id) === open && open.connection === connection,
+        () => {
+          open.stream = { recent: [], watch: 'unknown' };
+          connectQueue(id, open);
+          if (ui.queue === id) mark('main');
+        },
+      ),
+    });
+    open.connection = connection;
+  };
+
   const openQueueSocket = (id: string) => {
     const open: OpenQueue = { stream: { recent: [], watch: 'unknown' } };
     queues.set(id, open);
-    const connect = () => {
-      open.connection = host.connect(`queue=${enc(id)}`, {
-        message: (text) => onQueueMessage(id, open, text),
-        close: () => {
-          if (stopped || queues.get(id) !== open) return;
-          open.retry = host.later(() => {
-            delete open.retry;
-            if (queues.get(id) !== open) return;
-            open.stream = { recent: [], watch: 'unknown' };
-            connect();
-            if (ui.queue === id) mark('main');
-          }, RECONNECT_MS);
-        },
-      });
-    };
-    connect();
+    connectQueue(id, open);
   };
 
   /** Opens a queue socket for every queue in the index, and closes those no longer in it. */
@@ -633,6 +654,11 @@ export function boot(host: PageHost): Page {
     },
     'select-queue': (data) => {
       if (data.queue === undefined) return;
+      const failed = queues.get(data.queue);
+      if (failed?.stream.error !== undefined) {
+        failed.stream = { recent: [], watch: 'unknown' };
+        connectQueue(data.queue, failed);
+      }
       ui.queue = data.queue;
       delete ui.queueNotice;
       mark('rail', 'main');

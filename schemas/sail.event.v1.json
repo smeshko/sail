@@ -21,6 +21,7 @@
         "step:start",
         "step:end",
         "step:queued",
+        "step:stalled",
         "loop:iteration",
         "loop:exit",
         "all:start",
@@ -139,6 +140,10 @@
     {
       "if": { "properties": { "type": { "const": "step:queued" } }, "required": ["type"] },
       "then": { "$ref": "#/$defs/stepQueued" }
+    },
+    {
+      "if": { "properties": { "type": { "const": "step:stalled" } }, "required": ["type"] },
+      "then": { "$ref": "#/$defs/stepStalled" }
     },
     {
       "if": { "properties": { "type": { "const": "loop:iteration" } }, "required": ["type"] },
@@ -482,7 +487,8 @@
           "resetsAt": {
             "type": "string",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
-          }
+          },
+          "code": { "const": "unavailable" }
         },
         "required": ["reason", "message"],
         "additionalProperties": false
@@ -502,11 +508,26 @@
       },
       "additionalProperties": false
     },
+    "stepStalled": {
+      "type": "object",
+      "properties": {
+        "seq": true,
+        "ts": true,
+        "type": true,
+        "runId": true,
+        "key": { "type": "string", "pattern": "^[a-z0-9-]+#[0-9]+(/[a-z0-9-]+)?$" },
+        "idleMs": { "type": "number", "exclusiveMinimum": 0 },
+        "since": { "type": "string" }
+      },
+      "required": ["key", "idleMs", "since"],
+      "additionalProperties": false
+    },
     "budget": {
       "description": "a step's budget",
       "type": "object",
       "properties": {
         "maxTurns": { "type": "integer", "minimum": 1 },
+        "maxIdleMinutes": { "type": "number", "minimum": 0 },
         "maxUsd": { "type": "number", "minimum": 0 },
         "maxMinutes": { "type": "number", "minimum": 0 }
       },
@@ -678,7 +699,8 @@
             "unwatched",
             "stopped",
             "interrupted",
-            "usage_limit"
+            "usage_limit",
+            "port_unavailable"
           ]
         },
         "message": { "type": "string" },
@@ -696,11 +718,11 @@
       "unevaluatedProperties": false
     },
     "runSuspended": {
-      "description": "a run suspended right before its run:end: on its budget (which budget it used up, its limit and what was used), or on the provider's usage limit (the call that hit it, and when it resets if the provider said)",
+      "description": "a run suspended right before its run:end: on its budget (which budget it used up, its limit and what was used), on the provider's usage limit (the call that hit it, and when it resets if the provider said), or on a provider that was unavailable (the call whose step it ended)",
       "type": "object",
       "$ref": "#/$defs/envelope",
       "properties": {
-        "stopReason": { "enum": ["budget_exceeded", "usage_limit"] },
+        "stopReason": { "enum": ["budget_exceeded", "usage_limit", "port_unavailable"] },
         "budget": { "enum": ["usd", "minutes"] },
         "limit": { "type": "number", "minimum": 0 },
         "used": { "type": "number", "minimum": 0 },
@@ -713,14 +735,21 @@
       "required": ["stopReason"],
       "allOf": [
         {
-          "if": { "properties": { "stopReason": { "const": "usage_limit" } }, "required": ["stopReason"] },
+          "if": { "properties": { "stopReason": { "const": "port_unavailable" } }, "required": ["stopReason"] },
           "then": {
             "required": ["key"],
-            "properties": { "key": true, "resetsAt": true, "budget": false, "limit": false, "used": false }
+            "properties": { "key": true, "resetsAt": false, "budget": false, "limit": false, "used": false }
           },
           "else": {
-            "required": ["budget", "limit", "used"],
-            "properties": { "budget": true, "limit": true, "used": true, "key": false, "resetsAt": false }
+            "if": { "properties": { "stopReason": { "const": "usage_limit" } }, "required": ["stopReason"] },
+            "then": {
+              "required": ["key"],
+              "properties": { "key": true, "resetsAt": true, "budget": false, "limit": false, "used": false }
+            },
+            "else": {
+              "required": ["budget", "limit", "used"],
+              "properties": { "budget": true, "limit": true, "used": true, "key": false, "resetsAt": false }
+            }
           }
         }
       ],

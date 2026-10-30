@@ -1,4 +1,4 @@
-// Finds what the demonstrate call left in its directory, a sibling of this call's under the run directory: each demo
+// Finds what the demonstrate call left in its `$STAGE_OUT`, under a sibling of this call's directory: each demo
 // repository's `transcript.txt` and its screenshots (`*.png`). Without a transcript file, it writes the demonstration's
 // own transcript to one. Each file is attached to the ticket in $INPUT_TICKETKEY through `sail port ticket-source
 // attach`, then a comment lists each criterion with whether it was shown and its evidence, and links the attachments
@@ -20,15 +20,19 @@ function port(args) {
   return { error: (result.stderr || `exit ${result.status}`).trim().split('\n')[0] };
 }
 
-/** The demonstrate calls' directories: `<run>/<NN>-demonstrate/call-<n>/`, this call being `<run>/<NN>-<stage>/call-1/`. */
+/**
+ * The demonstrate calls' `$STAGE_OUT`s: `<run>/<NN>-demonstrate/call-<n>/out/`, this call's being
+ * `<run>/<NN>-<stage>/call-1/out/`.
+ */
 function demonstrateCalls() {
-  const run = dirname(dirname(out));
+  const run = dirname(dirname(dirname(out)));
   return readdirSync(run)
     .filter((name) => /^\d+-demonstrate$/.test(name))
     .flatMap((stage) =>
       readdirSync(join(run, stage))
         .filter((call) => /^call-\d+$/.test(call))
-        .map((call) => join(run, stage, call)),
+        .map((call) => join(run, stage, call, 'out'))
+        .filter((dir) => existsSync(dir)),
     );
 }
 

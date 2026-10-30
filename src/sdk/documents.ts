@@ -267,7 +267,7 @@ export function noPlaceholders(): Validator {
         if (from >= (ranges[range]?.[0] ?? Infinity)) continue;
         if (names.has(name)) {
           for (; newline !== -1 && newline < from; newline = text.indexOf('\n', newline + 1)) line += 1;
-          // The problem goes into the corrective prompt, outside any untrusted wrapper, so it names the placeholder
+          // The problem reaches the corrective prompt inside its untrusted wrapper, and still names the placeholder
           // only when the name is one a template author writes: never the text of a ticket the document quotes.
           problems.push(
             PLACEHOLDER_NAME.test(name) && name.length <= 64

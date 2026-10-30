@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { readEvents } from '../events/consumers/ndjson';
 import type { CallEmit, CallEvent, Emit, NewEvent, SailEvent } from '../events/types';
-import { KINDS, type StepRun } from '../kinds/index';
+import { KINDS, type StepContext, type StepRun } from '../kinds/index';
 import type { Harness } from '../ports/harness';
 import type { Usage } from '../ports/types';
 import type { AgentStep, ScriptStep, Stage, StageDefinition } from '../sdk/steps';
@@ -64,6 +64,8 @@ export interface CallRequest {
   workspace: string;
   /** The step runs in the clone itself, not a run's workspace, so it keeps a git hook's repository variables. */
   inClone?: boolean;
+  env?: StepContext['env'];
+  portVariables?: StepContext['portVariables'];
   /** The directory that holds `.sail/`: what the call records paths relative to. */
   root: string;
   /** The run's branch. Empty for a stage run in isolation. */
@@ -228,6 +230,8 @@ export async function runScriptTry(
     stageDir: dirname(request.stageFile),
     workspace: request.workspace,
     ...(request.inClone ? { inClone: true } : {}),
+    ...(request.env === undefined ? {} : { env: request.env }),
+    ...(request.portVariables === undefined ? {} : { portVariables: request.portVariables }),
     root: request.root,
     branch: request.branch,
     config: request.config,
@@ -335,9 +339,8 @@ const CORRECTABLE = new Set(['invalid_output', 'missing_file']);
 
 /**
  * Whether a try's output was checked and found wanting. A result from before the field existed counts when every one
- * of its errors is one a correction is for. Only a try that ended in `error` failed anything: a later try's directory
- * is inside `$STAGE_OUT`, where a session can write, and a record that says it failed and is `done` is none of the
- * engine's.
+ * of its errors is one a correction is for. Only a try that ended in `error` failed anything: a record that says it
+ * failed and is `done` is none of the engine's. Defence in depth: a try's records lie outside `$STAGE_OUT`.
  */
 function failedValidation(result: Record<string, unknown>): boolean {
   if (result.outcome !== 'error') return false;
@@ -534,7 +537,7 @@ export async function runAgentTries(
     // Checked again now that the try has ended: whoever heard its end may have aborted the call.
     if (!corrected || request.signal?.aborted === true) return { result, paths };
     found = ran.errors;
-    // From disk, not the try after this one: a session may have left a directory of that name in its `$STAGE_OUT`.
+    // From disk, not the try after this one, so a directory already there is never reused.
     tryNumber = nextOnDisk();
   }
 }

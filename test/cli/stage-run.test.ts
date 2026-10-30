@@ -71,6 +71,24 @@ function writeScript(path: string, body: string): void {
   chmodSync(path, 0o755);
 }
 
+test('a stage declaring unconfigured jev runs its script with no Jev variables, as Jev is optional', async () => {
+  await withTempRepo(async (repo) => {
+    const dir = join(fixtureCopy(repo), 'stages', 'jev-less');
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, 'stage.ts'),
+      `import { script, z } from 'sail';
+export const jevLess = script('jev-less', { run: './run.sh', output: z.object({}), ports: ['jev'] });`,
+    );
+    writeScript(join(dir, 'run.sh'), 'touch "$STAGE_OUT/ran"\necho "{}"');
+    const { code, stdout } = await runCaptured(['stage', 'run', '.sail/stages/jev-less'], repo.dir);
+    expect(code).toBe(EXIT_OK);
+    const callDir = callDirOf(stdout, repo.dir);
+    expect(readResult(callDir)).toMatchObject({ outcome: 'passed' });
+    expect(existsSync(join(callDir, 'out', 'ran'))).toBe(true);
+  });
+});
+
 test('the fixture tests stage runs in place from sail’s root, and fails as its first call does: with its report', async () => {
   const runs = join(inRepoFixture, '.sail-runs');
   const existing = existsSync(runs) ? readdirSync(runs) : [];
@@ -84,7 +102,7 @@ test('the fixture tests stage runs in place from sail’s root, and fails as its
       /^tests#1 failed {2}test\/fixtures\/repo\/\.sail-runs\/tests-[0-9A-HJKMNP-TV-Z]{26}\/00-tests\/call-1\n$/,
     );
     callDir = callDirOf(stdout, root);
-    expect(readdirSync(callDir).sort()).toEqual(['in', 'junit.xml', 'result.json', 'stderr.log', 'stdout.log']);
+    expect(readdirSync(callDir).sort()).toEqual(['in', 'out', 'result.json', 'stderr.log', 'stdout.log']);
     expect(readResult(callDir)).toMatchObject({
       key: 'tests#1',
       outcome: 'failed',
@@ -321,13 +339,16 @@ test('a type error in an unrelated workflow does not stop the stage', async () =
   });
 });
 
-test('a script that clears $STAGE_OUT first still gets a result.json, naming the removed log', async () => {
+test('a script that removes its log first still gets a result.json, naming the removed log', async () => {
   await withTempRepo(async (repo) => {
     const sail = fixtureCopy(repo);
     const runSh = join(sail, 'stages', 'tests', 'run.sh');
     writeFileSync(
       runSh,
-      readFileSync(runSh, 'utf8').replace('set -euo pipefail\n', 'set -euo pipefail\nrm -rf "$STAGE_OUT"/*\n'),
+      readFileSync(runSh, 'utf8').replace(
+        'set -euo pipefail\n',
+        'set -euo pipefail\nrm -f "$STAGE_OUT/../stdout.log"\n',
+      ),
     );
     const { code, stdout, stderr } = await runCaptured(['stage', 'run', '.sail/stages/tests'], repo.dir);
     console.log(stdout.trimEnd());
@@ -335,10 +356,8 @@ test('a script that clears $STAGE_OUT first still gets a result.json, naming the
     expect(code).toBe(EXIT_FAILED);
     expect(readResult(callDirOf(stdout, repo.dir))).toMatchObject({
       outcome: 'error',
-      errors: [
-        { reason: 'invalid_output', message: "stdout.log was removed from $STAGE_OUT, so the output can't be read" },
-      ],
-      files: { 'junit.xml': { path: '00-tests/call-1/junit.xml' } },
+      errors: [{ reason: 'invalid_output', message: "stdout.log was removed, so the output can't be read" }],
+      files: { 'junit.xml': { path: '00-tests/call-1/out/junit.xml' } },
     });
   });
 });
@@ -630,7 +649,7 @@ test('an agent stage runs in isolation on the harness project.yaml names and the
     expect(code).toBe(EXIT_OK);
     expect(stdout).toMatch(new RegExp(`^spec#1 done {2}${SPEC_RUN}\n$`));
     const callDir = callDirOf(stdout, repo.dir);
-    expect(readdirSync(callDir).sort()).toEqual(['in', 'prompt.md', 'result.json', 'session.log', 'spec.md']);
+    expect(readdirSync(callDir).sort()).toEqual(['in', 'out', 'prompt.md', 'result.json', 'session.log']);
     expect(readdirSync(join(callDir, 'in')).sort()).toEqual(['brief.md', 'ticket.json']);
     expect(readResult(callDir)).toMatchObject({
       key: 'spec#1',

@@ -2,7 +2,7 @@
 // checked against the read or write globs (D5, D6). Every case is built on disk under a realpath'd temp directory.
 import { afterAll, expect, test } from 'bun:test';
 import { mkdirSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   checkRead,
   checkWrite,
@@ -43,6 +43,22 @@ function verdict(decision: Decision, phrase: string): Want {
   return [decision.rule, decision.reason.includes(phrase) ? phrase : decision.reason];
 }
 
+test("the engine's records beside $STAGE_OUT are outside it: a write to result.json, session.log or try-2/ is denied, one into out/ is allowed", () => {
+  const call = dirname(stageOut);
+  const write = perms({ write: ['$STAGE_OUT/**'] });
+  const at = roots(ctx);
+  expect(
+    [join(call, 'result.json'), join(call, 'session.log'), join(call, 'try-2', 'x'), join(stageOut, 'x')].map((path) =>
+      place(path, at),
+    ),
+  ).toEqual(['outside', 'outside', 'outside', 'stage-out']);
+  const denied = [join(call, 'result.json'), join(call, 'session.log'), join(call, 'try-2', 'x')].map(
+    (path) => checkWrite([path], write, ctx).allow,
+  );
+  expect(denied).toEqual([false, false, false]);
+  expect(checkWrite([join(stageOut, 'x')], write, ctx).allow).toBe(true);
+});
+
 test('a path lands in $STAGE_IN, $STAGE_OUT, the worktree or outside; $STAGE_IN first, and without case', () => {
   const at = roots(ctx);
   const cases = [
@@ -52,7 +68,7 @@ test('a path lands in $STAGE_IN, $STAGE_OUT, the worktree or outside; $STAGE_IN 
     stageIn,
     join(stageOut, 'spec.md'),
     stageOut,
-    join(stageOut, 'IN', 'x.md'),
+    join(dirname(stageOut), 'IN', 'x.md'),
     join(clone, 'lib', 'a.dart'),
     `${worktree}-2/x`,
     elsewhere,
@@ -109,7 +125,7 @@ test('a read denial names the path as given and where it resolved', () => {
 test.each([
   ['$STAGE_IN/brief.md', '$STAGE_IN'],
   ['$STAGE_IN/new.md', '$STAGE_IN'],
-  ['$STAGE_OUT/IN/brief.md', '$STAGE_IN'],
+  [join(dirname(stageOut), 'IN', 'brief.md'), '$STAGE_IN'],
   ['.git/config', '.git'],
   ['.GIT/config', '.git'],
   ['sub/.git/hooks/x', '.git'],

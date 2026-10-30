@@ -91,7 +91,7 @@ function within(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
 
-/** The region `abs` lies in. `$STAGE_IN` is matched first, without case, since it lies inside `$STAGE_OUT`. */
+/** The region `abs` lies in. `$STAGE_IN` is matched first, without case, as it lies beside `$STAGE_OUT`. */
 export function place(abs: string, at: Roots): Region {
   if (within(abs.toLowerCase(), at.stageIn.toLowerCase())) return 'stage-in';
   if (within(abs, at.stageOut)) return 'stage-out';

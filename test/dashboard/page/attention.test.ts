@@ -20,6 +20,38 @@ beforeEach(() => {
 });
 afterEach(() => m.remove());
 
+test('each stalled key of a running run opens its call, but stale completed stalls are hidden', () => {
+  const repos = index(m.registryDir);
+  const run = repos[0]?.runs.find((run) => run.runId === GOLDEN_RUN_ID);
+  if (!run?.summary) throw new Error('missing fixture summary');
+  run.summary.stalled = [
+    { key: 'spec#1', since: '2026-10-01T12:00:00.000Z' },
+    { key: 'publish#1/describe', since: '2026-10-01T12:01:00.000Z' },
+  ];
+  expect(attention(repos).filter((item) => item.title === 'stalled')).toEqual([]);
+  run.status = { status: 'running' };
+  expect(attention(repos).filter((item) => item.title === 'stalled')).toEqual([
+    {
+      repo: 'alpha',
+      runId: GOLDEN_RUN_ID,
+      key: 'spec#1',
+      kind: 'stalled',
+      title: 'stalled',
+      detail: 'spec#1 · no event since 2026-10-01T12:00:00.000Z',
+      opens: { repo: 'alpha', runId: GOLDEN_RUN_ID, key: 'spec#1', tab: 'overview' },
+    },
+    {
+      repo: 'alpha',
+      runId: GOLDEN_RUN_ID,
+      key: 'publish#1/describe',
+      kind: 'stalled',
+      title: 'stalled',
+      detail: 'publish#1/describe · no event since 2026-10-01T12:01:00.000Z',
+      opens: { repo: 'alpha', runId: GOLDEN_RUN_ID, key: 'publish#1', tab: 'overview' },
+    },
+  ]);
+});
+
 const FAKE_2_MESSAGE = 'implement#1 ended in error: harness: the session ended before it submitted a result';
 const PARKED = 'stage_error: implement#1 ended in error: harness: the session ended before it submitted a result';
 

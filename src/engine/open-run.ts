@@ -28,7 +28,8 @@
 // over. It then reopens the workspace, which must still be there and still descend from its base. A raise of the run's
 // budget is checked with the refusals, right after the run is found: one of a budget the run doesn't have is refused,
 // and so is a resume, raised or not, of a run still at or over its budget. A run from before workspaces existed has no
-// workspace to resume in, and is refused.
+// workspace to resume in, and is refused. So is a run without the layout mark, which kept its calls' records inside their
+// `$STAGE_OUT`: a resume would read them as the session left them.
 //
 // A dispatched start (`dispatch`) is the run the watcher started: it runs under the run id the watcher minted and named
 // in its queue, and records `via: 'watch'`. It takes every step above in this order: the watcher only reads before it
@@ -37,8 +38,9 @@
 // `force`, and records the checks it overrode as a forced manual run does.
 //
 // A start given `definitions`, as a dispatched one is, runs on the `.sail/` committed at their sha rather than the
-// clone's: every check above reads that copy, its workspace is based on that commit, and its run directory keeps the
-// committed `.sail/` and conventions whole in `definition/`, recording the sha as `definitionsSha`.
+// clone's: every check above reads that copy, its workspace is based on that commit unless its branch is on the remote,
+// and its run directory keeps the committed `.sail/` and conventions whole in `definition/`, recording the sha as
+// `definitionsSha`.
 //
 // Every start checks designation against the workflow's label: its `watch.label`, then `project.yaml`'s, then sail's,
 // the label its watcher polls.
@@ -64,6 +66,7 @@ import { type Raise, raiseProblem } from './budget';
 import { isPlainName } from './call-dir';
 import { type Clock, systemClock } from './clock';
 import { PORTS, type ProjectConfig, type RunPort, readConfig } from './config';
+import { returnStop, takeHandOff } from './control';
 import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
@@ -81,6 +84,7 @@ import {
   removeRunDir,
   runsDir,
   type Source,
+  unmarkedRefusal,
   writeOpening,
   writeStatus,
 } from './run-dir';
@@ -123,6 +127,8 @@ export interface OpenedRun {
   harnesses: Record<string, Harness>;
   /** Where those adapters emit: the runtime attaches the run's stream to it. */
   relay: ProviderRelay;
+  /** The environment names each port's adapter requires: what a script step that declares the port is given. */
+  portVariables: ResolvedAdapters['portVariables'];
   /** `project.yaml` as it reads now. What the run froze of it, such as each stage's model, is in `header`. */
   config: ProjectConfig;
   /** The workflow, with the stages it reaches: what the run replays. */
@@ -356,8 +362,10 @@ export interface Made {
 }
 
 /**
- * Leases `branch`, makes the run directory and the workspace at `base`, the default branch's tip when left out, and
- * checks for an abort, in that order. A refusal at any step undoes the ones before it, in reverse.
+ * Leases `branch`, makes the run directory, moves the run's hand-off file into its `CONTROL` if a request is waiting
+ * there, makes the workspace at `base`, and checks for an abort, in that order. Left out, `base` is the branch's tip on
+ * the remote when the remote has it, else `fallback`, else the default branch's tip. A refusal at any step undoes the
+ * ones before it, in reverse, giving a stop in `CONTROL` back to the hand-off.
  */
 export async function startWorkspace(options: {
   port: WorkspacePort;
@@ -367,9 +375,10 @@ export async function startWorkspace(options: {
   workflow: string;
   branch: string;
   base?: string;
+  fallback?: string;
   signal: AbortSignal | undefined;
 }): Promise<{ made: Made } | { refused: string }> {
-  const { port, run, sailDir, workflow, branch, base, signal } = options;
+  const { port, run, sailDir, workflow, branch, base, fallback, signal } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -387,6 +396,7 @@ export async function startWorkspace(options: {
   let workspace: Workspace | undefined;
   const undo = async (refused: string): Promise<{ refused: string }> => {
     if (workspace !== undefined) await quietly(() => port.release(run, false));
+    returnStop(runsDir(sailDir), run.runId);
     removeRunDir(run.runDir);
     await quietly(() => port.releaseLease(repository.url, branch, run.runId));
     return { refused };
@@ -394,9 +404,11 @@ export async function startWorkspace(options: {
   try {
     createRunDir(sailDir, run.runId);
     writeOpening(run.runDir, { workflow, branch, remote: repository.url });
+    takeHandOff(runsDir(sailDir), run.runId);
     workspace = await port.create(run, {
       branch,
       ...(base === undefined ? {} : { base }),
+      ...(fallback === undefined ? {} : { fallback }),
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
@@ -671,8 +683,13 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       branch,
       signal: options.signal,
       // A pull-request run starts at the head sha it was resolved at (D4), and a ticket run from definitions at their
-      // commit, so a push since they were read can't give it another commit's code.
-      ...(source.kind === 'pr' ? { base: source.headSha } : definitions === undefined ? {} : { base: definitions.sha }),
+      // commit, so a push since they were read can't give it another commit's code, unless its branch is on the remote:
+      // then it continues that branch, as any ticket run does.
+      ...(source.kind === 'pr'
+        ? { base: source.headSha }
+        : definitions === undefined
+          ? {}
+          : { fallback: definitions.sha }),
     });
   });
   if ('refused' in opened) return opened;
@@ -707,6 +724,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     sailDir: definitions === undefined ? preflight.sailDir : join(dir, DEFINITION_DIR, '.sail'),
     root,
     adapters: options.adapters.ports,
+    portVariables: options.adapters.portVariables,
     harnesses,
     relay,
     config,
@@ -733,8 +751,8 @@ export interface ReopenRunOptions {
 }
 
 /**
- * Finds run `runId` beside `sailDir`, with its header and STATUS. A run that has completed or failed is refused, and so
- * is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
+ * Finds run `runId` beside `sailDir`, with its header and STATUS. A run that has completed or failed is refused, then one
+ * whose header has no layout mark, and so is an id that isn't a plain name or names no run. A STATUS or `run.json` that can't be read throws.
  */
 export function findRun(
   sailDir: string,
@@ -749,7 +767,10 @@ export function findRun(
   const status = readStatus(dir);
   const ended = endedRefusal(runId, status);
   if (ended !== undefined) return { refused: ended };
-  return { dir, header: readRunHeader(dir), status };
+  const header = readRunHeader(dir);
+  const unmarked = unmarkedRefusal(runId, header, 'be resumed');
+  if (unmarked !== undefined) return { refused: unmarked };
+  return { dir, header, status };
 }
 
 /** Why run `runId` can't be resumed because it has ended, or undefined while it hasn't. */
@@ -920,6 +941,7 @@ export async function reopenRun(options: ReopenRunOptions): Promise<OpenedRun | 
     sailDir: found.dir,
     root,
     adapters: options.adapters.ports,
+    portVariables: options.adapters.portVariables,
     harnesses: named.ports,
     relay,
     config: found.config,

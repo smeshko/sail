@@ -158,7 +158,7 @@ const CALL_STARTS = new Set(['intake:start', 'stage:start', 'step:start']);
 /**
  * File `name` of a call's try that has started and not ended: `NN-<stage>/call-<n>/`, or `try-<t>/` below it for a later
  * try. For a step key `stage#n/step` it is `call-<n>/steps/<index>-<step>/`, with the `index` its `step:start` named.
- * No end points at it yet, so the directory is found from the key, by the layout src/engine/call-dir.ts writes.
+ * No end points at it yet, so the directory is found from the key, by the layout src/engine/call-dir.ts writes: the records sit beside `out/`, the call's `$STAGE_OUT`.
  */
 function runningFile(
   runDir: string,

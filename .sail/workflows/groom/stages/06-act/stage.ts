@@ -7,6 +7,7 @@ import { Acted, Plan } from '../../schemas';
 
 export const act = script('act', {
   run: './run.sh',
+  ports: ['ticket-source'],
   consumes: { ticketKey: value(z.string()), report: file('report.md'), actions: value(Plan), label: value(z.string()) },
   output: Acted,
   // A comment or a label that could not be written is an error, never a verdict: no exit code means failed.

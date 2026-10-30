@@ -8,6 +8,7 @@ export const ChecksRead = z.object({
 
 export const checks = script('checks', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { pr: value(z.number().int()), tries: value(z.number().int()), intervalSeconds: value(z.number()) },
   output: ChecksRead,
   exitCodes: { passed: [0], failed: [] },

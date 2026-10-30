@@ -2,9 +2,11 @@
 // `sail FAKE-1` run to its end once in a repository of its own, and each case seeds from a copy of it: a process opens
 // one run per `.sail/`, so a resume runs in a copy of the seeded run's repository.
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJournal } from '../../src/engine/journal';
+import { lostEvents } from '../../src/engine/restore-events';
+import { readRunHeader } from '../../src/engine/run-header';
 import { type RunEnd, resumeWorkflow, runSeededWorkflow, runWorkflow } from '../../src/engine/runtime';
 import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
@@ -97,6 +99,24 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
       stageCalls: 1,
       issues: [],
     });
+  });
+}, 60_000);
+
+test("a seeded run starts from its source run's baseSha even when the source branch is pushed past it", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const tip = repo.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'work an earlier run pushed');
+    repo.git('update-ref', `refs/heads/${SOURCE_BRANCH}`, tip);
+    const sourceBase = JSON.parse(readFileSync(join(from.dir, 'run.json'), 'utf8')).repository.baseSha;
+    const end = await seeded(repo, from.runId, 'spec');
+    const created = readEvents(dirOf(end)).find((event) => event.type === 'workspace:created') as
+      | { baseSha: string }
+      | undefined;
+    expect({ end: endOf(end), base: created?.baseSha }).toEqual({
+      end: { status: 'suspended', stopReason: 'until' },
+      base: sourceBase,
+    });
+    expect(tip).not.toBe(sourceBase);
   });
 }, 60_000);
 
@@ -355,3 +375,50 @@ test('a seeded run opens while its workflow live runs fill the cap, and records 
     }
   });
 });
+
+test('a resume restores the reused calls a crash before the run start took, each once, with fromRun', async () => {
+  await withTempRepo(async (first) => {
+    const from = await source.copyInto(first.dir);
+    const stopped = await seeded(first, from.runId, 'spec');
+    expect(endOf(stopped)).toEqual({ status: 'suspended', stopReason: 'until' });
+    const runId = 'refused' in stopped ? '' : stopped.runId;
+    await withTempRepo(async (second) => {
+      copyRun(first.dir, second.dir);
+      const dir = join(second.dir, '.sail-runs', runId);
+      writeFileSync(join(dir, 'events.ndjson'), '');
+      rmSync(join(dir, 'summary.json'), { force: true });
+
+      const end = await resumeWorkflow({ cwd: second.dir, runId, adapters: await fakeAdapters(second.dir) });
+      expect(endOf(end)).toEqual({ status: 'completed', stopReason: undefined });
+      const list = readEvents(dir);
+      const starts = list.filter((event) => event.type === 'run:start');
+      const appended = list.flatMap((event) => (event.type === 'journal:append' ? [event] : []));
+      expect(starts).toHaveLength(1);
+      expect(starts[0]).toMatchObject({ fromRun: from.runId });
+      expect(appended.map(({ key }) => key)).toEqual(readJournal(dir).entries.map(({ key }) => key));
+      expect(appended.filter((event) => event.fromRun !== undefined).map(({ key }) => key)).toEqual(['intake#1']);
+      expect(appended[0]).toMatchObject({ key: 'intake#1', fromRun: from.runId, ticket: FAKE_TICKET });
+      expect(issuesOf(dir)).toEqual([]);
+      const summary: Summary = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+      expect(summary.calls.find((call) => call.key === 'intake#1')).toMatchObject({ fromRun: from.runId });
+      expect(summary.ticket).toEqual(FAKE_TICKET);
+      expect(lostEvents({ dir, header: readRunHeader(dir), sailDir: join(second.dir, '.sail') })).toEqual({
+        appends: [],
+      });
+    });
+  });
+}, 90_000);
+
+test("a seeded run keeps its reused calls' bindings and replays them, one that consumed another reused call's file included, without a violation", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const end = await seeded(repo, from.runId, 'tests', { continue: true });
+    expect(endOf(end)).toEqual({ status: 'completed', stopReason: undefined });
+    const dir = dirOf(end);
+    const [reused, original] = [readJournal(dir).entries, readJournal(from.dir).entries];
+    const implement = reused.find((entry) => entry.key === 'implement#1');
+    expect(Object.keys(implement?.bindings ?? {})).toEqual(['spec']);
+    expect(implement?.bindings).toEqual(original.find((entry) => entry.key === 'implement#1')?.bindings);
+    expect(journaled(dir)).toEqual(SOURCE_JOURNAL);
+  });
+}, 60_000);

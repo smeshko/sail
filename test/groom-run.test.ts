@@ -69,7 +69,7 @@ test("groom's intake wraps the ticket and the other tickets as untrusted input",
     const { code } = await runCaptured(RUN, repo.dir, { env: repo.env });
     expect(code).toBe(EXIT_OK);
 
-    const call = join(onlyRun(repo.dir), '00-intake', 'call-1');
+    const call = join(onlyRun(repo.dir), '00-intake', 'call-1', 'out');
     const brief = readFileSync(join(call, 'brief.md'), 'utf8');
     const others = readFileSync(join(call, 'others.md'), 'utf8');
     expect(brief).toContain('<untrusted-input source="ticket FAKE-2, description">');

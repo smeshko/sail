@@ -7,8 +7,9 @@
 // Every tool call passes the gate first (7.3 D1): its PreToolUse hook asks the permission engine, and canUseTool denies
 // whatever still reaches it. The session is offered only the tools its step can use (D2). The CLI scrubs the provider's
 // credentials from the Bash tool's environment (D3), returns that tool to the workspace after each command (D4), and
-// runs it under bash, the shell decide() reads. Each SDK message also goes to the request's onRaw as it comes, for a recording (11.3 D3). The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7).
+// runs it under bash, the shell decide() reads. Each SDK message also goes to the request's onRaw as it comes, for a recording (11.3 D3). The Claude Code process leads a process group of its own, and run() returns only once that group is gone (D7). A session sail cuts short, by its minutes or an aborted request, is interrupted first so the SDK's result records its cost, and aborted after INTERRUPT_GRACE_MS without one.
 import type { Options, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
+import { allowlisted } from '../../engine/env-allowlist';
 import type { Env } from '../../ports/adapter';
 import type { Harness, HarnessEvent, HarnessRequest } from '../../ports/harness';
 import type { HarnessCapabilities, HarnessResult } from '../../ports/types';
@@ -22,7 +23,13 @@ import { type Denial, sessionTools } from './tool-call';
 import { renderTranscript } from './transcript';
 
 /** What the harness calls to start a session: the SDK's `query()`, or a test's stand-in. */
-export type QueryFunction = (params: { prompt: string; options: Options }) => AsyncIterable<SDKMessage>;
+export type QueryFunction = (params: {
+  prompt: string;
+  options: Options;
+}) => AsyncIterable<SDKMessage> & { interrupt?: () => Promise<unknown> };
+
+/** How long a cut session is given to send its result before its controller is aborted. */
+export const INTERRUPT_GRACE_MS = 10_000;
 
 export interface ClaudeCodeHarnessOptions {
   /** The adapter context's environment, which the session's is picked from. */
@@ -48,37 +55,6 @@ const SYSTEM_TIMERS: BudgetTimers = {
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
-/** The names of sail's environment a session may see, beside its call's preamble (D7). */
-export const ENV_ALLOWLIST: readonly string[] = [
-  'PATH',
-  'HOME',
-  'USER',
-  'LOGNAME',
-  'SHELL',
-  'TMPDIR',
-  'LANG',
-  'LC_*',
-  'TERM',
-  'CLAUDE_CONFIG_DIR',
-  'ANTHROPIC_*',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX',
-  'AWS_*',
-  'CLOUD_ML_REGION',
-  'ANTHROPIC_VERTEX_PROJECT_ID',
-  'GOOGLE_APPLICATION_CREDENTIALS',
-  'GOOGLE_CLOUD_PROJECT',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'NO_PROXY',
-  // Jev's key, so a session can prove the Jev adapter with a live call.
-  'TYPESAFE_API_KEY',
-];
-
-const allowed = (name: string): boolean =>
-  ENV_ALLOWLIST.some((entry) => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry));
-
 /**
  * The switches every session runs with, which nothing else in its environment overrides. The CLI runs the Bash tool
  * under zsh when it finds one, but decide() reads commands as bash, and the two differ (zsh's `>!` writes its next
@@ -95,7 +71,7 @@ const SWITCHES: Readonly<Record<string, string>> = {
 /** The session's environment: the allowlisted names of `env`, the preamble, which wins a clash, then the switches. */
 export function sessionEnv(preamble: Readonly<Record<string, string>>, env: Env): Record<string, string> {
   const picked = Object.entries(env).filter(
-    (entry): entry is [string, string] => entry[1] !== undefined && allowed(entry[0]),
+    (entry): entry is [string, string] => entry[1] !== undefined && allowlisted(entry[0]),
   );
   return {
     ...Object.fromEntries(picked),
@@ -202,6 +178,8 @@ interface Progress {
   /** `query()` was called, so the session ends with a `harness:session_end` (D21). */
   started: boolean;
   ended: boolean;
+  /** Cuts the running session short: set by session(), so a request's abort goes through its interrupt first. */
+  cut?: () => void;
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -226,10 +204,39 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       }
     };
     const stopped = () => request.signal?.aborted === true;
+    const abort = () => {
+      waitingForResult = false;
+      sessionAt.abortController.abort();
+    };
 
     let result: SDKResultMessage | undefined;
     let thrown: { error: unknown } | undefined;
     let overMinutes = false;
+    let running: ReturnType<QueryFunction> | undefined;
+    let cutDone = false;
+    // Set while a cut session is given INTERRUPT_GRACE_MS to send its result.
+    let waitingForResult = false;
+    let grace: unknown;
+    const timers = options.timers ?? SYSTEM_TIMERS;
+    // A session sail cuts is interrupted first, so the SDK sends the result that holds its exact cost; the controller
+    // aborts when that doesn't come in time, or at once when the query can't be interrupted.
+    const cut = () => {
+      if (cutDone) return;
+      cutDone = true;
+      const interrupt = running?.interrupt?.bind(running);
+      if (interrupt === undefined) {
+        abort();
+        return;
+      }
+      waitingForResult = true;
+      grace = timers.set(abort, INTERRUPT_GRACE_MS);
+      try {
+        interrupt().catch(abort);
+      } catch {
+        abort();
+      }
+    };
+    progress.cut = cut;
     const quietly = (event: HarnessEvent) => {
       try {
         emit(event);
@@ -239,12 +246,12 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
     };
     const watch = createBudgetWatch({
       budget: request.budget,
-      timers: options.timers ?? SYSTEM_TIMERS,
+      timers,
       now: () => options.now?.() ?? Date.now(),
       emit: quietly,
       onOverMinutes: () => {
         overMinutes = true;
-        sessionAt.abortController.abort();
+        cut();
       },
     });
     try {
@@ -253,12 +260,13 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       // The SDK is imported by the first session, not with the CLI: it is most of what a sail process would load at
       // start, and only an agent step needs it.
       const query = options.query ?? (await import('@anthropic-ai/claude-agent-sdk')).query;
-      for await (const message of query({ prompt: request.prompt, options: sessionAt })) {
+      running = query({ prompt: request.prompt, options: sessionAt });
+      for await (const message of running) {
         tap(request, message);
         for (const event of reader.read(message)) emit(event);
         watch.turn(reader.state().turns);
         if (message.type === 'result') result = message;
-        if (stopped()) break;
+        if (waitingForResult ? result !== undefined : stopped()) break;
       }
     } catch (error) {
       // After an error result the SDK throws, restating it as "Claude Code returned an error result: …". The result,
@@ -266,7 +274,10 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
       if (result?.is_error !== true || progress.deaf) thrown = { error };
       sessionAt.abortController.abort();
     } finally {
+      // The loop is over, so an abort from here on has nothing to cut.
+      cutDone = true;
       watch.stop();
+      if (grace !== undefined) timers.clear(grace);
     }
 
     for (const event of reader.settle(result)) quietly(event);
@@ -381,7 +392,7 @@ export function createClaudeCodeHarness(options: ClaudeCodeHarnessOptions): Harn
           ...sessionOptions(request, options.env, (toolUseId, denial) => reader.markDenied(toolUseId, denial)),
           spawnClaudeCodeProcess: spawner.spawn,
         };
-        onAbort = () => sessionAt.abortController.abort();
+        onAbort = () => (progress.cut ?? (() => sessionAt.abortController.abort()))();
         request.signal?.addEventListener('abort', onAbort, { once: true });
         return await session(request, reader, sessionAt, progress);
       } catch (error) {

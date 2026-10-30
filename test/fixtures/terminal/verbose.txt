@@ -6,7 +6,7 @@ intake#1              file ticket.json · 1.7 KB
 intake#1              file brief.md · 1.3 KB
 intake#1            ✓ passed
 spec#1              ▶ spec · agent · claude-opus-5-5
-spec#1                in brief ← 00-intake/call-1/brief.md
+spec#1                in brief ← 00-intake/call-1/out/brief.md
 spec#1                output valid
 spec#1                file spec.md · 427 B
 spec#1                file spec.md valid · hasSections(Requirements, Tasks), noPlaceholders, countItems(Tasks, min 1)
@@ -14,7 +14,7 @@ spec#1              ✓ done · 1.2s
 fix                 ↻ iteration 1/3
 spec#1              → implement#1 · on done
 implement#1         ▶ implement · agent · claude-sonnet-5
-implement#1           in spec ← 01-spec/call-1/spec.md
+implement#1           in spec ← 01-spec/call-1/out/spec.md
 implement#1           output valid
 implement#1           file diff.patch · 1.0 KB
 implement#1         ✓ done · 1.2s
@@ -34,7 +34,7 @@ tests#1               │ {"ok":false,"total":6,"failed":1,"durationMs":2300,"fa
 fix                 ↻ iteration 2/3 · feedback from tests#1
 tests#1             → implement#2 · on failed
 implement#2         ▶ implement · agent · claude-sonnet-5
-implement#2           in spec ← 01-spec/call-1/spec.md
+implement#2           in spec ← 01-spec/call-1/out/spec.md
 implement#2           in feedback ← 03-tests/call-1/result.json#/output
 implement#2           output valid
 implement#2           file diff.patch · 613 B
@@ -53,7 +53,7 @@ tests#2               │ 0 fail
 tests#2               │ {"ok":true,"total":7,"failed":0,"durationMs":2450,"failures":[]}
 tests#2             → self-review#1 · on passed
 self-review#1       ▶ self-review · agent · claude-opus-5-5
-self-review#1         in spec ← 01-spec/call-1/spec.md
+self-review#1         in spec ← 01-spec/call-1/out/spec.md
 self-review#1         output valid
 self-review#1         file review.md · 374 B
 self-review#1       ✓ done · 1.1s
@@ -62,13 +62,13 @@ self-review#1       → publish#1 · on done
 publish#1           ▶ publish · 2 steps
 publish#1/describe  ▶ describe · step 1/2 · agent · claude-sonnet-5
 publish#1/describe    in ticket ← 00-intake/call-1/result.json#/output
-publish#1/describe    in spec ← 01-spec/call-1/spec.md
+publish#1/describe    in spec ← 01-spec/call-1/out/spec.md
 publish#1/describe    output valid
 publish#1/describe    file pr-body.md · 349 B
 publish#1/describe  ✓ done
 publish#1/open      ▶ open · step 2/2 · script
 publish#1/open        in title ← 05-publish/call-1/steps/1-describe/result.json#/output/title
-publish#1/open        in body ← 05-publish/call-1/pr-body.md
+publish#1/open        in body ← 05-publish/call-1/out/pr-body.md
 publish#1/open        in ticketKey ← workflow
 publish#1/open        $ .sail/workflows/ticket-to-pr/stages/publish/open.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
 publish#1/open        exit 0 → passed · 100ms

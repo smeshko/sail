@@ -11,6 +11,7 @@ export const Opened = PrInfo.extend({
 
 export const open = script('open', {
   run: './run.sh',
+  ports: ['codehost', 'ticket-source'],
   // The title and the ticket key as plain text, so the script reads them with no JSON parser.
   consumes: { title: value(z.string().max(120)), body: file('pr-body.md'), ticketKey: value(z.string()) },
   output: Opened,

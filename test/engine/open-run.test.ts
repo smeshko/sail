@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import {
   appendFileSync,
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -16,11 +17,13 @@ import { join } from 'node:path';
 import { isAlive } from '../../src/adapters/leases';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import type { Port } from '../../src/engine/config';
+import { handOffFile } from '../../src/engine/control';
 import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engine/journal';
 import { findRun, type OpenedRun, type OpenRunOptions, openRun, reopenRun } from '../../src/engine/open-run';
 import { type Forced, readStatus, runsDir, writeStatus } from '../../src/engine/run-dir';
 import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
 import { liveRuns } from '../../src/engine/runs';
+import { runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -302,6 +305,29 @@ test.each<[string, (run: OpenedRun) => string, (runId: string) => string]>([
   });
 });
 
+/** Rewrites `run.json` in `dir` without its `layout`, as a run from before the move to out/ has it. */
+function dropLayout(dir: string): void {
+  const path = join(dir, 'run.json');
+  const { layout: _, ...header } = JSON.parse(readFileSync(path, 'utf8'));
+  chmodSync(path, 0o644);
+  writeFileSync(path, `${JSON.stringify(header, null, 2)}\n`);
+}
+
+const UNMARKED = (runId: string) =>
+  `run ${runId} keeps its calls' records inside their $STAGE_OUT, as runs did before sail moved them to out/: it can't be resumed. sail stop ${runId} ends it`;
+
+test('findRun refuses a suspended run without a layout, and a completed or failed one with the ended-run message', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const run = await opened(repo.dir);
+    dropLayout(run.dir);
+    writeStatus(run.dir, 'suspended', 'budget_exceeded');
+    expect(findRun(sail, run.runId)).toEqual({ refused: UNMARKED(run.runId) });
+    writeStatus(run.dir, 'completed');
+    expect(findRun(sail, run.runId)).toEqual({ refused: `run ${run.runId} has completed: there is nothing to resume` });
+  });
+});
+
 test("findRun throws on a STATUS it can't read: sail's own files are broken", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
@@ -324,6 +350,22 @@ test('reopenRun reopens a suspended run with the header on disk and STATUS runni
       loaded: { workflow: { name: 'ticket-to-pr' } },
     });
     expect(readStatus(dir)).toEqual({ status: 'running' });
+  });
+});
+
+test('reopenRun returns the same refusal for a run without a layout, and leaves STATUS and the events as they were', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    dropLayout(dir);
+    const events = readFileSync(join(dir, 'events.ndjson'), 'utf8');
+    expect(await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) })).toEqual({
+      refused: UNMARKED(run.runId),
+    });
+    expect([readStatus(dir), readFileSync(join(dir, 'events.ndjson'), 'utf8')]).toEqual([
+      { status: 'suspended', stopReason: 'budget_exceeded' },
+      events,
+    ]);
   });
 });
 
@@ -1024,6 +1066,96 @@ test('a dispatched start whose run directory exists is refused, and the run dire
     });
     expect(await leftBehind(repo.dir)).toEqual({ runs: [DISPATCHED], leases: [], state: 'Todo', comments: 1 });
     expect(readdirSync(dir)).toEqual(['marker']);
+  });
+});
+
+/** A dispatched run of the stub, started with `request` waiting in its hand-off file, run to its end. */
+async function dispatchedWith(repoDir: string, request: string, run: Partial<StubRun> = {}) {
+  const runs = join(repoDir, '.sail-runs');
+  mkdirSync(runs, { recursive: true });
+  const runId = run.ticket === '#1' ? 'pr-1-01M3BWNZM08Q4T6V2XRJ5KWD3N' : DISPATCHED;
+  writeFileSync(handOffFile(runs, runId), `${request}\n`);
+  const end = await runWorkflow({
+    cwd: repoDir,
+    workflow: 'ticket-to-pr',
+    ticket: 'FAKE-1',
+    clock: () => NOW,
+    ...run,
+    dispatch: { runId },
+    adapters: await fakeAdapters(repoDir),
+  });
+  if ('refused' in end) throw new Error(end.refused);
+  return { end, runs, runId };
+}
+
+test.each<['stopped' | 'unwatched', 'failed' | 'suspended', 'stopped' | 'unwatched', string | undefined]>([
+  ['stopped', 'failed', 'stopped', 'stopped by sail stop before intake#1'],
+  ['unwatched', 'suspended', 'unwatched', undefined],
+])(
+  'a dispatched run with a %s hand-off ends %s %s before intake#1, claims nothing and leaves no hand-off',
+  async (request, status, stopReason, message) => {
+    await withTempRepo(async (repo) => {
+      writeStub(repo.dir);
+      const { end, runs, runId } = await dispatchedWith(repo.dir, request);
+      expect({
+        status: end.status,
+        stopReason: end.stopReason,
+        message: message === undefined ? undefined : end.message,
+        journal: readJournal(end.dir).entries.length,
+        files: readdirSync(runs).filter((name) => name.startsWith(runId)),
+        ticket: (await ticketIn(repo.dir, 'FAKE-1')).state.name,
+      }).toEqual({ status, stopReason, message, journal: 0, files: [runId], ticket: 'Todo' });
+    });
+  },
+);
+
+test('a dispatched pull-request start with a stopped hand-off ends failed stopped before intake#1', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writePrOnly(sail);
+    const head = repo.git('rev-parse', 'HEAD');
+    const prs = join(sail, 'fake', 'prs.json');
+    writeFileSync(
+      prs,
+      readFileSync(join(__dirname, '..', 'fixtures', 'repo', '.sail', 'fake', 'prs.json'), 'utf8').replaceAll(
+        'b4efb0c5de84d87c1455d4504b8b75b095a8e10b',
+        head,
+      ),
+    );
+    const { end, runs, runId } = await dispatchedWith(repo.dir, 'stopped', { ticket: '#1', workflow: 'pr-only' });
+    expect({
+      status: end.status,
+      stopReason: end.stopReason,
+      message: end.message,
+      files: readdirSync(runs).filter((name) => name.startsWith(runId)),
+    }).toEqual({
+      status: 'failed',
+      stopReason: 'stopped',
+      message: 'stopped by sail stop before intake#1',
+      files: [runId],
+    });
+  });
+});
+
+test('a dispatched start sent a stop and then refused making its workspace leaves the stop in its hand-off, for the watcher to park its item (review R1)', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    edit(sail, 'project.yaml', 'workspace: { use: fake }', 'workspace: { use: fake, defaultBranch: missing }');
+    const runs = join(repo.dir, '.sail-runs');
+    mkdirSync(runs, { recursive: true });
+    writeFileSync(handOffFile(runs, DISPATCHED), 'stopped\n');
+    const refused = await openStub(repo.dir, { ticket: 'FAKE-1', dispatch: { runId: DISPATCHED } });
+    expect({
+      refused,
+      files: readdirSync(runs).filter((name) => name.startsWith(DISPATCHED)),
+      handOff: existsSync(handOffFile(runs, DISPATCHED))
+        ? readFileSync(handOffFile(runs, DISPATCHED), 'utf8')
+        : undefined,
+    }).toEqual({
+      refused: { refused: 'the workspace could not be made: workspace.create: missing names no commit (invalid)' },
+      files: [`${DISPATCHED}.control`],
+      handOff: 'stopped\n',
+    });
   });
 });
 

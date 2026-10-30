@@ -83,6 +83,13 @@ async function fixtureHeader(
   });
 }
 
+test("a new run's header carries layout 2, right after its run id, and validates", async () => {
+  const header = await fixtureHeader();
+  expect(header.layout).toBe(2);
+  expect(Object.keys(header).slice(0, 3)).toEqual(['schema', 'runId', 'layout']);
+  expect(validateRunHeader(header)).toEqual([]);
+});
+
 test('the workflow hash is 64 hex characters, and the same for a copy at another path', async () => {
   const first = await hashAfter();
   expect(first).toMatch(/^[0-9a-f]{64}$/);
@@ -173,6 +180,13 @@ test("the fixture's header validates, with the workflow's folder, the adapters a
   expect(header.adapters).toEqual({ ticketSource: fake, codeHost: fake, harness: fake, workspace: fake });
   expect(Object.keys(header.stages)).toEqual(['implement', 'publish', 'self-review', 'spec', 'tests']);
   expect(header.intake.name).toBe('ticket');
+});
+
+test("a step's idle limit of 0 still validates, as its minute budget of 0 does, so the agent kind refuses it with its own message (review D1)", async () => {
+  const header = await fixtureHeader();
+  const spec = header.stages.spec as unknown as { budget: Record<string, number> };
+  spec.budget = { ...spec.budget, maxIdleMinutes: 0 };
+  expect(validateRunHeader(header)).toEqual([]);
 });
 
 test("a workflow's budget overrides project.yaml's field by field, and stands alone without one: the header validates and holds the merged budget a dry run prints", async () => {
@@ -297,7 +311,7 @@ test('a header holds the checks its source lists, as a copy, and no claim, and r
   writeRunHeader(dir, header);
   const written = JSON.parse(readFileSync(join(dir, RUN_HEADER_FILE), 'utf8'));
   expect(written.source.forced).toEqual(['designation', 'state']);
-  expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'source', 'workflow']);
+  expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'layout', 'source']);
 });
 
 test("a header built with the run's workspace records its branch, repository and base, and validates; one built without it holds none of them", async () => {
@@ -336,6 +350,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
       runId: RUN_ID,
       source: FAKE_1,
       fromRun,
+      reused: 2,
       sailDir: sail,
       loaded,
       config,
@@ -352,8 +367,10 @@ test('the header of a seeded run records its fromRun after the source and no cla
     [
       'schema',
       'runId',
+      'layout',
       'source',
       'fromRun',
+      'reused',
       'workflow',
       'sail',
       'adapters',
@@ -368,6 +385,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
     fromRun,
     [],
   ]);
+  expect(header.reused).toBe(2);
 });
 
 test('a header built with definitionsSha records it after startedAt, round-trips through run.json and validates; one built without it has no such key; a value that is not 40 hex is refused', async () => {

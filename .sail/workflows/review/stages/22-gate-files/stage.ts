@@ -6,6 +6,7 @@ export const GateFiles = z.object({ base: z.string(), touched: z.array(z.string(
 
 export const gateFiles = script('gate-files', {
   run: './run.sh',
+  ports: ['codehost'],
   consumes: { pr: value(PullRequestRef), headSha: value(z.string()) },
   output: GateFiles,
   exitCodes: { passed: [0], failed: [] },

@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createFakeHarness } from '../../src/adapters/fake/harness';
+import { FEEDBACK_SOURCE } from '../../src/engine/agent-prompt';
 import { materialisePrepared, type PreparedBindings, prepareBindings, type Supplied } from '../../src/engine/bindings';
 import { type CallPaths, callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
 import type { ContractError } from '../../src/engine/contract';
@@ -177,6 +178,111 @@ async function tried(step: AgentStep, harness: Harness, template?: string): Prom
   return { run: await agentKind.run(step, s.context(harness)), s };
 }
 
+test('a silent session stalls once and leaves no timer after returning', async () => {
+  const step = bare(z.any());
+  const limited = { ...step, budget: { ...budget, maxIdleMinutes: 0.001 } };
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(180);
+      return done(null);
+    },
+  };
+  const { s } = await tried(limited, harness);
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 60, since: expect.any(String) },
+  ]);
+  const count = s.events.length;
+  await Bun.sleep(100);
+  expect(s.events.length).toBe(count);
+});
+
+test("a stall's since is the run's clock, as every event's ts is (review R3)", async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 0.001 } };
+  const s = setup(step);
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(120);
+      return done(null);
+    },
+  };
+  const clock = () => new Date('2026-09-27T09:00:00.000Z');
+  await agentKind.run(step, { ...s.context(harness), clock });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 60, since: '2026-09-27T08:59:59.940Z' },
+  ]);
+});
+
+test('an idle limit longer than a timer can wait does not stall a session at once (review R6)', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 1_000_000 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run(req) {
+      req.onEvent?.({ type: 'agent:message', text: 'working' });
+      await Bun.sleep(50);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+});
+
+test('the default idle limit is a quarter of the own minute budget', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxMinutes: 0.02 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(70);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+});
+
+test('a silence past a quarter of the own minute budget, short of half, stalls once at that quarter (review R8)', async () => {
+  // 1.2 s of minutes: a quarter is 300 ms, half 600 ms.
+  const step = { ...bare(z.any()), budget: { ...budget, maxMinutes: 0.02 } };
+  const { s } = await tried(step, {
+    ...scripted({ resolves: done(null) }),
+    async run() {
+      await Bun.sleep(450);
+      return done(null);
+    },
+  });
+  expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([
+    { type: 'step:stalled', idleMs: 300, since: expect.any(String) },
+  ]);
+});
+
+test('every event resets silence and a speaking stalled session can stall again', async () => {
+  const step = { ...bare(z.any()), budget: { ...budget, maxIdleMinutes: 0.002 } };
+  const s = setup(step);
+  const harness: Harness = {
+    ...scripted({ resolves: done(null) }),
+    async run(req) {
+      await Bun.sleep(70);
+      req.onEvent?.({ type: 'agent:message', text: 'working' });
+      await Bun.sleep(70);
+      expect(s.events.filter((e) => e.type === 'step:stalled')).toEqual([]);
+      await Bun.sleep(140);
+      expect(s.events.filter((e) => e.type === 'step:stalled')).toHaveLength(1);
+      req.onEvent?.({ type: 'agent:thinking', text: 'again' });
+      await Bun.sleep(170);
+      return done(null);
+    },
+  };
+  await agentKind.run(step, s.context(harness));
+  expect(s.events.filter((e) => e.type === 'step:stalled').map((e) => e.idleMs)).toEqual([120, 120]);
+});
+
+test('non-positive and non-finite idle limits are step problems', () => {
+  for (const maxIdleMinutes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(agentKind.problems({ ...bare(z.any()), budget: { ...budget, maxIdleMinutes } })).toEqual([
+      `budget.maxIdleMinutes must be a positive number: ${maxIdleMinutes}`,
+    ]);
+  }
+});
+
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
 const types = (events: readonly CallEvent[]): string[] => events.map((event) => event.type);
 
@@ -191,27 +297,20 @@ const ends = (events: readonly CallEvent[]): object[] =>
 /** What a try that never reached a session records: no session id, no turns, no usage. */
 const UNSTARTED = { adapter: 'scripted', model: MODEL, turns: 0, toolCalls: 0, denials: 0 };
 
-test("problems() refuses a produced name that differs from an engine file's only by case", () => {
-  expect(agentKind.problems(spec({ produces: { 'Prompt.md': 'file' } }))).toEqual([
-    "'Prompt.md' can't be produced: the engine writes 'prompt.md' in $STAGE_OUT, and a file system that ignores case takes them for one",
-  ]);
-});
-
 test('problems() refuses two produced names that differ only by case', () => {
   expect(agentKind.problems(spec({ produces: { 'Notes.md': 'file', 'notes.md': 'file' } }))).toEqual([
     "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
   ]);
 });
 
-test('problems() reports a produced name the engine writes, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
+test('problems() reports a produced name that is not plain, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
   expect(agentKind.kind).toBe('agent');
   expect(agentKind.problems(spec())).toEqual([]);
   expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 1 }, onInvalidOutput: 'fail' }))).toEqual([]);
   expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 0 } }))).toEqual([
     'budget.maxUsd must be a positive number: 0',
   ]);
-  expect(agentKind.problems(spec({ produces: { 'session.log': 'file', '../spec.md': 'file' } }))).toEqual([
-    "'session.log' can't be produced: the engine writes it in $STAGE_OUT",
+  expect(agentKind.problems(spec({ produces: { '../spec.md': 'file' } }))).toEqual([
     "'../spec.md' can't be produced: it is not a plain file name",
   ]);
   const out: [keyof typeof budget, number][] = [
@@ -269,7 +368,7 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
       CALL: '1',
       TRY: '3',
       STAGE_IN: join(dir, 'in'),
-      STAGE_OUT: dir,
+      STAGE_OUT: join(dir, 'out'),
       WORKSPACE: s.workspace,
       BRANCH: 'sail/FAKE-1',
       SAIL_CONFIG: join(s.workspace, '.sail', 'project.yaml'),
@@ -293,7 +392,8 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
   });
   expect(typeof onEvent).toBe('function');
   expect(prompt).toStartWith(`Write the spec from ${join(dir, 'in', 'brief.md')}.\n\n${UNTRUSTED_HEADING}\n`);
-  expect(prompt?.trimEnd()).toEndWith(feedback[0] ?? '');
+  expect(prompt?.trimEnd()).toEndWith(`${feedback[0]}\n</untrusted-input>`);
+  expect(prompt).toContain(`<untrusted-input source="${FEEDBACK_SOURCE}">\n${feedback[0]}\n</untrusted-input>`);
   expect(s.read('prompt.md')).toBe(prompt ?? '');
   expect(run.output).toEqual({ ...VALID, points: 2, approved: true });
   expect(run.record).toMatchObject({ try: 3, validationTry: 2, validationFailed: false });
@@ -361,7 +461,7 @@ test('a done session gives its output and the hashes of its files, and records i
   expect(run).toEqual({
     outcome: 'done',
     output: VALID,
-    files: { 'spec.md': { path: '01-spec/call-1/spec.md', bytes: 7, sha256: sha256('# Spec\n') } },
+    files: { 'spec.md': { path: '01-spec/call-1/out/spec.md', bytes: 7, sha256: sha256('# Spec\n') } },
     errors: [],
     record: {
       try: 1,
@@ -378,7 +478,13 @@ test('a done session gives its output and the hashes of its files, and records i
     { type: 'prompt:rendered', try: 1, ...prompt },
     expect.objectContaining({ type: 'harness:session_end', sessionId: 'session-7', outcome: 'done', usage: USAGE }),
     { type: 'output:validated' },
-    { type: 'file:produced', name: 'spec.md', path: '01-spec/call-1/spec.md', bytes: 7, sha256: sha256('# Spec\n') },
+    {
+      type: 'file:produced',
+      name: 'spec.md',
+      path: '01-spec/call-1/out/spec.md',
+      bytes: 7,
+      sha256: sha256('# Spec\n'),
+    },
   ]);
   // What the call writes from it is a valid result, and holds nothing of the provider's own answer.
   const at = new Date('2026-10-05T10:00:00.000Z');
@@ -930,7 +1036,7 @@ test('a valid document is reported produced and then valid, and the result recor
     step,
     s.context(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } })),
   );
-  const entry = { path: '01-spec/call-1/spec.md', bytes: Buffer.byteLength(COMPLETED), sha256: sha256(COMPLETED) };
+  const entry = { path: '01-spec/call-1/out/spec.md', bytes: Buffer.byteLength(COMPLETED), sha256: sha256(COMPLETED) };
   expect([run.outcome, run.errors, run.files]).toEqual([
     'done',
     [],
@@ -999,6 +1105,35 @@ test('corrective prompt names only template placeholders, not quoted color tags'
     'spec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}',
   );
   expect(harness.requests[0]?.prompt.includes('color')).toBe(false);
+  expect(harness.requests[0]?.prompt).toContain(
+    `<untrusted-input source="${FEEDBACK_SOURCE}">\nspec.md: noPlaceholders: line 5 still holds the placeholder {{requirements: …}}\n</untrusted-input>`,
+  );
+});
+
+test('a document nested too deep ends the try in error with the depth problem, and the corrective try with a valid one ends done (ADW-198)', async () => {
+  const step = documented();
+  const deep = COMPLETED.replace('- greet --shout shouts', `${'- '.repeat(100)}x`);
+  const first = await agentKind.run(
+    step,
+    documentSetup(step).context(scripted({ resolves: done(VALID), files: { 'spec.md': deep } })),
+  );
+  expect([first.outcome, first.errors]).toEqual([
+    'error',
+    [
+      {
+        reason: 'invalid_output',
+        message: 'spec.md: nests 100 levels deep, more than the 64 a document may nest to be validated',
+      },
+    ],
+  ]);
+  expect(first.files['spec.md']?.validation).toEqual({ ok: false, checks: [] });
+  const harness = scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } });
+  const second = await agentKind.run(
+    step,
+    documentSetup(step, 2).context(harness, { validationTry: 2, feedback: first.errors.map(({ message }) => message) }),
+  );
+  expect(second.outcome).toBe('done');
+  expect(harness.requests[0]?.prompt).toContain('spec.md: nests 100 levels deep');
 });
 
 test('only a document the session left is validated: one it removed is a missing file, with no verdict', async () => {
@@ -1033,17 +1168,17 @@ test("a step of a multi-step call renders and records its document in its call's
   const [request] = (harness as Recorded).requests;
   expect([request?.key, request?.env.STAGE_OUT, request?.env.STAGE_IN]).toEqual([
     'publish#1/describe',
-    call,
+    join(call, 'out'),
     join(call, 'steps', '1-describe', 'in'),
   ]);
   expect(seen).toEqual([RENDERED]);
   expect([run.outcome, run.files['spec.md']?.path, run.record.prompt]).toEqual([
     'done',
-    '05-publish/call-1/spec.md',
+    '05-publish/call-1/out/spec.md',
     expect.objectContaining({ path: '05-publish/call-1/steps/1-describe/prompt.md' }),
   ]);
   expect([readdirSync(call).sort(), readdirSync(paths.dir).sort()]).toEqual([
-    ['spec.md', 'steps'],
+    ['out', 'steps'],
     ['in', 'prompt.md', 'session.log'],
   ]);
 });

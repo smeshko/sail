@@ -1,7 +1,8 @@
-// The script kind: any executable, run with the environment preamble in its own process group. Its exit code maps to
-// `passed` or `failed` through `exitCodes`, its last stdout line is its JSON output, and it must leave every declared
-// file in `$STAGE_OUT`. Every broken promise is collected as an error. It reports the facts only it knows as events:
-// how the process ran and ended, whether the output was read and held its schema, and which files it recorded.
+// The script kind: any executable, run with the script environment in its own process group. Credentials are never
+// given unless declared. Its exit code maps to `passed` or `failed` through `exitCodes`, its last stdout line is its
+// JSON output, and it must leave every declared file in `$STAGE_OUT`. Every broken promise is collected as an error. It
+// reports the facts only it knows as events: how the process ran and ended, whether the output was read and held its
+// schema, and which files it recorded.
 //
 // `sail` inside a script is the sail that runs it: `PATH` starts with this package's `bin/`, and `SAIL_BUN` names the
 // running Bun, which `bin/sail` executes. Both name this machine, so neither is recorded.
@@ -9,7 +10,9 @@
 // `SAIL_EVENTS` names the step's port events file, `port-events.ndjson` in its call directory, where a `sail port` the
 // script runs leaves its provider events. Once the process has ended, however it ended, the file is read and each event
 // emitted, after `script:exec` and before `script:exit`. A line that is no provider event ends the step in `error`,
-// with the reason `port`. The variable is this kind's, not the preamble's: an agent step gets none.
+// with the reason `port`. A step that doesn't pass and whose port events hold an `unavailable` error ends in `error`,
+// reason `port` with code `unavailable`, ahead of any other error: its provider was unreachable, so the work's own
+// verdict means nothing. The variable is this kind's, not the preamble's: an agent step gets none.
 //
 // A step that declares `exclusive` takes that machine-wide slot before `script:exec` and gives it back once the script
 // has ended and been read. While another holder has it the step waits, emitting `step:queued` for each holder it finds,
@@ -18,8 +21,10 @@ import { closeSync, fstatSync, openSync, readSync, statSync } from 'node:fs';
 import { delimiter, join, relative, resolve } from 'node:path';
 import { stageOut } from '../engine/call-dir';
 import { systemClock } from '../engine/clock';
+import type { Port } from '../engine/config';
 import { type ContractError, producesProblems, recordFiles, validateOutput } from '../engine/contract';
-import { withoutRepositoryVariables } from '../engine/git-env';
+import { scriptEnv } from '../engine/env-allowlist';
+import { repositoryVariables } from '../engine/git-env';
 import { PORT_EVENTS_FILE, readPortEvents } from '../engine/port-events';
 import { preamble } from '../engine/preamble';
 import { runProcess } from '../engine/process';
@@ -35,7 +40,7 @@ import {
   type SlotResult,
   takeSlot,
 } from '../engine/slots';
-import type { ScriptOutcome, ScriptStep } from '../sdk/steps';
+import type { ScriptOutcome, ScriptPort, ScriptStep } from '../sdk/steps';
 import type { StepContext, StepKind, StepRun } from './index';
 
 /** This package's `bin/`, which holds the `sail` a script step runs. */
@@ -48,6 +53,8 @@ const SYSTEM_PATH = '/usr/bin:/bin';
 export const DEFAULT_TIMEOUT_SECONDS = 600;
 
 const LISTS = ['passed', 'failed', 'error'] as const;
+
+const SCRIPT_PORTS: Record<ScriptPort, Port> = { 'ticket-source': 'ticketSource', codehost: 'codeHost', jev: 'jev' };
 
 const SLOT_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -65,6 +72,20 @@ export function exitCodeMap(step: ScriptStep): Record<(typeof LISTS)[number], re
 
 function problems(step: ScriptStep): string[] {
   const found: string[] = [];
+  const ports = new Set<string>();
+  for (const port of step.ports ?? []) {
+    if (!Object.hasOwn(SCRIPT_PORTS, port))
+      found.push(`ports names an unknown port '${port}': ticket-source, codehost or jev`);
+    else if (ports.has(port)) found.push(`ports names '${port}' twice`);
+    ports.add(port);
+  }
+  const names = new Set<string>();
+  for (const name of step.env ?? []) {
+    if (typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+      found.push(`env names an invalid variable: '${name}'`);
+    if (names.has(name)) found.push(`env names '${name}' twice`);
+    names.add(name);
+  }
   const map = exitCodeMap(step);
   const listedUnder = new Map<number, string>();
   for (const list of LISTS) {
@@ -135,11 +156,11 @@ function readOutput(
   try {
     line = lastLine(stdout);
   } catch (error) {
-    // The log is in $STAGE_OUT, so a script that clears it before writing its files removes the log too.
+    // A script may write anywhere in the run directory, the log's included.
     const code = (error as NodeJS.ErrnoException).code ?? (error as Error).message;
     const message =
       code === 'ENOENT'
-        ? "stdout.log was removed from $STAGE_OUT, so the output can't be read"
+        ? "stdout.log was removed, so the output can't be read"
         : `stdout.log can't be read (${code}), so the output can't be either`;
     return { ok: false, error: { reason: 'invalid_output', message } };
   }
@@ -249,24 +270,35 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
   const timeoutSeconds = step.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
   const portEvents = join(context.paths.dir, PORT_EVENTS_FILE);
   const variables = [...preamble(context), { name: 'SAIL_EVENTS', value: portEvents, path: true }];
-  // A step in a run's workspace must not have its git point at the clone. A step in the clone keeps what a hook set.
-  const inherited = context.inClone
-    ? Object.fromEntries(
-        Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-      )
-    : withoutRepositoryVariables(process.env);
-
-  // Recorded relative to the root, and only these variables: the inherited environment may hold secrets. The script
-  // runs in the workspace.
+  // Record only the preamble's values, even when a port cannot be resolved.
   const at = (path: string) => relative(context.root, path) || '.';
   const env = Object.fromEntries(variables.map(({ name, value, path }) => [name, path ? at(value) : value]));
   const recorded = { command: checkoutPath(context.root, context.runDir, command), env };
+  const source = context.env ?? process.env;
+  const declared = [...(step.env ?? [])];
+  for (const port of step.ports ?? []) {
+    const names = context.portVariables
+      ? await context.portVariables(SCRIPT_PORTS[port])
+      : { problem: 'no port variable resolver is available' };
+    if ('problem' in names)
+      return {
+        outcome: 'error',
+        output: null,
+        files: {},
+        record: recorded,
+        errors: [{ reason: 'not_started', message: `the step declares the port ${port}, but ${names.problem}` }],
+      };
+    declared.push(...names);
+  }
+  const picked = scriptEnv(source, declared);
+  // A step in a run's workspace must not have its git point at the clone. A step in the clone keeps what a hook set.
+  const inherited = { ...picked.env, ...(context.inClone ? repositoryVariables(source) : {}) };
 
   emit({
     type: 'script:exec',
     command: recorded.command,
     cwd: at(context.workspace),
-    envKeys: variables.map(({ name }) => name),
+    envKeys: [...variables.map(({ name }) => name), ...picked.given],
   });
   const clock = context.clock ?? systemClock;
   const startedAt = clock().getTime();
@@ -346,6 +378,14 @@ async function runScript(step: ScriptStep, context: StepContext): Promise<StepRu
     return ended({ reason: 'exit_code', message: `interrupted, then ${how}` }, record);
   }
   if (end.signal !== null) return ended({ reason: 'exit_code', message: `ended by signal ${end.signal}` }, record);
+  // A step that didn't pass because a provider was unreachable is an error, never a verdict: the run suspends to retry it.
+  const outage = ported.events.find(
+    (event): event is Extract<typeof event, { type: 'error:port' }> =>
+      event.type === 'error:port' && event.code === 'unavailable',
+  );
+  if (mapped !== 'passed' && outage !== undefined) {
+    return ended({ reason: 'port', code: 'unavailable', message: outage.message }, record);
+  }
   if (mapped !== 'passed' && mapped !== 'failed') {
     return ended({ reason: 'exit_code', message: `exit code ${end.code} is not mapped to passed or failed` }, record);
   }

@@ -14,6 +14,8 @@
 //   a resume that leaves the run unended parks the item with why; no `run.json` is a start that was refused, whose
 //   reason is the last line of its dispatch log. Anything else, such as `suspended until`, waits for a person, holding
 //   no slot.
+// - A hand-off file (`engine/control.ts`) the run never took is deleted when its item settles: done, failed or parked.
+//   A failure with a `stopped` hand-off, a start refused after `sail stop` reached it, parks the item instead.
 // - **A held dispatch**: a run `suspended usage_limit` holds the workflow's dispatch (`queue:held`) until its reset time,
 //   or the back-off after it hit the limit. While held, nothing starts and no run is resumed, and no item's attempt is
 //   counted, failed or parked. A tick past the hold releases it (`queue:released`), and the run is resumed with the
@@ -41,7 +43,7 @@
 //   caller.
 import { join } from 'node:path';
 import { branchFor } from '../engine/branch';
-import { cancelUnwatch } from '../engine/control';
+import { cancelUnwatch, dropHandOff, handOffStops } from '../engine/control';
 import { getPullRequestDetails } from '../engine/pr-source';
 import { readStatus } from '../engine/run-dir';
 import { newRunId } from '../engine/run-id';
@@ -173,8 +175,13 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
     }
   };
 
-  /** Records a failed attempt, or a failure before any, and reports it. */
+  /** Records a failed attempt, or a failure before any, and reports it: parked instead, when a stop waits in the hand-off. */
   const fail = (item: QueueItem, runId: string, reason: string) => {
+    if (handOffStops(options.runsDir, runId)) {
+      park(item, runId, `run ${runId} was stopped: ${reason}`);
+      return;
+    }
+    dropHandOff(options.runsDir, runId);
     const outcome = store.failed(item.dedupKey, reason);
     const retryAt = store.snapshot().items.find((each) => each.dedupKey === item.dedupKey)?.retryAt;
     options.onSettled?.({
@@ -213,6 +220,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
   };
 
   const park = (item: QueueItem, runId: string, reason: string) => {
+    dropHandOff(options.runsDir, runId);
     store.parked(item.dedupKey, reason);
     options.onSettled?.({
       dedupKey: item.dedupKey,
@@ -269,6 +277,7 @@ export function createDispatcher(options: DispatcherOptions): Dispatcher {
         store.adopted(item.dedupKey, answer.pid);
         break;
       case 'done':
+        dropHandOff(options.runsDir, runId);
         store.done(item.dedupKey);
         options.onSettled?.({ dedupKey: item.dedupKey, ...sourceOf(item), runId, outcome: 'done' });
         break;

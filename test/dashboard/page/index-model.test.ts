@@ -75,6 +75,16 @@ test('railRepos lists alpha then beta, each run newest first with its status, st
   expect([...named('index-model.ts'), ...named('attention.ts')]).toEqual([]);
 });
 
+test('only running runs carry the first stalled key in the rail', () => {
+  const repos = index(m.registryDir);
+  const run = repos[0]?.runs.find((run) => run.runId === GOLDEN_RUN_ID);
+  if (!run?.summary) throw new Error('missing fixture summary');
+  run.summary.stalled = [{ key: 'spec#1', since: '2026-10-01T12:00:00.000Z' }];
+  expect(railRepos(repos, NOW)[0]?.runs[0]?.stalled).toBeUndefined();
+  run.status = { status: 'running' };
+  expect(railRepos(repos, NOW)[0]?.runs[0]?.stalled).toBe('spec#1');
+});
+
 test('a running copy is live, listed first, and its duration is the time since it started', () => {
   runningCopy(m, 20);
   const started = Date.parse('2026-09-25T09:00:00.000Z');
