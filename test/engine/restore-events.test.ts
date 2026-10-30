@@ -1,7 +1,7 @@
 // lostEvents(): what a resume restores to the stream, from the golden run's directory with its events cut as a power loss
 // would cut them.
 import { afterEach, expect, test } from 'bun:test';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { lostEvents, runStartOf } from '../../src/engine/restore-events';
@@ -79,4 +79,42 @@ test('an empty events file restores the run:start and every journal line', () =>
     'publish#1/open',
     'publish#1',
   ]);
+});
+
+/** A seeded run that reused the golden run's first `reused` lines: its header, and a repository root holding the source. */
+function seededIn(reused: number | undefined) {
+  const root = mkdtempSync(join(tmpdir(), 'sail-restore-root-'));
+  dirs.push(root);
+  const source = join(root, '.sail-runs', 'FAKE-1-SOURCE');
+  mkdirSync(source, { recursive: true });
+  cpSync(join(GOLDEN, 'events.ndjson'), join(source, 'events.ndjson'));
+  const dir = copyWith(() => []);
+  const header = { ...readRunHeader(dir), fromRun: 'FAKE-1-SOURCE', ...(reused === undefined ? {} : { reused }) };
+  return lostEvents({ dir, header, sailDir: join(root, '.sail') });
+}
+
+test("the reused journal lines are restored with fromRun, and the intake's with the source's ticket", () => {
+  const { appends } = seededIn(2);
+  expect(appends.slice(0, 3)).toEqual([
+    {
+      type: 'journal:append',
+      key: 'intake#1',
+      line: 1,
+      outcome: 'passed',
+      fromRun: 'FAKE-1-SOURCE',
+      ticket: {
+        ticketKey: 'FAKE-1',
+        title: 'Add a --shout flag to the greet command',
+        url: expect.stringContaining('FAKE-1'),
+      },
+    },
+    { type: 'journal:append', key: 'spec#1', line: 2, outcome: 'done', fromRun: 'FAKE-1-SOURCE' },
+    { type: 'journal:append', key: 'implement#1', line: 3, outcome: 'done' },
+  ]);
+});
+
+test('a seeded header with no reused, an older run, restores its lines without fromRun', () => {
+  const { appends } = seededIn(undefined);
+  expect(appends.some((event) => event.type === 'journal:append' && 'fromRun' in event)).toBe(false);
+  expect(appends[0]).toEqual({ type: 'journal:append', key: 'intake#1', line: 1, outcome: 'passed' });
 });

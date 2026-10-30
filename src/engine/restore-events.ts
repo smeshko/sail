@@ -4,13 +4,20 @@
 // line was ever synced behind it. `lostEvents()` compares the events with the journal and returns those two, and a
 // resume emits them once, so each is in the stream exactly once however often the run resumes.
 //
+// A seeded run's reused lines, those up to the header's `reused`, are restored with `fromRun`, and the intake's with the
+// source's ticket, as a seeded run reports them at its start.
+//
 // A restored event takes the resume's `ts`, so a restored `run:start` makes the summary's `startedAt` the resume's time.
 // The run header's `startedAt` stays the true one.
+import { join } from 'node:path';
 import { readEvents } from '../events/consumers/ndjson';
 import type { NewEvent } from '../events/types';
+import { INTAKE_KEY } from './intake';
 import { readJournal } from './journal';
 import type { OpenedRun } from './open-run';
+import { runsDir } from './run-dir';
 import type { RunHeader } from './run-header';
+import { sourceTicket } from './seed-run';
 
 /** The `run:start` of the run `header` describes: from the header, never derived again. */
 export function runStartOf(header: RunHeader): NewEvent {
@@ -36,12 +43,17 @@ export function lostEvents(opened: Pick<OpenedRun, 'dir' | 'header' | 'sailDir'>
   const { dir, header } = opened;
   const events = readEvents(dir);
   const reported = new Set(events.flatMap((event) => (event.type === 'journal:append' ? [event.key] : [])));
+  const { fromRun, reused = 0 } = header;
+  const ticket =
+    fromRun === undefined || reused === 0 ? undefined : sourceTicket(join(runsDir(opened.sailDir), fromRun));
   return {
     ...(events.some((event) => event.type === 'run:start') ? {} : { start: runStartOf(header) }),
-    appends: readJournal(dir).entries.flatMap((entry) =>
-      reported.has(entry.key)
-        ? []
-        : [{ type: 'journal:append' as const, key: entry.key, line: entry.seq, outcome: entry.outcome }],
-    ),
+    appends: readJournal(dir).entries.flatMap((entry): NewEvent[] => {
+      if (reported.has(entry.key)) return [];
+      const { key, seq: line, outcome } = entry;
+      if (fromRun === undefined || line > reused) return [{ type: 'journal:append', key, line, outcome }];
+      const named = key === INTAKE_KEY && ticket !== undefined ? { ticket } : {};
+      return [{ type: 'journal:append', key, line, outcome, fromRun, ...named }];
+    }),
   };
 }

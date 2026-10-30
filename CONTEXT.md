@@ -303,7 +303,7 @@ What is added to a suspended run's budget, in dollars or minutes, given to `sail
 _Avoid_: top-up, extension, bump
 
 **Seeded run**:
-A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun`. It claims nothing, and works on a branch of its own.
+A new run whose journal starts with another run's calls, those before a named stage, so they aren't paid for again. `sail run --from-run <run> --stage <stage>` starts one. It runs that stage and stops, suspended with `until`, unless `--continue`. Its run header records the run it came from as `fromRun` and how many journal lines it reused as `reused`, and a resume restores the reports of reused calls its events lost. It claims nothing, and works on a branch of its own.
 _Avoid_: rerun, fork, clone, replay
 
 **Reused call**:

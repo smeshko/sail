@@ -336,6 +336,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
       runId: RUN_ID,
       source: FAKE_1,
       fromRun,
+      reused: 2,
       sailDir: sail,
       loaded,
       config,
@@ -354,6 +355,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
       'runId',
       'source',
       'fromRun',
+      'reused',
       'workflow',
       'sail',
       'adapters',
@@ -368,4 +370,5 @@ test('the header of a seeded run records its fromRun after the source and no cla
     fromRun,
     [],
   ]);
+  expect(header.reused).toBe(2);
 });
