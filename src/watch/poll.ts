@@ -12,9 +12,11 @@
 // - A poll that throws, as a queue write on a full disk does, is retried at the backoff all the same. `pollNow` rejects
 //   with it, and a poll nobody awaits (a timer's, a command's, the start's) hands it to `onError`, never to an unhandled
 //   rejection, which would end the watcher.
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { ProjectConfig } from '../engine/config';
-import { loadWorkflow } from '../engine/load-workflow';
+import { type LoadedWorkflow, loadWorkflow } from '../engine/load-workflow';
 import { runsDir } from '../engine/run-dir';
 import { parseEvery, pollKind, watchLabel, watchProblem } from '../engine/watchable';
 import type { QueueEvent } from '../events/types';
@@ -59,7 +61,15 @@ export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclara
   const { sailDir, name } = options;
   const loaded = await loadWorkflow(sailDir, name);
   if ('refused' in loaded) return loaded;
-  const { workflow } = loaded;
+  return declaration(name, loaded.workflow, options.config);
+}
+
+/** The watch declaration of a loaded workflow, or a refusal: it declares no watch, or a broken one. */
+function declaration(
+  name: string,
+  workflow: LoadedWorkflow['workflow'],
+  config: Pick<ProjectConfig, 'label'>,
+): WatchDeclaration | { refused: string } {
   if (workflow.watch === undefined) return { refused: `workflow '${name}' isn't watched: it declares no watch` };
   const everyMs = parseEvery(workflow.watch.every);
   const problem = watchProblem(workflow);
@@ -68,7 +78,35 @@ export async function readWatch(options: ReadWatchOptions): Promise<WatchDeclara
     return { refused: `workflow '${name}' ${problem}` };
   }
   const kind = pollKind(workflow);
-  return { workflow: name, kind, label: watchLabel(workflow, options.config), everyMs, maxConcurrentRuns };
+  return { workflow: name, kind, label: watchLabel(workflow, config), everyMs, maxConcurrentRuns };
+}
+
+/**
+ * Loads every workflow under `<sailDir>/workflows/`, in name order, and reads the watch declaration of each that
+ * declares one. One that won't load, or declares a broken watch, refuses.
+ */
+export async function readWatches(options: {
+  sailDir: string;
+  config: Pick<ProjectConfig, 'label'>;
+}): Promise<{ watches: WatchDeclaration[] } | { refused: string }> {
+  const { sailDir, config } = options;
+  const root = join(sailDir, 'workflows');
+  const names = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+    : [];
+  const watches: WatchDeclaration[] = [];
+  for (const name of names) {
+    const loaded = await loadWorkflow(sailDir, name);
+    if ('refused' in loaded) return loaded;
+    if (loaded.workflow.watch === undefined) continue;
+    const watch = declaration(name, loaded.workflow, config);
+    if ('refused' in watch) return watch;
+    watches.push(watch);
+  }
+  return { watches };
 }
 
 export interface OpenWatchTargetOptions extends ReadWatchOptions {
