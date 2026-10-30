@@ -502,7 +502,7 @@ The port that runs an agent step: a session with tools, permissions enforced on 
 _Avoid_: agent provider, runner, executor, model
 
 **Jev port**:
-The optional port to Jev: `ask` a state's typed questions and get their answers keyed by name. A script step reaches it with `sail port jev ask`, and each answered call leaves a `jev:asked` event. Unlike the other four ports, no run resolves it: only `sail port jev` does, and the config may leave `adapters.jev` out. v1 adapter: `typesafe`.
+The optional port to Jev: `ask` a state's typed questions and get their answers keyed by name. A script step reaches it with `sail port jev ask`, and each answered call leaves a `jev:asked` event. Unlike the other four ports, no run resolves it: only `sail port jev` does, and the config may leave `adapters.jev` out. v1 adapter: `typesafe`, which reads its endpoint from `SAIL_TYPESAFE_API_URL`, never the config, and sends `TYPESAFE_API_KEY` only to `https://api.typesafe.ai` or a loopback host.
 _Avoid_: judge port, oracle port, LLM port
 
 **Codex login**:

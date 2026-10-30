@@ -166,3 +166,44 @@ test('jev: { use: typesafe } without TYPESAFE_API_KEY exits 3 naming it, and ask
     expect(stderr).toContain('needs TYPESAFE_API_KEY, which is not set');
   });
 });
+
+test('jev: { use: typesafe, apiUrl } exits 3 naming apiUrl and SAIL_TYPESAFE_API_URL, and asks nothing', async () => {
+  await withTempRepo(async (repo) => {
+    withJev(repo, undefined, '{ use: typesafe, apiUrl: http://example.net }');
+    const { code, stdout, stderr } = await jev(repo, ['ask'], {
+      env: { TYPESAFE_API_KEY: 'demo-key-12345678' },
+      stdin: BODY,
+    });
+    expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+    expect(stderr).toContain('/adapters/jev');
+    expect(stderr).toContain('option apiUrl');
+    expect(stderr).toContain('SAIL_TYPESAFE_API_URL');
+  });
+});
+
+test.each(['https://example.net', 'http://example.net'])(
+  'SAIL_TYPESAFE_API_URL=%s exits 3 naming the variable, and asks nothing',
+  async (url) => {
+    await withTempRepo(async (repo) => {
+      withJev(repo, undefined, '{ use: typesafe }');
+      const { code, stdout, stderr } = await jev(repo, ['ask'], {
+        env: { TYPESAFE_API_KEY: 'demo-key-12345678', SAIL_TYPESAFE_API_URL: url },
+        stdin: BODY,
+      });
+      expect({ code, stdout }).toEqual({ code: EXIT_REFUSED, stdout: '' });
+      expect(stderr).toContain(`SAIL_TYPESAFE_API_URL is ${url}`);
+    });
+  },
+);
+
+test('SAIL_TYPESAFE_API_URL on a loopback host is used: the ask goes there and fails unreachable, not refused', async () => {
+  await withTempRepo(async (repo) => {
+    withJev(repo, undefined, '{ use: typesafe }');
+    const { code, stderr } = await jev(repo, ['ask'], {
+      env: { TYPESAFE_API_KEY: 'demo-key-12345678', SAIL_TYPESAFE_API_URL: 'http://127.0.0.1:9' },
+      stdin: BODY,
+    });
+    expect(code).not.toBe(EXIT_REFUSED);
+    expect(stderr).toContain('TypeSafe is unreachable at 127.0.0.1:9');
+  });
+});
