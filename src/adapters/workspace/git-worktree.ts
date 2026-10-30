@@ -153,7 +153,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     async holder(leased, branch) {
       return heldLease(leasesDir(), leased, branch);
     },
-    async create(run, { branch, base, signal }) {
+    async create(run, { branch, base, fallback, signal }) {
       const started = now().getTime();
       await fetchRemote(repo, remote, env, options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS, signal);
       // A rerun whose branch is already on the remote continues it, so its push is a fast-forward.
@@ -161,7 +161,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
         base ??
         (resolveCommit(repo, `refs/remotes/${remote}/${branch}`, env)
           ? `refs/remotes/${remote}/${branch}`
-          : `${remote}/${defaultBranch()}`);
+          : (fallback ?? `${remote}/${defaultBranch()}`));
       const baseSha = resolveCommit(repo, from, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${from} names no commit`);
       const path = join(run.runDir, WORKSPACE_DIR);

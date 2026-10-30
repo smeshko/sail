@@ -433,6 +433,18 @@ export function workspaceSuite(label: string, make: MakeWorkspace): void {
     expect('baseSha' in workspace ? workspace.baseSha : workspace).toBe(world.baseSha);
   });
 
+  test(`${label}: a fallback is where a branch the remote lacks starts, and the branch's tip wins over it (review V2)`, async () => {
+    const { adapter, world } = await start();
+    const fallback = world.publishBranch('sail/FAKE-79-elsewhere');
+    const tip = world.publishBranch('sail/FAKE-80-published');
+    const absent = held(await settle(adapter.create(await world.run('r1'), { branch: 'sail/FAKE-81', fallback })));
+    const present = held(
+      await settle(adapter.create(await world.run('r2'), { branch: 'sail/FAKE-80-published', fallback })),
+    );
+    const sha = (workspace: ReturnType<typeof held>) => ('baseSha' in workspace ? workspace.baseSha : workspace);
+    expect([sha(absent), sha(present)]).toEqual([fallback, tip]);
+  });
+
   test(`${label}: diff over <rev>...HEAD is taken against the merge-base, and diff over a sha against that sha`, async () => {
     const { adapter, world } = await start();
     const { path } = await adapter.create(await world.run('r1'), { base: world.base, branch: BRANCH });

@@ -65,10 +65,10 @@ export function createFakeWorkspace(options: FakeWorkspaceOptions): WorkspacePor
     async holder(remote, branch) {
       return heldLease(leasesDir(), remote, branch);
     },
-    async create(run, { base, branch }) {
+    async create(run, { base, branch, fallback }) {
       const started = now().getTime();
       // A branch already in the repository, which stands in for the remote, is continued rather than restarted.
-      base ??= resolveCommit(repo, `refs/heads/${branch}`, env) ? `refs/heads/${branch}` : defaultBranch;
+      base ??= resolveCommit(repo, `refs/heads/${branch}`, env) ? `refs/heads/${branch}` : (fallback ?? defaultBranch);
       const baseSha = resolveCommit(repo, base, env);
       if (baseSha === undefined) throw new PortError('workspace', 'create', 'invalid', `${base} names no commit`);
       const path = join(run.runDir, WORKSPACE_DIR);

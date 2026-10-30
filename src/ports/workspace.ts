@@ -37,11 +37,17 @@ export interface WorkspacePort {
   holder(remote: string, branch: string): Promise<Lease | undefined>;
   /**
    * A detached checkout of `base`, recording `branch` for the later push. Left out, `base` is `branch`'s tip on the remote
-   * when the remote has it, else the default branch's tip. `signal` stops whatever the adapter fetches first. Emits `workspace:created`.
+   * when the remote has it, else `fallback`, else the default branch's tip. `signal` stops whatever the adapter fetches
+   * first. Emits `workspace:created`.
    */
   create(
     run: RunRef,
-    from: { readonly branch: string; readonly base?: string; readonly signal?: AbortSignal },
+    from: {
+      readonly branch: string;
+      readonly base?: string;
+      readonly fallback?: string;
+      readonly signal?: AbortSignal;
+    },
   ): Promise<Workspace>;
   /**
    * Copies `paths` as committed at `base` into the directory `into`, and returns the commit's sha. Left out, `base` is

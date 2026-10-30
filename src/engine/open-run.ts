@@ -36,8 +36,9 @@
 // `force`, and records the checks it overrode as a forced manual run does.
 //
 // A start given `definitions`, as a dispatched one is, runs on the `.sail/` committed at their sha rather than the
-// clone's: every check above reads that copy, its workspace is based on that commit, and its run directory keeps the
-// committed `.sail/` and conventions whole in `definition/`, recording the sha as `definitionsSha`.
+// clone's: every check above reads that copy, its workspace is based on that commit unless its branch is on the remote,
+// and its run directory keeps the committed `.sail/` and conventions whole in `definition/`, recording the sha as
+// `definitionsSha`.
 //
 // Every start checks designation against the workflow's label: its `watch.label`, then `project.yaml`'s, then sail's,
 // the label its watcher polls.
@@ -349,7 +350,7 @@ export interface Made {
 
 /**
  * Leases `branch`, makes the run directory and the workspace at `base`, and checks for an abort, in that order. Left out,
- * `base` is the branch's tip on the remote when the remote has it, else the default branch's tip. A refusal at any step undoes the ones before it, in reverse.
+ * `base` is the branch's tip on the remote when the remote has it, else `fallback`, else the default branch's tip. A refusal at any step undoes the ones before it, in reverse.
  */
 export async function startWorkspace(options: {
   port: WorkspacePort;
@@ -357,9 +358,10 @@ export async function startWorkspace(options: {
   sailDir: string;
   branch: string;
   base?: string;
+  fallback?: string;
   signal: AbortSignal | undefined;
 }): Promise<{ made: Made } | { refused: string }> {
-  const { port, run, sailDir, branch, base, signal } = options;
+  const { port, run, sailDir, branch, base, fallback, signal } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -386,6 +388,7 @@ export async function startWorkspace(options: {
     workspace = await port.create(run, {
       branch,
       ...(base === undefined ? {} : { base }),
+      ...(fallback === undefined ? {} : { fallback }),
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
@@ -609,8 +612,13 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       branch,
       signal: options.signal,
       // A pull-request run starts at the head sha it was resolved at (D4), and a ticket run from definitions at their
-      // commit, so a push since they were read can't give it another commit's code.
-      ...(source.kind === 'pr' ? { base: source.headSha } : definitions === undefined ? {} : { base: definitions.sha }),
+      // commit, so a push since they were read can't give it another commit's code, unless its branch is on the remote:
+      // then it continues that branch, as any ticket run does.
+      ...(source.kind === 'pr'
+        ? { base: source.headSha }
+        : definitions === undefined
+          ? {}
+          : { fallback: definitions.sha }),
     });
   });
   if ('refused' in opened) return opened;

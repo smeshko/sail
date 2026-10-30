@@ -1207,6 +1207,9 @@ test('a dispatched rerun of a ticket whose branch is pushed starts from it, and 
     const branch = (
       readEvents(from.dir).find((event) => event.type === 'codehost:pushed') as { branch: string } | undefined
     )?.branch;
+    // A dispatched run reads the `.sail/` committed on the default branch.
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
     const tip = repo.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'work an earlier run pushed');
     repo.git('update-ref', `refs/heads/${branch}`, tip);
     const runId = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3P';
