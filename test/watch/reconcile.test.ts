@@ -354,6 +354,29 @@ test('consecutive port_unavailable suspensions wait for each back-off in turn, a
   ]);
 });
 
+test('the port error a held port_unavailable run quotes is the suspended call’s, not one another call of its group took after it', async () => {
+  const w = world();
+  runDir(w.runsDir, 1, 'suspended', 'port_unavailable');
+  portEvents(w.runsDir, 1, ['2026-10-28T09:59:30.000Z']);
+  const other = {
+    seq: 3,
+    ts: NOW,
+    runId: runIdOf(1),
+    type: 'error:port',
+    key: 'link#1/comment',
+    port: 'ticketSource',
+    op: 'comment',
+    code: 'unavailable',
+    message: 'the fake ticket source is unreachable',
+  };
+  appendFileSync(join(w.runsDir, runIdOf(1), 'events.ndjson'), `${JSON.stringify(other)}\n`);
+  expect(await reconcileItem(item(1, DEAD), w.context())).toEqual({
+    kind: 'held',
+    until: '2026-10-28T10:00:30.000Z',
+    reason: 'publish#1 could not reach a provider: codeHost.push: the fake code host is unreachable',
+  });
+});
+
 test('a suspended port_unavailable run whose lease a live process holds is adopted, not held or resumed', async () => {
   const w = world();
   runDir(w.runsDir, 1, 'suspended', 'port_unavailable');

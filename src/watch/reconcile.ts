@@ -103,7 +103,7 @@ function usageLimitOf(
 /**
  * When a run suspended on an unavailable port may be resumed, and why it waits. The suspensions counted are those
  * since the run's last `journal:append`; the back-off is the schedule's entry for that count, after the last
- * suspension's time. `error` names the last unavailable port call the run recorded.
+ * suspension's time. `error` names the last unavailable port call the suspended call recorded.
  */
 function portUnavailableOf(
   runDir: string,
@@ -115,18 +115,30 @@ function portUnavailableOf(
     .slice(since + 1)
     .filter((event) => event.type === 'run:suspended' && event.stopReason === 'port_unavailable');
   const last = suspensions.at(-1);
-  const failed = events.filter((event) => event.type === 'error:port' && event.code === 'unavailable').at(-1);
+  const key = last?.type === 'run:suspended' && last.stopReason === 'port_unavailable' ? last.key : undefined;
+  // Another call's error, as one that returned its errors or another member of a group took, is not this one's cause.
+  const failed = events
+    .filter(
+      (event) =>
+        event.type === 'error:port' &&
+        event.code === 'unavailable' &&
+        (key === undefined || callKeyOf(event.key ?? '') === key),
+    )
+    .at(-1);
   const count = Math.max(suspensions.length, 1);
   const base = last === undefined ? (context.limitedAt ?? context.now).getTime() : Date.parse(last.ts);
   const wait = context.portBackoffMs[Math.min(count, context.portBackoffMs.length) - 1] ?? 0;
   return {
     count,
-    ...(last?.type === 'run:suspended' && last.stopReason === 'port_unavailable' ? { key: last.key } : {}),
+    ...(key === undefined ? {} : { key }),
     until: new Date(base + wait).toISOString(),
     ...(last === undefined ? {} : { at: Date.parse(last.ts) }),
     ...(failed?.type === 'error:port' ? { error: `${failed.port}.${failed.op}: ${failed.message}` } : {}),
   };
 }
+
+/** The call a step's key belongs to: `stage#call` of `stage#call/step`. */
+const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
 
 /** Where a run stands that a resume takes on, or undefined for any other. */
 function resumable(status: RunStatus): ResumedFrom | undefined {
