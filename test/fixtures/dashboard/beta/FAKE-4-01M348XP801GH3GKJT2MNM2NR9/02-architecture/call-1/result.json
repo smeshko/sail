@@ -12,7 +12,7 @@
   },
   "files": {},
   "consumed": {
-    "brief": "00-intake/call-1/brief.md"
+    "brief": "00-intake/call-1/out/brief.md"
   },
   "startedAt": "2026-09-22T10:00:02.700Z",
   "finishedAt": "2026-09-22T10:00:08.600Z",

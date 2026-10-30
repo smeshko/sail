@@ -326,7 +326,7 @@ const CLOSED: NewEvent[] = [
     type: 'file:produced',
     key: KEY,
     name: 'junit.xml',
-    path: '03-tests/call-1/junit.xml',
+    path: '03-tests/call-1/out/junit.xml',
     bytes: 14,
     sha256: 'c98a97ba5504e953e5ddd12d9b65f5f176325398331606b16512f617d3a3358f',
   },
@@ -917,6 +917,17 @@ test('validateRunDir reports an unparseable line or file by file and line', () =
   expect(issues[1]).toStartWith('summary.json  [sail.summary.v1]  / is not valid JSON: ');
 });
 
+test("validateRunDir validates only the engine's results: a result.json a step produced under out/ is no run record", () => {
+  const dir = tempDir({
+    ...validRunDir(),
+    '01-spec/call-1/out/result.json': '{ "not": "a result" }',
+    '05-publish/call-1/out/steps/2-open/result.json': '{ "not": "a result" }',
+    '05-publish/call-1/steps/2-open/out/result.json': '{ "not": "a result" }',
+  });
+  const { counts, issues } = validateRunDir(dir);
+  expect([counts['sail.result.v1'], issues]).toEqual([1, []]);
+});
+
 test('validateRunDir reports a nested result.json by its path in the run directory', () => {
   const dir = tempDir({
     ...validRunDir(),
@@ -979,7 +990,7 @@ test('validateRunDir checks that every journal line points at a result that agre
 });
 
 test('validateRunDir checks that a journal line replays the output and files its result recorded', () => {
-  const brief = { path: '00-intake/call-1/brief.md', bytes: 1, sha256: 'a'.repeat(64) };
+  const brief = { path: '00-intake/call-1/out/brief.md', bytes: 1, sha256: 'a'.repeat(64) };
   const dir = tempDir({
     ...validRunDir(),
     'journal.ndjson': ndjson({ ...journal, output: { ticketKey: 'FAKE-1' }, files: { 'brief.md': brief.path } }),

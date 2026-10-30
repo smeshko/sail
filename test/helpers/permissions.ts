@@ -31,8 +31,9 @@ export function makeLayout(): Layout {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'sail-permissions-')));
   const clone = join(root, 'clone');
   const worktree = join(clone, '.sail-runs', 'r1', 'worktree');
-  const stageOut = join(clone, '.sail-runs', 'r1', '01-spec', 'call-1');
-  const stageIn = join(stageOut, 'in');
+  const callDir = join(clone, '.sail-runs', 'r1', '01-spec', 'call-1');
+  const stageOut = join(callDir, 'out');
+  const stageIn = join(callDir, 'in');
   const elsewhere = join(root, 'elsewhere');
   const at = (path: string): string => (path.startsWith('/') ? path : join(worktree, path));
   const file = (path: string): string => {
@@ -41,7 +42,14 @@ export function makeLayout(): Layout {
     writeFileSync(full, '');
     return full;
   };
-  for (const dir of [join(worktree, 'src', 'deep'), join(worktree, 'sub'), join(worktree, 'lib'), stageIn, elsewhere]) {
+  for (const dir of [
+    join(worktree, 'src', 'deep'),
+    join(worktree, 'sub'),
+    join(worktree, 'lib'),
+    stageIn,
+    stageOut,
+    elsewhere,
+  ]) {
     mkdirSync(dir, { recursive: true });
   }
   file(join(clone, 'lib', 'a.dart'));

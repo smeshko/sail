@@ -439,16 +439,16 @@ test.each<[string, (dir: string) => void, Partial<SeededRunOptions>, (runId: str
     (dir) =>
       rewriteLine(dir, 'intake#1', (line) => ({
         ...line,
-        files: { ...(line.files as object), 'brief.md': '01-spec/call-1/spec.md' },
+        files: { ...(line.files as object), 'brief.md': '01-spec/call-1/out/spec.md' },
       })),
     {},
-    (runId) => `run ${runId}'s journal line 1 points at '01-spec/call-1/spec.md', outside a call directory`,
+    (runId) => `run ${runId}'s journal line 1 points at '01-spec/call-1/out/spec.md', outside a call directory`,
   ],
   [
     'a reused file that is a symlink',
-    (dir) => linkOut(dir, '00-intake/call-1/brief.md'),
+    (dir) => linkOut(dir, '00-intake/call-1/out/brief.md'),
     {},
-    (runId) => `run ${runId}'s 00-intake/call-1/brief.md is a symlink: a seed copies only what the run wrote`,
+    (runId) => `run ${runId}'s 00-intake/call-1/out/brief.md is a symlink: a seed copies only what the run wrote`,
   ],
   [
     'a reused call directory that is a symlink',

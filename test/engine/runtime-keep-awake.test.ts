@@ -184,7 +184,7 @@ test('the hold is released when an exception inside sail propagates', async () =
       sail,
       'workflows/ticket-to-pr/stages/spec/run.sh',
       "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+      'echo not-json >>"$STAGE_OUT/../../../journal.ndjson"\nprintf \'# Spec',
     );
     const { keepAwake, moments } = watching(repo.dir);
     await expect(ran(repo.dir, { keepAwake })).rejects.toThrow();

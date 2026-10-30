@@ -335,9 +335,8 @@ const CORRECTABLE = new Set(['invalid_output', 'missing_file']);
 
 /**
  * Whether a try's output was checked and found wanting. A result from before the field existed counts when every one
- * of its errors is one a correction is for. Only a try that ended in `error` failed anything: a later try's directory
- * is inside `$STAGE_OUT`, where a session can write, and a record that says it failed and is `done` is none of the
- * engine's.
+ * of its errors is one a correction is for. Only a try that ended in `error` failed anything: a record that says it
+ * failed and is `done` is none of the engine's. Defence in depth: a try's records lie outside `$STAGE_OUT`.
  */
 function failedValidation(result: Record<string, unknown>): boolean {
   if (result.outcome !== 'error') return false;
@@ -534,7 +533,7 @@ export async function runAgentTries(
     // Checked again now that the try has ended: whoever heard its end may have aborted the call.
     if (!corrected || request.signal?.aborted === true) return { result, paths };
     found = ran.errors;
-    // From disk, not the try after this one: a session may have left a directory of that name in its `$STAGE_OUT`.
+    // From disk, not the try after this one, so a directory already there is never reused.
     tryNumber = nextOnDisk();
   }
 }

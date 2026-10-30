@@ -191,27 +191,20 @@ const ends = (events: readonly CallEvent[]): object[] =>
 /** What a try that never reached a session records: no session id, no turns, no usage. */
 const UNSTARTED = { adapter: 'scripted', model: MODEL, turns: 0, toolCalls: 0, denials: 0 };
 
-test("problems() refuses a produced name that differs from an engine file's only by case", () => {
-  expect(agentKind.problems(spec({ produces: { 'Prompt.md': 'file' } }))).toEqual([
-    "'Prompt.md' can't be produced: the engine writes 'prompt.md' in $STAGE_OUT, and a file system that ignores case takes them for one",
-  ]);
-});
-
 test('problems() refuses two produced names that differ only by case', () => {
   expect(agentKind.problems(spec({ produces: { 'Notes.md': 'file', 'notes.md': 'file' } }))).toEqual([
     "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
   ]);
 });
 
-test('problems() reports a produced name the engine writes, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
+test('problems() reports a produced name that is not plain, a budget out of range, an unknown onInvalidOutput and an output JSON Schema cannot hold', () => {
   expect(agentKind.kind).toBe('agent');
   expect(agentKind.problems(spec())).toEqual([]);
   expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 1 }, onInvalidOutput: 'fail' }))).toEqual([]);
   expect(agentKind.problems(spec({ budget: { ...budget, maxUsd: 0 } }))).toEqual([
     'budget.maxUsd must be a positive number: 0',
   ]);
-  expect(agentKind.problems(spec({ produces: { 'session.log': 'file', '../spec.md': 'file' } }))).toEqual([
-    "'session.log' can't be produced: the engine writes it in $STAGE_OUT",
+  expect(agentKind.problems(spec({ produces: { '../spec.md': 'file' } }))).toEqual([
     "'../spec.md' can't be produced: it is not a plain file name",
   ]);
   const out: [keyof typeof budget, number][] = [
@@ -269,7 +262,7 @@ test('the harness receives the rendered prompt with its feedback, the preamble a
       CALL: '1',
       TRY: '3',
       STAGE_IN: join(dir, 'in'),
-      STAGE_OUT: dir,
+      STAGE_OUT: join(dir, 'out'),
       WORKSPACE: s.workspace,
       BRANCH: 'sail/FAKE-1',
       SAIL_CONFIG: join(s.workspace, '.sail', 'project.yaml'),
@@ -361,7 +354,7 @@ test('a done session gives its output and the hashes of its files, and records i
   expect(run).toEqual({
     outcome: 'done',
     output: VALID,
-    files: { 'spec.md': { path: '01-spec/call-1/spec.md', bytes: 7, sha256: sha256('# Spec\n') } },
+    files: { 'spec.md': { path: '01-spec/call-1/out/spec.md', bytes: 7, sha256: sha256('# Spec\n') } },
     errors: [],
     record: {
       try: 1,
@@ -378,7 +371,13 @@ test('a done session gives its output and the hashes of its files, and records i
     { type: 'prompt:rendered', try: 1, ...prompt },
     expect.objectContaining({ type: 'harness:session_end', sessionId: 'session-7', outcome: 'done', usage: USAGE }),
     { type: 'output:validated' },
-    { type: 'file:produced', name: 'spec.md', path: '01-spec/call-1/spec.md', bytes: 7, sha256: sha256('# Spec\n') },
+    {
+      type: 'file:produced',
+      name: 'spec.md',
+      path: '01-spec/call-1/out/spec.md',
+      bytes: 7,
+      sha256: sha256('# Spec\n'),
+    },
   ]);
   // What the call writes from it is a valid result, and holds nothing of the provider's own answer.
   const at = new Date('2026-10-05T10:00:00.000Z');
@@ -930,7 +929,7 @@ test('a valid document is reported produced and then valid, and the result recor
     step,
     s.context(scripted({ resolves: done(VALID), files: { 'spec.md': COMPLETED } })),
   );
-  const entry = { path: '01-spec/call-1/spec.md', bytes: Buffer.byteLength(COMPLETED), sha256: sha256(COMPLETED) };
+  const entry = { path: '01-spec/call-1/out/spec.md', bytes: Buffer.byteLength(COMPLETED), sha256: sha256(COMPLETED) };
   expect([run.outcome, run.errors, run.files]).toEqual([
     'done',
     [],
@@ -1033,17 +1032,17 @@ test("a step of a multi-step call renders and records its document in its call's
   const [request] = (harness as Recorded).requests;
   expect([request?.key, request?.env.STAGE_OUT, request?.env.STAGE_IN]).toEqual([
     'publish#1/describe',
-    call,
+    join(call, 'out'),
     join(call, 'steps', '1-describe', 'in'),
   ]);
   expect(seen).toEqual([RENDERED]);
   expect([run.outcome, run.files['spec.md']?.path, run.record.prompt]).toEqual([
     'done',
-    '05-publish/call-1/spec.md',
+    '05-publish/call-1/out/spec.md',
     expect.objectContaining({ path: '05-publish/call-1/steps/1-describe/prompt.md' }),
   ]);
   expect([readdirSync(call).sort(), readdirSync(paths.dir).sort()]).toEqual([
-    ['spec.md', 'steps'],
+    ['out', 'steps'],
     ['in', 'prompt.md', 'session.log'],
   ]);
 });

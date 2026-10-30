@@ -208,7 +208,7 @@ test.each([
     'a resultPath that is not a result.json',
     'evil#1',
     'result.json',
-    (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '01-spec/call-1/spec.md'),
+    (m: Machine) => appendStageEnd(m.alpha.runDir, 'evil#1', '01-spec/call-1/out/spec.md'),
   ],
   [
     'a session.log that links out of the run',

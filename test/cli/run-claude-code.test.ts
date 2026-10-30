@@ -78,7 +78,7 @@ async function runSpec(stream: Stream) {
       status: readStatus(dir),
       header: JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8')),
       result: JSON.parse(read('result.json') ?? '{}'),
-      spec: read('spec.md'),
+      spec: read('out/spec.md'),
       sessionLog: read('session.log'),
       events: readEvents(dir).filter((event) => 'key' in event && event.key === 'spec#1'),
       issues: validateRunDir(dir).issues.map(formatIssue),

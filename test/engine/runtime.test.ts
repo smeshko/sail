@@ -265,7 +265,7 @@ test('the stub runs to completion through its fix loop, and every call ran once'
   expect(validateRunDir(end.dir).issues).toEqual([]);
   const implement = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
   expect(implement.consumed).toEqual({
-    spec: '01-spec/call-1/spec.md',
+    spec: '01-spec/call-1/out/spec.md',
     feedback: '03-tests/call-1/result.json#/output',
   });
   expect(implement.output).toEqual({ notes: 'a stub change', sawFeedback: true });
@@ -343,7 +343,7 @@ test("the fixture's ticket-to-pr, with its harness script gone, gets as far as i
     });
     expect(keys(end.dir)).toEqual(['intake#1', 'spec#1']);
     const spec = JSON.parse(readFileSync(join(end.dir, '01-spec', 'call-1', 'result.json'), 'utf8'));
-    expect(spec.consumed).toEqual({ brief: '00-intake/call-1/brief.md' });
+    expect(spec.consumed).toEqual({ brief: '00-intake/call-1/out/brief.md' });
   });
 });
 
@@ -958,7 +958,7 @@ test('an exception inside sail propagates, leaves error:crash as the last event,
       sail,
       'workflows/ticket-to-pr/stages/spec/run.sh',
       "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+      'echo not-json >>"$STAGE_OUT/../../../journal.ndjson"\nprintf \'# Spec',
     );
     const adapters = await fakeAdapters(repo.dir);
     const error = await ran(repo.dir, { adapters }).catch((thrown: unknown) => thrown);
@@ -1535,7 +1535,7 @@ test('an agent call is journaled once, with the output, the files and the result
       call: 1,
       output: SPEC,
       reason: null,
-      files: { 'spec.md': '02-spec/call-1/try-2/spec.md' },
+      files: { 'spec.md': '02-spec/call-1/try-2/out/spec.md' },
       resultPath: '02-spec/call-1/try-2/result.json',
     });
     expect(specResult(end.dir, 2)).toMatchObject({
@@ -1555,7 +1555,7 @@ test('an agent call is journaled once, with the output, the files and the result
     expect([prompt.includes('Indent with tabs.'), prompt.includes(NO_TASKS_MESSAGE)]).toEqual([true, true]);
     // publish read the file the journal holds: the second try's.
     const publish = JSON.parse(readFileSync(join(end.dir, '03-publish', 'call-1', 'result.json'), 'utf8'));
-    expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/spec.md' });
+    expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/out/spec.md' });
     expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 20_000);

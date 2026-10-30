@@ -649,7 +649,7 @@ test('a journal corrupted mid-run is an internal error, exit 4', async () => {
       sail,
       'workflows/ticket-to-pr/stages/spec/run.sh',
       "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+      'echo not-json >>"$STAGE_OUT/../../../journal.ndjson"\nprintf \'# Spec',
     ),
   );
   expect(stderr).toStartWith('sail: internal error: ');
@@ -720,7 +720,7 @@ test('the interrupt handler is unregistered even when the run throws', async () 
       sail,
       'workflows/ticket-to-pr/stages/spec/run.sh',
       "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+      'echo not-json >>"$STAGE_OUT/../../../journal.ndjson"\nprintf \'# Spec',
     );
     const interrupts = fakeInterrupts();
     const { code } = await runCaptured(['FAKE-1'], repo.dir, interrupts);
@@ -892,8 +892,8 @@ test('sail FAKE-1 takes a script-to-agent workflow to its end on the fake harnes
           .sort(),
       ),
     ).toEqual([
-      ['in', 'prompt.md', 'result.json', 'session.log', 'spec.md'],
-      ['in', 'prompt.md', 'result.json', 'session.log', 'spec.md'],
+      ['in', 'out', 'prompt.md', 'result.json', 'session.log'],
+      ['in', 'out', 'prompt.md', 'result.json', 'session.log'],
     ]);
     expect(specFile(dir, 'prompt.md', 2)).toContain(NO_TASKS_MESSAGE);
 

@@ -38,7 +38,7 @@ const COMMANDS = ['git log *', 'git diff *'];
 const PR_BODY = '## Summary\n\nAdds `--shout` to the `greet` command.\n';
 const PR = { number: 1, url: 'fake://codehost/fixture/pull/1', draft: false };
 const DESCRIBED = { title: 'Add a --shout flag to the greet command (FAKE-1)', bodyFile: 'pr-body.md' };
-const CONSUMED = { ticket: '00-intake/call-1/result.json#/output', spec: '01-spec/call-1/spec.md' };
+const CONSUMED = { ticket: '00-intake/call-1/result.json#/output', spec: '01-spec/call-1/out/spec.md' };
 const fake = { use: 'fake', origin: 'builtin' };
 
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
@@ -52,13 +52,13 @@ export function twoStepEvents(): SailEvent[] {
     [100, start('publish#1', { kind: 'stage', steps: ['describe', 'open'], consumed: CONSUMED })],
     [200, stepStart(DESCRIBE, 1, 2, 'agent')],
     // A first session whose output was sent back, then the one that submitted.
-    [300, toolStart(DESCRIBE, 'tool-1', 'Read', { path: '01-spec/call-1/spec.md' })],
+    [300, toolStart(DESCRIBE, 'tool-1', 'Read', { path: '01-spec/call-1/out/spec.md' })],
     [340, toolEnd(DESCRIBE, 'tool-1', 'completed', 40)],
     [400, toolStart(DESCRIBE, 'tool-2', 'Bash', { command: 'git log --oneline main..' })],
     [470, toolEnd(DESCRIBE, 'tool-2', 'completed', 70)],
     [500, session(DESCRIBE, { turns: 2, toolCalls: 2, denials: 0, usage: { costUsd: 0.05 } })],
     [600, thinking(DESCRIBE, 'Summarise the change for a reviewer: what, why, and how it was tested.')],
-    [700, toolStart(DESCRIBE, 'tool-3', 'Read', { path: '01-spec/call-1/spec.md' })],
+    [700, toolStart(DESCRIBE, 'tool-3', 'Read', { path: '01-spec/call-1/out/spec.md' })],
     [725, toolEnd(DESCRIBE, 'tool-3', 'completed', 25)],
     [800, toolStart(DESCRIBE, 'tool-4', 'Bash', { command: 'git push origin HEAD' })],
     [800, denied(DESCRIBE, 'tool-4', COMMANDS, "'git push origin HEAD' matches none of the step's commands")],

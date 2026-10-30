@@ -252,7 +252,7 @@ test("a fromStep binding the engine supplies is written as an earlier step left 
       value: { title: 'Add --shout', bodyFile: 'pr-body.md' },
       from: `${result}#/output`,
     },
-    body: { kind: 'fromStep', path: body, from: '05-publish/call-1/pr-body.md' },
+    body: { kind: 'fromStep', path: body, from: '05-publish/call-1/out/pr-body.md' },
   };
   expect(bindingProblems(consumes, supplied)).toEqual([]);
   const { inputs, consumed } = materialise(consumes, supplied, s.stageIn);
@@ -270,6 +270,6 @@ test("a fromStep binding the engine supplies is written as an earlier step left 
   expect(consumed).toEqual({
     title: `${result}#/output/title`,
     description: `${result}#/output`,
-    body: '05-publish/call-1/pr-body.md',
+    body: '05-publish/call-1/out/pr-body.md',
   });
 });

@@ -143,7 +143,7 @@ test("describe then open: open's $STAGE_IN holds the title and the body describe
       output: { number: 7, url: 'fake://codehost/pull/7' },
     });
 
-    expect(s.read(`${CALL}/pr-body.md`)).toBe(BODY);
+    expect(s.read(`${CALL}/out/pr-body.md`)).toBe(BODY);
     expect(readdirSync(join(s.runDir, CALL, 'steps', '2-open', 'in')).sort()).toEqual([
       'pr-body.md',
       'ticketKey.txt',
@@ -156,7 +156,7 @@ test("describe then open: open's $STAGE_IN holds the title and the body describe
       outcome: 'passed',
       consumed: {
         title: `${CALL}/steps/1-describe/result.json#/output/title`,
-        body: `${CALL}/pr-body.md`,
+        body: `${CALL}/out/pr-body.md`,
         ticketKey: '01-intake/call-1/result.json#/output/ticketKey',
       },
     });
@@ -165,7 +165,7 @@ test("describe then open: open's $STAGE_IN holds the title and the body describe
       key: 'publish#1',
       outcome: 'passed',
       output: { number: 7, url: 'fake://codehost/pull/7' },
-      files: { 'pr-body.md': { path: `${CALL}/pr-body.md`, bytes: BODY.length, sha256 } },
+      files: { 'pr-body.md': { path: `${CALL}/out/pr-body.md`, bytes: BODY.length, sha256 } },
       consumed: { ticketKey: '01-intake/call-1/result.json#/output/ticketKey' },
       steps: [
         {
@@ -400,7 +400,7 @@ test("a step already journaled is not run again: open takes describe's title fro
       outcome: 'done',
       output: heard?.output,
       reason: null,
-      files: { 'pr-body.md': `${CALL}/pr-body.md` },
+      files: { 'pr-body.md': `${CALL}/out/pr-body.md` },
       resultPath: `${CALL}/steps/1-describe/result.json`,
       recordedAt: TS,
     };
@@ -418,6 +418,23 @@ test("a step already journaled is not run again: open takes describe's title fro
     expect(s.harness.requests.length).toBe(asked);
     expect(stepStarts(s.events)).toEqual(['publish#1/describe 1', 'publish#1/open 1']);
     expect(s.read(`${CALL}/steps/2-open/in/title.txt`)).toBe(TITLE);
+  });
+});
+
+test("an earlier step that plants steps/2-open/result.json in the shared $STAGE_OUT doesn't stand in for the later step", async () => {
+  let forged = '';
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    await runStageCall(s.request(), publish);
+    forged = JSON.stringify({ ...json(s, `${CALL}/steps/2-open/result.json`), outcome: 'error' });
+  });
+  await withTempRepo(async (repo) => {
+    const s = setup(repo, [{ ...DESCRIBED, files: { 'pr-body.md': BODY, 'steps/2-open/result.json': forged } }]);
+    const { result } = await runStageCall(s.request(), publish);
+    expect(result).toMatchObject({ outcome: 'passed', steps: [{ step: 'describe' }, { step: 'open' }] });
+    expect(stepStarts(s.events)).toEqual(['publish#1/describe 1', 'publish#1/open 1']);
+    expect(json(s, `${CALL}/steps/2-open/result.json`)).toMatchObject({ outcome: 'passed', runId: RUN_ID });
+    expect(s.read(`${CALL}/out/steps/2-open/result.json`)).toBe(forged);
   });
 });
 
@@ -440,21 +457,21 @@ test("a journaled step's files come from its journal line on a resume, not from 
       outcome: 'done',
       output: heard?.output,
       reason: null,
-      files: { 'pr-body.md': `${CALL}/pr-body.md` },
+      files: { 'pr-body.md': `${CALL}/out/pr-body.md` },
       resultPath: `${CALL}/steps/1-describe/result.json`,
       recordedAt: TS,
     };
     // Valid under sail.result.v1 and under the step's key, with a file path and a file the journal never held.
     const path = join(s.runDir, entry.resultPath);
     const rewritten = JSON.parse(readFileSync(path, 'utf8'));
-    rewritten.files['pr-body.md'].path = `${CALL}/planted.md`;
-    rewritten.files['planted.md'] = { path: `${CALL}/planted.md`, bytes: 1, sha256: 'a'.repeat(64) };
+    rewritten.files['pr-body.md'].path = `${CALL}/out/planted.md`;
+    rewritten.files['planted.md'] = { path: `${CALL}/out/planted.md`, bytes: 1, sha256: 'a'.repeat(64) };
     writeFileSync(path, JSON.stringify(rewritten));
 
     const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
     expect(result).toMatchObject({ outcome: 'passed' });
     expect(Object.keys(result.files as object)).toEqual(['pr-body.md']);
-    expect((result.files as Record<string, { path: string }>)['pr-body.md']?.path).toBe(`${CALL}/pr-body.md`);
+    expect((result.files as Record<string, { path: string }>)['pr-body.md']?.path).toBe(`${CALL}/out/pr-body.md`);
   });
 });
 
@@ -539,6 +556,7 @@ test("a stage of one step runs as that step, under the stage's name: call-1/resu
     expect(ran).toMatchObject({ result: { key: 'alone#1', kind: 'script', outcome: 'passed', output: { number: 8 } } });
     expect(readdirSync(join(s.runDir, '05-alone', 'call-1')).sort()).toEqual([
       'in',
+      'out',
       'result.json',
       'stderr.log',
       'stdout.log',
@@ -615,12 +633,11 @@ test("the stage's own produces don't replace the last step's document of the sam
 test("callProblems of a multi-step stage checks the stage's own produces with its last step's (review R1-4)", () => {
   const harness = createFakeHarness({ script: {} });
   const reserved = stage('reserved', {
-    produces: { 'result.json': 'file', '../outside.txt': 'file' },
+    produces: { '../outside.txt': 'file' },
     output: PrInfo,
     steps: [script('a', { run: './a.sh', output: z.object({}) }), script('b', { run: './b.sh', output: PrInfo })],
   });
   expect(callProblems(reserved, {}, { harness, model: MODEL })).toEqual([
-    "step 'b': 'result.json' can't be produced: the engine writes it in $STAGE_OUT",
     "step 'b': '../outside.txt' can't be produced: it is not a plain file name",
   ]);
 });
@@ -654,18 +671,6 @@ test("callProblems of a multi-step stage refuses its own produces name that diff
   });
   expect(callProblems(pair, {})).toEqual([
     "step 'b': 'Notes.md' can't be produced: 'notes.md' is produced too, and a file system that ignores case takes them for one",
-  ]);
-});
-
-test("callProblems of a multi-step stage refuses its own produces name that differs from an engine file's only by case", () => {
-  const harness = createFakeHarness({ script: {} });
-  const variant = stage('variant', {
-    produces: { 'Result.json': 'file' },
-    output: PrInfo,
-    steps: [script('a', { run: './a.sh', output: z.object({}) }), script('b', { run: './b.sh', output: PrInfo })],
-  });
-  expect(callProblems(variant, {}, { harness, model: MODEL })).toEqual([
-    "step 'b': 'Result.json' can't be produced: the engine writes 'result.json' in $STAGE_OUT, and a file system that ignores case takes them for one",
   ]);
 });
 

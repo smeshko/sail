@@ -716,26 +716,26 @@ test('the timeline filter loads what was saved, toggles a kind in the order of t
 
 test("a file name opens the drawer with the file's markdown as HTML, another file as text, Esc closes it before the timeline, and another run closes it", async () => {
   const file = (path: string) => `/api/repos/alpha/runs/${GOLDEN_RUN_ID}/file?path=${encodeURIComponent(path)}`;
-  host.bodies.set(`${file('01-spec/call-1/spec.md')}&as=html`, { status: 200, body: '<h1>Spec</h1>' });
-  host.bodies.set(file('00-intake/call-1/ticket.json'), { status: 200, body: '{}' });
+  host.bodies.set(`${file('01-spec/call-1/out/spec.md')}&as=html`, { status: 200, body: '<h1>Spec</h1>' });
+  host.bodies.set(file('00-intake/call-1/out/ticket.json'), { status: 200, body: '{}' });
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
   replay(host.open('run=')[0], GOLDEN(), false);
   host.click({ action: 'select-card', key: 'spec#1' });
-  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
-  expect(page.ui.file).toEqual({ name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
+  expect(page.ui.file).toEqual({ name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
   host.advance(100);
   expect(host.regions.drawer).toContain('<div class="code">loading…</div>');
   await settle();
   host.advance(100);
   expect(host.regions.drawer).toContain('<div class="md"><h1>Spec</h1></div>');
-  host.click({ action: 'open-file', name: 'ticket.json', path: '00-intake/call-1/ticket.json' });
+  host.click({ action: 'open-file', name: 'ticket.json', path: '00-intake/call-1/out/ticket.json' });
   host.click({ action: 'open-file', name: 'gone.txt', path: '00-intake/call-1/gone.txt' });
   await settle();
   host.advance(100);
   expect(host.reads.map((read) => read.path).filter((path) => path.includes('/file?'))).toEqual([
-    `${file('01-spec/call-1/spec.md')}&as=html`,
-    file('00-intake/call-1/ticket.json'),
+    `${file('01-spec/call-1/out/spec.md')}&as=html`,
+    file('00-intake/call-1/out/ticket.json'),
     file('00-intake/call-1/gone.txt'),
   ]);
   // Only the latest file's read is shown.
@@ -745,12 +745,12 @@ test("a file name opens the drawer with the file's markdown as HTML, another fil
   expect([page.ui.file, page.ui.timeline]).toEqual([undefined, true]);
   host.advance(100);
   expect(host.regions.drawer).toBe('');
-  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
   host.click({ action: 'close-file' });
   expect(page.ui.file).toBeUndefined();
   host.click({ action: 'open-file', name: 'spec.md' });
   expect(page.ui.file).toBeUndefined();
-  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/spec.md' });
+  host.click({ action: 'open-file', name: 'spec.md', path: '01-spec/call-1/out/spec.md' });
   host.click({ action: 'select-run', repo: 'alpha', run: FAKE_2_ID });
   expect(page.ui.file).toBeUndefined();
 });
