@@ -33,6 +33,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -127,9 +128,11 @@ function planRuns(folders) {
   });
 }
 
-/** Makes every file under `path` writable, as a copy of a read-only fixture must be. */
+/** Makes every file under `path` writable, as a copy of a read-only fixture must be; a link and what it points to stay. */
 function makeWritable(path) {
-  if (statSync(path).isDirectory()) {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) return;
+  if (stat.isDirectory()) {
     chmodSync(path, 0o755);
     for (const entry of readdirSync(path)) makeWritable(join(path, entry));
   } else chmodSync(path, 0o644);

@@ -1,7 +1,7 @@
 // sail's own demo harness, `.sail/lib/demo.mjs`: `new --own` makes a demo repository from the repository's own
 // `.sail/` with every adapter on fake, while `--from` still refuses a `.sail/` whose ports aren't.
 import { expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withTempRepo } from './helpers/temp-repo';
 
@@ -82,6 +82,23 @@ test('new --runs copies a run directory under its runId and a .sail-runs folder 
       queue: existsSync(join(runs, 'queue', 'ticket-to-pr', 'queue.json')),
       committed: files.includes('.sail-runs/queue/ticket-to-pr/queue.json'),
     }).toEqual({ code: 0, seeded: true, recorded: true, beta: true, queue: true, committed: true });
+  });
+});
+
+test('new --runs leaves what a link in a seeded folder points to as it was', async () => {
+  await withTempRepo(async (repo) => {
+    const outside = join(repo.dir, 'outside');
+    mkdirSync(outside, { mode: 0o700 });
+    writeFileSync(join(outside, 'key'), 'secret\n', { mode: 0o600 });
+    const runs = join(repo.dir, 'runs');
+    mkdirSync(runs);
+    symlinkSync(outside, join(runs, 'link'));
+    const { code } = await demo(repo.env, 'new', join(repo.dir, 'demo'), '--runs', runs);
+    expect({
+      code,
+      folder: statSync(outside).mode & 0o777,
+      key: statSync(join(outside, 'key')).mode & 0o777,
+    }).toEqual({ code: 0, folder: 0o700, key: 0o600 });
   });
 });
 
