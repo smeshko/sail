@@ -2,6 +2,7 @@
 import type { StepRun } from '../kinds/index';
 import type { Usage } from '../ports/types';
 import { writeOwnFile } from './call-dir';
+import type { ContractError } from './contract';
 import { replaceFileAnew } from './durable';
 import type { Redactor } from './redact';
 import { formatIssue, validateDocument } from './schemas';
@@ -66,6 +67,8 @@ function plus(a: Usage, b: Usage): Usage {
  * A multi-step call's `result.json`, from the steps that ran, in order: the last of them ended the stage (D2). Its
  * outcome is that step's, and so are its reason when blocked and its errors when error. Its output is that step's
  * unless it was blocked or broke its contract, its files are every step's, and its times and usage are the steps' (D8).
+ * Stage-level `errors`, such as a step's file gone by the stage's end, make the outcome `error` whatever the last
+ * step's was, with no output and no reason: its own errors, when it ended `error`, then these.
  */
 export function buildStageResult(fields: {
   runId: string;
@@ -73,11 +76,14 @@ export function buildStageResult(fields: {
   call: number;
   consumed: Record<string, string | null>;
   steps: readonly StepEntry[];
+  errors?: readonly ContractError[];
 }): Record<string, unknown> {
   const last = fields.steps.at(-1);
   if (last === undefined) throw new Error(`${fields.stage}#${fields.call}: a stage's result needs a step that ran`);
   const { result } = last;
-  const outcome = result.outcome;
+  const stageErrors = fields.errors ?? [];
+  const outcome = stageErrors.length > 0 ? 'error' : result.outcome;
+  const errors = [...(result.outcome === 'error' ? (result.errors as ContractError[]) : []), ...stageErrors];
   const usageOf = (step: StepEntry) => (step.result.usage as Usage | undefined) ?? ZERO;
   return {
     schema: 'sail.result.v1',
@@ -86,7 +92,7 @@ export function buildStageResult(fields: {
     call: fields.call,
     key: `${fields.stage}#${fields.call}`,
     outcome,
-    ...(outcome === 'error' ? { errors: result.errors } : {}),
+    ...(outcome === 'error' ? { errors } : {}),
     ...(outcome === 'blocked' ? { reason: result.reason } : {}),
     output: outcome === 'blocked' || outcome === 'error' ? null : result.output,
     // Entries, not assignment: a file named `__proto__` would set the prototype.

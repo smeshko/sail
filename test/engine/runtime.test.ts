@@ -2701,6 +2701,18 @@ test('a two-step stage journals each step as it finishes, then its call, and run
   });
 }, 60_000);
 
+test("a two-step call whose open step deletes describe's file fails the run with stage_error, and the call's journal line says missing_file", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeTwoStep(repo.dir);
+    edit(sail, `${PUBLISH_STAGE}/open.sh`, `echo '{"number":3`, `rm "$STAGE_OUT/pr-body.md"\necho '{"number":3`);
+    const end = await ranAgent(repo.dir);
+    expect(end).toMatchObject({ status: 'failed', stopReason: 'stage_error' });
+    expect(entryOf(end.dir, 'publish#1/open')).toMatchObject({ outcome: 'passed' });
+    expect(entryOf(end.dir, 'publish#1')).toMatchObject({ outcome: 'error' });
+    expect(entryOf(end.dir, 'publish#1')?.reason).toStartWith("missing_file: step 'describe'");
+  });
+}, 60_000);
+
 const SPY_HARNESSES = 'harness: { use: fake }\n  harnesses: { second: { use: spy } }';
 
 test('an agent call runs on the harness its alias names, and every other on the default', async () => {

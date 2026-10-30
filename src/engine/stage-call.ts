@@ -12,8 +12,12 @@
 // reaches (D11): seen between steps, no further step starts and no stage `result.json` is written; seen during a step,
 // that try's result is written, and the step is left for a resume to run again.
 //
+// As the stage ends, every step's files are recorded again, and one that is gone ends the call in `error` with
+// `missing_file`, whether the step ran in this process or was journaled before it.
+//
 // The caller journals: it hands the call the steps already journaled, which are skipped, and hears of each step as it
 // finishes. The runtime journals them, and `sail stage run`, which has no journal, passes nothing.
+import { lstatSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { z } from 'zod';
 import type { CallEvent, NewEvent } from '../events/types';
@@ -224,7 +228,10 @@ async function suppliedFor(
 function pick(runDir: string, source: Done, binding: FromStepBinding): Supplied | undefined {
   if (binding.file !== undefined) {
     const path = Object.hasOwn(source.files, binding.file) ? source.files[binding.file] : undefined;
-    return path === undefined ? undefined : { kind: 'fromStep', path: join(runDir, path), from: path };
+    // A file that is gone has nothing to give: the stage's end reports it.
+    return path === undefined || !lstatSync(join(runDir, path), { throwIfNoEntry: false })?.isFile()
+      ? undefined
+      : { kind: 'fromStep', path: join(runDir, path), from: path };
   }
   const output = source.output;
   if (binding.key === undefined) return { kind: 'fromStep', value: output, from: `${source.resultPath}#/output` };
@@ -265,15 +272,11 @@ function errorsOf(entry: JournalEntry): ContractError[] {
 
 /**
  * A step journaled before this process, as the stage's result lists it, built from its journal line alone: its
- * outcome, output and reason, what it spent and when it ran, and its errors, with its files hashed afresh. Its
+ * outcome, output and reason, what it spent and when it ran, and its errors, with no files yet: the stage's end records them. Its
  * `result.json` is never read, since a later session may have rewritten it. A line without usage or times, from before
  * the line held them, lists nothing spent and the journal's time.
  */
-function journaledStep(request: CallRequest, step: Step, index: number, entry: JournalEntry): Done {
-  const out = stageOut(
-    stepPaths(request.runDir, request.stageIndex, request.definition.name, request.call, index, step.name),
-  );
-  const produced = Object.fromEntries(Object.keys(entry.files).map((name) => [name, 'file']));
+function journaledStep(step: Step, index: number, entry: JournalEntry): Done {
   return {
     step,
     index,
@@ -288,7 +291,7 @@ function journaledStep(request: CallRequest, step: Step, index: number, entry: J
       durationMs: entry.durationMs ?? 0,
       outcome: entry.outcome,
       output: entry.output,
-      files: recordFiles(produced, out, request.runDir).files,
+      files: {},
       ...(entry.outcome === 'blocked' ? { reason: entry.reason } : {}),
       ...(entry.outcome === 'error' ? { errors: errorsOf(entry) } : {}),
     },
@@ -374,7 +377,7 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
     const step: Step = index === lastIndex ? withStageProduces(declared, stage) : declared;
     const entry = finished[offset];
     if (entry !== undefined) {
-      done.push(journaledStep(request, step, index, entry));
+      done.push(journaledStep(step, index, entry));
       if (!PASSED.has(entry.outcome)) break;
       continue;
     }
@@ -465,13 +468,26 @@ export async function runStageCall(request: CallRequest, stage: Stage, hooks: St
     if (!PASSED.has(String(ran.result.outcome))) break;
   }
 
-  const steps: StepEntry[] = done.map((each) => ({
-    step: each.step.name,
-    kind: each.step.kind,
-    result: each.result,
-    resultPath: each.resultPath,
-  }));
-  const result = buildStageResult({ runId, stage: name, call, consumed, steps });
+  // Every step's files, fresh and journaled alike, are recorded as they are as the stage ends: one a later step or
+  // session removed ends the call in error.
+  const missing: ContractError[] = [];
+  const steps: StepEntry[] = done.map((each) => {
+    const out = stageOut(stepPaths(runDir, stageIndex, name, call, each.index, each.step.name));
+    const recorded = recordFiles(
+      Object.fromEntries(Object.keys(each.files).map((file) => [file, 'file'])),
+      out,
+      runDir,
+    );
+    for (const error of recorded.errors)
+      missing.push({ ...error, message: `step '${each.step.name}': ${error.message}` });
+    return {
+      step: each.step.name,
+      kind: each.step.kind,
+      result: { ...each.result, files: recorded.files },
+      resultPath: each.resultPath,
+    };
+  });
+  const result = buildStageResult({ runId, stage: name, call, consumed, steps, errors: missing });
   const paths = callPaths(runDir, stageIndex, name, call);
   writeResult(paths.result, result, request.redact === undefined ? {} : { redact: request.redact });
   emitCall({

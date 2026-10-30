@@ -809,3 +809,65 @@ test.each([
     expect(validateDocument('sail.result.v1', json(s, `${CALL}/result.json`)).map(formatIssue)).toEqual([]);
   });
 });
+
+const GONE_BODY = {
+  reason: 'missing_file',
+  message: "step 'describe': 'pr-body.md' was not produced in $STAGE_OUT",
+} as const;
+
+test("a fresh call whose later step deletes an earlier step's file ends in error, missing_file, naming the step", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    s.script('open.sh', `${OPENS}\nrm "$STAGE_OUT/pr-body.md"`);
+    const { result } = await runStageCall(s.request(), publish);
+    expect(result).toMatchObject({ outcome: 'error', errors: [GONE_BODY], output: null });
+    const end = s.events.find((event) => event.type === 'stage:end');
+    expect(end).toMatchObject({ outcome: 'error', errors: [GONE_BODY] });
+    expect(json(s, `${CALL}/steps/2-open/result.json`)).toMatchObject({ outcome: 'passed' });
+    expect(Object.values(resultIssues(s)).flat()).toEqual([]);
+  });
+});
+
+test("a resume whose journaled step's file is missing ends in error, missing_file, and its later step still runs", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const entry = await journaledDescribe(s);
+    rmSync(join(s.runDir, CALL, 'pr-body.md'));
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    expect(result).toMatchObject({ outcome: 'error' });
+    expect(result.errors).toContainEqual(GONE_BODY);
+    expect(stepStarts(s.events)).toEqual(['publish#1/describe 1', 'publish#1/open 1']);
+    expect(Object.values(resultIssues(s)).flat()).toEqual([]);
+  });
+});
+
+test("a journaled step's file replaced by a directory ends the call in error, missing_file (not a regular file)", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const entry = await journaledDescribe(s);
+    const file = join(s.runDir, CALL, 'pr-body.md');
+    rmSync(file);
+    mkdirSync(file);
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    expect(result).toMatchObject({ outcome: 'error' });
+    expect(result.errors).toContainEqual({
+      reason: 'missing_file',
+      message: "step 'describe': 'pr-body.md' in $STAGE_OUT is not a regular file",
+    });
+  });
+});
+
+test("a journaled step's file changed after it was journaled is hashed again: the call passes and records the new sha256", async () => {
+  await withTempRepo(async (repo) => {
+    const s = setup(repo);
+    const entry = await journaledDescribe(s);
+    writeFileSync(join(s.runDir, CALL, 'pr-body.md'), 'Changed.\n');
+    const { result } = await runStageCall(s.request(), publish, { finished: [entry] });
+    const now = new Bun.CryptoHasher('sha256').update('Changed.\n').digest('hex');
+    expect(result).toMatchObject({ outcome: 'passed' });
+    expect((result.files as Record<string, { sha256: string; bytes: number }>)['pr-body.md']).toMatchObject({
+      sha256: now,
+      bytes: 9,
+    });
+  });
+});
