@@ -71,7 +71,13 @@ export function verbosityOf(args: Parsed, io: Io, command: string): Verbosity | 
 export async function findProject<P extends Port = RunPort>(
   io: Io,
   command: string,
-  only: { found?: { dir: string } | { refused: string }; ports?: readonly P[]; emit?: ProviderEmit } = {},
+  only: {
+    found?: { dir: string } | { refused: string };
+    /** The repository the adapters work on, when `found` is a copy of its `.sail/` elsewhere. */
+    root?: string;
+    ports?: readonly P[];
+    emit?: ProviderEmit;
+  } = {},
 ): Promise<{ sailDir: string; config: ProjectConfig; adapters: ResolvedAdapters<P> } | ExitCode> {
   const found = only.found ?? findSailDir(io.cwd);
   if ('refused' in found) return refuseAs(io, command)(found.refused);
@@ -83,6 +89,7 @@ export async function findProject<P extends Port = RunPort>(
   }
   const adapters = await resolveAdapters({
     sailDir: found.dir,
+    ...(only.root === undefined ? {} : { root: only.root }),
     config,
     builtins: BUILTINS,
     env: io.env ?? process.env,
