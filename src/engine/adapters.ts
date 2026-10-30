@@ -2,7 +2,7 @@
 // the definitions it is handed, and the repository's own is imported by module path. Anything it can't resolve, create
 // or recognise as its port is an issue at `/adapters/<port>`.
 import { existsSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ProviderEmit, ProviderEvent } from '../events/types';
 import {
   type AdapterDefinition,
@@ -17,12 +17,14 @@ import type { Harness } from '../ports/harness';
 import { type AdapterConfig, aliasOf, PORTS, type Port, type ProjectConfig, type RunPort } from './config';
 import { registerSail } from './definitions';
 import { origin } from './roster';
-import { runsDir } from './run-dir';
+import { RUNS_DIR } from './run-dir';
 import type { AdapterEntry } from './run-header';
 import type { SchemaIssue } from './schemas';
 
 export interface ResolveOptions<P extends Port = RunPort> {
   sailDir: string;
+  /** The repository the adapters work on: `dirname(sailDir)` when left out. Module paths still resolve under `sailDir`. */
+  root?: string;
   config: ProjectConfig;
   builtins: Builtins;
   env: Env;
@@ -247,11 +249,12 @@ async function build(
 ): Promise<{ adapter: unknown } | { issue: string }> {
   const fail = (text: string) => ({ issue: text });
   let adapter: unknown;
+  const root = resolved.root ?? dirname(resolved.sailDir);
   try {
     adapter = await found.definition.create(options, {
-      root: dirname(resolved.sailDir),
+      root,
       sailDir: resolved.sailDir,
-      runsDir: runsDir(resolved.sailDir),
+      runsDir: join(root, RUNS_DIR),
       env: resolved.env,
       emit,
       ...(resolved.now === undefined ? {} : { now: resolved.now }),

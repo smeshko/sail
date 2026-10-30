@@ -1011,3 +1011,40 @@ test('a harness with no checkModels(), or one the config does not name, is left 
     await checkModelAliases({ sailDir, config: broken, builtins: all, env: {} }),
   ]).toEqual([[], [{ path: '/models/deep', message: 'm on b (broken): checkModels() failed: catalog down' }]]);
 });
+
+test("with a root apart from sailDir, an adapter is handed that root and its runs directory, while a module path still loads from sailDir's copy", async () => {
+  const clone = repo();
+  const copy = repo();
+  write(
+    copy.sailDir,
+    'adapters/echo.ts',
+    `export default { create(options, context) {
+      globalThis.__seenAtRoot = context;
+      return { name: 'echo-copy', capabilities: () => (${HARNESS_CAPABILITIES}), run: async () => ({}) };
+    } };`,
+  );
+  write(clone.sailDir, 'adapters/echo.ts', "throw new Error('the clone must not be loaded');");
+  const resolved = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir: copy.sailDir,
+      root: clone.root,
+      config: configOf({ harness: { use: './adapters/echo.ts' } }),
+      builtins: BUILTINS,
+      env: {},
+    }),
+  );
+  const seen = (globalThis as unknown as { __seenAtRoot: Record<string, unknown> }).__seenAtRoot;
+  expect({
+    name: resolved.ports.harness?.name,
+    root: seen.root,
+    sailDir: seen.sailDir,
+    runsDir: seen.runsDir,
+    workspace: (await resolved.ports.workspace?.repository())?.url,
+  }).toEqual({
+    name: 'echo-copy',
+    root: clone.root,
+    sailDir: copy.sailDir,
+    runsDir: join(clone.root, '.sail-runs'),
+    workspace: 'fake://origin',
+  });
+});

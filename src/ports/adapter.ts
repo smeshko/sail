@@ -119,6 +119,7 @@ export const PORT_OPERATIONS = {
     'releaseLease',
     'holder',
     'create',
+    'readTree',
     'reopen',
     'diff',
     'release',

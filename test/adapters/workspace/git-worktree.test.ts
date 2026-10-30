@@ -76,6 +76,7 @@ function world(repo: TempRepo): WorkspaceWorld & { leasesDir: string } {
     base: 'origin/main',
     defaultBranch: 'main',
     baseSha: repo.git('rev-parse', 'origin/main'),
+    repoDir: repo.dir,
     tracked: 'README.md',
     runsDir,
     leasesDir: tempDir(),
@@ -88,6 +89,11 @@ function world(repo: TempRepo): WorkspaceWorld & { leasesDir: string } {
       return { runId, runDir, pid: alive ? process.pid : await deadPid() };
     },
     git: (cwd, ...args) => gitIn(repo, cwd, ...args),
+    publishBranch: (branch) => {
+      const sha = repo.git('commit-tree', 'origin/main^{tree}', '-p', 'origin/main', '-m', `work on ${branch}`);
+      repo.git('push', '--quiet', 'origin', `${sha}:refs/heads/${branch}`);
+      return sha;
+    },
   };
 }
 
@@ -155,6 +161,19 @@ test('create fetches first: a commit pushed to the origin after the clone fetche
       baseSha: 'rejected' in created ? created : created.baseSha,
       originMain: repo.git('rev-parse', 'origin/main'),
     }).toEqual({ baseSha: pushed, originMain: pushed });
+  });
+});
+
+test("a run's branch deleted on the remote is not continued from the clone's stale tracking ref: create starts at the default branch (review R1)", async () => {
+  await withTempRepo(async (repo) => {
+    withOrigin(repo);
+    const w = world(repo);
+    const stale = w.publishBranch(BRANCH);
+    // Deleting it from the clone drops the tracking ref too, so it is put back as a merged-and-deleted branch leaves it.
+    repo.git('push', '--quiet', 'origin', `:refs/heads/${BRANCH}`);
+    repo.git('update-ref', `refs/remotes/origin/${BRANCH}`, stale);
+    const created = await settle(adapterOf(repo, w).create(runIn(w.runsDir), { branch: BRANCH }));
+    expect('rejected' in created ? created : created.baseSha).toBe(w.baseSha);
   });
 });
 

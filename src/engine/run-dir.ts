@@ -4,9 +4,14 @@
 // A run also keeps `definition/`: a copy of each stage folder its roster reaches, at its path from the repository root,
 // made as the run starts. Its workflow's modules are imported once, then, but a call reads its stage's prompt, templates
 // and scripts as it runs, so a call reads them from the copy: a stage folder renamed or edited in the checkout mid-run
-// changes nothing the run does, a resume included. A script's command is still recorded at its checkout path. The folders are what `workflow.sha256` hashes, so the copy is what
-// the header vouches for. `.sail/lib/` and the shared prompt fragments are left where they are: a script finds the one
-// beside `$SAIL_CONFIG`, which `sail port` also reads its adapters from, and neither belongs to one stage.
+// changes nothing the run does, a resume included. A script's command is still recorded at its checkout path. The
+// folders are what `workflow.sha256` hashes, so the copy is what the header vouches for. `.sail/lib/` and the shared
+// prompt fragments are left where they are: a script finds the one beside `$SAIL_CONFIG`, which `sail port` also reads
+// its adapters from, and neither belongs to one stage.
+//
+// A run started from committed definitions, as a dispatched one is, keeps more: its `definition/` holds the whole
+// committed `.sail/` and the conventions `project.yaml` names, and the run, its resumes included, reads `.sail/lib/`, the
+// fragments and `$SAIL_CONFIG` from that copy.
 import { cpSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { createDir, replaceFile } from './durable';
@@ -144,6 +149,7 @@ export const STOP_REASONS = [
   'stopped',
   'interrupted',
   'usage_limit',
+  'port_unavailable',
 ] as const;
 export type StopReason = (typeof STOP_REASONS)[number];
 

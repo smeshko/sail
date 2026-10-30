@@ -64,7 +64,7 @@ interface Clone {
 }
 
 /**
- * A clone of the fixture repository on every real adapter but the harness: `.sail/` uncommitted, `.sail-runs/` ignored,
+ * A clone of the fixture repository on every real adapter but the harness: `.sail/` committed and pushed, `.sail-runs/` ignored,
  * a bare origin that the GitHub world reads its branches from, and `main` there one commit ahead of the clone's.
  */
 async function withClone<T>(fn: (clone: Clone) => Promise<T>): Promise<T> {
@@ -91,6 +91,10 @@ async function withClone<T>(fn: (clone: Clone) => Promise<T>): Promise<T> {
     const answers = JSON.parse(readFileSync(harness, 'utf8'));
     answers['implement#1'][0].delayMs = HOLD_MS;
     writeFileSync(harness, `${JSON.stringify(answers, null, 2)}\n`);
+    // A dispatched run reads the `.sail/` committed on the default branch's tip at the origin.
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
+    repo.git('push', '-q', 'origin', 'main');
     const github = createGitHubWorld({
       owner: 'o',
       repo: 'r',

@@ -208,27 +208,6 @@
         font-weight: 600;
         color: var(--fg-2);
       }
-      .lgrp-h .ic {
-        font-size: 11px;
-        color: var(--fg-4);
-      }
-      .lgrp-h .n {
-        margin-left: auto;
-        font-family: var(--mono);
-        font-size: 10.5px;
-        color: var(--fg-4);
-        border: 1px solid var(--line);
-        border-radius: 4px;
-        padding: 0 5px;
-      }
-      .lgrp-h .live {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--run);
-        animation: pulse 1.4s infinite;
-      }
-      .lgrp-r,
       .lgrp-p {
         padding: 0 12px 6px 34px;
         font-family: var(--mono);
@@ -286,57 +265,29 @@
       .why {
         color: var(--del);
       }
-      .subgrp-h {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        width: 100%;
-        padding: 5px 12px 5px 34px;
-        font-family: var(--mono);
-        font-size: 10px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--fg-4);
-      }
-      .subgrp-h:hover {
-        background: var(--hover);
-        color: var(--fg-2);
-      }
       .lgrp-h .caret,
-      .wf-h .caret {
+      .wf-t .caret {
         font-size: 11px;
         color: var(--fg-4);
       }
-      .subgrp-h .caret,
       .lgrp-h .caret,
-      .wf-h .caret,
+      .wf-t .caret,
       .qsec .caret,
       .qrecent-h .caret {
         transition: transform 0.12s;
       }
-      .subgrp-h.open .caret,
       .lgrp-h.open .caret,
-      .wf-h.open .caret,
+      .wf-t.open .caret,
       .qsec.open .caret,
       .qrecent-h.open .caret {
         transform: rotate(90deg);
       }
-      .subgrp-h .sw {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-      }
-      .subgrp-h .n {
-        margin-left: auto;
-      }
 
       /* status colours, for dots and pills */
-      .st.p-pass,
-      .sw.p-pass {
+      .st.p-pass {
         background: var(--ok);
       }
-      .st.p-fail,
-      .sw.p-fail {
+      .st.p-fail {
         background: var(--err);
       }
       .st.p-run {
@@ -398,67 +349,170 @@
         color: var(--err);
       }
 
-      /* the rail's workflows, inside a repository, and a watched workflow's queue row */
+      /* the rail's workflows, inside a repository, and a watched workflow's queue badge */
       .lgrp-h:hover,
-      .wf-h:hover,
-      .wf-q:hover {
+      .wf-h:hover {
         background: var(--hover);
-      }
-      .wf {
-        border-top: 1px solid var(--line);
       }
       .wf-h {
         display: flex;
         align-items: center;
         gap: 7px;
         width: 100%;
-        padding: 7px 12px 7px 22px;
+        padding: 0 12px 0 22px;
         font-family: var(--mono);
         font-size: 11.5px;
         color: var(--fg-2);
       }
+      .wf-t {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 7px 0;
+        color: inherit;
+        text-align: left;
+      }
       .wf-h .nm {
         font-weight: 600;
         color: var(--fg);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
+      .lgrp-h .nm {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .lgrp-h .counts,
       .wf-h .counts {
         margin-left: auto;
         display: flex;
         gap: 6px;
+        font-family: var(--mono);
         font-size: 10.5px;
+        font-weight: 400;
         color: var(--fg-4);
       }
+      .lgrp-h .counts .r,
       .wf-h .counts .r {
         color: var(--run);
       }
+      .lgrp-h .counts .f,
       .wf-h .counts .f {
         color: var(--err);
       }
-      .wf-q {
+      .qbadge {
+        flex: 0 0 auto;
+        padding: 0 5px;
+        font-family: var(--mono);
+        font-size: 10px;
+        border-radius: 4px;
+        border: 1px solid var(--line);
+      }
+      .qbadge.warn {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
+      .qbadge.idle {
+        color: var(--fg-4);
+        visibility: hidden;
+      }
+      .wf-h:hover .qbadge.idle,
+      .wf-h:focus-within .qbadge.idle,
+      .qbadge.idle.sel {
+        visibility: visible;
+      }
+      .qbadge.sel {
+        background: var(--panel-2);
+      }
+      .hist {
         display: flex;
-        align-items: center;
-        gap: 7px;
-        width: 100%;
-        padding: 5px 12px 5px 34px;
+        gap: 12px;
+        padding: 2px 12px 4px 34px;
         font-family: var(--mono);
         font-size: 10.5px;
-        color: var(--fg-3);
-        border-left: 2px solid transparent;
       }
-      .wf-q.sel {
-        background: var(--panel-2);
-        border-left-color: var(--warn);
-        color: var(--fg);
+      .hist-t {
+        color: var(--fg-4);
       }
-      .wf-q .qd {
+      .hist-t:hover,
+      .hist-t.open {
+        color: var(--fg-2);
+      }
+      .hist-run {
+        align-items: center;
+        padding-top: 3px;
+        padding-bottom: 3px;
+      }
+      .hist-run .st {
+        margin-top: 0;
+      }
+      .hist-run .r-title {
+        flex: 1 1 auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow-wrap: normal;
+      }
+      .r-el {
+        margin-left: auto;
+        flex: 0 0 auto;
+        color: var(--fg-4);
+        font-size: 10.5px;
+      }
+      .q-row .qd {
         width: 7px;
         height: 7px;
         border-radius: 50%;
         border: 1.5px solid var(--warn);
         flex: 0 0 auto;
       }
-      .wf-q .n {
+      .live-run {
+        padding-left: 12px;
+      }
+      .live-run .st {
+        margin-top: 0;
+      }
+      .r-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        white-space: nowrap;
+      }
+      .r-line .r-id {
+        flex: 0 0 auto;
+      }
+      .r-line .r-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        overflow-wrap: normal;
+      }
+      .q-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        width: 100%;
+        padding: 5px 12px;
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--fg-3);
+        border-left: 2px solid transparent;
+      }
+      .q-row:hover {
+        background: var(--hover);
+      }
+      .q-row.sel {
+        background: var(--panel-2);
+        border-left-color: var(--warn);
+        color: var(--fg);
+      }
+      .q-row .n {
         margin-left: auto;
+        color: var(--warn);
       }
       /* needs attention: a button in the top bar, and the pane it opens */
       .att-btn {

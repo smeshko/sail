@@ -34,6 +34,9 @@ function repository(repo: TempRepo, caps: { a: number; b: number }, tickets: See
   writeWatched(sailDir, 'b', { label: 'sail-b', cap: caps.b });
   writeTickets(sailDir, tickets);
   setHoldAt(repo.dir, 'implement#1');
+  // A dispatched run reads the `.sail/` committed on the default branch.
+  repo.git('add', '.sail');
+  repo.git('commit', '-q', '-m', 'definitions');
   const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
   const runs = join(repo.dir, '.sail-runs');
   return { env, runs };
@@ -272,6 +275,45 @@ test(
           order: [held?.runId, 'FAKE-2', true],
           issues: [],
         });
+      } finally {
+        cleanUp(repo.dir, [watcher]);
+      }
+    });
+  },
+  TIMEOUT_MS,
+);
+
+test(
+  "a watcher dispatching a workflow its default branch's commit lacks has the start refused: the item fails its attempt with the last line of the dispatch log, naming the commit, and no run exists",
+  async () => {
+    await withTempRepo(async (repo) => {
+      const sailDir = writeStub(repo.dir, { testsPassAt: 1 });
+      writeTickets(sailDir, [{ key: 'FAKE-1', labels: ['sail-a'] }]);
+      repo.git('add', '.sail');
+      repo.git('commit', '-q', '-m', 'definitions without a');
+      const sha = repo.git('rev-parse', 'main');
+      writeWatched(sailDir, 'a', { label: 'sail-a', cap: 1 });
+      const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
+      const runs = join(repo.dir, '.sail-runs');
+      const watcher = sailProcess(repo.dir, env, ['watch', 'a']);
+      try {
+        const failedOnce = () => queueOf(runs, 'a').items.some((item) => item.state === 'failed');
+        expect(
+          await until(
+            'the refused start failed its attempt',
+            () => existsSync(join(queueDir(runs, 'a'), 'queue.json')) && failedOnce(),
+          ),
+        ).toBe('the refused start failed its attempt');
+        const [item] = queueOf(runs, 'a').items;
+        expect({ state: item?.state, attempts: item?.attempts, runs: runsIn(runs).length }).toEqual({
+          state: 'failed',
+          attempts: 1,
+          runs: 0,
+        });
+        expect(item?.reason).toContain(`(in the .sail/ committed at ${sha.slice(0, 7)})`);
+        expect(item?.reason).toContain("no workflow 'a'");
+        expect((await sail(repo.dir, env, ['unwatch', 'a'])).code).toBe(0);
+        expect(await exitOf(watcher)).toBe(0);
       } finally {
         cleanUp(repo.dir, [watcher]);
       }
