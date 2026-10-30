@@ -547,7 +547,14 @@ test('sail resume refuses a run still running in another process, naming its pid
       );
       const runId = heldRuns(repo.dir)[0]?.runId ?? '';
       const lease = leasesIn(repo);
+      const leasesDir = join(repo.dir, '.sail-runs', 'fake', 'leases');
+      const leaseName = readdirSync(leasesDir).find((name) => name.endsWith('.json'));
+      expect(leaseName).toBeString();
       const refused = await spawned(repo, 'resume', runId);
+      expect(refused.stderr).toContain(
+        `If process ${running.pid} is not sail, it took the pid of the run's ended process`,
+      );
+      expect(refused.stderr).toContain(`remove the lease file ${join(leasesDir, leaseName ?? '')}, then resume it`);
       expect({
         code: refused.code,
         said: refused.stderr.includes(`is still running, in process ${running.pid}`),

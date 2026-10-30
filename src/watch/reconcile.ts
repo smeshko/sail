@@ -119,7 +119,7 @@ function leaseOf(runDir: string): { remote: string; branch: string } | undefined
 
 /**
  * The pid of a live process that holds run `runId`'s lease, as a resume started by hand or by an earlier watcher does,
- * or undefined when none does.
+ * or undefined when none does. A marked lease has no live holder, whatever its pid.
  */
 export async function liveHolder(
   runDir: string,
@@ -129,7 +129,7 @@ export async function liveHolder(
   const lease = leaseOf(runDir);
   if (lease === undefined) return undefined;
   const holder = await context.workspace.holder(lease.remote, lease.branch);
-  return holder?.runId === runId && context.isAlive(holder.pid) ? holder.pid : undefined;
+  return holder?.runId === runId && !holder.suspended && context.isAlive(holder.pid) ? holder.pid : undefined;
 }
 
 /**

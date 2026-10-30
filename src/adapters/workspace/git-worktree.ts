@@ -137,7 +137,7 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
     },
     async lease(leased, branch, holder) {
       const result = takeLease(leasesDir(), leased, branch, holder, now());
-      if (result.leased) {
+      if (result.leased && !holder.suspended) {
         const took = result.took === undefined ? {} : { took: result.took };
         emit({ type: 'workspace:leased', remote: leased, branch, ...took });
       }
