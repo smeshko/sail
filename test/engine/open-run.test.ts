@@ -15,10 +15,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ResolvedAdapters } from '../../src/engine/adapters';
 import type { Port } from '../../src/engine/config';
+import { handOffFile } from '../../src/engine/control';
 import { appendJournal, type NewJournalEntry, readJournal } from '../../src/engine/journal';
 import { findRun, type OpenedRun, openRun, reopenRun } from '../../src/engine/open-run';
 import { type Forced, readStatus, writeStatus } from '../../src/engine/run-dir';
 import { type AdapterEntry, RUN_HEADER_FILE, type RunHeader, readRunHeader } from '../../src/engine/run-header';
+import { runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
 import { PortError } from '../../src/ports/errors';
 import type { TicketSource } from '../../src/ports/ticket-source';
@@ -1019,6 +1021,74 @@ test('a dispatched start whose run directory exists is refused, and the run dire
     });
     expect(await leftBehind(repo.dir)).toEqual({ runs: [DISPATCHED], leases: [], state: 'Todo', comments: 1 });
     expect(readdirSync(dir)).toEqual(['marker']);
+  });
+});
+
+/** A dispatched run of the stub, started with `request` waiting in its hand-off file, run to its end. */
+async function dispatchedWith(repoDir: string, request: string, run: Partial<StubRun> = {}) {
+  const runs = join(repoDir, '.sail-runs');
+  mkdirSync(runs, { recursive: true });
+  const runId = run.ticket === '#1' ? 'pr-1-01M3BWNZM08Q4T6V2XRJ5KWD3N' : DISPATCHED;
+  writeFileSync(handOffFile(runs, runId), `${request}\n`);
+  const end = await runWorkflow({
+    cwd: repoDir,
+    workflow: 'ticket-to-pr',
+    ticket: 'FAKE-1',
+    clock: () => NOW,
+    ...run,
+    dispatch: { runId },
+    adapters: await fakeAdapters(repoDir),
+  });
+  if ('refused' in end) throw new Error(end.refused);
+  return { end, runs, runId };
+}
+
+test.each<['stopped' | 'unwatched', 'failed' | 'suspended', 'stopped' | 'unwatched', string | undefined]>([
+  ['stopped', 'failed', 'stopped', 'stopped by sail stop before intake#1'],
+  ['unwatched', 'suspended', 'unwatched', undefined],
+])(
+  'a dispatched run with a %s hand-off ends %s %s before intake#1, claims nothing and leaves no hand-off',
+  async (request, status, stopReason, message) => {
+    await withTempRepo(async (repo) => {
+      writeStub(repo.dir);
+      const { end, runs, runId } = await dispatchedWith(repo.dir, request);
+      expect({
+        status: end.status,
+        stopReason: end.stopReason,
+        message: message === undefined ? undefined : end.message,
+        journal: readJournal(end.dir).entries.length,
+        files: readdirSync(runs).filter((name) => name.startsWith(runId)),
+        ticket: (await ticketIn(repo.dir, 'FAKE-1')).state.name,
+      }).toEqual({ status, stopReason, message, journal: 0, files: [runId], ticket: 'Todo' });
+    });
+  },
+);
+
+test('a dispatched pull-request start with a stopped hand-off ends failed stopped before intake#1', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    writePrOnly(sail);
+    const head = repo.git('rev-parse', 'HEAD');
+    const prs = join(sail, 'fake', 'prs.json');
+    writeFileSync(
+      prs,
+      readFileSync(join(__dirname, '..', 'fixtures', 'repo', '.sail', 'fake', 'prs.json'), 'utf8').replaceAll(
+        'b4efb0c5de84d87c1455d4504b8b75b095a8e10b',
+        head,
+      ),
+    );
+    const { end, runs, runId } = await dispatchedWith(repo.dir, 'stopped', { ticket: '#1', workflow: 'pr-only' });
+    expect({
+      status: end.status,
+      stopReason: end.stopReason,
+      message: end.message,
+      files: readdirSync(runs).filter((name) => name.startsWith(runId)),
+    }).toEqual({
+      status: 'failed',
+      stopReason: 'stopped',
+      message: 'stopped by sail stop before intake#1',
+      files: [runId],
+    });
   });
 });
 
