@@ -84,10 +84,10 @@ export function replaceFile(path: string, text: string, tmp = `${path}.tmp`): vo
 }
 
 /**
- * `replaceFile()` in a directory a step may write to, as a call directory is its step's `$STAGE_OUT`. The temp file's
- * name can be guessed, and a link left under it would take the write to wherever it points. So whatever is there is
- * removed and the temp file is made new, which anything put in its place refuses. The rename replaces a link at `path`
- * itself, and never follows it.
+ * `replaceFile()` in a directory beside one a step writes to, as a call directory holds its step's `$STAGE_OUT`. No
+ * step's permissions reach it, but the temp file's name can be guessed, and a link left under it would take the write
+ * to wherever it points. So whatever is there is removed and the temp file is made new, which anything put in its place
+ * refuses. The rename replaces a link at `path` itself, and never follows it.
  */
 export function replaceFileAnew(path: string, text: string): void {
   const tmp = `${path}.tmp`;
