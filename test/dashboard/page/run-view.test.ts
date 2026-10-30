@@ -4,6 +4,7 @@
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { RestartOffer, ResumeOffer } from '../../../src/dashboard/actions';
 import { foldRun } from '../../../src/dashboard/page/run-model';
 import { renderRun, renderStatus } from '../../../src/dashboard/page/run-view';
 import { initialUi } from '../../../src/dashboard/page/ui-state';
@@ -174,4 +175,84 @@ test("a group inside a loop iteration is headed by the iteration and the group, 
     '-: intake#1',
     `rounds · iteration 1 of 2 · run.all · 6 calls: ${REVIEW_KEYS.join(' ')}`,
   ]);
+});
+
+const SOURCE_RUN = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+const RESUME_OFFER: ResumeOffer = {
+  enabled: true,
+  spentUsd: 1.0625,
+  budget: { maxUsd: 1, maxMinutes: 90 },
+  raise: 'usd',
+};
+
+test("a seeded run's header names the run it was seeded from, and an unseeded run's does not", () => {
+  const events = readEvents(GOLDEN_RUN);
+  const seeded = foldRun(
+    events.map((event) => (event.type === 'run:start' ? { ...event, fromRun: SOURCE_RUN } : event)),
+  );
+  const header = (model: ReturnType<typeof foldRun>) =>
+    /<span class="d-agent">([^<]*)<\/span>/.exec(renderRun(model, summaryOf(GOLDEN_RUN), initialUi(0), NOW).value)?.[1];
+  expect([seeded.fromRun, header(seeded)]).toEqual([
+    SOURCE_RUN,
+    `${GOLDEN_RUN_ID} · ticket-to-pr@1 · seeded from ${SOURCE_RUN}`,
+  ]);
+  expect([foldRun(events).fromRun, header(foldRun(events))]).toEqual([undefined, `${GOLDEN_RUN_ID} · ticket-to-pr@1`]);
+});
+
+test('Resume shows its raise field with what was typed, arms into the confirmation with what was spent, and shows a disabled one with its reason', () => {
+  const model = foldRun(readEvents(FAKE_3));
+  const resume = RESUME_OFFER;
+  const view = (ui: Partial<ReturnType<typeof initialUi>>, offers: Parameters<typeof renderRun>[4]) =>
+    renderRun(model, summaryOf(FAKE_3), { ...initialUi(0), ...ui }, NOW, offers).value;
+  const idle = view({ raise: '5' }, { resume });
+  expect(idle).toContain(
+    '<div class="grp"><div class="grp-t">start again</div><div class="acts"><span class="act"><label class="lbl">raise $ <input class="num" type="number" name="raise" min="0.01" step="any" value="5"></label><button class="btn" data-action="resume-run">resume</button></span></div></div>',
+  );
+  expect(idle).not.toContain('restart');
+  expect(view({ armed: 'resume' }, { resume })).toContain(
+    '<button class="btn armed" data-action="resume-run">confirm resume · spent $1.06 of $1.00</button>',
+  );
+  expect(view({ armed: 'resume' }, { resume: { ...resume, raise: 'minutes', spentMinutes: 91.5 } })).toContain(
+    'confirm resume · spent 91.5 min of 90 min</button>',
+  );
+  expect(
+    view({ runNotice: 'refused <b>' }, { resume: { ...resume, enabled: false, why: 'run is running' } }),
+  ).toContain(
+    '<span class="act"><button class="btn" disabled>resume</button><span class="act-why">run is running</span></span><span class="warnchip">refused &lt;b&gt;</span>',
+  );
+  expect(view({}, undefined)).not.toContain('start again');
+  expect(view({}, {})).not.toContain('start again');
+});
+
+test('Restart lists the stages with what runs again as titles, the failed one selected unless another was chosen, and arms into the confirmation with the stage and budget', () => {
+  const model = foldRun(readEvents(FAKE_2));
+  const restart: RestartOffer = {
+    enabled: true,
+    stages: [
+      { stage: 'spec', runsAgain: 'spec#1 and everything after it' },
+      { stage: 'implement', runsAgain: 'implement#1 and everything after it, in loop fix from iteration 1' },
+    ],
+    stage: 'implement',
+    budget: { maxUsd: 25, maxMinutes: 90 },
+  };
+  const view = (ui: Partial<ReturnType<typeof initialUi>>, offer = restart) =>
+    renderRun(model, summaryOf(FAKE_2), { ...initialUi(0), ...ui }, NOW, { restart: offer }).value;
+  expect(view({})).toContain(
+    '<select name="stage"><option value="spec" title="spec#1 and everything after it">spec</option><option value="implement" title="implement#1 and everything after it, in loop fix from iteration 1" selected>implement</option></select>',
+  );
+  expect(view({ restartStage: 'spec' })).toContain(
+    '<option value="spec" title="spec#1 and everything after it" selected>spec</option>',
+  );
+  expect(view({ restartStage: 'nonesuch' })).toContain('implement</option></select>');
+  expect(view({ armed: 'restart', restartStage: 'spec' })).toContain(
+    '<button class="btn armed" data-action="restart-run">confirm restart from spec · budget $25.00</button>',
+  );
+  expect(view({ armed: 'restart' }, { ...restart, budget: { maxMinutes: 90 } })).toContain(
+    'confirm restart from implement · budget 90 min</button>',
+  );
+  expect(view({}, { ...restart, budget: {} })).toContain('restart</button>');
+  expect(view({ armed: 'restart' }, { ...restart, budget: {} })).toContain('· no budget</button>');
+  expect(view({}, { enabled: false, why: 'branch sail/x is leased by run FAKE-9', stages: [], budget: {} })).toContain(
+    '<button class="btn" disabled>restart</button><span class="act-why">branch sail/x is leased by run FAKE-9</span>',
+  );
 });

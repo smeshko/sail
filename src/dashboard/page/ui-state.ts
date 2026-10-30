@@ -45,6 +45,13 @@ export interface UiState {
   queueEvents: boolean;
   /** Why the last move was refused, shown in the queue view until the next move succeeds. */
   queueNotice?: string;
+  /** The run action a first click has armed, which a second click starts. */
+  armed?: 'resume' | 'restart';
+  /** Why the last Resume or Restart was refused, or that it is starting, shown beside the buttons. */
+  runNotice?: string;
+  /** What was typed in the raise field and chosen in the stage list, kept across a draw. */
+  raise?: string | undefined;
+  restartStage?: string | undefined;
   theme: Theme;
   inspector: boolean;
   /** The card under the keyboard's cursor, by its place in the run view. */

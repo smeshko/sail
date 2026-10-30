@@ -23,10 +23,14 @@
 // - Clicks arrive as delegated `data-action`s, and keys as keys. Renders are coalesced: a region marked dirty is drawn
 //   by one flush at most every 100 ms.
 //
-// It controls one thing: `move-item` asks the dashboard's server to have the watcher move a waiting queue item, and a
-// refusal is shown in the queue view. The other actions change what is shown, and `copy` puts a CLI command on the
-// clipboard.
+// It controls three things. `move-item` asks the dashboard's server to have the watcher move a waiting queue item, and a
+// refusal is shown in the queue view. `resume-run` and `restart-run` ask it to start a suspended run again or a failed
+// run as a seeded one, each on a second click: what the open run offers is read from its actions route when it opens and
+// when the index changes its status or its queue item, and the page draws it. A refusal is shown beside the buttons; a
+// started restart opens the new run, and a started resume reads the run again. The other actions change what is shown,
+// and `copy` puts a CLI command on the clipboard.
 import type { QueueEvent, SailEvent } from '../../events/types';
+import type { RunActions } from '../actions';
 import type { IndexRepo } from '../files';
 import type { Message } from '../streams';
 import { attention } from './attention';
@@ -95,16 +99,16 @@ const enc = encodeURIComponent;
 /** The keys that move the card cursor, and by how much. */
 const MOVES: Record<string, number> = { j: 1, ArrowDown: 1, ArrowRight: 1, k: -1, ArrowUp: -1, ArrowLeft: -1 };
 
-/** Why a move was refused: the `error` its answer carries, else its status. */
-function refusal(status: number, body: string): string {
-  if (status === 0) return 'the move could not be sent: the dashboard did not answer';
+/** Why a request of kind `what` (a move, a resume, a restart) was refused: the `error` its answer carries, else its status. */
+function refusal(status: number, body: string, what: string): string {
+  if (status === 0) return `the ${what} could not be sent: the dashboard did not answer`;
   try {
     const { error } = JSON.parse(body) as { error?: unknown };
     if (typeof error === 'string' && error !== '') return error;
   } catch {
     // An answer that isn't JSON is told by its status.
   }
-  return `the move was refused (${status})`;
+  return `the ${what} was refused (${status})`;
 }
 
 function parse(text: string): Message | undefined {
@@ -137,6 +141,15 @@ export function boot(host: PageHost): Page {
   let run: OpenRun | undefined;
   let result: Loaded<unknown> | undefined;
   let log: Loaded<string> | undefined;
+  /** What the open run offers, as its actions route answered. */
+  let offers: RunActions | undefined;
+  /** Bumped on every read of the actions: only the latest is shown. */
+  let offersRead = 0;
+  /** What the open run's status and queue item were when its actions were read. */
+  let offersFor: string | undefined;
+  /** The stage a Restart was armed with, and whether a start is waiting for its answer. */
+  let armedStage: string | undefined;
+  let starting = false;
   /** The selected call's script output by call or step key, once a command is opened. */
   let outputs: Record<string, CallOutput> | undefined;
   let outputRead = 0;
@@ -193,10 +206,13 @@ export function boot(host: PageHost): Page {
       }
       if (run === undefined) return html`<div class="qempty">no run selected</div>`.value;
       const error = run.error === undefined ? '' : html`<div class="code bad">${run.error}</div>`;
+      // A raise typed and a stage chosen survive the draw.
+      ui.raise = host.value('raise') ?? ui.raise;
+      ui.restartStage = host.value('stage') ?? ui.restartStage;
       const card = opened();
       const view =
         card === undefined
-          ? renderRun(run.model, summaryOf(run), ui, host.now())
+          ? renderRun(run.model, summaryOf(run), ui, host.now(), offers)
           : renderTimeline(card, ui, host.now(), outputs);
       return html`${error}${view}`.value;
     },
@@ -503,6 +519,37 @@ export function boot(host: PageHost): Page {
     mark('drawer');
   };
 
+  /** The open run's status and its queue items' states: what its actions depend on that the index shows. */
+  const offerSignature = (open: OpenRun) => {
+    const repo = index?.find((each) => each.name === open.repo);
+    const item = repo?.runs.find((each) => each.runId === open.runId);
+    const queued = (repo?.queues ?? []).flatMap((view) =>
+      (view.queue?.items ?? [])
+        .filter((each) => each.runId === open.runId)
+        .map((each) => `${view.workflow}:${each.state}:${each.retryAt ?? ''}`),
+    );
+    return `${item === undefined ? '' : statusOf(item)}|${queued.join(',')}`;
+  };
+
+  const readOffers = () => {
+    const open = run;
+    if (open === undefined) return;
+    const asked = ++offersRead;
+    offersFor = offerSignature(open);
+    void host.get(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/actions`).then((answer) => {
+      if (asked !== offersRead || stopped) return;
+      offers = undefined;
+      if (answer.status === 200) {
+        try {
+          offers = JSON.parse(answer.body) as RunActions;
+        } catch {
+          // An answer that isn't JSON offers nothing.
+        }
+      }
+      mark('main');
+    });
+  };
+
   const selectRun = (repo: string, runId: string) => {
     if (run?.repo === repo && run.runId === runId) return;
     closeRun();
@@ -515,7 +562,11 @@ export function boot(host: PageHost): Page {
     ui.opened = [];
     ui.cursor = 0;
     run = { repo, runId, model: emptyRun(), ended: false };
+    offers = undefined;
+    delete ui.armed;
+    delete ui.runNotice;
     openRunSocket(run);
+    readOffers();
     mark('rail', 'main', 'inspector', 'status');
   };
 
@@ -587,6 +638,10 @@ export function boot(host: PageHost): Page {
       if (first !== undefined) selectRun(first.repo, first.runId);
     }
     if (run !== undefined) followAgain(run, true);
+    if (run !== undefined && offerSignature(run) !== offersFor) {
+      delete ui.armed;
+      readOffers();
+    }
     if (ui.queue !== undefined && openQueue() === undefined) delete ui.queue;
     mark('rail', 'attention', 'main', 'status');
     tick();
@@ -623,6 +678,67 @@ export function boot(host: PageHost): Page {
     if (!ui.attention) return;
     ui.attention = false;
     mark('attention');
+  };
+
+  /**
+   * A first click arms Resume or Restart, which then reads what it will do; a second click posts it. A raise that isn't
+   * a positive number, or a stage changed since the arming, arms again instead.
+   */
+  const startRun = (kind: 'resume' | 'restart') => {
+    const open = run;
+    const offer = kind === 'resume' ? offers?.resume : offers?.restart;
+    if (open === undefined || offer === undefined || !offer.enabled || starting) return;
+    const stage = kind === 'restart' ? (host.value('stage') ?? ui.restartStage ?? offers?.restart?.stage) : undefined;
+    if (kind === 'restart') ui.restartStage = stage;
+    let body: Record<string, unknown> = kind === 'restart' ? { stage } : {};
+    const raising = offers?.resume?.raise;
+    if (kind === 'resume' && raising !== undefined) {
+      ui.raise = host.value('raise') ?? ui.raise;
+      const amount = Number(ui.raise);
+      if (ui.raise === undefined || ui.raise.trim() === '' || !Number.isFinite(amount) || amount < 0.01) {
+        delete ui.armed;
+        ui.runNotice = `give the ${raising === 'usd' ? 'dollars' : 'minutes'} to raise the budget by: at least 0.01`;
+        mark('main');
+        return;
+      }
+      body = { raise: { [raising]: amount } };
+    }
+    if (ui.armed !== kind || armedStage !== stage) {
+      ui.armed = kind;
+      armedStage = stage;
+      delete ui.runNotice;
+      mark('main');
+      return;
+    }
+    delete ui.armed;
+    starting = true;
+    ui.runNotice = `${kind === 'resume' ? 'resuming' : 'restarting'} ${open.runId}…`;
+    mark('main');
+    void host
+      .post(`/api/repos/${enc(open.repo)}/runs/${enc(open.runId)}/${kind}`, body)
+      .then(({ status, body: answer }) => {
+        starting = false;
+        if (stopped) return;
+        if (status < 200 || status >= 300) {
+          ui.runNotice = refusal(status, answer, kind);
+          mark('main');
+          return;
+        }
+        delete ui.runNotice;
+        if (run !== open) return;
+        if (kind === 'resume') {
+          closeRun();
+          selectRun(open.repo, open.runId);
+          return;
+        }
+        try {
+          const { runId } = JSON.parse(answer) as { runId?: unknown };
+          if (typeof runId === 'string') selectRun(open.repo, runId);
+        } catch {
+          // An answer with no run id leaves the run open.
+        }
+        mark('main');
+      });
   };
 
   const actions: Record<string, (data: Record<string, string>) => void> = {
@@ -712,10 +828,12 @@ export function boot(host: PageHost): Page {
       void host.post(path, body).then(({ status, body: answer }) => {
         if (stopped) return;
         if (status >= 200 && status < 300) delete ui.queueNotice;
-        else ui.queueNotice = refusal(status, answer);
+        else ui.queueNotice = refusal(status, answer, 'move');
         mark('main');
       });
     },
+    'resume-run': () => startRun('resume'),
+    'restart-run': () => startRun('restart'),
     'toggle-queue-events': () => {
       ui.queueEvents = !ui.queueEvents;
       mark('main');
@@ -772,7 +890,14 @@ export function boot(host: PageHost): Page {
     a: () => actions['toggle-attention']?.({}),
   };
 
-  host.onAction((action, data) => actions[action]?.(data));
+  host.onAction((action, data) => {
+    // A click on anything but a start disarms it.
+    if (ui.armed !== undefined && action !== 'resume-run' && action !== 'restart-run') {
+      delete ui.armed;
+      mark('main');
+    }
+    actions[action]?.(data);
+  });
   host.onKey((key, inInput) => {
     if (inInput) return;
     const by = MOVES[key];

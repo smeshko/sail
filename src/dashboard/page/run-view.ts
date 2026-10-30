@@ -1,8 +1,9 @@
 // The run view: the run's header, its totals against its budget, one stage card per call grouped by loop iteration, a
 // group's cards side by side under a header of their own, the roster stages not called yet, the pull request it opened,
-// and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
+// the Resume or Restart a run offers, and the CLI commands to copy. The cards come from the run model, fed by the run's events. The totals come from the
 // summary in the index when there is one, and from the cards otherwise.
 import type { Summary } from '../../events/summary';
+import type { RestartOffer, ResumeOffer, RunActions } from '../actions';
 import { runCommands } from './commands';
 import { cost, duration, percent, tokens } from './format';
 import { html, type SafeHtml, safeHref, text } from './html';
@@ -114,8 +115,66 @@ function totals(model: RunModel, summary: Summary | null | undefined, now: numbe
 </div>`;
 }
 
+/** What a resume has spent against its budget, in the unit a raise is in. */
+function spentOf(offer: ResumeOffer): string {
+  const { budget } = offer;
+  if (offer.raise === 'minutes') {
+    const of = budget.maxMinutes === undefined ? '' : ` of ${budget.maxMinutes} min`;
+    return `spent ${offer.spentMinutes === undefined ? '?' : `${offer.spentMinutes} min`}${of}`;
+  }
+  return `spent ${cost(offer.spentUsd)}${budget.maxUsd === undefined ? '' : ` of ${cost(budget.maxUsd)}`}`;
+}
+
+/** The budget a restart gives the new run. */
+function budgetOf(offer: RestartOffer): string {
+  const { maxUsd, maxMinutes } = offer.budget;
+  if (maxUsd !== undefined) return `budget ${cost(maxUsd)}`;
+  return maxMinutes === undefined ? 'no budget' : `budget ${maxMinutes} min`;
+}
+
+function resumeControl(offer: ResumeOffer, ui: UiState): SafeHtml {
+  if (!offer.enabled) {
+    return html`<span class="act"><button class="btn" disabled>resume</button><span class="act-why">${offer.why}</span></span>`;
+  }
+  const raise =
+    offer.raise === undefined
+      ? ''
+      : html`<label class="lbl">raise ${offer.raise === 'usd' ? '$' : 'min'} <input class="num" type="number" name="raise" min="0.01" step="any" value="${ui.raise ?? ''}"></label>`;
+  const label = ui.armed === 'resume' ? `confirm resume · ${spentOf(offer)}` : 'resume';
+  return html`<span class="act">${raise}<button class="btn${ui.armed === 'resume' ? ' armed' : ''}" data-action="resume-run">${label}</button></span>`;
+}
+
+function restartControl(offer: RestartOffer, ui: UiState): SafeHtml {
+  if (!offer.enabled) {
+    return html`<span class="act"><button class="btn" disabled>restart</button><span class="act-why">${offer.why}</span></span>`;
+  }
+  const chosen = offer.stages.some((each) => each.stage === ui.restartStage) ? ui.restartStage : offer.stage;
+  const label = ui.armed === 'restart' ? `confirm restart from ${chosen} · ${budgetOf(offer)}` : 'restart';
+  return html`<span class="act"><label class="lbl">from <select name="stage">${offer.stages.map(
+    (each) =>
+      html`<option value="${each.stage}" title="${each.runsAgain}"${each.stage === chosen ? ' selected' : ''}>${each.stage}</option>`,
+  )}</select></label><button class="btn${ui.armed === 'restart' ? ' armed' : ''}" data-action="restart-run">${label}</button></span>`;
+}
+
+/** Resume or Restart, whichever the run offers, with the notice of the last start. */
+function actionBar(actions: RunActions | undefined, ui: UiState): SafeHtml {
+  if (actions === undefined || (actions.resume === undefined && actions.restart === undefined)) return html``;
+  return html`<div class="grp"><div class="grp-t">start again</div><div class="acts">${
+    actions.resume === undefined ? '' : resumeControl(actions.resume, ui)
+  }${actions.restart === undefined ? '' : restartControl(actions.restart, ui)}${
+    ui.runNotice === undefined ? '' : html`<span class="warnchip">${ui.runNotice}</span>`
+  }</div></div>
+`;
+}
+
 /** The run view. `now` is ms since the epoch, for the running cards' durations. */
-export function renderRun(model: RunModel, summary: Summary | null | undefined, ui: UiState, now: number): SafeHtml {
+export function renderRun(
+  model: RunModel,
+  summary: Summary | null | undefined,
+  ui: UiState,
+  now: number,
+  actions?: RunActions,
+): SafeHtml {
   const runId = model.runId ?? summary?.runId ?? ui.runId ?? '';
   const status = model.end?.status ?? (model.runId === undefined ? summary?.status : 'running');
   const stopReason = model.end?.stopReason ?? summary?.stopReason;
@@ -126,7 +185,9 @@ export function renderRun(model: RunModel, summary: Summary | null | undefined, 
     ticket === undefined ? '' : html`<span class="d-title">${ticket.ticketKey}</span> ${link(ticket.url, ticket.title)}`
   }<span class="pill ${pillOf(status)}">${status ?? 'unknown'}</span>${
     stopReason === undefined ? '' : html`<span class="warnchip">${stopReason}</span>`
-  }<span class="d-agent">${runId}${model.workflow === undefined ? '' : html` · ${model.workflow}`}</span></div>
+  }<span class="d-agent">${runId}${model.workflow === undefined ? '' : html` · ${model.workflow}`}${
+    model.fromRun === undefined ? '' : html` · seeded from ${model.fromRun}`
+  }</span></div>
 ${model.end?.message === undefined ? '' : html`<div class="d-msg">${model.end.message}</div>`}
 <div class="run-b">
 ${totals(model, summary, now)}
@@ -141,7 +202,7 @@ ${
     ? ''
     : html`<div class="grp"><div class="grp-t">pull request</div>${link(typeof pr.url === 'string' ? pr.url : undefined, `#${text(pr.number)}`)}</div>`
 }
-${runId === '' ? '' : html`<div class="grp"><div class="grp-t">commands</div>${commandList(runCommands(runId, status))}</div>`}
+${actionBar(actions, ui)}${runId === '' ? '' : html`<div class="grp"><div class="grp-t">commands</div>${commandList(runCommands(runId, status))}</div>`}
 ${
   model.unreadable === 0
     ? ''

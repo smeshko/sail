@@ -344,3 +344,20 @@ test('post sends the method, the client header, a JSON content type and the JSON
   ]);
   expect(await browserHost(fakeWindow({ fetch: 'fails' }).win).post('/x', {})).toEqual({ status: 0, body: '' });
 });
+
+test('value() reads the named field of the main region, and answers undefined for a field it lacks and for no main region', () => {
+  const fake = fakeWindow();
+  const host = browserHost(fake.win);
+  expect(host.value('raise')).toBeUndefined();
+  const asked: string[] = [];
+  fake.elements.main = element({
+    querySelector: (selectors: string) => {
+      asked.push(selectors);
+      return selectors === '[name="raise"]' ? element({ value: '2.5' }) : null;
+    },
+  });
+  expect([host.value('raise'), host.value('stage')]).toEqual(['2.5', undefined]);
+  expect(asked).toEqual(['[name="raise"]', '[name="stage"]']);
+  fake.elements.main = element();
+  expect(host.value('raise')).toBeUndefined();
+});

@@ -167,6 +167,8 @@ export interface RunModel {
   /** `name@version`. */
   workflow?: string;
   source?: RunStart['source'];
+  /** The run a seeded run reused calls from. */
+  fromRun?: string;
   startedAt?: string;
   budget?: { maxUsd?: number; maxMinutes?: number };
   roster?: Roster;
@@ -398,6 +400,8 @@ function fold(model: RunModel, e: Fields, type: string, ts: string, key?: string
       if (runId !== undefined) model.runId = runId;
       if (name !== undefined && version !== undefined) model.workflow = `${name}@${version}`;
       if (source !== undefined) model.source = source as RunModel['source'] & object;
+      const fromRun = str(e.fromRun);
+      if (fromRun !== undefined) model.fromRun = fromRun;
       if (budget !== undefined) {
         // Only the limits the view shows, each a finite number (review R2-4).
         const maxUsd = num(budget.maxUsd);

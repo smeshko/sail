@@ -1,5 +1,5 @@
 // What the page needs from a browser, as one interface: regions to render into, delegated actions and keys, reads with
-// the client header, the one POST (a queue move), sockets, timers, storage and the clipboard. `boot()` takes a `PageHost`, so the whole shell runs
+// the client header, the POSTs (a queue move, a resume, a restart), sockets, timers, storage and the clipboard. `boot()` takes a `PageHost`, so the whole shell runs
 // in a test against a fake one, and `browserHost()` adapts a real window to it. The window is typed here, by the few
 // members the page uses, since the project's TypeScript has no DOM library.
 
@@ -28,6 +28,8 @@ export interface PageHost {
   get(path: string): Promise<{ status: number; body: string }>;
   /** A POST of `body` as JSON to `path`, with the client header. A failed request answers status 0. */
   post(path: string, body: unknown): Promise<{ status: number; body: string }>;
+  /** The current value of the field named `name` in the main region, or undefined when there is none. */
+  value(name: string): string | undefined;
   /** A WebSocket on `/ws?<query>`. */
   connect(query: string, handlers: ConnectHandlers): Connection;
   now(): number;
@@ -50,12 +52,14 @@ export interface PageHost {
 /** The members of an element the page uses. */
 export interface ElementLike {
   innerHTML: string;
+  value?: string;
   scrollTop?: number;
   scrollHeight?: number;
   dataset: Record<string, string | undefined>;
   parentElement: ElementLike | null;
   tagName?: string;
   querySelectorAll?(selectors: string): ArrayLike<ElementLike>;
+  querySelector?(selectors: string): ElementLike | null;
   style?: { setProperty(name: string, value: string): void };
 }
 
@@ -195,6 +199,9 @@ export function browserHost(win: BrowserWindow): PageHost {
       } catch {
         return { status: 0, body: '' };
       }
+    },
+    value(name) {
+      return doc.getElementById('main')?.querySelector?.(`[name="${name}"]`)?.value ?? undefined;
     },
     connect(query, handlers) {
       const socket = new win.WebSocket(`ws://${win.location.host}/ws?${query}`);
