@@ -1204,10 +1204,7 @@ function commitDefinitions(repo: TempRepo, conventions: string): string {
 }
 
 /** The committed `.sail/` and conventions of `repo` read into a scratch directory, as a dispatched start reads them. */
-async function committedDefinitions(
-  repo: TempRepo,
-  adapters: ResolvedAdapters,
-): Promise<NonNullable<OpenRunOptions['definitions']>> {
+async function committedDefinitions(adapters: ResolvedAdapters): Promise<NonNullable<OpenRunOptions['definitions']>> {
   const scratch = mkdtempSync(join(tmpdir(), 'sail-definitions-test-'));
   dirs.push(scratch);
   const port = adapters.ports.workspace;
@@ -1233,7 +1230,7 @@ test("a run opened with definitions runs the committed workflow while the clone'
     rmSync(join(sail, 'workflows', 'ticket-to-pr'), { recursive: true });
     writeFileSync(join(repo.dir, 'AGENTS.md'), 'an uncommitted edit\n');
     const adapters = await fakeAdapters(repo.dir);
-    const definitions = await committedDefinitions(repo, adapters);
+    const definitions = await committedDefinitions(adapters);
     const run = await openedFrom(repo, definitions, adapters);
     const copy = join(run.dir, 'definition');
     expect({
@@ -1287,7 +1284,7 @@ test('a workflow missing at the commit is refused though the working tree has it
     commitDefinitions(repo, 'conventions\n');
     cpSync(join(repo.dir, 'kept-workflow'), held, { recursive: true });
     const adapters = await fakeAdapters(repo.dir);
-    const definitions = await committedDefinitions(repo, adapters);
+    const definitions = await committedDefinitions(adapters);
     const refused = await openRun({
       cwd: repo.dir,
       workflow: 'ticket-to-pr',

@@ -52,7 +52,7 @@ import {
   writePrOnly,
   writeStub,
 } from '../helpers/stub-workflow';
-import { withTempRepo } from '../helpers/temp-repo';
+import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 const IN_PROGRESS: TicketState = { type: 'started', name: 'In Progress' };
@@ -1068,9 +1068,17 @@ test("sail FAKE-1 whose workspace can't be made exits 3, with the ticket untouch
 // `--dispatch <run id>`: the watcher's start of a run it minted the id of (DECISIONS D3).
 const DISPATCHED = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
 
+/** Commits what the repository's `.sail/` holds on `main`, and returns that commit's sha. */
+const committed = (repo: TempRepo): string => {
+  repo.git('add', '.sail');
+  repo.git('commit', '-q', '-m', 'definitions');
+  return repo.git('rev-parse', 'HEAD');
+};
+
 test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, its claim inside its intake', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir, { testsPassAt: 1 });
+    committed(repo);
     const { code, stderr, runs, header, events, ticket } = await started(repo.dir, [
       'FAKE-1',
       '--dispatch',
@@ -1090,11 +1098,64 @@ test('sail FAKE-1 --dispatch <run id> runs to its end under that id, via watch, 
 });
 
 test('sail FAKE-1 --dispatch with a malformed id exits 3 in one line, with no run directory', async () => {
-  const malformed = await sailIn(['FAKE-1', '--dispatch', 'FAKE-1-nope']);
-  expect({ code: malformed.code, stderr: malformed.stderr, touched: malformed.touched }).toEqual({
-    code: EXIT_REFUSED,
-    stderr:
-      "sail FAKE-1: --dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-nope' is not one\n",
-    touched: false,
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const sha = committed(repo);
+    const malformed = await runCaptured(['FAKE-1', '--dispatch', 'FAKE-1-nope'], repo.dir);
+    expect({ code: malformed.code, stderr: malformed.stderr, runs: runIds(repo.dir) }).toEqual({
+      code: EXIT_REFUSED,
+      stderr: `sail FAKE-1: --dispatch takes the id of a new run of FAKE-1, FAKE-1-<26 Crockford characters>: 'FAKE-1-nope' is not one (in the .sail/ committed at ${sha.slice(0, 7)})\n`,
+      runs: [],
+    });
+  });
+});
+
+test("a dispatched start runs the workflow committed at main while the working tree lacks it, and records main's sha in run.json; a manual start of the same repository is refused", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
+    const sha = committed(repo);
+    rmSync(join(sail, 'workflows', 'ticket-to-pr'), { recursive: true });
+    const manual = await runCaptured(['FAKE-1', '--workflow', 'ticket-to-pr'], repo.dir);
+    expect(manual.code).toBe(EXIT_REFUSED);
+    expect(manual.stderr).toContain("no workflow 'ticket-to-pr'");
+    const run = await started(repo.dir, ['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', DISPATCHED]);
+    expect({ code: run.code, runs: run.runs, sha: run.header.definitionsSha }).toEqual({
+      code: EXIT_OK,
+      runs: [DISPATCHED],
+      sha: repo.git('rev-parse', 'main'),
+    });
+    expect(run.header.definitionsSha).toBe(sha);
+    expect(existsSync(join(run.dir, 'definition', '.sail', 'workflows', 'ticket-to-pr', 'workflow.ts'))).toBe(true);
+  });
+});
+
+test("a dispatched start ignores an uncommitted edit of the clone's .sail/, and a manual start runs it and has no definitionsSha", async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir, { testsPassAt: 1 });
+    committed(repo);
+    edit(sail, 'project.yaml', 'name: ', 'name: edited-');
+    const dispatched = await started(repo.dir, ['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', DISPATCHED]);
+    expect(dispatched.code).toBe(EXIT_OK);
+    expect(readFileSync(join(dispatched.dir, 'definition', '.sail', 'project.yaml'), 'utf8')).not.toContain('edited-');
+  });
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir, { testsPassAt: 1 });
+    committed(repo);
+    const manual = await started(repo.dir, ['FAKE-1', '--workflow', 'ticket-to-pr']);
+    expect({ code: manual.code, sha: manual.header.definitionsSha }).toEqual({ code: EXIT_OK, sha: undefined });
+  });
+});
+
+test('a dispatched start whose commit lacks the workflow exits 3 naming the commit, with no run directory and no lease', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = writeStub(repo.dir);
+    rmSync(join(sail, 'workflows', 'ticket-to-pr'), { recursive: true });
+    const sha = committed(repo);
+    writeStub(repo.dir);
+    const run = await runCaptured(['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', DISPATCHED], repo.dir);
+    expect({ code: run.code, runs: runIds(repo.dir) }).toEqual({ code: EXIT_REFUSED, runs: [] });
+    expect(run.stderr).toContain(`(in the .sail/ committed at ${sha.slice(0, 7)})`);
+    expect(run.stderr).toContain("no workflow 'ticket-to-pr'");
+    expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'leases'))).toBe(false);
   });
 });

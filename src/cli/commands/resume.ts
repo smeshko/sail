@@ -12,10 +12,12 @@
 //
 // The terminal view shows the whole run: it reads the run's earlier events first, prints nothing for them, and opens
 // with what already ran once the resume's first event arrives. A resume refused before then prints nothing.
+import { dirname, join } from 'node:path';
 import type { Raise } from '../../engine/budget';
 import { systemKeepAwake } from '../../engine/keep-awake';
 import { findWorkflowFile } from '../../engine/load-workflow';
 import { findRun } from '../../engine/open-run';
+import { DEFINITION_DIR } from '../../engine/run-dir';
 import { resumeWorkflow } from '../../engine/runtime';
 import { readEvents } from '../../events/consumers/ndjson';
 import type { ExitCode } from '../exit-codes';
@@ -62,19 +64,30 @@ export async function resume(args: Parsed, io: Io): Promise<ExitCode> {
   if ('refused' in raise) return refuse(raise.refused);
   const verbosity = verbosityOf(args, io, COMMAND);
   if (typeof verbosity === 'number') return verbosity;
-  const project = await findProject(io, COMMAND);
-  if (typeof project === 'number') return project;
+  const clone = await findProject(io, COMMAND);
+  if (typeof clone === 'number') return clone;
 
-  const run = findRun(project.sailDir, runId);
+  const run = findRun(clone.sailDir, runId);
   if ('refused' in run) return refuse(run.refused);
+  // A run started from committed definitions resumes on its own copy of them, whatever the clone's `.sail/` holds.
+  const copy =
+    run.header.definitionsSha === undefined
+      ? undefined
+      : await findProject(io, COMMAND, {
+          found: { dir: join(run.dir, DEFINITION_DIR, '.sail') },
+          label: `${run.header.definitionsSha.slice(0, 7)}:.sail/project.yaml`,
+          root: dirname(clone.sailDir),
+        });
+  if (typeof copy === 'number') return copy;
+  const project = copy ?? clone;
   const workflowFile = findWorkflowFile(project.sailDir, run.header.workflow.name);
   if ('refused' in workflowFile) return refuse(workflowFile.refused);
   const typed = await typecheckWorkflow(io, COMMAND, project.sailDir, workflowFile.file);
   if (typed !== undefined) return typed;
-  await registerRepository(io, COMMAND, project);
-  const recording = recorded(args, io, project);
+  await registerRepository(io, COMMAND, clone);
+  const recording = recorded(args, io, { sailDir: clone.sailDir, adapters: project.adapters });
 
-  const terminal = terminalFor(io, project.sailDir, verbosity, readEvents(run.dir));
+  const terminal = terminalFor(io, clone.sailDir, verbosity, readEvents(run.dir));
   // Closed however the run ends, so a throw never leaves the live line or its timer behind.
   const end = await interruptibly(io, (signal) =>
     resumeWorkflow({
