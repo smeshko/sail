@@ -532,6 +532,11 @@ export function boot(host: PageHost): Page {
 
   const onQueueMessage = (id: string, open: OpenQueue, text: string) => {
     const message = parse(text);
+    if (message?.kind === 'error') {
+      open.stream = { ...open.stream, error: message.message };
+      if (ui.queue === id) mark('main');
+      return;
+    }
     if (message?.kind !== 'queue-event') return;
     const event = message.event as QueueEvent;
     const recent = [...open.stream.recent, event].slice(-RECENT_EVENTS);
@@ -541,25 +546,26 @@ export function boot(host: PageHost): Page {
     if (ui.queue === id) mark('main');
   };
 
+  const connectQueue = (id: string, open: OpenQueue) => {
+    open.connection = host.connect(`queue=${enc(id)}`, {
+      message: (text) => onQueueMessage(id, open, text),
+      close: retryOnClose(
+        open,
+        () => open.stream.error !== undefined,
+        () => queues.get(id) === open,
+        () => {
+          open.stream = { recent: [], watch: 'unknown' };
+          connectQueue(id, open);
+          if (ui.queue === id) mark('main');
+        },
+      ),
+    });
+  };
+
   const openQueueSocket = (id: string) => {
     const open: OpenQueue = { stream: { recent: [], watch: 'unknown' } };
     queues.set(id, open);
-    const connect = () => {
-      open.connection = host.connect(`queue=${enc(id)}`, {
-        message: (text) => onQueueMessage(id, open, text),
-        close: () => {
-          if (stopped || queues.get(id) !== open) return;
-          open.retry = host.later(() => {
-            delete open.retry;
-            if (queues.get(id) !== open) return;
-            open.stream = { recent: [], watch: 'unknown' };
-            connect();
-            if (ui.queue === id) mark('main');
-          }, RECONNECT_MS);
-        },
-      });
-    };
-    connect();
+    connectQueue(id, open);
   };
 
   /** Opens a queue socket for every queue in the index, and closes those no longer in it. */
@@ -644,6 +650,11 @@ export function boot(host: PageHost): Page {
     },
     'select-queue': (data) => {
       if (data.queue === undefined) return;
+      const failed = queues.get(data.queue);
+      if (failed?.stream.error !== undefined) {
+        failed.stream = { recent: [], watch: 'unknown' };
+        connectQueue(data.queue, failed);
+      }
       ui.queue = data.queue;
       delete ui.queueNotice;
       mark('rail', 'main');

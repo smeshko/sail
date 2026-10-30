@@ -599,6 +599,32 @@ test("with no queue the rail has no queue row and no queue socket opens; with be
   expect([page.ui.queue, cards(host.regions.main)]).toEqual([undefined, expect.arrayContaining(['publish#1'])]);
 });
 
+test('a queue stream that sends an error and closes is not reopened and shows its error, and clicking its row opens it again from empty (ADW-209)', () => {
+  const queueSockets = () => host.sockets.filter((socket) => socket.query.startsWith('queue='));
+  const queue = `beta/${QUEUE_WORKFLOW}`;
+  page = boot(host);
+  host.push(host.open('index')[0], indexMessage());
+  const socket = host.open('queue=')[0];
+  host.click({ action: 'select-queue', queue });
+  expect(queueSockets()).toHaveLength(1);
+  host.push(socket, {
+    kind: 'queue-event',
+    event: { seq: 1, ts: '2026-09-24T10:54:59.000Z', type: 'watch:added', workflow: QUEUE_WORKFLOW },
+  });
+  host.push(socket, { kind: 'error', message: "events.ndjson:2 can't be read" });
+  host.drop(socket);
+  host.advance(10_000);
+  expect(queueSockets()).toHaveLength(1);
+  expect(host.regions.main).toContain('<div class="code bad">events.ndjson:2 can&#39;t be read</div>');
+  host.click({ action: 'select-queue', queue });
+  host.advance(100);
+  expect(queueSockets()).toHaveLength(2);
+  expect(host.regions.main).not.toContain('code bad');
+  expect(host.regions.main).toContain('<span class="pill p-skip">unknown</span>');
+  host.click({ action: 'select-queue', queue });
+  expect(queueSockets()).toHaveLength(2);
+});
+
 test('keys move the cursor, Enter opens a timeline, ] and [ step it, Escape goes back to the cards then deselects, i toggles the inspector, and a key typed in an input does nothing', () => {
   page = boot(host);
   host.push(host.open('index')[0], indexMessage());
