@@ -14,6 +14,7 @@ import type { Summary } from '../../src/events/summary';
 import { fakeAdapters } from '../helpers/adapters';
 import { AGENT_WORKFLOW } from '../helpers/agent-fixture';
 import { edit } from '../helpers/fixture';
+import { writeLiveRun } from '../helpers/live-run';
 import { TRIO, TRIO_GROUP, TRIO_JOURNAL, trioRunInto } from '../helpers/review-fixture';
 import { SOURCE_BRANCH, SOURCE_JOURNAL, sharedSource } from '../helpers/seeded';
 import { copyRun } from '../helpers/stub-workflow';
@@ -350,6 +351,30 @@ test("a run seeded for the stage after a two-step call reuses the call's step li
     });
   });
 }, 90_000);
+
+test('a seeded run opens while its workflow live runs fill the cap, and records no cap', async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const adapters = await fakeAdapters(repo.dir);
+    const lives = [];
+    for (const [index, runId] of [
+      'ZZ-live-1-01M3BWNZM08Q4T6V2XRJ5KWD3A',
+      'ZZ-live-2-01M3BWNZM08Q4T6V2XRJ5KWD3B',
+    ].entries()) {
+      lives.push(
+        await writeLiveRun(repo.dir, { workflow: 'ticket-to-pr', ticketKey: `FAKE-${index + 2}`, runId, adapters }),
+      );
+    }
+    try {
+      const end = await seeded(repo, from.runId, 'spec');
+      expect(endOf(end)).toEqual({ status: 'suspended', stopReason: 'until' });
+      const header = JSON.parse(readFileSync(join(dirOf(end), 'run.json'), 'utf8'));
+      expect(header.source.forced).toEqual([]);
+    } finally {
+      for (const live of lives) await live.release();
+    }
+  });
+});
 
 test('a resume restores the reused calls a crash before the run start took, each once, with fromRun', async () => {
   await withTempRepo(async (first) => {

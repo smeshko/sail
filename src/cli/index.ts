@@ -84,7 +84,7 @@ Usage:
   sail --help                                                Print this help
 
 Starting a run from a ticket:
-  --force          Runs a ticket that is not designated, or not in a pick-up state, and records which check it overrode; a pull request that is unlabelled, closed or a draft
+  --force          Runs a ticket that is not designated, not in a pick-up state, or whose workflow's live runs fill its maxConcurrentRuns, and records which check it overrode; a pull request that is unlabelled, closed or a draft
   --until <stage>  Stops the run after that stage's first call, suspended: sail resume takes it to its end
   --dry-run        Runs every check a start runs and prints the roster it would freeze; writes nothing
   --record <dir>   Writes each agent session to <dir> as a recording; sail resume takes it too

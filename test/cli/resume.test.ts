@@ -13,6 +13,7 @@ import { formatIssue, validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import { rebuildSummary } from '../../src/events/consumers/summary';
 import type { Summary } from '../../src/events/summary';
+import { fakeAdapters } from '../helpers/adapters';
 import {
   interruptInSession,
   journaled,
@@ -28,6 +29,7 @@ import {
   writeAgentFixture,
 } from '../helpers/agent-fixture';
 import { edit, FIXTURE_SAIL, write } from '../helpers/fixture';
+import { writeLiveRun } from '../helpers/live-run';
 import { fakeInterrupts, normaliseDurations, runCaptured } from '../helpers/run-captured';
 import { killOne, sailProcess, until } from '../helpers/sail-process';
 import {
@@ -43,6 +45,7 @@ import {
   writeStub,
 } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { writeWatched } from '../helpers/watched';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 
@@ -722,3 +725,34 @@ test("sail resume of a dispatched run loads the run's own copy of the definition
     expect(readStatus(join(repo.dir, '.sail-runs', runId))).toEqual({ status: 'completed' });
   });
 });
+
+test('sail resume of a watched workflow opens while its live runs fill the cap, and runs to its end', async () => {
+  await withTempRepo(async (repo) => {
+    await withTempRepo(async (from) => {
+      const sail = writeStub(from.dir, { sleepAt: 'implement#2' });
+      writeWatched(sail, 'capped', { label: 'sail', cap: 1 });
+      const interrupts = fakeInterrupts();
+      const running = runCaptured(['FAKE-1', '--workflow', 'capped'], from.dir, interrupts);
+      const { end } = await interruptWhenAsleep(from.dir, running, interrupts.interrupt);
+      expect({ code: end.code, stderr: end.stderr }).toEqual({ code: EXIT_SUSPENDED, stderr: '' });
+      copyRun(from.dir, repo.dir);
+    });
+    const runId = runIdIn(repo.dir);
+    const live = await writeLiveRun(repo.dir, {
+      workflow: 'capped',
+      ticketKey: 'FAKE-2',
+      runId: 'ZZ-live-01M3BWNZM08Q4T6V2XRJ5KWD3A',
+      adapters: await fakeAdapters(repo.dir),
+    });
+    try {
+      const { code, stderr } = await runCaptured(['resume', runId], repo.dir);
+      expect({ code, stderr, status: readStatus(join(repo.dir, '.sail-runs', runId)) }).toEqual({
+        code: EXIT_OK,
+        stderr: '',
+        status: { status: 'completed' },
+      });
+    } finally {
+      await live.release();
+    }
+  });
+}, 60_000);

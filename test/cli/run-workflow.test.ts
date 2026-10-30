@@ -37,6 +37,7 @@ import {
   writeAgentFixture,
 } from '../helpers/agent-fixture';
 import { copyFixture, edit, FIXTURE_SAIL, write } from '../helpers/fixture';
+import { writeLiveRun } from '../helpers/live-run';
 import {
   type Captured,
   type CaptureOptions,
@@ -53,6 +54,7 @@ import {
   writeStub,
 } from '../helpers/stub-workflow';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
+import { writeWatched } from '../helpers/watched';
 
 const WORKFLOW = 'workflows/ticket-to-pr/workflow.ts';
 const IN_PROGRESS: TicketState = { type: 'started', name: 'In Progress' };
@@ -1227,5 +1229,51 @@ test('a dispatched start whose commit lacks the workflow exits 3 naming the comm
     expect(run.stderr).toContain(`(in the .sail/ committed at ${sha.slice(0, 7)})`);
     expect(run.stderr).toContain("no workflow 'ticket-to-pr'");
     expect(existsSync(join(repo.dir, '.sail-runs', 'fake', 'leases'))).toBe(false);
+  });
+});
+
+// The cap on a watched workflow's live runs in this clone (ADW-201): `sail <ticket>` is refused at it unless `--force`.
+
+const LIVE = 'FAKE-0-01M3BWNZM08Q4T6V2XRJ5KWD3A';
+
+/** The stub with a `capped` workflow, watched with a cap of 1, and one live run of it. */
+async function cappedWithLiveRun(repo: TempRepo) {
+  const sail = writeStub(repo.dir, { testsPassAt: 1 });
+  writeWatched(sail, 'capped', { label: 'sail', cap: 1 });
+  return writeLiveRun(repo.dir, {
+    workflow: 'capped',
+    ticketKey: 'FAKE-0',
+    runId: LIVE,
+    adapters: await fakeAdapters(repo.dir),
+  });
+}
+
+test('sail FAKE-1 at its workflow full cap exits 3 naming the cap and the live run, and writes no run directory', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLiveRun(repo);
+    try {
+      const { code, stderr, stdout } = await runCaptured(['FAKE-1', '--workflow', 'capped'], repo.dir);
+      expect({ code, stderr, stdout }).toEqual({
+        code: EXIT_REFUSED,
+        stderr: `sail FAKE-1: workflow 'capped' has 1 live run, its maxConcurrentRuns of 1: ${LIVE}; --force starts it anyway\n`,
+        stdout: '',
+      });
+      expect(runIds(repo.dir)).toEqual([LIVE]);
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('sail FAKE-1 --force at its workflow full cap runs, and run.json lists cap', async () => {
+  await withTempRepo(async (repo) => {
+    const live = await cappedWithLiveRun(repo);
+    try {
+      const { code, stderr, header } = await started(repo.dir, ['FAKE-1', '--workflow', 'capped', '--force']);
+      expect({ code, stderr }).toEqual({ code: EXIT_OK, stderr: '' });
+      expect(header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: ['cap'] });
+    } finally {
+      await live.release();
+    }
   });
 });

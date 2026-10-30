@@ -61,7 +61,7 @@ Moving a designated ticket to In Progress through TicketSource, and commenting o
 _Avoid_: lock, reserve, take
 
 **Forced run**:
-A run started with `--force` on a ticket that is not designated, not in a pick-up state, or both. Its run header lists the checks `--force` overrode, `designation` and `state`.
+A run started with `--force` on a ticket that is not designated, not in a pick-up state, whose workflow's live runs fill its `maxConcurrentRuns`, or any of these. Its run header lists the checks `--force` overrode: `designation`, `state` and `cap`.
 _Avoid_: bypass, skip, unsafe run
 
 **Brief**:
@@ -622,7 +622,7 @@ A request to the live watcher, a JSON file dropped in `.sail-runs/watcher/comman
 _Avoid_: message, signal, IPC
 
 **Dispatch**:
-The watcher taking the next queued source and starting an ordinary run, only while the workflow is under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
+The watcher taking the next queued source and starting an ordinary run, only while the workflow's live runs in the clone, those started by hand included, are under its maximum of concurrent runs and after re-checking the source is still eligible. A source whose branch a live run's lease holds waits, using no slot. For a ticket, the dispatched run's intake claims the ticket, as a run started by hand does. A ticket claimed by the workflow's own run that then failed or was stopped stays eligible, so its retry and its requeue run again, and that run starts with `--force`.
 _Avoid_: pickup, schedule, spawn
 
 **Dashboard**:

@@ -8,7 +8,8 @@
 // Both claim the `.sail/` for the process.
 //
 // A fresh run's checks, in order: the config, the workflow and its definitions, the model aliases, a stage named
-// `intake`, an intake that accepts tickets and is a built-in, the stage `--until` names, then the ticket itself, which
+// `intake`, an intake that accepts tickets and is a built-in, the stage `--until` names, the cap on the workflow's live
+// runs in this clone (a full one refuses unless `--force`, which records `cap`; a dispatch is never held to it), then the ticket itself, which
 // the ticket source must parse, hold, and show designated and in a pick-up state unless `--force`. The run's header is built and
 // checked before anything is written. Then, in order (D1):
 //   1. the lease on the run's branch, which a live run holding it refuses, naming that run;
@@ -70,6 +71,7 @@ import { INTAKE_KEY, INTAKE_STAGE } from './intake';
 import { createJournal, type JournalEntry } from './journal';
 import { type LoadedWorkflow, loadWorkflow } from './load-workflow';
 import { type ResolvedPullRequest, resolvePullRequest, resolveRef } from './pr-source';
+import { isAlive } from './process';
 import { credentialValues, type Redactor, redactor } from './redact';
 import { buildRoster, harnessesReached, modelProblems } from './roster';
 import {
@@ -78,10 +80,12 @@ import {
   DEFINITION_DIR,
   type RunStatus,
   readStatus,
+  removeOpening,
   removeRunDir,
   runsDir,
   type Source,
   unmarkedRefusal,
+  writeOpening,
   writeStatus,
 } from './run-dir';
 import {
@@ -95,6 +99,7 @@ import {
   writeRunHeader,
 } from './run-header';
 import { isRunIdOf, newRunId } from './run-id';
+import { liveRuns } from './runs';
 import { findSailDir } from './sail-dir';
 import { formatIssue } from './schemas';
 import { type ResolvedSource, resolveSource } from './source';
@@ -171,7 +176,10 @@ export interface OpenRunOptions {
   workflow: string;
   /** The ticket the run starts from, as typed: a ticket key, or a URL the ticket source owns. */
   ticket: string;
-  /** Runs a ticket that is not designated or not in a pick-up state, and records which check it overrode. */
+  /**
+   * Runs a ticket that is not designated or not in a pick-up state, or a workflow whose live runs fill its
+   * maxConcurrentRuns, and records which check it overrode.
+   */
   force?: boolean;
   /** The stage after whose first call the run stops, suspended. One the workflow doesn't reach is refused. */
   until?: string;
@@ -363,12 +371,14 @@ export async function startWorkspace(options: {
   port: WorkspacePort;
   run: RunRef;
   sailDir: string;
+  /** The run's workflow, which its `OPENING` names until its header does. */
+  workflow: string;
   branch: string;
   base?: string;
   fallback?: string;
   signal: AbortSignal | undefined;
 }): Promise<{ made: Made } | { refused: string }> {
-  const { port, run, sailDir, branch, base, fallback, signal } = options;
+  const { port, run, sailDir, workflow, branch, base, fallback, signal } = options;
   let repository: Repository;
   try {
     repository = await port.repository();
@@ -393,6 +403,7 @@ export async function startWorkspace(options: {
   };
   try {
     createRunDir(sailDir, run.runId);
+    writeOpening(run.runDir, { workflow, branch, remote: repository.url });
     takeHandOff(runsDir(sailDir), run.runId);
     workspace = await port.create(run, {
       branch,
@@ -440,6 +451,36 @@ function conventionPaths(config: ProjectConfig, header: Pick<RunHeader, 'intake'
   const entries = [header.intake, ...Object.values(header.stages)];
   const own = entries.flatMap((entry) => [entry, ...(entry.steps ?? [])].flatMap((each) => each.conventions ?? []));
   return [...new Set([...(config.conventions ?? DEFAULT_CONVENTIONS), ...own])];
+}
+
+/**
+ * The cap on a watched workflow's live runs in this clone, whoever started them. A full one refuses the start, or with
+ * `force` lets it through and says it overrode the cap. A dispatched start, which the watcher counted, and a workflow with
+ * no `maxConcurrentRuns` are never held. A run making its workspace is counted by its `OPENING`, but two starts that
+ * count at once can both pass; the watcher then counts both.
+ */
+async function checkCap(options: {
+  loaded: LoadedWorkflow;
+  runs: string;
+  workspace: WorkspacePort;
+  force: boolean;
+  dispatched: boolean;
+}): Promise<{ refused: string } | { forced: boolean }> {
+  const { loaded, runs, workspace, force, dispatched } = options;
+  const cap = loaded.workflow.maxConcurrentRuns;
+  if (dispatched || cap === undefined) return { forced: false };
+  let live: string[];
+  try {
+    live = await liveRuns(runs, loaded.name, { workspace, isAlive });
+  } catch (error) {
+    return { refused: `the branch leases could not be read: ${portRefusal(error)}` };
+  }
+  if (live.length < cap) return { forced: false };
+  if (force) return { forced: true };
+  const count = `${live.length} live ${live.length === 1 ? 'run' : 'runs'}`;
+  return {
+    refused: `workflow '${loaded.name}' has ${count}, its maxConcurrentRuns of ${cap}: ${live.join(', ')}; --force starts it anyway`,
+  };
 }
 
 /**
@@ -494,6 +535,15 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
       refused: `--until names '${until}', which is no stage of workflow '${loaded.name}': its stages are ${known}`,
     };
   }
+  const capped = await checkCap({
+    loaded,
+    runs: runsDir(homeDir),
+    workspace: options.adapters.ports.workspace,
+    force,
+    dispatched: dispatch !== undefined,
+  });
+  if ('refused' in capped) return capped;
+  const capForced = capped.forced;
   const label = watchLabel(loaded.workflow, config);
   const branchPrefix = config.branchPrefix ?? DEFAULT_BRANCH_PREFIX;
   const via = dispatch === undefined ? 'cli' : 'watch';
@@ -538,7 +588,13 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
     const runId = runIdOf(`pr-${ref.number}`);
     if (typeof runId !== 'string') return runId;
     const { pr } = pullRequest;
-    const source: Source = { kind: 'pr', number: pr.number, headSha: pr.headSha, via, forced: pullRequest.forced };
+    const source: Source = {
+      kind: 'pr',
+      number: pr.number,
+      headSha: pr.headSha,
+      via,
+      forced: [...pullRequest.forced, ...(capForced ? ['cap' as const] : [])],
+    };
     const header = headerOf(runId, source);
     const harnesses = named.ports;
     return {
@@ -572,7 +628,12 @@ export async function preflightRun(options: OpenRunOptions): Promise<Preflight |
   if (typeof runId !== 'string') return runId;
   const branch = branchFor(branchPrefix, ticketKey, resolved.ticket.title);
   // Built and checked before anything is written. Opening a run claims nothing, so it has no claim.
-  const source: Source = { kind: 'ticket', ticketKey, via, forced: resolved.forced };
+  const source: Source = {
+    kind: 'ticket',
+    ticketKey,
+    via,
+    forced: [...resolved.forced, ...(capForced ? ['cap' as const] : [])],
+  };
   const header = headerOf(runId, source);
   return {
     sailDir: found.dir,
@@ -618,6 +679,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       port: options.adapters.ports.workspace,
       run,
       sailDir: home,
+      workflow: loaded.name,
       branch,
       signal: options.signal,
       // A pull-request run starts at the head sha it was resolved at (D4), and a ticket run from definitions at their
@@ -647,6 +709,7 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
     createJournal(dir);
     createEventsFile(dir);
     writeStatus(dir, 'running');
+    removeOpening(dir);
   } catch (error) {
     // No run is behind the workspace, so nothing may hold its branch: undone as a refusal would, as far as it still can.
     await undoOpened(options.adapters.ports.workspace, run, made.repository.url, branch);

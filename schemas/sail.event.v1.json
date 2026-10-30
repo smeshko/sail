@@ -613,7 +613,7 @@
               "number": { "type": "integer", "minimum": 1 },
               "headSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
               "via": { "enum": ["cli", "watch"] },
-              "forced": { "type": "array", "items": { "enum": ["designation", "state"] }, "uniqueItems": true }
+              "forced": { "type": "array", "items": { "enum": ["designation", "state", "cap"] }, "uniqueItems": true }
             },
             "required": ["kind", "number", "headSha", "via", "forced"],
             "additionalProperties": false
@@ -623,7 +623,7 @@
               "kind": { "const": "ticket" },
               "ticketKey": { "type": "string" },
               "via": { "enum": ["cli", "watch"] },
-              "forced": { "type": "array", "items": { "enum": ["designation", "state"] }, "uniqueItems": true }
+              "forced": { "type": "array", "items": { "enum": ["designation", "state", "cap"] }, "uniqueItems": true }
             },
             "required": ["kind", "ticketKey", "via", "forced"],
             "additionalProperties": false

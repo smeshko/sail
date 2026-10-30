@@ -42,7 +42,7 @@ export function runsDir(sailDir: string): string {
 }
 
 /** The checks `--force` can override, in the order a run header lists them. */
-export const FORCED = ['designation', 'state'] as const;
+export const FORCED = ['designation', 'state', 'cap'] as const;
 export type Forced = (typeof FORCED)[number];
 
 /** A run started from a ticket, by its key. */
@@ -52,8 +52,8 @@ export interface TicketRunSource {
   via: 'cli' | 'watch';
   /**
    * The checks `--force` overrode, each at most once: `designation` when the ticket didn't carry the repository's
-   * label, `state` when the claim didn't take because the ticket was not in a pick-up state. Empty for a run nobody forced, and
-   * for one `--force` had nothing to override.
+   * label, `state` when the claim didn't take because the ticket was not in a pick-up state, `cap` when its workflow's
+   * live runs filled its maxConcurrentRuns. Empty for a run nobody forced, and for one `--force` had nothing to override.
    */
   forced: Forced[];
 }
@@ -67,7 +67,7 @@ export interface PullRequestRunSource {
   via: 'cli' | 'watch';
   /**
    * The checks `--force` overrode: `designation` when the pull request didn't carry the label, `state` when it was
-   * closed, merged or a draft.
+   * closed, merged or a draft, `cap` when its workflow's live runs filled its maxConcurrentRuns.
    */
   forced: Forced[];
 }
@@ -86,6 +86,41 @@ export function createRunDir(sailDir: string, runId: string): string {
   const dir = join(runs, runId);
   createDir(dir);
   return dir;
+}
+
+/**
+ * What a run being opened is, before its header is written: its workflow, and the branch it leased on its remote. The
+ * cap counts a run by it while the run makes its workspace, which can take minutes, and it goes once STATUS is written.
+ */
+export interface Opening {
+  workflow: string;
+  branch: string;
+  remote: string;
+}
+
+const OPENING_FILE = 'OPENING';
+
+/** Writes the run's `OPENING`. */
+export function writeOpening(runDir: string, opening: Opening): void {
+  replaceFile(join(runDir, OPENING_FILE), `${JSON.stringify(opening)}\n`);
+}
+
+/** The run's `OPENING`, or undefined when it has none or it doesn't read as one. */
+export function readOpening(runDir: string): Opening | undefined {
+  try {
+    const read: unknown = JSON.parse(readFileSync(join(runDir, OPENING_FILE), 'utf8'));
+    if (typeof read !== 'object' || read === null) return undefined;
+    const { workflow, branch, remote } = read as Record<string, unknown>;
+    if (typeof workflow !== 'string' || typeof branch !== 'string' || typeof remote !== 'string') return undefined;
+    return { workflow, branch, remote };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Removes the run's `OPENING`, once its header and STATUS say what it is. */
+export function removeOpening(runDir: string): void {
+  rmSync(join(runDir, OPENING_FILE), { force: true });
 }
 
 /** The folder of a run directory that holds its copy of the stage folders. */

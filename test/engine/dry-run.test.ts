@@ -8,6 +8,7 @@ import { openRun } from '../../src/engine/open-run';
 import { PortError } from '../../src/ports/errors';
 import { fakeAdapters } from '../helpers/adapters';
 import { copyFixture, edit } from '../helpers/fixture';
+import { writeLiveRun } from '../helpers/live-run';
 import { type TempRepo, withTempRepo } from '../helpers/temp-repo';
 
 const BRANCH = 'sail/FAKE-1-add-a-shout-flag-to-the-greet-command';
@@ -150,5 +151,50 @@ test('dryRun with force on a ticket that is not designated answers with designat
     expect('refused' in result ? result.refused : 'answered').toBe('answered');
     if ('refused' in result) return;
     expect(result.header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-3', via: 'cli', forced: ['designation'] });
+  });
+});
+
+// The fixture's ticket-to-pr declares maxConcurrentRuns: 2, so two live runs of it fill the cap.
+
+async function twoLiveRuns(repo: TempRepo) {
+  const adapters = await fakeAdapters(repo.dir);
+  const ids = ['FAKE-2-01M3BWNZM08Q4T6V2XRJ5KWD3A', 'FAKE-3-01M3BWNZM08Q4T6V2XRJ5KWD3B'];
+  const runs: Awaited<ReturnType<typeof writeLiveRun>>[] = [];
+  for (const runId of ids) {
+    runs.push(
+      await writeLiveRun(repo.dir, { workflow: 'ticket-to-pr', ticketKey: runId.slice(0, 6), runId, adapters }),
+    );
+  }
+  return { ids, release: () => Promise.all(runs.map((run) => run.release())) };
+}
+
+test("dryRun at its workflow's full cap refuses with the start's own words and writes nothing", async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const live = await twoLiveRuns(repo);
+    try {
+      const before = traces(repo);
+      expect(await dry(repo)).toEqual({
+        refused: `workflow 'ticket-to-pr' has 2 live runs, its maxConcurrentRuns of 2: ${live.ids.join(', ')}; --force starts it anyway`,
+      });
+      expect(traces(repo)).toEqual(before);
+    } finally {
+      await live.release();
+    }
+  });
+});
+
+test('dryRun with force at a full cap answers with cap among the forced checks', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const live = await twoLiveRuns(repo);
+    try {
+      const result = await dry(repo, { force: true });
+      expect('refused' in result ? result.refused : 'answered').toBe('answered');
+      if ('refused' in result) return;
+      expect(result.header.source).toEqual({ kind: 'ticket', ticketKey: 'FAKE-1', via: 'cli', forced: ['cap'] });
+    } finally {
+      await live.release();
+    }
   });
 });

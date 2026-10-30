@@ -54,7 +54,7 @@ import {
 } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { harnessesReached, modelProblems } from './roster';
-import { copyStageFolders, runsDir, type Source, unmarkedRefusal, writeStatus } from './run-dir';
+import { copyStageFolders, removeOpening, runsDir, type Source, unmarkedRefusal, writeStatus } from './run-dir';
 import {
   assertRunHeader,
   buildRunHeader,
@@ -291,6 +291,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
       port,
       run,
       sailDir: found.dir,
+      workflow: loaded.name,
       branch,
       base: repository.baseSha,
       signal: options.signal,
@@ -322,6 +323,7 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
     journaled = seed.map(({ seq: _, recordedAt: __, ...entry }) => appendJournal(dir, entry, now));
     createEventsFile(dir);
     writeStatus(dir, 'running');
+    removeOpening(dir);
   } catch (error) {
     await undoOpened(port, run, made.repository.url, branch);
     throw error;

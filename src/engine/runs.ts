@@ -1,10 +1,12 @@
 // The runs in `.sail-runs/`: every one listed, and one found by its id or a prefix of it. A run is a directory holding
 // `run.json`, so what `sail stage run` writes there is never one. Unlike resume's `findRun()`, nothing here refuses a
-// run for how it ended: these are for viewing.
+// run for how it ended: these are for viewing. `liveRuns()` is the exception: it names the runs of one workflow that are
+// alive, which the cap on a workflow's concurrent runs counts.
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { WorkspacePort } from '../ports/workspace';
 import { isPlainName } from './call-dir';
-import { RUNS_DIR, type RunStatus, readStatus, runsDir } from './run-dir';
+import { type Opening, RUNS_DIR, type RunStatus, readOpening, readStatus, runsDir } from './run-dir';
 import { RUN_HEADER_FILE, readRunHeader } from './run-header';
 
 /** One run as `sail runs` lists it. A field whose file can't be read is left out, and `problem` says why. */
@@ -92,4 +94,50 @@ export function resolveRun(sailDir: string, name: string): { runId: string; dir:
   const more = matches.length - SHOWN_MATCHES;
   const shown = `${matches.slice(0, SHOWN_MATCHES).join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
   return { refused: `'${name}' matches ${matches.length} runs: ${shown}` };
+}
+
+/**
+ * The ids of the runs of `workflow` in `runs` that are alive now, sorted: the lease on the run's branch is its own, not
+ * suspended, and held by a pid that `isAlive` reads alive. The lease decides, not STATUS: a crashed run reads `running`
+ * forever, and a resume renews its lease before it writes STATUS. A run being opened, with no header yet, is found by
+ * its `OPENING`. A run that has ended, whose header can't be read, or that has no branch or repository, is skipped. A
+ * `PortError` from reading a lease propagates.
+ */
+export async function liveRuns(
+  runs: string,
+  workflow: string,
+  options: { workspace: Pick<WorkspacePort, 'holder'>; isAlive: (pid: number) => boolean },
+): Promise<string[]> {
+  if (!existsSync(runs)) return [];
+  const ids = readdirSync(runs, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && isPlainName(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+  const live: string[] = [];
+  for (const runId of ids) {
+    const dir = join(runs, runId);
+    const run = liveCandidate(dir);
+    if (run === undefined || run.workflow !== workflow) continue;
+    const lease = await options.workspace.holder(run.remote, run.branch);
+    if (lease?.runId === runId && !lease.suspended && options.isAlive(lease.pid)) live.push(runId);
+  }
+  return live;
+}
+
+/** The workflow, branch and remote of the run in `dir`, from its header or its `OPENING`, unless it has ended. */
+function liveCandidate(dir: string): Opening | undefined {
+  if (!existsSync(join(dir, RUN_HEADER_FILE))) return readOpening(dir);
+  try {
+    const { status } = readStatus(dir);
+    if (status === 'completed' || status === 'failed') return undefined;
+  } catch {
+    // No STATUS yet: the header is written just before it.
+  }
+  try {
+    const header = readRunHeader(dir);
+    if (header.branch === undefined || header.repository === undefined) return undefined;
+    return { workflow: header.workflow.name, branch: header.branch, remote: header.repository.url };
+  } catch {
+    return undefined;
+  }
 }
