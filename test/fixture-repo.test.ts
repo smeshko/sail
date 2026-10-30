@@ -129,6 +129,28 @@ test('each stage matches its golden roster entry', async () => {
   }
 });
 
+test.each([
+  ['the short sha git commit prints', '8954145', true],
+  ['a full lowercase hex sha', '89541459e5b0696a12a6adb712334ea24cff1a31', true],
+  ['a sha shorter than seven characters', '895414', false],
+  ['a sha longer than forty characters', '89541459e5b0696a12a6adb712334ea24cff1a310', false],
+  ['a non-hex sha', 'zzzzzzz', false],
+  ['an uppercase sha', '8954145A', false],
+  ['a full-length non-hex sha', 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz', false],
+  ['a full-length uppercase sha', '89541459E5B0696A12A6ADB712334EA24CFF1A31', false],
+])("implement's ChangeSet validates %s", async (_behaviour, sha, accepted) => {
+  const { ChangeSet } = await import('./fixtures/repo/.sail/stages/implement/stage');
+  expect(ChangeSet.safeParse({ commits: [{ sha, message: 'Make the change' }], files: [], notes: '' }).success).toBe(
+    accepted,
+  );
+});
+
+test('the implement prompt tells the agent to copy the sha git commit prints', () => {
+  expect(readFileSync(join(sail, 'stages/implement/prompt.md'), 'utf8')).toContain(
+    "Give each commit's sha as `git commit` prints it.",
+  );
+});
+
 test('every golden output parses with the matching fixture schema', async () => {
   const found = await stages();
   const results = [...new Bun.Glob('**/result.json').scanSync({ cwd: golden })].sort();
