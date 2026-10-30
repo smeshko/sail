@@ -10,7 +10,7 @@ import type { ProjectConfig, RunPort } from './config';
 import { createFileOnce } from './durable';
 import type { LoadedWorkflow } from './load-workflow';
 import { buildRoster, type IntakeEntry, origin, type RosterEntry } from './roster';
-import type { Source } from './run-dir';
+import { RUN_LAYOUT, type Source } from './run-dir';
 import { formatIssue, type SchemaIssue, validateDocument } from './schemas';
 
 export const RUN_HEADER_FILE = 'run.json';
@@ -32,6 +32,8 @@ export interface ClaimRecord {
 export interface RunHeader {
   schema: 'sail.run.v1';
   runId: string;
+  /** The run directory's layout. A run without it kept its calls' records inside their `$STAGE_OUT`. */
+  layout?: typeof RUN_LAYOUT;
   source: Source;
   /** The run a seeded run reused calls from. */
   fromRun?: string;
@@ -136,6 +138,7 @@ export function buildRunHeader(fields: HeaderFields): RunHeader {
   return {
     schema: 'sail.run.v1',
     runId,
+    layout: RUN_LAYOUT,
     source: { ...source, forced: [...source.forced] },
     ...(fromRun === undefined ? {} : { fromRun }),
     ...(reused === undefined ? {} : { reused }),

@@ -16,7 +16,7 @@ function callDir(): { runDir: string; outDir: string } {
   dirs.push(runDir);
   const paths = callPaths(runDir, 3, 'tests', 1);
   createCallDir(paths);
-  return { runDir, outDir: paths.dir };
+  return { runDir, outDir: paths.out };
 }
 
 const sha256 = (text: string) => new Bun.CryptoHasher('sha256').update(text).digest('hex');
@@ -42,8 +42,8 @@ test('recordFiles records each declared file by its run-relative path, size and 
   writeFileSync(join(outDir, 'report.md'), '');
   expect(recordFiles({ 'junit.xml': 'file', 'report.md': 'file' }, outDir, runDir)).toEqual({
     files: {
-      'junit.xml': { path: '03-tests/call-1/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
-      'report.md': { path: '03-tests/call-1/report.md', bytes: 0, sha256: sha256('') },
+      'junit.xml': { path: '03-tests/call-1/out/junit.xml', bytes: 14, sha256: sha256('<testsuites/>\n') },
+      'report.md': { path: '03-tests/call-1/out/report.md', bytes: 0, sha256: sha256('') },
     },
     errors: [],
   });
@@ -82,7 +82,7 @@ test('a declared file that is a symlink is a missing_file error, even to a real 
   });
 });
 
-test('producesProblems refuses a name that is not a plain file name, or that the engine writes', () => {
+test('producesProblems refuses a name that is not a plain file name', () => {
   expect(producesProblems({ 'junit.xml': 'file', '.hidden': 'file' })).toEqual([]);
   expect(
     producesProblems({ '../secret': 'file', 'a/b.md': 'file', 'a\\b.md': 'file', '..': 'file', '.': 'file' }),
@@ -93,42 +93,25 @@ test('producesProblems refuses a name that is not a plain file name, or that the
     "'..' can't be produced: it is not a plain file name",
     "'.' can't be produced: it is not a plain file name",
   ]);
-  expect(producesProblems({ 'result.json': 'file', in: 'file' })).toEqual([
-    "'result.json' can't be produced: the engine writes it in $STAGE_OUT",
-    "'in' can't be produced: the engine writes it in $STAGE_OUT",
-  ]);
 });
 
-test("producesProblems refuses port-events.ndjson, where a script step's port calls leave their events, in any case", () => {
-  expect(producesProblems({ 'port-events.ndjson': 'file', 'Port-Events.ndjson': 'file' })).toEqual([
-    "'port-events.ndjson' can't be produced: the engine writes it in $STAGE_OUT",
-    "'Port-Events.ndjson' can't be produced: the engine writes 'port-events.ndjson' in $STAGE_OUT, and a file system that ignores case takes them for one",
-  ]);
+test("producesProblems takes the engine's own names, which $STAGE_OUT holds none of: result.json, in, steps and try-2", () => {
+  expect(
+    producesProblems({
+      'result.json': 'file',
+      in: 'file',
+      steps: 'file',
+      'try-2': 'file',
+      'port-events.ndjson': 'file',
+      'prompt.md': 'file',
+    }),
+  ).toEqual([]);
 });
 
 test('producesProblems refuses a name that differs from another produced name only by case', () => {
   expect(producesProblems({ 'Notes.md': 'file', 'notes.md': 'file', 'NOTES.MD': 'file', 'other.md': 'file' })).toEqual([
     "'notes.md' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
     "'NOTES.MD' can't be produced: 'Notes.md' is produced too, and a file system that ignores case takes them for one",
-  ]);
-});
-
-test('producesProblems reports reserved case pairs only as reserved names', () => {
-  expect(producesProblems({ 'Result.json': 'file', 'result.json': 'file' })).toEqual([
-    "'Result.json' can't be produced: the engine writes 'result.json' in $STAGE_OUT, and a file system that ignores case takes them for one",
-    "'result.json' can't be produced: the engine writes it in $STAGE_OUT",
-  ]);
-});
-
-test("producesProblems refuses try-<n>, the name of a later try's directory", () => {
-  expect(producesProblems({ 'try-2': 'file', 'try-x': 'file', 'try-2.txt': 'file' })).toEqual([
-    "'try-2' can't be produced: the engine uses it for a later try",
-  ]);
-});
-
-test("producesProblems refuses steps, where a multi-step call's steps keep their own directories", () => {
-  expect(producesProblems({ steps: 'file', 'steps.md': 'file' })).toEqual([
-    "'steps' can't be produced: the engine writes it in $STAGE_OUT",
   ]);
 });
 

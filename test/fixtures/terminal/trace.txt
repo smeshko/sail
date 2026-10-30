@@ -12,7 +12,7 @@ intake#1              file brief.md · 1.3 KB
 intake#1            ✓ passed
 intake#1              journal line 1
 spec#1              ▶ spec · agent · claude-opus-5-5
-spec#1                in brief ← 00-intake/call-1/brief.md
+spec#1                in brief ← 00-intake/call-1/out/brief.md
 spec#1              · prompt:rendered {"try":1,"path":"01-spec/call-1/prompt.md","untrusted":0,"fragments":[{"name":"untrusted-input","origin":"builtin"},{"name":"finish","origin":"builtin"}],"conventions":[]}
 spec#1              · harness:session_start {"adapter":"fake","sessionId":"fake-session-spec-1","model":"claude-opus-5-5"}
 spec#1              · agent:message {"text":"Spec written: two tasks, greet() and the CLI first, then the tests."}
@@ -29,7 +29,7 @@ spec#1                journal line 2
 fix                 ↻ iteration 1/3
 spec#1              → implement#1 · on done
 implement#1         ▶ implement · agent · claude-sonnet-5
-implement#1           in spec ← 01-spec/call-1/spec.md
+implement#1           in spec ← 01-spec/call-1/out/spec.md
 implement#1         · prompt:rendered {"try":1,"path":"02-implement/call-1/prompt.md","untrusted":0,"fragments":[{"name":"untrusted-input","origin":"builtin"},{"name":"finish","origin":"builtin"}],"conventions":[]}
 implement#1         · harness:session_start {"adapter":"fake","sessionId":"fake-session-implement-1","model":"claude-sonnet-5"}
 implement#1         · agent:message {"text":"Implemented both tasks in two commits. Pushing is not allowed here, so the branch stays local."}
@@ -60,7 +60,7 @@ tests#1               journal line 4
 fix                 ↻ iteration 2/3 · feedback from tests#1
 tests#1             → implement#2 · on failed
 implement#2         ▶ implement · agent · claude-sonnet-5
-implement#2           in spec ← 01-spec/call-1/spec.md
+implement#2           in spec ← 01-spec/call-1/out/spec.md
 implement#2           in feedback ← 03-tests/call-1/result.json#/output
 implement#2         · prompt:rendered {"try":1,"path":"02-implement/call-2/prompt.md","untrusted":0,"fragments":[{"name":"untrusted-input","origin":"builtin"},{"name":"finish","origin":"builtin"}],"conventions":[]}
 implement#2         · harness:session_start {"adapter":"fake","sessionId":"fake-session-implement-2","model":"claude-sonnet-5"}
@@ -89,7 +89,7 @@ tests#2               │ {"ok":true,"total":7,"failed":0,"durationMs":2450,"fai
 tests#2               journal line 6
 tests#2             → self-review#1 · on passed
 self-review#1       ▶ self-review · agent · claude-opus-5-5
-self-review#1         in spec ← 01-spec/call-1/spec.md
+self-review#1         in spec ← 01-spec/call-1/out/spec.md
 self-review#1       · prompt:rendered {"try":1,"path":"04-self-review/call-1/prompt.md","untrusted":0,"fragments":[{"name":"untrusted-input","origin":"builtin"},{"name":"finish","origin":"builtin"}],"conventions":[]}
 self-review#1       · harness:session_start {"adapter":"fake","sessionId":"fake-session-self-review-1","model":"claude-opus-5-5"}
 self-review#1       · agent:message {"text":"Every requirement is met. One low finding and one nit."}
@@ -107,7 +107,7 @@ self-review#1       → publish#1 · on done
 publish#1           ▶ publish · 2 steps
 publish#1/describe  ▶ describe · step 1/2 · agent · claude-sonnet-5
 publish#1/describe    in ticket ← 00-intake/call-1/result.json#/output
-publish#1/describe    in spec ← 01-spec/call-1/spec.md
+publish#1/describe    in spec ← 01-spec/call-1/out/spec.md
 publish#1/describe  · prompt:rendered {"try":1,"path":"05-publish/call-1/steps/1-describe/prompt.md","untrusted":0,"fragments":[{"name":"untrusted-input","origin":"builtin"},{"name":"finish","origin":"builtin"}],"conventions":[]}
 publish#1/describe  · harness:session_start {"adapter":"fake","sessionId":"fake-session-publish-1-describe","model":"claude-sonnet-5"}
 publish#1/describe  · agent:message {"text":"PR description written."}
@@ -122,7 +122,7 @@ publish#1/describe  ✓ done
 publish#1/describe    journal line 8
 publish#1/open      ▶ open · step 2/2 · script
 publish#1/open        in title ← 05-publish/call-1/steps/1-describe/result.json#/output/title
-publish#1/open        in body ← 05-publish/call-1/pr-body.md
+publish#1/open        in body ← 05-publish/call-1/out/pr-body.md
 publish#1/open        in ticketKey ← workflow
 publish#1/open        $ .sail/workflows/ticket-to-pr/stages/publish/open.sh · in .sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace
 publish#1/open      · codehost:pushed {"branch":"sail/FAKE-1-add-a-shout-flag-to-the-greet-command","headSha":"07c6208644b69cb52695e7a34747a86d123f4995"}

@@ -26,7 +26,7 @@
   },
   "files": {
     "spec.md": {
-      "path": "01-spec/call-1/spec.md",
+      "path": "01-spec/call-1/out/spec.md",
       "bytes": 427,
       "sha256": "7cfdb9431ea6aa3d875a9c8f607989903c30cfee471b39a7891077bbd96f5cd6",
       "validation": {
@@ -40,7 +40,7 @@
     }
   },
   "consumed": {
-    "brief": "00-intake/call-1/brief.md"
+    "brief": "00-intake/call-1/out/brief.md"
   },
   "startedAt": "2026-09-25T09:00:02.700Z",
   "finishedAt": "2026-09-25T09:00:03.900Z",

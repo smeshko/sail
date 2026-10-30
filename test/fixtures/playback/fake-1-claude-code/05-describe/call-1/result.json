@@ -12,14 +12,14 @@
   },
   "files": {
     "pr-body.md": {
-      "path": "05-describe/call-1/pr-body.md",
+      "path": "05-describe/call-1/out/pr-body.md",
       "bytes": 937,
       "sha256": "e66507b1ce84439b8a822e671f3936dca4f531a8993a2d030b2de1e86d92fb1b"
     }
   },
   "consumed": {
     "ticket": "00-intake/call-1/result.json#/output",
-    "spec": "01-spec/call-1/spec.md"
+    "spec": "01-spec/call-1/out/spec.md"
   },
   "startedAt": "2026-09-25T09:00:57.900Z",
   "finishedAt": "2026-09-25T09:01:00.300Z",

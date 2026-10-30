@@ -83,6 +83,13 @@ async function fixtureHeader(
   });
 }
 
+test("a new run's header carries layout 2, right after its run id, and validates", async () => {
+  const header = await fixtureHeader();
+  expect(header.layout).toBe(2);
+  expect(Object.keys(header).slice(0, 3)).toEqual(['schema', 'runId', 'layout']);
+  expect(validateRunHeader(header)).toEqual([]);
+});
+
 test('the workflow hash is 64 hex characters, and the same for a copy at another path', async () => {
   const first = await hashAfter();
   expect(first).toMatch(/^[0-9a-f]{64}$/);
@@ -304,7 +311,7 @@ test('a header holds the checks its source lists, as a copy, and no claim, and r
   writeRunHeader(dir, header);
   const written = JSON.parse(readFileSync(join(dir, RUN_HEADER_FILE), 'utf8'));
   expect(written.source.forced).toEqual(['designation', 'state']);
-  expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'source', 'workflow']);
+  expect(Object.keys(written).slice(0, 4)).toEqual(['schema', 'runId', 'layout', 'source']);
 });
 
 test("a header built with the run's workspace records its branch, repository and base, and validates; one built without it holds none of them", async () => {
@@ -360,6 +367,7 @@ test('the header of a seeded run records its fromRun after the source and no cla
     [
       'schema',
       'runId',
+      'layout',
       'source',
       'fromRun',
       'reused',

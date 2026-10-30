@@ -197,9 +197,10 @@ export function runDirIn(repoDir: string): string {
 export const specDir = (runDir: string, tryNumber = 1): string =>
   join(runDir, '02-spec', 'call-1', ...(tryNumber > 1 ? [`try-${tryNumber}`] : []));
 
-/** A file of try `tryNumber` of `spec#1`, or null when the try left none by that name. */
+/** A file of try `tryNumber` of `spec#1`, or null when the try left none by that name: the engine's beside `out/`, the rest in it. */
 export function specFile(runDir: string, name: string, tryNumber = 1): string | null {
-  const path = join(specDir(runDir, tryNumber), name);
+  const engine = ['prompt.md', 'session.log', 'result.json', 'stdout.log', 'stderr.log'].includes(name);
+  const path = join(specDir(runDir, tryNumber), ...(engine ? [] : ['out']), name);
   return existsSync(path) ? readFileSync(path, 'utf8') : null;
 }
 

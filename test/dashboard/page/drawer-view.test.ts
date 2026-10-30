@@ -23,7 +23,7 @@ test("markdown is the server's HTML as it came, any other file is escaped text, 
   expect(renderDrawer(ui(plan), { state: 'loaded', value: '<h1>Plan</h1>' }).value).toContain(
     '<div class="drawer-b"><div class="md"><h1>Plan</h1></div></div>',
   );
-  const json = { name: 'ticket.json', path: '00-intake/call-1/ticket.json' };
+  const json = { name: 'ticket.json', path: '00-intake/call-1/out/ticket.json' };
   expect(renderDrawer(ui(json), { state: 'loaded', value: '{"a":"<b>"}' }).value).toContain(
     '<pre class="code">{&quot;a&quot;:&quot;&lt;b&gt;&quot;}</pre>',
   );

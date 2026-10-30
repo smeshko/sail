@@ -6,7 +6,7 @@
 // In order, every refusal before anything is written:
 //   1. `.sail/` and its config, then the claim of `.sail/` for the process;
 //   2. the source run: a plain name, a directory and no link, with a `run.json` that reads, from a run that had a
-//      workspace. Any STATUS is accepted, a crashed `running` one included, since only its journal's complete lines
+//      workspace and the layout mark. Any STATUS is accepted, a crashed `running` one included, since only its journal's complete lines
 //      are read;
 //   3. the workflow as it reads now, its model aliases, and no stage named `intake`;
 //   4. the stage, which must be a stage of that workflow;
@@ -54,7 +54,7 @@ import {
 } from './open-run';
 import { credentialValues, redactor } from './redact';
 import { harnessesReached, modelProblems } from './roster';
-import { copyStageFolders, runsDir, type Source, writeStatus } from './run-dir';
+import { copyStageFolders, runsDir, type Source, unmarkedRefusal, writeStatus } from './run-dir';
 import {
   assertRunHeader,
   buildRunHeader,
@@ -223,6 +223,8 @@ export async function openSeededRun(options: SeededRunOptions): Promise<OpenedRu
   if (sourceBranch === undefined || repository === undefined) {
     return { refused: `run ${fromRun} started before runs had workspaces: it can't seed a run` };
   }
+  const unmarked = unmarkedRefusal(fromRun, source.header, 'seed a run');
+  if (unmarked !== undefined) return { refused: unmarked };
   const loaded = await loadWorkflow(found.dir, source.header.workflow.name);
   if ('refused' in loaded) return loaded;
   const models = modelProblems(loaded, config);

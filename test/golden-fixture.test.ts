@@ -113,6 +113,7 @@ test('it holds nothing a run cannot write yet: no tool, thinking or denial event
   expect(Object.keys(header)).toEqual([
     'schema',
     'runId',
+    'layout',
     'source',
     'workflow',
     'sail',
@@ -207,12 +208,12 @@ test("the golden run's intake records its claim: run.json holds none, the stream
   expect(fetched.map((event) => [event.key, event.comments, event.title, event.url])).toEqual([
     ['intake#1', 2, 'Add a --shout flag to the greet command', 'fake://tickets/FAKE-1'],
   ]);
-  const ticket = JSON.parse(text('00-intake/call-1/ticket.json'));
+  const ticket = JSON.parse(text('00-intake/call-1/out/ticket.json'));
   expect([ticket.state, ticket.comments.at(-1)]).toEqual([
     inProgress,
     { author: 'sail', body: comment, createdAt: '2026-09-25T09:00:01.300Z' },
   ]);
-  expect(text('00-intake/call-1/brief.md')).toEndWith(
+  expect(text('00-intake/call-1/out/brief.md')).toEndWith(
     `<untrusted-input source="ticket FAKE-1, comment 2">\n${comment}\n</untrusted-input>\n`,
   );
   // The input the workflow reads holds no comment, so the journal's first line is what it was.

@@ -31,13 +31,13 @@
   },
   "files": {
     "diff.patch": {
-      "path": "02-implement/call-1/diff.patch",
+      "path": "02-implement/call-1/out/diff.patch",
       "bytes": 2716,
       "sha256": "83c12795d5d66dfe08aa2df392df78d563d153a732a48e7d05d99a52ced878c6"
     }
   },
   "consumed": {
-    "spec": "01-spec/call-1/spec.md",
+    "spec": "01-spec/call-1/out/spec.md",
     "feedback": null
   },
   "startedAt": "2026-09-25T09:00:07.500Z",

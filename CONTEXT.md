@@ -91,7 +91,7 @@ A stage in `.sail/stages/<stage>/`, which any workflow may import. A private sta
 _Avoid_: global stage, common stage, public stage
 
 **Step**:
-One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step. The steps of a stage share its `$STAGE_OUT`, and each step of a multi-step stage is journaled under `stage#call/step` as it finishes, so a resume runs only the steps after it.
+One body inside a stage, run in order with its siblings. Every stage has at least one step, and most have exactly one and are written as that step. The steps of a stage share its `$STAGE_OUT`, the `out/` of the call's directory, and each step of a multi-step stage is journaled under `stage#call/step` as it finishes, so a resume runs only the steps after it.
 _Avoid_: sub-stage, action, unit
 
 **Kind**:
@@ -119,7 +119,7 @@ The calls one `run.all()` makes at once. Their keys are assigned in the order gi
 _Avoid_: batch, fan-out, parallel block
 
 **Try**:
-One execution of a call's body, in a directory of its own. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `$STAGE_OUT`.
+One execution of a call's body, in a directory of its own, whose `out/` is its `$STAGE_OUT` and holds only what the body produced: the engine's records of the try (its `result.json`, logs, prompt and session transcript) and a later try's `try-M/` sit beside `out/`, out of a session's reach. A call has a later try when a resume runs it again after an interruption, and one corrective try when the engine rejects what an agent step handed in: invalid output, a missing declared file or a failed validator. A corrective try's prompt ends with the problems of the try it corrects. A try belongs to a call's body, or to one step of a multi-step call: a step's later try sits in that step's own directory, and the call keeps one `out/`.
 _Avoid_: attempt, retry (as a noun)
 
 **Key**:
@@ -335,7 +335,7 @@ Always the git branch, such as the one a run's workspace sits on. A workflow's r
 _Avoid_: using "branch" for a route or a fork in the workflow
 
 **Run directory**:
-Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from (for a run started from the `.sail/` committed at the default branch, as a dispatched one is, the whole of that `.sail/` and its conventions), and one directory per call holding its result and files.
+Everything a run wrote: the run header, the journal, the events, the summary, `definition/`, a copy of each roster stage's folder as the run started, which its calls read their prompts, templates and scripts from (for a run started from the `.sail/` committed at the default branch, as a dispatched one is, the whole of that `.sail/` and its conventions), and one directory per call holding the engine's records of it (result, logs, prompt, transcript, later tries) beside an `out/` with the files it produced.
 _Avoid_: run folder, output directory, artifacts
 
 **Run header**:

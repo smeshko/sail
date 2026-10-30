@@ -150,8 +150,8 @@ export interface RenderDocumentsOptions {
   /** The try's `$STAGE_OUT`. */
   outDir: string;
   /**
-   * Replaces a file already there: a step's `$STAGE_OUT` is its call's, which an earlier try of the step wrote to. A
-   * one-step call's try writes into a new directory, where any file already there is a bug.
+   * Replaces a file already there, rather than refusing it. An agent step always passes it: a multi-step call's steps
+   * share the call's `$STAGE_OUT`, which an earlier try of the step may have written to.
    */
   replace?: boolean;
 }
@@ -180,8 +180,8 @@ export function renderDocuments(
       return { ok: false, message: `${of}: ${messageOf(error)}` };
     }
     try {
-      // A try's directory is new, so a file already there is a bug, unless `$STAGE_OUT` is shared and an earlier try
-      // of the step left it: that one is replaced, never written through.
+      // Without `replace`, a file already there is refused. With it, one an earlier try left is replaced, never
+      // written through.
       const path = join(options.outDir, name);
       if (options.replace) rmSync(path, { force: true, recursive: true });
       writeFileSync(path, text, { flag: 'wx' });

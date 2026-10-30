@@ -270,7 +270,7 @@ test('the stub runs to completion through its fix loop, and every call ran once'
   expect(validateRunDir(end.dir).issues).toEqual([]);
   const implement = JSON.parse(readFileSync(join(end.dir, '02-implement', 'call-2', 'result.json'), 'utf8'));
   expect(implement.consumed).toEqual({
-    spec: '01-spec/call-1/spec.md',
+    spec: '01-spec/call-1/out/spec.md',
     feedback: '03-tests/call-1/result.json#/output',
   });
   expect(implement.output).toEqual({ notes: 'a stub change', sawFeedback: true });
@@ -398,7 +398,7 @@ test("the fixture's ticket-to-pr, with its harness script gone, gets as far as i
     });
     expect(keys(end.dir)).toEqual(['intake#1', 'spec#1']);
     const spec = JSON.parse(readFileSync(join(end.dir, '01-spec', 'call-1', 'result.json'), 'utf8'));
-    expect(spec.consumed).toEqual({ brief: '00-intake/call-1/brief.md' });
+    expect(spec.consumed).toEqual({ brief: '00-intake/call-1/out/brief.md' });
   });
 });
 
@@ -1013,7 +1013,7 @@ test('an exception inside sail propagates, leaves error:crash as the last event,
       sail,
       'workflows/ticket-to-pr/stages/spec/run.sh',
       "printf '# Spec",
-      'echo not-json >>"$STAGE_OUT/../../journal.ndjson"\nprintf \'# Spec',
+      'echo not-json >>"$STAGE_OUT/../../../journal.ndjson"\nprintf \'# Spec',
     );
     const adapters = await fakeAdapters(repo.dir);
     const error = await ran(repo.dir, { adapters }).catch((thrown: unknown) => thrown);
@@ -1690,7 +1690,7 @@ test('an agent call is journaled once, with the output, the files and the result
       call: 1,
       output: SPEC,
       reason: null,
-      files: { 'spec.md': '02-spec/call-1/try-2/spec.md' },
+      files: { 'spec.md': '02-spec/call-1/try-2/out/spec.md' },
       resultPath: '02-spec/call-1/try-2/result.json',
     });
     expect(specResult(end.dir, 2)).toMatchObject({
@@ -1710,7 +1710,7 @@ test('an agent call is journaled once, with the output, the files and the result
     expect([prompt.includes('Indent with tabs.'), prompt.includes(NO_TASKS_MESSAGE)]).toEqual([true, true]);
     // publish read the file the journal holds: the second try's.
     const publish = JSON.parse(readFileSync(join(end.dir, '03-publish', 'call-1', 'result.json'), 'utf8'));
-    expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/spec.md' });
+    expect(publish.consumed).toEqual({ spec: '02-spec/call-1/try-2/out/spec.md' });
     expect(validateRunDir(end.dir).issues.map(formatIssue)).toEqual([]);
   });
 }, 20_000);
@@ -2945,12 +2945,29 @@ test('a call whose every step is journaled, but not itself, is journaled on resu
 
 test("a two-step stage in a group: its step lines interleave with its sibling's call line, its call line carries the group, and a resume after an abort runs only what isn't journaled; a reordered group is still a change", async () => {
   await withTempRepo(async (repo) => {
-    const slow: ScriptedAnswer = { ...DESCRIBED, delayMs: 1500 } as ScriptedAnswer;
     const stopped = await withTempRepo(async (from) => {
-      writeTwoStep(from.dir, { grouped: true, describe: [slow] });
+      writeTwoStep(from.dir, { grouped: true });
       setSleepAt(from.dir, 'publish#1');
+      // describe starts only once notify#1 is journaled, so its step line follows notify's however slow notify's script.
+      const { promise: notified, resolve: notify } = Promise.withResolvers<void>();
+      const adapters = await fakeAdapters(from.dir);
+      const fake = adapters.ports.harness;
+      adapters.ports.harness = {
+        name: fake.name,
+        capabilities: () => fake.capabilities(),
+        run: async (request) => {
+          if (request.key === 'publish#1/describe') await notified;
+          return fake.run(request);
+        },
+      };
+      const journaledNotify: Consumer = {
+        name: 'notified',
+        onEvent: (event) => {
+          if (event.type === 'journal:append' && event.key === 'notify#1') notify();
+        },
+      };
       const controller = new AbortController();
-      const running = ranAgent(from.dir, { signal: controller.signal });
+      const running = ranAgent(from.dir, { adapters, consumers: [journaledNotify], signal: controller.signal });
       const { end } = await interruptWhenAsleep(from.dir, running, () => controller.abort(), 30_000);
       copyRun(from.dir, repo.dir);
       return end;
@@ -3184,11 +3201,11 @@ test('a run journals each call line with its bindings fingerprints, {} for a cal
   const { entries } = readJournal(end.dir);
   const by = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
   expect(by['intake#1']?.bindings).toBeUndefined();
-  expect(by['spec#1']?.bindings).toEqual({ brief: fileHash('brief', '00-intake/call-1/brief.md') });
-  expect(by['implement#1']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/spec.md') });
+  expect(by['spec#1']?.bindings).toEqual({ brief: fileHash('brief', '00-intake/call-1/out/brief.md') });
+  expect(by['implement#1']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/out/spec.md') });
   expect(by['tests#1']?.bindings).toEqual({});
   const feedback = fingerprintBindings({ feedback: { kind: 'value', value: by['tests#1']?.output, from: '' } });
-  expect(by['implement#2']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/spec.md'), ...feedback });
+  expect(by['implement#2']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/out/spec.md'), ...feedback });
   expect(feedback.feedback).toMatch(/^[0-9a-f]{16}$/);
   const lines = readFileSync(join(end.dir, JOURNAL_FILE), 'utf8').trim().split('\n');
   expect(lines.flatMap((line) => validateDocument('sail.journal.v1', JSON.parse(line))).map(formatIssue)).toEqual([]);
@@ -3211,7 +3228,7 @@ test("a group's call lines each carry their own call's bindings, beside the grou
     writeTrio(repo.dir, { a: 0, b: 0, c: 0 });
     const end = await ranTrio(repo.dir);
     const calls = readJournal(end.dir).entries.filter((entry) => entry.group !== undefined);
-    const brief = { brief: fileHash('brief', '00-intake/call-1/brief.md') };
+    const brief = { brief: fileHash('brief', '00-intake/call-1/out/brief.md') };
     expect(calls.map((entry) => entry.key).sort()).toEqual(TRIO_KEYS);
     expect(calls.map((entry) => [entry.group, entry.bindings])).toEqual(calls.map(() => [TRIO_KEYS, brief]));
   });

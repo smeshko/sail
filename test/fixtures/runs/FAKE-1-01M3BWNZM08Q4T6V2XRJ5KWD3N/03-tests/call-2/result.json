@@ -15,7 +15,7 @@
   },
   "files": {
     "junit.xml": {
-      "path": "03-tests/call-2/junit.xml",
+      "path": "03-tests/call-2/out/junit.xml",
       "bytes": 876,
       "sha256": "e64a9744ccaf5de6502f18d8829bdf7831793b53c33e4a795b07901cfeb1d3c0"
     }
@@ -35,7 +35,7 @@
     "CALL": "2",
     "TRY": "1",
     "STAGE_IN": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/in",
-    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2",
+    "STAGE_OUT": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/03-tests/call-2/out",
     "WORKSPACE": ".sail-runs/FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N/workspace",
     "BRANCH": "sail/FAKE-1-add-a-shout-flag-to-the-greet-command",
     "SAIL_CONFIG": ".sail/project.yaml",

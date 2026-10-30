@@ -31,7 +31,7 @@ const intakeOf = (output: unknown): JournalEntry => ({
   outcome: 'passed',
   output,
   reason: null,
-  files: { 'ticket.json': '00-intake/call-1/ticket.json', 'brief.md': '00-intake/call-1/brief.md' },
+  files: { 'ticket.json': '00-intake/call-1/out/ticket.json', 'brief.md': '00-intake/call-1/out/brief.md' },
   resultPath: '00-intake/call-1/result.json',
   recordedAt: '2026-10-06T09:00:00.000Z',
 });
@@ -797,7 +797,7 @@ const INTAKE = intakeOf({
 /** The same intake journaled from its second try. */
 const LATER_TRY: JournalEntry = {
   ...INTAKE,
-  files: { 'ticket.json': '00-intake/call-1/try-2/ticket.json', 'brief.md': '00-intake/call-1/try-2/brief.md' },
+  files: { 'ticket.json': '00-intake/call-1/try-2/out/ticket.json', 'brief.md': '00-intake/call-1/try-2/out/brief.md' },
   resultPath: '00-intake/call-1/try-2/result.json',
 };
 
@@ -852,7 +852,11 @@ test("run.intake.files holds a handle per file the entry names, which binds as t
       key: 'b#1',
       stageIndex: 1,
       supplied: {
-        report: { kind: 'file', path: join(RUN_DIR, '00-intake/call-1/brief.md'), from: '00-intake/call-1/brief.md' },
+        report: {
+          kind: 'file',
+          path: join(RUN_DIR, '00-intake/call-1/out/brief.md'),
+          from: '00-intake/call-1/out/brief.md',
+        },
       },
     },
   });
@@ -888,7 +892,7 @@ test("an entry journaled from a later try gives handles and provenance under tha
   const file = await replayedFrom(async (run) => {
     await run.stage(b, { report: run.intake.files['brief.md'] });
   }, LATER_TRY);
-  const from = '00-intake/call-1/try-2/brief.md';
+  const from = '00-intake/call-1/try-2/out/brief.md';
   expect(file).toMatchObject({ call: { supplied: { report: { kind: 'file', path: join(RUN_DIR, from), from } } } });
   const value = await replayedFrom(async (run) => {
     await run.stage(c, { data: run.input });

@@ -314,10 +314,11 @@ test("on the fixture's FAKE-1, once it is claimed and commented on as the golden
   expect(output).toEqual(golden.output);
   expect(records).toEqual([{ claim: { claimed: true, state: { type: 'started', name: 'In Progress' } } }]);
   for (const name of ['ticket.json', 'brief.md']) {
-    expect(readFileSync(join(out, name), 'utf8')).toBe(readFileSync(join(GOLDEN_CALL, name), 'utf8'));
+    expect(readFileSync(join(out, name), 'utf8')).toBe(readFileSync(join(GOLDEN_CALL, 'out', name), 'utf8'));
   }
   // The golden call holds what a built-in's call leaves, and nothing a script's did.
-  expect(readdirSync(GOLDEN_CALL).sort()).toEqual(['brief.md', 'result.json', 'ticket.json']);
+  expect(readdirSync(GOLDEN_CALL).sort()).toEqual(['out', 'result.json']);
+  expect(readdirSync(join(GOLDEN_CALL, 'out')).sort()).toEqual(['brief.md', 'ticket.json']);
   expect(golden).toMatchObject({ key: 'intake#1', kind: 'builtin', outcome: 'passed' });
 });
 

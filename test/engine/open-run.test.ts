@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import {
   appendFileSync,
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -299,6 +300,29 @@ test.each<[string, (run: OpenedRun) => string, (runId: string) => string]>([
   });
 });
 
+/** Rewrites `run.json` in `dir` without its `layout`, as a run from before the move to out/ has it. */
+function dropLayout(dir: string): void {
+  const path = join(dir, 'run.json');
+  const { layout: _, ...header } = JSON.parse(readFileSync(path, 'utf8'));
+  chmodSync(path, 0o644);
+  writeFileSync(path, `${JSON.stringify(header, null, 2)}\n`);
+}
+
+const UNMARKED = (runId: string) =>
+  `run ${runId} keeps its calls' records inside their $STAGE_OUT, as runs did before sail moved them to out/: it can't be resumed. sail stop ${runId} ends it`;
+
+test('findRun refuses a suspended run without a layout, and a completed or failed one with the ended-run message', async () => {
+  await withTempRepo(async (repo) => {
+    const sail = copyFixture(repo.dir);
+    const run = await opened(repo.dir);
+    dropLayout(run.dir);
+    writeStatus(run.dir, 'suspended', 'budget_exceeded');
+    expect(findRun(sail, run.runId)).toEqual({ refused: UNMARKED(run.runId) });
+    writeStatus(run.dir, 'completed');
+    expect(findRun(sail, run.runId)).toEqual({ refused: `run ${run.runId} has completed: there is nothing to resume` });
+  });
+});
+
 test("findRun throws on a STATUS it can't read: sail's own files are broken", async () => {
   await withTempRepo(async (repo) => {
     const sail = copyFixture(repo.dir);
@@ -321,6 +345,22 @@ test('reopenRun reopens a suspended run with the header on disk and STATUS runni
       loaded: { workflow: { name: 'ticket-to-pr' } },
     });
     expect(readStatus(dir)).toEqual({ status: 'running' });
+  });
+});
+
+test('reopenRun returns the same refusal for a run without a layout, and leaves STATUS and the events as they were', async () => {
+  await withTempRepo(async (repo) => {
+    const run = await suspendedCopy(repo.dir);
+    const dir = join(repo.dir, '.sail-runs', run.runId);
+    dropLayout(dir);
+    const events = readFileSync(join(dir, 'events.ndjson'), 'utf8');
+    expect(await reopenRun({ cwd: repo.dir, runId: run.runId, adapters: await fakeAdapters(repo.dir) })).toEqual({
+      refused: UNMARKED(run.runId),
+    });
+    expect([readStatus(dir), readFileSync(join(dir, 'events.ndjson'), 'utf8')]).toEqual([
+      { status: 'suspended', stopReason: 'budget_exceeded' },
+      events,
+    ]);
   });
 });
 
