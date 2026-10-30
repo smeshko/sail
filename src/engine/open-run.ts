@@ -601,8 +601,9 @@ export async function openRun(options: OpenRunOptions): Promise<OpenedRun | { re
       sailDir: home,
       branch,
       signal: options.signal,
-      // A pull-request run starts at the head sha it was resolved at (D4).
-      ...(source.kind === 'pr' ? { base: source.headSha } : {}),
+      // A pull-request run starts at the head sha it was resolved at (D4), and a ticket run from definitions at their
+      // commit, so a push since they were read can't give it another commit's code.
+      ...(source.kind === 'pr' ? { base: source.headSha } : definitions === undefined ? {} : { base: definitions.sha }),
     });
   });
   if ('refused' in opened) return opened;

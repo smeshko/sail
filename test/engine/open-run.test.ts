@@ -1263,6 +1263,23 @@ test("a run opened with definitions runs the committed workflow while the clone'
   });
 });
 
+test('a run opened with definitions bases its workspace on their commit, though the default branch has moved on since they were read', async () => {
+  await withTempRepo(async (repo) => {
+    copyFixture(repo.dir);
+    const sha = commitDefinitions(repo, 'committed conventions\n');
+    const adapters = await fakeAdapters(repo.dir);
+    const definitions = await committedDefinitions(adapters);
+    writeFileSync(join(repo.dir, 'pushed.txt'), 'a push after the read\n');
+    repo.git('add', 'pushed.txt');
+    repo.git('commit', '-q', '-m', 'pushed');
+    const run = await openedFrom(repo, definitions, adapters);
+    expect({ baseSha: run.header.repository?.baseSha, definitionsSha: run.header.definitionsSha }).toEqual({
+      baseSha: sha,
+      definitionsSha: sha,
+    });
+  });
+});
+
 test('a run opened without definitions has no definitionsSha and its root is the clone', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
