@@ -71,8 +71,9 @@ function problems(step: ScriptStep): string[] {
   const found: string[] = [];
   const ports = new Set<string>();
   for (const port of step.ports ?? []) {
-    if (!Object.hasOwn(SCRIPT_PORTS, port) || ports.has(port))
+    if (!Object.hasOwn(SCRIPT_PORTS, port))
       found.push(`ports names an unknown port '${port}': ticket-source, codehost or jev`);
+    else if (ports.has(port)) found.push(`ports names '${port}' twice`);
     ports.add(port);
   }
   const names = new Set<string>();

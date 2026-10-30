@@ -209,12 +209,13 @@ for (const resolver of [undefined, async () => ({ problem: 'jev is not configure
   });
 }
 
-for (const ports of [['unknown'], ['jev', 'jev']]) {
+for (const [ports, message] of [
+  [['unknown'], "ports names an unknown port 'unknown': ticket-source, codehost or jev"],
+  [['jev', 'jev'], "ports names 'jev' twice"],
+] as const) {
   test(`problems refuses ports ${ports.join(',')}`, () => {
     const step = script('x', { run: './x', output: z.object({}), ports: ports as never });
-    expect(scriptKind.problems(step)).toEqual([
-      `ports names an unknown port '${ports.at(-1)}': ticket-source, codehost or jev`,
-    ]);
+    expect(scriptKind.problems(step)).toEqual([message]);
   });
 }
 
