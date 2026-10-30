@@ -71,7 +71,9 @@ async function withOpenHandle(hang: boolean, minutes: number, interrupt = false)
           return child.exited;
         })(),
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('shim did not exit within ten seconds')), 10_000);
+          // The run itself, its type check included, takes up to ten seconds on a loaded machine: the bound only stops
+          // a shim that never exits, well inside the test's own timeout.
+          timer = setTimeout(() => reject(new Error('shim did not exit within 45 seconds')), 45_000);
         }),
       ]);
       expect(await stderr).toBe('');

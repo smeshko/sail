@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { fingerprintBindings } from '../../src/engine/fingerprint';
 import type { JournalEntry } from '../../src/engine/journal';
 import type { ReachedStage } from '../../src/engine/load-workflow';
 import { dropStrayHalt, type ReplayEnd, replay } from '../../src/engine/replay';
@@ -131,6 +132,7 @@ test("with an empty journal the first run.stage() is the replay's end, and the w
       definition: a,
       stageFile: '/repo/.sail/stages/a/stage.ts',
       supplied: {},
+      fingerprints: {},
     },
   });
   if (end.kind !== 'call') throw new Error('a call');
@@ -186,6 +188,40 @@ test("a value binding records where it came from: a call's output, or the workfl
       },
     },
   });
+});
+
+test('a pending call carries one hash per supplied binding, a value by its canonical JSON and a file by its path', async () => {
+  const entries = [entry('a#1', 'passed', { files: { 'r.txt': '01-a/call-1/r.txt' } })];
+  const end = await replayed(async (run) => {
+    const r = await run.stage(a);
+    await run.stage(c, { data: { y: 1, x: [2] }, extra: undefined });
+    await run.stage(b, { report: r.files['r.txt'] });
+  }, entries);
+  if (end.kind !== 'call') throw new Error('a call');
+  expect(end.call.fingerprints).toEqual(
+    fingerprintBindings({ data: { kind: 'value', value: { x: [2], y: 1 }, from: '' } }),
+  );
+  expect(end.call.fingerprints.data).toMatch(/^[0-9a-f]{16}$/);
+
+  const consumer = await replayed(async (run) => {
+    const r = await run.stage(a);
+    await run.stage(b, { report: r.files['r.txt'] });
+  }, entries);
+  if (consumer.kind !== 'call') throw new Error('a call');
+  expect(consumer.call.fingerprints).toEqual(
+    fingerprintBindings({
+      report: { kind: 'file', path: join(RUN_DIR, '01-a/call-1/r.txt'), from: '01-a/call-1/r.txt' },
+    }),
+  );
+});
+
+test('a value canonical JSON cannot encode fails the call as workflow_failed, naming the binding', async () => {
+  const end = await replayed(async (run) => {
+    await run.stage(c, { data: 1n });
+  });
+  if (end.kind !== 'failed') throw new Error('a failure');
+  expect(end.stopReason).toBe('workflow_failed');
+  expect(end.message).toStartWith("c#1 can't run: 'data' can't be fingerprinted: ");
 });
 
 test('a value binding not declared by the stage passes through for callProblems to name', async () => {
@@ -920,6 +956,7 @@ const pendingOf = (key: string, stage: StageDefinition, call: number, stageIndex
   definition: stage,
   stageFile: `/repo/.sail/stages/${stage.name}/stage.ts`,
   supplied: {},
+  fingerprints: {},
   group: GROUP,
 });
 
@@ -1084,4 +1121,159 @@ test('run.all([]) resolves to no results at once, and the next run.stage() is ke
   );
   expect({ results, events }).toEqual({ results: [], events: [] });
   expect(end).toMatchObject({ kind: 'call', call: { key: 'a#1', stageIndex: 1 } });
+});
+
+/** The fingerprints a journaled call of `c` would carry for these value bindings. */
+const valuesOf = (bound: Record<string, unknown>) =>
+  fingerprintBindings(
+    Object.fromEntries(
+      Object.entries(bound).map(([name, each]) => [name, { kind: 'value' as const, value: each, from: '' }]),
+    ),
+  );
+const changedMessage = (key: string, changes: string) =>
+  `the workflow asked for '${key}' with other bindings than the journal's: ${changes}`;
+
+test('a value binding changed since the journaled call fails the replay with determinism_violation, naming it', async () => {
+  const entries = [entry('c#1', 'passed', { bindings: valuesOf({ data: 'one' }) })];
+  const end = await replayed(async (run) => {
+    await run.stage(c, { data: 'two' });
+  }, entries);
+  expect(end).toEqual(failed('determinism_violation', changedMessage('c#1', "'data' changed")));
+});
+
+test('a binding that is unchanged replays the journaled result, and the replay goes on to the next call', async () => {
+  const entries = [entry('c#1', 'passed', { output: { ok: false }, bindings: valuesOf({ data: { b: 1, a: 2 } }) })];
+  let result: unknown;
+  const end = await replayed(async (run) => {
+    result = await run.stage(c, { data: { a: 2, b: 1 } });
+    await run.stage(tests);
+  }, entries);
+  expect(result).toEqual({ outcome: 'passed', output: { ok: false }, files: {} });
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'tests#1' } });
+});
+
+test('two sequential calls of one stage swapped between replays fail with determinism_violation at the first', async () => {
+  const entries = [
+    entry('c#1', 'passed', { seq: 1, bindings: valuesOf({ data: 'one' }) }),
+    entry('c#2', 'passed', { seq: 2, bindings: valuesOf({ data: 'two' }) }),
+  ];
+  const end = await replayed(async (run) => {
+    await run.stage(c, { data: 'two' });
+    await run.stage(c, { data: 'one' });
+  }, entries);
+  expect(end).toEqual(failed('determinism_violation', changedMessage('c#1', "'data' changed")));
+});
+
+test('two calls of one stage swapped inside run.all() fail with determinism_violation, and nothing is rebuilt', async () => {
+  const keys = ['c#1', 'c#2'];
+  const entries = [
+    entry('c#2', 'passed', { seq: 1, group: keys, bindings: valuesOf({ data: 'two' }) }),
+    entry('c#1', 'passed', { seq: 2, group: keys, bindings: valuesOf({ data: 'one' }) }),
+  ];
+  const end = await replayed(async (run) => {
+    await run.all([
+      [c, { data: 'two' }],
+      [c, { data: 'one' }],
+    ]);
+  }, entries);
+  expect(end).toEqual(failed('determinism_violation', changedMessage('c#1', "'data' changed")));
+});
+
+test('a group whose journaled member kept its bindings and whose other member is still to run ends the replay with that one', async () => {
+  const keys = ['c#1', 'c#2'];
+  const entries = [entry('c#2', 'passed', { seq: 1, group: keys, bindings: valuesOf({ data: 'two' }) })];
+  const end = await replayed(async (run) => {
+    await run.all([
+      [c, { data: 'one' }],
+      [c, { data: 'two' }],
+    ]);
+  }, entries);
+  expect(end).toMatchObject({ kind: 'group', keys, calls: [{ key: 'c#1' }] });
+});
+
+test('a binding that appeared, one that went and one that changed are named in that order of kind, each by name', async () => {
+  const entries = [entry('c#1', 'passed', { bindings: valuesOf({ data: 'one', extra: 'x' }) })];
+  const appeared = await replayed(
+    async (run) => {
+      await run.stage(c, { data: 'one', extra: 'x' });
+    },
+    [entry('c#1', 'passed', { bindings: valuesOf({ data: 'one' }) })],
+  );
+  expect(appeared).toEqual(failed('determinism_violation', changedMessage('c#1', "'extra' appeared")));
+
+  const went = await replayed(async (run) => {
+    await run.stage(c, { data: 'one' });
+  }, entries);
+  expect(went).toEqual(failed('determinism_violation', changedMessage('c#1', "'extra' went")));
+
+  const all = await replayed(
+    async (run) => {
+      await run.stage(c, { data: 'two' });
+    },
+    [entry('c#1', 'passed', { bindings: valuesOf({ extra: 'x', data: 'one' }) })],
+  );
+  expect(all).toEqual(failed('determinism_violation', changedMessage('c#1', "'data' changed, 'extra' went")));
+});
+
+test('a call with no bindings in the journal that now has one is named as appeared', async () => {
+  const end = await replayed(
+    async (run) => {
+      await run.stage(c, { data: 'one' });
+    },
+    [entry('c#1', 'passed', { bindings: {} })],
+  );
+  expect(end).toEqual(failed('determinism_violation', changedMessage('c#1', "'data' appeared")));
+});
+
+test("a file binding handed another call's file is named as changed", async () => {
+  const entries = [
+    entry('a#1', 'passed', { seq: 1, files: { 'r.txt': '01-a/call-1/r.txt' }, bindings: {} }),
+    entry('a#2', 'passed', { seq: 2, files: { 'r.txt': '01-a/call-2/r.txt' }, bindings: {} }),
+    entry('b#1', 'passed', {
+      seq: 3,
+      bindings: fingerprintBindings({
+        report: { kind: 'file', path: join(RUN_DIR, '01-a/call-1/r.txt'), from: '01-a/call-1/r.txt' },
+      }),
+    }),
+  ];
+  const end = await replayed(async (run) => {
+    await run.stage(a);
+    const second = await run.stage(a);
+    await run.stage(b, { report: second.files['r.txt'] });
+  }, entries);
+  expect(end).toEqual(failed('determinism_violation', changedMessage('b#1', "'report' changed")));
+});
+
+test('a journaled call whose bindings the workflow can no longer resolve fails with determinism_violation', async () => {
+  const entries = [entry('b#1', 'passed', { bindings: { report: '0123456789abcdef' } })];
+  const end = await replayed(async (run) => {
+    await run.stage(b, { report: { name: 'r.txt' } as ProducedFile });
+  }, entries);
+  expect(end).toEqual(
+    failed(
+      'determinism_violation',
+      "the workflow asked for 'b#1' with bindings the journal can't match: 'report' needs a file a call produced",
+    ),
+  );
+});
+
+test('a journaled error whose bindings changed reports determinism_violation, not stage_error', async () => {
+  const entries = [entry('c#1', 'error', { reason: 'boom', bindings: valuesOf({ data: 'one' }) })];
+  const end = await replayed(async (run) => {
+    await run.stage(c, { data: 'two' });
+  }, entries);
+  expect(end).toEqual(failed('determinism_violation', changedMessage('c#1', "'data' changed")));
+});
+
+test('a journal line without bindings keeps the key-only check, whatever the workflow binds now', async () => {
+  const entries = [entry('c#1', 'passed'), entry('c#2', 'passed', { seq: 2 })];
+  let outcomes: string[] = [];
+  const end = await replayed(async (run) => {
+    const first = await run.stage(c, { data: 'anything', extra: 'new' });
+    const second = await run.stage(c, {} as never);
+    outcomes = [first.outcome, second.outcome];
+    await run.stage(tests);
+  }, entries);
+  expect(outcomes).toEqual(['passed', 'passed']);
+  expect(end).toMatchObject({ kind: 'call', call: { key: 'tests#1' } });
 });

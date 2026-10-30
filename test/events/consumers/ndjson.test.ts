@@ -1,8 +1,9 @@
 // events.ndjson: created with the run, one appended line per event, and where a resumed run's numbering continues.
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import * as durable from '../../../src/engine/durable';
 import {
   createEventsFile,
   type EventCursor,
@@ -13,6 +14,7 @@ import {
   readEvents,
   readEventsFrom,
   START,
+  syncEvents,
 } from '../../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../../src/events/types';
 
@@ -334,4 +336,17 @@ test('lastSeq reads a 64 MB last line in linear time', () => {
   const took = performance.now() - started;
   expect(seq).toBe(3);
   expect(took).toBeLessThan(2000);
+});
+
+test('syncEvents syncs the events file, and does nothing for a run with none', () => {
+  const dir = runDir();
+  expect(() => syncEvents(dir)).not.toThrow();
+  createEventsFile(dir);
+  const sync = spyOn(durable, 'syncFile');
+  try {
+    syncEvents(dir);
+    expect(sync.mock.calls).toEqual([[join(dir, 'events.ndjson')]]);
+  } finally {
+    sync.mockRestore();
+  }
 });

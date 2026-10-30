@@ -245,3 +245,32 @@ test.each(DISAGREEING)('an append refuses %s, a bug in sail, and writes nothing'
   expect(() => appendJournal(dir, bad, at(1))).toThrow(`a journal entry ${why}, a bug in sail`);
   expect(text(dir)).toBe('');
 });
+
+test('a journal line with bindings appends and reads back with them', () => {
+  const dir = runDir();
+  createJournal(dir);
+  const bindings = { data: '0123456789abcdef', doc: 'fedcba9876543210' };
+  appendJournal(dir, { ...entry('a'), bindings }, at(1));
+  expect(readJournal(dir).entries[0]?.bindings).toEqual(bindings);
+  expect(JSON.parse(text(dir)).bindings).toEqual(bindings);
+});
+
+test('a journal line with an empty bindings object reads back with it, apart from one without', () => {
+  const dir = runDir();
+  createJournal(dir);
+  appendJournal(dir, { ...entry('a'), bindings: {} }, at(1));
+  appendJournal(dir, entry('b'), at(2));
+  const [withEmpty, without] = readJournal(dir).entries;
+  expect(withEmpty?.bindings).toEqual({});
+  expect(without?.bindings).toBeUndefined();
+});
+
+test('a bindings hash that breaks the pattern is refused by appendJournal and by readJournal', () => {
+  const dir = runDir();
+  createJournal(dir);
+  expect(() => appendJournal(dir, { ...entry('a'), bindings: { data: 'xyz' } }, at(1))).toThrow('sail.journal.v1');
+  expect(text(dir)).toBe('');
+  const bad = { seq: 1, ...entry('a'), bindings: { data: '0123456789ABCDEF' }, recordedAt: at(1).toISOString() };
+  writeFileSync(join(dir, JOURNAL_FILE), `${JSON.stringify(bad)}\n`);
+  expect(journalError(() => readJournal(dir)).message).toContain('breaks sail.journal.v1');
+});

@@ -1422,6 +1422,13 @@ test('run: a seeded header names its fromRun; an empty fromRun is refused', () =
   expect(paths('sail.run.v1', { ...seeded, fromRun: '' })).toEqual(['/fromRun']);
 });
 
+test('run: a seeded header records how many journal lines it reused, which needs a fromRun and at least one', () => {
+  const seeded = { ...omit(run, 'claim'), fromRun: RUN_ID };
+  expect(validateDocument('sail.run.v1', { ...seeded, reused: 2 })).toEqual([]);
+  expect(paths('sail.run.v1', { ...omit(run, 'claim'), reused: 2 })).toEqual(['/']);
+  expect(paths('sail.run.v1', { ...seeded, reused: 0 })).toEqual(['/reused']);
+});
+
 test('event: run:start and journal:append take a fromRun naming a run, and refuse an empty one', () => {
   const append = { ...envelope, type: 'journal:append', key: 'intake#1', line: 1, outcome: 'passed' };
   expect([

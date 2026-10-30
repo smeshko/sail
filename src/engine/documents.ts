@@ -1,7 +1,7 @@
 // Documents in the engine: what is wrong with a step's declaration of them, each template rendered into `$STAGE_OUT`
 // before the session, and each produced document read with `Bun.markdown` and checked by its validators after it. A
 // validator is a repository's code, so whatever it does, throwing included, becomes a problem of the try, never a crash
-// and never a `result.json` its schema refuses.
+// and never a `result.json` its schema refuses. A document too big or nested too deep is refused before it is read.
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type {
@@ -15,6 +15,7 @@ import type {
 } from '../sdk/documents';
 import { placeholderNames } from '../sdk/documents';
 import type { ContractError, FileEntry } from './contract';
+import { MAX_MARKDOWN_DEPTH, markdownDepth } from './markdown-depth';
 import { type RenderValues, render } from './render';
 
 /** The most a produced document may hold for its validators to read it: it is read whole. */
@@ -89,7 +90,8 @@ export function documentProblems(produces: Readonly<Record<string, unknown>>): s
 /**
  * Reads a document's headings and top-level list items, as `Bun.markdown` parses them: fenced code holds neither, and
  * a nested list's items are not its parent's section's. A section runs from its heading to the next heading of the
- * same or a higher level.
+ * same or a higher level. Its caller refuses a text nested deeper than `MAX_MARKDOWN_DEPTH` first: Bun parses some
+ * deep shapes in quadratic time.
  */
 export function readDocument(name: string, text: string, placeholders: readonly string[]): DocumentContent {
   // Bun calls an element's callback after its children's, so a heading inside a list item comes before the item. Each
@@ -271,6 +273,11 @@ export function validateDocuments(options: ValidateDocumentsOptions): Validated 
       text = readFileSync(join(options.outDir, name), 'utf8');
     } catch (error) {
       refuse(`can't be read (${codeOf(error)})`);
+      continue;
+    }
+    const depth = markdownDepth(text);
+    if (depth > MAX_MARKDOWN_DEPTH) {
+      refuse(`nests ${depth} levels deep, more than the ${MAX_MARKDOWN_DEPTH} a document may nest to be validated`);
       continue;
     }
     const content = readDocument(name, text, options.placeholders[name] ?? []);

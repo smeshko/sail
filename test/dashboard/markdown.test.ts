@@ -37,3 +37,23 @@ test('raw HTML is text, a script is never markup, only http(s) links are links, 
   expect(out).toContain('<span class="md-img">[pic · https://e.com/p.png]</span>');
   expect(out).toContain('<pre class="md-code" data-lang="&quot;&gt;&lt;script&gt;"><code>x');
 });
+
+test('a text nested more than 64 levels is shown as a note and its escaped raw text, never as markup (ADW-198)', () => {
+  const text = `${'- '.repeat(65)}<b>x</b>\n`;
+  expect(renderMarkdown(text)).toBe(
+    `<p class="md-note">Shown as text: it nests 65 levels deep, more than the 64 the dashboard renders as markdown.</p>\n<pre class="md-code"><code>${'- '.repeat(65)}&lt;b&gt;x&lt;/b&gt;\n</code></pre>\n`,
+  );
+});
+
+test('1 MiB of the slow nesting shape is shown as text in under a second (ADW-198)', () => {
+  const started = performance.now();
+  const html = renderMarkdown(`${'- '.repeat(512 * 1024 - 2)}x\n`);
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(html).toStartWith('<p class="md-note">Shown as text: it nests 524286 levels deep');
+});
+
+test('a text at exactly 64 levels still renders as nested lists (ADW-198)', () => {
+  const html = renderMarkdown(`${'- '.repeat(64)}x\n`);
+  expect(html).toStartWith('<ul><li><ul><li>');
+  expect(html.split('<ul>')).toHaveLength(65);
+});
