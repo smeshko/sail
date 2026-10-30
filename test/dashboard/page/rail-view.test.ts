@@ -25,42 +25,72 @@ afterEach(() => m.remove());
 const NOW = Date.parse('2026-10-01T12:00:00.000Z');
 const rail = (fields = {}) =>
   renderRail(railRepos(index(m.registryDir), NOW), { ...initialUi(0), ...fields }, NOW).value;
-/** The runs the rail shows, in order, each marked when selected. */
+/** The finished runs the rail shows as history rows, in order, each marked when selected. */
 const shown = (markup: string) =>
   [
-    ...markup.matchAll(/<button class="run( sel)?" data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)">/g),
+    ...markup.matchAll(
+      /<button class="run hist-run( sel)?" title="[^"]*" data-action="select-run" data-repo="(\w+)" data-run="([\w-]+)">/g,
+    ),
   ].map(([, sel, repo, run]) => `${repo} ${run}${sel ? ' *' : ''}`);
 
-test("the rail shows alpha's failed FAKE-2 in its opened failed section, its closed completed section still showing the selected golden run, and beta's FAKE-3 suspended on budget_exceeded with its title escaped", () => {
-  const markup = rail({ repo: 'alpha', runId: GOLDEN_RUN_ID, open: ['alpha/ticket-to-pr:failed'] });
-  expect(shown(markup)).toEqual([`alpha ${FAKE_2_ID}`, `alpha ${GOLDEN_RUN_ID} *`, `beta ${FAKE_3_ID}`]);
+test('repository headers are one line with the remote as the tooltip and counts omitted at 0, with no diamond, live dot or remote line', () => {
+  const markup = rail();
   expect(markup).toContain(
-    '<button class="subgrp-h open" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed"><span class="caret">›</span><span class="sw p-fail"></span><span>failed</span><span class="n">1</span></button>',
-  );
-  expect(markup.indexOf('data-section="alpha/ticket-to-pr:failed"')).toBeLessThan(
-    markup.indexOf('data-section="alpha/ticket-to-pr:completed"'),
-  );
-  expect(markup).toContain('<span class="nm">alpha</span>');
-  expect(markup).toContain('<div class="lgrp-r">https://example.com/beta.git</div>');
-  expect(markup).toContain(
-    '<button class="subgrp-h" data-action="toggle-section" data-section="alpha/ticket-to-pr:completed"><span class="caret">›</span><span class="sw p-pass"></span><span>completed</span><span class="n">1</span></button>',
+    '<button class="lgrp-h open" title="https://example.com/alpha.git" data-action="toggle-group" data-group="alpha"><span class="caret">›</span><span class="nm">alpha</span><span class="counts"><span class="f">✗ 1</span><span>2</span></span></button>',
   );
   expect(markup).toContain(
-    '<span class="r-title">Escape &lt;b&gt;this&lt;/b&gt; &amp; &quot;that&quot;</span><span class="r-sub">suspended · <span class="why">budget_exceeded</span> · 6.2s · $1.06</span>',
+    '<button class="lgrp-h open" title="https://example.com/beta.git" data-action="toggle-group" data-group="beta"><span class="caret">›</span><span class="nm">beta</span><span class="counts"><span class="r">▶ 1</span><span>2</span></span></button>',
   );
-  expect(markup).toContain('failed · <span class="why">stage_error</span> · 4.9s · $0.36');
-  expect(markup).toContain('<div class="rail-h"><span>repositories</span><span class="c">4 runs</span></div>');
+  for (const gone of ['lgrp-r', '◆', 'class="live"', 'class="ic"']) expect(markup).not.toContain(gone);
+  const bare = renderRail(handMade([]), initialUi(0), NOW).value;
+  expect(bare).toContain(
+    '<button class="lgrp-h open" data-action="toggle-group" data-group="gamma"><span class="caret">›</span><span class="nm">gamma</span><span class="counts"></span></button>',
+  );
 });
 
-test('the failed and completed sections stay closed unless opened or holding the selection', () => {
-  expect(shown(rail())).toEqual([`beta ${FAKE_3_ID}`]);
-  expect(rail()).toContain(
-    '<button class="subgrp-h" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed">',
+test('each repository lists its workflows by name, the watched one with a warn queue badge that opens its queue and the others with none', () => {
+  const markup = rail();
+  const groups = [...markup.matchAll(/data-action="toggle-group" data-group="([^"]+)"/g)].map(([, group]) => group);
+  expect(groups).toEqual(['alpha', 'alpha/ticket-to-pr', 'beta', 'beta/review', 'beta/ticket-to-pr']);
+  expect(markup).toContain(
+    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="beta/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><button class="qbadge warn" title="polled 7d ago" data-action="select-queue" data-queue="beta/ticket-to-pr">1 queued</button><span class="counts"><span class="r">▶ 1</span><span>1</span></span></div>',
   );
-  expect(rail()).toContain(
-    '<button class="subgrp-h" data-action="toggle-section" data-section="alpha/ticket-to-pr:completed">',
+  expect(markup).toContain(
+    '<div class="wf-h"><button class="wf-t open" data-action="toggle-group" data-group="alpha/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span></button><span class="counts"><span class="f">✗ 1</span><span>2</span></span></div>',
   );
-  expect(shown(rail({ repo: 'alpha', runId: FAKE_2_ID }))).toEqual([`alpha ${FAKE_2_ID} *`, `beta ${FAKE_3_ID}`]);
+  expect(markup.match(/class="qbadge/g)).toHaveLength(1);
+  const idle = renderRail(handMade([{}], 0), initialUi(0), NOW).value;
+  expect(idle).toContain(
+    '<button class="qbadge idle" data-action="select-queue" data-queue="gamma/flow">queue</button>',
+  );
+  const open = rail({ queue: 'beta/ticket-to-pr' });
+  expect(open).toContain('<button class="qbadge warn sel" title="polled 7d ago"');
+});
+
+test('an open workflow lists no live run and its history line toggles its failed and completed runs as one-line rows', () => {
+  const markup = rail();
+  expect(markup).toContain(
+    '<div class="hist"><button class="hist-t" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed">✗ 1 failed</button><button class="hist-t" data-action="toggle-section" data-section="alpha/ticket-to-pr:completed">✓ 1 done ›</button></div>',
+  );
+  expect(markup).not.toContain('class="hist-t" data-action="toggle-section" data-section="beta/ticket-to-pr');
+  expect([shown(markup), markup.includes('hist-run')]).toEqual([[], false]);
+  expect(markup.slice(markup.indexOf('data-group="beta/ticket-to-pr"'))).not.toContain('class="run');
+  const failed = rail({ open: ['alpha/ticket-to-pr:failed'] });
+  expect(shown(failed)).toEqual([`alpha ${FAKE_2_ID}`]);
+  expect(failed).toContain(
+    '<button class="hist-t open" data-action="toggle-section" data-section="alpha/ticket-to-pr:failed">',
+  );
+  expect(shown(rail({ open: ['alpha/ticket-to-pr:failed', 'alpha/ticket-to-pr:completed'] }))).toEqual([
+    `alpha ${FAKE_2_ID}`,
+    `alpha ${GOLDEN_RUN_ID}`,
+  ]);
+  expect(failed).toContain(
+    `title="$0.36" data-action="select-run" data-repo="alpha" data-run="${FAKE_2_ID}">\n<span class="st p-fail"></span><span class="r-id">FAKE-2</span>`,
+  );
+  expect(failed).toContain('<span class="r-el">4.9s</span></button>');
+});
+
+test('the run states map to the pill colours the rail draws', () => {
   const states = [
     'completed',
     'passed',
@@ -86,45 +116,24 @@ test('the failed and completed sections stay closed unless opened or holding the
     'p-pend',
     'p-skip',
   ]);
-  expect(shown(rail({ open: ['alpha/ticket-to-pr:completed'] }))).toEqual([
-    `alpha ${GOLDEN_RUN_ID}`,
-    `beta ${FAKE_3_ID}`,
-  ]);
 });
 
-test("each repository lists its workflows by name: beta's review and ticket-to-pr, the watched one with its queue row", () => {
-  const markup = rail();
-  const groups = [...markup.matchAll(/data-action="toggle-group" data-group="([^"]+)"/g)].map(([, group]) => group);
-  expect(groups).toEqual(['alpha', 'alpha/ticket-to-pr', 'beta', 'beta/review', 'beta/ticket-to-pr']);
-  expect(markup).toContain(
-    '<button class="wf-h open" data-action="toggle-group" data-group="alpha/ticket-to-pr"><span class="caret">›</span><span class="nm">ticket-to-pr</span><span class="counts"><span class="f">✗ 1</span><span>2</span></span></button>',
-  );
-  expect(markup).toContain(
-    '<button class="wf-q" data-action="select-queue" data-queue="beta/ticket-to-pr"><span class="qd"></span><span>queue</span><span class="n">1 waiting · polled 7d ago</span></button>',
-  );
-  expect(markup.match(/data-action="select-queue"/g)).toHaveLength(2);
-  expect(markup).toContain('data-section="beta/review:completed"');
-});
-
-test("a closed repository or workflow folds, keeping only the open run's row or the open queue's row in sight, and an open queue unmarks the run", () => {
+test("a closed repository or workflow folds, keeping only the open finished run's row or the open queue's workflow header in sight", () => {
   const closed = rail({ closed: ['alpha', 'beta/ticket-to-pr'] });
-  expect(closed).toContain('<button class="lgrp-h" data-action="toggle-group" data-group="alpha">');
+  expect(closed).toContain(
+    '<button class="lgrp-h" title="https://example.com/alpha.git" data-action="toggle-group" data-group="alpha">',
+  );
   expect(closed).not.toContain('data-group="alpha/ticket-to-pr"');
-  expect(closed).toContain('<button class="wf-h" data-action="toggle-group" data-group="beta/ticket-to-pr">');
-  expect([shown(closed), closed.includes('class="wf-q"')]).toEqual([[], false]);
+  expect(closed).toContain('<button class="wf-t" data-action="toggle-group" data-group="beta/ticket-to-pr">');
+  expect(shown(closed)).toEqual([]);
   const holding = rail({ closed: ['alpha', 'alpha/ticket-to-pr'], repo: 'alpha', runId: GOLDEN_RUN_ID });
-  expect(shown(holding)).toEqual([`alpha ${GOLDEN_RUN_ID} *`, `beta ${FAKE_3_ID}`]);
-  const queued = rail({
-    closed: ['beta', 'beta/ticket-to-pr'],
-    repo: 'beta',
-    runId: FAKE_3_ID,
-    queue: 'beta/ticket-to-pr',
-  });
-  expect(queued).toContain('<button class="wf-q sel" data-action="select-queue" data-queue="beta/ticket-to-pr">');
-  expect(shown(queued)).toEqual([]);
-  const repoClosed = rail({ closed: ['beta'], repo: 'beta', runId: FAKE_3_ID });
-  expect(shown(repoClosed)).toEqual([`beta ${FAKE_3_ID} *`]);
-  expect(repoClosed).not.toContain('data-group="beta/ticket-to-pr"');
+  expect(shown(holding)).toEqual([`alpha ${GOLDEN_RUN_ID} *`]);
+  const queued = rail({ closed: ['beta'], repo: 'beta', runId: FAKE_3_ID, queue: 'beta/ticket-to-pr' });
+  expect(queued).toContain('<button class="qbadge warn sel" title="polled 7d ago"');
+  expect(queued).not.toContain('data-group="beta/review"');
+  const live = rail({ closed: ['beta'], repo: 'beta', runId: FAKE_3_ID });
+  expect(live).not.toContain('data-group="beta/ticket-to-pr"');
+  expect(live).toContain('class="run live-run sel"');
 });
 
 const liveRows = (markup: string) =>
