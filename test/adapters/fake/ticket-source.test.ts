@@ -408,16 +408,15 @@ test('a scripted removeLabel answer of unavailable refuses the call, keeps the l
   expect(events.filter((event) => event.type === 'ticket:unlabelled')).toHaveLength(1);
 });
 
-test('a scripted addLabel answer of unavailable refuses every call, the last repeating, and the count carries to a new instance', async () => {
-  const world = scriptedSeed({ answers: { addLabel: ['unavailable'] } });
-  for (const source of [createFakeTicketSource(world), createFakeTicketSource(world)]) {
-    expect(portFailure(await rejection(source.addLabel('FAKE-1', 'sail')))).toEqual({
-      port: 'ticketSource',
-      op: 'addLabel',
-      code: 'unavailable',
-    });
-  }
-  expect((await createFakeTicketSource(world).get('FAKE-1')).labels).toEqual(['sail']);
+test('a scripted addLabel answer of unavailable refuses the call, and the count carries to a new instance on the same state file', async () => {
+  const world = scriptedSeed({ answers: { addLabel: ['unavailable', 'ok'] } });
+  expect(portFailure(await rejection(createFakeTicketSource(world).addLabel('FAKE-1', 'sail')))).toEqual({
+    port: 'ticketSource',
+    op: 'addLabel',
+    code: 'unavailable',
+  });
+  const next = createFakeTicketSource(world);
+  expect((await next.addLabel('FAKE-1', 'sail')).labels).toEqual(['sail']);
 });
 
 test("a label answer script leaves the ticket's other calls and its raw untouched", async () => {
