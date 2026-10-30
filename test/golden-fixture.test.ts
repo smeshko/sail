@@ -113,6 +113,7 @@ test('it holds nothing a run cannot write yet: no tool, thinking or denial event
   expect(Object.keys(header)).toEqual([
     'schema',
     'runId',
+    'layout',
     'source',
     'workflow',
     'sail',

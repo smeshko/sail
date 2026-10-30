@@ -456,7 +456,7 @@ test("sail FAKE-1 runs publish as describe, then open, each journaled as it fini
   expect(readFileSync(join(ran.dir, PUBLISH, 'steps', '2-open', 'in', 'title.txt'), 'utf8')).toBe(DESCRIBED_TITLE);
   expect(json(ran.dir, PUBLISH, 'steps', '2-open', 'result.json').consumed).toEqual({
     title: `${PUBLISH}/steps/1-describe/result.json#/output/title`,
-    body: `${PUBLISH}/pr-body.md`,
+    body: `${PUBLISH}/out/pr-body.md`,
     ticketKey: 'workflow',
   });
   expect(json(ran.dir, PUBLISH, 'result.json')).toMatchObject({
