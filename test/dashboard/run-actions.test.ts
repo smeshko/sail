@@ -28,16 +28,19 @@ async function until(what: string, holds: () => boolean, ms = 90_000): Promise<v
 test('a suspended run resumes to completion from the dashboard, and a failed one restarts as a seeded run from a stage it ran', async () => {
   await withTempRepo(async (repo) => {
     copyFixture(repo.dir);
-    const ran = await runCaptured(['FAKE-1', '--until', 'spec'], repo.dir, { env: repo.env });
+    // A machine directory of its own: an in-process run finds the default one through the test process's HOME, which
+    // the other test files of the process share, and whose entry for the fixture's name another clone may take.
+    const env = { ...repo.env, SAIL_HOME: join(repo.home, '.sail') };
+    const ran = await runCaptured(['FAKE-1', '--until', 'spec'], repo.dir, { env });
     expect(ran.code).toBe(EXIT_SUSPENDED);
     const runs = join(repo.dir, '.sail-runs');
     const [runId = ''] = readdirSync(runs).filter((name) => isRunIdOf('FAKE-1', name));
     const dir = join(runs, runId);
     expect(statusOf(dir)).toStartWith('suspended');
 
-    const registry = registryDir(machineDir(repo.env));
-    const [{ name = '' } = {}] = readRegistry(registry).entries;
-    const started = startDashboard({ registryDir: registry, port: 0, env: repo.env });
+    const registry = registryDir(machineDir(env));
+    const { name = '' } = readRegistry(registry).entries.find((entry) => entry.clone === repo.dir) ?? {};
+    const started = startDashboard({ registryDir: registry, port: 0, env });
     if ('refused' in started) throw new Error(started.refused);
     try {
       const base = `http://127.0.0.1:${started.port}/api/repos/${name}/runs`;
