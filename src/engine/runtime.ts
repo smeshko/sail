@@ -67,7 +67,8 @@
 //
 // A call (or a step of one) that ended in an `error` with the port error code `unavailable` (a provider that could not be
 // reached) suspends the run with `port_unavailable`, `run:suspended` naming the call. It is left unjournaled in the same
-// way, and `sail resume` runs it again; a usage limit in the same group takes precedence.
+// way, and `sail resume` runs it again; a usage limit in the same group takes precedence. A call that passed
+// `{ onError: 'return' }` is the exception: its workflow takes the error, as it takes any other.
 //
 // A seeded run is driven by this same loop: its journal already holds the reused calls, so the intake isn't run again
 // and the replay returns each reused call from its line. Its `run:start` carries `fromRun`, and each reused call is
@@ -596,9 +597,9 @@ async function drive(
       ...(resetsAt === undefined ? {} : { resetsAt }),
     });
   };
-  /** A call (or a step of one) that ended in `error` on an unavailable port: its call's key. */
-  const unavailableOf = (result: Record<string, unknown>): Unavailable | undefined => {
-    if (result.outcome !== 'error') return undefined;
+  /** A call (or a step of one) that ended in `error` on an unavailable port, and doesn't return its errors: its key. */
+  const unavailableOf = (result: Record<string, unknown>, call: PendingCall): Unavailable | undefined => {
+    if (result.outcome !== 'error' || call.onError === 'return') return undefined;
     const hit = ((result.errors ?? []) as { reason: string; code?: string }[]).some(
       (error) => error.reason === 'port' && error.code === 'unavailable',
     );
@@ -674,7 +675,7 @@ async function drive(
             callSignal?.aborted ||
             ranOut(result) ||
             limitedOf(result) !== undefined ||
-            unavailableOf(result) !== undefined
+            unavailableOf(result, call) !== undefined
           )
             return false;
           journal(result, paths);
@@ -910,7 +911,7 @@ async function drive(
           running = undefined;
           return await limitReached(limit);
         }
-        const unavailable = unavailableOf(result);
+        const unavailable = unavailableOf(result, one.call);
         if (unavailable !== undefined) {
           running = undefined;
           return await portUnavailable(unavailable);
@@ -956,7 +957,7 @@ async function drive(
               usageLimited ??= limit;
               return;
             }
-            const down = unavailableOf(result);
+            const down = unavailableOf(result, each.call);
             if (down !== undefined) {
               unavailable ??= down;
               return;

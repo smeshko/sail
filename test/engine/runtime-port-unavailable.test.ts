@@ -177,3 +177,30 @@ test('in a group whose member ends on an unavailable port while another hits the
     });
   });
 });
+
+test('a call that passes onError: return, alone or in a group, gets its unavailable port back as an error, and the run goes on to complete (review V2)', async () => {
+  await withTempRepo(async (repo) => {
+    trioDownAtB(repo.dir);
+    write(
+      join(repo.dir, '.sail'),
+      `workflows/${TRIO}/workflow.ts`,
+      `import { workflow } from 'sail';
+import { ticket } from 'sail/intakes';
+import { b } from './stages/b/stage';
+
+export default workflow('${TRIO}', { intake: ticket, version: 1 }, async (run) => {
+  const brief = run.intake.files['brief.md'];
+  const alone = await run.stage(b, { brief }, { onError: 'return' });
+  const [grouped] = await run.all([[b, { brief }, { onError: 'return' }]] as const);
+  return { alone: alone.outcome, grouped: grouped.outcome };
+});
+`,
+    );
+    const end = await ran(repo.dir, TRIO);
+    expect({ status: end.status, stopReason: end.stopReason, journal: keys(end.dir) }).toEqual({
+      status: 'completed',
+      stopReason: undefined,
+      journal: ['intake#1', 'b#1', 'b#2'],
+    });
+  });
+});
