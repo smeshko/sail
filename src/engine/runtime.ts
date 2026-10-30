@@ -46,6 +46,10 @@
 // and every step line must belong to a call the journal holds or the workflow asks for now: anything else fails the
 // run with `determinism_violation`, before anything runs.
 //
+// A resume restores what a power cut took from the stream (`restore-events.ts`): the run's `run:start` when the events
+// hold none, where a fresh run emits its own, and the `journal:append` of each journal line they never reported, after
+// the renewed lease. Nothing runs again, and a stream that lost nothing gains nothing.
+//
 // A run with a budget is driven under its tracker (`budget.ts`). Each agent request is handed the run's share of what it
 // has left, and the harness ends a session that reaches it. A call that ran out of the run's budget, an `error` with
 // `budget_exceeded` whose request the run's budget narrowed, is left unjournaled, so the next replay asks for it again.
@@ -136,6 +140,7 @@ import {
   rootRelative,
 } from './open-run';
 import { type PendingCall, type ReplayEnd, replay } from './replay';
+import { type LostEvents, lostEvents, runStartOf } from './restore-events';
 import type { RosterEntry } from './roster';
 import { copiedIntakeFile, copiedStageFile, type StopReason, writeStatus } from './run-dir';
 import { openSeededRun, type SeededRunOptions } from './seed-run';
@@ -444,7 +449,7 @@ async function awake<T>(options: EventOptions, body: (hold: KeepAwakeHold) => Pr
 async function drive(
   opened: OpenedRun,
   options: DriveOptions,
-  { start, hold }: { start: boolean; hold: KeepAwakeHold },
+  { start, hold, restored }: { start: boolean; hold: KeepAwakeHold; restored?: LostEvents },
 ): Promise<RunEnd> {
   const { runId, dir, sailDir, loaded, header } = opened;
   const { signal, clock = systemClock } = options;
@@ -710,18 +715,10 @@ async function drive(
   let seededFor = opened.seeded;
 
   try {
-    if (start) {
-      // From the header, never derived again: the roster in the stream is the one frozen in run.json.
-      bus.emit({
-        type: 'run:start',
-        source: header.source,
-        workflow: header.workflow,
-        roster: { intake: header.intake, stages: header.stages },
-        adapters: header.adapters,
-        ...(header.budget === undefined ? {} : { budget: header.budget }),
-        ...(header.fromRun === undefined ? {} : { fromRun: header.fromRun }),
-      });
-    }
+    // From the header, never derived again: the roster in the stream is the one frozen in run.json. A resume restores
+    // the one its events lost, in the same place.
+    if (start) bus.emit(runStartOf(header));
+    else if (restored?.start !== undefined) bus.emit(restored.start);
     // What opening the run did, before this stream existed to hear it: the lease and the workspace. No call was
     // running, so no key.
     for (const event of opened.started) bus.emit(event);
@@ -734,6 +731,8 @@ async function drive(
         bus.emit({ type: 'journal:append', key, line: seq, outcome, fromRun, ...named });
       }
     }
+    // What a power cut took from a resumed run's stream: the journal lines it never reported, each once.
+    for (const event of restored?.appends ?? []) bus.emit(event);
     // After the opening's events, so a resume's budget segment still starts at its renewed lease.
     bus.emit(
       hold.held
@@ -974,6 +973,6 @@ export async function resumeWorkflow(options: ResumeWorkflowOptions): Promise<Ru
   return awake(options, async (hold) => {
     const opened = await reopenRun(options);
     if ('refused' in opened) return opened;
-    return drive(opened, options, { start: false, hold });
+    return drive(opened, options, { start: false, hold, restored: lostEvents(opened) });
   });
 }
