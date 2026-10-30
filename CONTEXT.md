@@ -546,11 +546,11 @@ A workflow that declares `watch: { every, label? }` and `maxConcurrentRuns`, whi
 _Avoid_: loop, line, daemon, pipeline
 
 **Watcher**:
-The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
+The resident process that automates one repository's watch set: it polls and it dispatches. `sail watch <workflow…>` starts it in the clone where it is run, or adds to the live one; `sail watch` with no names does so for every workflow that declares a watch. There is one per repository. Each run it dispatches fetches before it makes its worktree, and runs start from `origin/<default>` in detached worktrees, using the `.sail/` committed there. It is sail's home in v1. Without one running, nothing starts on its own.
 _Avoid_: daemon, monitor, poller, scheduler
 
 **Watch set**:
-The watched workflows a watcher is watching now: exactly those named with `sail watch`, minus those removed with `sail unwatch`. It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
+The watched workflows a watcher is watching now: exactly those named with `sail watch` (every workflow that declares a watch, when it names none), minus those removed with `sail unwatch` (the whole set, when it names none). It is never remembered across restarts, and the watcher exits when it becomes empty. Each change is a `watch:added` or `watch:removed` event in that workflow's queue event stream, naming the watcher's pid. Unwatching a workflow suspends its runs; stopping the watcher does not (ADR-0019).
 _Avoid_: enabled workflows, active loops, subscriptions
 
 **Watcher registry**:
