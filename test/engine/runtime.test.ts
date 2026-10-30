@@ -3201,11 +3201,11 @@ test('a run journals each call line with its bindings fingerprints, {} for a cal
   const { entries } = readJournal(end.dir);
   const by = Object.fromEntries(entries.map((entry) => [entry.key, entry]));
   expect(by['intake#1']?.bindings).toBeUndefined();
-  expect(by['spec#1']?.bindings).toEqual({ brief: fileHash('brief', '00-intake/call-1/brief.md') });
-  expect(by['implement#1']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/spec.md') });
+  expect(by['spec#1']?.bindings).toEqual({ brief: fileHash('brief', '00-intake/call-1/out/brief.md') });
+  expect(by['implement#1']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/out/spec.md') });
   expect(by['tests#1']?.bindings).toEqual({});
   const feedback = fingerprintBindings({ feedback: { kind: 'value', value: by['tests#1']?.output, from: '' } });
-  expect(by['implement#2']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/spec.md'), ...feedback });
+  expect(by['implement#2']?.bindings).toEqual({ spec: fileHash('spec', '01-spec/call-1/out/spec.md'), ...feedback });
   expect(feedback.feedback).toMatch(/^[0-9a-f]{16}$/);
   const lines = readFileSync(join(end.dir, JOURNAL_FILE), 'utf8').trim().split('\n');
   expect(lines.flatMap((line) => validateDocument('sail.journal.v1', JSON.parse(line))).map(formatIssue)).toEqual([]);
@@ -3228,7 +3228,7 @@ test("a group's call lines each carry their own call's bindings, beside the grou
     writeTrio(repo.dir, { a: 0, b: 0, c: 0 });
     const end = await ranTrio(repo.dir);
     const calls = readJournal(end.dir).entries.filter((entry) => entry.group !== undefined);
-    const brief = { brief: fileHash('brief', '00-intake/call-1/brief.md') };
+    const brief = { brief: fileHash('brief', '00-intake/call-1/out/brief.md') };
     expect(calls.map((entry) => entry.key).sort()).toEqual(TRIO_KEYS);
     expect(calls.map((entry) => [entry.group, entry.bindings])).toEqual(calls.map(() => [TRIO_KEYS, brief]));
   });
