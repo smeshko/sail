@@ -98,14 +98,24 @@ export interface RunOnDisk {
   events: { type: string; ts: string; [field: string]: unknown }[];
 }
 
+/** The run header in `dir`, or undefined while there is none or it is created but not yet written. */
+function headerIn(dir: string): ReturnType<typeof JSON.parse> {
+  if (!existsSync(join(dir, 'run.json'))) return undefined;
+  try {
+    return JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
 /** The runs in `runs`, oldest first. */
 export function runsIn(runs: string): RunOnDisk[] {
   if (!existsSync(runs)) return [];
   return readdirSync(runs)
-    .filter((name) => existsSync(join(runs, name, 'run.json')))
-    .map((runId) => {
+    .flatMap((runId) => {
       const dir = join(runs, runId);
-      const header = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
+      const header = headerIn(dir);
+      if (header === undefined) return [];
       let status = 'starting';
       try {
         const read = readStatus(dir);
@@ -116,19 +126,23 @@ export function runsIn(runs: string): RunOnDisk[] {
       const events = existsSync(join(dir, 'events.ndjson'))
         ? readFileSync(join(dir, 'events.ndjson'), 'utf8')
             .split('\n')
+            // The last piece is a line still being appended, or empty once the last one is whole.
+            .slice(0, -1)
             .filter((line) => line !== '')
             .map((line) => JSON.parse(line))
         : [];
-      return {
-        runId,
-        workflow: header.workflow.name,
-        ticketKey: header.source.ticketKey,
-        source: header.source,
-        via: header.source.via,
-        startedAt: header.startedAt,
-        status,
-        events,
-      };
+      return [
+        {
+          runId,
+          workflow: header.workflow.name,
+          ticketKey: header.source.ticketKey,
+          source: header.source,
+          via: header.source.via,
+          startedAt: header.startedAt,
+          status,
+          events,
+        },
+      ];
     })
     .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 }

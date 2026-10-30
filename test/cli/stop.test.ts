@@ -151,6 +151,8 @@ function dispatchFake1(runs: string, pid?: number): void {
 test('sail stop on a dispatched run with no directory yet exits 0 saying it is still starting and writes a stopped hand-off, and the run started under that id then fails stopped before intake#1', async () => {
   await withTempRepo(async (repo) => {
     writeStub(repo.dir);
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
     const runs = join(repo.dir, '.sail-runs');
     dispatchFake1(runs);
     const handOff = join(runs, `${STARTING}.control`);
