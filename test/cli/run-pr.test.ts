@@ -121,6 +121,28 @@ test("sail '#1' --workflow review-pr runs to completion in a workspace at the he
   });
 });
 
+test("a pull-request start's workspace starts at the pull request's head, not at the tip its branch has since moved to", async () => {
+  await withTempRepo(async (repo) => {
+    const { headSha } = stub(repo);
+    const tip = repo.git(
+      'commit-tree',
+      `${headSha}^{tree}`,
+      '-p',
+      headSha,
+      '-m',
+      'pushed after the pull request was read',
+    );
+    repo.git('update-ref', `refs/heads/${BRANCH}`, tip);
+    const { code } = await runCaptured(['#1', '--workflow', 'review-pr'], repo.dir);
+    const [runId = ''] = runIds(repo.dir);
+    const created = readEvents(join(repo.dir, '.sail-runs', runId)).find(
+      (event) => event.type === 'workspace:created',
+    ) as { baseSha: string } | undefined;
+    expect({ code, base: created?.baseSha }).toEqual({ code: EXIT_OK, base: headSha });
+    expect(tip).not.toBe(headSha);
+  });
+});
+
 test("sail '#1' --workflow review-pr runs a pull request labelled in another case to completion, with no designation forced", async () => {
   await withTempRepo(async (repo) => {
     const sail = writeStub(repo.dir);

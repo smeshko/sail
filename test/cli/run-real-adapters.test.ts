@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
+import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED, EXIT_SUSPENDED } from '../../src/cli/exit-codes';
 import { validateRunDir } from '../../src/engine/schemas';
 import { readEvents } from '../../src/events/consumers/ndjson';
 import type { SailEvent } from '../../src/events/types';
@@ -328,7 +328,7 @@ test('a link comment Linear fails once is tried again: the run ends completed, a
   );
 }, 90_000);
 
-test('a link comment Linear fails three times fails open after its third try, and ADW-1 holds no link comment', async () => {
+test('a link comment Linear fails three times suspends the run on the unavailable port after its third try, and ADW-1 holds no link comment', async () => {
   await withClone(
     async (clone) => {
       const ran = await sail(clone, ['ADW-1']);
@@ -340,7 +340,7 @@ test('a link comment Linear fails three times fails open after its third try, an
         requests: comments(clone.linear).length,
         bodies: clone.linear.ticket(1).comments?.map((comment) => comment.body),
       }).toEqual({
-        ran: [EXIT_FAILED, 'failed stage_error\n'],
+        ran: [EXIT_SUSPENDED, 'suspended port_unavailable\n'],
         pulls: 1,
         requests: 4,
         bodies: ['Keep the exclamation mark.', `sail run ${runId} started`],

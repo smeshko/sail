@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pkg from '../../package.json' with { type: 'json' };
 import { callPaths, createCallDir, stepPaths } from '../../src/engine/call-dir';
+import type { ContractError } from '../../src/engine/contract';
 import { redactor } from '../../src/engine/redact';
 import { validateDocument } from '../../src/engine/schemas';
 import { readSlot, releaseSlot, takeSlot } from '../../src/engine/slots';
@@ -864,7 +865,7 @@ test("a script that runs sail port jev ask has jev:asked emitted before script:e
   });
 });
 
-test('a script whose sail port jev ask is answered 429 and which exits with its status ends failed, with an error:port of the jev port', async () => {
+test('a script whose sail port jev ask is answered 429 and which exits with its status ends in error, port unavailable, with an error:port of the jev port', async () => {
   const s = setup();
   withJev(s, { error: { status: 429, detail: 'slow down' } });
   s.run(
@@ -881,7 +882,10 @@ test('a script whose sail port jev ask is answered 429 and which exits with its 
       message: 'jev.ask: TypeSafe answered 429 Too Many Requests: slow down',
     },
   ]);
-  expect(run.outcome).toBe('failed');
+  expect([run.outcome, run.errors]).toEqual([
+    'error',
+    [{ reason: 'port', code: 'unavailable', message: 'jev.ask: TypeSafe answered 429 Too Many Requests: slow down' }],
+  ]);
 });
 
 test.each<[string, string, number | undefined, string, string[]]>([
@@ -1244,4 +1248,42 @@ test("a slot that can't be released leaves the script's own result", async () =>
   c.s.run(`echo 'not json' > ${join(slots, 'verify.json')}\necho '{}'`);
   const run = await scriptKind.run(verify(), c.context);
   expect([run.outcome, run.errors]).toEqual(['passed', []]);
+});
+
+const UNAVAILABLE = `printf '%s\\n' '{"type":"error:port","port":"codeHost","op":"push","code":"unavailable","message":"codeHost.push: GitHub is unreachable"}' >> "$SAIL_EVENTS"`;
+const PORT_UNAVAILABLE: ContractError = {
+  reason: 'port',
+  code: 'unavailable',
+  message: 'codeHost.push: GitHub is unreachable',
+};
+
+test('a script whose port call fails unavailable and which exits 1 ends in error, port, code unavailable, naming the call', async () => {
+  const s = setup();
+  s.run(`${UNAVAILABLE}\nexit 1`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect([run.outcome, run.output, run.errors]).toEqual(['error', null, [PORT_UNAVAILABLE]]);
+});
+
+test('a script whose port call fails unavailable and which exits with an unmapped code ends in error the same way, ahead of the exit code', async () => {
+  const s = setup();
+  s.run(`${UNAVAILABLE}\nexit 3`);
+  const { context, events } = collecting(s);
+  const run = await scriptKind.run(tests(), context);
+  expect([run.outcome, run.errors]).toEqual(['error', [PORT_UNAVAILABLE]]);
+  expect(typesOf(events)).toEqual(['script:exec', 'error:port', 'script:exit']);
+});
+
+test('a script whose port call fails unavailable but which exits 0 stays passed', async () => {
+  const s = setup();
+  s.run(`${UNAVAILABLE}\n${JUNIT}\necho '${PASSING}'`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect([run.outcome, run.errors]).toEqual(['passed', []]);
+});
+
+test('a port call that fails not_found and a script that exits 1 keep the exit code as the verdict, with no port error', async () => {
+  const s = setup();
+  withTicket(s);
+  s.run(`sail port ticket-source get FAKE-9 >/dev/null || true\n${JUNIT}\necho '${FAILING}'\nexit 1`);
+  const run = await scriptKind.run(tests(), s.context);
+  expect([run.outcome, run.errors]).toEqual(['failed', []]);
 });
