@@ -10,15 +10,18 @@
 // | `failed` otherwise | a failed attempt, retried later or parked |
 // | `running` with its pid dead, `suspended interrupted`, `suspended unwatched` | adopted under its lease's pid when a live process holds its lease, else resumed, once |
 // | `suspended usage_limit` | adopted when a live process holds its lease; else held while now is before its reset time (or the back-off after it hit the limit), then resumed, even when this dispatcher resumed it before, unless its resume hit no limit since: then parked with why |
-// | anything else, such as `suspended until`, `suspended port_unavailable` or `budget_exceeded` | left: a person resumes or stops it |
+// | `suspended port_unavailable` | adopted when a live process holds its lease; else held for the back-off its suspension's place in the run of them calls for (1, 2, 5, 10 then 30 minutes), then resumed; parked with why when its resume was not suspended again, and parked with the call, the count and the last port error once it has been suspended past the schedule |
+// | anything else, such as `suspended until` or `budget_exceeded` | left: a person resumes or stops it |
 //
-// A limit with no event to date it by is dated by when the dispatcher first saw it (`limitedAt`).
+// A limit with no event to date it by is dated by when the dispatcher first saw it (`limitedAt`). The suspensions of
+// an unavailable port are counted from the run's events: those since its last `journal:append`, so a resume that got
+// past the call that failed starts the schedule again.
 //
 // The lease comes before a resume because the item's pid is the process the watcher started last: a resume another
 // process started, or one a watcher spawned and died before recording, holds the run's lease with a live pid. Adopting
 // it then, rather than resuming the run a second time, keeps two processes off one workspace. A run this dispatcher has
-// already resumed, found unended with its resume's process gone, and not on a usage limit hit since, is parked with
-// why: its resume failed, by the last
+// already resumed, found unended with its resume's process gone, and not on a usage limit or an unavailable port hit
+// since, is parked with why: its resume failed, by the last
 // line the resume itself logged (the log after the offset the spawn reported) or, with none, by its exit. A new
 // dispatcher, a restart or the workflow watched again, starts with none resumed, so it gets one more chance.
 import { existsSync, readFileSync } from 'node:fs';
@@ -41,13 +44,15 @@ export interface ReconcileContext {
   now: Date;
   /** How long a usage limit holds the dispatch when the run names no reset time. */
   backoffMs: number;
-  /** When this dispatcher first saw the run on its usage limit: dates a limit whose run left no event for it. */
+  /** How long a run suspended on an unavailable port holds the dispatch, by consecutive suspension; one past the end parks. */
+  portBackoffMs: readonly number[];
+  /** When this dispatcher first saw the run held, on its usage limit or an unavailable port: dates a hold whose run left no event for it. */
   limitedAt?: Date;
   /** The dispatcher's first settle: a live run is adopted. */
   first: boolean;
   /** Whether this dispatcher has already resumed the item's run. */
   resumed: boolean;
-  /** When this dispatcher last resumed the item's run from its usage limit: a limit not hit since means it failed. */
+  /** When this dispatcher last resumed the item's run from a hold: no limit hit nor suspension on an unavailable port since means it failed. */
   resumedAt?: Date;
   /** How the process this dispatcher last started for the item exited, once it has. */
   exited?: number | null;
@@ -94,6 +99,46 @@ function usageLimitOf(
   const call = key === undefined ? 'a run' : key;
   return { until, reason: `${call} hit the usage limit`, ...(last === undefined ? {} : { at: Date.parse(last.ts) }) };
 }
+
+/**
+ * When a run suspended on an unavailable port may be resumed, and why it waits. The suspensions counted are those
+ * since the run's last `journal:append`; the back-off is the schedule's entry for that count, after the last
+ * suspension's time. `error` names the last unavailable port call the suspended call recorded.
+ */
+function portUnavailableOf(
+  runDir: string,
+  context: Pick<ReconcileContext, 'now' | 'portBackoffMs' | 'limitedAt'>,
+): { count: number; key?: string; until: string; at?: number; error?: string } {
+  const events = readEvents(runDir);
+  const since = events.map((event) => event.type).lastIndexOf('journal:append');
+  const suspensions = events
+    .slice(since + 1)
+    .filter((event) => event.type === 'run:suspended' && event.stopReason === 'port_unavailable');
+  const last = suspensions.at(-1);
+  const key = last?.type === 'run:suspended' && last.stopReason === 'port_unavailable' ? last.key : undefined;
+  // Another call's error, as one that returned its errors or another member of a group took, is not this one's cause.
+  const failed = events
+    .filter(
+      (event) =>
+        event.type === 'error:port' &&
+        event.code === 'unavailable' &&
+        (key === undefined || callKeyOf(event.key ?? '') === key),
+    )
+    .at(-1);
+  const count = Math.max(suspensions.length, 1);
+  const base = last === undefined ? (context.limitedAt ?? context.now).getTime() : Date.parse(last.ts);
+  const wait = context.portBackoffMs[Math.min(count, context.portBackoffMs.length) - 1] ?? 0;
+  return {
+    count,
+    ...(key === undefined ? {} : { key }),
+    until: new Date(base + wait).toISOString(),
+    ...(last === undefined ? {} : { at: Date.parse(last.ts) }),
+    ...(failed?.type === 'error:port' ? { error: `${failed.port}.${failed.op}: ${failed.message}` } : {}),
+  };
+}
+
+/** The call a step's key belongs to: `stage#call` of `stage#call/step`. */
+const callKeyOf = (key: string): string => key.split('/')[0] ?? key;
 
 /** Where a run stands that a resume takes on, or undefined for any other. */
 function resumable(status: RunStatus): ResumedFrom | undefined {
@@ -169,6 +214,23 @@ export async function reconcileItem(item: QueueItem, context: ReconcileContext):
     }
     if (context.now.getTime() < Date.parse(until)) return { kind: 'held', until, reason };
     return { kind: 'resume', from: { status: 'suspended', stopReason: 'usage_limit' } };
+  }
+  if (status.status === 'suspended' && status.stopReason === 'port_unavailable') {
+    const holder = await liveHolder(runDir, runId, context);
+    if (holder !== undefined) return { kind: 'adopt', pid: holder };
+    const { count, key, until, at, error } = portUnavailableOf(runDir, context);
+    if (context.resumedAt !== undefined && (at === undefined || at <= context.resumedAt.getTime())) {
+      return { kind: 'park', reason: why(context, runId, 'its resume failed') ?? 'its resume failed' };
+    }
+    const call = `${key ?? 'a run'} could not reach a provider`;
+    if (count > context.portBackoffMs.length) {
+      const last = error === undefined ? '' : `: ${error}`;
+      return { kind: 'park', reason: `${call} on ${count} suspensions in a row${last}` };
+    }
+    if (context.now.getTime() < Date.parse(until)) {
+      return { kind: 'held', until, reason: error === undefined ? call : `${call}: ${error}` };
+    }
+    return { kind: 'resume', from: { status: 'suspended', stopReason: 'port_unavailable' } };
   }
   const from = resumable(status);
   if (from === undefined) return { kind: 'wait' };

@@ -315,6 +315,7 @@ export async function startWatcher(options: WatcherOptions): Promise<Watcher | {
     const dispatcher = createDispatcher({
       workflow,
       usageLimitBackoffMs: (policy ?? DEFAULT_QUEUE_POLICY).usageLimitBackoffMs,
+      portUnavailableBackoffMs: (policy ?? DEFAULT_QUEUE_POLICY).portUnavailableBackoffMs,
       label: target.label,
       maxConcurrentRuns: target.maxConcurrentRuns,
       branchPrefix: config.branchPrefix ?? DEFAULT_BRANCH_PREFIX,

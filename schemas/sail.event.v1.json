@@ -1774,7 +1774,7 @@
       "unevaluatedProperties": false
     },
     "runResumed": {
-      "description": "the watcher started sail resume for a dispatched item's run, as this pid: the run was running with its process gone, or suspended with interrupted or unwatched",
+      "description": "the watcher started sail resume for a dispatched item's run, as this pid: the run was running with its process gone, or suspended with interrupted, unwatched, usage_limit or port_unavailable",
       "type": "object",
       "$ref": "#/$defs/queueEnvelope",
       "properties": {
@@ -1786,7 +1786,7 @@
           "type": "object",
           "properties": {
             "status": { "enum": ["running", "suspended"] },
-            "stopReason": { "enum": ["interrupted", "unwatched", "usage_limit"] }
+            "stopReason": { "enum": ["interrupted", "unwatched", "usage_limit", "port_unavailable"] }
           },
           "required": ["status"],
           "allOf": [
@@ -1814,7 +1814,7 @@
       "unevaluatedProperties": false
     },
     "queueHeld": {
-      "description": "a workflow's dispatch held until a time because a run hit the usage limit: nothing starts or resumes until then, and the queue is unchanged",
+      "description": "a workflow's dispatch held until a time because a run hit the usage limit or could not reach a provider: nothing starts or resumes until then, and the queue is unchanged",
       "type": "object",
       "$ref": "#/$defs/queueEnvelope",
       "properties": {
