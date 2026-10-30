@@ -91,9 +91,10 @@
 // the loop and route events of the moves past the journal's end. A resume continues the file's `seq` with no marker.
 // `run:end` ends the stream: a replay abandoned by an interrupt or budget may move on once its workflow stops waiting,
 // but nothing it reports after that is emitted. The bin exits once the command returns, ending any leftover handles.
+// The events file is synced before each journal line, so a journaled call's events are on disk whenever its line is.
 import { dirname, join, relative } from 'node:path';
 import { createBus } from '../events/bus';
-import { ndjsonConsumer, readEvents } from '../events/consumers/ndjson';
+import { ndjsonConsumer, readEvents, syncEvents } from '../events/consumers/ndjson';
 import { summaryConsumer } from '../events/consumers/summary';
 import type { Consumer, Emit, NewEvent, ProviderEvent, SailEvent } from '../events/types';
 import { PortError } from '../ports/errors';
@@ -658,6 +659,7 @@ async function drive(
   /** Journals a call that ran, with its group's keys when it has a group, and reports it. */
   const journal = (result: Record<string, unknown>, paths: CallPaths, group?: string[]): JournalEntry => {
     tracker?.assertRecorded();
+    syncEvents(dir);
     const journaled = appendJournal(dir, opened.redact.value(entryFrom(dir, result, paths, group)), clock());
     bus.emit({ type: 'journal:append', key: journaled.key, line: journaled.seq, outcome: journaled.outcome });
     reached ||= journaled.key === last;

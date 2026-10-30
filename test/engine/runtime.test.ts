@@ -2,7 +2,7 @@
 // run interrupted or stopped by `until`, then resumed. Each case has a temp repository of its own: one run per .sail/
 // in a process, and Bun caches the workflow's modules by path. So a run resumes in a copy of the repository it was
 // interrupted in. Every run starts from the stub's `FAKE-1`, so its journal starts with `intake#1`.
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import {
   appendFileSync,
   cpSync,
@@ -18,6 +18,8 @@ import { join } from 'node:path';
 import type { ScriptedAnswer } from '../../src/adapters/fake/harness';
 import { readConfig } from '../../src/engine/config';
 import { CONTROL_FILE, requestStop, requestUnwatch } from '../../src/engine/control';
+import * as durable from '../../src/engine/durable';
+import * as journalModule from '../../src/engine/journal';
 import { JOURNAL_FILE, type JournalEntry, JournalError, readJournal } from '../../src/engine/journal';
 import { readStatus, writeStatus } from '../../src/engine/run-dir';
 import { RUN_HEADER_FILE } from '../../src/engine/run-header';
@@ -2783,3 +2785,38 @@ test("a two-step stage in a group: its step lines interleave with its sibling's 
     expect(sessionsOf(events(dir), 'publish#1/describe')).toBe(1);
   });
 }, 90_000);
+
+test("events.ndjson is synced before each journal line, holding the call's end", async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const order: string[] = [];
+    const ended: Record<string, boolean> = {};
+    let runDir = '';
+    const realSync = durable.syncFile;
+    const syncSpy = spyOn(durable, 'syncFile').mockImplementation((path: string) => {
+      if (path.endsWith('events.ndjson')) order.push('sync');
+      realSync(path);
+    });
+    const realAppend = journalModule.appendJournal;
+    const appendSpy = spyOn(journalModule, 'appendJournal').mockImplementation(((dir, entry, now) => {
+      runDir = dir;
+      order.push('append');
+      const end = events(dir).filter(
+        (event) => event.type.endsWith(':end') && 'key' in event && event.key === entry.key,
+      );
+      ended[entry.key] = end.length > 0;
+      return realAppend(dir, entry, now);
+    }) as typeof journalModule.appendJournal);
+    try {
+      expect((await ran(repo.dir)).status).toBe('completed');
+    } finally {
+      syncSpy.mockRestore();
+      appendSpy.mockRestore();
+    }
+    const appends = order.filter((step) => step === 'append').length;
+    expect(appends).toBe(keys(runDir).length);
+    expect(order.filter((step, at) => step === 'append' && order[at - 1] === 'sync')).toHaveLength(appends);
+    expect(Object.values(ended).every(Boolean)).toBe(true);
+    expect(Object.keys(ended)).toEqual(keys(runDir));
+  });
+}, 30_000);

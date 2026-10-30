@@ -2,10 +2,11 @@
 //
 // - The file is append-only across a resume (ADR-0012): a resumed run continues it from `nextSeq()`. The prototype's
 //   consumer truncated it in `init()`.
-// - Each line is one `O_APPEND` write with no fsync. A killed process loses nothing, since the kernel has the bytes; a
-//   power cut can lose or tear the tail. The journal durably records completed calls, but events also support claim
+// - Each line is one `O_APPEND` write, and the file is synced before each journal line (`syncEvents()`). A killed
+//   process loses nothing, since the kernel has the bytes. A power cut can lose or tear only what follows the last sync,
+//   so at most the `journal:append` of the last journal line, which is emitted after its line. Events also support claim
 //   recovery: a later try of the built-in ticket intake reads ticket:claimed here to recognise its unjournaled claim
-//   when the claim comment never posted. Losing that event loses this recovery evidence; it is not fsynced.
+//   when the claim comment never posted. That event comes before the intake's journal line, so the sync keeps it.
 // - A write that fails keeps its line for the next event's write, which first cuts whatever the failed write left. So
 //   a file whose writes recover, say once a full disk has room again, still holds every `seq` in order.
 // - Streaming chunks arrive with Epic 07, coalesced into whole events: a chunk never takes a `seq`.
@@ -26,7 +27,7 @@ import {
   truncateSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { createFileOnce } from '../../engine/durable';
+import { createFileOnce, syncFile } from '../../engine/durable';
 import { validateDocument } from '../../engine/schemas';
 import type { Consumer, SailEvent } from '../types';
 
@@ -101,6 +102,12 @@ function parseEvent(line: string): SailEvent | string {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** Syncs the run's events file, so every event appended so far survives a power cut. A run with no file has nothing to sync. */
+export function syncEvents(runDir: string): void {
+  const path = join(runDir, EVENTS_FILE);
+  if (existsSync(path)) syncFile(path);
+}
 
 /** Creates the run's empty events file. An existing one throws `EEXIST`. */
 export function createEventsFile(runDir: string): void {
