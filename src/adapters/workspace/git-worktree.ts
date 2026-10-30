@@ -26,6 +26,7 @@ import type { WorkspacePort } from '../../ports/workspace';
 import { defaultLeasesDir, heldLease, releaseLease, takeLease } from '../leases';
 import {
   addDetached,
+  copyTree,
   diffWorkingTree,
   fetchRemote,
   gitSync,
@@ -172,6 +173,14 @@ export function createGitWorktreeWorkspace(options: GitWorktreeOptions): Workspa
       }
       emit({ type: 'workspace:created', path, branch, baseSha, durationMs: Math.max(0, now().getTime() - started) });
       return { path, branch, baseSha, raw: added };
+    },
+    async readTree(into, { paths, base, signal }) {
+      if (base === undefined) await fetchRemote(repo, remote, env, options.fetchTimeoutMs ?? FETCH_TIMEOUT_MS, signal);
+      const from = base ?? `${remote}/${defaultBranch()}`;
+      const sha = resolveCommit(repo, from, env);
+      if (sha === undefined) throw new PortError('workspace', 'readTree', 'invalid', `${from} names no commit`);
+      copyTree(repo, sha, paths, into, env);
+      return { sha };
     },
     async reopen(run, { branch, baseSha }) {
       return reopenWorktree(join(run.runDir, WORKSPACE_DIR), branch, baseSha, env);

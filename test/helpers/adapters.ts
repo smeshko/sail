@@ -96,6 +96,7 @@ export const OPERATIONS: Record<Port, string[]> = {
     'diff',
     'holder',
     'lease',
+    'readTree',
     'release',
     'releaseLease',
     'reopen',

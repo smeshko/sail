@@ -52,6 +52,7 @@ function world(): WorkspaceWorld & { leasesDir: string } {
     base: 'main',
     defaultBranch: 'main',
     baseSha: git('rev-parse', 'main'),
+    repoDir: repo().dir,
     tracked: 'README.md',
     runsDir,
     leasesDir: tempDir(),
