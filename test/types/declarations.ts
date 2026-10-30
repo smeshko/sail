@@ -4,6 +4,20 @@
 import { agent, file, fromStep, gitDiff, intake, type OutcomeOf, type ScriptOutcome, script, stage, z } from 'sail';
 
 const Output = z.object({ ok: z.boolean() });
+
+script('bad-port', {
+  run: './x',
+  output: Output,
+  // @ts-expect-error TS2322: not a script port
+  ports: ['github'],
+});
+
+script('bad-env', {
+  run: './x',
+  output: Output,
+  // @ts-expect-error TS2322: env is a list of names
+  env: 'GITHUB_TOKEN',
+});
 const permissions = { read: ['**'], write: ['$STAGE_OUT/**'], commands: [] };
 const budget = { maxTurns: 10, maxUsd: 1, maxMinutes: 5 };
 

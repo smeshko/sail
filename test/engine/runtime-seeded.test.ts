@@ -99,6 +99,24 @@ test('seeding spec runs spec#1 alone after the reused intake, reports the intake
   });
 }, 60_000);
 
+test("a seeded run starts from its source run's baseSha even when the source branch is pushed past it", async () => {
+  await withTempRepo(async (repo) => {
+    const from = await source.copyInto(repo.dir);
+    const tip = repo.git('commit-tree', 'main^{tree}', '-p', 'main', '-m', 'work an earlier run pushed');
+    repo.git('update-ref', `refs/heads/${SOURCE_BRANCH}`, tip);
+    const sourceBase = JSON.parse(readFileSync(join(from.dir, 'run.json'), 'utf8')).repository.baseSha;
+    const end = await seeded(repo, from.runId, 'spec');
+    const created = readEvents(dirOf(end)).find((event) => event.type === 'workspace:created') as
+      | { baseSha: string }
+      | undefined;
+    expect({ end: endOf(end), base: created?.baseSha }).toEqual({
+      end: { status: 'suspended', stopReason: 'until' },
+      base: sourceBase,
+    });
+    expect(tip).not.toBe(sourceBase);
+  });
+}, 60_000);
+
 test('a run seeded from a seeded run names the same ticket in its summary, though neither fetched it', async () => {
   await withTempRepo(async (first) => {
     const from = await source.copyInto(first.dir);

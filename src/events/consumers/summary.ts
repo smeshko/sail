@@ -21,6 +21,7 @@ export const SUMMARY_FILE = 'summary.json';
 /** The events after which `summary.json` is written. */
 const WRITE_POINTS: ReadonlySet<EventType> = new Set([
   'run:start',
+  'step:stalled',
   'journal:append',
   'all:end',
   'run:end',
@@ -47,8 +48,9 @@ export function summaryConsumer(runDir: string): Consumer {
         if (event.seq > 1) state = seed(runDir, event.seq);
         seeded = true;
       }
+      const stalled = state.stalled.size;
       foldEvent(state, event);
-      const summary = WRITE_POINTS.has(event.type) ? toSummary(state) : undefined;
+      const summary = WRITE_POINTS.has(event.type) || state.stalled.size < stalled ? toSummary(state) : undefined;
       if (summary !== undefined) writeSummary(runDir, summary);
     },
   };
@@ -80,8 +82,13 @@ export function rebuildSummary(
   while (true) {
     const read = readEventsFrom(runDir, cursor);
     if ('refused' in read) return read;
-    if (written !== undefined && !read.events.some((event) => WRITE_POINTS.has(event.type))) return written;
-    for (const event of read.events) foldEvent(state, event);
+    let changed = false;
+    for (const event of read.events) {
+      const stalled = state.stalled.size;
+      foldEvent(state, event);
+      changed ||= WRITE_POINTS.has(event.type) || state.stalled.size < stalled;
+    }
+    if (written !== undefined && !changed) return written;
     cursor = read.next;
     const summary = toSummary(state);
     if (summary === undefined) {

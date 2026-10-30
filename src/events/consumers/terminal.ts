@@ -52,6 +52,7 @@ const SHOWN_FROM: Partial<Record<EventType, Verbosity>> = {
   'stage:end': 'normal',
   'step:end': 'normal',
   'step:queued': 'normal',
+  'step:stalled': 'normal',
   'loop:iteration': 'normal',
   'loop:exit': 'normal',
   'all:start': 'normal',
@@ -411,6 +412,8 @@ export function terminalConsumer(options: TerminalOptions): TerminalConsumer {
         const outcome = event.outcome === undefined ? '' : ` → ${event.outcome}`;
         return [detail(event.key, `exit ${event.code}${outcome} · ${duration}`)];
       }
+      case 'step:stalled':
+        return [[column(event.key), '    ', ['yellow', `stalled · no event for ${formatDuration(event.idleMs)}`]]];
       case 'step:queued':
         return [
           detail(

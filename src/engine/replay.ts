@@ -57,6 +57,8 @@ export interface PendingCall {
   fingerprints: Record<string, string>;
   /** The keys of the group the call belongs to, in declaration order, when it belongs to one. */
   group?: string[];
+  /** Set when the call passed `{ onError: 'return' }`: the workflow takes any `error`, an unavailable port's too. */
+  onError?: 'return';
 }
 
 export type ReplayEnd =
@@ -273,6 +275,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       keyed: ReturnType<typeof keyOf>,
       definition: StageDefinition,
       bindings: unknown,
+      callOptions: CallOptions | undefined,
     ): Omit<PendingCall, 'group'> | undefined {
       const { key, stage } = keyed;
       const reached = stages.find((each) => each.definition === definition);
@@ -285,7 +288,13 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         failRun('workflow_failed', `${key} can't run: ${resolved.problems.join('; ')}`);
         return undefined;
       }
-      return { ...keyed, definition, stageFile: join(reached.dir, 'stage.ts'), ...resolved };
+      return {
+        ...keyed,
+        definition,
+        stageFile: join(reached.dir, 'stage.ts'),
+        ...resolved,
+        ...(callOptions?.onError === 'return' ? { onError: 'return' as const } : {}),
+      };
     }
 
     const listed = (keys: readonly string[]) => `[${keys.join(', ')}]`;
@@ -332,7 +341,7 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
         return rebuild(journaled, key, callOptions);
       }
 
-      const call = pending(keyed, definition, bindings);
+      const call = pending(keyed, definition, bindings, callOptions);
       if (call === undefined) return never();
       move(key);
       record({ kind: 'call', call });
@@ -412,9 +421,9 @@ export function replay(options: ReplayOptions): Promise<ReplayEnd> {
       }
 
       const calls: PendingCall[] = [];
-      for (const { keyed, definition, bindings } of members) {
+      for (const { keyed, definition, bindings, options } of members) {
         if (done.has(keyed.key)) continue;
-        const call = pending(keyed, definition, bindings);
+        const call = pending(keyed, definition, bindings, options);
         if (call === undefined) return never();
         calls.push({ ...call, group: keys });
       }

@@ -8,8 +8,10 @@ import { EXIT_FAILED, EXIT_OK, EXIT_REFUSED } from '../../src/cli/exit-codes';
 import { readStatus } from '../../src/engine/run-dir';
 import { runWorkflow } from '../../src/engine/runtime';
 import { validateRunDir } from '../../src/engine/schemas';
+import { openQueue } from '../../src/watch/queue-store';
 import { fakeAdapters } from '../helpers/adapters';
 import { edit } from '../helpers/fixture';
+import { manualClock, ticket } from '../helpers/queue';
 import { runCaptured } from '../helpers/run-captured';
 import { killOne, runsIn, sail, sailProcess, until, WAIT_MS } from '../helpers/sail-process';
 import { heldRuns, releaseHeld, setHoldAt, writeStub } from '../helpers/stub-workflow';
@@ -38,7 +40,7 @@ test('sail stop with no run says its usage, and a run that is unknown, completed
       results.push(await runCaptured(argv, repo.dir, { env: repo.env }));
     }
     expect(results).toEqual([
-      { code: EXIT_REFUSED, stdout: '', stderr: 'sail stop: usage: sail stop <run>\n' },
+      { code: EXIT_REFUSED, stdout: '', stderr: 'sail stop: usage: sail stop <run> [--now]\n' },
       { code: EXIT_REFUSED, stdout: '', stderr: `sail stop: no run '${UNKNOWN}' in .sail-runs\n` },
       {
         code: EXIT_REFUSED,
@@ -78,54 +80,130 @@ test('sail stop ends a suspended run with no watcher running, and asks for no ti
   });
 });
 
-test('a manual run held in a call is asked to stop by sail stop from another process, which exits 0 at once, and the run ends failed stopped at its next call boundary, its lease released', async () => {
-  await withTempRepo(async (repo) => {
-    writeStub(repo.dir, { testsPassAt: 1 });
-    setHoldAt(repo.dir, 'implement#1');
-    const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
-    const runs = join(repo.dir, '.sail-runs');
-    const running = sailProcess(repo.dir, env, ['FAKE-1']);
-    try {
-      expect(await until('the run holding at implement#1', () => heldRuns(repo.dir).length === 1)).toBe(
-        'the run holding at implement#1',
-      );
-      const [held] = heldRuns(repo.dir);
-      const runId = held?.runId ?? '';
-      const stopped = await sail(repo.dir, env, ['stop', runId]);
-      const control = join(runs, runId, 'CONTROL');
-      expect({ ...stopped, control: existsSync(control) ? readFileSync(control, 'utf8') : 'none' }).toEqual({
-        code: EXIT_OK,
-        stdout: `sail stop: run ${runId} stops at its next call boundary (pid ${running.pid})\n`,
-        stderr: '',
-        control: 'stopped\n',
-      });
-      releaseHeld(repo.dir);
-      const code = await Promise.race([running.exited, Bun.sleep(WAIT_MS).then(() => 'still running')]);
-      const [run] = runsIn(runs);
-      const leases = join(runs, 'fake', 'leases');
-      expect({
-        code,
-        status: run?.status,
-        end: run?.events.at(-1),
-        leases: existsSync(leases) ? readdirSync(leases).filter((name) => name.endsWith('.json')) : [],
-        control: existsSync(join(runs, runId, 'CONTROL')),
-        issues: validateRunDir(join(runs, runId)).issues,
-      }).toEqual({
-        code: EXIT_FAILED,
-        status: 'failed stopped',
-        end: expect.objectContaining({
-          type: 'run:end',
-          status: 'failed',
-          stopReason: 'stopped',
-          message: 'stopped by sail stop before tests#1',
-        }),
-        leases: [],
-        control: false,
-        issues: [],
-      });
-    } finally {
-      releaseHeld(repo.dir);
-      if (running.exitCode === null) killOne(running.pid, 'SIGKILL');
-    }
+test.each([false, true])(
+  'a manual run held in a call obeys sail stop now=%s from another process',
+  async (now) => {
+    await withTempRepo(async (repo) => {
+      writeStub(repo.dir, { testsPassAt: 1 });
+      setHoldAt(repo.dir, 'implement#1');
+      const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
+      const runs = join(repo.dir, '.sail-runs');
+      const running = sailProcess(repo.dir, env, ['FAKE-1']);
+      try {
+        expect(await until('the run holding at implement#1', () => heldRuns(repo.dir).length === 1)).toBe(
+          'the run holding at implement#1',
+        );
+        const [held] = heldRuns(repo.dir);
+        const runId = held?.runId ?? '';
+        const stopped = await sail(repo.dir, env, ['stop', runId, ...(now ? ['--now'] : [])]);
+        const control = join(runs, runId, 'CONTROL');
+        expect({ ...stopped, control: existsSync(control) ? readFileSync(control, 'utf8') : 'none' }).toEqual({
+          code: EXIT_OK,
+          stdout: now
+            ? `sail stop: run ${runId} ends its running call now (pid ${running.pid})\n`
+            : `sail stop: run ${runId} stops at its next call boundary (pid ${running.pid})\n`,
+          stderr: '',
+          control: now ? 'stopped now\n' : 'stopped\n',
+        });
+        if (!now) releaseHeld(repo.dir);
+        const code = await Promise.race([running.exited, Bun.sleep(WAIT_MS).then(() => 'still running')]);
+        const [run] = runsIn(runs);
+        const leases = join(runs, 'fake', 'leases');
+        expect({
+          code,
+          status: run?.status,
+          end: run?.events.at(-1),
+          leases: existsSync(leases) ? readdirSync(leases).filter((name) => name.endsWith('.json')) : [],
+          control: existsSync(join(runs, runId, 'CONTROL')),
+          issues: validateRunDir(join(runs, runId)).issues,
+        }).toEqual({
+          code: EXIT_FAILED,
+          status: 'failed stopped',
+          end: expect.objectContaining({
+            type: 'run:end',
+            status: 'failed',
+            stopReason: 'stopped',
+            message: now ? 'stopped by sail stop --now during implement#1' : 'stopped by sail stop before tests#1',
+          }),
+          leases: [],
+          control: false,
+          issues: [],
+        });
+      } finally {
+        releaseHeld(repo.dir);
+        if (running.exitCode === null) killOne(running.pid, 'SIGKILL');
+      }
+    });
+  },
+  150_000,
+);
+
+const STARTING = 'FAKE-1-01M3BWNZM08Q4T6V2XRJ5KWD3N';
+
+/** A queue holding FAKE-1 dispatched under `STARTING`, with the process `pid` when one is given. */
+function dispatchFake1(runs: string, pid?: number): void {
+  const store = openQueue({
+    runsDir: runs,
+    workflow: 'ticket-to-pr',
+    label: 'sail',
+    now: manualClock('2026-10-14T09:00:00.000Z'),
   });
-}, 150_000);
+  if ('refused' in store) throw new Error(store.refused);
+  store.add([ticket('FAKE-1')]);
+  store.dispatched('ticket:FAKE-1', STARTING);
+  if (pid !== undefined) store.spawned('ticket:FAKE-1', pid);
+}
+
+test('sail stop on a dispatched run with no directory yet exits 0 saying it is still starting and writes a stopped hand-off, and the run started under that id then fails stopped before intake#1', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    repo.git('add', '.sail');
+    repo.git('commit', '-q', '-m', 'definitions');
+    const runs = join(repo.dir, '.sail-runs');
+    dispatchFake1(runs);
+    const handOff = join(runs, `${STARTING}.control`);
+    const stopped = await runCaptured(['stop', STARTING], repo.dir, { env: repo.env });
+    expect({ ...stopped, handOff: readFileSync(handOff, 'utf8') }).toEqual({
+      code: EXIT_OK,
+      stdout: `sail stop: run ${STARTING} is still starting: it stops before its intake\n`,
+      stderr: '',
+      handOff: 'stopped\n',
+    });
+    const started = await runCaptured(['FAKE-1', '--workflow', 'ticket-to-pr', '--dispatch', STARTING], repo.dir, {
+      env: repo.env,
+    });
+    const events = readFileSync(join(runs, STARTING, 'events.ndjson'), 'utf8');
+    expect({
+      code: started.code,
+      status: readStatus(join(runs, STARTING)),
+      stoppedBeforeIntake: events.includes('stopped by sail stop before intake#1'),
+      calls: events.includes('"type":"call:start"'),
+      handOff: existsSync(handOff),
+    }).toEqual({
+      code: EXIT_FAILED,
+      status: { status: 'failed', stopReason: 'stopped' },
+      stoppedBeforeIntake: true,
+      calls: false,
+      handOff: false,
+    });
+  });
+}, 60_000);
+
+test('sail stop on a run a dispatched item names with a dead process, or that no item names, exits 3 with no run and writes nothing', async () => {
+  await withTempRepo(async (repo) => {
+    writeStub(repo.dir);
+    const runs = join(repo.dir, '.sail-runs');
+    dispatchFake1(runs, 2_000_000_000);
+    const dead = await runCaptured(['stop', STARTING], repo.dir, { env: repo.env });
+    const unknown = await runCaptured(['stop', UNKNOWN], repo.dir, { env: repo.env });
+    expect({
+      dead,
+      unknown,
+      files: readdirSync(runs).filter((name) => name.endsWith('.control')),
+    }).toEqual({
+      dead: { code: EXIT_REFUSED, stdout: '', stderr: `sail stop: no run '${STARTING}' in .sail-runs\n` },
+      unknown: { code: EXIT_REFUSED, stdout: '', stderr: `sail stop: no run '${UNKNOWN}' in .sail-runs\n` },
+      files: [],
+    });
+  });
+});

@@ -6,6 +6,7 @@ export const Stopped = z.object({ number: z.number().int() });
 
 export const stop = script('stop', {
   run: './run.sh',
+  ports: ['ticket-source', 'codehost'],
   consumes: { pr: value(z.number().int()), ticketKey: value(z.string()).optional() },
   output: Stopped,
   // A port call that failed is an error, never a verdict: no exit code means failed.

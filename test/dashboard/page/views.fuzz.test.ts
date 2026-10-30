@@ -142,7 +142,13 @@ test('the rail, needs attention and the queue view keep their structure under a 
   const events = readEvents(queueDirOf(m)) as unknown as QueueEvent[];
   const views = (input: typeof repos, queue: QueueEvent[]) => {
     const stream = { recent: queue, watch: watchState(queue) };
-    const rail = { ...ui, repo: 'alpha', runId: FAKE_2_ID, open: ['alpha/ticket-to-pr:completed'] };
+    const rail = {
+      ...ui,
+      repo: 'alpha',
+      runId: FAKE_2_ID,
+      expanded: ['alpha', 'alpha/ticket-to-pr'],
+      open: ['alpha/ticket-to-pr:completed'],
+    };
     return [
       renderRail(railRepos(input, NOW), rail, NOW).value,
       renderAttention(attention(input), true).value,

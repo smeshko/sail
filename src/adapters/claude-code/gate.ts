@@ -2,8 +2,11 @@
 // maps it to sail's ToolCall and answers with decide()'s verdict: allow, or deny with the reason, which the model
 // reads. `canUseTool` is the fail-closed fallback: whatever reaches it the gate never decided, so it is denied, unless
 // it is the submission. Each denial is reported with its rule, the step's permissions under it and the reason (D9, D11).
-// A Grep of a folder reads every file below it, so it also needs a read glob that covers them all.
-import { statSync } from 'node:fs';
+// A Grep of a folder reads every file below it, so it also needs a read glob that covers them all. A Read of a file in the
+// session's own `tool-results/` folder, where Claude Code saves a long tool output and tells the agent to read it, runs
+// whatever the read globs say; no other path outside the workspace does.
+import { realpathSync, statSync } from 'node:fs';
+import { dirname, join, sep } from 'node:path';
 import type { CanUseTool, HookCallback, HookJSONOutput, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import { type DecideContext, type DenialRule, decide, type ToolCall, type ToolKind } from '../../engine/permissions';
 import { place, resolvePhysical, roots } from '../../engine/permissions/paths';
@@ -66,6 +69,16 @@ export function uncoveredSearch(call: ToolCall, permissions: Permissions, ctx: D
   return undefined;
 }
 
+/** The folder Claude Code saves the session's long tool output in, beside its transcript, or undefined when there is none. */
+function toolResultsOf(transcriptPath: string, sessionId: string): string | undefined {
+  if (transcriptPath === '' || sessionId === '' || /[\\/]/.test(sessionId)) return undefined;
+  try {
+    return realpathSync(join(dirname(transcriptPath), sessionId, 'tool-results'));
+  } catch {
+    return undefined;
+  }
+}
+
 function isFolder(path: string): boolean {
   try {
     return statSync(path).isDirectory();
@@ -98,10 +111,17 @@ export function createGate(options: GateOptions): Gate {
   };
 
   /** The verdict for one call: undefined when it may run, or its rule and reason. */
-  const verdict = (tool: string, input: unknown, cwd: string, server?: string) => {
+  const verdict = (
+    tool: string,
+    input: unknown,
+    cwd: string,
+    session: { transcriptPath: string; sessionId: string },
+    server?: string,
+  ) => {
     try {
       const mapped = toToolCall(tool, input, cwd, server);
       if ('unchecked' in mapped) return { rule: ruleOf(mapped.kind), reason: `can't be checked: ${mapped.unchecked}` };
+      if (tool === 'Read' && mapped.call.kind === 'read' && readsOwnToolResults(mapped.call, session)) return undefined;
       if (rootless) {
         return {
           rule: ruleOf(mapped.call.kind),
@@ -117,11 +137,30 @@ export function createGate(options: GateOptions): Gate {
     }
   };
 
+  /** Whether every path of the read `call` lies, physically, in the session's own tool-results folder. */
+  const readsOwnToolResults = (call: ToolCall, session: { transcriptPath: string; sessionId: string }): boolean => {
+    const folder = toolResultsOf(session.transcriptPath, session.sessionId);
+    if (folder === undefined || call.paths.length === 0) return false;
+    const from = resolvePhysical(call.cwd ?? ctx.worktree, '/');
+    if (!from.ok) return false;
+    return call.paths.every((path) => {
+      const found = resolvePhysical(path, from.path);
+      return found.ok && found.path.startsWith(`${folder}${sep}`);
+    });
+  };
+
   return {
     async preToolUse(input) {
       if (input.hook_event_name !== 'PreToolUse') return {};
       if (input.tool_name === SUBMIT_TOOL) return decision('allow');
-      const denial = verdict(input.tool_name, input.tool_input, input.cwd || ctx.worktree, input.mcp_server?.name);
+      const session = { transcriptPath: input.transcript_path, sessionId: input.session_id };
+      const denial = verdict(
+        input.tool_name,
+        input.tool_input,
+        input.cwd || ctx.worktree,
+        session,
+        input.mcp_server?.name,
+      );
       if (denial === undefined) return decision('allow');
       denied(input.tool_use_id, input.tool_name, denial.rule, denial.reason);
       return decision('deny', denial.reason);

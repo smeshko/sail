@@ -5,8 +5,8 @@
 // refuses a command that sends a job to the background.
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { allowlisted, isCredential } from '../../engine/env-allowlist';
 import { DEFAULT_GRACE_MS, stopGroup } from '../../engine/process';
-import { ENV_ALLOWLIST } from '../claude-code/harness';
 
 /** How long the output of a command that has exited has to arrive, when a descendant still holds its pipes. */
 const FLUSH_MS = 200;
@@ -24,19 +24,13 @@ export interface BashRunner {
   reap(): Promise<void>;
 }
 
-/** Names the credentials of a provider sit under: allowlisted for the harness itself, never for a command. */
-const CREDENTIALS = /^(?:ANTHROPIC_|AWS_|CLAUDE_|CLOUD_ML_|GOOGLE_)|(?:_API_KEY|_TOKEN|_SECRET|_SECRET_KEY)$/;
-
-const allowed = (name: string): boolean =>
-  ENV_ALLOWLIST.some((entry) => (entry.endsWith('*') ? name.startsWith(entry.slice(0, -1)) : name === entry));
-
 /** A command's environment: the allowlisted names of `env` that are no credential, the preamble, then the shell. */
 export function bashEnv(
   preamble: Readonly<Record<string, string>>,
   env: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
   const picked = Object.entries(env).filter(
-    (entry): entry is [string, string] => entry[1] !== undefined && allowed(entry[0]) && !CREDENTIALS.test(entry[0]),
+    (entry): entry is [string, string] => entry[1] !== undefined && allowlisted(entry[0]) && !isCredential(entry[0]),
   );
   return { ...Object.fromEntries(picked), ...preamble, SHELL: '/bin/bash' };
 }

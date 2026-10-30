@@ -36,13 +36,28 @@ export interface WorkspacePort {
    */
   holder(remote: string, branch: string): Promise<Lease | undefined>;
   /**
-   * A detached checkout of `base`, recording `branch` for the later push. Left out, `base` is the default branch's tip
-   * on the remote. `signal` stops whatever the adapter fetches first. Emits `workspace:created`.
+   * A detached checkout of `base`, recording `branch` for the later push. Left out, `base` is `branch`'s tip on the remote
+   * when the remote has it, else `fallback`, else the default branch's tip. `signal` stops whatever the adapter fetches
+   * first. Emits `workspace:created`.
    */
   create(
     run: RunRef,
-    from: { readonly branch: string; readonly base?: string; readonly signal?: AbortSignal },
+    from: {
+      readonly branch: string;
+      readonly base?: string;
+      readonly fallback?: string;
+      readonly signal?: AbortSignal;
+    },
   ): Promise<Workspace>;
+  /**
+   * Copies `paths` as committed at `base` into the directory `into`, and returns the commit's sha. Left out, `base` is
+   * the default branch's tip, fetched first where the adapter fetches. The working tree is never read, and a path the
+   * commit lacks is skipped. A `base` that names no commit is `invalid`. It emits nothing.
+   */
+  readTree(
+    into: string,
+    from: { readonly paths: readonly string[]; readonly base?: string; readonly signal?: AbortSignal },
+  ): Promise<{ sha: string }>;
   /**
    * The run's existing workspace, once checked to be a checkout whose `HEAD` descends from `baseSha`. One that is gone,
    * or has lost its base, is `invalid`. Emits nothing.

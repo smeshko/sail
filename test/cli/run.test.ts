@@ -157,7 +157,7 @@ test('the usage lists sail port render --each', async () => {
 test('the usage lists sail stop, saying when a run stops', async () => {
   const { stdout } = await runCaptured(['--help']);
   expect(stdout).toMatch(
-    /^ {2}sail stop <run> {2,}Stop a run: at its next call boundary while it runs, at once when it is suspended$/m,
+    /^ {2}sail stop <run> \[--now\] {2,}Stop at the next call boundary, or end the running call now$/m,
   );
 });
 

@@ -107,6 +107,13 @@ function recorder(inner: Harness, over: { secrets?: string[]; roots?: Record<str
 const read = (dir: string, key: string): Recording =>
   Recording.parse(JSON.parse(readFileSync(recordingFile(dir, key), 'utf8')));
 
+test('recordings preserve an optional idle limit', async () => {
+  const dir = tempDir();
+  const harness = recordingHarness(standIn(), { dir, secrets: [], roots: {} });
+  await harness.run(request('spec#1', { budget: { maxTurns: 5, maxUsd: 1, maxMinutes: 5, maxIdleMinutes: 0.02 } }));
+  expect(read(dir, 'spec#1').tries[0]?.request.budget.maxIdleMinutes).toBe(0.02);
+});
+
 /** Every byte under `dir`, as one string. */
 const bytes = (dir: string): string =>
   readdirSync(dir)

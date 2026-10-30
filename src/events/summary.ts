@@ -28,6 +28,7 @@
 // the key holds one, and the run's totals; one with no key counts in the totals alone. A call that starts again starts
 // its count over, as it does its other facts, from the steps it keeps. A run that asked Jev nothing has no `jev`
 // anywhere.
+// Stalled steps are listed only until their next keyed event, or the run ends or suspends.
 import { INTAKE_KEY } from '../engine/intake';
 import type { JournalEntry } from '../engine/journal';
 import type { StopReason } from '../engine/run-dir';
@@ -119,6 +120,7 @@ export interface Summary {
   durationMs?: number;
   result?: unknown;
   calls: CallEntry[];
+  stalled?: { key: string; since: string }[];
   loops?: Record<string, { iterations: number; max: number }>;
   routes?: { at: string; value: unknown; took: string }[];
   /** The calls that ran together, each group's keys in declaration order: present only when the run had a group. */
@@ -197,6 +199,7 @@ export interface SummaryState {
     | undefined;
   latestTs?: string;
   calls: Map<string, CallState>;
+  stalled: Map<string, string>;
   /** Each ended call's and step's `resultPath`, to the key it belongs to. */
   results: Map<string, string>;
   /** Each running loop's latest feedback pointer, by loop name. */
@@ -241,6 +244,7 @@ function defined<T extends object>(fields: { [K in keyof T]: T[K] | undefined })
 export function emptyState(): SummaryState {
   return {
     calls: new Map(),
+    stalled: new Map(),
     results: new Map(),
     feedback: new Map(),
     loops: new Map(),
@@ -254,6 +258,9 @@ export function emptyState(): SummaryState {
 /** Folds one event into `state`. */
 export function foldEvent(state: SummaryState, event: SailEvent): void {
   state.latestTs = event.ts;
+  if (event.type === 'step:stalled') state.stalled.set(event.key, event.since);
+  else if ('key' in event && event.key !== undefined) state.stalled.delete(event.key);
+  if (event.type === 'run:end' || event.type === 'run:suspended') state.stalled.clear();
   // A resume writes no marker: whatever follows a run:end means the run is going again. A consumer that failed on
   // run:end reports after it, and changes nothing.
   if (event.type !== 'run:end' && event.type !== 'error:consumer') state.ending = undefined;
@@ -523,6 +530,7 @@ export function toSummary(state: SummaryState): Summary | undefined {
     durationMs: elapsed(run.startedAt, ending?.endedAt ?? state.latestTs ?? run.startedAt),
     result: ending?.result,
     calls: ended.map((call) => callEntry(state, call)),
+    stalled: state.stalled.size ? [...state.stalled].map(([key, since]) => ({ key, since })) : undefined,
     loops: Object.fromEntries([...state.loops].map(([name, loop]) => [name, { ...loop }])),
     routes: state.routes.map((route) => ({ ...route })),
     groups: state.groups.length === 0 ? undefined : state.groups.map((group) => ({ ...group, keys: [...group.keys] })),

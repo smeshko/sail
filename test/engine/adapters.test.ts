@@ -9,7 +9,13 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BUILTINS } from '../../src/adapters/index';
-import { checkModelAliases, providerRelay, type ResolvedAdapters, resolveAdapters } from '../../src/engine/adapters';
+import {
+  checkModelAliases,
+  portVariables,
+  providerRelay,
+  type ResolvedAdapters,
+  resolveAdapters,
+} from '../../src/engine/adapters';
 import { type AdapterConfig, PORTS, type Port, type ProjectConfig, readConfig } from '../../src/engine/config';
 import { runsDir } from '../../src/engine/run-dir';
 import { type AdapterEntry, type RunHeader, validateRunHeader } from '../../src/engine/run-header';
@@ -103,6 +109,78 @@ const resolvedOrThrow = <P extends Port>(
 const HARNESS_CAPABILITIES = '{ structuredOutput: true, permissions: true, usage: true, abort: true, budgets: [] }';
 const harnessModule = (extra = '') =>
   `export default { create() { return { name: 'echo', capabilities: () => (${HARNESS_CAPABILITIES}), run: async () => ({}) }; }, ${extra} };`;
+
+for (const [port, use, expected] of [
+  ['codeHost', 'github', ['SAIL_GITHUB_TOKEN', 'GITHUB_TOKEN']],
+  ['ticketSource', 'linear', ['LINEAR_API_KEY']],
+  ['jev', 'typesafe', ['TYPESAFE_API_KEY']],
+  ['codeHost', 'fake', []],
+] as const) {
+  test(`portVariables gives ${use} ${port} names`, async () => {
+    const { sailDir } = repo();
+    expect(
+      await portVariables({ sailDir, config: configOf({ [port]: { use } }), builtins: BUILTINS, env: {} }, port),
+    ).toEqual([...expected]);
+  });
+}
+
+test('portVariables gives unconfigured jev no names, as the config may leave it out', async () => {
+  expect(
+    await portVariables({ sailDir: repo().sailDir, config: configOf({}), builtins: BUILTINS, env: {} }, 'jev'),
+  ).toEqual([]);
+});
+
+test('portVariables reports a module whose requires throws without creating it', async () => {
+  const { sailDir } = repo();
+  write(
+    sailDir,
+    'broken.ts',
+    `export default { requires() { throw new Error('broken requirement'); }, create() { throw new Error('must not create'); } };`,
+  );
+  expect(
+    await portVariables(
+      { sailDir, config: configOf({ jev: { use: './broken.ts' } }), builtins: BUILTINS, env: {} },
+      'jev',
+    ),
+  ).toEqual({ problem: "jev: ./broken.ts's requires() failed: broken requirement" });
+});
+
+test('portVariables reports a missing adapter', async () => {
+  expect(
+    await portVariables(
+      { sailDir: repo().sailDir, config: configOf({ jev: { use: 'absent' } }), builtins: BUILTINS, env: {} },
+      'jev',
+    ),
+  ).toEqual({ problem: "jev: no built-in adapter 'absent' fills jev: the built-ins that do are fake, typesafe" });
+});
+
+for (const value of ['undefined', "['']", '[[]]']) {
+  test(`portVariables refuses malformed requires ${value}`, async () => {
+    const { sailDir } = repo();
+    write(sailDir, 'bad.ts', `export default { requires: () => ${value}, create() {} };`);
+    expect(
+      await portVariables(
+        { sailDir, config: configOf({ jev: { use: './bad.ts' } }), builtins: BUILTINS, env: {} },
+        'jev',
+      ),
+    ).toEqual({ problem: "jev: ./bad.ts's requires() must return environment variable names" });
+  });
+}
+
+test('portVariables flattens and deduplicates names without creating the adapter', async () => {
+  const { sailDir } = repo();
+  write(
+    sailDir,
+    'names.ts',
+    `export default { requires: () => ['A', ['B', 'A'], 'C'], create() { throw new Error('must not create'); } };`,
+  );
+  expect(
+    await portVariables(
+      { sailDir, config: configOf({ jev: { use: './names.ts' } }), builtins: BUILTINS, env: {} },
+      'jev',
+    ),
+  ).toEqual(['A', 'B', 'C']);
+});
 
 // TASK-004
 
@@ -932,4 +1010,41 @@ test('a harness with no checkModels(), or one the config does not name, is left 
     await checkModelAliases({ sailDir, config: quiet, builtins: all, env: {} }),
     await checkModelAliases({ sailDir, config: broken, builtins: all, env: {} }),
   ]).toEqual([[], [{ path: '/models/deep', message: 'm on b (broken): checkModels() failed: catalog down' }]]);
+});
+
+test("with a root apart from sailDir, an adapter is handed that root and its runs directory, while a module path still loads from sailDir's copy", async () => {
+  const clone = repo();
+  const copy = repo();
+  write(
+    copy.sailDir,
+    'adapters/echo.ts',
+    `export default { create(options, context) {
+      globalThis.__seenAtRoot = context;
+      return { name: 'echo-copy', capabilities: () => (${HARNESS_CAPABILITIES}), run: async () => ({}) };
+    } };`,
+  );
+  write(clone.sailDir, 'adapters/echo.ts', "throw new Error('the clone must not be loaded');");
+  const resolved = resolvedOrThrow(
+    await resolveAdapters({
+      sailDir: copy.sailDir,
+      root: clone.root,
+      config: configOf({ harness: { use: './adapters/echo.ts' } }),
+      builtins: BUILTINS,
+      env: {},
+    }),
+  );
+  const seen = (globalThis as unknown as { __seenAtRoot: Record<string, unknown> }).__seenAtRoot;
+  expect({
+    name: resolved.ports.harness?.name,
+    root: seen.root,
+    sailDir: seen.sailDir,
+    runsDir: seen.runsDir,
+    workspace: (await resolved.ports.workspace?.repository())?.url,
+  }).toEqual({
+    name: 'echo-copy',
+    root: clone.root,
+    sailDir: copy.sailDir,
+    runsDir: join(clone.root, '.sail-runs'),
+    workspace: 'fake://origin',
+  });
 });

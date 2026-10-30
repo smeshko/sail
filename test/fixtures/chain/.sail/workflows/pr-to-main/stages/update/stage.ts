@@ -10,6 +10,7 @@ export const Updated = z.object({
 
 export const update = script('update', {
   run: './run.sh',
+  ports: ['codehost'],
   output: Updated,
   // A conflict exits 1. Any other failure, a push the host refused among them, has no exit code to map: an error.
   exitCodes: { passed: [0], failed: [1] },
