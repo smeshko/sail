@@ -34,6 +34,9 @@ function repository(repo: TempRepo, caps: { a: number; b: number }, tickets: See
   writeWatched(sailDir, 'b', { label: 'sail-b', cap: caps.b });
   writeTickets(sailDir, tickets);
   setHoldAt(repo.dir, 'implement#1');
+  // A dispatched run reads the `.sail/` committed on the default branch.
+  repo.git('add', '.sail');
+  repo.git('commit', '-q', '-m', 'definitions');
   const env = { ...repo.env, SAIL_HOME: join(repo.home, 'sail-home') };
   const runs = join(repo.dir, '.sail-runs');
   return { env, runs };
