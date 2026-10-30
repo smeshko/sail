@@ -454,3 +454,31 @@ test('listDesignated leaves out a fork, as a designated pull request has its hea
   );
   expect((await host.listDesignated('sail')).map((pr) => pr.number)).toEqual([1, 3, 4, 6]);
 });
+
+test('a seed with unavailable.push 2 fails the first two pushes as unavailable and lets the third through', async () => {
+  await withTempRepo(async (r) => {
+    const world = files((seed) => Object.assign(seed, { unavailable: { push: 2 } }));
+    const host = createFakeCodeHost({ ...world, env: r.env });
+    const head = commitFile(r, 'one');
+    const tries: unknown[] = [];
+    for (let i = 0; i < 3; i++) {
+      const outcome = await host.push(r.dir, 'sail/FAKE-30').then(
+        (pushed) => pushed.headSha,
+        (error) => portFailure(error),
+      );
+      tries.push(outcome);
+      if (i === 1) {
+        expect(
+          Bun.spawnSync(['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/sail/FAKE-30'], {
+            cwd: r.dir,
+            env: r.env,
+          }).exitCode,
+        ).toBe(1);
+        expect(JSON.parse(readFileSync(world.state, 'utf8')).branches['sail/FAKE-30']).toBeUndefined();
+      }
+    }
+    const unavailable = { port: 'codeHost', op: 'push', code: 'unavailable' };
+    expect(tries).toEqual([unavailable, unavailable, head]);
+    expect(r.git('rev-parse', 'refs/heads/sail/FAKE-30')).toBe(head);
+  });
+});

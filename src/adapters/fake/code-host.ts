@@ -76,6 +76,8 @@ const World = z.object({
   pullRequests: z.array(StoredPullRequest),
   /** The scripts a pull request `openPullRequest` opens starts with. Left out, it has no checks and merges at once. */
   opened: z.object({ checks: CheckScripts.optional(), merges: MergeScripts.optional() }).optional(),
+  /** How many of the next calls of an operation fail as `unavailable`, as a host outage does. */
+  unavailable: z.object({ push: z.number().int().nonnegative().optional() }).optional(),
 });
 type World = z.infer<typeof World>;
 
@@ -167,6 +169,12 @@ export function createFakeCodeHost(options: FakeCodeHostOptions): CodeHost {
       if (branch === store.read().defaultBranch) {
         throw new PortError('codeHost', 'push', 'invalid', `${branch} is the default branch`);
       }
+      const outage = store.change((world) => {
+        const left = world.unavailable?.push ?? 0;
+        if (left > 0 && world.unavailable !== undefined) world.unavailable.push = left - 1;
+        return left > 0;
+      });
+      if (outage) throw new PortError('codeHost', 'push', 'unavailable', 'the fake code host is unreachable');
       const git = gitSync(cwd, ['rev-parse', 'HEAD'], options.env);
       if (git.code !== 0) {
         throw new PortError('codeHost', 'push', 'invalid', `${cwd} is not a git checkout: ${git.stderr}`);
