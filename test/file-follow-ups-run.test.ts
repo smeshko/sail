@@ -323,8 +323,12 @@ export default { create(_options, context) {
     edit(sailDir, 'project.yaml', 'jev: { use: fake, seed: ./fake/jev.json }', 'jev: { use: ./bounded-jev.ts }');
     repo.git('add', '.sail/fake/tickets.json', '.sail/bounded-jev.ts', '.sail/project.yaml');
     repo.git('commit', '-m', 'seed long passages and record requests');
-    const { code } = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
-    expect(code).toBe(EXIT_OK);
+    const { code, stdout, stderr } = await runCaptured(['FAKE-1'], repo.dir, { env: repo.env });
+    // The run's own words when it fails, which the exit code alone doesn't give (ADW-436).
+    expect({ code, said: code === EXIT_OK ? '' : `${stdout.slice(-4000)}\n${stderr.slice(-4000)}` }).toEqual({
+      code: EXIT_OK,
+      said: '',
+    });
     const requests = readFileSync(requestsFile, 'utf8')
       .trim()
       .split('\n')
