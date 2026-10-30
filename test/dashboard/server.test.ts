@@ -3,10 +3,12 @@
 // server starts on port 0 and is stopped after its test.
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -16,10 +18,12 @@ import {
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { type Dashboard, guard, startDashboard } from '../../src/dashboard/server';
+import { isRunIdOf } from '../../src/engine/run-id';
 import {
   appendStageEnd,
   entryOf,
   FAKE_2_ID,
+  FAKE_3_ID,
   GOLDEN_RUN,
   GOLDEN_RUN_ID,
   type Machine,
@@ -551,4 +555,168 @@ test('a move for a repository whose live watcher runs in another clone is 409 na
     { error: `the watcher of 'beta' (pid ${process.pid}) runs in another clone: ${m.alpha.sailDir}` },
     [],
   ]);
+});
+
+const RESUME = `/api/repos/beta/runs/${FAKE_3_ID}/resume`;
+const RESTART = `/api/repos/alpha/runs/${FAKE_2_ID}/restart`;
+const startedBy = (body: string) => ({ headers: JSON_HEADERS, body });
+
+/** A stand-in `sail` that records its arguments and then runs `script`, with the clone as its working directory. */
+function stubSail(script: string): { cli: string[]; argv: () => string[] } {
+  const file = join(m.root, 'stub-sail.sh');
+  const record = join(m.root, 'stub-argv');
+  writeFileSync(file, `#!/bin/sh\necho "$*" >> '${record}'\n${script}\n`);
+  chmodSync(file, 0o755);
+  return {
+    cli: ['/bin/sh', file],
+    argv: () => (existsSync(record) ? readFileSync(record, 'utf8').trimEnd().split('\n') : []),
+  };
+}
+
+function startWith(cli: string[], startWaitMs = 5000): Dashboard {
+  const leasesDir = join(m.root, 'leases');
+  mkdirSync(leasesDir, { recursive: true });
+  const started = startDashboard({
+    registryDir: m.registryDir,
+    port: 0,
+    cli,
+    leasesDir,
+    env: process.env,
+    startWaitMs,
+  });
+  if ('refused' in started) throw new Error(started.refused);
+  servers.push(started);
+  return started;
+}
+
+const settleQueue = () => {
+  const file = join(queueDirOf(m), 'queue.json');
+  writeFileSync(file, readFileSync(file, 'utf8').replace('"state": "dispatched"', '"state": "done"'));
+};
+const betaRun = () => join(m.beta.clone, '.sail-runs', FAKE_3_ID);
+const dashboardLogs = (clone: { clone: string }) => {
+  const dir = join(clone.clone, '.sail-runs', 'dashboard');
+  return existsSync(dir) ? readdirSync(dir) : [];
+};
+
+test('a POST to resume a suspended run starts `sail resume` with the raise, answers 202 once it is no longer suspended, and logs under .sail-runs/dashboard', async () => {
+  m = seedFixtures();
+  settleQueue();
+  const stub = stubSail(`echo "started from $(pwd -P)"\nprintf 'running\\n' > '${join(betaRun(), 'STATUS')}'\nsleep 1`);
+  const server = startWith(stub.cli);
+  const response = await post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
+  expect([response.status, await response.json()]).toEqual([202, { runId: FAKE_3_ID }]);
+  expect(stub.argv()).toEqual([`resume ${FAKE_3_ID} --raise-budget 5`]);
+  expect(dashboardLogs(m.beta)).toEqual([`${FAKE_3_ID}.log`]);
+  expect(readFileSync(join(m.beta.clone, '.sail-runs', 'dashboard', `${FAKE_3_ID}.log`), 'utf8')).toContain(
+    `started from ${realpathSync(m.beta.clone)}`,
+  );
+  const runs = await get(server, '/api/repos/beta/runs');
+  expect(JSON.parse(runs.body).map((run: { runId: string }) => run.runId)).not.toContain(`${FAKE_3_ID}.log`);
+});
+
+test('a POST to restart a failed run starts `sail run --from-run` under a minted id of its ticket and answers 202 with it once run.json exists', async () => {
+  m = seedFixtures();
+  const stub = stubSail(
+    `id=$(echo "$*" | sed 's/.*--run-id //')\nmkdir -p ".sail-runs/$id"\necho '{}' > ".sail-runs/$id/run.json"\nsleep 1`,
+  );
+  const server = startWith(stub.cli);
+  const response = await post(server, RESTART, startedBy('{"stage":"spec"}'));
+  const { runId } = (await response.json()) as { runId: string };
+  expect(response.status).toBe(202);
+  expect(isRunIdOf('FAKE-2', runId)).toBe(true);
+  expect(stub.argv()).toEqual([`run --from-run ${FAKE_2_ID} --stage spec --continue --run-id ${runId}`]);
+  expect(dashboardLogs(m.alpha)).toEqual([`${runId}.log`]);
+});
+
+test('a start the sail refuses with exit code 3 is 409 with the last line it printed', async () => {
+  m = seedFixtures();
+  settleQueue();
+  const stub = stubSail("echo 'one'\necho 'run is not suspended: nothing to resume' >&2\nexit 3");
+  const server = startWith(stub.cli);
+  const response = await post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
+  expect([response.status, await response.json()]).toEqual([409, { error: 'run is not suspended: nothing to resume' }]);
+});
+
+test('a start still going when the wait ends is answered 202 anyway', async () => {
+  m = seedFixtures();
+  settleQueue();
+  const stub = stubSail('sleep 2');
+  const server = startWith(stub.cli, 300);
+  const response = await post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
+  expect([response.status, await response.json()]).toEqual([202, { runId: FAKE_3_ID }]);
+});
+
+test('an action the run does not offer is 409 with the reason, and the sail never runs', async () => {
+  m = seedFixtures();
+  const stub = stubSail('exit 0');
+  const server = startWith(stub.cli);
+  const resume = await post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
+  expect([resume.status, await resume.json()]).toEqual([
+    409,
+    { error: "ticket-to-pr's watcher has this run: ticket:FAKE-3 is dispatched" },
+  ]);
+  const restart = await post(server, `/api/repos/beta/runs/${FAKE_3_ID}/restart`, startedBy('{"stage":"spec"}'));
+  expect(restart.status).toBe(409);
+  expect(stub.argv()).toEqual([]);
+});
+
+test('a second start of a run while the first is under way is 409, and only one sail runs', async () => {
+  m = seedFixtures();
+  settleQueue();
+  const stub = stubSail('sleep 1');
+  const server = startWith(stub.cli);
+  const first = post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
+  await Bun.sleep(300);
+  const second = await post(server, RESUME, startedBy('{"raise":{"usd":5}}'));
+  expect([second.status, await second.json()]).toEqual([
+    409,
+    { error: `a start of ${FAKE_3_ID} is already under way` },
+  ]);
+  expect((await first).status).toBe(202);
+  expect(stub.argv()).toEqual([`resume ${FAKE_3_ID} --raise-budget 5`]);
+});
+
+test.each([
+  ['a resume with no raise for a run over its dollars', RESUME, '{}'],
+  ['a resume raising the minutes it did not run out of', RESUME, '{"raise":{"minutes":5}}'],
+  ['a resume raising less than a cent', RESUME, '{"raise":{"usd":0}}'],
+  ['a resume with a field it does not take', RESUME, '{"raise":{"usd":5},"force":true}'],
+  ['a resume that is not JSON', RESUME, 'nope'],
+  ['a restart from a stage the run did not offer', RESTART, '{"stage":"publish"}'],
+  ['a restart with no stage', RESTART, '{}'],
+  ['a restart with a field it does not take', RESTART, '{"stage":"spec","x":1}'],
+])('%s is 400 as JSON, and the sail never runs', async (_, path, body) => {
+  m = seedFixtures();
+  settleQueue();
+  const stub = stubSail('exit 0');
+  const server = startWith(stub.cli);
+  const response = await post(server, path, startedBy(body));
+  expect([response.status, await response.json()]).toEqual([400, { error: expect.any(String) }]);
+  expect(stub.argv()).toEqual([]);
+});
+
+test('a start for a run the repository lacks is 404', async () => {
+  m = seedFixtures();
+  const server = startWith(stubSail('exit 0').cli);
+  expect((await post(server, '/api/repos/alpha/runs/FAKE-0-NOPE/resume', startedBy('{}'))).status).toBe(404);
+  expect((await post(server, '/api/repos/gamma/runs/FAKE-0-NOPE/restart', startedBy('{}'))).status).toBe(404);
+});
+
+test.each([
+  ['no client header', { 'Content-Type': 'application/json' }, 403],
+  ['a form content type', { ...HEADER, 'Content-Type': 'text/plain' }, 415],
+  ['a foreign Origin', { ...JSON_HEADERS, Origin: 'http://evil.example' }, 403],
+])('a start with %s is refused with %i, and the sail never runs', async (_, headers, status) => {
+  m = seedFixtures();
+  settleQueue();
+  const stub = stubSail('exit 0');
+  const server = startWith(stub.cli);
+  for (const path of [RESUME, RESTART]) {
+    const response = await post(server, path, { headers, body: '{"raise":{"usd":5},"stage":"spec"}' });
+    expect(response.status).toBe(status);
+  }
+  const options = await fetch(`http://127.0.0.1:${server.port}${RESUME}`, { method: 'OPTIONS', headers: HEADER });
+  expect([options.status, options.headers.get('allow')]).toEqual([405, 'GET']);
+  expect(stub.argv()).toEqual([]);
 });

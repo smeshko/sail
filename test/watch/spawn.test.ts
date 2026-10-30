@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { dispatchLog, lastLine, spawnResume, spawnRun } from '../../src/watch/spawn';
+import { dispatchLog, lastLine, spawnDetached, spawnResume, spawnRun } from '../../src/watch/spawn';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -183,4 +183,29 @@ test('a dispatched pull-request run gets #<number>, its workflow, --dispatch wit
   expect(await spawned.exited).toBe(3);
   const [argv] = readFileSync(dispatchLog(runs, 'r', runId), 'utf8').split('\n');
   expect(argv).toBe(`argv: #12 --workflow r --dispatch ${runId} --head-sha ${headSha}`);
+});
+
+test('spawnDetached runs the given arguments in the root, in the env given, in a session of its own, and logs to the path given', async () => {
+  const dir = tempDir();
+  const root = join(dir, 'repo');
+  mkdirSync(root);
+  const log = join(dir, 'logs', 'deep', 'a.log');
+  const spawned = spawnDetached(
+    root,
+    log,
+    ['resume', RUN, '--raise-budget', '5'],
+    { SAIL_SPAWN_MARK: 'by hand', HOME: dir },
+    ['/bin/sh', fakeSail(dir)],
+  );
+  expect(await spawned.exited).toBe(3);
+  const lines = readFileSync(log, 'utf8').split('\n');
+  expect(lines.filter((line) => !line.startsWith('pgid') && !line.startsWith('pid'))).toEqual([
+    `argv: resume ${RUN} --raise-budget 5`,
+    `cwd: ${root}`,
+    `mark: by hand home: ${dir}`,
+    'to stderr',
+    '',
+    '',
+  ]);
+  expect(lastLine(log, spawned.logFrom)).toBe('to stderr');
 });

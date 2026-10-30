@@ -1,6 +1,8 @@
 // `sail dashboard [--port N]`: serves every registered repository's runs and queues on 127.0.0.1, in the foreground,
-// until Ctrl-C. It writes nothing but a move command in a live watcher's inbox, when a person moves a queued item. The default port is 3400, and 0 picks a free one. A port that isn't a whole number from 0 to 65535, or
-// one in use, is refused with exit code 3.
+// until Ctrl-C. It writes nothing but a move command in a live watcher's inbox, when a person moves a queued item, and
+// the runs a person resumes or restarts, which it starts detached with this command's environment. The default port is
+// 3400, and 0 picks a free one. A port that isn't a whole number from 0 to 65535, or one in use, is refused with exit
+// code 3.
 
 import { startDashboard } from '../../dashboard/server';
 import { machineDir, registryDir as registryDirOf } from '../../watch/registry';
@@ -26,7 +28,7 @@ export async function dashboard(args: Parsed, io: Io): Promise<ExitCode> {
   const onInterrupt = io.onInterrupt;
   if (onInterrupt === undefined) return refuse('nothing can stop it here: run it from a terminal');
   const registryDir = registryDirOf(machineDir(io.env ?? process.env));
-  const started = startDashboard({ registryDir, port });
+  const started = startDashboard({ registryDir, port, env: io.env ?? process.env });
   if ('refused' in started) {
     return refuse(`${started.refused}: is another sail dashboard running? --port picks another`);
   }
