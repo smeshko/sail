@@ -149,3 +149,27 @@ test("railRepos groups each repository's runs by workflow without its version, b
     'unknown',
   ]);
 });
+
+test('a run whose header or summary source is a pull request carries its number, and a ticket run carries none', () => {
+  const pr = (number: number) => ({ kind: 'pr', number, headSha: 'abc1234', via: 'cli', forced: [] });
+  const [alpha] = index(m.registryDir);
+  if (alpha === undefined) throw new Error('no alpha');
+  const run = (runId: string, extra: Record<string, unknown>) =>
+    ({ runId, status: { status: 'completed' }, summary: null, ...extra }) as unknown as (typeof alpha.runs)[number];
+  const summaryOf = (source: unknown) =>
+    ({ ...alpha.runs[0]?.summary, source }) as unknown as NonNullable<(typeof alpha.runs)[number]['summary']>;
+  const repo = {
+    ...alpha,
+    queues: [],
+    runs: [
+      run('pr-12', { source: pr(12) }),
+      run('pr-13', { summary: summaryOf(pr(13)) }),
+      run('ticket-1', { source: { kind: 'ticket', ticketKey: 'FAKE-9', via: 'cli', forced: [] } }),
+    ],
+  };
+  const runs = railRepos([repo], NOW)[0]?.runs ?? [];
+  const byId = (id: string) => runs.find((each) => each.runId === id);
+  expect([byId('pr-12')?.pr, byId('pr-12')?.ticketKey]).toEqual([12, undefined]);
+  expect([byId('pr-13')?.pr, byId('pr-13')?.ticketKey]).toEqual([13, undefined]);
+  expect([byId('ticket-1')?.pr, byId('ticket-1')?.ticketKey]).toEqual([undefined, 'FAKE-9']);
+});
